@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./webhooks.md) | [JP](./i18n/ja/webhooks.md) | [KR](./i18n/ko/webhooks.md) | [CN](./i18n/zh-cn/webhooks.md)
+<!-- docs-i18n-links:end -->
+
 # Webhooks
 
 Webhooks are one transport for the external input framework. A webhook handler

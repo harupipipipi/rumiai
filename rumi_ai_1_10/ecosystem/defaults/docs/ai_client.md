@@ -1,23 +1,25 @@
+<!-- docs-i18n-links:start -->
+[EN](./ai_client.md) | [JP](./i18n/ja/ai_client.md) | [KR](./i18n/ko/ai_client.md) | [CN](./i18n/zh-cn/ai_client.md)
+<!-- docs-i18n-links:end -->
 
+Thought: The user wants us to write a prompt (instructions to give to the AI ​​agent) to modify ai_client.md.
 
-思考: ユーザーは ai_client.md を修正するためのプロンプト（AIエージェントに渡す指示書）を書いてほしいと言っている。
+This prompt is for passing to another AI agent (such as Claude Code) to modify ai_client.md.
 
-このプロンプトは、別のAIエージェント（Claude Code等）に渡して、ai_client.md を修正させるためのもの。
+Context constraints:
+- Cannot load any more files
+- This means you need to include all the necessary information in the prompt.
 
-コンテキストの制約：
-- これ以上ファイルを読み込めない
-- つまりプロンプト内で必要な情報を全て含める必要がある
+Information to include in the prompt:
+1. File to be modified: ai_client.md
+2. What to add: How events.ui.yaml works (stream_handler reads events.ui.yaml of profile and includes widget in payload)
+3. Design principle: ai_client has no animation definitions. Just how it works. The contents are provided by the model profile of user_data.
+4. Consistency with existing specifications: There is already a specification that allows widgets to be included in the payload of message.stream.data.
+5. Format of events.ui.yaml
+6. Changes to stream_handler
+7. Front-end behavior (if Asset has its own implementation, give priority to that, otherwise use payload widget)
 
-プロンプトに含めるべき情報：
-1. 修正対象ファイル: ai_client.md
-2. 何を追加するか: events.ui.yaml の仕組み（stream_handler が profile の events.ui.yaml を読んで payload に widget を含める）
-3. 設計原則: ai_client はアニメーション定義を持たない。仕組みだけ。中身は user_data のモデル profile が提供。
-4. 既存の仕様との整合: message.stream.data の payload に widget を含められる仕様は既にある
-5. events.ui.yaml の形式
-6. stream_handler の変更内容
-7. フロントエンドの挙動（Asset が独自実装を持っていればそちら優先、なければ payload の widget を使う）
-
-プロンプトを書こう。
+Write a prompt.
 
 ```markdown
 # ai_client.md 修正指示
@@ -52,7 +54,7 @@ events:
       type: ...
       label: ...
       ...
-    auto_dismiss: {ms}  # 任意。指定ms後に自動消去
+    auto_dismiss: {ms} # Optional. Automatically erase after specified ms
 ```
 
 テンプレート変数: {{key}} はイベントの data.key で置換される。例: {{name}} → tool_call_start の data.name
@@ -123,15 +125,15 @@ events:
 def process_event(self, event):
     event_type = event["event"]
     event_data = event.get("data", {})
-    
+
     ui_def = self.events_ui.get("events", {}).get(event_type) if self.events_ui else None
-    
+
     if ui_def and ui_def.get("widget"):
         widget = self._resolve_templates(ui_def["widget"], event_data)
         event["data"]["widget"] = widget
         if ui_def.get("auto_dismiss"):
             event["data"]["widget_auto_dismiss"] = ui_def["auto_dismiss"]
-    
+
     return event
 ```
 
@@ -142,11 +144,11 @@ def process_event(self, event):
 - Widget の型は widget.md に定義されている既存の型のみを使用（新しい Widget 型は追加しない）
 ```
 
-これでいいと思う。ただ、ユーザーは「プロンプトを書いて」と言っているので、このプロンプト自体を回答として出力する。
+I think this is fine. However, since the user is saying, "Write a prompt," this prompt itself is output as the answer.
 
-では出力する。
+Now output.
 
-以下、ai_client.md を修正するエージェント用のプロンプト。
+Below is the prompt for the agent to modify ai_client.md.
 
 ---
 
@@ -185,13 +187,13 @@ user_data/shared/ai_models/{provider_id}/profiles/{model_name}/ui/events.ui.yaml
 形式:
 ```yaml
 events:
-  {event_name}:          # セクション11.3の正規化イベント名と対応
-    widget:               # widget.md に定義された任意の Widget JSON
+  {event_name}: # Corresponds to normalized event name in section 11.3
+    widget: # Any Widget JSON defined in widget.md
       type: indicator
       label: "Thinking..."
       state: running
       animation: wave_dots
-    auto_dismiss: 800     # 任意。指定ミリ秒後に自動消去のヒント
+    auto_dismiss: 800 # Optional. Auto-clear after specified milliseconds hint
 ```
 
 テンプレート変数: `{{key}}` はイベントの `data.key` の値で置換する。例えば `{{name}}` は `tool_call_start` イベントの `data.name`（ツール名）に展開される。
@@ -203,14 +205,14 @@ widget フィールドが null または省略されたイベントには何も�
 stream_handler.py が .jsonl のイベントを読む際の追加処理:
 
 ```
-1. モデル profile に ui/events.ui.yaml が存在するか確認
-2. 存在すれば起動時に1回読み込んでメモリに保持
-3. 各ストリーミングイベント処理時:
-   a. 現在のイベント名に対応する定義が events.ui.yaml にあるか確認
-   b. あれば widget 定義のテンプレート変数（{{key}}）をイベントの data で置換
-   c. 置換済み widget を event.data.widget に格納
-   d. auto_dismiss があれば event.data.widget_auto_dismiss に格納
-4. 定義がなければ何も付与しない
+1. Check if ui/events.ui.yaml exists in model profile
+2. If it exists, it will be read once at startup and kept in memory.
+3. When processing each streaming event:
+   a. Check if there is a definition corresponding to the current event name in events.ui.yaml
+   b. Replace the template variable ({{key}}) in the widget definition with the event data, if any.
+   c. Store the replaced widget in event.data.widget
+   d. If auto_dismiss exists, store it in event.data.widget_auto_dismiss
+4. Give nothing if there is no definition
 ```
 
 擬似コード:
@@ -237,7 +239,7 @@ class StreamHandler:
         return event
 
 def resolve_templates(widget_dict, data):
-    """widget定義内の {{key}} を data[key] で置換"""
+"""Replace {{key}} with data[key] in widget definition"""
     raw = json.dumps(widget_dict)
     for key, value in data.items():
         raw = raw.replace("{{" + key + "}}", str(value))
@@ -325,7 +327,7 @@ ai_client.md 内の適切な場所に追記。候補:
 
 ## 注意事項
 - ai_client.md の既存の記法・トーン・構造を維持
-- events.ui.yaml は「任意」（optional）であることを繰り返し明記 
+- events.ui.yaml は「任意」（optional）であることを繰り返し明記
 - 新しい Widget 型は追加しない（widget.md 既存の型のみ使用）
 - ai_client にデフォルトのアニメーション定義をハードコードしない
 - 「仕組みだけ提供」の原則を守る

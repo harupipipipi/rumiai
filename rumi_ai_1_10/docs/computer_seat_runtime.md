@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./computer_seat_runtime.md) | [JP](./i18n/ja/computer_seat_runtime.md) | [KR](./i18n/ko/computer_seat_runtime.md) | [CN](./i18n/zh-cn/computer_seat_runtime.md)
+<!-- docs-i18n-links:end -->
+
 # ComputerSeat Runtime – Architecture & Usage
 
 ## Overview

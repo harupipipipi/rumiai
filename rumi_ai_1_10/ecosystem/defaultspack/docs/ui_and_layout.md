@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./ui_and_layout.md) | [JP](./i18n/ja/ui_and_layout.md) | [KR](./i18n/ko/ui_and_layout.md) | [CN](./i18n/zh-cn/ui_and_layout.md)
+<!-- docs-i18n-links:end -->
+
 # Rumi AI OS Defaults UI and Layout
 
 This document details the design principles and expectations for the UI components provided by the `defaults` pack, specifically addressing requirements for customization, drag-and-drop capability, and dynamic tool displays.
@@ -43,7 +47,7 @@ Users need to configure tools (e.g., entering API keys, setting search preferenc
 To prevent visual clashes between different packs:
 
 1.  **Animation Constants:** The `defaults` pack defines standard CSS variables for transitions (e.g., `--rumi-anim-fast: 150ms ease`, `--rumi-anim-medium: 300ms ease-in-out`).
-2.  **Guidance:** Pack developers are strongly encouraged via documentation to utilize these variables for tool displays and custom UI assets to maintain a cohesive experience (統一感).
+2.  **Guidance:** Pack developers are strongly encouraged via documentation to utilize these variables for tool displays and custom UI assets to maintain a cohesive experience.
 
 ## Fallback Mechanisms
 

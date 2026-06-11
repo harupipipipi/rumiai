@@ -1,22 +1,26 @@
-# Transport 層
+<!-- docs-i18n-links:start -->
+[EN](./transport.md) | [JP](./i18n/ja/transport.md) | [KR](./i18n/ko/transport.md) | [CN](./i18n/zh-cn/transport.md)
+<!-- docs-i18n-links:end -->
 
-defaultspack はフロントエンドやクライアントとの通信手段として、3 種類の transport を提供する。いずれも `transport/` ディレクトリに配置されている。
+# Transport layer
 
----
-
-## 概要
-
-transport 層はクライアントからのリクエストを受け取り、`transport/registry.py` の endpoint -> flow/function 宣言を解決してレスポンスを返す中間層である。通常 chat の本線は `defaultspack.chat_turn` / `defaultspack.chat_stream_turn` を通り、既存 frontend の HTTP path、JSON shape、SSE event shape は fallback block で後方互換を維持する。`ecosystem/defaults/transport/*` は defaultspack transport への互換 shim である。
-
-transport の選択は起動時に決まる。`defaults.frontend.start` handler が `transport` パラメータに基づいて適切な transport を起動する。
+defaultspack provides three types of transports as a means of communicating with front ends and clients. Both are located in the `transport/` directory.
 
 ---
 
-## HTTP サーバー (`transport/http.py`)
+## Overview
+
+The transport layer is an intermediate layer that receives requests from clients, resolves the endpoint -> flow/function declaration in `transport/registry.py`, and returns a response. Normally, the main line of chat passes through `defaultspack.chat_turn` / `defaultspack.chat_stream_turn`, and the existing frontend's HTTP path, JSON shape, and SSE event shape maintain backward compatibility with fallback blocks. `ecosystem/defaults/transport/*` is a compatibility shim to the defaultspack transport.
+
+Transport selection is determined at startup. `defaults.frontend.start` handler launches the appropriate transport based on the `transport` parameters.
+
+---
+
+## HTTP server (`transport/http.py`)
 
 ### DefaultsHttpServer
 
-`DefaultsHttpServer` は Python 標準ライブラリの `http.server.HTTPServer` をベースにした HTTP サーバーである。
+`DefaultsHttpServer` is an HTTP server based on `http.server.HTTPServer` of the Python standard library.
 
 ```python
 from transport.http import start_http_server
@@ -24,28 +28,28 @@ from transport.http import start_http_server
 server = start_http_server(facade)  # KernelFacade or None
 ```
 
-**コンストラクタ引数:**
+**Constructor arguments:**
 
-`facade` — カーネルの KernelFacade インスタンス。`/api/context` エンドポイントで `list_interfaces()` を呼び出すために使用される。None も可。
+`facade` — KernelFacade instance of the kernel. `/api/context` Used to call `list_interfaces()` on the endpoint. None is also possible.
 
-**環境変数:**
+**Environment variables:**
 
-`DEFAULTS_HTTP_HOST` — バインドホスト。デフォルト `127.0.0.1`。
-`DEFAULTS_HTTP_PORT` — バインドポート。デフォルト `8766`。
+`DEFAULTS_HTTP_HOST` — Bind host. Default `127.0.0.1`.
+`DEFAULTS_HTTP_PORT` — Bind port. Default `8766`.
 
-**スレッドモデル:** daemon スレッドで `serve_forever()` を実行する。メインスレッドをブロックしない。
+**Threading model:** Run `serve_forever()` in a daemon thread. Don't block the main thread.
 
-### ルーティングの仕組み
+### How routing works
 
-`_setup_routes()` メソッドは `transport/registry.py` から canonical route specs を読み込む。flow YAML の `transport.http.routes` が最優先で、足りない endpoint は互換 fallback specs と component route specs で補われる。パターン中の `{param}` は正規表現 `(?P<param>[^/]+)` に変換され、コンパイル済み正規表現として保持される。
+The `_setup_routes()` method reads canonical route specs from `transport/registry.py`. flow YAML's `transport.http.routes` is the top priority, and missing endpoints are supplemented by compatible fallback specs and component route specs. `{param}` in the pattern is converted to regular expression `(?P<param>[^/]+)` and kept as a compiled regular expression.
 
-リクエスト到着時に `_match_route(method, path)` が全ルートを順にスキャンし、メソッドとパスが一致する最初のルートのハンドラを呼び出す。パスパラメータは `groupdict()` で抽出され、各ハンドラに渡される。
+When a request arrives, `_match_route(method, path)` scans all routes in order and calls the handler for the first route with a matching method and path. Path parameters are extracted in `groupdict()` and passed to each handler.
 
-各ハンドラ内では、パスパラメータが `request_data` dict に注入される。例えば `/api/chat/conversations/{id}` の場合、`request_data["conversation_id"] = path_params.get("id", "")` のように設定される。
+Inside each handler, path parameters are injected into a `request_data` dict. For example, in the case of `/api/chat/conversations/{id}`, it is set as `request_data["conversation_id"] = path_params.get("id", "")`.
 
-### HTTP ルート一覧
+### HTTP route list
 
-| メソッド | パス | handler (block) |
+| method | path | handler (block) |
 |---|---|---|
 | `POST` | `/v1/chat/completions` | `defaultspack.chat_turn` (`blocks/chat/send.py` fallback) |
 | `POST` | `/api/chat/conversations` | `blocks/chat/create_conversation.py` |
@@ -80,14 +84,14 @@ server = start_http_server(facade)  # KernelFacade or None
 | `GET` | `/api/dev/prompt-history` | `blocks/dev/prompt_history.py` |
 | `POST` | `/api/dev/edit-prompt` | `blocks/dev/edit_prompt_live.py` |
 | `POST` | `/api/dev/replay` | `blocks/dev/replay.py` |
-| `GET` | `/api/health` | （インライン: ヘルスチェック） |
-| `GET` | `/api/context` | （インライン: Pack 情報 + interfaces） |
-| `GET` | `/` | （静的: `ui/shell.html`） |
-| `GET` | `/static/{path}` | （静的: `ui/{path}`） |
+| `GET` | `/api/health` | (Inline: Health Check) |
+| `GET` | `/api/context` | (Inline: Pack information + interfaces) |
+| `GET` | `/` | (Static: `ui/shell.html`) |
+| `GET` | `/static/{path}` | (Static: `ui/{path}`) |
 
-### CORS 設定
+### CORS settings
 
-すべてのレスポンスに以下のヘッダーが付与される:
+All responses will have the following headers:
 
 ```
 Access-Control-Allow-Origin: *
@@ -95,22 +99,22 @@ Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
 Access-Control-Allow-Headers: Content-Type, Authorization
 ```
 
-`OPTIONS` リクエストは 204 No Content でプリフライト応答する。
+`OPTIONS` The request is preflighted with a 204 No Content response.
 
-### リクエスト処理フロー
+### Request processing flow
 
-1. `_RequestHandler` が HTTP リクエストを受信
-2. パスのクエリ文字列部分を除去（`?` 以降を切り落とし）
-3. `_match_route()` でルートをマッチング
-4. POST/PUT の場合は Body を JSON パース
-5. ハンドラ関数を `(request_data, path_params)` で呼び出し
-6. 結果が `_static` フラグを持つ場合は静的ファイルとして返却
-7. それ以外は JSON レスポンスとして返却（エラー時は 400、成功時は 200）
-8. ハンドラ内例外は 500 Internal Server Error
+1. `_RequestHandler` receives an HTTP request
+2. Remove the query string part of the path (cut off `?`)
+3. Matching routes with `_match_route()`
+4. For POST/PUT, parse the Body as JSON
+5. Call the handler function with `(request_data, path_params)`
+6. If the result has the `_static` flag, return it as a static file.
+7. Otherwise, return as JSON response (400 for error, 200 for success)
+8. Exception in handler is 500 Internal Server Error
 
-### context 構築
+### Context construction
 
-各ハンドラが `_build_context()` で生成する context は以下の構造を持つ:
+The context generated by each handler in `_build_context()` has the following structure:
 
 ```python
 {
@@ -125,7 +129,7 @@ Access-Control-Allow-Headers: Content-Type, Authorization
 
 ### KernelFacade
 
-`DefaultsHttpServer` のコンストラクタに渡す `facade` はカーネルの `io.http.server` モジュールが提供する `KernelFacade` インスタンスである。defaults Pack がカーネルなしでスタンドアロン動作する場合は `None` を渡す。facade が設定されている場合、`/api/context` エンドポイントが `facade.list_interfaces()` を呼び出してインターフェース情報を返す。
+The `facade` passed to the constructor of `DefaultsHttpServer` is a `KernelFacade` instance provided by the kernel's `io.http.server` module. Pass `None` if the defaults pack runs standalone without a kernel. If facade is set, the `/api/context` endpoint calls `facade.list_interfaces()` and returns interface information.
 
 ---
 
@@ -133,9 +137,9 @@ Access-Control-Allow-Headers: Content-Type, Authorization
 
 ### DefaultsStdioTransport
 
-stdin/stdout を使った JSONL (JSON Lines) 形式の transport。CLI ツールやパイプライン統合向け。
+JSONL (JSON Lines) format transport using stdin/stdout. For CLI tools and pipeline integrations.
 
-**起動方法:**
+**Startup method:**
 
 ```python
 from transport.stdio import DefaultsStdioTransport
@@ -144,31 +148,31 @@ transport = DefaultsStdioTransport()
 transport.start()  # ブロッキング（stdin を読み続ける）
 ```
 
-### JSONL プロトコル
+### JSONL Protocol
 
-**リクエスト形式（1行の JSON）:**
+**Request format (1 line JSON):**
 
 ```json
 {"method": "POST", "path": "/api/chat/conversations", "data": {"model": "openai/gpt-4o"}}
 ```
 
-| フィールド | 必須 | 型 | 説明 |
+| Field | Required | Type | Description |
 |---|---|---|---|
-| `method` | 任意 | `string` | HTTP メソッド。デフォルト `"GET"` |
-| `path` | 必須 | `string` | エンドポイントパス |
-| `data` | 任意 | `object` | リクエストボディ |
+| `method` | Optional | `string` | HTTP method. Default `"GET"` |
+| `path` | Required | `string` | Endpoint path |
+| `data` | Optional | `object` | Request body |
 
-**レスポンス形式（1行の JSON を stdout に出力）:**
+**Response format (outputs one line of JSON to stdout):**
 
 ```json
 {"status": "ok", "data": {...}}
 ```
 
-### stdio ルート一覧
+### stdio route list
 
-stdio transport は `transport/registry.py` の canonical route specs を使う。静的ファイル系を除き、HTTP と同じ endpoint -> flow/function 本線を通る。`_ROUTE_MAP` と `_ID_INJECT_MAP` は既存コード向けの互換 export である。
+stdio transport uses canonical route specs from `transport/registry.py`. Except for static files, it passes through the same endpoint -> flow/function main line as HTTP. `_ROUTE_MAP` and `_ID_INJECT_MAP` are compatible exports for existing code.
 
-| メソッド | パス | block モジュール | ID 注入 |
+| Method | Path | block module | ID injection |
 |---|---|---|---|
 | `POST` | `/v1/chat/completions` | `defaultspack.chat_turn` | — |
 | `POST` | `/api/chat/conversations` | `blocks.chat.create_conversation` | — |
@@ -184,18 +188,18 @@ stdio transport は `transport/registry.py` の canonical route specs を使う�
 | `POST` | `/api/agent/{id}/reject` | `blocks.agent.reject` | `execution_id` ← `id` |
 | `POST` | `/api/agent/{id}/cancel` | `blocks.agent.cancel` | `execution_id` ← `id` |
 | `GET` | `/api/agent/{id}/status` | `blocks.agent.status` | `execution_id` ← `id` |
-| `GET` | `/api/health` | （インライン） | — |
-| `GET` | `/api/context` | （インライン） | — |
+| `GET` | `/api/health` | (inline) | — |
+| `GET` | `/api/context` | (inline) | — |
 
-静的ファイル配信 (`/`, `/chat`, `/static/{path}`) は HTTP transport 専用である。
+Static file delivery (`/`, `/chat`, `/static/{path}`) is exclusive to the HTTP transport.
 
-### ルーティング
+### Routing
 
-ルートマッチングは `_match_route()` 関数が行う。HTTP transport と同様に `{param}` を正規表現に変換してマッチングする。パスパラメータの注入は `_ID_INJECT_MAP` dict を参照して行われる。
+Route matching is performed by the `_match_route()` function. Similar to HTTP transport, convert `{param}` into a regular expression and match. Injection of path parameters is done by referring to `_ID_INJECT_MAP` dict.
 
-### context 構築
+### Context construction
 
-stdio transport が `_build_context()` で生成する context:
+The context that stdio transport generates in `_build_context()`:
 
 ```python
 {
@@ -214,9 +218,9 @@ stdio transport が `_build_context()` で生成する context:
 
 ### DefaultsUdsTransport
 
-Unix Domain Socket を使った transport。ローカルプロセス間通信向け。
+transport using Unix Domain Sockets. For local interprocess communication.
 
-**起動方法:**
+**Startup method:**
 
 ```python
 from transport.uds import DefaultsUdsTransport
@@ -225,47 +229,47 @@ transport = DefaultsUdsTransport(socket_path="/tmp/rumi_defaults.sock")
 transport.start()  # ブロッキング
 ```
 
-**環境変数:**
+**Environment variables:**
 
-`DEFAULTS_UDS_PATH` — ソケットパス。デフォルト `/tmp/rumi_defaults.sock`。
+`DEFAULTS_UDS_PATH` — Socket path. Default `/tmp/rumi_defaults.sock`.
 
-### プロトコル
+### Protocol
 
-Length-prefix 方式: 4 バイト (big-endian) のメッセージ長 + JSON バイト列。
+Length-prefix method: 4-byte (big-endian) message length + JSON byte string.
 
-**リクエスト:**
+**Request:**
 
 ```
 [4 bytes: length][JSON bytes]
 ```
 
-JSON の構造は stdio と同一:
+The structure of JSON is the same as stdio:
 
 ```json
 {"method": "POST", "path": "/api/chat/conversations", "data": {...}}
 ```
 
-**レスポンス:**
+**Response:**
 
 ```
 [4 bytes: length][JSON bytes]
 ```
 
-### メッセージサイズ制限
+### Message size limit
 
-最大 10 MB (10 * 1024 * 1024 バイト)。超過した場合はエラーレスポンスを返す。
+Maximum 10 MB (10 * 1024 * 1024 bytes). If it exceeds the limit, an error response will be returned.
 
-### スレッドモデル
+### Threading model
 
-accept ループはメインスレッドで実行され、各クライアント接続は daemon スレッドで処理される。`listen(8)` でバックログ 8。ソケットタイムアウトは 1 秒。
+The accept loop runs on the main thread, and each client connection is handled by a daemon thread. Backlog 8 with `listen(8)`. Socket timeout is 1 second.
 
-### ルーティング
+### Routing
 
-stdio transport と同じ `_ROUTE_MAP` および `_ID_INJECT_MAP` を使用する。利用可能なルートは stdio transport と同一である。
+Uses the same `_ROUTE_MAP` and `_ID_INJECT_MAP` as stdio transport. Available routes are the same as stdio transport.
 
-### context 構築
+### Context construction
 
-UDS transport が `_build_context()` で生成する context:
+Context generated by UDS transport in `_build_context()`:
 
 ```python
 {
@@ -278,6 +282,6 @@ UDS transport が `_build_context()` で生成する context:
 }
 ```
 
-### ライフサイクル
+### Life cycle
 
-`start()` 呼び出し時に既存のソケットファイルがあれば `unlink` する。`stop()` 呼び出し時にもソケットファイルを削除する。
+`start()` If there is an existing socket file when calling `unlink`. `stop()` Also deletes the socket file when called.

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./company_workspace.md) | [JP](./i18n/ja/company_workspace.md) | [KR](./i18n/ko/company_workspace.md) | [CN](./i18n/zh-cn/company_workspace.md)
+<!-- docs-i18n-links:end -->
+
 # Team Workspace
 
 This document uses `team workspace` as the user-facing name for the long-running

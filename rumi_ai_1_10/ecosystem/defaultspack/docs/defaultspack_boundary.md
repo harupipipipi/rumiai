@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./defaultspack_boundary.md) | [JP](./i18n/ja/defaultspack_boundary.md) | [KR](./i18n/ko/defaultspack_boundary.md) | [CN](./i18n/zh-cn/defaultspack_boundary.md)
+<!-- docs-i18n-links:end -->
+
 # Defaultspack Boundary
 
 defaultspack is Rumi's core runtime pack. It provides the common execution

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./prompt.md) | [JP](./i18n/ja/prompt.md) | [KR](./i18n/ko/prompt.md) | [CN](./i18n/zh-cn/prompt.md)
+<!-- docs-i18n-links:end -->
+
 # Prompt Design
 
 Prompt is a passive text layer. It stores, validates, resolves, and renders

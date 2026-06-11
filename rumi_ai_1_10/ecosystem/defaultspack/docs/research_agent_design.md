@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./research_agent_design.md) | [JP](./i18n/ja/research_agent_design.md) | [KR](./i18n/ko/research_agent_design.md) | [CN](./i18n/zh-cn/research_agent_design.md)
+<!-- docs-i18n-links:end -->
+
 # Research Agent Design
 
 Research is local-first.

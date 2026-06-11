@@ -1,25 +1,25 @@
+<!-- docs-i18n-links:start -->
+[EN](./chat.md) | [JP](./i18n/ja/chat.md) | [KR](./i18n/ko/chat.md) | [CN](./i18n/zh-cn/chat.md)
+<!-- docs-i18n-links:end -->
+
 # Chat API
 
-defaults Pack のチャット機能の全 API リファレンスです。handler は `blocks/chat/` に、ドメインロジックは `domain/chat/store.py`（ChatStore）に実装されています。
+A complete API reference for the defaults pack's chat functionality. The handler is implemented in `blocks/chat/` and the domain logic is implemented in `domain/chat/store.py` (ChatStore).
 
-ecosystem.json の chat コンポーネントは 18 個の handler を provides しています: `create_conversation`, `get_conversation`, `list_conversations`, `update_conversation`, `delete_conversation`, `export_conversation`, `send`, `stream`, `add_message`, `get_message`, `update_message`, `delete_message`, `branch`, `search`, `stop`, `regenerate`, `summarize_and_trim`, `auto_trim`。
+The chat component in ecosystem.json provides 18 handlers: `create_conversation`, `get_conversation`, `list_conversations`, `update_conversation`, `delete_conversation`, `export_conversation`, `send`, `stream`, `add_message`, `get_message`, `update_message`, `delete_message`, `branch`, `search`, `stop`, `regenerate`, `summarize_and_trim`, `auto_trim`.
 
-## 会話の作成
+## Create a conversation
 
-**handler**: `defaults.chat.create_conversation`（`blocks/chat/create_conversation.py`）
+**handler**: `defaults.chat.create_conversation`（`blocks/chat/create_conversation.py`）**HTTP**: `POST /api/chat/conversations`**input_data**:
 
-**HTTP**: `POST /api/chat/conversations`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `model` | `string` | No | AI モデル名。デフォルト `"stub/default"` |
-| `system_prompt_id` | `string` | No | システムプロンプト ID |
-| `agent_id` | `string` | No | エージェント ID |
-| `tags` | `string[]` | No | タグ配列。デフォルト `[]` |
+| `model` | `string` | No | AI model name. Default `"stub/default"` |
+| `system_prompt_id` | `string` | No | System Prompt ID |
+| `agent_id` | `string` | No | Agent ID |
+| `tags` | `string[]` | No | Tag array. Default `[]` |
 
-**戻り値**（`ok(conv)`）:
+**Return value** (`ok(conv)`):
 
 ```json
 {
@@ -41,85 +41,63 @@ ecosystem.json の chat コンポーネントは 18 個の handler を provides 
 }
 ```
 
-## 会話の取得
+## Get conversation
 
-**handler**: `defaults.chat.get_conversation`（`blocks/chat/get_conversation.py`）
+**handler**: `defaults.chat.get_conversation`（`blocks/chat/get_conversation.py`）**HTTP**: `GET /api/chat/conversations/{id}`**input_data**:
 
-**HTTP**: `GET /api/chat/conversations/{id}`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID（URL パスから自動注入） |
+| `conversation_id` | `string` | Yes | Conversation ID (automatically injected from URL path) |
 
-**戻り値**: `ok(conv)` — 会話オブジェクト全体（messages 含む）。見つからない場合は `error("Conversation not found", "NOT_FOUND")`。
+**Return value**: `ok(conv)` — The entire conversation object (including messages). If not found, `error("Conversation not found", "NOT_FOUND")`.
 
-## 会話の一覧
+## List of conversations
 
-**handler**: `defaults.chat.list_conversations`（`blocks/chat/list_conversations.py`）
+**handler**: `defaults.chat.list_conversations`（`blocks/chat/list_conversations.py`）**HTTP**: `GET /api/chat/conversations`**input_data**:
 
-**HTTP**: `GET /api/chat/conversations`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `limit` | `int` | No | 取得件数。デフォルト `50` |
-| `offset` | `int` | No | オフセット。デフォルト `0` |
-| `tag` | `string` | No | タグでフィルタ |
-| `is_starred` | `bool` | No | スター状態でフィルタ |
-| `is_archived` | `bool` | No | アーカイブ状態でフィルタ |
+| `limit` | `int` | No | Number of acquisitions. Default `50` |
+| `offset` | `int` | No | Offset. Default `0` |
+| `tag` | `string` | No | Filter by tag |
+| `is_starred` | `bool` | No | Filter by star status |
+| `is_archived` | `bool` | No | Filter by archive status |
 
-**戻り値**: `ok({"conversations": [...], "total": int})`。`updated_at` 降順でソートされます。
+**Return value**: `ok({"conversations": [...], "total": int})`. `updated_at` Sorted in descending order.
 
-## 会話の更新
+## Update conversation
 
-**handler**: `defaults.chat.update_conversation`（`blocks/chat/update_conversation.py`）
+**handler**: `defaults.chat.update_conversation`（`blocks/chat/update_conversation.py`）**HTTP**: `PUT /api/chat/conversations/{id}`**input_data**:
 
-**HTTP**: `PUT /api/chat/conversations/{id}`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID（URL パスから自動注入） |
-| `updates` | `dict` | Yes | 更新するフィールド。`id`, `created_at`, `messages` は変更不可 |
+| `conversation_id` | `string` | Yes | Conversation ID (automatically injected from URL path) |
+| `updates` | `dict` | Yes | Field to update. `id`, `created_at`, `messages` cannot be changed |
 
-**戻り値**: `ok(conv)` — 更新後の会話オブジェクト。
+**Return value**: `ok(conv)` — Updated conversation object.
 
-## 会話の削除
+## Delete conversation
 
-**handler**: `defaults.chat.delete_conversation`（`blocks/chat/delete_conversation.py`）
+**handler**: `defaults.chat.delete_conversation`（`blocks/chat/delete_conversation.py`）**HTTP**: `DELETE /api/chat/conversations/{id}`**input_data**:
 
-**HTTP**: `DELETE /api/chat/conversations/{id}`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID（URL パスから自動注入） |
+| `conversation_id` | `string` | Yes | Conversation ID (automatically injected from URL path) |
 
-**戻り値**: `ok({"success": true})`。見つからない場合は `error("Conversation not found", "NOT_FOUND")`。
+**Return value**: `ok({"success": true})`. If not found, `error("Conversation not found", "NOT_FOUND")`.
 
-## メッセージの送信（AI 応答付き）
+## Send a message (with AI response)
 
-**handler**: `defaults.chat.send`（`blocks/chat/send.py`）
+**handler**: `defaults.chat.send`（`blocks/chat/send.py`）**HTTP**: `POST /api/chat/conversations/{id}/messages` or `POST /v1/chat/completions`**input_data**:
 
-**HTTP**: `POST /api/chat/conversations/{id}/messages` または `POST /v1/chat/completions`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID |
-| `message` | `dict` | Yes | メッセージオブジェクト |
-| `message.role` | `string` | No | ロール。デフォルト `"user"` |
-| `message.content` | `string` or `list` | Yes | メッセージ内容。文字列の場合は `[{"type": "text", "text": ...}]` に変換される |
+| `conversation_id` | `string` | Yes | Conversation ID |
+| `message` | `dict` | Yes | Message object |
+| `message.role` | `string` | No | Role. Default `"user"` |
+| `message.content` | `string` or `list` | Yes | Message content. If it is a string, it will be converted to `[{"type": "text", "text": ...}]` |
 
-**処理フロー**: ユーザーメッセージを `ChatStore.add_message()` で保存 → `get_message_chain()` で会話履歴を取得 → `convert_to_standard()` で標準形式に変換 → `call_handler("defaults.ai.complete", ...)` で AI 呼び出し → `build_assistant_message()` で assistant メッセージを構築 → `ChatStore.add_message()` で保存。
-
-**戻り値**: `ok(assistant_msg)` — AI の応答メッセージオブジェクト。
+**Processing flow**: Save user message in `ChatStore.add_message()` → Get conversation history in `get_message_chain()` → Convert to standard format in `convert_to_standard()` → Call AI in `call_handler("defaults.ai.complete", ...)` → Build assistant message in `build_assistant_message()` → Save in `ChatStore.add_message()`.**Return value**: `ok(assistant_msg)` — AI response message object.
 
 ```json
 {
@@ -141,170 +119,130 @@ ecosystem.json の chat コンポーネントは 18 個の handler を provides 
 }
 ```
 
-## メッセージの追加（AI 応答なし）
+## Add message (AI no response)
 
-**handler**: `defaults.chat.add_message`（`blocks/chat/add_message.py`）
+**handler**: `defaults.chat.add_message`（`blocks/chat/add_message.py`）**input_data**:
 
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID |
-| `message` | `dict` | Yes | メッセージオブジェクト（role, content） |
+| `conversation_id` | `string` | Yes | Conversation ID |
+| `message` | `dict` | Yes | Message object (role, content) |
 
-**戻り値**: `ok(msg)` — 追加されたメッセージオブジェクト。AI 呼び出しは行われません。
+**Return value**: `ok(msg)` — Added message object. No AI calls are made.
 
-## メッセージの取得
+## Get message
 
-**handler**: `defaults.chat.get_message`（`blocks/chat/get_message.py`）
+**handler**: `defaults.chat.get_message`（`blocks/chat/get_message.py`）**input_data**:
 
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID |
-| `message_id` | `string` | Yes | メッセージ ID |
+| `conversation_id` | `string` | Yes | Conversation ID |
+| `message_id` | `string` | Yes | Message ID |
 
-**戻り値**: `ok(msg)` — メッセージオブジェクト。
+**Return value**: `ok(msg)` — Message object.
 
-## メッセージの更新
+## Update message
 
-**handler**: `defaults.chat.update_message`（`blocks/chat/update_message.py`）
+**handler**: `defaults.chat.update_message`（`blocks/chat/update_message.py`）**input_data**:
 
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID |
-| `message_id` | `string` | Yes | メッセージ ID |
-| `updates` | `dict` | Yes | 更新するフィールド。`id`, `conversation_id`, `created_at` は変更不可 |
+| `conversation_id` | `string` | Yes | Conversation ID |
+| `message_id` | `string` | Yes | Message ID |
+| `updates` | `dict` | Yes | Field to update. `id`, `conversation_id`, `created_at` cannot be changed |
 
-**戻り値**: `ok(msg)` — 更新後のメッセージオブジェクト。
+**Return value**: `ok(msg)` — Updated message object.
 
-## メッセージの削除
+## Delete message
 
-**handler**: `defaults.chat.delete_message`（`blocks/chat/delete_message.py`）
+**handler**: `defaults.chat.delete_message`（`blocks/chat/delete_message.py`）**input_data**:
 
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID |
-| `message_id` | `string` | Yes | メッセージ ID |
+| `conversation_id` | `string` | Yes | Conversation ID |
+| `message_id` | `string` | Yes | Message ID |
 
-**戻り値**: `ok({"success": true})`。親メッセージの `children_ids` から自動的に削除されます。`current_node_id` が削除対象の場合は `parent_id` に更新されます。
+**Return value**: `ok({"success": true})`. Automatically removed from `children_ids` of the parent message. If `current_node_id` is subject to deletion, it will be updated to `parent_id`.
 
-## ストリーミング送信
+## Streaming transmission
 
-**handler**: `defaults.chat.stream`（`blocks/chat/stream.py`）
+**handler**: `defaults.chat.stream`（`blocks/chat/stream.py`）**HTTP**: `POST /api/chat/conversations/{id}/stream`**input_data**:
 
-**HTTP**: `POST /api/chat/conversations/{id}/stream`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID |
-| `message` | `dict` | Yes | メッセージオブジェクト |
+| `conversation_id` | `string` | Yes | Conversation ID |
+| `message` | `dict` | Yes | Message object |
 
-**処理**: ユーザーメッセージを保存し、`call_handler("defaults.ai.stream", ...)` でストリーミング AI 呼び出しを行います。`stream_id` が返され、これを使ってストリームの停止が可能です。
+**Processing**: Store user messages and make streaming AI calls in `call_handler("defaults.ai.stream", ...)`. `stream_id` is returned and can be used to stop the stream.**Return value**: `ok({"stream_id": "...", "conversation_id": "..."})`
 
-**戻り値**: `ok({"stream_id": "...", "conversation_id": "..."})`
+## Stop streaming
 
-## ストリーミング停止
+**handler**: `defaults.chat.stop`（`blocks/chat/stop.py`）**input_data**:
 
-**handler**: `defaults.chat.stop`（`blocks/chat/stop.py`）
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID |
-| `stream_id` | `string` | No | 停止するストリームの ID |
+| `conversation_id` | `string` | Yes | Conversation ID |
+| `stream_id` | `string` | No | ID of the stream to stop |
 
-**戻り値**: `ok({"success": true})`
+**Return value**: `ok({"success": true})`
 
-## AI 応答の再生成
+## Regenerate AI responses
 
-**handler**: `defaults.chat.regenerate`（`blocks/chat/regenerate.py`）
+**handler**: `defaults.chat.regenerate`（`blocks/chat/regenerate.py`）**input_data**:
 
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID |
-| `message_id` | `string` | Yes | 再生成対象のメッセージ ID |
+| `conversation_id` | `string` | Yes | Conversation ID |
+| `message_id` | `string` | Yes | Message ID to be regenerated |
 
-**処理**: 指定メッセージを削除 → 親メッセージまでの会話チェーンを取得 → AI に再度送信 → 新しい assistant メッセージを保存。
+**Processing**: Delete specified message → Get conversation chain up to parent message → Send again to AI → Save new assistant message.**Return value**: `ok(assistant_msg)` — New AI response message.
 
-**戻り値**: `ok(assistant_msg)` — 新しい AI 応答メッセージ。
+## Branch (conversation branch)
 
-## ブランチ（会話の分岐）
+**handler**: `defaults.chat.branch`（`blocks/chat/branch.py`）**HTTP**: Direct HTTP route is undefined. Call via `call_handler("defaults.chat.branch", ...)`.**input_data**:
 
-**handler**: `defaults.chat.branch`（`blocks/chat/branch.py`）
-
-**HTTP**: 直接の HTTP ルートは未定義。`call_handler("defaults.chat.branch", ...)` 経由で呼び出します。
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 元の会話 ID |
-| `message_id` | `string` | Yes | 分岐起点のメッセージ ID |
+| `conversation_id` | `string` | Yes | Original conversation ID |
+| `message_id` | `string` | Yes | Branch origin message ID |
 
-**処理**: `ChatStore.branch()` が指定メッセージまでのチェーンをコピーして新しい会話を作成します。新しい会話のタイトルには `" (branch)"` が付加されます。メッセージの `parent_id` / `children_ids` は新しい ID に再マッピングされます。
+**Processing**: `ChatStore.branch()` creates a new conversation by copying the chain up to the specified message. New conversation titles will have `" (branch)"` appended to them. `parent_id` / `children_ids` in the message will be remapped to the new ID.**Return value**: `ok(new_conv)` — New branched conversation object.
 
-**戻り値**: `ok(new_conv)` — 分岐された新しい会話オブジェクト。
+## Search
 
-## 検索
+**handler**: `defaults.chat.search`（`blocks/chat/search.py`）**input_data**:
 
-**handler**: `defaults.chat.search`（`blocks/chat/search.py`）
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `query` | `string` | Yes | 検索クエリ |
-| `conversation_id` | `string` | No | 特定の会話内に限定する場合 |
+| `query` | `string` | Yes | Search query |
+| `conversation_id` | `string` | No | To limit to a specific conversation |
 
-**処理**: `ChatStore.search()` が全メッセージの `raw_text` フィールドに対して大文字小文字を区別しない部分一致検索を行います。
+**Processing**: `ChatStore.search()` performs a case-insensitive partial match search on the `raw_text` field of all messages.**Return value**: `ok({"results": [msg, msg, ...]})`
 
-**戻り値**: `ok({"results": [msg, msg, ...]})`
+## Export
 
-## エクスポート
+**handler**: `defaults.chat.export_conversation`（`blocks/chat/export_conversation.py`）**HTTP**: `POST /api/chat/conversations/{id}/export`**input_data**:
 
-**handler**: `defaults.chat.export_conversation`（`blocks/chat/export_conversation.py`）
-
-**HTTP**: `POST /api/chat/conversations/{id}/export`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID |
-| `format` | `string` | No | `"markdown"` または `"json"`。デフォルト `"markdown"` |
+| `conversation_id` | `string` | Yes | Conversation ID |
+| `format` | `string` | No | `"markdown"` or `"json"`. Default `"markdown"` |
 
-**戻り値**: `ok({"content": "..."})`。`domain/chat/exporter.py` の `export_markdown()` または `export_json()` が呼ばれます。
+**Return value**: `ok({"content": "..."})`. `domain/chat/exporter.py`, `export_markdown()` or `export_json()` are called.
 
-## 会話履歴の AI 要約（summarize_and_trim）
+## AI summary of conversation history (summarize_and_trim)
 
-**handler**: `defaults.chat.summarize_and_trim`（`blocks/chat/summarize_and_trim.py`）
+**handler**: `defaults.chat.summarize_and_trim`（`blocks/chat/summarize_and_trim.py`）**HTTP**: `POST /api/chat/conversations/{id}/summarize`**input_data**:
 
-**HTTP**: `POST /api/chat/conversations/{id}/summarize`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID |
-| `start_message_id` | `string` | Yes | 要約範囲の開始メッセージ ID |
-| `end_message_id` | `string` | Yes | 要約範囲の終了メッセージ ID |
-| `model` | `string` | No | 要約に使用する AI モデル。`"default"` の場合は会話のモデルを使用 |
-| `instruction` | `string` | No | 追加の要約指示 |
+| `conversation_id` | `string` | Yes | Conversation ID |
+| `start_message_id` | `string` | Yes | Start message ID of summary range |
+| `end_message_id` | `string` | Yes | End of summary range message ID |
+| `model` | `string` | No | AI model used for summarization. Use conversational model for `"default"` |
+| `instruction` | `string` | No | Additional summary instructions |
 
-**処理**: 指定範囲のメッセージを取得 → `convert_to_standard()` で標準形式に変換 → 要約用プロンプトを構築 → AI に要約させる → 範囲内メッセージを一括削除（`delete_messages_bulk`） → 要約メッセージを挿入（`insert_message_at`）。要約メッセージの `metadata` には `is_summary: true` と `original_message_ids` が含まれます。
-
-**戻り値**:
+**Processing**: Get messages in a specified range → Convert to standard format with `convert_to_standard()` → Build summary prompt → Let AI summarize → Delete messages in range in bulk (`delete_messages_bulk`) → Insert summary message (`insert_message_at`). Summary message `metadata` includes `is_summary: true` and `original_message_ids`.**Return value**:
 
 ```json
 {
@@ -317,23 +255,17 @@ ecosystem.json の chat コンポーネントは 18 個の handler を provides 
 }
 ```
 
-## 会話履歴の AI 自動トリム提案（auto_trim）
+## AI automatic trim suggestion for conversation history (auto_trim)
 
-**handler**: `defaults.chat.auto_trim`（`blocks/chat/auto_trim.py`）
+**handler**: `defaults.chat.auto_trim`（`blocks/chat/auto_trim.py`）**HTTP**: `POST /api/chat/conversations/{id}/auto-trim`**input_data**:
 
-**HTTP**: `POST /api/chat/conversations/{id}/auto-trim`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `conversation_id` | `string` | Yes | 会話 ID |
-| `model` | `string` | No | 分析に使用する AI モデル。`"default"` の場合は会話のモデルを使用 |
-| `max_context_tokens` | `int` | No | トリム後の目標トークン数 |
+| `conversation_id` | `string` | Yes | Conversation ID |
+| `model` | `string` | No | AI model used for analysis. Use conversational model for `"default"` |
+| `max_context_tokens` | `int` | No | Target number of tokens after trimming |
 
-**処理**: 会話の全メッセージを取得 → 各メッセージの content からテキストを抽出 → AI に分析プロンプトを送信 → AI が要約可能なセグメントを JSON 配列で返す → メッセージ ID の存在チェックでバリデーション。
-
-**戻り値**:
+**Processing**: Get all messages of the conversation → Extract text from the content of each message → Send analysis prompt to AI → AI returns summarizable segments as JSON array → Validate by checking for presence of message ID.**Return value**:
 
 ```json
 {
@@ -355,11 +287,11 @@ ecosystem.json の chat コンポーネントは 18 個の handler を provides 
 }
 ```
 
-返された `segments` の各 `start_id` / `end_id` を `summarize_and_trim` に渡すことで実際のトリムを実行できます。
+The actual trimming can be performed by passing each `start_id` / `end_id` of the returned `segments` to `summarize_and_trim`.
 
-## 全 API エンドポイント一覧
+## List of all API endpoints
 
-| メソッド | パス | handler ファイル |
+| method | path | handler file |
 |---|---|---|
 | `POST` | `/v1/chat/completions` | `blocks/chat/send.py` |
 | `POST` | `/api/chat/conversations` | `blocks/chat/create_conversation.py` |

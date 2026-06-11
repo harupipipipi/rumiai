@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./defaultspack-v2.md) | [JP](./i18n/ja/defaultspack-v2.md) | [KR](./i18n/ko/defaultspack-v2.md) | [CN](./i18n/zh-cn/defaultspack-v2.md)
+<!-- docs-i18n-links:end -->
+
 # defaultspack v2
 
 This branch adds the defaultspack v2 compatibility surface.

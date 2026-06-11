@@ -1,36 +1,40 @@
-# Tool ↔ Prompt 変換ガイド
+<!-- docs-i18n-links:start -->
+[EN](./tool-prompt-conversion.md) | [JP](./i18n/ja/tool-prompt-conversion.md) | [KR](./i18n/ko/tool-prompt-conversion.md) | [CN](./i18n/zh-cn/tool-prompt-conversion.md)
+<!-- docs-i18n-links:end -->
 
-## 1. 構造の共通性
+# Tool ↔ Prompt conversion guide
 
-rumiai defaults において tool と prompt は構造的に対称な存在である。
+## 1. Commonality of structure
 
-tool は「パラメータを受け取り結果を返す関数」であり、定義は schema.json + handler.py で構成される。prompt は「変数を受け取りテキストを返す関数」であり、定義は VARIABLES + template.md（または prompt.py）で構成される。
+In rumiai defaults, tool and prompt are structurally symmetrical.
 
-両者の対応関係は以下の通りである。
+tool is a "function that receives parameters and returns results" and its definition consists of schema.json + handler.py. prompt is a ``function that receives variables and returns text,'' and its definition consists of VARIABLES + template.md (or prompt.py).
 
-| tool の概念 | prompt の概念 |
+The correspondence relationship between the two is as follows.
+
+| Concept of tool | Concept of prompt |
 |---|---|
 | `tool_id` | `prompt_id` |
-| `schema.json` の `parameters` | `VARIABLES` の `required` + `optional` + `custom` |
-| `handler.py` の `run(params, context)` | `prompt.py` の `pre_render(variables, context)` |
-| `handler.py` の戻り値 `{"result": ...}` | レンダリング後のテキスト文字列 |
-| `guide.json` の `purpose` / `when_to_use` | `METADATA` の `description` |
-| `conditions.json` | 該当なし（prompt はモデル条件を持たない） |
-| `permission.json` の `capabilities_required` | `PERMISSIONS` |
-| `tool.json` の `tags` | `METADATA` の `tags` |
+| `parameters` of `schema.json` | `required` of `VARIABLES` + `optional` + `custom` |
+| `handler.py` of `run(params, context)` | `prompt.py` of `pre_render(variables, context)` |
+| Return value of `handler.py` `{"result": ...}` | Rendered text string |
+| `guide.json` of `purpose` / `when_to_use` | `METADATA` of `description` |
+| `conditions.json` | Not applicable (prompt has no model condition) |
+| `permission.json` of `capabilities_required` | `PERMISSIONS` |
+| `tool.json` of `tags` | `METADATA` of `tags` |
 
-この対称性により、tool と prompt の間の双方向変換が可能である。
+This symmetry allows bidirectional conversion between tool and prompt.
 
 
-## 2. Tool → Prompt 変換
+## 2. Tool → Prompt conversion
 
-### 2.1 変換の目的
+### 2.1 Purpose of conversion
 
-tool 定義を prompt のテンプレート変数として再利用する場合に使う。たとえば「ツールの使い方を LLM に教えるプロンプト」を自動生成する、ツールのスキーマからフォーム入力用のプロンプトを生成する、といったユースケースがある。
+Used when reusing the tool definition as a prompt template variable. For example, there are use cases such as automatically generating prompts to teach an LLM how to use a tool, or generating prompts for form input from a tool's schema.
 
-### 2.2 変換ルール
+### 2.2 Conversion rules
 
-tool の `schema.json` の `parameters.properties` を prompt の `VARIABLES` に変換する。各プロパティの `type` と `description` がそのまま変数定義になる。`required` 配列に含まれるプロパティは `VARIABLES.required` に、含まれないものは `VARIABLES.optional` に配置される。`default` 値があればそのまま引き継ぐ。
+Convert `parameters.properties` of tool's `schema.json` to prompt's `VARIABLES`. `type` and `description` of each property become variable definitions as they are. Properties included in the `required` array are placed in `VARIABLES.required`, and those not included in the array are placed in `VARIABLES.optional`. `default` If there is a value, it will be inherited as is.
 
 ```python
 # 変換の疑似コード
@@ -55,7 +59,7 @@ def tool_to_prompt_variables(schema: dict) -> dict:
     return variables
 ```
 
-tool の `guide.json` からテンプレートのベース構造を生成する。`purpose` がテンプレートの冒頭説明になり、`examples` が few-shot 例として埋め込まれる。
+Generate the base structure of the template from the tool `guide.json`. `purpose` becomes the opening explanation of the template, and `examples` is embedded as a few-shot example.
 
 ```markdown
 {# 自動生成されたテンプレート #}
@@ -70,27 +74,27 @@ tool の `guide.json` からテンプレートのベース構造を生成する�
 {{ user_input }}
 ```
 
-### 2.3 メタデータの変換
+### 2.3 Metadata conversion
 
-| tool フィールド | prompt フィールド |
+| tool field | prompt field |
 |---|---|
-| `tool.json` の `tool_id` | `METADATA["prompt_id"]` に `"tool_prompt_{tool_id}"` |
-| `tool.json` の `name` | `METADATA["name"]` |
-| `tool.json` の `summary` | `METADATA["description"]` |
-| `tool.json` の `version` | `METADATA["version"]` |
-| `tool.json` の `tags` | `METADATA["metadata"]["tags"]` |
-| `permission.json` の capabilities | `PERMISSIONS` |
+| `tool.json` of `tool_id` | `METADATA["prompt_id"]` of `"tool_prompt_{tool_id}"` |
+| `tool.json` of `name` | `METADATA["name"]` |
+| `tool.json` of `summary` | `METADATA["description"]` |
+| `tool.json` of `version` | `METADATA["version"]` |
+| `tool.json` of `tags` | `METADATA["metadata"]["tags"]` |
+| `permission.json` capabilities | `PERMISSIONS` |
 
 
-## 3. Prompt → Tool 変換
+## 3. Prompt → Tool conversion
 
-### 3.1 変換の目的
+### 3.1 Purpose of conversion
 
-prompt を LLM の tool_call として呼び出し可能にする場合に使う。たとえば agent がプロンプトのレンダリングをツールとして使いたい場合、プロンプト定義から tool のスキーマを自動生成できる。
+Used to make prompt callable as LLM's tool_call. For example, if an agent wants to use prompt rendering as a tool, it can automatically generate the tool schema from the prompt definition.
 
-### 3.2 変換ルール
+### 3.2 Conversion rules
 
-prompt の `VARIABLES` の各変数を `schema.json` の `parameters.properties` に変換する。`required` 変数は `parameters.required` 配列に含める。`optional` と `custom` は `default` 値付きのプロパティになる。
+Convert each variable of `VARIABLES` of prompt to `parameters.properties` of `schema.json`. `required` Variables are included in the `parameters.required` array. `optional` and `custom` become `default` valued properties.
 
 ```python
 def prompt_to_tool_schema(variables: dict) -> dict:
@@ -131,7 +135,7 @@ def prompt_to_tool_schema(variables: dict) -> dict:
     }
 ```
 
-handler.py は自動的に `defaults.prompt.render` を `call_handler` で呼び出すラッパーになる。
+handler.py automatically becomes a wrapper that calls `defaults.prompt.render` with `call_handler`.
 
 ```python
 # 自動生成される handler.py
@@ -144,22 +148,22 @@ def run(params, context):
 ```
 
 
-## 4. ラウンドトリップの注意点
+## 4. Notes on round trips
 
-tool → prompt → tool の往復変換（ラウンドトリップ）では情報の欠落が発生する。
+Information is lost in the round-trip conversion of tool → prompt → tool.
 
-tool 固有の情報で prompt に変換できないもの: `conditions.json`（モデル条件）、`relations.json`（連携ツール）、`permission.json` の `parameter_restrictions`（パラメータ制限）、`execution` 設定（実行タイプ、タイムアウト）。これらは変換時に失われる。
+Tool-specific information that cannot be converted into a prompt: `conditions.json` (model conditions), `relations.json` (cooperative tools), `parameter_restrictions` (parameter restrictions) of `permission.json`, `execution` settings (execution type, timeout). These are lost during conversion.
 
-prompt 固有の情報で tool に変換できないもの: `extends`（テンプレート継承）、`pre_render` / `post_render` のロジック、`include` で参照される partials、`source: system` の変数。
+Information specific to prompt that cannot be converted to tool: `extends` (template inheritance), logic in `pre_render` / `post_render`, partials referenced in `include`, variables in `source: system`.
 
-ラウンドトリップが必要な場合は、元の定義を保持した上で変換結果を利用することを推奨する。変換結果だけで元を復元することは保証されない。
+If a round trip is required, it is recommended to retain the original definition and use the conversion result. It is not guaranteed that the original can be restored based on the conversion result alone.
 
 
-## 5. API の使い方
+## 5. How to use the API
 
-変換は handler 経由で行う。
+Conversion is done via handler.
 
-### tool → prompt 変換
+### tool → prompt conversion
 
 ```python
 # tool の handler.py 内で
@@ -177,7 +181,7 @@ rendered = context["call_handler"]("defaults.prompt.render", {
 })
 ```
 
-### prompt → tool 呼び出し
+### prompt → tool call
 
 ```python
 # agent やフロー内で prompt をツールとして使う
@@ -193,9 +197,9 @@ result = context["call_handler"]("defaults.prompt.render", {
 ```
 
 
-## 6. 実践例
+## 6. Practical examples
 
-### 例1: ツール定義からドキュメントを自動生成
+### Example 1: Automatically generate documentation from tool definition
 
 ```python
 def run(params, context):
@@ -220,9 +224,9 @@ def run(params, context):
     return {"result": "\n---\n".join(docs)}
 ```
 
-### 例2: プロンプトを tool_call として LLM に公開
+### Example 2: Expose prompt to LLM as tool_call
 
-エージェントが system prompt の変更を tool_call で動的に行う例。
+An example of an agent dynamically changing the system prompt using tool_call.
 
 ```python
 # user_data/shared/tools/switch_persona/handler.py
@@ -238,7 +242,7 @@ def run(params, context):
     return {"result": f"Persona switched to {params['persona_prompt_id']}"}
 ```
 
-### 例3: 複数ツールの統合ガイドを prompt で生成
+### Example 3: Generate multi-tool integration guide with prompt
 
 ```python
 def run(params, context):

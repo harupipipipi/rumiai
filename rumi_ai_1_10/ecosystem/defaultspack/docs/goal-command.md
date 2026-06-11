@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./goal-command.md) | [JP](./i18n/ja/goal-command.md) | [KR](./i18n/ko/goal-command.md) | [CN](./i18n/zh-cn/goal-command.md)
+<!-- docs-i18n-links:end -->
+
 # /goal slash command
 
 `/goal <description>` runs a goal-pursuit loop in the defaultspack console without direct tool execution:

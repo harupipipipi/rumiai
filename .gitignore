@@ -9,6 +9,8 @@
 !/pack-shell/
 !/rumi_mobile/
 !/tests/
+!/i18n/
+!/i18n/**
 
 # 整理退避用ディレクトリは Git 管理しない
 /others/

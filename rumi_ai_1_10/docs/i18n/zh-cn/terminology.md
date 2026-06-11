@@ -1,0 +1,56 @@
+<!-- docs-i18n-links:start -->
+[EN](../../terminology.md) | [JP](../ja/terminology.md) | [KR](../ko/terminology.md) | [CN](./terminology.md)
+<!-- docs-i18n-links:end -->
+
+# 术语
+
+本文档定义了 Rumi 首选的面向用户的词汇表。
+
+在文档、UI 副本和示例中一致使用这些术语。较低级别的运行时
+API 名称仍可能使用传统或面向传输的标识符，其中
+兼容性很重要。
+
+## 首选条款
+
+|术语 |用它来 |笔记|
+|---|---|---|
+| `rule`|默认情况下在某个范围内应用的始终加载的指令 |这是基线行为的主要产品术语。 |
+| `skill`|触发式或按需指令/工作流程包 |用于在相关时激活的集中功能包。 |
+| `prompt`|执行时组装的原始模型输入文本 |将其视为运行时工件，而不是面向用户的主要概念。 |
+| `system prompt`|发送到模型 API 的低级系统角色提示负载 |在面向用户的解释中优先使用`rule` 或`skill`，除非传输层本身就是主题。 |
+| `team workspace`|一个面向用户的工作空间，其中多个代理进行协调 |在新文档和 UI 副本中，优先使用此选项而不是 `company workspace`。 |
+| `team`|代理合作 |在描述组时使用，而不是在描述存储或路由层时使用。 |
+| `agent`|具有工具功能的运行时参与者 |这仍然是通用执行单元。 |
+| `specialist`|范围狭窄的代理定义或角色 |在命名可重用的辅助角色时，优先使用此选项而不是`subagent`。 |
+| `delegation`|将有限工作发送给另一个代理的行为 |映射到规范的`agent.delegate`运行时行为。 |
+| `tool`|代理可以调用​​的外部操作或集成 |保持这个含义狭隘而具体。 |
+| `pack`|提供代码、资产、路由、提示、工具或技能的已发布运行时/包单元 |将其与指令层术语（例如`rule`）分开。 |
+
+## 兼容性条款
+
+|兼容性术语 |首选术语 |如何谈论它 |
+|---|---|---|
+| `company` / `company workspace` | `team` / `team workspace` |仅在运行时 API、存储的标识符或遗留文档仍然使用`company`时才保留它。 |
+| `subagent`| `specialist` 或 `delegated agent` |保留`subagent`作为旧路由、工具和文档的兼容性别名。 |
+| `system prompt`作为产品概念| `rule` / `skill` |仅在讨论模型传输或提供程序 API 时使用`system prompt`。 |
+
+## 重要消歧：`rule` 与 `pack_type: "rule"`
+
+Rumi 目前对`rule` 这个词有两种不同的用法。
+
+1.指令层`rule`
+   当您指的是始终加载代理行为指令时，请使用此选项。
+2. 打包/运行时`pack_type: "rule"`
+   仅当您指的是内部包分类或清单/运行时概念时才使用此选项。
+
+这些仅通过名称相关。打包/运行时`rule`不会自动
+与指令层`rule`相同，并且文档应该说明哪一层是
+只要可能出现歧义，就进行讨论。
+
+## 写作指导
+
+- 更喜欢`rule = always on`。
+- 更喜欢`skill = triggered or on demand`。
+- 对于长期运行的多代理表面，首选`team workspace`。
+- 对于运行时操作，首选`delegation`，对于辅助角色，首选`specialist`。
+- 为实现、运行时或 API 详细信息保留`prompt`和`system prompt`。

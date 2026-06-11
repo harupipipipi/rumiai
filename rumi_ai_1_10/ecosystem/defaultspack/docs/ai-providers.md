@@ -1,32 +1,36 @@
-# AI Providers ガイド
+<!-- docs-i18n-links:start -->
+[EN](./ai-providers.md) | [JP](./i18n/ja/ai-providers.md) | [KR](./i18n/ko/ai-providers.md) | [CN](./i18n/zh-cn/ai-providers.md)
+<!-- docs-i18n-links:end -->
+
+# AI Providers Guide
 
 ## 1. Provider Source Of Truth
 
-defaultspack の ai_client は manifest-first で provider を解決する。OpenAI-compatible provider は
-`extensions/llm/providers/<provider_id>/manifest.json` と `models/*.json` だけで追加できる。
-Python provider class は独自プロトコルが必要な場合だけ使う。
+defaultspack's ai_client resolves provider with manifest-first. OpenAI-compatible provider is
+It can be added only with `extensions/llm/providers/<provider_id>/manifest.json` and `models/*.json`.
+Use the Python provider class only when you need a proprietary protocol.
 
-runtime 内の curated table は互換 fallback であり、新規 provider を追加する主経路ではない。
+The curated table in the runtime is a compatibility fallback and not the primary path to adding new providers.
 
-## 2. 対応プロバイダー一覧
+## 2. List of supported providers
 
-| プロバイダー ID | 説明 |
+| Provider ID | Description |
 |---|---|
-| `openai` | OpenAI API（GPT-4o, GPT-4o-mini, o3, o4-mini 等） |
-| `anthropic` | Anthropic API（Claude Opus 4, Sonnet 4, Haiku 3 等） |
-| `google` | Google Gemini API（Gemini 2.5 Pro, Gemini 2.5 Flash 等） |
-| `openrouter` | OpenRouter API（defaultspack では `tencent/hy3-preview:free` のみ） |
-| `gitlawb-opengateway` | Gitlawb OpenGateway（MiMo の固定allowlist。全モデルで API key 必須） |
+| `openai` | OpenAI API (GPT-4o, GPT-4o-mini, o3, o4-mini, etc.) |
+| `anthropic` | Anthropic API (Claude Opus 4, Sonnet 4, Haiku 3, etc.) |
+| `google` | Google Gemini API (Gemini 2.5 Pro, Gemini 2.5 Flash, etc.) |
+| `openrouter` | OpenRouter API (only `tencent/hy3-preview:free` in defaultspack) |
+| `gitlawb-opengateway` | Gitlawb OpenGateway (Fixed allowlist for MiMo. API key required for all models) |
 | `groq` | Groq OpenAI-compatible API |
 | `cerebras` | Cerebras OpenAI-compatible API |
 | `nvidia` | NVIDIA NIM OpenAI-compatible API |
 | `moonshotai` | Moonshot AI OpenAI-compatible API |
-| `xiaomi-mimo` | Xiaomi MiMo direct API の地域別 catalog entry（初期状態は実行不可） |
-| `stub` | テスト用スタブ。固定レスポンスを返す |
-| `rumi` | rumi 独自のメタプロバイダー（パイプライン、ルーティング、評価） |
+| `xiaomi-mimo` | Xiaomi MiMo direct API regional catalog entry (initial state cannot be executed) |
+| `stub` | Test stub. Return fixed response |
+| `rumi` | rumi's own meta-provider (pipeline, routing, evaluation) |
 
 
-## 3. 各プロバイダーの環境変数設定
+## 3. Environment variable settings for each provider
 
 ### OpenAI
 
@@ -57,9 +61,9 @@ GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
 
 ### OpenRouter
 
-defaultspack の OpenRouter 統合は、現時点では `tencent/hy3-preview:free` だけを実行対象にする。
-API キーはデスクトップ UI の Settings から保存できる。値は `user_data/secrets/OPENROUTER_API_KEY.json`
-に暗号化保存され、フロントエンドには保存済みかどうかだけが返る。
+defaultspack's OpenRouter integration currently targets only `tencent/hy3-preview:free`.
+API keys can be saved from Settings on the desktop UI. The value is `user_data/secrets/OPENROUTER_API_KEY.json`
+The file is encrypted and saved, and only whether it has been saved is returned to the front end.
 
 ```bash
 OPENROUTER_API_KEY=sk-or-...
@@ -69,7 +73,7 @@ OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 
 ### Gitlawb OpenGateway
 
-Gitlawb OpenGateway は OpenAI-compatible な外部 gateway。現在は全モデルで API key が必須なので、Rumi runtime では `GITLAWB_OPENGATEWAY_API_KEY` として保存・送信する。クラウド provider として扱うため、runtime で使うには明示的な opt-in が必要。
+Gitlawb OpenGateway is an OpenAI-compatible external gateway. Currently, an API key is required for all models, so Rumi runtime saves and sends it as `GITLAWB_OPENGATEWAY_API_KEY`. Since it is treated as a cloud provider, explicit opt-in is required to use it in runtime.
 
 ```bash
 RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS=1
@@ -78,19 +82,19 @@ GITLAWB_OPENGATEWAY_API_KEY=ogw_live_...
 GITLAWB_OPENGATEWAY_BASE_URL=https://opengateway.gitlawb.com/v1
 ```
 
-利用できるモデルは固定 allowlist のみ。
+The only available model is a fixed allowlist.
 
-| モデル名 | 特徴 |
+| Model name | Features |
 |---|---|
-| `gitlawb-opengateway/mimo-v2.5-pro` | reasoning 用の MiMo V2.5 Pro |
-| `gitlawb-opengateway/mimo-v2-flash` | 高速な MiMo V2 Flash |
-| `gitlawb-opengateway/mimo-v2-omni` | 画像入力対応の MiMo V2 Omni |
-| `gitlawb-opengateway/mimo-v2-pro` | reasoning 用の MiMo V2 Pro |
-| `gitlawb-opengateway/mimo-v2.5` | reasoning 用の MiMo V2.5 |
+| `gitlawb-opengateway/mimo-v2.5-pro` | MiMo V2.5 Pro for reasoning |
+| `gitlawb-opengateway/mimo-v2-flash` | Fast MiMo V2 Flash |
+| `gitlawb-opengateway/mimo-v2-omni` | MiMo V2 Omni with image input |
+| `gitlawb-opengateway/mimo-v2-pro` | MiMo V2 Pro for reasoning |
+| `gitlawb-opengateway/mimo-v2.5` | MiMo V2.5 for reasoning |
 
-`mimo` 系は Gitlawb OpenGateway の OpenAI-compatible `POST /v1/chat/completions` に送信され、違いは `model` のみ。`mimo-v2-omni` の画像認識では OpenAI 互換の `content` 配列形式を使う。runtime は gateway 互換性のため Browser User-Agent を付与する。
+The `mimo` system is sent to Gitlawb OpenGateway's OpenAI-compatible `POST /v1/chat/completions`, and the only difference is `model`. `mimo-v2-omni` image recognition uses the OpenAI compatible `content` array format. runtime assigns Browser User-Agent for gateway compatibility.
 
-汎用 OpenAI-compatible client から直接使う場合は、base URL と API key を OpenAI 互換の環境変数に割り当てられる。
+When used directly from a generic OpenAI-compatible client, the base URL and API key can be assigned to OpenAI-compatible environment variables.
 
 ```bash
 OPENAI_BASE_URL=https://opengateway.gitlawb.com/v1
@@ -100,7 +104,7 @@ OPENAI_MODEL=mimo-v2-omni
 
 ### Cloud OpenAI-compatible providers
 
-Groq / Cerebras / NVIDIA NIM / Moonshot AI は manifest-first provider として追加されている。API key が設定されている場合、`detect_available_providers()` で runtime provider として検出される。
+Groq / Cerebras / NVIDIA NIM / Moonshot AI have been added as manifest-first providers. If an API key is set, it will be detected as a runtime provider in `detect_available_providers()`.
 
 ```bash
 GROQ_API_KEY=...
@@ -109,19 +113,19 @@ NVIDIA_API_KEY=...      # または NGC_API_KEY
 MOONSHOT_API_KEY=...
 ```
 
-service tier や preview/enterprise-only 条件は metadata に保持するだけで、初期実装では request body に自動注入しない。
+Service tier and preview/enterprise-only conditions are only stored in metadata and are not automatically injected into the request body in the initial implementation.
 
 ### Xiaomi MiMo direct API
 
-`xiaomi-mimo` は Gitlawb OpenGateway とは分離された umbrella catalog entry。direct API は `xiaomi-mimo-global` と `xiaomi-mimo-cn` に地域分割し、公式 base URL / auth / token grant 条件が確認されるまでは runtime provider として自動有効化しない。
+`xiaomi-mimo` is an umbrella catalog entry separate from Gitlawb OpenGateway. The direct API will be regionalized into `xiaomi-mimo-global` and `xiaomi-mimo-cn` and will not be automatically enabled as a runtime provider until the official base URL / auth / token grant conditions are confirmed.
 
-MiMo token plan は provider catalog の `subscription_plans` として保持する。現時点では `mimo_orbit_100t_grant_if_available` を catalog metadata として公開するだけで、manual signup / region scoped / do not auto enable の扱いにする。
+The MiMo token plan will be retained as `subscription_plans` in the provider catalog. At the moment, we only publish `mimo_orbit_100t_grant_if_available` as catalog metadata and treat it as manual signup / region scoped / do not auto enable.
 
-警告: この provider を実行有効化すると、プロンプト、会話履歴、tool結果などのコンテキストが Xiaomi MiMo direct API に送信される。
+Warning: Enabling this provider will send context such as prompts, conversation history, and tool results to the Xiaomi MiMo direct API.
 
 ### stub
 
-環境変数不要。テスト用。
+No environment variables required. For testing.
 
 ### rumi
 
@@ -130,62 +134,62 @@ MiMo token plan は provider catalog の `subscription_plans` として保持す
 # rumi 固有の設定は user_data/shared/ai_models/rumi/ に配置。
 ```
 
-環境変数の設定は `user_data/config.json` の `ai.providers` セクション、または OS の環境変数で行う。`config.json` の値が優先される。
+Set environment variables in the `ai.providers` section of `user_data/config.json` or OS environment variables. The value of `config.json` takes precedence.
 
 
-## 4. 各プロバイダーで使えるモデル一覧
+## 4. List of models available for each provider
 
 ### OpenAI
 
-| モデル名 | 特徴 |
+| Model name | Features |
 |---|---|
-| `gpt-4o` | フラグシップ。マルチモーダル対応 |
-| `gpt-4o-mini` | 軽量・高速・低コスト |
-| `o3` | 推論特化（reasoning tokens） |
-| `o4-mini` | 推論特化・軽量版 |
-| `gpt-4.1` | 最新世代（利用可能な場合） |
-| `gpt-4.1-mini` | 最新世代・軽量版 |
-| `gpt-4.1-nano` | 最新世代・最軽量 |
+| `gpt-4o` | Flagship. Multimodal compatible |
+| `gpt-4o-mini` | Lightweight, high speed, low cost |
+| `o3` | Reasoning specialization (reasoning tokens) |
+| `o4-mini` | Inference specialized/light version |
+| `gpt-4.1` | Latest generation (if available) |
+| `gpt-4.1-mini` | Latest generation/lightweight version |
+| `gpt-4.1-nano` | Latest generation and lightest |
 
 ### Anthropic
 
-| モデル名 | 特徴 |
+| Model name | Features |
 |---|---|
-| `claude-opus-4-20250514` | 最高性能。extended thinking 対応 |
-| `claude-sonnet-4-20250514` | バランス型。extended thinking 対応 |
-| `claude-haiku-3-20250307` | 高速・低コスト |
+| `claude-opus-4-20250514` | Best performance. extended thinking correspondence |
+| `claude-sonnet-4-20250514` | Balanced type. extended thinking correspondence |
+| `claude-haiku-3-20250307` | High speed and low cost |
 
 ### Google
 
-| モデル名 | 特徴 |
+| Model name | Features |
 |---|---|
-| `gemini-2.5-pro` | フラグシップ。thinking 対応 |
-| `gemini-2.5-flash` | 高速・低コスト |
-| `gemini-2.0-flash` | 安定版 |
+| `gemini-2.5-pro` | Flagship. thinking correspondence |
+| `gemini-2.5-flash` | High speed and low cost |
+| `gemini-2.0-flash` | Stable version |
 
 ### stub
 
-| モデル名 | 特徴 |
+| Model name | Features |
 |---|---|
-| `stub/echo` | 入力をそのまま返す |
-| `stub/fixed` | 固定テキストを返す |
-| `stub/error` | 常にエラーを返す |
+| `stub/echo` | Return input as is |
+| `stub/fixed` | Return fixed text |
+| `stub/error` | Always returns an error |
 
 ### rumi
 
-| モデル名 | 特徴 |
+| Model name | Features |
 |---|---|
-| `rumi/pipeline` | 複数モデルをパイプライン実行 |
-| `rumi/router` | タスクに応じたモデル自動選択 |
-| `rumi/moa` | Mixture of Agents（複数モデルの合議） |
-| `rumi/eval` | 生成結果の自動評価・リランキング |
+| `rumi/pipeline` | Pipeline execution of multiple models |
+| `rumi/router` | Automatic model selection according to task |
+| `rumi/moa` | Mixture of Agents |
+| `rumi/eval` | Automatic evaluation and reranking of generated results |
 
 
-## 5. モデル指定方法
+## 5. Model specification method
 
-### "provider/model" 形式
+### "provider/model" format
 
-モデルは `"provider/model"` 形式の文字列で指定する。
+Specify the model using a string in the `"provider/model"` format.
 
 ```
 "openai/gpt-4o"
@@ -195,11 +199,11 @@ MiMo token plan は provider catalog の `subscription_plans` として保持す
 "rumi/router"
 ```
 
-provider を省略した場合、ai_client が既知のモデル名からプロバイダーを自動推定する。`"gpt-4o"` は `"openai/gpt-4o"` に解決される。
+If provider is omitted, ai_client automatically infers the provider from the known model name. `"gpt-4o"` resolves to `"openai/gpt-4o"`.
 
-### プロファイル名
+### Profile name
 
-`user_data/shared/ai_models/` に配置したプロファイル名でも指定できる。
+You can also specify the profile name placed in `user_data/shared/ai_models/`.
 
 ```
 "fast"          → config で定義されたプロファイル
@@ -207,7 +211,7 @@ provider を省略した場合、ai_client が既知のモデル名からプロ�
 "coding"        → config で定義されたプロファイル
 ```
 
-これらは agent.json の `model` セクションで使われる。
+These are used in the `model` section of agent.json.
 
 ```json
 {
@@ -221,9 +225,9 @@ provider を省略した場合、ai_client が既知のモデル名からプロ�
 ```
 
 
-## 6. プロファイルの設定方法
+## 6. How to set up a profile
 
-プロファイルは `user_data/shared/ai_models/{provider_id}/profiles/{profile_name}/` に配置する。
+Place the profile in `user_data/shared/ai_models/{provider_id}/profiles/{profile_name}/`.
 
 ```
 user_data/shared/ai_models/
@@ -249,7 +253,7 @@ user_data/shared/ai_models/
             └── profile.json
 ```
 
-### profile.json の構造
+### Structure of profile.json
 
 ```json
 {
@@ -281,12 +285,12 @@ user_data/shared/ai_models/
 }
 ```
 
-`ui/events.ui.yaml` はストリーミング中のアニメーション Widget を定義する任意ファイルである。詳細は ai_client.md を参照。
+`ui/events.ui.yaml` is an arbitrary file that defines the animation widget being streamed. See ai_client.md for details.
 
 
-## 7. 対応機能マトリクス
+## 7. Compatible function matrix
 
-| 機能 | OpenAI | Anthropic | Google | stub | rumi |
+| Features | OpenAI | Anthropic | Google | stub | rumi |
 |---|---|---|---|---|---|
 | `defaults.ai.complete` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `defaults.ai.stream` | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -296,20 +300,20 @@ user_data/shared/ai_models/
 | `defaults.ai.transcribe` | ✅ (Whisper) | ❌ | ✅ | ❌ | ❌ |
 | `defaults.ai.tts` | ✅ | ❌ | ✅ | ❌ | ❌ |
 | tool_calls | ✅ | ✅ | ✅ | ✅ | ✅ |
-| thinking/reasoning | ✅ (o3系) | ✅ (extended thinking) | ✅ (Gemini 2.5) | ❌ | ✅ |
+| thinking/reasoning | ✅ (o3 series) | ✅ (extended thinking) | ✅ (Gemini 2.5) | ❌ | ✅ |
 | vision | ✅ | ✅ | ✅ | ❌ | ✅ |
 | caching | ❌ | ✅ (ephemeral cache) | ✅ (context cache) | ❌ | ❌ |
 | json_mode | ✅ | ✅ | ✅ | ❌ | ✅ |
 | streaming | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 
-## 7. rumi モデルの概要
+## 7. rumi model overview
 
-rumi プロバイダーは他のプロバイダーのモデルを組み合わせるメタプロバイダーである。ai_client から見ると通常のプロバイダーと同じインターフェースを持つが、内部で複数のモデルを呼び出す。
+The rumi provider is a meta-provider that combines models from other providers. From ai_client's perspective, it has the same interface as a normal provider, but calls multiple models internally.
 
-### rumi/pipeline — パイプライン
+### rumi/pipeline — pipeline
 
-複数モデルを直列に実行する。前段の出力を後段の入力に渡す。
+Run multiple models in series. Pass the output of the previous stage to the input of the next stage.
 
 ```json
 {
@@ -323,9 +327,9 @@ rumi プロバイダーは他のプロバイダーのモデルを組み合わせ
 }
 ```
 
-### rumi/router — ルーティング
+### rumi/router — Routing
 
-タスクの種類に応じてモデルを自動選択する。分類にはルーティングモデル（軽量モデル）を使用する。
+Automatically select a model depending on the type of task. A routing model (lightweight model) is used for classification.
 
 ```json
 {
@@ -344,7 +348,7 @@ rumi プロバイダーは他のプロバイダーのモデルを組み合わせ
 
 ### rumi/moa — Mixture of Agents
 
-同一のプロンプトを複数モデルに送信し、結果を合議して最終回答を生成する。
+Send the same prompt to multiple models and collate the results to generate a final answer.
 
 ```json
 {
@@ -360,9 +364,9 @@ rumi プロバイダーは他のプロバイダーのモデルを組み合わせ
 }
 ```
 
-### rumi/eval — 評価
+### rumi/eval — evaluation
 
-生成結果を評価モデルで採点し、最も高スコアの結果を返す。
+The generated results are scored using an evaluation model and the result with the highest score is returned.
 
 ```json
 {
@@ -375,4 +379,4 @@ rumi プロバイダーは他のプロバイダーのモデルを組み合わせ
 }
 ```
 
-rumi プロバイダーの定義は全て `user_data/shared/ai_models/rumi/profiles/` に配置される。defaults は rumi プロバイダーの実行エンジンの仕組みだけを提供し、具体的なパイプライン構成は user_data 側で定義する。
+All rumi provider definitions are placed in `user_data/shared/ai_models/rumi/profiles/`. defaults only provides the execution engine mechanism of the rumi provider, and the specific pipeline configuration is defined on the user_data side.

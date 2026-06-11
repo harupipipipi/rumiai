@@ -1,25 +1,22 @@
-```markdown
-# api.md — Rumi AI OS API & Transport 設計書
+<!-- docs-i18n-links:start -->
+[EN](./api.md) | [JP](./i18n/ja/api.md) | [KR](./i18n/ko/api.md) | [CN](./i18n/zh-cn/api.md)
+<!-- docs-i18n-links:end -->
 
-## 1. 概要
+# api.md — Rumi AI OS API & Transport design document
 
-defaults は外部からの通信を受け付ける「仕組み」を提供する。具体的なエンドポイント（チャット、モデル一覧等）は Flow の api トリガーが登録する。defaults はルーティング、認証、ストリーミング、エラー形式の基盤だけを定義し、何ができるかは user_data 側の Flow 定義で決まる。
+## 1. Overview
 
-Tauri フロントエンド、CLI、外部スクリプト、Webhook、全てが同じ Flow に到達する。違うのは transport（メッセージの運び方）だけである。
+Defaults provides a "mechanism" to accept communications from outside. Specific endpoints (chat, model list, etc.) are registered by Flow's api trigger. The defaults only define the basics of routing, authentication, streaming, and error formats, and what can be done is determined by the Flow definition on the user_data side.
 
-
-## 2. 設計思想
-
-**Transport 非依存**: 全ての通信は最終的に `FlowEngine.execute(flow_id, trigger_input)` の呼び出しになる。HTTP、stdin/stdout、UDS のいずれを経由しても、Flow に届く trigger_input は同一形式である。
-
-**エンドポイントはフローである**: HTTP の `/v1/chat/completions` も CLI の `rumi chat` も、同じ `default.chat` フローを起動する。エンドポイントの追加は Flow 定義の追加であり、コード変更を伴わない。
-
-**認証は transport 層で行う**: HTTP はAPIキー、stdio は親プロセスの信頼、UDS はソケットパーミッション。Flow 層は認証済みリクエストだけを受け取る。
-
-**ストリーミングは transport が吸収する**: Flow は `ctx.emit()` でイベントを発行するだけ。HTTP transport は SSE に変換し、stdio transport は JSON Lines に変換し、Tauri transport は IPC Channel に変換する。Flow はどの transport で配信されるかを知らない。
+Tauri frontend, CLI, external scripts, webhooks, all reach the same Flow. The only difference is the transport (how the message is carried).
 
 
-## 3. アーキテクチャ
+## 2. Design philosophy
+
+**Transport independent**: All communication ultimately results in a call to `FlowEngine.execute(flow_id, trigger_input)`. Whether via HTTP, stdin/stdout, or UDS, trigger_input that reaches Flow has the same format.**Endpoints are flows**: HTTP's `/v1/chat/completions` and CLI's `rumi chat` both launch the same `default.chat` flow. Adding an endpoint is an addition to the Flow definition and does not involve changing the code.**Authentication is done at the transport layer**: API key for HTTP, parent process trust for stdio, socket permissions for UDS. The Flow layer only accepts authenticated requests.**Streaming is absorbed by transport**: Flow only issues events in `ctx.emit()`. HTTP transport is converted to SSE, stdio transport is converted to JSON Lines, and Tauri transport is converted to IPC Channel. Flow does not know which transport it will be delivered on.
+
+
+## 3. Architecture
 
 ```
 外部            transport 層               Flow Engine
@@ -33,22 +30,22 @@ Tauri       ─→ stdin/stdout ───┤                    ↓
 UDS Client  ─→ uds transport ──┘
 ```
 
-transport 層は defaults の handler として実装される。
+The transport layer is implemented as a defaults handler.
 
-| handler | transport | 権限 |
+| handler | transport | permissions |
 |---|---|---|
-| `defaults.transport.http` | HTTP サーバー | `frontend.serve`, `frontend.bind` |
-| `defaults.transport.stdio` | 標準入出力 | `frontend.serve` |
+| `defaults.transport.http` | HTTP Server | `frontend.serve`, `frontend.bind` |
+| `defaults.transport.stdio` | Standard input/output | `frontend.serve` |
 | `defaults.transport.uds` | Unix Domain Socket | `frontend.serve`, `frontend.bind` |
 
-各 transport handler は Grant で許可された権限のみで動作し、カーネルオブジェクト全体にはアクセスしない（io.http.server の問題を回避）。
+Each transport handler operates only with the privileges granted by the grant, and does not access the entire kernel object (avoiding the io.http.server issue).
 
 
-## 4. 共通メッセージ形式
+## 4. Common message format
 
-全 transport で共通の JSON 形式。transport はこの形式をそのまま流すか、自身のプロトコルに変換する。
+JSON format common to all transports. Transport either passes this format as is or converts it to its own protocol.
 
-### 4.1 リクエスト
+### 4.1 Request
 
 ```json
 {
@@ -65,14 +62,14 @@ transport 層は defaults の handler として実装される。
 }
 ```
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| id | string | 任意 | リクエスト識別子。省略時は自動生成 |
-| flow_id | string | 必須 | 起動する Flow の ID |
-| input | object | 必須 | Flow の trigger_input |
-| config | object | 任意 | Flow の flow_config 上書き |
+| id | string | optional | request identifier. Automatically generated if omitted |
+| flow_id | string | Required | ID of the Flow to start |
+| input | object | Required | Flow trigger_input |
+| config | object | optional | flow_config override for Flow |
 
-### 4.2 レスポンス（非ストリーミング）
+### 4.2 Response (non-streaming)
 
 ```json
 {
@@ -95,16 +92,16 @@ transport 層は defaults の handler として実装される。
 }
 ```
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| id | string | リクエスト識別子 |
+| id | string | request identifier |
 | status | string | `completed`, `error`, `cancelled`, `timeout` |
-| output | object | Flow の出力（FlowResult.output） |
-| metadata | object | 実行メタデータ |
+| output | object | Flow output (FlowResult.output) |
+| metadata | object | execution metadata |
 
-### 4.3 レスポンス（ストリーミング）
+### 4.3 Response (Streaming)
 
-ストリーミング時は transport に応じた方式で複数のイベントが配信される。各イベントの形式は共通。
+During streaming, multiple events are distributed according to the transport. The format of each event is the same.
 
 ```json
 {"event": "stream.start", "id": "req_01JXYZ", "data": {}}
@@ -117,9 +114,9 @@ transport 層は defaults の handler として実装される。
 {"event": "stream.end", "id": "req_01JXYZ", "data": {"status": "completed", "output": {...}, "metadata": {...}}}
 ```
 
-stream.delta の `data.type` は ai_client.md セクション 11.3 の正規化イベント一覧と同一。transport 層はこのイベント列をプロトコル固有の方式に変換する。
+`data.type` of stream.delta is the same as the normalized event list in ai_client.md section 11.3. The transport layer converts this event sequence into a protocol-specific format.
 
-### 4.4 エラー
+### 4.4 Error
 
 ```json
 {
@@ -134,27 +131,27 @@ stream.delta の `data.type` は ai_client.md セクション 11.3 の正規化�
 }
 ```
 
-エラーコードの体系。
+Error code system.
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `AUTH_REQUIRED` | 認証が必要 |
-| `AUTH_INVALID` | APIキーが無効 |
-| `FLOW_NOT_FOUND` | 指定された flow_id が存在しない |
-| `FLOW_ERROR` | Flow 実行中のエラー |
-| `FLOW_TIMEOUT` | Flow がタイムアウト |
-| `FLOW_CANCELLED` | ユーザーまたはシステムがキャンセル |
-| `VALIDATION_ERROR` | input の形式が不正 |
-| `PERMISSION_DENIED` | 権限不足 |
-| `RATE_LIMITED` | レート制限 |
-| `INTERNAL_ERROR` | 内部エラー |
+| `AUTH_REQUIRED` | Authentication required |
+| `AUTH_INVALID` | API key is invalid |
+| `FLOW_NOT_FOUND` | Specified flow_id does not exist |
+| `FLOW_ERROR` | Error while running Flow |
+| `FLOW_TIMEOUT` | Flow timed out |
+| `FLOW_CANCELLED` | Cancelled by user or system |
+| `VALIDATION_ERROR` | Invalid input format |
+| `PERMISSION_DENIED` | Insufficient authority |
+| `RATE_LIMITED` | Rate Limit |
+| `INTERNAL_ERROR` | Internal error |
 
 
 ## 5. HTTP Transport
 
-### 5.1 起動
+### 5.1 Startup
 
-`defaults.transport.http` handler がHTTPサーバーを起動する。設定は user_data で行う。
+`defaults.transport.http` handler starts the HTTP server. Settings are done in user_data.
 
 ```json
 // user_data/config/transport.json
@@ -171,15 +168,15 @@ stream.delta の `data.type` は ai_client.md セクション 11.3 の正規化�
 }
 ```
 
-### 5.2 認証
+### 5.2 Authentication
 
-HTTP transport はリクエストごとに認証を行う。
+HTTP transport performs authentication for each request.
 
 ```
 Authorization: Bearer rumi_xxxxxxxxxxxx
 ```
 
-APIキーは `user_data/secrets/api_keys.json` で管理する。
+API keys are managed in `user_data/secrets/api_keys.json`.
 
 ```json
 {
@@ -198,11 +195,11 @@ APIキーは `user_data/secrets/api_keys.json` で管理する。
 }
 ```
 
-`permissions` は Flow レベルの許可。`["*"]` は全 Flow にアクセス可能。`["default.chat", "default.model_list"]` のように制限できる。
+`permissions` is a Flow level permission. `["*"]` can access all Flows. It can be restricted as in `["default.chat", "default.model_list"]`.
 
-### 5.3 ルーティング
+### 5.3 Routing
 
-HTTP エンドポイントから flow_id へのマッピングは `user_data/config/routes.json` で定義する。
+Mapping from HTTP endpoint to flow_id is defined in `user_data/config/routes.json`.
 
 ```json
 {
@@ -241,11 +238,11 @@ HTTP エンドポイントから flow_id へのマッピングは `user_data/con
 }
 ```
 
-`input_mapping` はHTTPリクエストから共通メッセージ形式の `input` へのフィールドマッピング。`body.model` はリクエストボディの `model` フィールドを意味する。`"*": "body"` はボディ全体を input にする。`{flow_id}` はパスパラメータ。
+`input_mapping` is a field mapping from HTTP request to common message format `input`. `body.model` means the `model` field of the request body. `"*": "body"` makes the entire body an input. `{flow_id}` is a path parameter.
 
-routes.json を編集するだけで任意のHTTPエンドポイントを追加できる。Flow 側のコード変更は不要。Pack が routes.json にエントリを追加することも可能。
+You can add any HTTP endpoint just by editing routes.json. No code changes required on the Flow side. Packs can also add entries to routes.json.
 
-### 5.4 リクエスト処理フロー
+### 5.4 Request processing flow
 
 ```
 HTTP リクエスト受信
@@ -277,7 +274,7 @@ stream == true:
   → Flow 完了時に stream.end を送信して接続を閉じる
 ```
 
-### 5.5 SSE ストリーミング
+### 5.5 SSE Streaming
 
 ```
 HTTP/1.1 200 OK
@@ -298,9 +295,9 @@ data: {"id":"req_01JXYZ","data":{"status":"completed","output":{...}}}
 
 ```
 
-### 5.6 OpenAI 互換モード
+### 5.6 OpenAI Compatibility Mode
 
-routes.json の `/v1/chat/completions` エンドポイントに `response_format: "openai"` を追加すると、レスポンスを OpenAI API 互換形式に変換して返す。
+Adding `response_format: "openai"` to the `/v1/chat/completions` endpoint in routes.json converts the response to an OpenAI API compatible format and returns it.
 
 ```json
 {
@@ -319,7 +316,7 @@ routes.json の `/v1/chat/completions` エンドポイントに `response_format
 }
 ```
 
-変換は transport 層が行う。Flow の出力（共通形式）を OpenAI のレスポンス形式にマッピングする。
+The conversion is performed by the transport layer. Map Flow output (common format) to OpenAI response format.
 
 ```json
 // 共通形式からの変換
@@ -346,32 +343,32 @@ routes.json の `/v1/chat/completions` エンドポイントに `response_format
 }
 ```
 
-ストリーミング時も OpenAI 互換 SSE 形式に変換する。これにより既存の OpenAI SDK やライブラリがそのまま rumi に接続できる。
+Converts to OpenAI compatible SSE format even when streaming. This allows existing OpenAI SDKs and libraries to connect to rumi as is.
 
 
 ## 6. stdio Transport
 
-### 6.1 概要
+### 6.1 Overview
 
-stdin/stdout で JSON Lines を送受信する。Tauri のフロントエンドと rumiai プロセス間の通信、および CLI がこの transport を使用する。
+Send and receive JSON Lines on stdin/stdout. Communication between the Tauri frontend and the rumiai process, and the CLI, use this transport.
 
-### 6.2 形式
+### 6.2 Format
 
-stdin（クライアント → rumiai）:
+stdin (client → rumiai):
 
 ```jsonl
 {"id":"req_01","flow_id":"default.chat","input":{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}],"stream":false}}
 {"id":"req_02","flow_id":"default.model_list","input":{}}
 ```
 
-stdout（rumiai → クライアント）:
+stdout (rumiai → client):
 
 ```jsonl
 {"id":"req_01","status":"completed","output":{"content":"Hello!","model":"gpt-4o","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"finish_reason":"stop"},"metadata":{"flow_id":"default.chat","duration_ms":800}}
 {"id":"req_02","status":"completed","output":{"models":[...]},"metadata":{"flow_id":"default.model_list","duration_ms":50}}
 ```
 
-ストリーミング時:
+When streaming:
 
 ```jsonl
 {"event":"stream.start","id":"req_03","data":{}}
@@ -379,13 +376,13 @@ stdout（rumiai → クライアント）:
 {"event":"stream.end","id":"req_03","data":{"status":"completed","output":{...}}}
 ```
 
-### 6.3 認証
+### 6.3 Authentication
 
-stdio transport は認証を行わない。stdin/stdout に接続できるのは親プロセス（Tauri の Rust 層、または CLI を起動したシェル）だけであり、プロセス間の信頼で十分とする。
+stdio transport does not perform authentication. Only the parent process (Tauri's Rust layer, or the shell that started the CLI) can connect to stdin/stdout, so trust between processes is sufficient.
 
-### 6.4 フロントエンドメッセージとの統合
+### 6.4 Integration with front-end messages
 
-frontend.md で定義されている `component.register`、`render.mount`、`message.send` 等のフロントエンド固有メッセージも同じ stdin/stdout を共有する。区別は `type` フィールドの有無で行う。
+Front-end specific messages such as `component.register`, `render.mount`, `message.send` defined in frontend.md also share the same stdin/stdout. The distinction is made by the presence or absence of the `type` field.
 
 ```jsonl
 // Flow 呼び出し（type フィールドなし、flow_id フィールドあり）
@@ -396,16 +393,16 @@ frontend.md で定義されている `component.register`、`render.mount`、`me
 {"type":"message.send","component":"defaults.chat","data":{...}}
 ```
 
-transport handler がメッセージを振り分ける。`flow_id` があれば FlowEngine に転送、`type` があればフロントエンド handler に転送。
+A transport handler distributes messages. If `flow_id` is present, forward to FlowEngine; if `type` is present, forward to front-end handler.
 
 
 ## 7. UDS Transport
 
-### 7.1 概要
+### 7.1 Overview
 
-Unix Domain Socket で通信する。ローカルの別プロセス（他のアプリケーション、スクリプト、エディタプラグイン等）が rumiai と通信する場合に使用する。
+Communicate using Unix Domain Socket. Used when another local process (another application, script, editor plugin, etc.) communicates with rumiai.
 
-### 7.2 設定
+### 7.2 Settings
 
 ```json
 // user_data/config/transport.json
@@ -417,13 +414,13 @@ Unix Domain Socket で通信する。ローカルの別プロセス（他のア�
 }
 ```
 
-### 7.3 プロトコル
+### 7.3 Protocol
 
-JSON Lines。stdio transport と同一形式。
+JSON Lines. Same format as stdio transport.
 
-### 7.4 認証
+### 7.4 Authentication
 
-ソケットファイルのパーミッション（`0600`、所有者のみ読み書き可能）で制御する。追加でAPIキー認証を要求する設定も可能。
+Controlled by socket file permissions (`0600`, only the owner can read and write). It is also possible to configure settings to additionally require API key authentication.
 
 ```json
 {
@@ -435,7 +432,7 @@ JSON Lines。stdio transport と同一形式。
 }
 ```
 
-`require_auth: true` の場合、接続後の最初のメッセージで認証を行う。
+In the case of `require_auth: true`, authentication is performed in the first message after connection.
 
 ```jsonl
 {"type":"auth","key":"rumi_xxxxxxxxxxxx"}
@@ -443,15 +440,15 @@ JSON Lines。stdio transport と同一形式。
 ```
 
 
-## 8. CLI 統合
+## 8. CLI integration
 
-### 8.1 概要
+### 8.1 Overview
 
-CLI は stdio transport の上に構築されるシンクライアントである。rumiai プロセスを起動し、stdin/stdout で共通メッセージ形式を送受信する。CLI 自身はドメイン知識を持たない。
+The CLI is a thin client built on top of the stdio transport. Start the rumiai process and send and receive common message formats on stdin/stdout. The CLI itself has no domain knowledge.
 
-### 8.2 コマンド体系
+### 8.2 Command system
 
-CLI のコマンドは flow_id へのエイリアスである。
+The CLI command is an alias to flow_id.
 
 ```
 rumi chat "hello"
@@ -464,7 +461,7 @@ rumi run my_custom_flow --input '{"key": "value"}'
   → {"flow_id": "my_custom_flow", "input": {"key": "value"}}
 ```
 
-コマンドと flow_id のマッピングは `user_data/config/cli.json` で定義する。
+The mapping between command and flow_id is defined in `user_data/config/cli.json`.
 
 ```json
 {
@@ -505,13 +502,13 @@ rumi run my_custom_flow --input '{"key": "value"}'
 }
 ```
 
-Pack が cli.json にコマンドを追加すれば、CLI からその Pack の Flow を呼び出せる。CLI 本体のコード変更は不要。
+If a Pack adds a command to cli.json, you can call that Pack's Flow from the CLI. No need to change the CLI code.
 
-### 8.3 出力フォーマット
+### 8.3 Output format
 
-CLI は transport から受け取った共通形式のレスポンスを人間が読める形式に変換する。
+The CLI converts the common format responses received from the transport into a human-readable format.
 
-非ストリーミング:
+Non-streaming:
 
 ```
 $ rumi chat "hello" --no-stream
@@ -520,44 +517,44 @@ Hello! How can I help you today?
 [gpt-4o | 20 tokens | 1.2s]
 ```
 
-ストリーミング:
+Streaming:
 
 ```
 $ rumi chat "hello"
 Hello! How can I help you today?█
 ```
 
-ストリーミング時は stream.delta のテキストチャンクを逐次出力する。カーソルが末尾に表示される。stream.end 受信で完了。
+When streaming, text chunks of stream.delta are output sequentially. The cursor appears at the end. Completed with stream.end reception.
 
-### 8.4 Widget のテキストフォールバック
+### 8.4 Widget text fallback
 
-Flow やツールが emit_widget で Widget JSON を送出した場合、CLI は Widget のテキスト表現にフォールバックする。
+If a Flow or tool sends Widget JSON with emit_widget, the CLI will fall back to the widget's text representation.
 
-| Widget type | CLI 表示 |
+| Widget type | CLI display |
 |---|---|
-| Text | そのままテキスト出力 |
-| CodeBlock | ``` 囲み + 言語名 |
-| Diff | unified diff 形式 |
+| Text | Output as text |
+| CodeBlock | ``` Enclosure + language name |
+| Diff | unified diff format |
 | Image | `[Image: alt WxH]` |
 | Screenshot | `[Screenshot: url]` |
-| Terminal | コマンドと出力をそのまま |
+| Terminal | Command and output as is |
 | Progress | `[████░░░░░░] 40%` |
-| Table | ASCII テーブル |
-| FileTree | インデント付きテキスト |
-| Markdown | そのまま出力 |
-| Chart | 数値要約 |
+| Table | ASCII table |
+| FileTree | Indented text |
+| Markdown | Output as is |
+| Chart | Numerical summary |
 | Audio | `[Audio: duration]` |
 | Video | `[Video: duration]` |
 | Map | `[Map: lat, lng]` |
 | Indicator | `● label (state)` |
-| Card | ヘッダー + ボディのテキスト結合 |
+| Card | Text combination of header + body |
 
 
-## 9. エンドポイント登録メカニズム
+## 9. Endpoint registration mechanism
 
-### 9.1 Flow の api トリガー
+### 9.1 Flow api triggers
 
-Flow 定義の `trigger.type: api` で HTTP エンドポイントが登録される。flow.md のトリガーシステムと連動する。
+The HTTP endpoint is registered in `trigger.type: api` of the Flow definition. Works with flow.md's trigger system.
 
 ```yaml
 # user_data/shared/flows/my_api/flow.yaml
@@ -572,22 +569,22 @@ trigger:
 handler: handler.py
 ```
 
-Flow のデプロイ時に transport.http handler が routes を再読み込みし、このエンドポイントが有効になる。
+When the Flow is deployed, the transport.http handler reloads the routes and this endpoint is enabled.
 
-### 9.2 routes.json との関係
+### 9.2 Relationship with routes.json
 
-routes.json は静的なルーティング定義。Flow の api トリガーは動的に登録される。解決順序は以下の通り。
+routes.json is a static routing definition. Flow api triggers are registered dynamically. The solution order is as follows.
 
-1. routes.json の静的ルート（最優先）
-2. Flow の api トリガーで登録された動的ルート
+1. Static routes in routes.json (highest priority)
+2. Dynamic route registered with Flow api trigger
 
-同一パスが競合した場合は routes.json が勝つ。
+If the same path conflicts, routes.json wins.
 
-### 9.3 Pack がエンドポイントを追加する
+### 9.3 Pack adds endpoints
 
-Pack は2つの方法でエンドポイントを追加できる。
+Packs can add endpoints in two ways.
 
-方法1: Flow の api トリガーを定義する。
+Method 1: Define an api trigger for Flow.
 
 ```yaml
 # user_data/packs/my_pack/flows/webhook_receiver/flow.yaml
@@ -601,41 +598,41 @@ trigger:
 handler: handler.py
 ```
 
-方法2: routes.json にエントリを追加する（Pack のインストールスクリプト経由）。
+Method 2: Add an entry to routes.json (via the Pack's installation script).
 
-いずれの方法でも defaults 側のコード変更は不要。
+Either method requires no code changes on the defaults side.
 
 
-## 10. セキュリティ
+## 10. Security
 
-### 10.1 transport 層の隔離
+### 10.1 Transport layer isolation
 
-各 transport handler は Grant で許可された権限のみで動作する。`io.http.server` のようにカーネルオブジェクト全体が渡される問題は発生しない。
+Each transport handler operates only with the permissions granted by Grant. The problem of passing the entire kernel object as in `io.http.server` does not occur.
 
-### 10.2 認証の階層
+### 10.2 Authentication hierarchy
 
-| transport | 認証方式 | 根拠 |
+| transport | Authentication method | Basis |
 |---|---|---|
-| HTTP | APIキー（Bearer トークン） | ネットワーク経由のアクセスは常に認証が必要 |
-| stdio | なし | 親プロセス信頼 |
-| UDS | ソケットパーミッション + オプションでAPIキー | ローカルプロセス信頼 + 設定可能 |
+| HTTP | API key (Bearer token) | Access via network always requires authentication |
+| stdio | None | Parent process trust |
+| UDS | Socket permissions + optional API key | Local process trust + configurable |
 
-### 10.3 Flow レベルの権限
+### 10.3 Flow Level Permissions
 
-APIキーの `permissions` フィールドで、キーごとにアクセス可能な Flow を制限できる。管理用の強い権限を持つキーと、限定用途のキーを分離できる。
+Accessible flows can be restricted for each key using the `permissions` field of the API key. Keys with strong administrative privileges can be separated from keys for limited use.
 
-### 10.4 レート制限
+### 10.4 Rate Limiting
 
-transport 層で実施する。APIキーごとに `requests_per_minute` を設定可能。超過時は `429 RATE_LIMITED` を返す。
+Implemented in the transport layer. `requests_per_minute` can be set for each API key. If exceeded, `429 RATE_LIMITED` is returned.
 
-### 10.5 input のバリデーション
+### 10.5 Validation of input
 
-Flow の `config_schema`（flow.md セクション 6.1）による入力バリデーションは FlowEngine が実施する。transport 層は形式チェック（JSON として valid か）のみ行う。
+Input validation according to Flow's `config_schema` (flow.md section 6.1) is performed by FlowEngine. The transport layer only performs format checking (is it valid as JSON?).
 
 
-## 11. デフォルトルート
+## 11. Default route
 
-defaults が routes.json に登録するデフォルトルート。全て user_data の routes.json で上書き・削除可能。
+Default route that defaults registers in routes.json. All can be overwritten/deleted in user_data's routes.json.
 
 ```json
 {
@@ -701,32 +698,31 @@ defaults が routes.json に登録するデフォルトルート。全て user_d
 }
 ```
 
-### 11.1 input_mapping の記法
+### 11.1 Notation of input_mapping
 
-| 記法 | 説明 | 例 |
+| Notation | Explanation | Example |
 |---|---|---|
-| `body.{field}` | リクエストボディのフィールド | `body.model` |
-| `path.{param}` | URL パスパラメータ | `path.model_id` |
-| `query.{param}` | クエリパラメータ | `query.limit` |
-| `header.{name}` | リクエストヘッダー | `header.X-Custom` |
-| `"*": "body"` | ボディ全体を input にする | — |
+| `body.{field}` | Request body fields | `body.model` |
+| `path.{param}` | URL path parameters | `path.model_id` |
+| `query.{param}` | Query parameters | `query.limit` |
+| `header.{name}` | Request header | `header.X-Custom` |
+| `"*": "body"` | Make the entire body input | — |
 
 ### 11.2 response_format
 
-| 値 | 説明 |
+| Value | Description |
 |---|---|
-| 省略 / `"default"` | 共通メッセージ形式でそのまま返す |
-| `"openai"` | OpenAI API 互換形式に変換して返す |
+| Omitted / `"default"` | Return as is in common message format |
+| `"openai"` | Convert and return to OpenAI API compatible format |
 
-将来的に `"anthropic"` 等を追加可能。変換ロジックは transport 層に配置する。
+`"anthropic"` etc. can be added in the future. Place the conversion logic in the transport layer.
 
 
-## 12. 他ドキュメントとの関係
+## 12. Relationship with other documents
 
-| ドキュメント | 関係 |
+| Document | Relationship |
 |---|---|
-| frontend.md | stdio transport のメッセージ形式は frontend.md の通信フローと共存する。`flow_id` があれば FlowEngine へ、`type` があればフロントエンドへ |
-| flow.md | エンドポイントは Flow の api トリガーで登録される。FlowEngine がリクエストを処理する |
-| ai_client.md | ストリーミングイベントの type は ai_client.md セクション 11.3 の正規化イベントと同一 |
-| tool.md | ツールの context API（call_handler, emit_event 等）で transport を操作することはない。transport は上位層であり、ツールから直接触らない |
-```
+| frontend.md | The message format of the stdio transport coexists with the communication flow of frontend.md. If you have `flow_id`, go to FlowEngine, if you have `type`, go to front end |
+| flow.md | Endpoints are registered with Flow's api trigger. FlowEngine processes the request |
+| ai_client.md | Streaming event type is the same as normalized event in ai_client.md section 11.3 |
+| tool.md | Transport is not manipulated using the tool's context API (call_handler, emit_event, etc.). transport is an upper layer and is not touched directly by tools |

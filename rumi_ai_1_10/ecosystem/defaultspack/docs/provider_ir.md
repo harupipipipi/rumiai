@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./provider_ir.md) | [JP](./i18n/ja/provider_ir.md) | [KR](./i18n/ko/provider_ir.md) | [CN](./i18n/zh-cn/provider_ir.md)
+<!-- docs-i18n-links:end -->
+
 # Provider IR
 
 Rumi Chat IR v2 is the provider-neutral contract between ChatStore and provider

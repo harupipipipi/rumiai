@@ -1,19 +1,23 @@
-# Coding 機能ガイド
+<!-- docs-i18n-links:start -->
+[EN](./coding.md) | [JP](./i18n/ja/coding.md) | [KR](./i18n/ko/coding.md) | [CN](./i18n/zh-cn/coding.md)
+<!-- docs-i18n-links:end -->
 
-## 1. 概要
+# Coding feature guide
 
-coding モジュールは defaults の `domain/coding/` に配置されるドメインコードであり、ファイル操作・ターミナル実行・Git 操作の handler を提供する。これらの handler はエージェントや tool から `call_handler` で呼び出される。
+## 1. Overview
 
-coding モジュールはワークスペース内のファイルを対象とする。ワークスペース外のファイルへのアクセスは権限チェックで拒否される。
+The coding module is domain code placed in `domain/coding/` of defaults and provides handlers for file operations, terminal execution, and Git operations. These handlers are called by agents and tools with `call_handler`.
+
+The coding module targets files in your workspace. Access to files outside the workspace is denied by permission checks.
 
 
-## 2. ファイル操作
+## 2. File operations
 
 ### defaults.coding.file_read
 
-ファイルの内容を読み取る。
+Read the contents of a file.
 
-権限: `file.workspace.read`
+Permissions: `file.workspace.read`
 
 input_data:
 ```json
@@ -25,9 +29,9 @@ input_data:
 }
 ```
 
-`path` はワークスペースからの相対パス。`line_start` / `line_end` を指定すると部分読み取りになる。
+`path` is the path relative to the workspace. Specifying `line_start` / `line_end` results in partial reading.
 
-戻り値:
+Return value:
 ```json
 {
   "content": "import os\n...",
@@ -40,9 +44,9 @@ input_data:
 
 ### defaults.coding.file_write
 
-ファイルの内容を上書きする。ファイルが存在しない場合は作成する。
+Overwrite the contents of the file. Create the file if it does not exist.
 
-権限: `file.workspace.write`
+Permissions: `file.workspace.write`
 
 input_data:
 ```json
@@ -54,9 +58,9 @@ input_data:
 }
 ```
 
-`create_dirs` が true の場合、中間ディレクトリも作成する。
+If `create_dirs` is true, intermediate directories will also be created.
 
-戻り値:
+Return value:
 ```json
 {
   "success": true,
@@ -67,9 +71,9 @@ input_data:
 
 ### defaults.coding.file_create
 
-新しいファイルを作成する。既存ファイルがあればエラー。
+Create a new file. Error if there is an existing file.
 
-権限: `file.create`
+Permissions: `file.create`
 
 input_data:
 ```json
@@ -80,7 +84,7 @@ input_data:
 }
 ```
 
-戻り値:
+Return value:
 ```json
 {
   "success": true,
@@ -91,9 +95,9 @@ input_data:
 
 ### defaults.coding.file_delete
 
-ファイルを削除する。
+Delete files.
 
-権限: `file.delete`
+Permissions: `file.delete`
 
 input_data:
 ```json
@@ -102,7 +106,7 @@ input_data:
 }
 ```
 
-戻り値:
+Return value:
 ```json
 {
   "success": true,
@@ -112,9 +116,9 @@ input_data:
 
 ### defaults.coding.file_search
 
-ワークスペース内のファイルをテキスト検索（grep 相当）する。
+Perform a text search (equivalent to grep) on files in your workspace.
 
-権限: `file.search`
+Permissions: `file.search`
 
 input_data:
 ```json
@@ -128,7 +132,7 @@ input_data:
 }
 ```
 
-戻り値:
+Return value:
 ```json
 {
   "matches": [
@@ -147,9 +151,9 @@ input_data:
 
 ### defaults.coding.file_list
 
-ディレクトリの内容を一覧する。
+List the contents of a directory.
 
-権限: `file.list`
+Permissions: `file.list`
 
 input_data:
 ```json
@@ -161,7 +165,7 @@ input_data:
 }
 ```
 
-戻り値:
+Return value:
 ```json
 {
   "entries": [
@@ -174,13 +178,13 @@ input_data:
 ```
 
 
-## 3. ターミナル実行
+## 3. Run terminal
 
 ### defaults.coding.terminal_exec
 
-コマンドを実行して完了を待つ。
+Execute the command and wait for completion.
 
-権限: `terminal.execute`
+Permissions: `terminal.execute`
 
 input_data:
 ```json
@@ -192,9 +196,9 @@ input_data:
 }
 ```
 
-`cwd` はワーキングディレクトリ（省略でワークスペースルート）。`timeout_ms` はタイムアウト（デフォルト 120000ms = 2分）。`env` は追加の環境変数。
+`cwd` is the working directory (workspace root for short). `timeout_ms` is timeout (default 120000ms = 2 minutes). `env` is an additional environment variable.
 
-戻り値:
+Return value:
 ```json
 {
   "stdout": "...",
@@ -207,9 +211,9 @@ input_data:
 
 ### defaults.coding.terminal_stream
 
-コマンドを実行し、出力をストリーミングする。
+Run commands and stream output.
 
-権限: `terminal.stream`
+Permissions: `terminal.stream`
 
 input_data:
 ```json
@@ -220,7 +224,7 @@ input_data:
 }
 ```
 
-戻り値:
+Return value:
 ```json
 {
   "stream_id": "term-001",
@@ -228,23 +232,23 @@ input_data:
 }
 ```
 
-出力はイベント `terminal.output` として emit_event で送出される。完了時に `terminal.completed` イベントが発行される。
+The output is emitted as event `terminal.output` with emit_event. A `terminal.completed` event is fired upon completion.
 
 
-## 4. Git 操作
+## 4. Git operations
 
 ### defaults.coding.git_status
 
-リポジトリの状態を取得する。
+Get the repository status.
 
-権限: `git.status`
+Permissions: `git.status`
 
 input_data:
 ```json
 {}
 ```
 
-戻り値:
+Return value:
 ```json
 {
   "branch": "main",
@@ -259,9 +263,9 @@ input_data:
 
 ### defaults.coding.git_diff
 
-差分を取得する。
+Get the difference.
 
-権限: `git.diff`
+Permissions: `git.diff`
 
 input_data:
 ```json
@@ -272,9 +276,9 @@ input_data:
 }
 ```
 
-`path` で特定ファイルに限定可能。`staged` が true でステージ済みの差分。`commit` でコミットハッシュとの差分。
+Can be limited to specific files with `path`. Staged diff with `staged` true. Difference with commit hash in `commit`.
 
-戻り値:
+Return value:
 ```json
 {
   "diff": "diff --git a/README.md b/README.md\n...",
@@ -286,9 +290,9 @@ input_data:
 
 ### defaults.coding.git_commit
 
-変更をコミットする。
+Commit your changes.
 
-権限: `git.commit`
+Permissions: `git.commit`
 
 input_data:
 ```json
@@ -299,9 +303,9 @@ input_data:
 }
 ```
 
-`add_all` が true で全変更を自動ステージ。`paths` で特定ファイルのみステージ。
+`add_all` is true to autostage all changes. `paths` only stages specific files.
 
-戻り値:
+Return value:
 ```json
 {
   "success": true,
@@ -313,9 +317,9 @@ input_data:
 
 ### defaults.coding.git_push
 
-リモートにプッシュする。
+Push to remote.
 
-権限: `git.push`
+Permissions: `git.push`
 
 input_data:
 ```json
@@ -326,9 +330,9 @@ input_data:
 }
 ```
 
-`branch` 省略で現在のブランチ。
+`branch` Omit current branch.
 
-戻り値:
+Return value:
 ```json
 {
   "success": true,

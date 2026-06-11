@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./node_spec.md) | [JP](./i18n/ja/node_spec.md) | [KR](./i18n/ko/node_spec.md) | [CN](./i18n/zh-cn/node_spec.md)
+<!-- docs-i18n-links:end -->
+
 # Node Definition Spec
 
 Node definitions describe static capability nodes exposed by ecosystem packs.

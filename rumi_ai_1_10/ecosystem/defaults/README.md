@@ -1,86 +1,80 @@
+<!-- docs-i18n-links:start -->
+[EN](./README.md) | [JP](./i18n/ja/README.md) | [KR](./i18n/ko/README.md) | [CN](./i18n/zh-cn/README.md)
+<!-- docs-i18n-links:end -->
 
-```markdown
 # rumiai_defaults
 
-rumiai のデフォルトパック。
+rumiai's default pack.
 
-rumiai 本体はドメイン知識を持たない汎用カーネルである。defaults は rumiai ecosystem に「AI サービスとして動作するための全ての仕組み」を提供する。チャット、エージェント、ツール、プロンプト、AI クライアント、コーディング支援、マルチモーダル処理、フロントエンド通信の全てが defaults の handler と domain コードによって動作する。
+rumiai itself is a general-purpose kernel with no domain knowledge. Defaults provides the rumiai ecosystem with “all the mechanisms to operate as an AI service.” Chat, agents, tools, prompts, AI clients, coding assistance, multimodal processing, and front-end communication all work through the defaults handler and domain codes.
 
-ただし defaults が提供するのは「仕組み」だけである。具体的な UI、ツール定義、エージェント定義、プロンプト、テーマ、レイアウトは全て user_data 側に配置される。defaults はそれらを「置ける場所」と「動かす仕組み」を提供する。
+However, defaults only provides a "mechanism". Concrete UI, tool definitions, agent definitions, prompts, themes, and layouts are all placed on the user_data side. Defaults provides a place to put them and a mechanism to move them.
 
-defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin）と正面から戦えるレベルの品質を目指す。
-
----
-
-## 思想
-
-**Batteries Included, But Every Battery Is Removable.** defaults を入れれば全機能が動く。しかし任意のコンポーネントを別パックで置き換えられる。
-
-**Defaults Defines the Standard, Not the Limit.** defaults が定義する権限・handler・ドメインモデルは rumiai ecosystem の「標準語彙」になる。他のパックはこの語彙を使う。しかしこの語彙は拡張可能であり、defaults が知らない概念を他のパックが追加できる。
-
-**Know Everything, Assume Nothing.** defaults は AI サービスに必要なドメイン知識を全て持つ。しかしユーザーの環境、ユースケース、好みについて何も仮定しない。
-
-**Security by Capability, Not by Trust.** defaults は rumiai のセキュリティモデルに完全に従う。defaults 自身も Grant された権限の範囲内でのみ動作する。
-
-**Infrastructure Only, Content in user_data.** defaults が提供するのはドメインロジック（handler）、通信基盤、Widget ライブラリ、シェル、Flow 定義のみ。画面の見た目（Asset）、ツール定義、エージェント設定、プロンプト、テーマ、レイアウトは全て user_data に配置される。defaults はそれらが動くための API とフレームワークを提供する。
+Aiming for a level of quality that allows defaults alone to compete head-on with existing AI services (ChatGPT / Claude / Cursor / Devin).
 
 ---
 
-## defaults が提供するもの
+## Thoughts
 
-- **handler** — call_handler で呼び出せるドメイン操作 API。chat、agent、coding、ai、tool、prompt、memory、media の各ドメインの基本操作。
-- **domain コード** — handler の実装。各ドメインのビジネスロジック。
-- **Flow 定義** — simple_chat、agent_chat、planning_agent。デフォルトの処理パイプライン。
-- **通信基盤** — frontend handler + transport。HTTP、stdio、UDS 経由の通信。
-- **Widget ライブラリ** — lib/rumi_widgets/。バックエンドが UI に描画指示を出すための Python ヘルパー。
-- **シェル** — ui/shell.html。スロット定義 + Asset ローダー + Widget レンダラー。Asset を載せる空の枠。
+**Batteries Included, But Every Battery Is Removable.** If you include defaults, all functions will work. However, you can replace any component with another pack.**Defaults Defines the Standard, Not the Limit.** The permissions, handlers, and domain models defined by defaults become the "standard vocabulary" of the rumiai ecosystem. Other packs use this vocabulary. However, this vocabulary is extensible, and other packs can add concepts that defaults do not know.**Know Everything, Assume Nothing.** Defaults have all the domain knowledge required by the AI service. But it makes no assumptions about the user's environment, use case, or preferences.**Security by Capability, Not by Trust.** defaults fully follows rumiai's security model. defaults itself operates only within the scope of the granted privileges.**Infrastructure Only, Content in user_data.** Defaults only provide domain logic (handler), communication infrastructure, Widget library, shell, and Flow definition. Screen appearance (Assets), tool definitions, agent settings, prompts, themes, and layouts are all placed in user_data. Defaults provide the API and framework for them to work.
 
-## defaults が提供しないもの
+---
 
-- **Asset** — 画面に描画される UI ファイル。chat 画面、agent 画面、coding 画面、設定画面は全て user_data 側に配置される。
-- **ツール定義** — tool.json + handler.py。user_data/shared/tools/ に配置される。
-- **エージェント定義** — agent.json。user_data/shared/agents/ に配置される。
-- **プロンプト定義** — user_data/shared/prompts/ に配置される。
-- **テーマ定義** — theme.yaml。user_data/themes/ に配置される。
-- **レイアウト定義** — layout.json。user_data/layouts/ に配置される。
-- **AI モデルプロファイル** — user_data/shared/ai_models/ に配置される。
+## What defaults provide
+
+- **handler** — Domain manipulation API that can be called with call_handler. Basic operations for chat, agent, coding, ai, tool, prompt, memory, and media domains.
+- **domain code** — handler implementation. Business logic for each domain.
+- **Flow definition** — simple_chat, agent_chat, planning_agent. Default processing pipeline.
+- **Communication infrastructure** — frontend handler + transport. Communication via HTTP, stdio, and UDS.
+- **Widget Library** — lib/rumi_widgets/. A Python helper for the backend to issue drawing instructions to the UI.
+- **Shell** — ui/shell.html. Slot definition + Asset loader + Widget renderer. An empty frame to place an Asset.
+
+## What defaults don't provide
+
+- **Asset** — UI files drawn to the screen. The chat screen, agent screen, coding screen, and settings screen are all placed on the user_data side.
+- **Tool definition** — tool.json + handler.py. Located in user_data/shared/tools/.
+- **Agent definition** — agent.json. Located in user_data/shared/agents/.
+- **Prompt definition** — located in user_data/shared/prompts/.
+- **Theme definition** — theme.yaml. Located in user_data/themes/.
+- **Layout definition** — layout.json. Located in user_data/layouts/.
+- **AI Model Profile** — located in user_data/shared/ai_models/.
 
 ---
 
 ## Tool Context API
 
-tool の handler.py に注入される context は汎用プリミティブのみで構成される。特定のドメイン（チャット、エージェント等）に特化した API は存在しない。全てのドメイン操作は汎用プリミティブの組み合わせで実現する。
+The context injected into handler.py of tool consists only of general-purpose primitives. There are no APIs specific to specific domains (chat, agents, etc.). All domain operations are realized by combinations of general-purpose primitives.
 
-### 常に注入される（宣言不要）
+### Always injected (no declaration required)
 
-| context キー | 説明 |
+| context key | description |
 |---|---|
-| `call_handler(handler_name, params)` | 任意の handler を呼び出す。Grant で許可された権限の範囲内でのみ実行可能 |
-| `emit_event(event_type, data)` | イベントを発行する。handler、Flow トリガー、フロントエンドが受信可能 |
-| `wait_event(event_type, timeout, filter)` | イベントを待つ。タイムアウト指定可能 |
-| `emit_widget(widget_json)` | Widget JSON を UI に送出する |
-| `cancel_check()` | キャンセル確認 |
-| `handler_config` | conditions.json から注入された設定 |
-| `session` | セッション情報（session_id、workspace 等） |
+| `call_handler(handler_name, params)` | Call any handler. Can only be executed within the scope of permissions granted by Grant |
+| `emit_event(event_type, data)` | Publish an event. handler, Flow trigger, and front end can be received |
+| `wait_event(event_type, timeout, filter)` | Wait for an event. Timeout can be specified |
+| `emit_widget(widget_json)` | Send Widget JSON to the UI |
+| `cancel_check()` | Cancellation confirmation |
+| `handler_config` | Settings injected from conditions.json |
+| `session` | Session information (session_id, workspace, etc.) |
 
-### capabilities_required で宣言して注入されるもの
+### What is declared and injected with capabilities_required
 
-| capability_id | context キー | 説明 | リスク |
+| capability_id | context key | description | risk |
 |---|---|---|---|
-| `data_read` | `data_read(path) → str/bytes` | user_data 配下のファイル読み取り | 低 |
-| `data_write` | `data_write(path, content)` | user_data 配下のファイル書き込み | 中 |
-| `execute_flow` | `execute_flow(flow_id, input) → FlowResult` | Flow を起動する | 中 |
-| `shell_exec` | `capability("shell_exec", {...})` | シェルコマンド実行 | 高 |
-| `browser_control` | `capability("browser_control", {...})` | ブラウザ操作 | 高 |
-| `container_exec` | `capability("container_exec", {...})` | Docker コンテナの起動・操作・破棄 | 高 |
-| `app_control` | `capability("app_control", {...})` | ホストアプリ操作 | 高 |
-| `http_request` | `capability("http_request", {...})` | 外部 HTTP 通信 | 中 |
-| `llm_call` | `capability("llm_call", {...})` | ツール内 LLM 呼び出し | 中 |
-| `session_state` | `capability("session_state", {...})` | セッション状態読み書き | 低 |
+| `data_read` | `data_read(path) → str/bytes` | Read file under user_data | Low |
+| `data_write` | `data_write(path, content)` | Writing files under user_data | Medium |
+| `execute_flow` | `execute_flow(flow_id, input) → FlowResult` | Launch Flow | Medium |
+| `shell_exec` | `capability("shell_exec", {...})` | Shell command execution | High |
+| `browser_control` | `capability("browser_control", {...})` | Browser operation | High |
+| `container_exec` | `capability("container_exec", {...})` | Starting, operating, and destroying Docker containers | High |
+| `app_control` | `capability("app_control", {...})` | Host application operation | High |
+| `http_request` | `capability("http_request", {...})` | External HTTP communication | Medium |
+| `llm_call` | `capability("llm_call", {...})` | In-tool LLM call | Medium |
+| `session_state` | `capability("session_state", {...})` | Session state read/write | Low |
 
-### call_handler の仕組み
+### How call_handler works
 
-call_handler は defaults や Pack が登録した任意の handler を呼び出す汎用ゲートウェイである。
+call_handler is a general-purpose gateway that calls any handler registered by defaults or Pack.
 
 ```python
 result = context["call_handler"]("defaults.chat.send", {
@@ -89,13 +83,13 @@ result = context["call_handler"]("defaults.chat.send", {
 })
 ```
 
-呼び出し元 tool の権限を検証し、呼び出し先 handler が要求する権限が含まれていなければ拒否する。含まれていれば handler を実行し結果を返す。
+Verify the permissions of the calling tool and deny them if they do not include the permissions requested by the called handler. If it is included, execute handler and return the result.
 
-チャット操作、エージェント起動、メモリ読み書き、プロンプトレンダリング、全てが call_handler 経由で行える。新しい handler が Pack によって追加されれば、tool は同じ call_handler でそれも呼び出せる。
+Chat operations, agent activation, memory read/write, prompt rendering, all can be done via call_handler. If a new handler is added by Pack, tool can also call it with the same call_handler.
 
-### emit_event / wait_event の仕組み
+### How emit_event / wait_event works
 
-イベントはシステム全体の汎用通信メカニズムである。
+Events are a general purpose communication mechanism throughout the system.
 
 ```python
 context["emit_event"]("my_tool.done", {"result": "success"})
@@ -103,11 +97,11 @@ context["emit_event"]("my_tool.done", {"result": "success"})
 response = context["wait_event"]("ui.user_response", timeout=30, filter={"id": "popup_1"})
 ```
 
-フロントエンドへのポップアップ表示、tool 間の非同期通信、Flow トリガーのフック、全てが同じ仕組みで実現される。
+Pop-up display on the front end, asynchronous communication between tools, and hooks for Flow triggers are all realized using the same mechanism.
 
 ### container_exec capability
 
-Docker コンテナのライフサイクルを操作する汎用 capability である。display オプションが true の場合、コンテナ内に仮想フレームバッファが起動し、screenshot と input（click, type, key, scroll）が使用可能になる。
+It is a general-purpose capability that operates the life cycle of Docker containers. If the display option is true, a virtual framebuffer is started within the container and screenshots and inputs (click, type, key, scroll) are available.
 
 ```python
 container = context["capability"]("container_exec", {
@@ -142,13 +136,13 @@ context["capability"]("container_exec", {
 
 ---
 
-## 権限カタログ
+## Permission Catalog
 
-defaults は rumiai ecosystem の「標準語彙」として権限を定義する。tool、handler、Pack はこれらの権限を Grant で取得して操作を行う。
+defaults defines permissions as the "standard vocabulary" of the rumiai ecosystem. Tools, handlers, and Packs obtain these permissions using grants and perform operations.
 
-### 命名規則
+### Naming convention
 
-`domain.resource.action` のドット区切り3層。ワイルドカード `*` で一括指定可能。
+`domain.resource.action` 3 layers of dot separation. Can be specified all at once using the wildcard `*`.
 
 ```
 chat.conversation.create     → chat ドメイン、conversation リソース、create アクション
@@ -156,353 +150,353 @@ chat.conversation.*          → conversation の全アクション
 chat.*                       → chat ドメインの全権限
 ```
 
-### chat ドメイン（18権限）
+### chat domain (18 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `chat.conversation.create` | 会話作成 |
-| `chat.conversation.read` | 会話読み取り |
-| `chat.conversation.list` | 会話一覧 |
-| `chat.conversation.update` | 会話更新 |
-| `chat.conversation.delete` | 会話削除 |
-| `chat.conversation.export` | 会話エクスポート |
-| `chat.conversation.branch` | 会話分岐 |
-| `chat.message.send` | メッセージ送信 |
-| `chat.message.read` | メッセージ読み取り |
-| `chat.message.edit` | メッセージ編集 |
-| `chat.message.delete` | メッセージ削除 |
-| `chat.message.regenerate` | AI 応答再生成 |
-| `chat.message.stream` | ストリーミング |
-| `chat.message.stop` | ストリーミング停止 |
-| `chat.attachment.upload` | 添付アップロード |
-| `chat.attachment.read` | 添付読み取り |
-| `chat.reaction.write` | リアクション |
-| `chat.search` | メッセージ検索 |
+| `chat.conversation.create` | Conversation creation |
+| `chat.conversation.read` | Conversation reading |
+| `chat.conversation.list` | Conversation list |
+| `chat.conversation.update` | Conversation update |
+| `chat.conversation.delete` | Conversation deleted |
+| `chat.conversation.export` | Conversation export |
+| `chat.conversation.branch` | Conversation branching |
+| `chat.message.send` | Send message |
+| `chat.message.read` | Read message |
+| `chat.message.edit` | Edit message |
+| `chat.message.delete` | Delete message |
+| `chat.message.regenerate` | AI response regeneration |
+| `chat.message.stream` | Streaming |
+| `chat.message.stop` | Stop streaming |
+| `chat.attachment.upload` | Upload attachment |
+| `chat.attachment.read` | Read attachment |
+| `chat.reaction.write` | Reaction |
+| `chat.search` | Message search |
 
-### agent ドメイン（18権限）
+### agent domain (18 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `agent.create` | エージェント作成 |
-| `agent.read` | エージェント読み取り |
-| `agent.list` | エージェント一覧 |
-| `agent.update` | エージェント更新 |
-| `agent.delete` | エージェント削除 |
-| `agent.execute` | エージェント実行 |
-| `agent.step.read` | ステップ読み取り |
-| `agent.step.approve` | ステップ承認 |
-| `agent.step.reject` | ステップ拒否 |
-| `agent.cancel` | 実行キャンセル |
-| `agent.pause` | 一時停止 |
-| `agent.resume` | 再開 |
-| `agent.status.read` | 状態読み取り |
-| `agent.sub.spawn` | サブエージェント起動 |
-| `agent.sub.manage` | サブエージェント管理 |
-| `agent.plan.read` | プラン読み取り |
-| `agent.plan.modify` | プラン変更 |
-| `agent.history.read` | 履歴読み取り |
+| `agent.create` | Agent creation |
+| `agent.read` | Agent read |
+| `agent.list` | Agent list |
+| `agent.update` | Agent update |
+| `agent.delete` | Agent deletion |
+| `agent.execute` | Agent execution |
+| `agent.step.read` | Step reading |
+| `agent.step.approve` | Step approval |
+| `agent.step.reject` | Step Rejection |
+| `agent.cancel` | Cancel execution |
+| `agent.pause` | Pause |
+| `agent.resume` | Resume |
+| `agent.status.read` | Status reading |
+| `agent.sub.spawn` | Subagent startup |
+| `agent.sub.manage` | Subagent management |
+| `agent.plan.read` | Read plan |
+| `agent.plan.modify` | Plan change |
+| `agent.history.read` | History reading |
 
-### tool ドメイン（13権限）
+### tool domain (13 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `tool.invoke` | ツール実行 |
-| `tool.read` | ツール読み取り |
-| `tool.list` | ツール一覧 |
-| `tool.schema.read` | スキーマ読み取り |
-| `tool.create` | ツール作成 |
-| `tool.update` | ツール更新 |
-| `tool.delete` | ツール削除 |
-| `tool.result.read` | 実行結果読み取り |
-| `tool.permission.read` | 権限読み取り |
-| `tool.permission.write` | 権限書き込み |
-| `tool.mcp.connect` | MCP サーバー接続 |
-| `tool.mcp.disconnect` | MCP サーバー切断 |
-| `tool.mcp.list` | MCP ツール一覧 |
+| `tool.invoke` | Tool execution |
+| `tool.read` | Tool reading |
+| `tool.list` | Tool list |
+| `tool.schema.read` | Schema reading |
+| `tool.create` | Tool creation |
+| `tool.update` | Tool update |
+| `tool.delete` | Tool deletion |
+| `tool.result.read` | Read execution results |
+| `tool.permission.read` | Read permissions |
+| `tool.permission.write` | Authorization write |
+| `tool.mcp.connect` | MCP server connection |
+| `tool.mcp.disconnect` | MCP server disconnection |
+| `tool.mcp.list` | MCP tools list |
 
-### prompt ドメイン（12権限）
+### prompt domain (12 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `prompt.create` | プロンプト作成 |
-| `prompt.read` | プロンプト読み取り |
-| `prompt.list` | プロンプト一覧 |
-| `prompt.update` | プロンプト更新 |
-| `prompt.delete` | プロンプト削除 |
-| `prompt.render` | プロンプトレンダリング |
-| `prompt.variable.read` | 変数読み取り |
-| `prompt.variable.write` | 変数書き込み |
-| `prompt.system.read` | システムプロンプト読み取り |
-| `prompt.system.write` | システムプロンプト書き込み |
-| `prompt.import` | インポート |
-| `prompt.export` | エクスポート |
+| `prompt.create` | Prompt creation |
+| `prompt.read` | Prompt reading |
+| `prompt.list` | Prompt list |
+| `prompt.update` | Prompt update |
+| `prompt.delete` | Delete prompt |
+| `prompt.render` | Prompt rendering |
+| `prompt.variable.read` | Read variable |
+| `prompt.variable.write` | Writing variables |
+| `prompt.system.read` | Read system prompt |
+| `prompt.system.write` | System prompt writing |
+| `prompt.import` | Import |
+| `prompt.export` | Export |
 
-### ai ドメイン（19権限）
+### ai domain (19 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `ai.completion` | テキスト生成 |
-| `ai.stream` | ストリーミング生成 |
-| `ai.model.list` | モデル一覧 |
-| `ai.model.read` | モデル情報読み取り |
-| `ai.provider.list` | プロバイダ一覧 |
-| `ai.provider.add` | プロバイダ追加 |
-| `ai.provider.remove` | プロバイダ削除 |
-| `ai.provider.config.read` | プロバイダ設定読み取り |
-| `ai.provider.config.write` | プロバイダ設定書き込み |
-| `ai.profile.read` | AI プロファイル読み取り |
-| `ai.profile.write` | AI プロファイル書き込み |
-| `ai.profile.list` | プロファイル一覧 |
-| `ai.usage.read` | 使用量読み取り |
-| `ai.token.count` | トークンカウント |
-| `ai.embedding` | 埋め込みベクトル生成 |
-| `ai.image.generate` | 画像生成 |
-| `ai.image.analyze` | 画像解析 |
-| `ai.audio.transcribe` | 音声文字起こし |
-| `ai.audio.synthesize` | 音声合成 |
+| `ai.completion` | Text generation |
+| `ai.stream` | Streaming generation |
+| `ai.model.list` | Model list |
+| `ai.model.read` | Read model information |
+| `ai.provider.list` | List of providers |
+| `ai.provider.add` | Add provider |
+| `ai.provider.remove` | Delete provider |
+| `ai.provider.config.read` | Read provider settings |
+| `ai.provider.config.write` | Write provider settings |
+| `ai.profile.read` | AI profile reading |
+| `ai.profile.write` | AI profile writing |
+| `ai.profile.list` | Profile list |
+| `ai.usage.read` | Read usage |
+| `ai.token.count` | Token count |
+| `ai.embedding` | Embedding vector generation |
+| `ai.image.generate` | Image generation |
+| `ai.image.analyze` | Image analysis |
+| `ai.audio.transcribe` | Audio transcription |
+| `ai.audio.synthesize` | Speech synthesis |
 
-### file ドメイン（18権限）
+### file domain (18 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `file.read` | ファイル読み取り |
-| `file.write` | ファイル書き込み |
-| `file.create` | ファイル作成 |
-| `file.delete` | ファイル削除 |
-| `file.move` | ファイル移動 |
-| `file.copy` | ファイルコピー |
-| `file.list` | ファイル一覧 |
-| `file.search` | ファイル検索 |
-| `file.watch` | ファイル監視 |
-| `file.metadata.read` | メタデータ読み取り |
-| `file.permission.read` | 権限読み取り |
-| `file.workspace.read` | ワークスペース読み取り |
-| `file.workspace.write` | ワークスペース書き込み |
-| `file.system.read` | システムファイル読み取り |
-| `file.system.write` | システムファイル書き込み |
-| `file.temp.write` | 一時ファイル書き込み |
-| `file.archive.read` | アーカイブ読み取り |
-| `file.archive.create` | アーカイブ作成 |
+| `file.read` | File read |
+| `file.write` | File writing |
+| `file.create` | File creation |
+| `file.delete` | File deletion |
+| `file.move` | File movement |
+| `file.copy` | File copy |
+| `file.list` | File list |
+| `file.search` | File search |
+| `file.watch` | File monitoring |
+| `file.metadata.read` | Read metadata |
+| `file.permission.read` | Read permissions |
+| `file.workspace.read` | Workspace Read |
+| `file.workspace.write` | Workspace writing |
+| `file.system.read` | System file read |
+| `file.system.write` | System file writing |
+| `file.temp.write` | Temporary file writing |
+| `file.archive.read` | Archive reading |
+| `file.archive.create` | Archive creation |
 
-### terminal ドメイン（11権限）
+### terminal domain (11 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `terminal.execute` | コマンド実行 |
-| `terminal.read` | 出力読み取り |
-| `terminal.stream` | ストリーミング出力 |
-| `terminal.session.create` | セッション作成 |
-| `terminal.session.list` | セッション一覧 |
-| `terminal.session.close` | セッション終了 |
-| `terminal.interrupt` | 割り込み |
-| `terminal.env.read` | 環境変数読み取り |
-| `terminal.env.write` | 環境変数書き込み |
-| `terminal.cwd.read` | カレントディレクトリ読み取り |
-| `terminal.cwd.write` | カレントディレクトリ変更 |
+| `terminal.execute` | Command execution |
+| `terminal.read` | Read output |
+| `terminal.stream` | Streaming output |
+| `terminal.session.create` | Session creation |
+| `terminal.session.list` | Session list |
+| `terminal.session.close` | End session |
+| `terminal.interrupt` | Interruption |
+| `terminal.env.read` | Read environment variables |
+| `terminal.env.write` | Writing environment variables |
+| `terminal.cwd.read` | Read current directory |
+| `terminal.cwd.write` | Change current directory |
 
-### git ドメイン（15権限）
+### git domain (15 permissions)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `git.status` | ステータス確認 |
-| `git.diff` | 差分表示 |
-| `git.log` | ログ表示 |
-| `git.commit` | コミット |
-| `git.branch.list` | ブランチ一覧 |
-| `git.branch.create` | ブランチ作成 |
-| `git.branch.switch` | ブランチ切り替え |
-| `git.branch.delete` | ブランチ削除 |
-| `git.merge` | マージ |
-| `git.push` | プッシュ |
-| `git.pull` | プル |
-| `git.stash` | スタッシュ |
-| `git.reset` | リセット |
-| `git.remote.list` | リモート一覧 |
-| `git.remote.manage` | リモート管理 |
+| `git.status` | Status confirmation |
+| `git.diff` | Difference display |
+| `git.log` | Log display |
+| `git.commit` | Commit |
+| `git.branch.list` | Branch list |
+| `git.branch.create` | Create branch |
+| `git.branch.switch` | Branch switching |
+| `git.branch.delete` | Branch deletion |
+| `git.merge` | Merge |
+| `git.push` | Push |
+| `git.pull` | Pull |
+| `git.stash` | Stash |
+| `git.reset` | Reset |
+| `git.remote.list` | Remote list |
+| `git.remote.manage` | Remote management |
 
-### memory ドメイン（13権限）
+### memory domain (13 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `memory.short.read` | 短期メモリ読み取り |
-| `memory.short.write` | 短期メモリ書き込み |
-| `memory.long.read` | 長期メモリ読み取り |
-| `memory.long.write` | 長期メモリ書き込み |
-| `memory.long.delete` | 長期メモリ削除 |
-| `memory.long.search` | 長期メモリ検索 |
-| `memory.project.read` | プロジェクトメモリ読み取り |
-| `memory.project.write` | プロジェクトメモリ書き込み |
-| `memory.user.read` | ユーザーメモリ読み取り |
-| `memory.user.write` | ユーザーメモリ書き込み |
-| `memory.vector.store` | ベクトル保存 |
-| `memory.vector.query` | ベクトル検索 |
-| `memory.clear` | メモリクリア |
+| `memory.short.read` | Short-term memory read |
+| `memory.short.write` | Short-term memory write |
+| `memory.long.read` | Long-term memory read |
+| `memory.long.write` | Long-term memory write |
+| `memory.long.delete` | Long-term memory deletion |
+| `memory.long.search` | Long-term memory retrieval |
+| `memory.project.read` | Read project memory |
+| `memory.project.write` | Project memory write |
+| `memory.user.read` | User memory read |
+| `memory.user.write` | User memory write |
+| `memory.vector.store` | Vector storage |
+| `memory.vector.query` | Vector search |
+| `memory.clear` | Clear memory |
 
-### media ドメイン（12権限）
+### media domain (12 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `media.image.read` | 画像読み取り |
-| `media.image.create` | 画像作成 |
-| `media.image.transform` | 画像変換 |
-| `media.audio.read` | 音声読み取り |
-| `media.audio.create` | 音声作成 |
-| `media.audio.transcribe` | 音声文字起こし |
-| `media.video.read` | 動画読み取り |
-| `media.document.read` | ドキュメント読み取り |
-| `media.document.parse` | ドキュメント解析 |
-| `media.clipboard.read` | クリップボード読み取り |
-| `media.clipboard.write` | クリップボード書き込み |
-| `media.screenshot` | スクリーンショット |
+| `media.image.read` | Image reading |
+| `media.image.create` | Image creation |
+| `media.image.transform` | Image conversion |
+| `media.audio.read` | Voice reading |
+| `media.audio.create` | Audio creation |
+| `media.audio.transcribe` | Audio transcription |
+| `media.video.read` | Video reading |
+| `media.document.read` | Read document |
+| `media.document.parse` | Document analysis |
+| `media.clipboard.read` | Clipboard reading |
+| `media.clipboard.write` | Clipboard writing |
+| `media.screenshot` | Screenshot |
 
-### flow ドメイン（12権限）
+### flow domain (12 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `flow.execute` | Flow 実行 |
-| `flow.read` | Flow 読み取り |
-| `flow.list` | Flow 一覧 |
-| `flow.create` | Flow 作成 |
-| `flow.update` | Flow 更新 |
-| `flow.delete` | Flow 削除 |
-| `flow.status.read` | 実行状態読み取り |
-| `flow.cancel` | 実行中 Flow キャンセル |
-| `flow.modifier.apply` | Flow Modifier 適用 |
-| `flow.modifier.list` | Modifier 一覧 |
-| `flow.context.read` | Flow コンテキスト読み取り |
-| `flow.context.write` | Flow コンテキスト書き込み |
+| `flow.execute` | Flow execution |
+| `flow.read` | Flow reading |
+| `flow.list` | Flow list |
+| `flow.create` | Flow creation |
+| `flow.update` | Flow update |
+| `flow.delete` | Flow Delete |
+| `flow.status.read` | Read execution status |
+| `flow.cancel` | Cancel running Flow |
+| `flow.modifier.apply` | Apply Flow Modifier |
+| `flow.modifier.list` | Modifier list |
+| `flow.context.read` | Flow context read |
+| `flow.context.write` | Flow context writing |
 
-### config ドメイン（13権限）
+### config domain (13 permissions)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `config.read` | 設定読み取り |
-| `config.write` | 設定書き込み |
-| `config.profile.read` | プロファイル読み取り |
-| `config.profile.write` | プロファイル書き込み |
-| `config.profile.list` | プロファイル一覧 |
-| `config.theme.read` | テーマ読み取り |
-| `config.theme.write` | テーマ書き込み |
-| `config.keybind.read` | キーバインド読み取り |
-| `config.keybind.write` | キーバインド書き込み |
-| `config.locale.read` | ロケール読み取り |
-| `config.locale.write` | ロケール書き込み |
-| `config.export` | 設定エクスポート |
-| `config.import` | 設定インポート |
+| `config.read` | Read settings |
+| `config.write` | Settings write |
+| `config.profile.read` | Profile reading |
+| `config.profile.write` | Profile writing |
+| `config.profile.list` | Profile list |
+| `config.theme.read` | Theme reading |
+| `config.theme.write` | Theme writing |
+| `config.keybind.read` | Keybind Read |
+| `config.keybind.write` | Keybind writing |
+| `config.locale.read` | Read locale |
+| `config.locale.write` | Locale writing |
+| `config.export` | Settings export |
+| `config.import` | Settings import |
 
-### net ドメイン（11権限）
+### net domain (11 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `net.http.request` | HTTP リクエスト |
-| `net.http.stream` | HTTP ストリーミング |
-| `net.websocket.connect` | WebSocket 接続 |
-| `net.websocket.send` | WebSocket 送信 |
-| `net.dns.resolve` | DNS 解決 |
-| `net.proxy.read` | プロキシ読み取り |
-| `net.proxy.write` | プロキシ書き込み |
-| `net.allowlist.read` | 許可リスト読み取り |
-| `net.allowlist.write` | 許可リスト書き込み |
-| `net.download` | ダウンロード |
-| `net.upload` | アップロード |
+| `net.http.request` | HTTP request |
+| `net.http.stream` | HTTP Streaming |
+| `net.websocket.connect` | WebSocket connection |
+| `net.websocket.send` | WebSocket sending |
+| `net.dns.resolve` | DNS resolution |
+| `net.proxy.read` | Proxy read |
+| `net.proxy.write` | Proxy writing |
+| `net.allowlist.read` | Read permission list |
+| `net.allowlist.write` | Write permission list |
+| `net.download` | Download |
+| `net.upload` | Upload |
 
-### frontend ドメイン（12権限）
+### frontend domain (12 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `frontend.render.mount` | Asset を描画面に載せる |
-| `frontend.render.unmount` | 描画面から外す |
-| `frontend.render.update` | 描画内容を更新する |
-| `frontend.message.send` | バックエンド → 描画面 |
-| `frontend.message.receive` | 描画面 → バックエンド |
-| `frontend.message.stream` | 連続的にデータを流す |
-| `frontend.asset.register` | Asset の登録を受け入れる |
-| `frontend.asset.unregister` | Asset の解除 |
-| `frontend.asset.list` | 登録 Asset の一覧 |
-| `frontend.layout.read` | レイアウト情報取得 |
-| `frontend.layout.write` | レイアウト変更・保存 |
-| `frontend.theme.read` | テーマ情報取得 |
+| `frontend.render.mount` | Put Asset on the drawing surface |
+| `frontend.render.unmount` | Remove from drawing surface |
+| `frontend.render.update` | Update drawing content |
+| `frontend.message.send` | Backend → drawing surface |
+| `frontend.message.receive` | Drawing surface → backend |
+| `frontend.message.stream` | Stream data continuously |
+| `frontend.asset.register` | Accept Asset Registration |
+| `frontend.asset.unregister` | Cancellation of Asset |
+| `frontend.asset.list` | List of registered Assets |
+| `frontend.layout.read` | Get layout information |
+| `frontend.layout.write` | Change/save layout |
+| `frontend.theme.read` | Get theme information |
 
-### event ドメイン（5権限）
+### event domain (5 permissions)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `event.emit` | イベント発行 |
-| `event.subscribe` | イベント購読 |
-| `event.unsubscribe` | イベント購読解除 |
-| `event.list` | イベント一覧 |
-| `event.history.read` | イベント履歴読み取り |
+| `event.emit` | Event publication |
+| `event.subscribe` | Event subscription |
+| `event.unsubscribe` | Unsubscribe from event |
+| `event.list` | Event list |
+| `event.history.read` | Read event history |
 
-### audit ドメイン（3権限）
+### audit domain (3 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `audit.read` | 監査ログ読み取り |
-| `audit.search` | 監査ログ検索 |
-| `audit.export` | 監査ログエクスポート |
+| `audit.read` | Read audit log |
+| `audit.search` | Audit log search |
+| `audit.export` | Audit log export |
 
-### pack ドメイン（8権限）
+### pack domain (8 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `pack.list` | パック一覧 |
-| `pack.read` | パック読み取り |
-| `pack.install` | パックインストール |
-| `pack.remove` | パック削除 |
-| `pack.update` | パック更新 |
-| `pack.approve` | パック承認 |
-| `pack.config.read` | パック設定読み取り |
-| `pack.config.write` | パック設定書き込み |
+| `pack.list` | Pack list |
+| `pack.read` | Pack reading |
+| `pack.install` | Pack installation |
+| `pack.remove` | Delete pack |
+| `pack.update` | Pack update |
+| `pack.approve` | Pack approval |
+| `pack.config.read` | Read pack settings |
+| `pack.config.write` | Pack settings write |
 
-### secret ドメイン（4権限）
+### secret domain (4 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `secret.read` | シークレット読み取り |
-| `secret.write` | シークレット書き込み |
-| `secret.delete` | シークレット削除 |
-| `secret.list` | シークレット一覧 |
+| `secret.read` | Secret read |
+| `secret.write` | Secret writing |
+| `secret.delete` | Secret deletion |
+| `secret.list` | Secret list |
 
-### kernel ドメイン（5権限）
+### kernel domain (5 privileges)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `kernel.status.read` | カーネル状態読み取り |
-| `kernel.shutdown` | シャットダウン |
-| `kernel.restart` | 再起動 |
-| `kernel.health` | ヘルスチェック |
-| `kernel.version` | バージョン情報 |
+| `kernel.status.read` | Read kernel state |
+| `kernel.shutdown` | Shutdown |
+| `kernel.restart` | Reboot |
+| `kernel.health` | Health check |
+| `kernel.version` | Version information |
 
-### schedule ドメイン（5権限）
+### schedule domain (5 permissions)
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `schedule.create` | スケジュール作成 |
-| `schedule.read` | スケジュール読み取り |
-| `schedule.update` | スケジュール更新 |
-| `schedule.delete` | スケジュール削除 |
-| `schedule.list` | スケジュール一覧 |
+| `schedule.create` | Schedule creation |
+| `schedule.read` | Schedule reading |
+| `schedule.update` | Schedule update |
+| `schedule.delete` | Delete schedule |
+| `schedule.list` | Schedule list |
 
 ---
 
-## 権限プリセット
+## Permission presets
 
-| プリセット | 含む権限 | 用途 |
+| Preset | Permissions included | Usage |
 |-----------|---------|------|
-| `preset.chat_basic` | `chat.conversation.*`, `chat.message.*`, `ai.completion`, `ai.stream` | 基本チャット |
-| `preset.chat_full` | `preset.chat_basic` + `chat.search`, `chat.attachment.*`, `prompt.*`, `memory.short.*` | フルチャット |
-| `preset.coding` | `file.workspace.*`, `terminal.*`, `git.*`, `ai.completion`, `ai.stream` | コーディング |
-| `preset.agent_basic` | `agent.*`, `tool.invoke`, `tool.list`, `tool.schema.read`, `ai.*` | 基本エージェント |
-| `preset.agent_full` | `preset.agent_basic` + `file.*`, `terminal.*`, `net.*`, `memory.*` | フルエージェント |
-| `preset.frontend` | `frontend.*`, `event.*`, `config.read`, `config.theme.*` | フロントエンド |
-| `preset.readonly` | `*.read`, `*.list` | 読み取り専用 |
-| `preset.admin` | `*`（全権限） | 管理者 |
+| `preset.chat_basic` | `chat.conversation.*`, `chat.message.*`, `ai.completion`, `ai.stream` | Basic chat |
+| `preset.chat_full` | `preset.chat_basic` + `chat.search`, `chat.attachment.*`, `prompt.*`, `memory.short.*` | Full chat |
+| `preset.coding` | `file.workspace.*`, `terminal.*`, `git.*`, `ai.completion`, `ai.stream` | Coding |
+| `preset.agent_basic` | `agent.*`, `tool.invoke`, `tool.list`, `tool.schema.read`, `ai.*` | Basic agent |
+| `preset.agent_full` | `preset.agent_basic` + `file.*`, `terminal.*`, `net.*`, `memory.*` | Full agent |
+| `preset.frontend` | `frontend.*`, `event.*`, `config.read`, `config.theme.*` | Front end |
+| `preset.readonly` | `*.read`, `*.list` | Read-only |
+| `preset.admin` | `*` (Full privileges) | Administrator |
 
 ---
 
-## defaults 自身の権限
+## defaults own permissions
 
-defaults は以下の権限で動作する。
+defaults operates with the following privileges.
 
 ```yaml
 grants:
@@ -524,17 +518,17 @@ grants:
   - kernel.version
 ```
 
-以下は defaults に付与されない。rumiai CLI またはユーザーの明示的操作が必要。
+The following are not added to defaults. Requires rumiai CLI or explicit user interaction.
 
 `secret.write`, `secret.delete`, `kernel.shutdown`, `kernel.restart`, `pack.install`, `pack.remove`, `pack.approve`
 
 ---
 
-## Handler 体系
+## Handler system
 
-handler は rumiai の Trust（SHA-256 ハッシュ検証）で承認される。defaults の handler は rumiai ecosystem 上の全ての Pack・Flow・tool が call_handler で呼び出せる標準 API として機能する。
+The handler is approved by rumiai's Trust (SHA-256 hash verification). The defaults handler functions as a standard API that all Packs, Flows, and tools on the rumiai ecosystem can call with call_handler.
 
-### handler 命名規則
+### handler naming convention
 
 `pack_id.category.name`
 
@@ -544,120 +538,120 @@ defaults.coding.file_read      → defaults パック、coding カテゴリ、fi
 some_pack.custom.my_handler    → 別パックの handler
 ```
 
-### defaults handler 一覧
+### defaults handler list
 
 #### frontend（3 handler）
 
-| handler | 必要な権限 | 説明 |
+| handler | Required permissions | Description |
 |---|---|---|
-| `defaults.frontend.start` | `frontend.serve`, `frontend.bind`, `frontend.auth.manage` | transport（http/stdio/uds）を起動 |
-| `defaults.frontend.stop` | `frontend.serve` | transport を停止 |
-| `defaults.frontend.emit` | `frontend.event.emit` | フロントエンドにイベントを送信 |
+| `defaults.frontend.start` | `frontend.serve`, `frontend.bind`, `frontend.auth.manage` | Start transport (http/stdio/uds) |
+| `defaults.frontend.stop` | `frontend.serve` | Stop transport |
+| `defaults.frontend.emit` | `frontend.event.emit` | Send events to the front end |
 
 #### chat（16 handler）
 
-| handler | 必要な権限 | 説明 |
+| handler | Required permissions | Description |
 |---|---|---|
-| `defaults.chat.create_conversation` | `chat.conversation.create` | 会話作成 |
-| `defaults.chat.get_conversation` | `chat.conversation.read` | 会話データ取得 |
-| `defaults.chat.list_conversations` | `chat.conversation.list` | 会話一覧 |
-| `defaults.chat.update_conversation` | `chat.conversation.update` | 会話メタデータ更新 |
-| `defaults.chat.delete_conversation` | `chat.conversation.delete` | 会話削除 |
-| `defaults.chat.export_conversation` | `chat.conversation.export` | 会話エクスポート |
-| `defaults.chat.send` | `chat.message.send`, `ai.completion` | メッセージ送信 + AI 応答生成 |
-| `defaults.chat.stream` | `chat.message.stream`, `ai.stream` | ストリーミング応答 |
-| `defaults.chat.add_message` | `chat.message.send` | メッセージ追加（AI 応答なし） |
-| `defaults.chat.get_message` | `chat.message.read` | メッセージ取得 |
-| `defaults.chat.update_message` | `chat.message.edit` | メッセージ編集 |
-| `defaults.chat.delete_message` | `chat.message.delete` | メッセージ削除 |
-| `defaults.chat.branch` | `chat.conversation.branch` | 会話分岐 |
-| `defaults.chat.search` | `chat.search` | メッセージ検索 |
-| `defaults.chat.stop` | `chat.message.stop` | ストリーミング停止 |
-| `defaults.chat.regenerate` | `chat.message.regenerate`, `ai.completion` | 応答再生成 |
+| `defaults.chat.create_conversation` | `chat.conversation.create` | Conversation creation |
+| `defaults.chat.get_conversation` | `chat.conversation.read` | Conversation data acquisition |
+| `defaults.chat.list_conversations` | `chat.conversation.list` | Conversation list |
+| `defaults.chat.update_conversation` | `chat.conversation.update` | Conversation metadata update |
+| `defaults.chat.delete_conversation` | `chat.conversation.delete` | Conversation deletion |
+| `defaults.chat.export_conversation` | `chat.conversation.export` | Conversation export |
+| `defaults.chat.send` | `chat.message.send`, `ai.completion` | Message sending + AI response generation |
+| `defaults.chat.stream` | `chat.message.stream`, `ai.stream` | Streaming response |
+| `defaults.chat.add_message` | `chat.message.send` | Add message (AI no response) |
+| `defaults.chat.get_message` | `chat.message.read` | Get message |
+| `defaults.chat.update_message` | `chat.message.edit` | Edit message |
+| `defaults.chat.delete_message` | `chat.message.delete` | Delete message |
+| `defaults.chat.branch` | `chat.conversation.branch` | Conversation branching |
+| `defaults.chat.search` | `chat.search` | Message search |
+| `defaults.chat.stop` | `chat.message.stop` | Stop streaming |
+| `defaults.chat.regenerate` | `chat.message.regenerate`, `ai.completion` | Response regeneration |
 
 #### agent（6 handler）
 
-| handler | 必要な権限 | 説明 |
+| handler | Required permissions | Description |
 |---|---|---|
-| `defaults.agent.execute` | `agent.execute`, `tool.invoke` | エージェント実行 |
-| `defaults.agent.approve` | `agent.step.approve` | ステップ承認 |
-| `defaults.agent.reject` | `agent.step.reject` | ステップ拒否 |
-| `defaults.agent.cancel` | `agent.cancel` | 実行キャンセル |
-| `defaults.agent.status` | `agent.status.read` | 状態取得 |
-| `defaults.agent.plan` | `agent.plan.read` | プラン取得 |
+| `defaults.agent.execute` | `agent.execute`, `tool.invoke` | Agent execution |
+| `defaults.agent.approve` | `agent.step.approve` | Step approval |
+| `defaults.agent.reject` | `agent.step.reject` | Step Rejection |
+| `defaults.agent.cancel` | `agent.cancel` | Cancel execution |
+| `defaults.agent.status` | `agent.status.read` | Status acquisition |
+| `defaults.agent.plan` | `agent.plan.read` | Get a plan |
 
 #### coding（12 handler）
 
-| handler | 必要な権限 | 説明 |
+| handler | Required permissions | Description |
 |---|---|---|
-| `defaults.coding.file_read` | `file.workspace.read` | ファイル読み取り |
-| `defaults.coding.file_write` | `file.workspace.write` | ファイル書き込み |
-| `defaults.coding.file_create` | `file.create` | ファイル作成 |
-| `defaults.coding.file_delete` | `file.delete` | ファイル削除 |
-| `defaults.coding.file_search` | `file.search` | ファイル検索 |
-| `defaults.coding.file_list` | `file.list` | ファイル一覧 |
-| `defaults.coding.terminal_exec` | `terminal.execute` | コマンド実行 |
-| `defaults.coding.terminal_stream` | `terminal.stream` | ストリーミング出力 |
-| `defaults.coding.git_status` | `git.status` | Git ステータス |
-| `defaults.coding.git_diff` | `git.diff` | Git 差分 |
-| `defaults.coding.git_commit` | `git.commit` | Git コミット |
-| `defaults.coding.git_push` | `git.push` | Git プッシュ |
+| `defaults.coding.file_read` | `file.workspace.read` | File reading |
+| `defaults.coding.file_write` | `file.workspace.write` | File writing |
+| `defaults.coding.file_create` | `file.create` | File creation |
+| `defaults.coding.file_delete` | `file.delete` | File deletion |
+| `defaults.coding.file_search` | `file.search` | File search |
+| `defaults.coding.file_list` | `file.list` | File list |
+| `defaults.coding.terminal_exec` | `terminal.execute` | Command execution |
+| `defaults.coding.terminal_stream` | `terminal.stream` | Streaming output |
+| `defaults.coding.git_status` | `git.status` | Git status |
+| `defaults.coding.git_diff` | `git.diff` | Git diff |
+| `defaults.coding.git_commit` | `git.commit` | Git commit |
+| `defaults.coding.git_push` | `git.push` | Git push |
 
 #### ai（9 handler）
 
-| handler | 必要な権限 | 説明 |
+| handler | Required permissions | Description |
 |---|---|---|
-| `defaults.ai.complete` | `ai.completion` | テキスト生成 |
-| `defaults.ai.stream` | `ai.stream` | ストリーミング生成 |
-| `defaults.ai.models` | `ai.model.list` | モデル一覧 |
-| `defaults.ai.providers` | `ai.provider.list` | プロバイダ一覧 |
-| `defaults.ai.embed` | `ai.embedding` | 埋め込みベクトル生成 |
-| `defaults.ai.image_gen` | `ai.image.generate` | 画像生成 |
-| `defaults.ai.image_analyze` | `ai.image.analyze` | 画像解析 |
-| `defaults.ai.transcribe` | `ai.audio.transcribe` | 音声文字起こし |
-| `defaults.ai.tts` | `ai.audio.synthesize` | 音声合成 |
+| `defaults.ai.complete` | `ai.completion` | Text generation |
+| `defaults.ai.stream` | `ai.stream` | Streaming generation |
+| `defaults.ai.models` | `ai.model.list` | Model list |
+| `defaults.ai.providers` | `ai.provider.list` | List of providers |
+| `defaults.ai.embed` | `ai.embedding` | Embedding vector generation |
+| `defaults.ai.image_gen` | `ai.image.generate` | Image generation |
+| `defaults.ai.image_analyze` | `ai.image.analyze` | Image analysis |
+| `defaults.ai.transcribe` | `ai.audio.transcribe` | Audio transcription |
+| `defaults.ai.tts` | `ai.audio.synthesize` | Speech synthesis |
 
 #### tool（5 handler）
 
-| handler | 必要な権限 | 説明 |
+| handler | Required permissions | Description |
 |---|---|---|
-| `defaults.tool.invoke` | `tool.invoke` | ツール実行 |
-| `defaults.tool.list` | `tool.list` | ツール一覧 |
-| `defaults.tool.schema` | `tool.schema.read` | スキーマ読み取り |
-| `defaults.tool.mcp_connect` | `tool.mcp.connect` | MCP サーバー接続 |
-| `defaults.tool.mcp_list` | `tool.mcp.list` | MCP ツール一覧 |
+| `defaults.tool.invoke` | `tool.invoke` | Tool execution |
+| `defaults.tool.list` | `tool.list` | Tool list |
+| `defaults.tool.schema` | `tool.schema.read` | Schema reading |
+| `defaults.tool.mcp_connect` | `tool.mcp.connect` | MCP server connection |
+| `defaults.tool.mcp_list` | `tool.mcp.list` | MCP tools list |
 
 #### prompt（4 handler）
 
-| handler | 必要な権限 | 説明 |
+| handler | Required permissions | Description |
 |---|---|---|
-| `defaults.prompt.render` | `prompt.render` | プロンプトレンダリング |
-| `defaults.prompt.list` | `prompt.list` | プロンプト一覧 |
-| `defaults.prompt.create` | `prompt.create` | プロンプト作成 |
-| `defaults.prompt.system` | `prompt.system.read`, `prompt.system.write` | システムプロンプト管理 |
+| `defaults.prompt.render` | `prompt.render` | Prompt rendering |
+| `defaults.prompt.list` | `prompt.list` | Prompt list |
+| `defaults.prompt.create` | `prompt.create` | Prompt creation |
+| `defaults.prompt.system` | `prompt.system.read`, `prompt.system.write` | System prompt management |
 
 #### memory（5 handler）
 
-| handler | 必要な権限 | 説明 |
+| handler | Required permissions | Description |
 |---|---|---|
-| `defaults.memory.store` | `memory.long.write` | 長期メモリ保存 |
-| `defaults.memory.recall` | `memory.long.read`, `memory.long.search` | 長期メモリ検索・読み取り |
-| `defaults.memory.project_context` | `memory.project.read` | プロジェクトメモリ読み取り |
-| `defaults.memory.vector_store` | `memory.vector.store` | ベクトル保存 |
-| `defaults.memory.vector_query` | `memory.vector.query` | ベクトル検索 |
+| `defaults.memory.store` | `memory.long.write` | Long-term memory storage |
+| `defaults.memory.recall` | `memory.long.read`, `memory.long.search` | Long-term memory search/read |
+| `defaults.memory.project_context` | `memory.project.read` | Read project memory |
+| `defaults.memory.vector_store` | `memory.vector.store` | Vector preservation |
+| `defaults.memory.vector_query` | `memory.vector.query` | Vector search |
 
 #### media（6 handler）
 
-| handler | 必要な権限 | 説明 |
+| handler | Required permissions | Description |
 |---|---|---|
-| `defaults.media.image_read` | `media.image.read` | 画像読み取り |
-| `defaults.media.image_transform` | `media.image.transform` | 画像変換 |
-| `defaults.media.doc_parse` | `media.document.parse` | ドキュメント解析 |
-| `defaults.media.clipboard_read` | `media.clipboard.read` | クリップボード読み取り |
-| `defaults.media.clipboard_write` | `media.clipboard.write` | クリップボード書き込み |
-| `defaults.media.screenshot` | `media.screenshot` | スクリーンショット |
+| `defaults.media.image_read` | `media.image.read` | Image reading |
+| `defaults.media.image_transform` | `media.image.transform` | Image conversion |
+| `defaults.media.doc_parse` | `media.document.parse` | Document analysis |
+| `defaults.media.clipboard_read` | `media.clipboard.read` | Clipboard reading |
+| `defaults.media.clipboard_write` | `media.clipboard.write` | Clipboard writing |
+| `defaults.media.screenshot` | `media.screenshot` | Screenshot |
 
-### 別 Pack が handler を使う例
+### Example of another Pack using handler
 
 ```yaml
 # rumiai-cursor の Flow 定義
@@ -692,7 +686,7 @@ grants:
 
 ---
 
-## ファイル構成
+## File structure
 
 ```
 ecosystem/defaults/
@@ -751,7 +745,7 @@ ecosystem/defaults/
             └── dependency-resolution.md
 ```
 
-user_data 側（defaults がセットアップ時に配置するデフォルトコンテンツ）:
+user_data side (default content placed by defaults during setup):
 
 ```
 user_data/
@@ -770,36 +764,35 @@ user_data/
 
 ---
 
-## ドキュメント一覧
+## Document list
 
-| ファイル | サイズ | 内容 |
+| File | Size | Contents |
 |---------|--------|------|
-| `docs/architecture_defaults.md` | 3.9KB | defaults 全体アーキテクチャ |
-| `docs/agent.md` | 41KB | エージェント設計 |
-| `docs/ai_client.md` | 53KB | AI クライアント設計 |
-| `docs/chat.md` | 43KB | チャットモジュール設計 |
-| `docs/flow.md` | 36KB | Flow Engine 設計 |
-| `docs/prompt.md` | 32KB | プロンプト設計 |
-| `docs/tool.md` | 35KB | ツールモジュール設計 |
-| `docs/frontend.md` | - | フロントエンド設計（改訂予定） |
-| `docs/widget.md` | - | Widget 仕様（新規作成予定） |
-| `docs/theme.md` | - | テーマ仕様（新規作成予定） |
-| `docs/profiles_and_models.md` | 3.2KB | AI モデルプロファイル |
-| `docs/conflict_resolution.md` | 3.4KB | 衝突解決 |
-| `docs/ui_and_layout.md` | 4.2KB | UI とレイアウト |
-| `docs/capability/dependency-resolution.md` | 9.2KB | capability 依存解決 |
+| `docs/architecture_defaults.md` | 3.9KB | defaults Overall architecture |
+| `docs/agent.md` | 41KB | Agent design |
+| `docs/ai_client.md` | 53KB | AI client design |
+| `docs/chat.md` | 43KB | Chat module design |
+| `docs/flow.md` | 36KB | Flow Engine design |
+| `docs/prompt.md` | 32KB | Prompt design |
+| `docs/tool.md` | 35KB | Tool module design |
+| `docs/frontend.md` | - | Front-end design (scheduled for revision) |
+| `docs/widget.md` | - | Widget specifications (newly planned) |
+| `docs/theme.md` | - | Theme specifications (newly planned) |
+| `docs/profiles_and_models.md` | 3.2KB | AI model profile |
+| `docs/conflict_resolution.md` | 3.4KB | Conflict resolution |
+| `docs/ui_and_layout.md` | 4.2KB | UI and layout |
+| `docs/capability/dependency-resolution.md` | 9.2KB | capability dependency resolution |
 
 ---
 
-## 品質目標
+## Quality goals
 
-defaults 単体で以下と同等以上のユーザー体験を提供する:
+defaults alone provides a user experience equal to or better than:
 
-- **ChatGPT / Claude** — チャット、マルチモーダル、メモリ
-- **Claude Code / Devin** — エージェント、自律コーディング、プランニング
-- **Cursor / Windsurf** — コーディング支援、Git 統合、ファイル操作
-- **MCP** — 外部ツール連携、プロトコル対応
-- **VS Code Extension** — defaults の handler を呼び出す Pack で実現可能
+- **ChatGPT/Claude** — chat, multimodal, memory
+- **Claude Code / Devin** — Agents, autonomous coding, planning
+- **Cursor / Windsurf** — Coding assistance, Git integration, file manipulation
+- **MCP** — External tool cooperation, protocol support
+- **VS Code Extension** — Can be achieved with Pack that calls defaults handler
 
-これらは全て defaults の handler + user_data のコンテンツ（Asset、tool、agent、prompt）の組み合わせで実現される。
-```
+All of these are realized by the combination of defaults handler + user_data contents (Asset, tool, agent, prompt).

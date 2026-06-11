@@ -1,13 +1,17 @@
+<!-- docs-i18n-links:start -->
+[EN](./README.md) | [JP](../../i18n/ja/examples/desktop_app_pack/README.md) | [KR](../../i18n/ko/examples/desktop_app_pack/README.md) | [CN](../../i18n/zh-cn/examples/desktop_app_pack/README.md)
+<!-- docs-i18n-links:end -->
+
 # Desktop App Pack
 
-Rumi AI OS の **desktop_app.execute** capability を使うサンプル Pack です。
-独立したデスクトップウィンドウ（tkinter）でアプリを起動します。
+This is a sample pack that uses Rumi AI OS's **desktop_app.execute** capability.
+Start the app in a separate desktop window (tkinter).
 
-Pack 開発者がコピーして改造できるテンプレートとしても機能します。
+Pack also serves as a template that developers can copy and modify.
 
 ---
 
-## ディレクトリ構成
+## Directory structure
 
 ```
 desktop_app_pack/
@@ -18,56 +22,56 @@ desktop_app_pack/
 
 ---
 
-## desktop_app.execute capability とは
+## What is desktop_app.execute capability?
 
-`desktop_app.execute` は Rumi AI OS の core capability の一つで、Pack が **独立したデスクトップウィンドウ** でアプリケーションを起動するための権限です。
+`desktop_app.execute` is a core capability of the Rumi AI OS that allows Packs to launch applications in **independent desktop windows**.
 
-Viewer 内のフロントエンド表示（`viewer:display`）とは異なり:
+Unlike the front-end display within the Viewer (`viewer:display`):
 
-1. `pack-shell` バイナリが Kernel の起動確認・トークン取得を自動化
-2. 環境変数 (`RUMI_TOKEN`, `RUMI_PORT`, `RUMI_PACK_ID`) を通じて Kernel API と通信
-3. tkinter, Qt, Electron, Tauri など任意の GUI フレームワークが使用可能
+1. `pack-shell` binary automates Kernel startup confirmation and token acquisition
+2. Communicate with Kernel API through environment variables (`RUMI_TOKEN`, `RUMI_PORT`, `RUMI_PACK_ID`)
+3. Any GUI framework can be used, such as tkinter, Qt, Electron, Tauri, etc.
 
-capability の定義は `core_runtime/core_pack/core_desktop_capability/` にあります。
+The definition of capability is in `core_runtime/core_pack/core_desktop_capability/`.
 
 ---
 
-## 使い方
+## How to use
 
-### 1. pack-shell をビルドする
+### 1. Build pack-shell
 
 ```bash
 cd pack-shell
 cargo build --release
 ```
 
-### 2. Pack を配置する
+### 2. Place the pack
 
-このディレクトリを `ecosystem/` にコピーします:
+Copy this directory to `ecosystem/`:
 
 ```bash
 cp -r docs/examples/desktop_app_pack/ ecosystem/desktop_app_pack/
 ```
 
-### 3. Kernel を起動する
+### 3. Start Kernel
 
 ```bash
 python -m rumi_ai
 ```
 
-Kernel が起動すると `ecosystem/desktop_app_pack/ecosystem.json` を自動でスキャンします。
+When Kernel starts, it automatically scans `ecosystem/desktop_app_pack/ecosystem.json`.
 
-### 4. Pack を承認する
+### 4. Approve the pack
 
-ecosystem Pack は初回で承認が必要です（core_pack と異なり自動承認されません）。
-Kernel の API または管理画面から Pack を承認してください。
+ecosystem packs require approval the first time (unlike core_packs, they are not automatically approved).
+Please approve the pack from the Kernel API or management screen.
 
-### 5. Grant を取得する
+### 5. Get a Grant
 
-`desktop_app.execute` permission の Grant が必要です。
-**注意**: `desktop_app.execute` は `dangerous: true` に設定されています。Grant の承認はデスクトップアプリがホスト OS 上で任意のプロセスを起動する許可を意味します。
+`desktop_app.execute` Permission grant is required.
+**Note**: `desktop_app.execute` is set to `dangerous: true`. Grant approval means permission for the desktop app to launch arbitrary processes on the host OS.
 
-### 6. pack-shell でアプリを起動する
+### 6. Start the app with pack-shell
 
 ```bash
 pack-shell run desktop_app_pack \
@@ -76,11 +80,11 @@ pack-shell run desktop_app_pack \
   --api-token "$RUMI_API_TOKEN"
 ```
 
-tkinter ウィンドウが開き、Kernel API への接続情報と Health Check 機能が表示されます。
+A tkinter window opens with connection information to the Kernel API and Health Check functionality.
 
 ---
 
-## ecosystem.json の解説
+## Explanation of ecosystem.json
 
 ```json
 {
@@ -97,19 +101,19 @@ tkinter ウィンドウが開き、Kernel API への接続情報と Health Check
 }
 ```
 
-| フィールド | 説明 |
+| Field | Description |
 |-----------|------|
-| `desktop_app.command` | pack-shell が起動するコマンド。`--command` 引数として渡される |
-| `desktop_app.requires_api_token` | `DesktopAppManager` が `RUMI_API_TOKEN` 必須として扱うか。現状は常に `true` で保存される |
-| `desktop_app.window.title` | ショートカット名・ウィンドウタイトルに使用される |
-| `desktop_app.window.width/height` | ウィンドウの推奨サイズ（アプリ側で読み取る場合） |
-| `desktop_app.platforms` | サポートするプラットフォーム |
+| `desktop_app.command` | Command that pack-shell launches. `--command` Passed as argument |
+| `desktop_app.requires_api_token` | Is `DesktopAppManager` treated as `RUMI_API_TOKEN` mandatory? The current state is always saved in `true` |
+| `desktop_app.window.title` | Used for shortcut name/window title |
+| `desktop_app.window.width/height` | Recommended window size (when reading on the app side) |
+| `desktop_app.platforms` | Supported platforms |
 
 ---
 
-## Kernel API 通信
+## Kernel API communication
 
-`app.py` に Kernel API への通信サンプルが含まれています。
+`app.py` contains a sample communication to the Kernel API.
 
 ```python
 import json
@@ -123,30 +127,30 @@ with urlopen(req, timeout=5) as resp:
     print(data)  # {"status": "ok"}
 ```
 
-pack-shell が設定する環境変数:
+Environment variables set by pack-shell:
 
-| 変数 | 説明 |
+| Variable | Description |
 |------|------|
-| `RUMI_TOKEN` | Kernel が発行した一時トークン |
-| `RUMI_PORT` | Kernel API のポート番号（デフォルト: 8765） |
-| `RUMI_PACK_ID` | 対象 Pack の ID |
+| `RUMI_TOKEN` | Temporary token issued by Kernel |
+| `RUMI_PORT` | Kernel API port number (default: 8765) |
+| `RUMI_PACK_ID` | Target Pack ID |
 
 ---
 
-## カスタマイズのヒント
+## Customization Tips
 
-- **GUI を変更する**: `app.py` の tkinter コードを Qt, wxPython, Electron 等に置き換えられます
-- **API 呼び出しを追加する**: `RUMI_TOKEN` を `Authorization: Bearer` ヘッダーに設定して Kernel API を呼び出せます
-- **command を変更する**: `ecosystem.json` の `desktop_app.command` を `"node app.js"` や `"./my_binary"` に変更できます
-- **token 契約**: `DesktopAppManager` 経由の起動では `RUMI_API_TOKEN` が事前に必要です
-- **Pack 名を変更する**: `ecosystem.json` の `pack_id` と `pack_identity` を変更してください
-- **ウィンドウ設定**: `desktop_app.window` の `title`, `width`, `height` を変更できます
+- **Change GUI**: tkinter code in `app.py` can be replaced with Qt, wxPython, Electron, etc.
+- **Add an API call**: You can call the Kernel API by setting `RUMI_TOKEN` in the `Authorization: Bearer` header
+- **Change command**: You can change `desktop_app.command` of `ecosystem.json` to `"node app.js"` or `"./my_binary"`
+- **token contract**: `RUMI_API_TOKEN` is required before activation via `DesktopAppManager`
+- **Change Pack name**: Please change `pack_id` and `pack_identity` of `ecosystem.json`
+- **Window settings**: You can change `title`, `width`, `height` of `desktop_app.window`
 
 ---
 
-## 関連ドキュメント
+## Related documents
 
-- [Pack デスクトップアプリ開発ガイド](../../pack_desktop_app_guide.md)
-- [Pack 開発ガイド](../../pack-development.md)
-- [多言語 Pack 開発ガイド](../../multilang_pack_guide.md)
+- [Pack Desktop App Development Guide](../../pack_desktop_app_guide.md)
+- [Pack Development Guide](../../pack-development.md)
+- [Multilingual Pack Development Guide](../../multilang_pack_guide.md)
 - [pack-shell README](../../../../pack-shell/README.md)

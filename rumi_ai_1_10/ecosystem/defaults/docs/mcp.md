@@ -1,17 +1,21 @@
-# MCP (Model Context Protocol) ガイド
+<!-- docs-i18n-links:start -->
+[EN](./mcp.md) | [JP](./i18n/ja/mcp.md) | [KR](./i18n/ko/mcp.md) | [CN](./i18n/zh-cn/mcp.md)
+<!-- docs-i18n-links:end -->
 
-## 1. MCP とは
+# MCP (Model Context Protocol) Guide
 
-MCP（Model Context Protocol）は LLM アプリケーションが外部ツールサーバーと通信するための標準プロトコルである。defaults の tool モジュールは MCP クライアントを内蔵しており、MCP サーバーが提供するツールを rumiai のツールシステムに統合できる。
+## 1. What is MCP?
 
-MCP サーバーが公開するツールは、rumiai のネイティブツール（user_data/shared/tools/ に配置されたもの）と同じ方法で LLM から呼び出される。LLM はツールが MCP 経由かネイティブかを意識する必要がない。
+MCP (Model Context Protocol) is a standard protocol for LLM applications to communicate with external tool servers. The defaults tool module has a built-in MCP client that allows you to integrate tools provided by the MCP server into rumiai's tool system.
+
+The tools exposed by the MCP server are called from LLM in the same way as rumiai's native tools (located in user_data/shared/tools/). LLM does not need to be aware of whether the tool is via MCP or native.
 
 
-## 2. サーバー接続方法
+## 2. Server connection method
 
-### stdio 接続
+### stdio connection
 
-MCP サーバーをサブプロセスとして起動し、stdin/stdout で通信する。
+Start the MCP server as a subprocess and communicate via stdin/stdout.
 
 ```json
 {
@@ -23,9 +27,9 @@ MCP サーバーをサブプロセスとして起動し、stdin/stdout で通信
 }
 ```
 
-### SSE 接続
+### SSE connection
 
-既に起動している MCP サーバーに HTTP Server-Sent Events で接続する。
+Connect to an already running MCP server using HTTP Server-Sent Events.
 
 ```json
 {
@@ -39,9 +43,9 @@ MCP サーバーをサブプロセスとして起動し、stdin/stdout で通信
 ```
 
 
-## 3. config の書き方
+## 3. How to write config
 
-MCP サーバーの定義は `user_data/shared/tools/mcp.json` に記述する。
+The definition of MCP server is described in `user_data/shared/tools/mcp.json`.
 
 ```json
 {
@@ -86,14 +90,14 @@ MCP サーバーの定義は `user_data/shared/tools/mcp.json` に記述する�
 }
 ```
 
-`server_id` はシステム内で一意な識別子。`auto_connect` が true の場合、rumiai 起動時に自動接続する。`tool_prefix` は MCP ツール名に付与するプレフィックス（ネイティブツールとの名前衝突を防ぐ）。`approval_mode` は `per_call`（毎回承認）、`per_session`（セッションごと1回）、`auto`（自動承認）から選択する。
+`server_id` is a unique identifier within the system. If `auto_connect` is true, connect automatically when rumiai starts. `tool_prefix` is the prefix added to the MCP tool name (to prevent name collision with native tools). For `approval_mode`, select from `per_call` (approval every time), `per_session` (once per session), and `auto` (automatic approval).
 
-環境変数は `${VAR_NAME}` 構文で参照できる。
+Environment variables can be referenced using the `${VAR_NAME}` syntax.
 
 
-## 4. ツール一覧の取得
+## 4. Get tool list
 
-接続済み MCP サーバーのツール一覧を取得する。
+Get a list of tools for connected MCP servers.
 
 ```python
 # handler 経由
@@ -114,16 +118,16 @@ tools = context["call_handler"]("defaults.tool.mcp_list", {
 # ]
 ```
 
-全サーバーのツールをまとめて取得する場合は `server_id` を省略する。
+If you want to obtain tools for all servers at once, omit `server_id`.
 
 ```python
 all_mcp_tools = context["call_handler"]("defaults.tool.mcp_list", {})
 ```
 
 
-## 5. ツール呼び出し
+## 5. Tool call
 
-MCP ツールの呼び出しはネイティブツールと同じ `defaults.tool.invoke` handler を使う。
+Calling the MCP tool uses the same `defaults.tool.invoke` handler as the native tool.
 
 ```python
 result = context["call_handler"]("defaults.tool.invoke", {
@@ -132,12 +136,12 @@ result = context["call_handler"]("defaults.tool.invoke", {
 })
 ```
 
-内部では tool モジュールの executor.py が `tool_id` のプレフィックスから MCP ツールであることを判別し、`mcp_client.py` 経由で MCP サーバーに `tools/call` リクエストを送信する。
+Internally, executor.py of the tool module determines that it is an MCP tool from the `tool_id` prefix and sends a `tools/call` request to the MCP server via `mcp_client.py`.
 
-LLM が tool_call で MCP ツールを呼んだ場合も同じ経路を通る。LLM にはネイティブツールと MCP ツールの区別なく統一されたツールリストが渡される。
+The same route is used when LLM calls the MCP tool using tool_call. LLM is given a unified list of tools, regardless of native tools or MCP tools.
 
 
-## 6. サーバーの切断
+## 6. Disconnecting the server
 
 ```python
 context["call_handler"]("defaults.tool.mcp_disconnect", {
@@ -145,21 +149,21 @@ context["call_handler"]("defaults.tool.mcp_disconnect", {
 })
 ```
 
-切断するとそのサーバーのツールは LLM のツールリストから除外される。再接続は `defaults.tool.mcp_connect` で行う。
+If you disconnect, that server's tools will be removed from LLM's tools list. Reconnection is done with `defaults.tool.mcp_connect`.
 
 
-## 7. API エンドポイント
+## 7. API endpoints
 
-| handler | 権限 | 説明 |
+| handler | permission | description |
 |---|---|---|
-| `defaults.tool.mcp_connect` | `tool.mcp.connect` | MCP サーバーに接続する |
-| `defaults.tool.mcp_list` | `tool.mcp.list` | 接続済みサーバーのツール一覧を取得する |
-| `defaults.tool.mcp_disconnect` | `tool.mcp.disconnect` | MCP サーバーから切断する |
-| `defaults.tool.invoke` | `tool.invoke` | ツールを呼び出す（MCP / ネイティブ共通） |
-| `defaults.tool.list` | `tool.list` | 全ツール一覧（MCP 含む）を取得する |
-| `defaults.tool.schema` | `tool.schema.read` | ツールのスキーマを取得する |
+| `defaults.tool.mcp_connect` | `tool.mcp.connect` | Connect to MCP server |
+| `defaults.tool.mcp_list` | `tool.mcp.list` | Get a list of tools for connected servers |
+| `defaults.tool.mcp_disconnect` | `tool.mcp.disconnect` | Disconnect from MCP server |
+| `defaults.tool.invoke` | `tool.invoke` | Calling tools (MCP/native common) |
+| `defaults.tool.list` | `tool.list` | Get all tools list (including MCP) |
+| `defaults.tool.schema` | `tool.schema.read` | Get tool schema |
 
-### input_data / 戻り値
+### input_data / return value
 
 **defaults.tool.mcp_connect**
 
@@ -170,9 +174,9 @@ input_data:
   "config": {}
 }
 ```
-`config` を省略すると mcp.json の定義を使用。`config` を渡すと一時的な接続設定として使用。
+If `config` is omitted, the mcp.json definition will be used. Passing `config` will be used as a temporary connection setting.
 
-戻り値:
+Return value:
 ```json
 {
   "server_id": "filesystem",
@@ -190,9 +194,9 @@ input_data:
   "server_id": "filesystem"
 }
 ```
-`server_id` 省略で全サーバー。
+`server_id` Omit all servers.
 
-戻り値:
+Return value:
 ```json
 [
   {
@@ -215,7 +219,7 @@ input_data:
 }
 ```
 
-戻り値:
+Return value:
 ```json
 {
   "server_id": "filesystem",

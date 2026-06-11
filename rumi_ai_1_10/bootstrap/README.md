@@ -17,7 +17,7 @@
 def run(context):
     diagnostics = context["diagnostics"]
     interface_registry = context["interface_registry"]
-    
+
     # 初期化処理
     pass
 ```

@@ -1,24 +1,28 @@
+<!-- docs-i18n-links:start -->
+[EN](./getting-started.md) | [JP](./i18n/ja/getting-started.md) | [KR](./i18n/ko/getting-started.md) | [CN](./i18n/zh-cn/getting-started.md)
+<!-- docs-i18n-links:end -->
+
 # Getting Started
 
-rumiai defaults Pack のセットアップから最初の会話を送信するまでのガイドです。
+A guide from setting up rumiai defaults pack to sending your first conversation.
 
-## 前提条件
+## Prerequisites
 
-- **Python 3.11 以上** がインストールされていること
-- **rumiai カーネル** がセットアップ済みであること（`https://github.com/harupipipipi/rumiai` の `rumi_ai_1_10/` 配下）
-- **git** がインストールされていること
+- **Python 3.11 or higher** installed
+- **rumiai kernel** has been set up (under `rumi_ai_1_10/` of `https://github.com/harupipipipi/rumiai`)
+- **git** is installed
 
-## インストール
+## Installation
 
-### 1. defaults Pack のクローン
+### 1. Clone defaults pack
 
 ```bash
 git clone https://github.com/harupipipipi/rumiai_defaults.git
 ```
 
-### 2. カーネルへの登録
+### 2. Registration to the kernel
 
-rumiai カーネルの Pack 登録ディレクトリに defaults Pack のパスを設定します。カーネルの `ecosystem/` ディレクトリ、または設定ファイルで defaults Pack のルートパスを指定してください。defaults Pack のルートには `ecosystem.json` が含まれており、カーネルはこのファイルを読み取って Pack を認識します。
+Set the defaults Pack path to the Pack registration directory of the rumiai kernel. Specify the root path of the defaults pack in the kernel's `ecosystem/` directory or configuration file. The root of the defaults Pack contains `ecosystem.json`, which the kernel reads to recognize the Pack.
 
 ```
 ecosystem.json   ← カーネルが読み取る Pack 構造定義
@@ -30,16 +34,16 @@ webapp/          ← standalone frontend の source（luxe-chat ベース）
 ui/              ← 配信される build 済み frontend（shell.html, shell-app.js など）
 ```
 
-### 3. 環境変数の設定
+### 3. Setting environment variables
 
-defaults Pack の HTTP サーバーは以下の環境変数を参照します。`transport/http.py` の `DefaultsHttpServer.__init__` で読み取られます。
+The HTTP server in the defaults pack references the following environment variables. Read in `DefaultsHttpServer.__init__` of `transport/http.py`.
 
-| 環境変数 | デフォルト値 | 説明 |
+| Environment variables | Default value | Description |
 |---|---|---|
-| `DEFAULTS_HTTP_HOST` | `127.0.0.1` | HTTP サーバーのバインドアドレス |
-| `DEFAULTS_HTTP_PORT` | `8766` | HTTP サーバーのポート番号 |
+| `DEFAULTS_HTTP_HOST` | `127.0.0.1` | HTTP server bind address |
+| `DEFAULTS_HTTP_PORT` | `8766` | HTTP server port number |
 
-AI プロバイダーを使用する場合は、各プロバイダーの API キーも設定してください（例: `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` など）。API キーが未設定の場合、AI 呼び出しはスタブ応答（`[stub] AI response placeholder`）を返します。
+If you use AI providers, also set the API key for each provider (for example, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.). If the API key is not set, the AI ​​call returns a stub response (`[stub] AI response placeholder`).
 
 ```bash
 export DEFAULTS_HTTP_HOST=127.0.0.1
@@ -47,9 +51,9 @@ export DEFAULTS_HTTP_PORT=8766
 export OPENAI_API_KEY=sk-...
 ```
 
-## 起動方法
+## How to start
 
-defaults Pack はカーネルから起動されます。カーネルが `defaults.frontend.start` handler を呼び出すと、`blocks/frontend/start.py` の `run()` が実行されます。`run()` は `input_data` から `facade` を取得し、`transport.http.start_http_server(facade)` を呼んで HTTP サーバーを起動します。`facade` が `None` の場合はエラーを返します。
+The defaults pack is launched from the kernel. When the kernel calls `defaults.frontend.start` handler, `run()` of `blocks/frontend/start.py` is executed. `run()` gets `facade` from `input_data` and calls `transport.http.start_http_server(facade)` to start the HTTP server. Returns an error if `facade` is `None`.
 
 ```python
 # blocks/frontend/start.py の動作概要
@@ -66,15 +70,15 @@ def run(input_data, context):
     })
 ```
 
-起動が成功すると、コンソールに以下のメッセージが表示されます。
+If the startup is successful, the following message will be displayed on the console.
 
 ```
 [defaults] HTTP server started on 127.0.0.1:8766
 ```
 
-## フロントエンドを編集するとき
+## When editing the front end
 
-`http://127.0.0.1:8766/` で出る standalone UI の source は `webapp/` にあります。`dont_push_this_file/luxe-chat` をベースに、`defaultspack` の実 API に繋ぐ形で管理しています。
+The source of the standalone UI in `http://127.0.0.1:8766/` is in `webapp/`. Based on `dont_push_this_file/luxe-chat`, it is managed by connecting to the actual API of `defaultspack`.
 
 ```bash
 cd rumi_ai_1_10/ecosystem/defaultspack/webapp
@@ -82,26 +86,26 @@ npm install
 npm run dev
 ```
 
-本番相当の配信ファイルを更新したいときは build します。
+Build when you want to update the distribution file equivalent to the production version.
 
 ```bash
 cd rumi_ai_1_10/ecosystem/defaultspack/webapp
 npm run build
 ```
 
-この build は `ui/` に `shell-app.js` と `shell-app.css` を出力します。HTTP サーバーは `ui/shell.html` を返し、そこから `/static/shell-app.js` と `/static/shell-app.css` を読み込みます。
+This build outputs `shell-app.js` and `shell-app.css` in `ui/`. The HTTP server returns `ui/shell.html` and reads `/static/shell-app.js` and `/static/shell-app.css` from it.
 
-## 最初の会話を送るまでの手順
+## Steps to send your first conversation
 
-### ブラウザで開く
+### Open in browser
 
-ブラウザで `http://127.0.0.1:8766/` にアクセスすると、`ui/shell.html` が返されます。`shell.html` は `webapp` の build 済み asset を mount するだけの薄い入口です。UI が表示されれば起動成功です。
+Accessing `http://127.0.0.1:8766/` in a browser returns `ui/shell.html`. `shell.html` is a thin entrance that just mounts the built asset of `webapp`. If the UI is displayed, startup is successful.
 
-HTTP サーバーのルート `/` は `transport/http.py` の `_handle_static()` が処理し、Pack ルートからの相対パス `ui/shell.html` を読み込んで返します。追加の静的ファイル（CSS、JS、画像等）は `/static/{path}` でアクセスでき、`_handle_static_file()` が `ui/{path}` からファイルを読み込みます。例えば `/static/shell-app.js` は `ui/shell-app.js`、`/static/dev_panel.js` は `ui/dev_panel.js` を返します。
+The HTTP server root `/` is processed by `_handle_static()` in `transport/http.py`, which reads and returns the path `ui/shell.html` relative to the Pack root. Additional static files (CSS, JS, images, etc.) can be accessed in `/static/{path}`, and `_handle_static_file()` loads the files from `ui/{path}`. For example, `/static/shell-app.js` returns `ui/shell-app.js`, `/static/dev_panel.js` returns `ui/dev_panel.js`.
 
-### curl で会話を作成してメッセージを送る
+### Create a conversation and send a message with curl
 
-#### 1. 会話を作成する
+#### 1. Create a conversation
 
 ```bash
 curl -X POST http://127.0.0.1:8766/api/chat/conversations \
@@ -109,7 +113,7 @@ curl -X POST http://127.0.0.1:8766/api/chat/conversations \
   -d '{"model": "stub/default"}'
 ```
 
-レスポンス（`blocks/chat/create_conversation.py` → `domain/chat/store.py` の `create_conversation()`）:
+Response (`blocks/chat/create_conversation.py` → `create_conversation()` of `domain/chat/store.py`):
 
 ```json
 {
@@ -129,9 +133,9 @@ curl -X POST http://127.0.0.1:8766/api/chat/conversations \
 }
 ```
 
-#### 2. メッセージを送信する
+#### 2. Send a message
 
-返された `id` を `{conversation_id}` として使用します。
+Use the returned `id` as `{conversation_id}`.
 
 ```bash
 curl -X POST http://127.0.0.1:8766/api/chat/conversations/{conversation_id}/messages \
@@ -144,7 +148,7 @@ curl -X POST http://127.0.0.1:8766/api/chat/conversations/{conversation_id}/mess
   }'
 ```
 
-このリクエストは `blocks/chat/send.py` の `run()` を呼び出します。ユーザーメッセージを保存し、会話履歴を AI に送信し、AI の応答を assistant メッセージとして保存して返します。
+This request calls `run()` of `blocks/chat/send.py`. Save user messages, send conversation history to AI, and save and return AI responses as assistant messages.
 
 ```json
 {
@@ -162,31 +166,31 @@ curl -X POST http://127.0.0.1:8766/api/chat/conversations/{conversation_id}/mess
 }
 ```
 
-## トラブルシューティング
+## Troubleshooting
 
-### サーバーが起動しない
+### Server does not start
 
-- `DEFAULTS_HTTP_PORT` が他のプロセスに使われていないか確認してください。
-- `input_data` に `facade` が含まれていない場合、`blocks/frontend/start.py` は `error("facade is required")` を返します。カーネルから正しく facade が渡されているか確認してください。
+- Please check if `DEFAULTS_HTTP_PORT` is being used by another process.
+- If `input_data` does not contain `facade`, `blocks/frontend/start.py` returns `error("facade is required")`. Please check if the facade is passed correctly from the kernel.
 
-### `[stub] AI response placeholder` が返される
+### `[stub] AI response placeholder` is returned
 
-- AI プロバイダーの API キーが設定されていない場合、または `call_handler` が `None` の場合にスタブ応答が返されます。
-- `blocks/chat/send.py` の `_stub_response()` がフォールバックとして使われています。
-- 実際の AI 応答を得るには、環境変数で API キーを設定し、会話の `model` に有効なモデル名（例: `openai/gpt-4o`）を指定してください。
+- A stub response is returned if the AI provider's API key is not set or `call_handler` is `None`.
+- `_stub_response()` of `blocks/chat/send.py` is used as a fallback.
+- To get real AI responses, set your API key in environment variables and specify a valid model name (e.g. `openai/gpt-4o`) in `model` of the conversation.
 
-### 会話が見つからない（NOT_FOUND）
+### Conversation not found (NOT_FOUND)
 
-- `ChatStore` はインメモリのシングルトンです（`domain/chat/store.py`）。サーバーを再起動すると全ての会話データが失われます。
-- 会話作成で返された `id` が正しいか確認してください。
+- `ChatStore` is an in-memory singleton (`domain/chat/store.py`). If you restart the server, all conversation data will be lost.
+- Please check if the `id` returned by conversation creation is correct.
 
-### CORS エラー
+### CORS errors
 
-- HTTP サーバーは全てのオリジンからのアクセスを許可しています（`Access-Control-Allow-Origin: *`）。CORS が問題になる場合は、ブラウザの拡張機能やプロキシの影響を確認してください。
+- The HTTP server allows access from all origins (`Access-Control-Allow-Origin: *`). If CORS is an issue, check the impact of browser extensions and proxies.
 
-### ヘルスチェック
+### Health check
 
-サーバーの稼働状態は以下で確認できます。
+You can check the server operating status below.
 
 ```bash
 curl http://127.0.0.1:8766/api/health

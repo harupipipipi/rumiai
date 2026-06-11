@@ -1,19 +1,21 @@
+<!-- docs-i18n-links:start -->
+[EN](./frontend.md) | [JP](./i18n/ja/frontend.md) | [KR](./i18n/ko/frontend.md) | [CN](./i18n/zh-cn/frontend.md)
+<!-- docs-i18n-links:end -->
 
-```markdown
-# frontend.md — Rumi AI OS フロントエンド設計書
+# frontend.md — Rumi AI OS front end design document
 
-## 1. 概要
+## 1. Overview
 
-defaults のフロントエンドは Tauri（Rust + WebView）で構成されるデスクトップアプリケーションである。
+The front end of defaults is a desktop application composed of Tauri (Rust + WebView).
 
-フロントエンドはドメイン知識を持たない。チャットが何か、エージェントが何か、ファイルが何かを知らない。知っているのは「スロットという枠がある」「Asset という UI ブロックを枠に載せられる」「Widget という描画指示を受け取れる」「メッセージが行き来する」の 4 つだけである。
+The front end has no domain knowledge. I don't know what a chat is, I don't know what an agent is, I don't know what a file is. There are only four things I know about: ``There is a frame called a slot,'' ``UI blocks called Assets can be placed in the frame,'' ``Widgets can receive drawing instructions,'' and ``Messages are sent back and forth.''
 
-rumiai 本体がドメイン知識を持たない汎用カーネルであるのと同じ構造を、フロントエンドにも適用する。全てのドメイン機能は Asset が持ち込む。defaults は Asset を載せる空の枠（シェル）と、Asset を描画・通信する仕組みだけを提供する。
+The same structure that rumiai itself is a general-purpose kernel with no domain knowledge is applied to the front end. All domain functionality is brought in by Asset. Defaults only provides an empty frame (shell) to place the Asset and a mechanism to draw and communicate with the Asset.
 
-具体的な UI（チャット画面、エージェント画面、コーディング画面等）は全て user_data 側のパックが Asset として登録する。defaults 自身は一切の具体的 UI を持たない。
+All specific UI (chat screen, agent screen, coding screen, etc.) are registered as Assets by the pack on the user_data side. Defaults themselves do not have any concrete UI.
 
 
-## 2. アーキテクチャ
+## 2. Architecture
 
 ```
 Tauri App（1プロセス）
@@ -34,64 +36,64 @@ Tauri App（1プロセス）
             └── handlers/frontend.py: 通信ブリッジのみ
 ```
 
-3つの層が存在する。
+There are three layers.
 
-Rust 層は Tauri のコアであり、2つの通信を橋渡しする。rumiai プロセスとの stdin/stdout と、WebView との Tauri IPC（invoke / event / channel）である。Rust 層自身はメッセージの中身を解釈しない。
+The Rust layer is the core of Tauri and bridges the communication between the two. stdin/stdout with the rumiai process and Tauri IPC (invoke/event/channel) with WebView. The Rust layer itself does not interpret the contents of messages.
 
-WebView 層は描画面である。シェル（空の枠 + スロット定義）、Asset ローダー、Widget レンダラー、Layout エンジン、Theme エンジンで構成される。
+The WebView layer is the drawing surface. It consists of a shell (empty frame + slot definition), Asset loader, Widget renderer, Layout engine, and Theme engine.
 
-rumiai 層はバックエンドである。frontend handler が通信を中継するだけであり、ドメイン処理は行わない。
+The rumiai layer is the backend. The frontend handler only relays communication and does not perform domain processing.
 
 
-## 3. 権限
+## 3. Permissions
 
-フロントエンドの権限は 12 個のみ。ドメイン権限は一切含まない。
+Frontend has only 12 permissions. Does not include any domain authority.
 
-| 権限 | 説明 |
+| Permissions | Description |
 |------|------|
-| `frontend.render.mount` | Asset を描画面に載せる |
-| `frontend.render.unmount` | 描画面から外す |
-| `frontend.render.update` | 描画内容を更新する |
-| `frontend.message.send` | バックエンド → 描画面 |
-| `frontend.message.receive` | 描画面 → バックエンド |
-| `frontend.message.stream` | 連続的にデータを流す |
-| `frontend.asset.register` | Asset の登録を受け入れる |
-| `frontend.asset.unregister` | Asset の解除 |
-| `frontend.asset.list` | 何が登録されているか |
-| `frontend.layout.read` | 現在のレイアウト情報を取得 |
-| `frontend.layout.write` | レイアウトを変更・保存 |
-| `frontend.theme.read` | 現在のテーマ情報を取得 |
+| `frontend.render.mount` | Put Asset on the drawing surface |
+| `frontend.render.unmount` | Remove from drawing surface |
+| `frontend.render.update` | Update drawing content |
+| `frontend.message.send` | Backend → drawing surface |
+| `frontend.message.receive` | Drawing surface → backend |
+| `frontend.message.stream` | Stream data continuously |
+| `frontend.asset.register` | Accept Asset Registration |
+| `frontend.asset.unregister` | Cancellation of Asset |
+| `frontend.asset.list` | What is registered |
+| `frontend.layout.read` | Get current layout information |
+| `frontend.layout.write` | Change and save layout |
+| `frontend.theme.read` | Get current theme information |
 
 
-## 4. Asset モデル
+## 4. Asset model
 
-Asset とはフロントエンドに UI を持ち込む単位である。あらゆるパック、あらゆる tool が Asset を登録できる。フロントエンドは Asset が何者であるかを問わない。
+Asset is a unit that brings UI to the front end. Any pack or tool can register Assets. The front end does not care who the Asset is.
 
-### 4.1 Asset の構成
+### 4.1 Asset configuration
 
-Asset は以下を持つ。
+Asset has the following:
 
-`asset_id` は ecosystem 内で一意な文字列である。命名規則は `{source}.{category}.{name}`。例えば `defaults.chat.messages` や `my_pack.dashboard.main`。
+`asset_id` is a unique string within the ecosystem. The naming convention is `{source}.{category}.{name}`. For example `defaults.chat.messages` and `my_pack.dashboard.main`.
 
-`entry` はパック内の HTML ファイル（または JS バンドル）の相対パスである。フロントエンドはこのファイルを WebView に読み込ませる。
+`entry` is the relative path of the HTML file (or JS bundle) within the pack. The front end loads this file into WebView.
 
-`handler` はバックエンドでメッセージを処理する Python ファイルの相対パスである。Asset 宛のメッセージがこの handler に転送される。
+`handler` is the relative path of the Python file that processes messages in the backend. Messages addressed to Asset will be forwarded to this handler.
 
-`permissions` はこの Asset が要求するドメイン権限の配列である。フロントエンド権限（`frontend.*`）とは別に Asset 自身が持つ。
+`permissions` is an array of domain authorities required by this Asset. Apart from front-end authority (`frontend.*`), it is held by the Asset itself.
 
-`placement` はこの Asset をどのスロットに載せたいかのヒントである。`slot`（スロット名）と `priority`（数値、大きい方が優先）を持つ。
+`placement` is a hint as to which slot you want to place this Asset. It has `slot` (slot name) and `priority` (numeric value, larger one takes priority).
 
-`category` は UI の分類である。`"chat"`, `"coding"`, `"settings"` 等。自由な文字列。
+`category` is a classification of UI. `"chat"`, `"coding"`, `"settings"` etc. free string.
 
-`tags` は検索・フィルタ用のタグ配列である。
+`tags` is a tag array for search/filter.
 
-`requires` は他の Asset への依存。指定された Asset が登録されていないとこの Asset は動作しない。
+`requires` is dependence on other Assets. This Asset will not work if the specified Asset is not registered.
 
-`extensions` はスキーマフリーの拡張フィールドである。対応するかは読む側の責務。
+`extensions` is a schema-free extension field. It is the responsibility of the reader to respond.
 
 ### 4.2 asset.yaml
 
-Asset の定義ファイル。パック内の `assets/` ディレクトリに配置する。
+Asset definition file. Place it in the `assets/` directory within the pack.
 
 ```yaml
 asset_id: "my_pack.chat.messages"
@@ -129,9 +131,9 @@ extensions:
   supports_voice_input: false
 ```
 
-### 4.3 Asset の登録
+### 4.3 Asset registration
 
-Asset が `frontend.asset.register` を通じて登録されると、フロントエンドは以下を記録する。
+When an Asset is registered through `frontend.asset.register`, the front end records the following:
 
 ```json
 {
@@ -152,15 +154,15 @@ Asset が `frontend.asset.register` を通じて登録されると、フロン�
 }
 ```
 
-フロントエンドはこの情報を使って WebView にファイルを載せ、layout.json に従って配置する。Asset が何をするかは知らない。
+The front end uses this information to load files onto the WebView and arrange them according to layout.json. I don't know what Asset does.
 
-### 4.4 同一 ID での上書き
+### 4.4 Overwriting with the same ID
 
-既に登録済みの asset_id と同じ ID で `asset.register` が呼ばれた場合、後からの登録が前の登録を置き換える。これにより別のパックが任意の Asset を差し替えられる。
+If `asset.register` is called with the same ID as an already registered asset_id, the later registration replaces the previous one. This allows another pack to replace any Asset.
 
-### 4.5 tool が Asset を追加する仕組み
+### 4.5 How tool adds Asset
 
-tool はツール実行結果の Widget 出力に加えて、Asset を持てる。ツールディレクトリ内に `assets/` を配置し、`*.asset.yaml` と HTML ファイルを置く。ツールのインストール時にその Asset が「未配置」状態で登録され、ユーザーが Layout エディタで配置する。
+In addition to the Widget output of tool execution results, a tool can have Assets. Place `assets/` in the tools directory, and place `*.asset.yaml` and the HTML file. When the tool is installed, the Asset is registered in the "unplaced" state, and the user places it using the Layout editor.
 
 ```
 user_data/shared/tools/browser_navigate/
@@ -173,11 +175,11 @@ user_data/shared/tools/browser_navigate/
 ```
 
 
-## 5. スロット
+## 5. Slot
 
-スロットは Asset が表示される位置の枠である。シェル（shell.html）がスロットを定義する。
+A slot is a frame in which an Asset is displayed. The shell (shell.html) defines the slot.
 
-### 5.1 スロットモデル
+### 5.1 Slot Model
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -196,30 +198,30 @@ user_data/shared/tools/browser_navigate/
 └─────────────────────────────────────────────────┘
 ```
 
-### 5.2 スロットのレンダリングモード
+### 5.2 Slot rendering modes
 
-| スロット | モード | 説明 |
+| Slot | Mode | Description |
 |----------|--------|------|
-| `header` | single | 横一列に並べる |
-| `sidebar.left` | stack | 縦に積む、各 Asset のサイズ変更可能 |
-| `sidebar.right` | stack | 縦に積む |
-| `main` | tabs | タブ切り替え、分割も可能 |
-| `panel.bottom` | tabs | タブ切り替え |
-| `statusbar` | single | 横一列に並べる |
-| `floating` | float | 必要時にオーバーレイ表示 |
+| `header` | single | line up horizontally |
+| `sidebar.left` | stack | Stack vertically, each Asset can be resized |
+| `sidebar.right` | stack | stack vertically |
+| `main` | tabs | You can also switch and split tabs |
+| `panel.bottom` | tabs | Tab switching |
+| `statusbar` | single | line up horizontally |
+| `floating` | float | Overlay display when necessary |
 
-Asset は未知のスロット名を指定できる。シェルがそのスロットを認識しない場合、`floating` にフォールバックする。
+Asset can specify an unknown slot name. If the shell does not recognize the slot, it falls back to `floating`.
 
-### 5.3 配置の競合解決
+### 5.3 Placement conflict resolution
 
-同じスロットに複数の Asset が配置される場合のルール。placement.priority が高い方が優先（数値が大きい方）。同一 priority なら後から登録された方が勝つ。ユーザーが layout.json で明示的に配置した場合それが最優先。場所を失った Asset は「未配置」状態になる。
+Rules when multiple Assets are placed in the same slot. The one with higher placement.priority has priority (the one with the larger number). If the priority is the same, the one registered later wins. If the user explicitly places it in layout.json, it has the highest priority. Assets that have lost their location become "unplaced".
 
 
 ## 6. Layout
 
 ### 6.1 layout.json
 
-Asset の画面上の配置を定義する。`user_data/layout/` に保存される。
+Define the on-screen placement of Assets. Saved in `user_data/layout/`.
 
 ```json
 {
@@ -262,26 +264,26 @@ Asset の画面上の配置を定義する。`user_data/layout/` に保存され
 }
 ```
 
-defaults はこのファイルの形式を定義する。具体的にどの Asset がどこに置かれるかは user_data 側で決まる。
+defaults defines the format of this file. Specifically, which Asset is placed where is determined by the user_data side.
 
-### 6.2 ユーザーによるレイアウト編集
+### 6.2 Layout editing by user
 
-通常モードでは Asset の境界をドラッグしてリサイズ。編集モードでは Asset をスロット間でドラッグ移動、「未配置」パネルから Asset をドラッグして追加、Asset を閉じて未配置に戻す操作が可能。複数のレイアウトプリセットを保存・切り替え可能。
+In normal mode, drag the border of the Asset to resize it. In edit mode, you can drag and move Assets between slots, add Assets by dragging them from the "Unplaced" panel, and close Assets to return them to unplaced. Save and switch between multiple layout presets.
 
-これらの仕組みはシェル（shell.html）に組み込まれる。
+These mechanisms are built into the shell (shell.html).
 
 
-## 7. Widget レンダリング
+## 7. Widget rendering
 
-### 7.1 概要
+### 7.1 Overview
 
-Widget はバックエンドが「このデータをこう表示してほしい」と宣言するための JSON である。tool の handler、prompt、agent、ai_client、あらゆるバックエンドコードが Widget を emit できる。フロントエンドの Widget レンダラーがこの JSON を受け取り、テーマに従って描画する。
+Widget is JSON that the backend uses to declare that it wants this data to be displayed like this. Tool's handler, prompt, agent, ai_client, and any backend code can emit Widgets. The front-end Widget renderer receives this JSON and draws it according to the theme.
 
-Widget は純粋なデータ（JSON）であり、UI ライブラリではない。描画の責任はフロントエンド側にある。
+Widgets are pure data (JSON) and are not UI libraries. The responsibility for rendering lies with the front end.
 
-### 7.2 Widget JSON 形式
+### 7.2 Widget JSON format
 
-全ての Widget は以下の基底プロパティを持つ。
+All widgets have the following base properties.
 
 ```json
 {
@@ -292,75 +294,75 @@ Widget は純粋なデータ（JSON）であり、UI ライブラリではない
 }
 ```
 
-`type` は Widget の種類を示す文字列。`id` は任意の識別子。`style_hint` はテーマへのヒント（フロントエンドが解釈してもしなくてもよい）。`meta` は任意のメタデータ（フロントエンドは無視してよい）。
+`type` is a string indicating the type of widget. `id` is an arbitrary identifier. `style_hint` is a hint to the theme (which may or may not be interpreted by the front end). `meta` is optional metadata (can be ignored by the front end).
 
-### 7.3 Widget 型一覧
+### 7.3 Widget type list
 
-**表示系（14種）**
+**Display type (14 types)**
 
-| type | 説明 | 主要プロパティ |
+| type | Description | Main properties |
 |------|------|---------------|
-| `text` | テキスト | text |
-| `code_block` | コード | language, content, filename, line_start |
-| `diff` | 差分 | old_content, new_content, filename |
-| `image` | 画像 | src, alt, width, height |
-| `screenshot` | スクリーンショット | src, url, title |
-| `progress` | 進捗 | label, current, total, state |
-| `terminal` | ターミナル出力 | command, output, exit_code |
-| `table` | テーブル | headers, rows |
-| `chart` | グラフ | chart_type, data, labels |
-| `file_tree` | ファイルツリー | tree |
+| `text` | text | text |
+| `code_block` | code | language, content, filename, line_start |
+| `diff` | Difference | old_content, new_content, filename |
+| `image` | Image | src, alt, width, height |
+| `screenshot` | Screenshot | src, url, title |
+| `progress` | Progress | label, current, total, state |
+| `terminal` | Terminal output | command, output, exit_code |
+| `table` | table | headers, rows |
+| `chart` | Graph | chart_type, data, labels |
+| `file_tree` | File tree | tree |
 | `markdown` | Markdown | content |
-| `audio` | 音声 | src, duration |
-| `video` | 動画 | src, duration |
-| `map` | 地図 | lat, lng, zoom |
+| `audio` | Audio | src, duration |
+| `video` | Video | src, duration |
+| `map` | Map | lat, lng, zoom |
 
-**コントロール系（6種）**
+**Control type (6 types)**
 
-| type | 説明 | 主要プロパティ |
+| type | Description | Main properties |
 |------|------|---------------|
-| `input` | テキスト入力 | placeholder, value, multiline |
-| `button` | ボタン | label, action, variant |
-| `select` | 選択 | options, value, multiple |
-| `toggle` | トグル | label, value |
-| `slider` | スライダー | min, max, value, step |
-| `checkbox` | チェックボックス | label, checked |
+| `input` | Text input | placeholder, value, multiline |
+| `button` | Button | label, action, variant |
+| `select` | Selection | options, value, multiple |
+| `toggle` | Toggle | label, value |
+| `slider` | Slider | min, max, value, step |
+| `checkbox` | Checkbox | label, checked |
 
-**レイアウト系（6種）**
+**Layout type (6 types)**
 
-| type | 説明 | 主要プロパティ |
+| type | Description | Main properties |
 |------|------|---------------|
-| `container` | 汎用コンテナ | children |
-| `row` | 横並び | children, gap |
-| `column` | 縦並び | children, gap |
-| `tabs` | タブ切り替え | tabs |
-| `collapsible` | 折りたたみ | label, default_open, children |
-| `card` | カード | header, body, footer |
+| `container` | Generic container | children |
+| `row` | Side by side | children, gap |
+| `column` | Vertical | children, gap |
+| `tabs` | Tab switching | tabs |
+| `collapsible` | Collapse | label, default_open, children |
+| `card` | Card | header, body, footer |
 
-**ストリーミング系（2種）**
+**Streaming type (2 types)**
 
-| type | 説明 | 主要プロパティ |
+| type | Description | Main properties |
 |------|------|---------------|
-| `stream` | 状態ベースストリーム | states |
-| `indicator` | 状態インジケータ | label, state, animation |
+| `stream` | state-based stream | states |
+| `indicator` | State indicator | label, state, animation |
 
-**カスタム（1種）**
+**Custom (1 type)**
 
-| type | 説明 | 主要プロパティ |
+| type | Description | Main properties |
 |------|------|---------------|
-| `custom` | 定義外 Widget | custom_type, fallback, data |
+| `custom` | Undefined Widget | custom_type, fallback, data |
 
-### 7.4 Widget レンダラーの責務
+### 7.4 Widget Renderer Responsibilities
 
-シェルに組み込まれた Widget レンダラーは以下を行う。
+The shell's built-in Widget renderer:
 
-Widget JSON を受け取り、`type` に応じた描画関数を呼び出す。描画はテーマ（theme.yaml）の `widgets` セクションに定義されたスタイルに従う。未知の `type` はテキストにフォールバックする。`custom` 型は `custom_type` のレンダラーが登録されていれば専用描画を行い、なければ `fallback` Widget を描画する。
+Widget Receives JSON and calls the drawing function according to `type`. Drawing follows the style defined in the `widgets` section of the theme (theme.yaml). Unknown `type` falls back to text. The `custom` type performs dedicated drawing if the `custom_type` renderer is registered, and if not, draws the `fallback` Widget.
 
-Widget レンダラーはシェルの一部であり、全ての Asset が共有する。Asset 内の JS は Widget JSON を Widget レンダラーに渡して描画を委譲できる。
+The Widget renderer is part of the shell and is shared by all Assets. JS in Asset can delegate drawing by passing Widget JSON to Widget renderer.
 
-### 7.5 Custom Widget レンダラー
+### 7.5 Custom Widget Renderer
 
-`user_data/widget_renderers/` にカスタムレンダラーを配置できる。
+Custom renderers can be placed in `user_data/widget_renderers/`.
 
 ```
 user_data/widget_renderers/
@@ -372,34 +374,34 @@ user_data/widget_renderers/
     └── renderer.yaml
 ```
 
-renderer.yaml にメタデータ（custom_type、バージョン等）を定義し、renderer.js に描画ロジックを実装する。シェルの Widget レンダラーが custom_type を検出した時にこの JS を動的にロードして呼び出す。
+Define metadata (custom_type, version, etc.) in renderer.yaml and implement rendering logic in renderer.js. When the shell's Widget renderer detects custom_type, it dynamically loads and calls this JS.
 
 
 ## 8. Theme
 
-### 8.1 概要
+### 8.1 Overview
 
-テーマは全レイヤーの見た目を制御する。色、フォント、アニメーション、Widget の描画スタイルを定義する。`user_data/themes/` に `.theme.yaml` として配置される。テーマの詳細仕様は `docs/theme.md` に定義する。
+Themes control the appearance of all layers. Define colors, fonts, animations, and drawing styles for widgets. Placed in `user_data/themes/` as `.theme.yaml`. Detailed specifications of the theme are defined in `docs/theme.md`.
 
-### 8.2 テーマの適用
+### 8.2 Applying a theme
 
-シェルの Theme エンジンが `user_data/config.json` の `theme_id` を読み、対応する `theme.yaml` をロードする。テーマの `tokens`（色、フォント、スペーシング等）を CSS 変数として WebView に注入する。Widget レンダラーはこの CSS 変数を参照して描画する。Asset 内の HTML/JS もこの CSS 変数を使用できる。
+The shell's Theme engine reads `theme_id` in `user_data/config.json` and loads the corresponding `theme.yaml`. Inject the theme's `tokens` (colors, fonts, spacing, etc.) into WebView as CSS variables. Widget renderer refers to this CSS variable and draws. HTML/JS in Asset can also use this CSS variable.
 
-テーマの切り替えは config.json の `theme_id` を変更するだけで行われ、Asset やバックエンドに影響しない。
+Switching the theme is done by simply changing `theme_id` in config.json and does not affect Assets or the backend.
 
 
-## 9. 通信プロトコル
+## 9. Communication protocol
 
-全ての通信は 3 つの層を通過する。
+All communications pass through three layers.
 
 ```
 WebView ←→ Rust ←→ rumiai
         IPC      stdin/stdout
 ```
 
-### 9.1 メッセージ形式
+### 9.1 Message format
 
-rumiai と Rust の間は JSON Lines（1行1メッセージ）で通信する。
+rumiai and Rust communicate using JSON Lines (one message per line).
 
 ```json
 {
@@ -408,13 +410,13 @@ rumiai と Rust の間は JSON Lines（1行1メッセージ）で通信する。
 }
 ```
 
-`type` はフロントエンド権限に対応する操作名である。`data` は不透明なペイロードであり、フロントエンドと Rust はドメイン固有の中身を解釈しない。ただし Asset の宛先特定に必要なフィールド（`asset_id` 等）はフロントエンドが読む。
+`type` is the operation name corresponding to the front-end authority. `data` is an opaque payload, and the front end and Rust do not interpret its domain-specific contents. However, the fields required to identify the Asset destination (such as `asset_id`) are read by the front end.
 
-### 9.2 メッセージタイプ
+### 9.2 Message types
 
 #### asset.register
 
-Asset の登録。rumiai → Rust 方向。
+Asset registration. rumiai → Rust direction.
 
 ```json
 {
@@ -439,7 +441,7 @@ Asset の登録。rumiai → Rust 方向。
 
 #### asset.unregister
 
-Asset の解除。rumiai → Rust 方向。
+Release of Asset. rumiai → Rust direction.
 
 ```json
 {
@@ -452,7 +454,7 @@ Asset の解除。rumiai → Rust 方向。
 
 #### render.mount
 
-Asset の描画開始。rumiai → Rust 方向。
+Start drawing Asset. rumiai → Rust direction.
 
 ```json
 {
@@ -466,7 +468,7 @@ Asset の描画開始。rumiai → Rust 方向。
 
 #### render.unmount
 
-Asset の描画終了。rumiai → Rust 方向。
+Asset drawing finished. rumiai → Rust direction.
 
 ```json
 {
@@ -479,7 +481,7 @@ Asset の描画終了。rumiai → Rust 方向。
 
 #### render.update
 
-描画内容の更新。rumiai → Rust 方向。
+Update drawing content. rumiai → Rust direction.
 
 ```json
 {
@@ -493,11 +495,11 @@ Asset の描画終了。rumiai → Rust 方向。
 }
 ```
 
-`payload` の中身は Asset が決める。フロントエンドは asset_id で宛先を特定し、該当する Asset にデータをそのまま渡す。
+The contents of `payload` are determined by Asset. The front end identifies the destination using asset_id and passes the data as is to the corresponding Asset.
 
 #### message.send
 
-バックエンド → WebView 方向の単発メッセージ。rumiai → Rust 方向。
+Single message in the backend → WebView direction. rumiai → Rust direction.
 
 ```json
 {
@@ -517,11 +519,11 @@ Asset の描画終了。rumiai → Rust 方向。
 }
 ```
 
-`payload` 内に `widget` フィールドがあれば Widget JSON として Widget レンダラーに渡すことができる。これは Asset 側の JS が判断する。フロントエンドは `payload` の中身を解釈しない。
+If there is a `widget` field in `payload`, it can be passed to the Widget renderer as Widget JSON. This is determined by the JS on the Asset side. The front end does not interpret the contents of `payload`.
 
 #### message.receive
 
-WebView → バックエンド方向の単発メッセージ。Rust → rumiai 方向。
+WebView → Single message towards backend. Rust → rumiai direction.
 
 ```json
 {
@@ -539,7 +541,7 @@ WebView → バックエンド方向の単発メッセージ。Rust → rumiai �
 
 #### message.stream.start
 
-ストリーミングの開始。rumiai → Rust 方向。
+Start streaming. rumiai → Rust direction.
 
 ```json
 {
@@ -553,7 +555,7 @@ WebView → バックエンド方向の単発メッセージ。Rust → rumiai �
 
 #### message.stream.data
 
-ストリーミングのデータ片。rumiai → Rust 方向。
+Streaming data piece. rumiai → Rust direction.
 
 ```json
 {
@@ -568,7 +570,7 @@ WebView → バックエンド方向の単発メッセージ。Rust → rumiai �
 }
 ```
 
-`payload` には Widget JSON を含めることもできる。ストリーミング中の進捗表示等に使う。
+`payload` can also contain Widget JSON. Used to display progress during streaming, etc.
 
 ```json
 {
@@ -590,7 +592,7 @@ WebView → バックエンド方向の単発メッセージ。Rust → rumiai �
 
 #### message.stream.end
 
-ストリーミングの終了。rumiai → Rust 方向。
+End of streaming. rumiai → Rust direction.
 
 ```json
 {
@@ -604,7 +606,7 @@ WebView → バックエンド方向の単発メッセージ。Rust → rumiai �
 
 #### layout.update
 
-レイアウト変更通知。双方向。
+Layout change notification. Bidirectional.
 
 ```json
 {
@@ -617,7 +619,7 @@ WebView → バックエンド方向の単発メッセージ。Rust → rumiai �
 
 #### layout.save
 
-レイアウト保存。WebView → rumiai 方向。
+Save layout. WebView → rumiai direction.
 
 ```json
 {
@@ -631,7 +633,7 @@ WebView → バックエンド方向の単発メッセージ。Rust → rumiai �
 
 #### theme.change
 
-テーマ切り替え。双方向。
+Theme switching. Bidirectional.
 
 ```json
 {
@@ -644,7 +646,7 @@ WebView → バックエンド方向の単発メッセージ。Rust → rumiai �
 
 #### event.broadcast
 
-汎用イベントのブロードキャスト。双方向。バックエンドの `emit_event` がこのメッセージになる。
+Broadcasting of general purpose events. Bidirectional. `emit_event` in the backend becomes this message.
 
 ```json
 {
@@ -661,68 +663,68 @@ WebView → バックエンド方向の単発メッセージ。Rust → rumiai �
 }
 ```
 
-Asset の JS がこのイベントを受信してポップアップを描画し、ユーザーの応答を `event.broadcast` で返送する。特定の Asset 宛ではなく、全 Asset がイベントを受信できる。asset_id を含めれば特定 Asset 宛にもできるが、それはフロントエンドの振り分けではなく Asset 自身のフィルタリングに任せる。
+Asset's JS receives this event, draws the popup, and sends back the user's response in `event.broadcast`. All Assets can receive events, not just a specific Asset. If you include asset_id, you can address it to a specific Asset, but that is left to the filtering of the Asset itself, not to the front end's sorting.
 
 
-## 10. Rust 層の責務
+## 10. Rust Layer Responsibilities
 
-Rust 層は以下だけを行う。ドメイン知識を一切持たない。
+The Rust layer only does the following: Does not have any domain knowledge.
 
-### 10.1 sidecar 管理
+### 10.1 sidecar management
 
-Tauri 起動時に rumiai コンパイル済みバイナリを sidecar として起動する。`ecosystem/` ディレクトリのパスを起動引数で渡す。sidecar プロセスの stdin/stdout パイプを保持する。アプリ終了時に sidecar を停止する。
+Start the rumiai compiled binary as sidecar when Tauri starts. `ecosystem/` Pass the directory path as a startup argument. Holds the stdin/stdout pipes for sidecar processes. Stop sidecar when the app closes.
 
-### 10.2 stdin/stdout ブリッジ
+### 10.2 stdin/stdout bridge
 
-rumiai の stdout から JSON Lines を1行ずつ読み取り、`type` フィールドに応じて WebView に転送する。`render.*`、`message.send`、`message.stream.*`、`event.broadcast` は WebView への Tauri Event/Channel に変換する。`asset.*` は WebView の Asset ローダーにイベントとして通知する。`layout.*` は WebView の Layout エンジンに通知する。`theme.*` は WebView の Theme エンジンに通知する。
+Read JSON Lines line by line from rumiai's stdout and transfer it to WebView according to the `type` field. `render.*`, `message.send`, `message.stream.*`, `event.broadcast` are converted to Tauri Event/Channel to WebView. `asset.*` notifies the Asset loader of WebView as an event. `layout.*` informs the WebView's layout engine. `theme.*` informs the WebView's Theme engine.
 
-WebView からの `invoke` を受け取り、`message.receive`、`layout.save`、`event.broadcast` 形式に変換して rumiai の stdin に書き込む。
+Receive `invoke` from WebView, convert it to `message.receive`, `layout.save`, `event.broadcast` format and write it to stdin of rumiai.
 
-### 10.3 メッセージの不解釈
+### 10.3 Misinterpretation of messages
 
-Rust は `type` と `data` 内の `asset_id` / `stream_id` / `event_type` だけを見る。`payload` の中身は一切解釈しない。
-
-
-## 11. WebView 層の責務
-
-### 11.1 シェル
-
-WebView のエントリポイントはシェルである。シェルはスロット（`header`, `sidebar.left`, `main`, `panel.bottom`, `sidebar.right`, `statusbar`, `floating`）を定義する空の枠を描画する。スロットの配置とサイズは layout.json に従う。
-
-シェルは以下を含む。
-
-Asset ローダー: `asset.register` イベントを受け取り、Asset の HTML ファイルを iframe で読み込んでスロットに配置する。
-
-Widget レンダラー: Widget JSON を受け取り、テーマに従って DOM に描画する関数群。Asset の JS がこの関数を呼び出す。
-
-Layout エンジン: layout.json を読み込み、スロットのサイズと Asset の配置を管理する。ドラッグ&ドロップによるレイアウト編集を提供する。
-
-Theme エンジン: theme.yaml の tokens を CSS 変数に変換し、WebView に適用する。
-
-イベントディスパッチャー: `event.broadcast` を受信し、全 Asset（iframe）に postMessage で転送する。
-
-### 11.2 Asset ローダー
-
-`asset.register` を受け取ると、ローダーが Asset の HTML ファイルを読み込む。
-
-iframe 方式（デフォルト）: 各 Asset を iframe で読み込む。Asset 間の隔離性が高い。iframe と親ウィンドウの間は `postMessage` で通信する。
-
-Asset の HTML から親ウィンドウの Widget レンダラーを呼び出す場合は、postMessage で Widget JSON を送信し、親がレンダリング結果を返す。または Asset 自身が Widget レンダラーの JS を読み込んで自分で描画する（シェルが提供する `widget-renderer.js` を Asset が `<script>` で取り込む方式）。
-
-### 11.3 メッセージディスパッチ
-
-Rust から Tauri Event で到着した `message.send` や `message.stream.*` を `data.asset_id` で振り分け、該当する iframe に転送する。
-
-ユーザー操作で iframe 内から `postMessage` が来たら、`message.receive` として Rust に渡す。
-
-### 11.4 イベントディスパッチ
-
-`event.broadcast` は全ての iframe に転送する。各 Asset の JS は `event_type` を見て自分に関係あるイベントだけを処理する。
+Rust only sees `asset_id` / `stream_id` / `event_type` within `type` and `data`. The contents of `payload` shall not be interpreted in any way.
 
 
-## 12. ファイル構成
+## 11. Responsibilities of WebView layer
 
-### 12.1 defaults 側
+### 11.1 Shell
+
+WebView's entry point is the shell. The shell draws empty frames that define the slots (`header`, `sidebar.left`, `main`, `panel.bottom`, `sidebar.right`, `statusbar`, `floating`). Slot placement and size follow layout.json.
+
+The shell contains:
+
+Asset loader: Receives the `asset.register` event, loads the Asset's HTML file with an iframe, and places it in the slot.
+
+Widget renderer: A set of functions that accepts Widget JSON and draws it to the DOM according to a theme. Asset's JS calls this function.
+
+Layout engine: reads layout.json and manages slot size and Asset placement. Provides drag-and-drop layout editing.
+
+Theme engine: Convert tokens in theme.yaml to CSS variables and apply them to WebView.
+
+Event dispatcher: Receives `event.broadcast` and forwards it to all Assets (iframes) using postMessage.
+
+### 11.2 Asset Loader
+
+When `asset.register` is received, the loader loads the Asset's HTML file.
+
+iframe method (default): Load each Asset with an iframe. There is high isolation between assets. `postMessage` is used to communicate between the iframe and the parent window.
+
+When calling the parent window's Widget renderer from Asset's HTML, send Widget JSON with postMessage, and the parent returns the rendering result. Or Asset itself loads the JS of the Widget renderer and draws it itself (a method in which Asset imports `widget-renderer.js` provided by the shell with `<script>`).
+
+### 11.3 Message Dispatch
+
+`message.send` and `message.stream.*` that arrived from Rust via Tauri Event are sorted by `data.asset_id` and transferred to the corresponding iframe.
+
+When `postMessage` comes from within an iframe due to user operation, pass it to Rust as `message.receive`.
+
+### 11.4 Event dispatch
+
+`event.broadcast` forwards to all iframes. The JS of each Asset looks at `event_type` and processes only the events that are relevant to it.
+
+
+## 12. File structure
+
+### 12.1 defaults side
 
 ```
 ecosystem/defaults/
@@ -742,9 +744,9 @@ ecosystem/defaults/
             └── custom.py
 ```
 
-defaults が持つ UI ファイルは shell.html のみ。チャット、エージェント、コーディング等の具体的な UI ファイルは一切持たない。
+The only UI file that defaults has is shell.html. It does not have any specific UI files for chat, agents, coding, etc.
 
-### 12.2 Tauri 側
+### 12.2 Tauri side
 
 ```
 rumiai-desktop/
@@ -769,7 +771,7 @@ rumiai-desktop/
       └── defaults/
 ```
 
-### 12.3 user_data 側（Asset の例）
+### 12.3 user_data side (Asset example)
 
 ```
 user_data/packs/my_chat_pack/
@@ -792,7 +794,7 @@ user_data/packs/my_chat_pack/
 ```
 
 
-## 13. 起動フロー
+## 13. Startup flow
 
 ```
 1. ユーザーが Tauri アプリを起動
@@ -822,7 +824,7 @@ user_data/packs/my_chat_pack/
 ```
 
 
-## 14. ユーザー操作フロー
+## 14. User operation flow
 
 ```
 1. ユーザーが Asset 内で操作する（例: メッセージを入力して送信）
@@ -853,13 +855,13 @@ user_data/packs/my_chat_pack/
 ```
 
 
-## 15. 別のパックが参加する方法
+## 15. How another pack joins
 
-### 15.1 手順
+### 15.1 Procedure
 
-パックが `assets/` ディレクトリに `*.asset.yaml` と HTML ファイルを置く。rumiai の承認プロセス（SHA-256 ハッシュ検証 + ユーザー承認）を通過する。以上。defaults 側の変更はゼロ。
+The pack puts `*.asset.yaml` and HTML files in the `assets/` directory. Pass rumiai's approval process (SHA-256 hash verification + user approval). That's all. There are zero changes on the defaults side.
 
-### 15.2 必要な権限
+### 15.2 Required privileges
 
 ```yaml
 requires:
@@ -874,7 +876,7 @@ requires:
   - whatever.domain.permission
 ```
 
-### 15.3 具体例: 天気ウィジェットパック
+### 15.3 Specific example: Weather widget pack
 
 ```
 user_data/packs/weather_widget/
@@ -924,7 +926,7 @@ def on_message(context, data):
     }
 ```
 
-### 15.4 具体例: 既存 Asset の差し替え
+### 15.4 Specific example: Replacing an existing Asset
 
 ```yaml
 # better_chat.asset.yaml
@@ -937,56 +939,54 @@ placement:
 ```
 
 
-## 16. セキュリティ
+## 16. Security
 
-### 16.1 パックの承認
+### 16.1 Pack Approval
 
-全てのパックは rumiai の承認プロセスを経る。SHA-256 ハッシュ検証により、承認時のコードと実行時のコードが同一であることが保証される。
+All packs go through rumiai's approval process. SHA-256 hash verification ensures that the code at authorization and the code at runtime are the same.
 
-### 16.2 権限の分離
+### 16.2 Separation of Privileges
 
-フロントエンド権限（`frontend.*`）は Asset の登録・描画・メッセージングのみを許可する。ドメイン操作は Asset の handler が持つドメイン権限で行う。
+Front-end authority (`frontend.*`) only allows Asset registration, drawing, and messaging. Domain operations are performed using the domain authority held by the Asset handler.
 
-### 16.3 iframe 隔離
+### 16.3 iframe isolation
 
-各 Asset の UI は別の iframe で実行される。Asset 間の直接的な DOM アクセスは不可能。通信は全て `postMessage` 経由でシェルが中継する。
+Each Asset's UI runs in a separate iframe. Direct DOM access between Assets is not possible. All communications are relayed by the shell via `postMessage`.
 
-### 16.4 data の不透明性
+### 16.4 data opacity
 
-Rust 層とフロントエンドはメッセージの `payload` を解釈しない。中間層がデータを改ざんする余地を最小化する。
+The Rust layer and front end do not interpret `payload` in messages. Minimize the scope for middle tiers to tamper with data.
 
-### 16.5 イベントのフィルタリング
+### 16.5 Filtering events
 
-`event.broadcast` は全 Asset に転送される。機密データをイベントに含める場合は Asset 側の JS で `event_type` や `asset_id` によるフィルタリングを行う。フロントエンド側でのフィルタリングは信頼境界ではないため、バックエンド側で権限チェックを行った上でイベントを発行すること。
-
-
-## 17. Asset 間通信
-
-Asset 間の直接通信は定義していない。Asset A が Asset B に情報を送りたい場合、2つの方法がある。
-
-第一に、バックエンド経由。Asset A が message.receive でバックエンドに送信し、バックエンドの handler が処理して Asset B に message.send を送る。
-
-第二に、イベント経由。Asset A が event.broadcast でイベントを発行し、Asset B がそのイベントを受信する。この場合もバックエンドを経由する（Asset → Rust → rumiai → emit_event → Rust → 全 Asset）。
-
-いずれの場合もフロントエンド内で Asset 間が直接通信することはなく、必ず rumiai バックエンドを経由する。
+`event.broadcast` is transferred to all Assets. If confidential data is included in the event, perform filtering using `event_type` and `asset_id` in JS on the Asset side. Filtering on the front-end side is not a trust boundary, so perform an authority check on the back-end side before issuing an event.
 
 
-## 18. 設計上の制約と注意
+## 17. Communication between Assets
 
-### 18.1 UI ファイルの配信
+Direct communication between Assets is not defined. If Asset A wants to send information to Asset B, there are two ways to do it.
 
-Asset の HTML ファイルを WebView に読み込ませる方法は Tauri のアセットプロトコル（`asset://` または `tauri://`）を使用する。パックディレクトリのパスを Tauri のアセットスコープに追加する必要がある。
+Firstly, via the backend. Asset A sends message.receive to the backend, the backend handler processes it and sends message.send to Asset B.
 
-### 18.2 レイアウトの柔軟性
+Second, via events. Asset A emits an event on event.broadcast and Asset B receives the event. In this case, it also goes through the backend (Asset → Rust → rumiai → emit_event → Rust → All Assets).
 
-スロットの種類と配置はシェル（shell.html）が定義する。シェル自体も別のパックが差し替え可能（`ui/shell.html` を上書きする Asset を登録する方式）。
+In either case, there is no direct communication between Assets within the front end, but always via the rumiai back end.
 
-### 18.3 オフライン動作
 
-全ての UI ファイルはローカルの `ecosystem/` または `user_data/` にあるため、インターネット接続なしで UI が描画される。ドメイン処理がネットワークを必要とするかは Asset 側の責務。
+## 18. Design constraints and precautions
 
-### 18.4 CLI との共存
+### 18.1 Delivering UI files
 
-同じバックエンド（rumiai + handlers）に対して、Tauri フロントエンドと CLI の両方からアクセスできる。CLI の場合は transport が stdio になり、Widget JSON はテキストにフォールバック表示される。フロントエンドの有無はバックエンドの動作に影響しない。
-```
+The method to read Asset's HTML file into WebView is to use Tauri's asset protocol (`asset://` or `tauri://`). You need to add the pack directory path to Tauri's asset scope.
 
+### 18.2 Layout flexibility
+
+The type and arrangement of slots are defined by the shell (shell.html). The shell itself can also be replaced with another pack (by registering an Asset that overwrites `ui/shell.html`).
+
+### 18.3 Offline operation
+
+All UI files are located locally in `ecosystem/` or `user_data/`, so the UI is drawn without an internet connection. It is the Asset's responsibility to determine whether domain processing requires a network.
+
+### 18.4 Coexistence with CLI
+
+The same backend (rumiai + handlers) can be accessed from both Tauri frontend and CLI. In the case of CLI, the transport will be stdio, and the Widget JSON will fall back to text. The presence or absence of a front end does not affect the behavior of the back end.

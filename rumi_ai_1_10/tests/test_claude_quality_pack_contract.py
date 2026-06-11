@@ -36,9 +36,9 @@ def test_quality_pack_docs_exist_and_have_required_sections():
         [
             "No Favoritism",
             "Fail-Soft",
-            "悪意Pack前提",
-            "品質基準",
-            "変更判断ルール",
+            "Malicious Pack assumption",
+            "Quality standards",
+            "Change judgment rules",
         ],
         "philosophy_memo.md",
     )
@@ -46,14 +46,14 @@ def test_quality_pack_docs_exist_and_have_required_sections():
     _assert_contains_all(
         pack_text,
         [
-            "実行コマンド",
-            "監査手順",
-            "手動検証手順",
-            "回帰確認手順",
-            "リリース前チェック",
-            "思想適合チェックリスト",
-            "失敗時の切り分け手順",
-            "AIエージェント運用プロンプト",
+            "Execution commands",
+            "Audit Procedures",
+            "Manual verification steps",
+            "Regression confirmation procedure",
+            "Pre-release check",
+            "Ideology Compatibility Checklist",
+            "Isolation procedure in case of failure",
+            "AI agent operation prompt",
         ],
         "claude_desktop_quality_pack.md",
     )

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./model-packs.md) | [JP](./i18n/ja/model-packs.md) | [KR](./i18n/ko/model-packs.md) | [CN](./i18n/zh-cn/model-packs.md)
+<!-- docs-i18n-links:end -->
+
 # Model Packs And `model.call`
 
 Model routing now supports `modelpack/<id>` in addition to plain model ids and

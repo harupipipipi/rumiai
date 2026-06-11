@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./safety_permission_audit_design.md) | [JP](./i18n/ja/safety_permission_audit_design.md) | [KR](./i18n/ko/safety_permission_audit_design.md) | [CN](./i18n/zh-cn/safety_permission_audit_design.md)
+<!-- docs-i18n-links:end -->
+
 # Safety Permission Audit Design
 
 Safety primitives:

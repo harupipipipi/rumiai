@@ -1,11 +1,15 @@
+<!-- docs-i18n-links:start -->
+[EN](./pack_runtime_spec.md) | [JP](./i18n/ja/pack_runtime_spec.md) | [KR](./i18n/ko/pack_runtime_spec.md) | [CN](./i18n/zh-cn/pack_runtime_spec.md)
+<!-- docs-i18n-links:end -->
+
 # Pack Runtime Specification
 
-## 概要
+## Overview
 
-ecosystem.json の `runtime` セクションにより、Pack が自身のランタイム環境を宣言的に指定できます。
-これにより、Python 以外の言語（Rust, Go, Node.js 等）で実装された Pack が動作可能になります。
+The `runtime` section of ecosystem.json allows Packs to declaratively specify their runtime environment.
+This allows Packs implemented in languages other than Python (Rust, Go, Node.js, etc.) to work.
 
-## スキーマ
+## Schema
 
 ```json
 {
@@ -26,60 +30,60 @@ ecosystem.json の `runtime` セクションにより、Pack が自身のラン�
 }
 ```
 
-## フィールド定義
+## Field definition
 
-### `type` (必須)
+### `type` (required)
 
-実行方式。FunctionEntry の `calling_convention` に対応します。
+Execution method. Corresponds to `calling_convention` of FunctionEntry.
 
-| 値 | 説明 |
+| Value | Description |
 |----|------|
-| `python_host` | ホスト上で Python サブプロセスとして実行。`RUMI_ALLOW_HOST_EXECUTION=1` が必要。 |
-| `python_docker` | Docker コンテナ内で Python を実行（デフォルト動作と同等）。 |
-| `binary` | コンパイル済みバイナリを実行。stdin/stdout JSON プロトコルで通信。 |
-| `command` | 任意のコマンドを実行。stdin/stdout JSON プロトコルで通信。 |
-| `wasm` | WebAssembly ランタイムで実行（将来拡張用。現時点では未実装）。 |
+| `python_host` | Runs as a Python subprocess on the host. `RUMI_ALLOW_HOST_EXECUTION=1` required. |
+| `python_docker` | Run Python inside a Docker container (equivalent to default behavior). |
+| `binary` | Run compiled binary. Communication via stdin/stdout JSON protocol. |
+| `command` | Execute any command. Communication via stdin/stdout JSON protocol. |
+| `wasm` | Runs on WebAssembly runtime (for future expansion, not implemented at this time). |
 
-### `language` (任意)
+### `language` (optional)
 
-開発言語。情報用途のみで、実行方式には影響しません。
+development language. It is for informational purposes only and does not affect the execution method.
 
-### `protocol` (任意)
+### `protocol` (optional)
 
-通信プロトコル。現時点では `stdio_json` のみサポートしています。
+communication protocol. Currently only `stdio_json` is supported.
 
-- `stdio_json`: stdin に JSON を渡し、stdout から JSON を受け取る
+- `stdio_json`: Pass JSON to stdin and receive JSON from stdout
 
-### `docker` (任意)
+### `docker` (optional)
 
-Docker 環境の設定。
+Setting up the Docker environment.
 
-| フィールド | 型 | デフォルト | 説明 |
+| Field | Type | Default | Description |
 |-----------|-----|-----------|------|
-| `image` | string | `python:3.11-slim` | Docker イメージ名 |
-| `build_command` | string\|null | null | ビルドコマンド（将来拡張用） |
-| `network` | boolean | false | コンテナにネットワークアクセスを許可するか |
+| `image` | string | `python:3.11-slim` | Docker image name |
+| `build_command` | string\|null | null | Build command (for future expansion) |
+| `network` | boolean | false | Allow network access to container |
 
-### `host_requirements` (任意)
+### `host_requirements` (optional)
 
-ホスト環境の要求。
+Host environment requirements.
 
-| フィールド | 型 | デフォルト | 説明 |
+| Field | Type | Default | Description |
 |-----------|-----|-----------|------|
-| `min_memory_mb` | integer\|null | null | 最小メモリ要求 (MB) |
-| `gpu` | boolean | false | GPU が必要か |
+| `min_memory_mb` | integer\|null | null | Minimum memory request (MB) |
+| `gpu` | boolean | false | GPU required |
 
-## 後方互換性
+## Backward compatibility
 
-- `runtime` セクションが未指定の場合、既存のロジックで runtime が決定されます:
-  - `core_` 接頭辞を持つ Pack → `block` / `kernel`
-  - その他 → `subprocess`（Python サブプロセス）
-- `runtime.type` のみ指定すれば最小限の構成で動作します。
-- **優先順位**: functions/\<func\>/manifest.json の `calling_convention` > ecosystem.json の `runtime.type`
+- If the `runtime` section is unspecified, the runtime is determined by existing logic:
+  - Pack with `core_` prefix → `block` / `kernel`
+  - Others → `subprocess` (Python subprocess)
+- If only `runtime.type` is specified, it will work with minimal configuration.
+- **Priority**: `calling_convention` in functions/\<func\>/manifest.json > `runtime.type` in ecosystem.json
 
-## サンプル
+## Sample
 
-### Rust で実装された binary Pack
+### binary Pack implemented in Rust
 
 ```json
 {
@@ -95,7 +99,7 @@ Docker 環境の設定。
 }
 ```
 
-### Docker イメージを指定した Python Pack
+### Python Pack with Docker image
 
 ```json
 {
@@ -117,7 +121,7 @@ Docker 環境の設定。
 }
 ```
 
-### Host 上で直接実行する Python Pack
+### Python Pack running directly on the host
 
 ```json
 {
@@ -132,11 +136,11 @@ Docker 環境の設定。
 }
 ```
 
-## stdin/stdout JSON プロトコル
+## stdin/stdout JSON protocol
 
-binary / command タイプの Pack は、stdin/stdout JSON プロトコルで通信します。
+Packs of type binary / command communicate using the stdin/stdout JSON protocol.
 
-### 入力 (stdin)
+### Input (stdin)
 
 ```json
 {
@@ -153,16 +157,16 @@ binary / command タイプの Pack は、stdin/stdout JSON プロトコルで通
 }
 ```
 
-### 出力 (stdout)
+### Output (stdout)
 
-成功時:
+On success:
 ```json
 {
   "result": "processed: hello world"
 }
 ```
 
-エラー時:
+On error:
 ```json
 {
   "error": "Invalid input format",
@@ -170,15 +174,15 @@ binary / command タイプの Pack は、stdin/stdout JSON プロトコルで通
 }
 ```
 
-## 内部処理フロー
+## Internal processing flow
 
-1. `registry.py` の `_load_functions()` が ecosystem.json の `runtime` セクションを読み取る
-2. 各 function の manifest に Pack レベルの runtime 情報をデフォルトとして注入:
+1. `_load_functions()` of `registry.py` reads the `runtime` section of ecosystem.json
+2. Inject pack-level runtime information into each function's manifest as default:
    - `runtime.type` → `manifest["calling_convention"]`
    - `runtime.docker.image` → `manifest["docker_image"]`
    - `runtime.type == "python_host"` → `manifest["host_execution"] = True`
    - `runtime.type in ("binary", "command")` → `manifest["runtime"] = type`
-3. `FunctionRegistry._entry_from_kwargs()` が manifest から FunctionEntry を構築
-4. `capability_executor.py` の `_dispatch_by_calling_convention()` が calling_convention で分岐
+3. `FunctionRegistry._entry_from_kwargs()` constructs FunctionEntry from manifest
+4. `_dispatch_by_calling_convention()` of `capability_executor.py` branches at calling_convention
 
-個別の function manifest で `calling_convention` が指定されている場合は、そちらが優先されます。
+If `calling_convention` is specified in an individual function manifest, that takes precedence.

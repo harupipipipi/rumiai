@@ -1,14 +1,18 @@
-# Dev Tools ガイド
+<!-- docs-i18n-links:start -->
+[EN](./dev-tools.md) | [JP](./i18n/ja/dev-tools.md) | [KR](./i18n/ko/dev-tools.md) | [CN](./i18n/zh-cn/dev-tools.md)
+<!-- docs-i18n-links:end -->
 
-## 1. 概念
+# Dev Tools Guide
 
-Dev Tools は defaults が提供する開発者向けの検査・デバッグ機能群である。AI リクエストの詳細確認、プロンプト使用履歴、ライブ編集、リクエストの再実行を提供する。
+## 1. Concept
 
-Dev Tools の handler は `blocks/dev/` ディレクトリに配置され、`ecosystem.json` の `dev` コンポーネントとして宣言されている。具体的な UI パネルは user_data 側の Asset として提供されるが、defaults Pack は `ui/dev_panel.js` にリファレンス実装を含んでいる。
+Dev Tools is a group of inspection and debugging functions for developers provided by defaults. Provides AI request details, prompt usage history, live editing, and request replay.
 
-`blocks/dev/` には以下のファイルが含まれる。
+The Dev Tools handler is placed in the `blocks/dev/` directory and declared as the `dev` component of `ecosystem.json`. The specific UI panel is provided as an Asset on the user_data side, but the defaults pack includes a reference implementation in `ui/dev_panel.js`.
 
-| ファイル | handler 名 |
+`blocks/dev/` contains the following files.
+
+| file | handler name |
 |---|---|
 | `inspect.py` | `defaults.dev.inspect` |
 | `prompt_history.py` | `defaults.dev.prompt_history` |
@@ -16,13 +20,11 @@ Dev Tools の handler は `blocks/dev/` ディレクトリに配置され、`eco
 | `replay.py` | `defaults.dev.replay` |
 
 
-## 2. inspect（リクエスト情報の確認）
+## 2. inspect (confirm request information)
 
-LLM に送信されたリクエストの完全な詳細を確認する。
+View complete details of requests submitted to LLM.
 
-**handler**: `defaults.dev.inspect`（`blocks/dev/inspect.py`）
-
-**HTTP**: `GET /api/dev/inspect`
+**handler**: `defaults.dev.inspect`（`blocks/dev/inspect.py`）**HTTP**: `GET /api/dev/inspect`
 
 ```python
 # handler 経由で直前のリクエスト情報を取得
@@ -32,7 +34,7 @@ info = context["call_handler"]("defaults.dev.inspect", {
 })
 ```
 
-戻り値:
+Return value:
 ```json
 {
   "request": {
@@ -63,13 +65,11 @@ info = context["call_handler"]("defaults.dev.inspect", {
 ```
 
 
-## 3. prompt history（プロンプト使用履歴）
+## 3. prompt history
 
-セッション中にレンダリングされたプロンプトの履歴を確認する。
+See the history of prompts rendered during a session.
 
-**handler**: `defaults.dev.prompt_history`（`blocks/dev/prompt_history.py`）
-
-**HTTP**: `GET /api/dev/prompt-history`
+**handler**: `defaults.dev.prompt_history`（`blocks/dev/prompt_history.py`）**HTTP**: `GET /api/dev/prompt-history`
 
 ```python
 history = context["call_handler"]("defaults.dev.prompt_history", {
@@ -78,7 +78,7 @@ history = context["call_handler"]("defaults.dev.prompt_history", {
 })
 ```
 
-戻り値:
+Return value:
 ```json
 [
   {
@@ -92,13 +92,11 @@ history = context["call_handler"]("defaults.dev.prompt_history", {
 ```
 
 
-## 4. edit prompt live（プロンプトのライブ編集）
+## 4. edit prompt live
 
-プロンプトを即時に編集・上書きする。指定した `prompt_name` のプロンプトが存在すれば `content` を更新し、存在しなければ新規作成する。`prompt_name` に `"system"` を指定するとシステムプロンプトを書き換える。
+Edit and override prompts on the fly. If the specified `prompt_name` prompt exists, `content` is updated; if it does not exist, a new one is created. Specifying `"system"` for `prompt_name` rewrites the system prompt.
 
-**handler**: `defaults.dev.edit_prompt_live`（`blocks/dev/edit_prompt_live.py`）
-
-**HTTP**: `POST /api/dev/edit-prompt`
+**handler**: `defaults.dev.edit_prompt_live`（`blocks/dev/edit_prompt_live.py`）**HTTP**: `POST /api/dev/edit-prompt`
 
 ```python
 context["call_handler"]("defaults.dev.edit_prompt_live", {
@@ -107,7 +105,7 @@ context["call_handler"]("defaults.dev.edit_prompt_live", {
 })
 ```
 
-戻り値:
+Return value:
 ```json
 {
   "status": "ok",
@@ -120,16 +118,14 @@ context["call_handler"]("defaults.dev.edit_prompt_live", {
 }
 ```
 
-元に戻すには、元のテンプレート本文を `new_body` に指定して再度呼び出す。
+To restore, specify the original template body in `new_body` and call it again.
 
 
-## 5. replay（過去リクエストの再実行）
+## 5. replay (replaying past requests)
 
-過去の LLM リクエストを同じパラメータで再実行する。モデルやパラメータの変更も可能。
+Rerun a previous LLM request with the same parameters. It is also possible to change the model and parameters.
 
-**handler**: `defaults.dev.replay`（`blocks/dev/replay.py`）
-
-**HTTP**: `POST /api/dev/replay`
+**handler**: `defaults.dev.replay`（`blocks/dev/replay.py`）**HTTP**: `POST /api/dev/replay`
 
 ```python
 result = context["call_handler"]("defaults.dev.replay", {
@@ -142,23 +138,23 @@ result = context["call_handler"]("defaults.dev.replay", {
 })
 ```
 
-戻り値は `defaults.ai.complete` と同じ形式。元のリクエストのメッセージ配列とツール定義を使い回し、モデルやパラメータだけ差し替えて再実行する。
+The return value has the same format as `defaults.ai.complete`. Reuse the message array and tool definition from the original request, replace only the model and parameters, and rerun.
 
 
-## 6. Ctrl+Shift+D でのパネル表示
+## 6. Display panel with Ctrl+Shift+D
 
-フロントエンド側の Asset が `Ctrl+Shift+D` のキーバインドを検出し、Dev Tools パネルの表示/非表示をトグルする。
+Asset on the front end detects the `Ctrl+Shift+D` keybind and toggles the display/hide of the Dev Tools panel.
 
-パネルの Asset は user_data のパックとして提供される。defaults は Dev Tools の handler（`defaults.dev.inspect`, `defaults.dev.prompt_history`, `defaults.dev.edit_prompt_live`, `defaults.dev.replay`）を提供する。defaults Pack の `ui/dev_panel.js` にリファレンス実装が含まれている。
+Panel Asset is provided as a pack of user_data. defaults provides Dev Tools handlers (`defaults.dev.inspect`, `defaults.dev.prompt_history`, `defaults.dev.edit_prompt_live`, `defaults.dev.replay`). A reference implementation is included in `ui/dev_panel.js` of the defaults pack.
 
-パネル Asset の配置スロットは `panel.bottom` または `floating` が推奨される。
+`panel.bottom` or `floating` is recommended for the panel Asset placement slot.
 
 
-## 7. API エンドポイント
+## 7. API endpoints
 
-| handler | HTTP ルート | input_data | 戻り値 |
+| handler | HTTP route | input_data | return value |
 |---|---|---|---|
-| `defaults.dev.inspect` | `GET /api/dev/inspect` | `{conversation_id, message_id}` | リクエスト/レスポンス詳細 |
-| `defaults.dev.prompt_history` | `GET /api/dev/prompt-history` | `{session_id, limit}` | プロンプト使用履歴の配列 |
+| `defaults.dev.inspect` | `GET /api/dev/inspect` | `{conversation_id, message_id}` | Request/Response Details |
+| `defaults.dev.prompt_history` | `GET /api/dev/prompt-history` | `{session_id, limit}` | Prompt usage history array |
 | `defaults.dev.edit_prompt_live` | `POST /api/dev/edit-prompt` | `{prompt_name, new_body}` | `{prompt_name, updated, content, prompt_id}` |
 | `defaults.dev.replay` | `POST /api/dev/replay` | `{conversation_id, message_id, override}` | StandardResponse |

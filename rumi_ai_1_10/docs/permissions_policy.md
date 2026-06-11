@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./permissions_policy.md) | [JP](./i18n/ja/permissions_policy.md) | [KR](./i18n/ko/permissions_policy.md) | [CN](./i18n/zh-cn/permissions_policy.md)
+<!-- docs-i18n-links:end -->
+
 # Permissions Policy
 
 Profile permission files are defaults only.

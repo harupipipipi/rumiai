@@ -1,214 +1,218 @@
-# rumiai defaults Pack — ロードマップ
+<!-- docs-i18n-links:start -->
+[EN](./roadmap.md) | [JP](./i18n/ja/roadmap.md) | [KR](./i18n/ko/roadmap.md) | [CN](./i18n/zh-cn/roadmap.md)
+<!-- docs-i18n-links:end -->
 
-最終更新: 2026-03-06
-ステータス凡例: ✅ 完了 / 🔧 修正必要 / ⬜ 未着手
+# rumiai defaults Pack — Roadmap
+
+Last updated: 2026-03-06
+Status legend: ✅ Completed / 🔧 Needs modification / ⬜ Not started
 
 ---
 
-## フェーズ 0: 基盤（完了）
+## Phase 0: Foundation (Complete)
 
-すべて完了済み。起動 → ブラウザアクセス → AI チャットまで動作確認済み。
+All completed. Operation has been confirmed from startup to browser access to AI chat.
 
-| ID | 内容 | ステータス |
+| ID | Content | Status |
 |----|------|-----------|
-| G0-G3 | スケルトン〜Chat/Flow レイヤー | ✅ |
-| P0 | 正規化 | ✅ |
+| G0-G3 | Skeleton ~ Chat/Flow layer | ✅ |
+| P0 | Normalization | ✅ |
 | G4 | Agent / Transport / Frontend | ✅ |
-| G5 | AI プロバイダ (OpenAI, Anthropic, Google, Genspark) + MCP | ✅ |
-| G6 | UX 強化 | ✅ |
-| G7 | Tool & Prompt 拡張 | ✅ |
-| G8 | Agent 強化 + 全修正 | ✅ |
-| G9a/b | ナレッジ基盤 + フロー内自動検索 | ✅ |
-| docs | ドキュメント 24 ファイル + 修正 4 回 | ✅ |
+| G5 | AI provider (OpenAI, Anthropic, Google, Genspark) + MCP | ✅ |
+| G6 | UX enhancement | ✅ |
+| G7 | Tool & Prompt Extension | ✅ |
+| G8 | Agent enhancement + all fixes | ✅ |
+| G9a/b | Knowledge base + automatic search in flow | ✅ |
+| docs | Documentation 24 files + 4 revisions | ✅ |
 | startup/boot-fix | setup.py, ecosystem.json, components/ | ✅ |
-| Step 0 | Route Registry パターン移行 (44→100 ルート分散) | ✅ |
+| Step 0 | Route Registry pattern migration (44→100 route distribution) | ✅ |
 
 ---
 
-## フェーズ 1: 機能拡張（T1-T17）
+## Phase 1: Enhancements (T1-T17)
 
-17 タスクの並列実装。Route Registry により http.py への変更なしで完了。
+17 Parallel implementation of tasks. Completed with Route Registry without any changes to http.py.
 
-| ID | 内容 | domain | blocks | ルート | ステータス |
+| ID | Content | domain | blocks | Root | Status |
 |----|------|--------|--------|--------|-----------|
-| T1 | 複数会話セッション管理 | ✅ session_manager.py | 🔧 blocks/chat/session/ 未作成 | 🔧 未登録 | 🔧 |
-| T2 | AI による会話履歴編集 | ✅ history_editor.py | 🔧 blocks/chat/history/ 未作成 | 🔧 未登録 | 🔧 |
-| T3 | ランタイム tool 作成 | ✅ runtime_creator.py | ✅ 既存 blocks で対応 | ✅ | ✅ |
-| T4 | 免責同意 tool | ✅ disclaimer_manager.py | ✅ 既存 blocks で対応 | ✅ | ✅ |
-| T5 | prompt 高度化 (ビルダー, バージョニング) | ✅ builder.py | ✅ blocks/prompt/advanced/ | ✅ 8 ルート | ✅ |
-| T6 | tool/prompt 統一テンプレート | ✅ unified.py | ✅ blocks/prompt/convert.py | ✅ | ✅ |
-| T7 | rumi モデル (自動ルーティング) | ✅ model_router.py | ✅ blocks/ai/routing/ | ✅ 10 ルート | ✅ |
-| T8 | コンテキスト表示 API | ✅ analyzer.py | 🔧 専用 blocks なし | 🔧 ルート未登録 | 🔧 |
-| T9 | dev tool 拡張 | ✅ usage_tracker.py | ✅ 既存 blocks で対応 | ✅ | ✅ |
-| T10 | 組織エージェント基盤 | ✅ org_manager.py | ✅ blocks/agent/org/ (11 ファイル) | 🔧 ルート未登録 | 🔧 |
-| T11 | Slack 風 AI チャット | ✅ channel_manager.py | ✅ blocks/chat/channel/ (10 ファイル) | ✅ 10 ルート | ✅ |
-| T12 | 定期実行 agent | ✅ scheduler.py | ✅ blocks/agent/scheduler/ (9 ファイル) | ✅ 9 ルート | ✅ |
-| T13 | タスク中指示追加 | ✅ interrupt_manager.py | ✅ blocks/agent/interrupt/ (8 ファイル) | ✅ 9 ルート | ✅ |
-| T14 | Linux 環境 + 座標操作 | ✅ container_manager.py | ✅ blocks/tool/container/ (12 ファイル) | ✅ 13 ルート | ✅ |
-| T15 | 権限管理 | ⬜ 未実装 | ⬜ 未実装 | ⬜ | ⬜ |
-| T16 | CLI 完全分離 | ✅ cli.py | ✅ blocks/cli/entry.py | ✅ 2 ルート | ✅ |
-| T17 | タブシステムバックエンド | ⬜ 未実装 | ⬜ 未実装 | ⬜ | ⬜ |
+| T1 | Multiple conversation session management | ✅ session_manager.py | 🔧 blocks/chat/session/ not created | 🔧 not registered | 🔧 |
+| T2 | Conversation history editing by AI | ✅ history_editor.py | 🔧 blocks/chat/history/ Not created | 🔧 Not registered | 🔧 |
+| T3 | Runtime tool creation | ✅ runtime_creator.py | ✅ Compatible with existing blocks | ✅ | ✅ |
+| T4 | Disclaimer agreement tool | ✅ disclaimer_manager.py | ✅ Correspond with existing blocks | ✅ | ✅ |
+| T5 | prompt advanced (builder, versioning) | ✅ builder.py | ✅ blocks/prompt/advanced/ | ✅ 8 routes | ✅ |
+| T6 | tool/prompt unified template | ✅ unified.py | ✅ blocks/prompt/convert.py | ✅ | ✅ |
+| T7 | rumi model (automatic routing) | ✅ model_router.py | ✅ blocks/ai/routing/ | ✅ 10 routes | ✅ |
+| T8 | Context display API | ✅ analyzer.py | 🔧 No dedicated blocks | 🔧 Route not registered | 🔧 |
+| T9 | dev tool extension | ✅ usage_tracker.py | ✅ Compatible with existing blocks | ✅ | ✅ |
+| T10 | Organization agent base | ✅ org_manager.py | ✅ blocks/agent/org/ (11 files) | 🔧 Root not registered | 🔧 |
+| T11 | Slack-like AI chat | ✅ channel_manager.py | ✅ blocks/chat/channel/ (10 files) | ✅ 10 routes | ✅ |
+| T12 | Scheduled execution agent | ✅ scheduler.py | ✅ blocks/agent/scheduler/ (9 files) | ✅ 9 root | ✅ |
+| T13 | Add instructions during task | ✅ interrupt_manager.py | ✅ blocks/agent/interrupt/ (8 files) | ✅ 9 routes | ✅ |
+| T14 | Linux environment + coordinate manipulation | ✅ container_manager.py | ✅ blocks/tool/container/ (12 files) | ✅ 13 root | ✅ |
+| T15 | Permission management | ⬜ Not implemented | ⬜ Not implemented | ⬜ | ⬜ |
+| T16 | CLI complete isolation | ✅ cli.py | ✅ blocks/cli/entry.py | ✅ 2 roots | ✅ |
+| T17 | Tab system backend | ⬜ Not implemented | ⬜ Not implemented | ⬜ | ⬜ |
 
 ---
 
-## フェーズ 2: 品質保証 + 残修正
+## Phase 2: Quality Assurance + Remaining Corrections
 
-### 2-A: P1 修正（ブロッカー）
+### 2-A: P1 Modification (Blocker)
 
-| ID | 内容 | 詳細 |
+| ID | Contents | Details |
 |----|------|------|
-| P1-1 | システムルート 404 修正 | /api/health, /, /api/context, /static/* を io.http.route に登録。Registry モードでもアクセス可能にする |
-| P1-2 | T15 権限管理の実装 | domain/permission/manager.py, user_store.py, role_store.py, auth.py, audit.py + blocks/permission/ + setup.py ルート登録 |
-| P1-3 | T17 タブシステムの実装 | domain/frontend/tab_manager.py, tab_presets.py + blocks/frontend/tabs/ + setup.py ルート登録 |
+| P1-1 | System route 404 correction | Register /api/health, /, /api/context, /static/* to io.http.route. Make it accessible even in Registry mode |
+| P1-2 | T15 Implementation of permission management | domain/permission/manager.py, user_store.py, role_store.py, auth.py, audit.py + blocks/permission/ + setup.py Route registration |
+| P1-3 | T17 Tab system implementation | domain/frontend/tab_manager.py, tab_presets.py + blocks/frontend/tabs/ + setup.py Route registration |
 
-### 2-B: P2 修正（機能補完）
+### 2-B: P2 modification (functional completion)
 
-| ID | 内容 | 詳細 |
+| ID | Contents | Details |
 |----|------|------|
-| P2-1 | T10 組織エージェントのルート登録 | blocks/agent/setup.py に org 系 11 ルートを追記 |
-| P2-2 | T1 セッション管理の blocks + ルート | blocks/chat/session/ 作成 + chat/setup.py に 8 ルート追記 |
-| P2-3 | T2 履歴編集の blocks + ルート | blocks/chat/history/ 作成 + chat/setup.py に 4 ルート追記 |
-| P2-4 | T8 コンテキスト API のルート | /api/context/conversation/{id}, /api/context/system を登録 |
-| P2-5 | ecosystem.json の provides 更新 | T10/T12/T13/T14 の新ハンドラを反映 |
+| P2-1 | T10 organization agent route registration | Add org system 11 route to blocks/agent/setup.py |
+| P2-2 | T1 session management blocks + route | Create blocks/chat/session/ + add 8 routes to chat/setup.py |
+| P2-3 | T2 history editing blocks + route | Create blocks/chat/history/ + add 4 routes to chat/setup.py |
+| P2-4 | Root of T8 context API | Register /api/context/conversation/{id}, /api/context/system |
+| P2-5 | provides update of ecosystem.json | Reflects new handlers for T10/T12/T13/T14 |
 
-### 2-C: ファイルチェック
+### 2-C: File check
 
-| ID | 内容 | 詳細 |
+| ID | Contents | Details |
 |----|------|------|
-| FC-1 | 全ブロック def run シグネチャ確認 | def run(input_data, context): が統一されているか |
-| FC-2 | import スタイル統一確認 | sys.path.insert(0, pack_root) + from blocks._common import ... |
-| FC-3 | pass / TODO / NotImplementedError 残留チェック | 禁止されている未実装関数がないか |
-| FC-4 | setup.py ルート数と実ブロック数の一致 | 登録されたルート先のモジュールが全て存在するか |
-| FC-5 | 不要ファイル削除 | transport/uds.py, blocks/frontend/stop.py 等 |
+| FC-1 | Check def run signature of all blocks | Is def run(input_data, context): unified |
+| FC-2 | Import style uniformity check | sys.path.insert(0, pack_root) + from blocks._common import ... |
+| FC-3 | pass / TODO / NotImplementedError residual check | Are there any prohibited unimplemented functions |
+| FC-4 | setup.py The number of routes and the number of real blocks match | Do all registered route destination modules exist? |
+| FC-5 | Delete unnecessary files | transport/uds.py, blocks/frontend/stop.py, etc. |
 
-### 2-D: rumiai カーネルルール適合チェック
+### 2-D: rumiai kernel rule compliance check
 
-| ID | 内容 | 詳細 |
+| ID | Contents | Details |
 |----|------|------|
-| RC-1 | ecosystem.json スキーマ準拠 | カーネル W26 の ecosystem.schema.json に適合するか |
-| RC-2 | components/ manifest.json 存在確認 | 全 11 コンポーネントに manifest.json があるか |
-| RC-3 | setup.py context 利用の妥当性 | context["interface_registry"] 等の使用がカーネル仕様に準拠しているか |
-| RC-4 | KernelFacade API 制限の遵守 | get_interface, list_interfaces, emit 以外を呼んでいないか |
-| RC-5 | Pack 承認フロー互換性 | ファイル変更 → modified 状態 → 再承認が正しく動くか |
+| RC-1 | ecosystem.json schema compliant | Compatible with ecosystem.schema.json of kernel W26 |
+| RC-2 | Check the presence of components/ manifest.json | Does all 11 components have manifest.json |
+| RC-3 | Validity of using setup.py context | Is the use of context["interface_registry"] etc. compliant with the kernel specifications |
+| RC-4 | Compliance with KernelFacade API restrictions | Are you calling anything other than get_interface, list_interfaces, or emit? |
+| RC-5 | Pack approval flow compatibility | File change → modified status → Does re-approval work correctly? |
 
-### 2-E: defaults としての中立性チェック
+### 2-E: Neutrality check as defaults
 
-| ID | 内容 | 詳細 |
+| ID | Contents | Details |
 |----|------|------|
-| NC-1 | AI プロバイダの贔屓なし | 特定プロバイダがハードコードされていないか。stub/default がフォールバックか |
-| NC-2 | モデルの贔屓なし | rumi モデルルーティングがフェアか。特定モデルを不当に優先していないか |
-| NC-3 | ストレージの中立性 | user_data/ のパスが決め打ちでなくカーネルの userdata_manager 経由か |
-| NC-4 | 外部依存の最小化 | 標準ライブラリ以外の必須依存がないか（Docker SDK はオプショナルか） |
-| NC-5 | 設定のオーバーライド可能性 | 全ての挙動が環境変数 or API で変更可能か。ハードコード設定がないか |
+| NC-1 | No favoritism to AI providers | Is a specific provider hard-coded? Is stub/default a fallback |
+| NC-2 | No model favoritism | rumi Is model routing fair? Are certain models being given undue priority? |
+| NC-3 | Storage neutrality | Is the path of user_data/ not fixed but via the kernel's userdata_manager |
+| NC-4 | Minimize external dependencies | Are there any required dependencies other than the standard library (Is Docker SDK optional?) |
+| NC-5 | Possibility of overriding settings | Can all behaviors be changed using environment variables or API? Are there any hard-coded settings?
 
 ---
 
-## フェーズ 3: 拡張性検証
+## Phase 3: Scalability validation
 
-### 3-A: user_data 拡張性
+### 3-A: user_data extensibility
 
-| ID | 内容 | 詳細 |
+| ID | Contents | Details |
 |----|------|------|
-| UX-1 | 他 Pack からの user_data アクセス | 他の Pack が独自の user_data サブディレクトリを持てるか |
-| UX-2 | データマイグレーション | user_data のスキーマ変更時にマイグレーション手段があるか |
-| UX-3 | バックアップ/リストア | user_data の一括エクスポート/インポートが可能か |
-| UX-4 | ストレージプラグイン | JSON ファイル以外のストレージバックエンド（SQLite 等）に差し替え可能か |
-| UX-5 | 同時アクセス安全性 | 複数スレッド/プロセスからの user_data 書き込みが安全か（ロック機構） |
+| UX-1 | user_data access from other Packs | Can other Packs have their own user_data subdirectories |
+| UX-2 | Data migration | Is there a way to migrate when changing the schema of user_data |
+| UX-3 | Backup/Restore | Is it possible to export/import user_data in bulk |
+| UX-4 | Storage plugin | Is it possible to replace it with a storage backend other than JSON files (SQLite, etc.) |
+| UX-5 | Concurrent access safety | Is it safe to write user_data from multiple threads/processes (locking mechanism) |
 
-### 3-B: Pack 間拡張性
+### 3-B: Inter-pack extensibility
 
-| ID | 内容 | 詳細 |
+| ID | Contents | Details |
 |----|------|------|
-| PX-1 | 他 Pack からのルート追加テスト | ダミー Pack を作って io.http.route にルートを登録、http.py が収集するか |
-| PX-2 | 他 Pack からの domain 差し替え | InterfaceRegistry で AIClient 等を差し替え可能か |
-| PX-3 | イベントフック | EventBus で defaults Pack の動作にフックできるか |
-| PX-4 | プロバイダプラグイン | 新しい AI プロバイダを他 Pack から追加できるか（Genspark 方式の再現） |
+| PX-1 | Test for adding routes from other Packs | Create a dummy Pack and register the route in io.http.route, will http.py collect it? |
+| PX-2 | Domain replacement from other Pack | Is it possible to replace AIClient etc. with InterfaceRegistry |
+| PX-3 | Event hook | Can EventBus hook into defaults pack behavior? |
+| PX-4 | Provider Plugin | Is it possible to add a new AI provider from another pack (reproducing the Genspark method) |
 
 ---
 
-## フェーズ 4: プロダクション準備
+## Phase 4: Production Preparation
 
-### 4-A: 権限システム完成
+### 4-A: Authority system completed
 
-| ID | 内容 | 詳細 |
+| ID | Contents | Details |
 |----|------|------|
-| AUTH-1 | T15 の完全実装 | フェーズ 2-A P1-2 で基盤実装。ここでは統合テスト + エッジケース対応 |
-| AUTH-2 | ルートごとの権限定義 | 全 100+ ルートに必要権限を定義 |
-| AUTH-3 | 認証ミドルウェア統合 | http.py の _handle_request で権限チェックを挟む |
-| AUTH-4 | デフォルトユーザー + 初期設定フロー | 初回起動時に admin ユーザーを作成 |
+| AUTH-1 | Complete implementation of T15 | Base implementation in Phase 2-A P1-2. Integration testing + edge case support here |
+| AUTH-2 | Authority definition for each route | Define required authority for all 100+ routes |
+| AUTH-3 | Authentication middleware integration | Insert permission check in _handle_request of http.py |
+| AUTH-4 | Default user + initial setup flow | Create admin user on first startup |
 
-### 4-B: tool / prompt の一通り作成
+### 4-B: Create a set of tools / prompts
 
-| ID | 内容 | 詳細 |
+| ID | Contents | Details |
 |----|------|------|
-| TP-1 | 組み込み tool セット | web_search, calculator, code_exec, file_read, file_write, http_request |
-| TP-2 | 組み込み prompt テンプレート | general_assistant, coder, analyst, translator, summarizer, creative_writer |
-| TP-3 | tool/prompt のドキュメント | 各ツール/プロンプトの使い方、パラメータ、例 |
-| TP-4 | tool/prompt のテスト | 各ツール/プロンプトの動作確認 |
+| TP-1 | Built-in tool set | web_search, calculator, code_exec, file_read, file_write, http_request |
+| TP-2 | Built-in prompt templates | general_assistant, coder, analyst, translator, summarizer, creative_writer |
+| TP-3 | tool/prompt documentation | Usage, parameters, and examples for each tool/prompt |
+| TP-4 | Testing tool/prompt | Checking the operation of each tool/prompt |
 
-### 4-C: フロントエンド一式（ユーザー担当）
+### 4-C: Front end set (user responsibility)
 
-| ID | 内容 | 詳細 | 担当 |
+| ID | Contents | Details | Person in charge |
 |----|------|------|------|
-| FE-1 | shell.html の大規模分割 | 背景, サイドバー, インプットバー, タイトル, chattab, setting に分割 | ユーザー |
-| FE-2 | タブ UI | ブラウザ風タブ (normal, work, coding, agent, max, monitor) | ユーザー |
-| FE-3 | セッション UI | 会話タブの並列表示 (履歴1 / 履歴2 / 履歴3) | ユーザー |
-| FE-4 | チャネル UI | Slack 風チャンネルリスト + メッセージ表示 | ユーザー |
-| FE-5 | コンテキストパネル | 現在のコンテキスト情報をリアルタイム表示 | ユーザー |
-| FE-6 | Dev パネル | プロンプト使用状況、リアルタイム編集 | ユーザー |
-| FE-7 | 権限管理 UI | ユーザー/ロール/権限の管理画面 | ユーザー |
-| FE-8 | 免責ポップアップ | 同意 tool のポップアップ表示 | ユーザー |
-| FE-9 | コンテナ操作 UI | Linux 環境の操作画面 + スクリーンショット表示 | ユーザー |
+| FE-1 | Large-scale split of shell.html | Split into background, sidebar, input bar, title, chattab, setting | User |
+| FE-2 | Tab UI | Browser-like tab (normal, work, coding, agent, max, monitor) | User |
+| FE-3 | Session UI | Parallel display of conversation tabs (History 1 / History 2 / History 3) | User |
+| FE-4 | Channel UI | Slack-style channel list + message display | User |
+| FE-5 | Context Panel | Real-time display of current context information | User |
+| FE-6 | Dev panel | Prompt usage, real-time editing | User |
+| FE-7 | Permission management UI | User/role/permission management screen | User |
+| FE-8 | Disclaimer popup | Consent tool popup display | User |
+| FE-9 | Container operation UI | Linux environment operation screen + screenshot display | User |
 
 ---
 
-## フェーズ 5: デスクトップアプリ化
+## Phase 5: Desktop application
 
-| ID | 内容 | 詳細 |
+| ID | Contents | Details |
 |----|------|------|
-| DA-1 | Electron or Tauri ラッパー | shell.html をデスクトップアプリとしてパッケージング |
-| DA-2 | ネイティブ通知 | OS 通知連携（定期実行 agent の結果通知等） |
-| DA-3 | トレイアイコン | バックグラウンド動作 + トレイアイコン |
-| DA-4 | 自動起動設定 | OS 起動時に自動でカーネル + defaults Pack を起動 |
-| DA-5 | アップデーター | git pull ベースの自動更新（or GitHub Releases） |
+| DA-1 | Electron or Tauri wrapper | Packaging shell.html as a desktop app |
+| DA-2 | Native notification | OS notification cooperation (regular execution agent result notification, etc.) |
+| DA-3 | Tray icon | Background operation + tray icon |
+| DA-4 | Automatic startup settings | Automatically start the kernel + defaults pack when the OS starts |
+| DA-5 | Updater | git pull-based automatic updates (or GitHub Releases) |
 
 ---
 
-## フェーズ 6: コンパイル + リリース
+## Phase 6: Compile + Release
 
-| ID | 内容 | 詳細 |
+| ID | Contents | Details |
 |----|------|------|
-| CP-1 | Python バンドル | PyInstaller or Nuitka でカーネル + defaults Pack を単一バイナリ化 |
-| CP-2 | フロントエンド最適化 | shell.html の minify + アセットバンドル |
-| CP-3 | クロスプラットフォームビルド | macOS, Linux, Windows 向けビルド |
-| CP-4 | インストーラー | macOS: .dmg, Linux: .AppImage/.deb, Windows: .msi |
-| CP-5 | CI/CD パイプライン | GitHub Actions でビルド + テスト + リリース自動化 |
-| CP-6 | リリースノート | 全機能のリリースノート作成 |
+| CP-1 | Python Bundle | Single Binary Kernel + Defaults Pack with PyInstaller or Nuitka |
+| CP-2 | Front-end optimization | minify shell.html + asset bundle |
+| CP-3 | Cross-platform build | Build for macOS, Linux, Windows |
+| CP-4 | Installer | macOS: .dmg, Linux: .AppImage/.deb, Windows: .msi |
+| CP-5 | CI/CD Pipeline | Build + Test + Release Automation with GitHub Actions |
+| CP-6 | Release notes | Create release notes for all functions |
 
 ---
 
-## フェーズ 7: 最終整理
+## Phase 7: Final cleanup
 
-| ID | 内容 | 詳細 |
+| ID | Contents | Details |
 |----|------|------|
-| CL-1 | 不要ファイル削除 | transport/uds.py, transport/stdio.py (CLI 移行後), blocks/frontend/stop.py |
-| CL-2 | docs 最終同期 | 24 ドキュメントを全機能に合わせて更新 |
-| CL-3 | README.md 更新 | インストール手順、機能一覧、スクリーンショット |
-| CL-4 | CHANGELOG.md 作成 | 全リリース履歴 |
-| CL-5 | LICENSE 確認 | ライセンスファイルの最終確認 |
-| CL-6 | feature/genspark-provider ブランチ削除 | マージ済みブランチのクリーンアップ |
+| CL-1 | Delete unnecessary files | transport/uds.py, transport/stdio.py (after CLI migration), blocks/frontend/stop.py |
+| CL-2 | docs final sync | 24 Document updated for full functionality |
+| CL-3 | README.md updated | Installation instructions, feature list, screenshots |
+| CL-4 | CHANGELOG.md creation | Full release history |
+| CL-5 | LICENSE confirmation | Final confirmation of license file |
+| CL-6 | feature/genspark-provider branch deletion | Merged branch cleanup |
 
 ---
 
-## 統計
+## Statistics
 
-| 項目 | 数量 |
+| Item | Quantity |
 |------|------|
-| 総フェーズ数 | 8 (0-7) |
-| 総タスク数 | 約 80 |
-| 完了済みタスク | 約 45 |
-| 残タスク | 約 35 |
-| Registry ルート数 | 100+ |
-| ブロック数 | 100+ |
-| domain モジュール数 | 30+ |
-| ドキュメント | 24 ファイル |
+| Total number of phases | 8 (0-7) |
+| Total number of tasks | Approx. 80 |
+| Completed tasks | Approximately 45 |
+| Remaining tasks | Approx. 35 |
+| Number of Registry routes | 100+ |
+| Number of blocks | 100+ |
+| domain number of modules | 30+ |
+| Document | 24 files |

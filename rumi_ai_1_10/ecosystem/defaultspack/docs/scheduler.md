@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./scheduler.md) | [JP](./i18n/ja/scheduler.md) | [KR](./i18n/ko/scheduler.md) | [CN](./i18n/zh-cn/scheduler.md)
+<!-- docs-i18n-links:end -->
+
 # Scheduler
 
 `domain/scheduler` stores jobs in `user_data/shared/scheduler/jobs.json` and run

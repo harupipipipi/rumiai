@@ -1,39 +1,37 @@
+<!-- docs-i18n-links:start -->
+[EN](./agent.md) | [JP](./i18n/ja/agent.md) | [KR](./i18n/ko/agent.md) | [CN](./i18n/zh-cn/agent.md)
+<!-- docs-i18n-links:end -->
+
 # Agent API
 
-defaults Pack のエージェント機能の全 API リファレンスです。handler は `blocks/agent/` に、ドメインロジックは `domain/agent/engine.py`（AgentEngine）と `domain/agent/execution.py`（AgentExecution）に実装されています。
+A complete API reference for agent functionality in the defaults pack. The handler is implemented in `blocks/agent/`, and the domain logic is implemented in `domain/agent/engine.py` (AgentEngine) and `domain/agent/execution.py` (AgentExecution).
 
-## エージェントの概念
+## Agent concept
 
-エージェントは「タスクを受け取り、AI が思考し、必要に応じてツールを呼び出し、結果を返す」実行ループです。defaults Pack のエージェントは以下の flow で実現されます。
+The agent is an execution loop that "receives a task, the AI does some thinking, calls tools if necessary, and returns a result." The defaults pack agent is implemented using the following flow.
 
-1. ユーザーがタスクと使用可能なツールを指定して `execute` を呼び出す。
-2. `AgentEngine` が初期メッセージ（system_prompt + task）を構築し、AI に送信する。
-3. AI が「テキスト応答」を返した場合 → タスク完了（status: `completed`）。
-4. AI が「ツール呼び出し」を返した場合 → ユーザー承認待ち（status: `waiting_approval`）。
-5. ユーザーが `approve` → ツール実行 → 結果を AI に返す → 3 に戻る。
-6. ユーザーが `reject` → 拒否理由を AI に返す → AI が代替案を提案 → 3 に戻る。
-7. ツール呼び出し深度が `MAX_FLOW_CALL_DEPTH`（10）に達した場合 → エラー。
+1. The user calls `execute` with the task and available tools.
+2. `AgentEngine` constructs the initial message (system_prompt + task) and sends it to the AI.
+3. If the AI returns a “text response” → task completed (status: `completed`).
+4. If AI returns “tool call” → Waiting for user approval (status: `waiting_approval`).
+5. User `approve` → Run tool → Return results to AI → Return to 3.
+6. User `reject` → Returns rejection reason to AI → AI suggests alternative → Return to step 3.
+7. If the tool call depth reaches `MAX_FLOW_CALL_DEPTH` (10) → Error.
 
-`blocks/agent/_state.py` がインメモリで実行中の `AgentEngine` インスタンスを管理します。`execution_id` をキーとして `set_engine()` / `get_engine()` / `remove_engine()` で管理されます。
+`blocks/agent/_state.py` manages `AgentEngine` instances running in-memory. It is managed in `set_engine()` / `get_engine()` / `remove_engine()` with `execution_id` as the key.
 
-## タスク実行（execute）
+## Task execution (execute)
 
-**handler**: `defaults.agent.execute`（`blocks/agent/execute.py`）
+**handler**: `defaults.agent.execute`（`blocks/agent/execute.py`）**HTTP**: `POST /api/agent/execute`**input_data**:
 
-**HTTP**: `POST /api/agent/execute`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `task` | `string` | Yes | タスクの記述 |
-| `tools` | `list` | No | 使用可能なツール定義リスト。デフォルト `[]` |
-| `model` | `string` | No | AI モデル。デフォルト `"default"` |
-| `system_prompt` | `string` | No | システムプロンプト |
+| `task` | `string` | Yes | Task description |
+| `tools` | `list` | No | List of available tool definitions. Default `[]` |
+| `model` | `string` | No | AI model. Default `"default"` |
+| `system_prompt` | `string` | No | System prompt |
 
-**処理**: `AgentEngine().execute(task, tools, model, system_prompt, context)` を呼び出します。初期メッセージを構築し、AI に送信し、応答に応じて `completed` / `waiting_approval` / `error` のいずれかのステータスを返します。
-
-**戻り値**:
+**Processing**: Call `AgentEngine().execute(task, tools, model, system_prompt, context)`. Build an initial message, send it to the AI, and return a status of either `completed` / `waiting_approval` / `error` depending on the response.**Return value**:
 
 ```json
 {
@@ -63,68 +61,46 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 }
 ```
 
-## 承認（approve）
+## Approve
 
-**handler**: `defaults.agent.approve`（`blocks/agent/approve.py`）
+**handler**: `defaults.agent.approve`（`blocks/agent/approve.py`）**HTTP**: `POST /api/agent/{id}/approve`**input_data**:
 
-**HTTP**: `POST /api/agent/{id}/approve`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `execution_id` | `string` | Yes | 実行 ID（URL パスから自動注入） |
+| `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
 
-**処理**: `engine.approve(execution_id)` を呼び出します。保留中のツールを実行し、結果を AI に返し、次の応答を取得します。AI がさらにツールを呼び出した場合は再び `waiting_approval` になります。
+**Processing**: Call `engine.approve(execution_id)`. Run the pending tool, return the results to the AI, and get the next response. If the AI ​​calls more tools, it will become `waiting_approval` again.**Return value**: `ok(result)` — Updated execution state.
 
-**戻り値**: `ok(result)` — 更新された実行状態。
+## reject
 
-## 拒否（reject）
+**handler**: `defaults.agent.reject`（`blocks/agent/reject.py`）**HTTP**: `POST /api/agent/{id}/reject`**input_data**:
 
-**handler**: `defaults.agent.reject`（`blocks/agent/reject.py`）
-
-**HTTP**: `POST /api/agent/{id}/reject`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `execution_id` | `string` | Yes | 実行 ID（URL パスから自動注入） |
-| `reason` | `string` | No | 拒否理由。デフォルト `"Rejected by user"` |
+| `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
+| `reason` | `string` | No | Reason for refusal. Default `"Rejected by user"` |
 
-**処理**: `engine.reject(execution_id, reason)` を呼び出します。「ユーザーがツール呼び出しを拒否した。理由: {reason}。代替案を提案してください。」というメッセージを AI に送信します。
+**Processing**: Call `engine.reject(execution_id, reason)`. Send a message to the AI ​​that says "User declined the tool call. Reason: {reason}. Please suggest an alternative."**Return value**: `ok(result)` — Updated execution state.
 
-**戻り値**: `ok(result)` — 更新された実行状態。
+## Cancel
 
-## キャンセル
+**handler**: `defaults.agent.cancel`（`blocks/agent/cancel.py`）**HTTP**: `POST /api/agent/{id}/cancel`**input_data**:
 
-**handler**: `defaults.agent.cancel`（`blocks/agent/cancel.py`）
-
-**HTTP**: `POST /api/agent/{id}/cancel`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `execution_id` | `string` | Yes | 実行 ID（URL パスから自動注入） |
+| `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
 
-**処理**: `engine.cancel(execution_id)` を呼び出し、`_state.remove_engine(execution_id)` でエンジンをメモリから削除します。`InstructionQueue` の当該実行の指示もクリアされます。
+**Processing**: Call `engine.cancel(execution_id)` and remove the engine from memory in `_state.remove_engine(execution_id)`. The instructions for such execution in `InstructionQueue` are also cleared.**Return value**: `ok({"execution_id": "...", "status": "cancelled"})`
 
-**戻り値**: `ok({"execution_id": "...", "status": "cancelled"})`
+## Check status
 
-## ステータス確認
+**handler**: `defaults.agent.status`（`blocks/agent/status.py`）**HTTP**: `GET /api/agent/{id}/status`**input_data**:
 
-**handler**: `defaults.agent.status`（`blocks/agent/status.py`）
-
-**HTTP**: `GET /api/agent/{id}/status`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `execution_id` | `string` | Yes | 実行 ID（URL パスから自動注入） |
+| `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
 
-**戻り値**:
+**Return value**:
 
 ```json
 {
@@ -141,24 +117,22 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 }
 ```
 
-## 計画のみ（plan）
+## Plan only (plan)
 
 **handler**: `defaults.agent.plan`（`blocks/agent/plan.py`）
 
-現在 HTTP ルートは未定義。`call_handler("defaults.agent.plan", ...)` 経由でのみ呼び出し可能。
+HTTP route is currently undefined. Can only be called via `call_handler("defaults.agent.plan", ...)`.
 
 **input_data**:
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `task` | `string` | Yes | タスクの記述 |
-| `tools` | `list` | No | 使用可能なツール定義リスト。デフォルト `[]` |
-| `model` | `string` | No | AI モデル。デフォルト `"default"` |
-| `system_prompt` | `string` | No | システムプロンプト |
+| `task` | `string` | Yes | Task description |
+| `tools` | `list` | No | List of available tool definitions. Default `[]` |
+| `model` | `string` | No | AI model. Default `"default"` |
+| `system_prompt` | `string` | No | System prompt |
 
-**処理**: `engine.plan()` を呼び出します。通常の `execute` と異なり、システムプロンプトに「PLANNING モード。ツール呼び出し禁止。ステップバイステップの計画を番号付きリストで返せ。」という指示を追加して AI を呼び出します。
-
-**戻り値**:
+**Processing**: Call `engine.plan()`. Unlike the regular `execute`, we call the AI ​​by adding the following instruction to the system prompt: "PLANNING mode. Do not call tools. Return step-by-step plan in numbered list."**Return value**:
 
 ```json
 {
@@ -172,23 +146,17 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 }
 ```
 
-## タスク中の指示追加（add_instruction）
+## Add instructions during task (add_instruction)
 
-**handler**: `defaults.agent.add_instruction`（`blocks/agent/add_instruction.py`）
+**handler**: `defaults.agent.add_instruction`（`blocks/agent/add_instruction.py`）**HTTP**: `POST /api/agent/{id}/instruct`**input_data**:
 
-**HTTP**: `POST /api/agent/{id}/instruct`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `execution_id` | `string` | Yes | 実行 ID（URL パスから自動注入） |
-| `instruction` | `string` | Yes | 追加する指示内容 |
-| `priority` | `string` | No | `"normal"` または `"urgent"`。デフォルト `"normal"` |
+| `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
+| `instruction` | `string` | Yes | Additional instructions |
+| `priority` | `string` | No | `"normal"` or `"urgent"`. Default `"normal"` |
 
-**処理**: `InstructionQueue.add_instruction()` で指示をキューに追加します。指示は次の AI completion ステップの前に `AgentEngine._inject_pending_instructions()` によってメッセージ履歴に注入されます。`urgent` の場合は `[RUNTIME INSTRUCTION — URGENT: Override current approach]` プレフィックスが付きます。`normal` の場合は `[RUNTIME INSTRUCTION — Additional guidance from user]` プレフィックスが付きます。
-
-**戻り値**:
+**Processing**: Add the instruction to the queue with `InstructionQueue.add_instruction()`. Instructions are injected into the message history by `AgentEngine._inject_pending_instructions()` before the next AI completion step. `urgent` has the `[RUNTIME INSTRUCTION — URGENT: Override current approach]` prefix. `normal` has the `[RUNTIME INSTRUCTION — Additional guidance from user]` prefix.**Return value**:
 
 ```json
 {
@@ -202,9 +170,9 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 }
 ```
 
-## 全 API エンドポイント一覧
+## List of all API endpoints
 
-| メソッド | パス | handler ファイル |
+| method | path | handler file |
 |---|---|---|
 | `POST` | `/api/agent/execute` | `blocks/agent/execute.py` |
 | `POST` | `/api/agent/{id}/approve` | `blocks/agent/approve.py` |
@@ -212,4 +180,4 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 | `POST` | `/api/agent/{id}/cancel` | `blocks/agent/cancel.py` |
 | `GET` | `/api/agent/{id}/status` | `blocks/agent/status.py` |
 | `POST` | `/api/agent/{id}/instruct` | `blocks/agent/add_instruction.py` |
-| — | — (`call_handler` 経由のみ) | `blocks/agent/plan.py` |
+| — | — (only via `call_handler`) | `blocks/agent/plan.py` |

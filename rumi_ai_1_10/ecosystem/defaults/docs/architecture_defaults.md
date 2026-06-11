@@ -1,50 +1,52 @@
+<!-- docs-i18n-links:start -->
+[EN](./architecture_defaults.md) | [JP](./i18n/ja/architecture_defaults.md) | [KR](./i18n/ko/architecture_defaults.md) | [CN](./i18n/zh-cn/architecture_defaults.md)
+<!-- docs-i18n-links:end -->
 
-```markdown
-# defaults アーキテクチャ設計書
+# defaults architecture design document
 
-## 1. defaults とは何か
+## 1. What are defaults?
 
-defaults は rumiai のセットアップ時に自動インストールされるベースパックである。rumiai 本体がドメイン知識を持たない汎用カーネルであるのに対し、defaults は AI サービスとして必要な「仕組み」を全て提供する。
+defaults is a base pack that is automatically installed when rumiai is set up. While rumiai itself is a general-purpose kernel with no domain knowledge, defaults provides all the "mechanisms" necessary as an AI service.
 
-defaults が提供するのは仕組みだけである。仕組みとは、チャットができる場所、エージェントが動く場所、ツールが実行される場所、プロンプトがレンダリングされる場所、UI が描画される場所を意味する。これらの場所に何を置くかは user_data が決める。
+defaults only provide a mechanism. Mechanisms mean where you can chat, where agents move, where tools run, where prompts are rendered, and where UI is drawn. user_data determines what is placed in these locations.
 
-defaults 自身はチャット画面を持たない。エージェントの定義を持たない。ツールの実体を持たない。プロンプトのテンプレートを持たない。UI のコンポーネントを持たない。defaults が持つのは、それらを動かすための handler、権限、Flow、ドメインコード、通信レイヤーである。
+defaults itself does not have a chat screen. Does not have an agent definition. It does not have the substance of a tool. Does not have a prompt template. It has no UI components. Defaults have handlers, permissions, flows, domain code, and communication layers to run them.
 
-## 2. 設計原則
+## 2. Design principles
 
-### 仕組みだけ提供し、中身は全て user_data
+### Provide only the mechanism, all contents are user_data
 
-defaults は「何ができるか」を定義し、「何をするか」は定義しない。
+Defaults define what you can do, not what you do.
 
-handler はドメイン操作の実行基盤である。`defaults.chat.send` は「メッセージを送信する仕組み」を提供する。どの会話に何を送るかは呼び出し側（tool、Flow、Pack）が決める。
+handler is the execution platform for domain operations. `defaults.chat.send` provides a "mechanism for sending messages." The caller (tool, flow, pack) decides what to send to which conversation.
 
-権限カタログは操作の許可体系である。`chat.message.send` は「メッセージ送信が許可されうる」ことを定義する。誰に許可するかは Grant で決まる。
+A privilege catalog is a permission system for operations. `chat.message.send` defines that ``message transmission may be permitted.'' Grants determine who is granted permission.
 
-Flow は処理パイプラインの実行基盤である。`simple_chat` Flow は「ユーザー入力→コンテキスト構築→LLM呼び出し→応答保存」の骨格を提供する。どのモデルを使うか、どのプロンプトを適用するかは Flow の config と user_data の設定が決める。
+Flow is the execution base of the processing pipeline. `simple_chat` Flow provides the framework of "user input → context construction → LLM call → response storage". Flow's config and user_data settings determine which model to use and which prompts to apply.
 
-フロントエンドは描画の枠を提供する。shell.html はスロット（main、sidebar、panel 等）を定義する空の枠である。何をどのスロットに描画するかは Asset として登録されたものが決める。
+The front end provides a frame for drawing. shell.html is an empty box that defines slots (main, sidebar, panel, etc.). What is drawn in which slot is determined by what is registered as Asset.
 
 ### Batteries Included, But Every Battery Is Removable
 
-defaults を入れれば AI サービスとして必要な全ての仕組みが動く。しかし任意の仕組みを別パックで置き換えられる。handler は同名で上書き可能。Flow は replaces で差し替え可能。権限は拡張可能。フロントエンドの Asset は同一 ID で上書き可能。
+If you include defaults, all the mechanisms required as an AI service will work. However, any mechanism can be replaced with another pack. handler can be overwritten with the same name. Flow can be replaced with replaces. Privileges are extensible. Front-end Asset can be overwritten with the same ID.
 
 ### Defaults Defines the Standard, Not the Limit
 
-defaults が定義する権限・handler・ドメインモデル・Widget 型・Asset 形式は rumiai ecosystem の標準語彙になる。他のパックはこの語彙を使う。しかしこの語彙は拡張可能であり、defaults が知らない権限ドメイン、知らない handler カテゴリ、知らない Widget 型を他のパックが追加できる。
+The authority, handler, domain model, Widget type, and Asset format defined by defaults become the standard vocabulary of the rumiai ecosystem. Other packs use this vocabulary. However, this vocabulary is extensible, and other packs can add authority domains that defaults do not know, handler categories that they do not know, and widget types that they do not know.
 
 ### Know Everything, Assume Nothing
 
-defaults は AI サービスに必要なドメイン知識（チャット、エージェント、ツール、プロンプト、AI クライアント、コーディング、メモリ、メディア）を全て知っている。しかしユーザーの環境、ユースケース、好みについて何も仮定しない。全てが設定可能であり、全てが上書き可能である。
+Defaults know all the domain knowledge required for an AI service (chat, agents, tools, prompts, AI clients, coding, memory, media). But it makes no assumptions about the user's environment, use case, or preferences. Everything is configurable and everything can be overwritten.
 
 ### Security by Capability, Not by Trust
 
-defaults 自身が rumiai の承認プロセスの対象である。defaults のコードは SHA-256 ハッシュ検証で承認され、Grant で許可された権限の範囲内でのみ動作する。defaults が特別扱いされることはない。
+defaults itself is subject to rumiai's approval process. Code in defaults is authorized with SHA-256 hash verification and operates only within the scope of the permissions granted by the grant. defaults are not treated specially.
 
-### 特化禁止
+### Specialization prohibited
 
-defaults は特定のユースケースに特化した仕組みを作らない。マルチエージェント専用 API、ナレッジ検索専用 API、スケジューラ専用 API のようなものは作らない。汎用的なプリミティブ（handler 呼び出し、イベント発行、データ読み書き、Flow 実行）を提供し、それらの組み合わせの結果として任意のユースケースが実現できるようにする。
+Defaults does not create a mechanism specialized for specific use cases. Do not create APIs dedicated to multi-agents, APIs dedicated to knowledge search, or APIs dedicated to schedulers. It provides general-purpose primitives (handler calls, event issuing, data reading/writing, Flow execution), and allows any use case to be realized as a result of their combination.
 
-## 3. アーキテクチャ
+## 3. Architecture
 
 ```
 rumiai (コンパイル済みバイナリ)
@@ -83,109 +85,109 @@ rumiai (コンパイル済みバイナリ)
       └── themes/                ← テーマ
 ```
 
-### defaults が持つもの
+### What defaults have
 
-handler（58個）。chat、agent、tool、prompt、ai、coding、memory、media、frontend の各カテゴリ。全ての handler は汎用的な操作基盤であり、具体的な中身の知識を持たない。
+handler (58 pieces). Categories: chat, agent, tool, prompt, ai, coding, memory, media, frontend. All handlers are general-purpose operation platforms and have no specific knowledge of their contents.
 
-Flow（3個）。simple_chat、agent_chat、planning_agent。処理パイプラインの骨格のみを定義し、具体的なモデル選択やプロンプト適用は Flow config と user_data に委譲する。
+Flow (3 pieces). simple_chat, agent_chat, planning_agent. Define only the skeleton of the processing pipeline, and delegate specific model selection and prompt application to Flow config and user_data.
 
-権限カタログ（20ドメイン）。chat、agent、tool、prompt、ai、file、terminal、git、memory、media、flow、config、net、frontend、event、audit、pack、secret、kernel。全パックが共通で使う標準語彙。
+Rights catalog (20 domains). chat, agent, tool, prompt, ai, file, terminal, git, memory, media, flow, config, net, frontend, event, audit, pack, secret, kernel. Standard vocabulary used in all packs.
 
-ドメインコード。chat store、agent loop、tool executor、prompt renderer、ai_client、context builder 等の内部ロジック。これらは handler から呼ばれ、直接外部に露出しない。
+domain code. Internal logic such as chat store, agent loop, tool executor, prompt renderer, ai_client, context builder, etc. These are called from the handler and are not exposed directly to the outside world.
 
-フロントエンドの枠。shell.html（スロット定義 + Asset ローダー + Widget レンダラー + メッセージディスパッチ）。具体的な UI コンポーネントは持たない。
+front end frame. shell.html (slot definition + Asset loader + Widget renderer + message dispatch). It does not have any specific UI components.
 
-通信レイヤー。http、stdio、uds の3つの transport。どれを使うかは設定で選択する。
+communication layer. Three transports: http, stdio, and uds. Choose which one to use in the settings.
 
-Widget ヘルパーライブラリ。rumi_widgets。バックエンドの handler や tool が Widget JSON を構築するための Python ヘルパー。使用は任意であり、直接 dict を返しても等価。
+Widget helper library. rumi_widgets. Python helper for backend handlers and tools to construct Widget JSON. Usage is optional and equivalent to returning a dict directly.
 
-### defaults が持たないもの
+### What defaults don't have
 
-具体的な UI コンポーネント（チャット画面、エージェントパネル、コードエディタ等）。これらは user_data のパックが Asset として提供する。
+Specific UI components (chat screen, agent panel, code editor, etc.). These are provided by the user_data pack as Assets.
 
-具体的なツール定義（file_read、bash、web_search 等）。これらは user_data/shared/tools/ に配置される。
+Specific tool definitions (file_read, bash, web_search, etc.). These are placed in user_data/shared/tools/.
 
-具体的なエージェント定義（coding_assistant、research_agent 等）。これらは user_data/shared/agents/ に配置される。
+Specific agent definitions (coding_assistant, research_agent, etc.). These are placed in user_data/shared/agents/.
 
-具体的なプロンプトテンプレート。これらは user_data/shared/prompts/ に配置される。
+Specific prompt template. These are placed in user_data/shared/prompts/.
 
-具体的な AI モデルプロファイル。これらは user_data/shared/ai_models/ に配置される。
+Specific AI model profile. These are placed in user_data/shared/ai_models/.
 
-テーマ定義。これらは user_data/themes/ に配置される。
+Theme definition. These are placed in user_data/themes/.
 
-レイアウト定義。これらは user_data/layout/ に配置される。
+Layout definition. These are placed in user_data/layout/.
 
-## 4. tool の context API
+## 4. tool context API
 
-tool は defaults が提供する仕組みの最も重要な消費者である。tool の handler.py に注入される context API は汎用プリミティブのみで構成される。特定のドメインに特化した API は存在しない。
+Tools are the most important consumers of the mechanisms provided by defaults. The context API injected into handler.py of tool consists only of general-purpose primitives. There are no domain-specific APIs.
 
-### 常に注入される（宣言不要）
+### Always injected (no declaration required)
 
-`context["call_handler"](handler_name, params)` は任意の handler を呼び出す。Grant で許可された権限の範囲内でのみ実行可能。呼び出し先 handler が要求する権限を呼び出し元が保持していなければ PermissionError で拒否される。これにより tool は chat 操作、agent 起動、prompt レンダリング、memory 読み書き、全てを同じプリミティブで行える。
+`context["call_handler"](handler_name, params)` calls any handler. Can only be executed within the scope of the permissions granted by the Grant. If the caller does not have the permission requested by the called handler, it will be denied with a PermissionError. This allows the tool to perform chat operations, agent startup, prompt rendering, memory reading and writing, all using the same primitive.
 
-`context["emit_event"](event_type, data)` はイベントを発行する。他の handler、Flow のイベントトリガー、フロントエンドの Asset がこのイベントを受信できる。発行側は受信者を知らない。
+`context["emit_event"](event_type, data)` publishes an event. Other handlers, Flow event triggers, and front-end Assets can receive this event. The issuer does not know the recipient.
 
-`context["wait_event"](event_type, timeout, filter)` はイベントを待つ。指定したイベントタイプが発行されるまでブロックする。タイムアウト指定可能。フィルタで条件を絞れる。emit_event と組み合わせることで、フロントエンドへのポップアップ表示→ユーザー応答待ち、tool 間の非同期通信、Flow トリガーのフック等が全て実現される。
+`context["wait_event"](event_type, timeout, filter)` waits for an event. Blocks until the specified event type is fired. Timeout can be specified. You can narrow down your conditions using filters. By combining with emit_event, popup display on the front end → waiting for user response, asynchronous communication between tools, hooking of Flow trigger, etc. are all realized.
 
-`context["emit_widget"](widget_json)` は Widget JSON を UI に送出する。フロントエンドの Widget レンダラーが描画する。
+`context["emit_widget"](widget_json)` sends Widget JSON to the UI. Drawn by the front-end Widget renderer.
 
-`context["cancel_check"]()` はキャンセル確認。ユーザーがキャンセルした場合に CancelledError を送出する。
+`context["cancel_check"]()` is cancellation confirmation. Raise CancelledError if the user cancels.
 
-`context["handler_config"]` は conditions.json の behavior_variants から注入された設定。
+`context["handler_config"]` is a setting injected from behavior_variants in conditions.json.
 
-`context["session"]` はセッション情報（session_id、workspace 等）。
+`context["session"]` is session information (session_id, workspace, etc.).
 
-### capability として宣言して注入されるもの
+### What is injected by declaring it as a capability
 
-`data_read` は user_data 配下のファイル読み取り。`context["data_read"](path)` でアクセスする。パスは user_data/ からの相対パス。
+`data_read` reads files under user_data. Access via `context["data_read"](path)`. The path is relative to user_data/.
 
-`data_write` は user_data 配下のファイル書き込み。`context["data_write"](path, content)` でアクセスする。
+`data_write` writes files under user_data. Access via `context["data_write"](path, content)`.
 
-`execute_flow` は Flow の起動。`context["execute_flow"](flow_id, input)` でアクセスする。Flow Engine 経由で実行される。
+`execute_flow` starts Flow. Access via `context["execute_flow"](flow_id, input)`. Executed via Flow Engine.
 
-`shell_exec` はシェルコマンド実行。`context["capability"]("shell_exec", {...})` でアクセスする。
+`shell_exec` executes a shell command. Access via `context["capability"]("shell_exec", {...})`.
 
-`browser_control` はブラウザ操作。`context["capability"]("browser_control", {...})` でアクセスする。
+`browser_control` is browser operation. Access via `context["capability"]("browser_control", {...})`.
 
-`container_exec` は Docker コンテナの起動・操作・破棄。`context["capability"]("container_exec", {...})` でアクセスする。display オプションで GUI 環境（Xvfb + VNC）を起動し、screenshot と input（click, type, key, scroll）で座標ベースの画面操作が可能。
+`container_exec` starts, operates, and destroys Docker containers. Access via `context["capability"]("container_exec", {...})`. The GUI environment (Xvfb + VNC) is started with the display option, and coordinate-based screen operations are possible with screenshot and input (click, type, key, scroll).
 
-`app_control` はホストアプリ操作。`context["capability"]("app_control", {...})` でアクセスする。
+`app_control` is host application operation. Access via `context["capability"]("app_control", {...})`.
 
-`http_request` は外部 HTTP 通信。`context["capability"]("http_request", {...})` でアクセスする。
+`http_request` is external HTTP communication. Access via `context["capability"]("http_request", {...})`.
 
-`llm_call` はツール内 LLM 呼び出し。`context["capability"]("llm_call", {...})` でアクセスする。
+`llm_call` is an in-tool LLM call. Access via `context["capability"]("llm_call", {...})`.
 
-`session_state` はセッション状態読み書き。`context["capability"]("session_state", {...})` でアクセスする。
+`session_state` is session state read/write. Access via `context["capability"]("session_state", {...})`.
 
-### なぜ特化 API を作らないか
+### Why not create specialized APIs?
 
-`context["chat"]` や `context["agent"]` のようなドメイン特化 API を作ると、新しいドメインが追加されるたびに context API を拡張する必要がある。これは defaults の設計原則「特化禁止」に反する。
+If you create a domain-specific API like `context["chat"]` or `context["agent"]`, you will need to extend the context API every time a new domain is added. This violates the defaults design principle of "no specialization."
 
-代わりに `call_handler` という単一の汎用ゲートウェイを提供する。chat 操作は `call_handler("defaults.chat.send", {...})` で行う。agent 起動は `call_handler("defaults.agent.execute", {...})` で行う。新しいパックが新しい handler を定義すれば、tool は同じ `call_handler` でそれを呼び出せる。context API の変更は不要。
+Instead, it provides a single general-purpose gateway called `call_handler`. Chat operations are performed using `call_handler("defaults.chat.send", {...})`. The agent is started using `call_handler("defaults.agent.execute", {...})`. If a new pack defines a new handler, the tool can call it with the same `call_handler`. No need to change context API.
 
-同様に、フロントエンドへの通知、ユーザーへの確認、定期実行の登録、全てが `emit_event` / `wait_event` / `execute_flow` の汎用プリミティブで実現される。これらのプリミティブ自体が変わることはほぼなく、その上に乗る handler と Flow が拡張される。
+Similarly, notification to the front end, confirmation to the user, and registration of periodic execution are all realized using the general-purpose primitives of `emit_event` / `wait_event` / `execute_flow`. These primitives themselves rarely change, and the handlers and Flows that sit on top of them are extended.
 
-## 5. フロントエンドの仕組み
+## 5. How the front end works
 
-### defaults が提供するもの
+### What defaults provide
 
-shell.html のみ。shell.html は以下の機能を持つ空の枠である。
+shell.html only. shell.html is an empty box with the following functionality:
 
-スロット定義。header、sidebar.left、main、panel.bottom、sidebar.right、statusbar、floating の7つのスロットを定義する。スロットは Asset が配置される場所であり、スロット自体は何も描画しない。
+slot definition. Define seven slots: header, sidebar.left, main, panel.bottom, sidebar.right, statusbar, and floating. Slots are where Assets are placed; slots themselves do not draw anything.
 
-Asset ローダー。`asset.register` メッセージを受け取ると、Asset の HTML ファイルを iframe で読み込み、指定されたスロットに配置する。Asset が何であるか（チャット画面か、ファイルツリーか、ダッシュボードか）は知らない。
+Asset loader. `asset.register` When a message is received, load the Asset's HTML file using an iframe and place it in the specified slot. I don't know what Asset is (chat screen, file tree, dashboard).
 
-Widget レンダラー。バックエンドから送出された Widget JSON を受け取り、テーマに従って HTML に変換する。Widget の型（Text、CodeBlock、Image 等）ごとにレンダリングロジックを持つ。テーマが Widget の見た目を決める。
+Widget renderer. Receives the Widget JSON sent out from the backend and converts it to HTML according to the theme. Each widget type (Text, CodeBlock, Image, etc.) has rendering logic. The theme determines the appearance of the widget.
 
-メッセージディスパッチ。バックエンドからのメッセージを `asset_id` で振り分け、該当する iframe に転送する。iframe からのメッセージをバックエンドに転送する。データの中身は解釈しない。
+message dispatch. Sort messages from the backend using `asset_id` and forward them to the corresponding iframe. Forward messages from the iframe to the backend. The contents of the data are not interpreted.
 
-### defaults が提供しないもの
+### What defaults don't provide
 
-チャット画面の HTML/JS/CSS。エージェントパネルの HTML/JS/CSS。コードエディタの HTML/JS/CSS。設定画面の HTML/JS/CSS。これらは全て user_data のパックが Asset として提供する。
+HTML/JS/CSS for chat screen. HTML/JS/CSS in agent panel. Code editor HTML/JS/CSS. HTML/JS/CSS for settings screen. All of these are provided by the user_data pack as Assets.
 
-### Asset の登録形式
+### Asset registration format
 
-Asset は UI に配置されるブロックの単位である。Asset は asset.yaml（メタデータ）、HTML/JS ファイル（WebView で描画される UI）、handler（バックエンドでメッセージを処理する Python）で構成される。
+Asset is a unit of blocks placed on the UI. Asset consists of asset.yaml (metadata), HTML/JS file (UI drawn by WebView), and handler (Python that processes messages on the backend).
 
 ```yaml
 asset_id: "my_pack.chat.messages"
@@ -204,51 +206,51 @@ tags: ["chat", "messages"]
 extensions: {}
 ```
 
-Asset は user_data/packs/{pack_id}/assets/ に配置される。パック承認後、Asset が自動的にフロントエンドに登録される。defaults のコード変更はゼロ。
+Asset is placed in user_data/packs/{pack_id}/assets/. After the pack is approved, the Asset is automatically registered in the front end. Zero code changes for defaults.
 
-同じ asset_id で登録すると上書きされる。これにより別パックが defaults パック（またはその他のパック）の Asset を差し替えることが可能。
+If you register with the same asset_id, it will be overwritten. This allows another pack to replace Assets in the defaults pack (or other packs).
 
 ### Widget
 
-Widget はバックエンドが「このデータをこう表示してほしい」と宣言するための統一プリミティブである。tool、prompt、ai_client、chat、agent、全てが同じ Widget 体系を使う。Widget は純粋なデータ（JSON）であり UI ライブラリではない。フロントエンドの shell.html 内の Widget レンダラーがこの JSON を受け取り、テーマに従って実際に描画する。
+Widget is a unified primitive that allows the backend to declare "this is how I want this data to be displayed." tool, prompt, ai_client, chat, agent, all use the same widget system. Widgets are pure data (JSON) and are not UI libraries. The Widget renderer in shell.html on the front end receives this JSON and actually draws it according to the theme.
 
-Widget の型は表示系（Text、CodeBlock、Diff、Image、Screenshot、Progress、Terminal、Table、Chart、FileTree、Markdown、Audio、Video、Map の14種）、コントロール系（Input、Button、Select、Toggle、Slider、Checkbox の6種）、レイアウト系（Container、Row、Column、Tabs、Collapsible、Card の6種）、ストリーミング系（Stream、Indicator の2種）、カスタム（Custom の1種）の計29種。
+Widget types are display type (14 types: Text, CodeBlock, Diff, Image, Screenshot, Progress, Terminal, Table, Chart, FileTree, Markdown, Audio, Video, Map), control type (Input, Button, Select, Toggle, Slider, Checkbox). 29 types in total: layout type (6 types: Container, Row, Column, Tabs, Collapsible, Card), streaming type (2 types: Stream, Indicator), and custom (1 type: Custom).
 
-Widget の詳細仕様は docs/widget.md に定義する。
+Detailed specifications of Widget are defined in docs/widget.md.
 
-## 6. 全てが user_data で実現される例
+## 6. Example where everything is realized with user_data
 
-以下は全て user_data のツール・エージェント・Flow・Asset として実現される。defaults は仕組みを提供するだけであり、これらの具体的な実装コードを持たない。
+All of the following are realized as tools, agents, flows, and assets of user_data. Defaults only provides a mechanism and does not have specific implementation code.
 
-### ナレッジ検索
+### Knowledge Search
 
-user_data/shared/tools/knowledge_search/ にベクトル検索ツールを配置する。user_data/shared/flows/ に Flow Modifier を配置し、user_input 到着時にこのツールを自動実行するステップを注入する。ツールの handler.py は `context["capability"]("llm_call", {...})` で埋め込み生成し、`context["data_read"]` でインデックスを読み、結果を返す。defaults の変更はゼロ。
+Place the vector search tool in user_data/shared/tools/knowledge_search/. Place Flow Modifier in user_data/shared/flows/ and inject a step to automatically run this tool when user_input arrives. The tool handler.py generates the embedding in `context["capability"]("llm_call", {...})`, reads the index in `context["data_read"]`, and returns the result. Zero changes to defaults.
 
-### マルチエージェント
+### Multi-agent
 
-user_data/shared/tools/agent_delegate/ にエージェント委譲ツールを配置する。ツールの handler.py は `context["call_handler"]("defaults.chat.create_conversation", {...})` で新しい会話を作り、`context["call_handler"]("defaults.agent.execute", {...})` でエージェントを起動し、結果を受け取って返す。組織構造が必要なら user_data/shared/agents/ に複数の agent.json を置き、委譲ツールが適切なエージェントを選択する。defaults の変更はゼロ。
+Place the agent delegation tool in user_data/shared/tools/agent_delegate/. The tool handler.py creates a new conversation in `context["call_handler"]("defaults.chat.create_conversation", {...})`, starts an agent in `context["call_handler"]("defaults.agent.execute", {...})`, receives and returns the results. If you need an organizational structure, place multiple agent.json files in user_data/shared/agents/ and the delegation tool will select the appropriate agent. Zero changes to defaults.
 
-### AI による会話履歴の自己編集
+### Self-editing conversation history with AI
 
-user_data/shared/tools/history_prune/ に履歴編集ツールを配置する。ツールの handler.py は `context["call_handler"]("defaults.chat.list_conversations", {...})` でメッセージを取得し、`context["data_write"]` で会話ファイルを更新する。agent.json の tools.enabled にこのツールを追加すれば、エージェントが自律的に履歴を整理できる。defaults の変更はゼロ。
+Place the history editing tool in user_data/shared/tools/history_prune/. The tool handler.py retrieves messages in `context["call_handler"]("defaults.chat.list_conversations", {...})` and updates the conversation file in `context["data_write"]`. By adding this tool to tools.enabled in agent.json, agents can organize their history autonomously. Zero changes to defaults.
 
-### Linux 環境での GUI 操作
+### GUI operation in Linux environment
 
-user_data/shared/tools/linux_env/ に環境操作ツール群を配置する。ツールの handler.py は `context["capability"]("container_exec", {"action": "create", "options": {"display": true}})` でコンテナを起動し、screenshot と input アクションで画面操作する。操作するモデルの選択は agent.json の model 設定で行う。defaults の変更はゼロ。
+Place environment manipulation tools in user_data/shared/tools/linux_env/. The tool handler.py starts the container with `context["capability"]("container_exec", {"action": "create", "options": {"display": true}})` and operates the screen with the screenshot and input actions. Select the model to operate using the model setting in agent.json. Zero changes to defaults.
 
-### 同意ポップアップ
+### Consent popup
 
-user_data/shared/tools/consent_check/ に同意確認ツールを配置する。ツールの handler.py は `context["emit_event"]("ui.popup.show", {"title": "免責事項", ...})` でポップアップを出し、`context["wait_event"]("ui.popup.response", timeout=60)` でユーザーの応答を待つ。agent.json の tools.enabled に追加し、エージェントのシステムプロンプトで「投資助言に該当する場合はこのツールを使え」と指示する。defaults の変更はゼロ。
+Place the consent confirmation tool in user_data/shared/tools/consent_check/. The tool handler.py displays a popup in `context["emit_event"]("ui.popup.show", {"title": "免責事項", ...})` and waits for the user's response in `context["wait_event"]("ui.popup.response", timeout=60)`. Add it to tools.enabled in agent.json and instruct the agent's system prompt to ``Use this tool when applicable for investment advice.'' Zero changes to defaults.
 
-### 定期実行
+### Regular execution
 
-user_data/shared/flows/ に schedule トリガー付きの Flow を配置する。Flow の trigger.type を "schedule"、trigger.config.cron を "*/30 * * * *" に設定する。Flow の handler.py が `ctx.call_block("agent.run", {...})` でエージェントを起動する。defaults の変更はゼロ。
+Place a Flow with a schedule trigger in user_data/shared/flows/. Set Flow's trigger.type to "schedule" and trigger.config.cron to "*/30 * * * *". Flow's handler.py starts the agent with `ctx.call_block("agent.run", {...})`. Zero changes to defaults.
 
-### 課金・クレジット管理
+### Billing/Credit Management
 
-user_data/shared/tools/billing_check/ に使用量確認ツールを配置する。ツールの handler.py は `context["call_handler"]("defaults.ai.usage", {...})` で使用量を取得し、`context["data_read"]("billing/plan.json")` でプラン定義を読み、残りクレジットを計算して返す。UI 表示が必要なら user_data/packs/ に billing Asset を持つパックを配置する。defaults の変更はゼロ。
+Place the usage check tool in user_data/shared/tools/billing_check/. The tool handler.py gets the usage amount in `context["call_handler"]("defaults.ai.usage", {...})`, reads the plan definition in `context["data_read"]("billing/plan.json")`, calculates the remaining credits, and returns it. If UI display is required, place a pack with billing Asset in user_data/packs/. Zero changes to defaults.
 
-## 7. defaults のファイル構成
+## 7. Defaults file structure
 
 ```
 ecosystem/defaults/
@@ -308,47 +310,46 @@ ecosystem/defaults/
             └── dependency-resolution.md
 ```
 
-## 8. defaults が提供する handler 一覧
+## 8. List of handlers provided by defaults
 
-handler 58個。全ての handler は汎用的な操作基盤であり、tool の `call_handler` から呼び出せる。詳細は README.md に定義する。
+58 handlers. All handlers are general-purpose operation bases and can be called from the tool `call_handler`. Details are defined in README.md.
 
-frontend（3個）: start、stop、emit。
+frontend (3 pieces): start, stop, emit.
 
-chat（8個）: send、stream、create_conversation、list_conversations、branch、search、stop、regenerate。
+chat (8): send, stream, create_conversation, list_conversations, branch, search, stop, regenerate.
 
-agent（6個）: execute、approve、reject、cancel、status、plan。
+agent (6 pieces): execute, approve, reject, cancel, status, plan.
 
-coding（12個）: file_read、file_write、file_create、file_delete、file_search、file_list、terminal_exec、terminal_stream、git_status、git_diff、git_commit、git_push。
+coding (12 pieces): file_read, file_write, file_create, file_delete, file_search, file_list, terminal_exec, terminal_stream, git_status, git_diff, git_commit, git_push.
 
-ai（9個）: complete、stream、models、providers、embed、image_gen、image_analyze、transcribe、tts。
+ai (9 pieces): complete, stream, models, providers, embed, image_gen, image_analyze, transcribe, tts.
 
-tool（5個）: invoke、list、schema、mcp_connect、mcp_list。
+tools (5 pieces): invoke, list, schema, mcp_connect, mcp_list.
 
-prompt（4個）: render、list、create、system。
+prompt (4): render, list, create, system.
 
-memory（5個）: store、recall、project_context、vector_store、vector_query。
+memory (5 pieces): store, recall, project_context, vector_store, vector_query.
 
-media（6個）: image_read、image_transform、doc_parse、clipboard_read、clipboard_write、screenshot。
+media (6 pieces): image_read, image_transform, doc_parse, clipboard_read, clipboard_write, screenshot.
 
-## 9. 他のドキュメントとの関係
+## 9. Relationship with other documents
 
-本ドキュメントは defaults の全体像を定義する。各ドメインの詳細設計は以下のドキュメントに記載する。
+This document defines the overall picture of defaults. The detailed design of each domain is described in the following documents.
 
-agent.md はエージェントループ、agent.json 仕様、コンテキスト管理、サブエージェント、プランニングの詳細を定義する。
+agent.md defines the agent loop, agent.json specification, context management, subagents, and planning details.
 
-ai_client.md は LLM 通信、プロバイダ抽象化、二重バリア変換、StandardMessage/StandardResponse 仕様を定義する。
+ai_client.md defines LLM communication, provider abstraction, double barrier transformation, and StandardMessage/StandardResponse specifications.
 
-chat.md は会話データ形式、RumiMessage スキーマ、会話分岐、store API を定義する。
+chat.md defines conversation data format, RumiMessage schema, conversation branching, and store API.
 
-flow.md は Flow Engine、handler.py 仕様、ノードグラフ、トリガーシステム、Block 契約を定義する。
+flow.md defines the Flow Engine, handler.py specification, node graph, trigger system, and Block contract.
 
-prompt.md はプロンプトテンプレート、変数展開、Python 拡張を定義する。
+prompt.md defines prompt templates, variable expansion, and Python extensions.
 
-tool.md はツール定義形式、context API、段階的開示、MCP 対応、Pack 連携を定義する。
+tool.md defines tool definition format, context API, gradual disclosure, MCP support, and Pack coordination.
 
-frontend.md はフロントエンドアーキテクチャ、Asset 形式、通信プロトコル、スロットモデルを定義する。
+frontend.md defines the frontend architecture, Asset format, communication protocol, and slot model.
 
-widget.md は Widget 型一覧、JSON 形式、テーマ連携を定義する。
+widget.md defines the widget type list, JSON format, and theme coordination.
 
-theme.md はテーマ構造、トークン、アニメーション、Widget 描画スタイルを定義する。
-```
+theme.md defines theme structure, tokens, animations, and widget drawing styles.

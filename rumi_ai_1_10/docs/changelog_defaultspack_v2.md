@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./changelog_defaultspack_v2.md) | [JP](./i18n/ja/changelog_defaultspack_v2.md) | [KR](./i18n/ko/changelog_defaultspack_v2.md) | [CN](./i18n/zh-cn/changelog_defaultspack_v2.md)
+<!-- docs-i18n-links:end -->
+
 # Changelog: defaultspack v2
 
 ## Added

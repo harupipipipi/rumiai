@@ -1,17 +1,21 @@
+<!-- docs-i18n-links:start -->
+[EN](./flow_graph_editor_todo.md) | [JP](./i18n/ja/flow_graph_editor_todo.md) | [KR](./i18n/ko/flow_graph_editor_todo.md) | [CN](./i18n/zh-cn/flow_graph_editor_todo.md)
+<!-- docs-i18n-links:end -->
+
 # Flow Graph Editor TODO
 
-この TODO は `rumi_start` / port contracts / basepack bootstrap の導入後に残る発展課題を整理したものです。
+This TODO organizes the development issues that remain after the introduction of `rumi_start` / port contracts / basepack bootstrap.
 
 ## Next
 
-- `rumi_graph` から実ランタイム用 `steps` へのコンパイル精度を上げる
-- `depends_on` と graph branching の対応関係を整理する
-- port contracts を Pack manifest から自動供給できるようにする
-- `basepack` を bootstrap profile から独立 runtime pack へ育てるか再検討する
-- graph editor の UI snapshot / visual regression テストを追加する
+- Improve compilation accuracy from `rumi_graph` to `steps` for real runtime
+- Organize the correspondence between `depends_on` and graph branching
+- Allow port contracts to be automatically provided from Pack manifest
+- Reconsider whether to grow `basepack` from bootstrap profile to independent runtime pack.
+- Add UI snapshot/visual regression tests for graph editor
 
 ## Notes
 
-- いまの `basepack` は安全のため `defaultspack` を target にした bootstrap profile
-- いまの execution は viewer 内シミュレーションで、`rumi_start` から到達可能な step を順に流す
-- 既存ランタイム互換を保つため、YAML には `steps` と `rumi_graph` を併記している
+- The current `basepack` is a bootstrap profile that targets `defaultspack` for safety.
+- The current execution is a simulation in the viewer, which sequentially flows the reachable steps from `rumi_start`
+- To maintain compatibility with existing runtimes, `steps` and `rumi_graph` are included in YAML.

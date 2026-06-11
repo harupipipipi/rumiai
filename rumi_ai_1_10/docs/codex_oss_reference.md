@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./codex_oss_reference.md) | [JP](./i18n/ja/codex_oss_reference.md) | [KR](./i18n/ko/codex_oss_reference.md) | [CN](./i18n/zh-cn/codex_oss_reference.md)
+<!-- docs-i18n-links:end -->
+
 # Codex OSS Reference Notes
 
 OpenAI Codex OSS was reviewed as a reference for Rumi's coding-tool surface.

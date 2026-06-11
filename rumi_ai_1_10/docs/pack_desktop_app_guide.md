@@ -1,20 +1,24 @@
-# Rumi AI OS — Pack デスクトップアプリ開発ガイド
+<!-- docs-i18n-links:start -->
+[EN](./pack_desktop_app_guide.md) | [JP](./i18n/ja/pack_desktop_app_guide.md) | [KR](./i18n/ko/pack_desktop_app_guide.md) | [CN](./i18n/zh-cn/pack_desktop_app_guide.md)
+<!-- docs-i18n-links:end -->
 
-最終更新: 2026-03-28
+# Rumi AI OS — Pack Desktop App Development Guide
 
-本ドキュメントは Rumi AI OS の Pack に **デスクトップアプリ**（独立したデスクトップウィンドウで動作するアプリケーション）を組み込むための開発者向けガイドです。ecosystem.json の設定方法、pack-shell バイナリの使い方、セキュリティモデル、ショートカット生成までを網羅します。
+Last updated: 2026-03-28
+
+This document is a guide for developers to integrate **desktop apps** (applications that run in separate desktop windows) into Rumi AI OS Packs. It covers how to set up ecosystem.json, how to use pack-shell binaries, the security model, and shortcut generation.
 
 ---
 
-## 1. デスクトップアプリ Pack とは
+## 1. What is Desktop App Pack?
 
-### 1.1 概要
+### 1.1 Overview
 
-Pack デスクトップアプリは、Rumi AI OS の **capability ベースの権限システム** を通じて、独立したデスクトップウィンドウでアプリケーションを動作させる仕組みです。
+Pack desktop apps allow applications to run in separate desktop windows through Rumi AI OS's **capability-based permission system**.
 
-Rumi Viewer（Tauri ベースの WebView UI）内にフロントエンドを表示する `viewer:display` capability とは異なり、`desktop_app.execute` capability は **OS ネイティブのウィンドウ** でアプリを起動します。tkinter, Qt, Electron, Tauri など任意のGUIフレームワークが使えます。
+Unlike the `viewer:display` capability, which displays the frontend inside the Rumi Viewer (Tauri-based WebView UI), the `desktop_app.execute` capability launches the app in an **OS-native window**. You can use any GUI framework such as tkinter, Qt, Electron, Tauri, etc.
 
-### 1.2 アーキテクチャ
+### 1.2 Architecture
 
 ```
 ユーザー
@@ -43,27 +47,27 @@ Rumi Viewer（Tauri ベースの WebView UI）内にフロントエンドを表�
           └── POST /api/desktop/token (トークン発行)
 ```
 
-### 1.3 No Favoritism 原則
+### 1.3 No Favoritism Principle
 
-デスクトップアプリ対応も他の capability と同じパターンで実装されています。`core_desktop_capability` は core_pack として Kernel に同梱されており、`desktop_app.execute` permission を管理します。サードパーティ Pack がこの capability を使うには、他の capability と同様に Grant（認可）が必要です。
-
----
-
-## 2. 前提条件
-
-デスクトップアプリ Pack を開発・実行するには、以下が必要です:
-
-- **Rumi AI OS** がインストール・起動可能な環境
-- **pack-shell バイナリ** がビルド済みであること（後述のビルド手順を参照）
-- **Python 3.11 以上**（サンプルアプリの場合。アプリ自体は任意の言語で実装可能）
+Desktop app support is also implemented using the same pattern as other capabilities. `core_desktop_capability` is included in the Kernel as core_pack and manages `desktop_app.execute` permissions. Third-party packs need a grant to use this capability, just like any other capability.
 
 ---
 
-## 3. ecosystem.json の desktop_app セクション
+## 2. Prerequisites
 
-Pack にデスクトップアプリ機能を追加するには、`ecosystem.json` に `desktop_app` セクションを追加します。
+To develop and run the Desktop App Pack, you will need:
 
-### 3.1 設定例
+- Environment where **Rumi AI OS** can be installed and started
+- **pack-shell binary** has been built (see build instructions below)
+- **Python 3.11 or higher** (for sample apps. The app itself can be implemented in any language)
+
+---
+
+## 3. desktop_app section of ecosystem.json
+
+To add desktop app functionality to your pack, add the `desktop_app` section to `ecosystem.json`.
+
+### 3.1 Setting example
 
 ```json
 {
@@ -88,34 +92,34 @@ Pack にデスクトップアプリ機能を追加するには、`ecosystem.json
 }
 ```
 
-### 3.2 フィールド一覧
+### 3.2 Field list
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |-----------|-----|------|------|
-| `command` | string | ✅ | 起動コマンド。pack-shell の `--command` 引数としてアプリに渡される |
-| `working_dir` | string | — | アプリの作業ディレクトリ。空文字列の場合は Pack ディレクトリが使用される |
-| `env` | dict | — | アプリに追加で渡す環境変数。`RUMI_TOKEN`, `RUMI_PORT`, `RUMI_PACK_ID` は pack-shell が自動設定するため不要 |
-| `capabilities` | list | — | 要求する capability のリスト |
-| `window` | dict | — | ウィンドウ設定。`title`（string）でアプリ名、`width`/`height`（int）でサイズを指定。ショートカット名にも使用される |
-| `platforms` | list | — | サポートするプラットフォーム。`"darwin"`, `"win32"`, `"linux"` の組み合わせ |
+| `command` | string | ✅ | Start command. Passed to the app as the `--command` argument of pack-shell |
+| `working_dir` | string | — | Working directory of the app. If empty string, Pack directory will be used |
+| `env` | dict | — | Additional environment variables to pass to the app. `RUMI_TOKEN`, `RUMI_PORT`, `RUMI_PACK_ID` are not necessary as pack-shell automatically configures them |
+| `capabilities` | list | — | List of requested capabilities |
+| `window` | dict | — | Window settings. Specify the app name with `title` (string) and the size with `width`/`height` (int). Also used for shortcut names |
+| `platforms` | list | — | Supported platforms. Combination of `"darwin"`, `"win32"`, `"linux"` |
 
-### 3.3 スキーマ検証
+### 3.3 Schema validation
 
-Kernel の `PackImporter` は `desktop_app` セクションを以下のルールで検証します:
+The Kernel's `PackImporter` validates the `desktop_app` section with the following rules:
 
-- `desktop_app` が存在する場合、dict でなければならない
-- `desktop_app.command` は必須で、空でない文字列でなければならない
-- `working_dir` は string、`env` は dict、`capabilities` は list、`window` は dict、`platforms` は list でなければならない（いずれも省略可能）
+- If `desktop_app` is present, it must be a dict
+- `desktop_app.command` is required and must be a non-empty string
+- `working_dir` must be string, `env` must be dict, `capabilities` must be list, `window` must be dict, and `platforms` must be list (all can be omitted)
 
-検証に失敗すると、Pack のインポート時に警告が出力され、Pack は登録されません。
+If validation fails, a warning will be printed when importing the Pack, and the Pack will not be registered.
 
 ---
 
 ## 4. desktop_app.execute capability
 
-### 4.1 概要
+### 4.1 Overview
 
-`desktop_app.execute` は `core_desktop_capability` Pack が提供する capability です。デスクトップアプリの起動・停止・ステータス確認を制御します。
+`desktop_app.execute` is a capability provided by `core_desktop_capability` Pack. Controls starting, stopping, and checking the status of desktop apps.
 
 ### 4.2 manifest.json
 
@@ -159,34 +163,34 @@ Kernel の `PackImporter` は `desktop_app` セクションを以下のルール
 }
 ```
 
-### 4.3 dangerous フラグ
+### 4.3 dangerous flag
 
-`desktop_app.execute` は `dangerous: true` に設定されています。これは、デスクトップアプリがホスト OS 上で **任意のプロセスを起動する** ため、高い権限を持つことを意味します。Docker 隔離された Python Function とは異なり、デスクトップアプリはホストのファイルシステムやネットワークに直接アクセスできます。
+`desktop_app.execute` is set to `dangerous: true`. This means that the desktop app has high privileges because it launches arbitrary processes on the host OS. Unlike Docker-isolated Python Functions, desktop apps have direct access to the host's file system and network.
 
-そのため、ユーザーは Pack をインストールする際に、`desktop_app.execute` の Grant を明示的に承認する必要があります。
+Therefore, users must explicitly authorize the `desktop_app.execute` grant when installing the Pack.
 
 ### 4.4 action
 
-| action | 説明 |
+| action | description |
 |--------|------|
-| `launch` | アプリを起動し、トークンを発行する（デフォルト） |
-| `stop` | 起動中のアプリを停止する |
-| `status` | アプリの実行状態を返す |
+| `launch` | Start the app and issue a token (default) |
+| `stop` | Stop running apps |
+| `status` | Returns the running status of the app |
 
 ---
 
-## 5. pack-shell の使い方
+## 5. How to use pack-shell
 
-### 5.1 ビルド
+### 5.1 Build
 
 ```bash
 cd pack-shell
 cargo build --release
 ```
 
-ビルド成果物: `target/release/pack-shell`
+Build artifacts: `target/release/pack-shell`
 
-クロスコンパイル:
+Cross compilation:
 
 ```bash
 # macOS (Apple Silicon)
@@ -202,34 +206,34 @@ cargo build --release --target x86_64-pc-windows-msvc
 cargo build --release --target x86_64-unknown-linux-gnu
 ```
 
-### 5.2 CLI リファレンス
+### 5.2 CLI Reference
 
-pack-shell にはサブコマンド `run` と `version` があります。
+pack-shell has subcommands `run` and `version`.
 
-#### run サブコマンド
+#### run subcommand
 
 ```
 pack-shell run <PACK_ID> --command <COMMAND> [OPTIONS]
 ```
 
-| 引数 | 型 | 必須 | デフォルト | 説明 |
+| Arguments | Type | Required | Default | Description |
 |------|-----|------|-----------|------|
-| `<PACK_ID>` | 位置引数 | ✅ | — | 起動する Pack の ID |
-| `--command` | string | ✅ | — | 実行するコマンド（例: `"python app.py"`） |
-| `--api-token` | string | ✅ | 環境変数 `RUMI_API_TOKEN` | Kernel API の認証トークン |
-| `--port` | u16 | — | `8765` | Kernel API のポート番号 |
-| `--kernel-cmd` | string | — | `"python -m rumi_ai"` | Kernel が未起動の場合に起動するコマンド |
-| `--timeout` | u64 | — | `60` | Kernel 起動待ちのタイムアウト（秒） |
-| `--working-dir` | string | — | なし | アプリの作業ディレクトリ |
+| `<PACK_ID>` | Positional argument | ✅ | — | ID of the Pack to launch |
+| `--command` | string | ✅ | — | Command to execute (e.g. `"python app.py"`) |
+| `--api-token` | string | ✅ | Environment variables `RUMI_API_TOKEN` | Kernel API authentication token |
+| `--port` | u16 | — | `8765` | Kernel API port number |
+| `--kernel-cmd` | string | — | `"python -m rumi_ai"` | Command to start if Kernel is not started |
+| `--timeout` | u64 | — | `60` | Timeout for waiting for Kernel startup (seconds) |
+| `--working-dir` | string | — | None | App working directory |
 
-#### version サブコマンド
+#### version subcommand
 
 ```bash
 pack-shell version
 # 出力: pack-shell 0.1.0
 ```
 
-### 5.3 実行例
+### 5.3 Execution example
 
 ```bash
 # 基本的な使い方
@@ -245,43 +249,43 @@ pack-shell run my_desktop_pack \
   --working-dir /path/to/workdir
 ```
 
-### 5.4 実行フロー
+### 5.4 Execution flow
 
-pack-shell は以下の手順でデスクトップアプリを起動します:
+pack-shell launches the desktop app as follows:
 
-1. `GET /health` で Kernel の稼働状態を確認
-2. Kernel が応答しない場合、`--kernel-cmd` でカーネルを起動し、ヘルスチェックをポーリング（1秒間隔、`--timeout` まで）
-3. `POST /api/desktop/token` で一時トークンを取得
-4. 環境変数 `RUMI_TOKEN`, `RUMI_PORT`, `RUMI_PACK_ID` を設定してアプリプロセスを起動
-5. アプリプロセスの終了を待ち、exit code を返す
+1. Check the operating status of Kernel with `GET /health`
+2. If Kernel is not responding, start kernel with `--kernel-cmd` and poll health check (1 second interval, up to `--timeout`)
+3. Get temporary token at `POST /api/desktop/token`
+4. Set environment variables `RUMI_TOKEN`, `RUMI_PORT`, `RUMI_PACK_ID` and start the app process
+5. Wait for the app process to end and return the exit code
 
-### 5.5 環境変数
+### 5.5 Environment variables
 
-pack-shell が読む環境変数:
+Environment variables read by pack-shell:
 
-| 変数 | 説明 |
+| Variable | Description |
 |------|------|
-| `RUMI_API_TOKEN` | `--api-token` の代替。CLI 引数が優先される |
+| `RUMI_API_TOKEN` | Replacement of `--api-token`. CLI arguments take precedence |
 
-`DesktopAppManager` 経由の起動は `RUMI_API_TOKEN` を環境変数で供給する契約に固定されています。
+Launching via `DesktopAppManager` is fixed to a contract that supplies `RUMI_API_TOKEN` as an environment variable.
 
-pack-shell がアプリに渡す環境変数:
+Environment variables that pack-shell passes to the app:
 
-| 変数 | 説明 |
+| Variable | Description |
 |------|------|
-| `RUMI_TOKEN` | Kernel が発行した一時トークン |
-| `RUMI_PORT` | Kernel API のポート番号 |
-| `RUMI_PACK_ID` | 対象 Pack の ID |
+| `RUMI_TOKEN` | Temporary token issued by Kernel |
+| `RUMI_PORT` | Kernel API port number |
+| `RUMI_PACK_ID` | Target Pack ID |
 
 ---
 
-## 6. API リファレンス
+## 6. API Reference
 
 ### 6.1 POST /api/desktop/token
 
-デスクトップアプリ用の一時トークンを発行します。`core_desktop_capability` Pack が提供する API ルートです。
+Issue temporary tokens for desktop apps. `core_desktop_capability` API route provided by Pack.
 
-#### リクエスト
+#### Request
 
 ```json
 {
@@ -289,11 +293,11 @@ pack-shell がアプリに渡す環境変数:
 }
 ```
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |-----------|-----|------|------|
-| `pack_id` | string | ✅ | トークンを発行する対象の Pack ID |
+| `pack_id` | string | ✅ | Pack ID for which the token is issued |
 
-#### レスポンス（成功）
+#### Response (success)
 
 ```json
 {
@@ -303,13 +307,13 @@ pack-shell がアプリに渡す環境変数:
 }
 ```
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |-----------|-----|------|
-| `token` | string | 短期アクセストークン |
-| `port` | integer | Kernel API のポート番号（デフォルト: 8765） |
-| `expires_in` | integer | トークンの有効期限（秒。デフォルト: 3600） |
+| `token` | string | Short-term access token |
+| `port` | integer | Kernel API port number (default: 8765) |
+| `expires_in` | integer | Token expiration time (seconds; default: 3600) |
 
-#### レスポンス（エラー）
+#### Response (Error)
 
 ```json
 {
@@ -318,32 +322,32 @@ pack-shell がアプリに渡す環境変数:
 }
 ```
 
-| status_code | 説明 |
+| status_code | description |
 |------------|------|
-| 400 | `pack_id` が未指定または無効 |
-| 403 | `desktop_app.execute` の Grant がない |
-| 500 | 内部エラー |
-| 503 | Desktop capability handler が利用不可 |
+| 400 | `pack_id` unspecified or invalid |
+| 403 | No Grant for `desktop_app.execute` |
+| 500 | Internal error |
+| 503 | Desktop capability handler unavailable |
 
 ---
 
-## 7. ショートカット生成
+## 7. Shortcut generation
 
 ### 7.1 DesktopAppManager
 
-`desktop_app_manager.py` の `DesktopAppManager` クラスが Pack デスクトップアプリのライフサイクルを管理します。
+The `DesktopAppManager` classes in `desktop_app_manager.py` manage the lifecycle of Pack desktop apps.
 
-#### 主要メソッド
+#### Main methods
 
-| メソッド | 説明 |
+| Method | Description |
 |--------|------|
-| `register_app(pack_id, desktop_app_config, pack_dir)` | Pack のデスクトップアプリを登録し、プラットフォーム別ショートカットを生成する |
-| `unregister_app(pack_id)` | 登録を解除し、ショートカットを削除する |
-| `launch_app(pack_id)` | 登録済みアプリを起動する |
-| `stop_app(pack_id)` | 起動中のアプリを SIGTERM で停止する |
-| `list_registered_apps()` | 登録済みアプリの一覧を返す |
+| `register_app(pack_id, desktop_app_config, pack_dir)` | Register the Pack desktop app and generate platform-specific shortcuts |
+| `unregister_app(pack_id)` | Unsubscribe and delete shortcuts |
+| `launch_app(pack_id)` | Start a registered app |
+| `stop_app(pack_id)` | Stop a running application with SIGTERM |
+| `list_registered_apps()` | Return list of registered apps |
 
-#### register_app の戻り値
+#### Return value of register_app
 
 ```json
 {
@@ -352,73 +356,73 @@ pack-shell がアプリに渡す環境変数:
 }
 ```
 
-### 7.2 プラットフォーム別ショートカット
+### 7.2 Platform shortcuts
 
-`register_app` はプラットフォームに応じたショートカットを自動生成します:
+`register_app` automatically generates platform-specific shortcuts:
 
-| プラットフォーム | 形式 | 配置先 |
+| Platform | Format | Location |
 |---------------|------|--------|
-| macOS (`darwin`) | `.app` bundle（Info.plist + launch スクリプト） | `~/Applications/<AppName>.app` |
-| Windows (`win32`) | `.lnk` ショートカット（PowerShell で生成） | `user_data/apps/<AppName>.lnk` |
-| Linux | `.desktop` ファイル | `~/.local/share/applications/rumi-<AppName>.desktop` |
+| macOS (`darwin`) | `.app` bundle (Info.plist + launch script) | `~/Applications/<AppName>.app` |
+| Windows (`win32`) | `.lnk` Shortcut (generated with PowerShell) | `user_data/apps/<AppName>.lnk` |
+| Linux | `.desktop` File | `~/.local/share/applications/rumi-<AppName>.desktop` |
 
-ショートカットの `AppName` は `desktop_app.window.title` から取得されます（未指定の場合は `pack_id`）。
+The shortcut `AppName` is taken from `desktop_app.window.title` (or `pack_id` if unspecified).
 
-### 7.3 pack-shell バイナリの検索
+### 7.3 Searching for pack-shell binaries
 
-`DesktopAppManager` は以下の順で pack-shell バイナリを検索します:
+`DesktopAppManager` searches for pack-shell binaries in the following order:
 
-1. 環境変数 `RUMI_PACK_SHELL_PATH` に指定されたパス
-2. システムの `PATH` から `pack-shell` を検索
+1. Path specified in environment variable `RUMI_PACK_SHELL_PATH`
+2. Search `pack-shell` from `PATH` in the system
 
-見つからない場合、`register_app` はエラーを返します。
-
----
-
-## 8. セキュリティ
-
-### 8.1 なぜ dangerous なのか
-
-`desktop_app.execute` は以下の理由で `dangerous: true` に設定されています:
-
-- デスクトップアプリは **ホスト OS 上で直接実行される**（Docker 隔離なし）
-- ファイルシステム、ネットワーク、他のプロセスへのアクセスが可能
-- `command` フィールドに指定された任意のコマンドが実行される
-
-### 8.2 ユーザー承認の重要性
-
-Pack は悪意前提で設計されています。デスクトップアプリの `command` がどのようなプログラムを起動するか、ユーザーは必ず確認してから Grant を承認してください。
-
-### 8.3 トークンの有効期限
-
-`POST /api/desktop/token` で発行されるトークンは短期間（デフォルト 3600 秒 = 1 時間）で失効します。`max_token_lifetime` は `grant_config` で制御されます。
-
-`allowed_packs` は fail-closed です。空配列 `[]`、未指定、または不正な型はどの Pack も許可しません。全 Pack を明示的に許可する必要がある検証用途では `["*"]` を指定できますが、通常は起動対象の Pack ID を列挙してください。
-
-### 8.4 推奨事項
-
-- 信頼できるソースからの Pack のみインストールする
-- `desktop_app.command` の内容を確認してから Grant を承認する
-- 不要になった Pack は `unregister_app` でショートカットを削除する
-- `allowed_packs` を設定して、特定の Pack にのみ Grant を許可する
+If not found, `register_app` returns an error.
 
 ---
 
-## 9. 開発フロー
+## 8. Security
 
-### 9.1 ステップバイステップ
+### 8.1 Why is it dangerous?
 
-1. **アプリを開発する**: tkinter, Qt, Electron など任意のフレームワークでデスクトップアプリを作成
-2. **環境変数に対応する**: アプリ内で `RUMI_TOKEN`, `RUMI_PORT`, `RUMI_PACK_ID` を読み取り、Kernel API と通信するコードを実装
-3. **pack-shell でテストする**: `pack-shell run <PACK_ID> --command "python app.py" --working-dir <DIR> --api-token <TOKEN>` で動作確認
-4. **ecosystem.json に desktop_app を追加する**: `command`, `window`, `platforms` 等を設定
-5. **Pack をインストールする**: `ecosystem/` に配置するか、PackImporter でインポート
-6. **Grant を承認する**: GrantManager で `desktop_app.execute` の Grant を設定
-7. **ショートカットを生成する**: DesktopAppManager の `register_app` でプラットフォーム別ショートカットを自動生成
+`desktop_app.execute` is set to `dangerous: true` for the following reasons:
 
-### 9.2 ローカル開発のヒント
+- Desktop apps run directly on the host OS (no Docker isolation)
+- Can access the file system, network, and other processes
+- Any command specified in the `command` field is executed.
 
-pack-shell を使わずに、環境変数を手動で設定してアプリを直接起動することもできます:
+### 8.2 The importance of user approval
+
+Pack is designed with malicious intent. Users should be sure to check what programs the desktop app `command` launches before approving the grant.
+
+### 8.3 Token expiration time
+
+Tokens issued with `POST /api/desktop/token` expire after a short period of time (default 3600 seconds = 1 hour). `max_token_lifetime` is controlled by `grant_config`.
+
+`allowed_packs` is fail-closed. Empty arrays `[]`, unspecified, or illegal types are not allowed by any Pack. You can specify `["*"]` for validation purposes where you need to explicitly allow all Packs, but in general you should list the Pack IDs you want to launch.
+
+### 8.4 Recommendations
+
+- Only install packs from trusted sources
+- Check the contents of `desktop_app.command` before approving the grant
+- For packs that are no longer needed, delete the shortcuts with `unregister_app`
+- Set `allowed_packs` to allow grants only to specific packs
+
+---
+
+## 9. Development flow
+
+### 9.1 Step by Step
+
+1. **Develop an app**: Create a desktop app using any framework such as tkinter, Qt, Electron, etc.
+2. **Supports environment variables**: Implement code to read `RUMI_TOKEN`, `RUMI_PORT`, `RUMI_PACK_ID` and communicate with Kernel API within the app.
+3. **Test with pack-shell**: Confirm operation with `pack-shell run <PACK_ID> --command "python app.py" --working-dir <DIR> --api-token <TOKEN>`
+4. **Add desktop_app to ecosystem.json**: Set `command`, `window`, `platforms` etc.
+5. **Install the Pack**: Place it in `ecosystem/` or import it with PackImporter
+6. **Approve Grant**: Set the grant for `desktop_app.execute` in GrantManager
+7. **Generate shortcuts**: Automatically generate platform-specific shortcuts with `register_app` of DesktopAppManager
+
+### 9.2 Local development tips
+
+You can also set environment variables manually and launch the app directly without using pack-shell:
 
 ```bash
 export RUMI_TOKEN="dev-token-for-testing"
@@ -427,7 +431,7 @@ export RUMI_PACK_ID="my_desktop_pack"
 python app.py
 ```
 
-Kernel が起動していれば `GET /health` で接続を確認できます:
+Once the Kernel is running, you can check the connection with `GET /health`:
 
 ```bash
 curl http://localhost:8765/health
@@ -436,41 +440,41 @@ curl http://localhost:8765/health
 
 ---
 
-## 10. トラブルシューティング
+## 10. Troubleshooting
 
-### pack-shell が Kernel に接続できない
+### pack-shell cannot connect to Kernel
 
-- Kernel が起動しているか確認: `curl http://localhost:8765/health`
-- ポート番号が正しいか確認: デフォルトは `8765`
-- `--kernel-cmd` で正しい Kernel 起動コマンドが指定されているか確認
+- Check if Kernel is running: `curl http://localhost:8765/health`
+- Check if the port number is correct: Default is `8765`
+- Check if the correct Kernel startup command is specified in `--kernel-cmd`
 
-### トークン取得で 403 エラー
+### 403 error when getting token
 
-- `desktop_app.execute` の Grant が設定されているか確認
-- `pack_id` が正しいか確認
-- API トークン（`--api-token` または `RUMI_API_TOKEN`）が有効か確認
+- Check if Grant of `desktop_app.execute` is set.
+- Check if `pack_id` is correct
+- Check if the API token (`--api-token` or `RUMI_API_TOKEN`) is valid
 
-### ショートカットが生成されない
+### Shortcut not generated
 
-- pack-shell バイナリが見つかるか確認: `RUMI_PACK_SHELL_PATH` を設定するか、`PATH` に追加
-- `register_app` の戻り値を確認: `{"success": false, "error": "..."}` にエラーメッセージが含まれる
+- Check if pack-shell binary is found: set `RUMI_PACK_SHELL_PATH` or add to `PATH`
+- Check the return value of `register_app`: `{"success": false, "error": "..."}` contains an error message
 
-### アプリが起動しない
+### App does not start
 
-- `desktop_app.command` が正しいコマンドか確認: シェルで直接実行してみる
-- `working_dir` が正しいディレクトリを指しているか確認
-- 必要な依存ライブラリがインストールされているか確認
+- Check if `desktop_app.command` is the correct command: try executing it directly in the shell
+- Check that `working_dir` points to the correct directory
+- Check if the required dependent libraries are installed
 
-### macOS で .app が開けない
+### Can't open .app on macOS
 
-- ゲートキーパーにブロックされている場合: 「システム環境設定 > セキュリティとプライバシー」から許可
-- launch スクリプトに実行権限があるか確認: `chmod +x ~/Applications/MyApp.app/Contents/MacOS/launch`
+- If blocked by gatekeeper: Allow from "System Preferences > Security & Privacy"
+- Check if the launch script has execution permission: `chmod +x ~/Applications/MyApp.app/Contents/MacOS/launch`
 
 ---
 
-## 関連ドキュメント
+## Related documents
 
-- [Pack 開発ガイド](pack-development.md) — Pack の全体像
-- [多言語 Pack 開発ガイド](multilang_pack_guide.md) — Python 以外の言語で Pack を開発する方法
-- [サンプルコード: Desktop App Pack](examples/desktop_app_pack/) — デスクトップアプリ Pack のテンプレート
-- [pack-shell README](../../pack-shell/README.md) — pack-shell バイナリの詳細
+- [Pack Development Guide](./pack-development.md) — Overview of Pack
+- [Multilingual Pack Development Guide](./multilang_pack_guide.md) — How to develop Packs in languages other than Python
+- [Sample code: Desktop App Pack](examples/desktop_app_pack/) — Desktop App Pack template
+- [pack-shell README](../../pack-shell/README.md) — pack-shell binary details

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./terminology.md) | [JP](./i18n/ja/terminology.md) | [KR](./i18n/ko/terminology.md) | [CN](./i18n/zh-cn/terminology.md)
+<!-- docs-i18n-links:end -->
+
 # Terminology
 
 This document defines the preferred user-facing vocabulary for Rumi.

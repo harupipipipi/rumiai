@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./frontend_pack_contract.md) | [JP](./i18n/ja/frontend_pack_contract.md) | [KR](./i18n/ko/frontend_pack_contract.md) | [CN](./i18n/zh-cn/frontend_pack_contract.md)
+<!-- docs-i18n-links:end -->
+
 # Frontend Pack Contract
 
 A frontend pack can participate in Startup Capability Graph launch by exposing a

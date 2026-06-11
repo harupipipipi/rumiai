@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./index.md) | [JP](./i18n/ja/index.md) | [KR](./i18n/ko/index.md) | [CN](./i18n/zh-cn/index.md)
+<!-- docs-i18n-links:end -->
+
 # defaultspack Docs Index
 
 Start here when navigating defaultspack docs. The canonical implementation is
@@ -35,7 +39,7 @@ For the repo-wide glossary and migration guidance, see
 | UI and layout | [ui_and_layout.md](ui_and_layout.md) |
 | Chat module | [chat.md](chat.md) |
 | Agent runtime | [agent_runtime.md](agent_runtime.md) |
-| Team workspace runtime | [multi-agent.md](multi-agent.md) |
+| Team workspace runtime | [multi-agent.md](./multi-agent.md) |
 | Scheduler | [scheduler.md](scheduler.md) |
 
 ## Runtime Primitives

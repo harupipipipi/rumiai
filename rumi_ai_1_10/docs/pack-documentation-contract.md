@@ -1,28 +1,32 @@
+<!-- docs-i18n-links:start -->
+[EN](./pack-documentation-contract.md) | [JP](./i18n/ja/pack-documentation-contract.md) | [KR](./i18n/ko/pack-documentation-contract.md) | [CN](./i18n/zh-cn/pack-documentation-contract.md)
+<!-- docs-i18n-links:end -->
+
 # Pack Documentation Contract
 
-Pack 固有 docs を `ecosystem/<pack_id>/docs/` に集約するための共通規約です。
+Common rules for consolidating Pack-specific docs into `ecosystem/<pack_id>/docs/`.
 
 ## Responsibility Split
 
-`rumi_ai_1_10/docs/` は runtime 共通 docs と Pack 共通ルールだけを置きます。
+`rumi_ai_1_10/docs/` only contains runtime common docs and pack common rules.
 
-- kernel, flow, approval, grant など runtime 共通の説明
-- Pack の作り方
-- docs 規約
+- Runtime common explanations such as kernel, flow, approval, grant, etc.
+- How to make a pack
+- Docs terms
 
-`ecosystem/<pack_id>/docs/` はその Pack 固有の説明だけを置きます。
+`ecosystem/<pack_id>/docs/` only puts the description specific to that Pack.
 
-- Pack の責務
-- 実装構造
+- Pack Responsibilities
+- Mounting structure
 - flows / functions / handlers / routes
-- 運用方法
-- 制約
+- How to operate
+- Constraints
 
-root docs は Pack 本体を説明しません。Pack への入口リンクと共通規約だけを持ちます。
+The root docs do not describe the Pack itself. It only has the entry link to the Pack and the common terms.
 
 ## Required Files
 
-各 Pack は最低でも次を持ちます。
+Each Pack has at least:
 
 - `ecosystem/<pack_id>/README.md`
 - `ecosystem/<pack_id>/docs/README.md`
@@ -30,36 +34,36 @@ root docs は Pack 本体を説明しません。Pack への入口リンクと�
 - `ecosystem/<pack_id>/docs/interfaces.md`
 - `ecosystem/<pack_id>/docs/operations.md`
 
-各ファイルの責務:
+Responsibilities of each file:
 
-- `README.md`: 3分で分かる概要、提供するもの、提供しないもの、docs の入口
-- `docs/README.md`: pack 内 docs の目次、読み方ガイド、初見向け導線
-- `docs/architecture.md`: 責務、主要ディレクトリ、実行経路、runtime との接点
+- `README.md`: 3 minute overview, what we offer, what we don't offer, entry to docs
+- `docs/README.md`: Table of contents of docs in pack, reading guide, guide for first-time readers
+- `docs/architecture.md`: Responsibilities, main directories, execution paths, and contact points with runtime
 - `docs/interfaces.md`: flows / functions / handlers / routes / events / stores / required secrets / network / grants
-- `docs/operations.md`: 起動方法、開発方法、テスト方法、よくある壊れ方、変更時の確認観点
+- `docs/operations.md`: Startup method, development method, testing method, common breakage methods, confirmation points when making changes
 
 ## Conditionally Required Files
 
-その機能を持つ Pack は追加 docs を置きます。
+Packs with that functionality put additional docs.
 
-- `docs/flows.md`: flow / modifier を持つとき
+- `docs/flows.md`: When having flow / modifier
 
 ## Cross-Link Rules
 
-- root docs から Pack を説明するときは短い紹介と入口リンクに留める
-- Pack 固有の説明は `ecosystem/<pack_id>/docs/README.md` へリンクする
-- Pack 内個別 doc は、必要なら `docs/README.md` から辿れるようにする
+- When describing a Pack from the root docs, keep it to a short introduction and entry link.
+- Pack-specific instructions link to `ecosystem/<pack_id>/docs/README.md`
+- Individual docs within a pack can be traced from `docs/README.md` if necessary.
 
 ## PR Rule
 
-次の変更では docs 更新を必須にします。
+The following changes will require a docs update.
 
-- 新しい flow / modifier を増やした
-- 新しい function / handler / route を増やした
-- required secrets / grants / network が変わった
-- 起動方法や運用方法が変わった
-- Pack の責務が変わった
+- Added new flow/modifiers
+- Added new functions / handlers / routes
+- required secrets / grants / network changed
+- The startup method and operation method have changed
+- Pack's responsibilities have changed.
 
 ## Scaffold Expectation
 
-`pack_scaffold` は contract の必須 docs を吐ける状態を維持します。新しい Pack を作るときに、README と `docs/README.md` / `architecture.md` / `interfaces.md` / `operations.md` が自然に揃うことを目標にします。
+`pack_scaffold` maintains the required docs for the contract. When creating a new Pack, the goal is for the README and `docs/README.md` / `architecture.md` / `interfaces.md` / `operations.md` to naturally align.

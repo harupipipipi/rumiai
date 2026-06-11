@@ -1,57 +1,61 @@
+<!-- docs-i18n-links:start -->
+[EN](./README.md) | [JP](./i18n/ja/README.md) | [KR](./i18n/ko/README.md) | [CN](./i18n/zh-cn/README.md)
+<!-- docs-i18n-links:end -->
+
 # Rumi AI OS
 
-**「基盤のない基盤」** — 改造される「本体」が存在しないモジュラーAIフレームワーク
+**“Foundation without a foundation”** — a modular AI framework where there is no “body” to be modified
 
 ---
 
-## 目的別ガイド
+## Purposeful guide
 
-コードを全部追わなくても入口が分かるように、用途別の読み先を先に置きます。
+Place the reading destinations for each purpose first so that you can find the entry point without having to follow all the code.
 
-| やりたいこと | まず読む場所 | どこまで分かるか |
+| What I want to do | Where to read first | How much can I understand |
 |---|---|---|
-| 目的別にドキュメントを辿りたい | [`docs/README.md`](./docs/README.md) | 「何をしたいか→どのドキュメントか」を一枚で辿れる |
-| 用語の意味を揃えたい | [`docs/terminology.md`](./docs/terminology.md) | `rule`, `skill`, `team workspace`, `delegation` の使い分けを確認できる |
-| まず起動したい | ルートの [`README.md`](../README.md) | 最短の起動コマンドと repo の入口 |
-| まず手を動かして確認したい | [`docs/tutorials/runtime-quickstart.md`](./docs/tutorials/runtime-quickstart.md) | `--health` から `/panel/` までの最短チュートリアル |
-| コードを読まずに runtime の仕組みを理解したい | [`docs/concepts/system-mechanism.md`](./docs/concepts/system-mechanism.md) | 起動・Flow・承認・Grant・viewer 連携の実行経路 |
-| `rumi_viewer` の起動手順と詰まり方を見たい | [`docs/rumi_viewer_start.md`](./docs/rumi_viewer_start.md) | `401`, 黒画面, panel と defaultspack の関係 |
-| defaultspack の frontend を拡張したい | [`ecosystem/defaultspack/docs/frontend_extensions.md`](./ecosystem/defaultspack/docs/frontend_extensions.md) | 右バー、設定、chat renderer、preview feed の増やし方 |
-| この runtime の思想を知りたい | この README の `思想` | Flow 中心、Pack 前提、Fail-Soft の考え方 |
-| ディレクトリの役割を知りたい | この README の `プロジェクト構造` | `core_runtime/`, `ecosystem/`, `user_data/` の役割 |
-| Pack を作る・直す | [`docs/pack-development.md`](./docs/pack-development.md) | `ecosystem.json`, `routes.json`, `permissions.json`, secrets 利用 |
-| defaultspack の chat / ai を追いたい | [`ecosystem/defaultspack/README.md`](./ecosystem/defaultspack/README.md) | defaultspack の実装面 |
-| defaultspack frontend の今後の作業を見たい | [`ecosystem/defaultspack/docs/frontend_todo.md`](./ecosystem/defaultspack/docs/frontend_todo.md) | registry 化の進捗と次の作業 |
-| API キーや secrets を設定したい | [`docs/operations.md`](./docs/operations.md) の Secrets 節 | `user_data/secrets/` と API 経路 |
-| viewer 経由の起動経路を直したい | [`../rumi_viewer/src-tauri/src/config.rs`](../rumi_viewer/src-tauri/src/config.rs) と [`../rumi_viewer/src-tauri/src/kernel_manager.rs`](../rumi_viewer/src-tauri/src/kernel_manager.rs) | viewer がどの kernel を起動し、どの env を渡すか |
-| setup pack / 承認まわりを見たい | [`core_runtime/setup_pack.py`](./core_runtime/setup_pack.py) と [`core_runtime/approval_manager.py`](./core_runtime/approval_manager.py) | setup pack 選択、all-ok grant、再承認 |
-| 運用・監査を知りたい | [`docs/operations.md`](./docs/operations.md) と [`docs/roadmap.md`](./docs/roadmap.md) | 運用 API、secrets、今後の方針 |
+| I want to trace documents by purpose | [`docs/README.md`](./docs/README.md) | I can trace "what I want to do → which document" on one page |
+| I want to align the meanings of terms | [`docs/terminology.md`](./docs/terminology.md) | I can check the usage of `rule`, `skill`, `team workspace`, `delegation` |
+| I want to start it first | Root [`README.md`](../README.md) | Shortest startup command and repo entrance |
+| I want to try it out first | [`docs/tutorials/runtime-quickstart.md`](./docs/tutorials/runtime-quickstart.md) | The shortest tutorial from `--health` to `/panel/` |
+| I want to understand the runtime mechanism without reading the code | [`docs/concepts/system-mechanism.md`](./docs/concepts/system-mechanism.md) | Execution path of startup, flow, approval, grant, viewer collaboration |
+| I want to see the startup procedure of `rumi_viewer` and how it gets stuck | [`docs/rumi_viewer_start.md`](./docs/rumi_viewer_start.md) | `401`, black screen, relationship between panel and defaultspack |
+| I want to extend the frontend of defaultspack | [`ecosystem/defaultspack/docs/frontend_extensions.md`](./ecosystem/defaultspack/docs/frontend_extensions.md) | How to increase the right bar, settings, chat renderer, and preview feed |
+| I want to know the idea of this runtime | `Thoughts` in this README | Flow-centered, Pack premise, Fail-Soft idea |
+| I want to know the role of the directory | Role of `Project structure` | `core_runtime/`, `ecosystem/`, `user_data/` in this README |
+| Creating/Repairing a Pack | [`docs/pack-development.md`](./docs/pack-development.md) | `ecosystem.json`, `routes.json`, `permissions.json`, Using secrets |
+| I want to follow chat / ai of defaultspack | [`ecosystem/defaultspack/README.md`](./ecosystem/defaultspack/README.md) | Implementation side of defaultspack |
+| I would like to see the future work of defaultspack frontend | [`ecosystem/defaultspack/docs/frontend_todo.md`](./ecosystem/defaultspack/docs/frontend_todo.md) | Registry progress and next work |
+| I want to set API keys and secrets | Secrets section of [`docs/operations.md`](./docs/operations.md) | `user_data/secrets/` and API route |
+| I want to fix the boot path via viewer | [`../rumi_viewer/src-tauri/src/config.rs`](../rumi_viewer/src-tauri/src/config.rs) and [`../rumi_viewer/src-tauri/src/kernel_manager.rs`](../rumi_viewer/src-tauri/src/kernel_manager.rs) | Which kernel should viewer start and which env should it pass |
+| setup pack / want to see authorization | [`core_runtime/setup_pack.py`](./core_runtime/setup_pack.py) and [`core_runtime/approval_manager.py`](./core_runtime/approval_manager.py) | setup pack selection, all-ok grant, reauthorization |
+| I want to know about operations and auditing | [`docs/operations.md`](./docs/operations.md) and [`docs/roadmap.md`](./docs/roadmap.md) | Operational API, secrets, future policy |
 
-## 最短の見取り図
+## Shortest floor plan
 
-1. `app.py` が kernel を起動する
-2. `core_runtime/` が Flow, Pack, 承認, 実行基盤を持つ
-3. `ecosystem/<pack_id>/` が機能本体を提供する
-4. `user_data/` が承認状態, secrets, stores, audit を持つ
-5. `rumi_viewer/` は kernel を起動して panel に接続する shell になる
+1. `app.py` starts the kernel
+2. `core_runtime/` has Flow, Pack, Approval, and Execution infrastructure
+3. `ecosystem/<pack_id>/` provides the main body of functionality
+4. `user_data/` has authorization state, secrets, stores, audit
+5. `rumi_viewer/` becomes a shell that starts the kernel and connects to the panel
 
-## よく使う入口
+## Frequently used entrances
 
-### 起動確認
+### Startup confirmation
 
 ```bash
 python -m rumi_ai --health
 python -m rumi_ai
 ```
 
-### viewer 開発起動
+### viewer development startup
 
 ```bash
 cd ../rumi_viewer/src-tauri
 cargo tauri dev
 ```
 
-### 代表的なテスト
+### Typical tests
 
 ```bash
 python -m pytest tests/test_defaultspack_google_provider.py
@@ -60,19 +64,19 @@ python -m pytest tests/test_defaultspack_modules.py
 
 ---
 
-## 思想
+## Thoughts
 
-### 贔屓なし（No Favoritism）
+### No Favoritism
 
-Rumi AI の公式コードは「チャット」「ツール」「プロンプト」「AIクライアント」「フロントエンド」といったドメイン概念を**一切知りません**。これらは全て ecosystem 内の Pack が定義します。公式が提供するのは**実行の仕組み**だけです。
+Rumi AI's official code knows nothing about domain concepts such as "chat," "tool," "prompt," "AI client," and "frontend." All of these are defined by Packs within the ecosystem. The official only provides the **execution mechanism**.
 
-### 基盤のない基盤
+### Foundation without foundation
 
-Minecraft の mod は「Minecraft」という基盤を改造します。しかし Rumi AI には改造される「本体」がありません。全てのアプリケーション機能は Pack として実装され、Flow で結線されます。
+Minecraft mods modify the foundation of ``Minecraft.'' However, Rumi AI does not have a "body" that can be modified. All application functions are implemented as Packs and wired using Flows.
 
-### Flow 中心アーキテクチャ
+### Flow-centric architecture
 
-Pack 間の結線・順序・後付け注入を Flow で定義します。既存 Pack の改造なしに新機能を追加できます。
+Define the connections, order, and post-installation between Packs using Flow. New features can be added without modifying existing packs.
 
 ```
           +---------------------------+
@@ -92,23 +96,23 @@ Pack 間の結線・順序・後付け注入を Flow で定義します。既存
           +---------------------------+
 ```
 
-> **Flow の読み込み元**: `flows/`, `user_data/shared/flows/`, `ecosystem/<pack_id>/backend/flows/`
+> **Flow import source**: `flows/`, `user_data/shared/flows/`, `ecosystem/<pack_id>/backend/flows/`
 
 ### Fail-Soft
 
-エラーが発生してもシステムは停止しません。失敗したコンポーネントは無効化され、診断情報に記録されて継続します。
+The system does not stop when an error occurs. Failed components are disabled and logged in the diagnostic information to continue.
 
-### 悪意 Pack 前提のセキュリティ
+### Security based on malicious Pack
 
-ecosystem は第三者が作成でき、悪意ある作者も存在しうるという前提で設計されています。
+The ecosystem is designed on the premise that it can be created by third parties, and that there can also be malicious authors.
 
-- **承認必須**: 未承認 Pack のコードは一切実行されない
-- **ハッシュ検証**: 承認後にファイルが変更されると自動無効化（再承認必要）
-- **Docker 隔離**: 承認済み Pack はコンテナ内で実行（strict モード）
-- **Egress Proxy**: 外部通信は UDS ソケット経由のプロキシでのみ許可
-- **Capability（Trust + Grant）**: ホスト権限は二段階の承認で制御
+- **Approval Required**: No code in unapproved Packs will be executed.
+- **Hash verification**: Automatic invalidation if file is modified after approval (requires re-approval)
+- **Docker isolation**: Approved packs run in containers (strict mode)
+- **Egress Proxy**: External communication is only allowed by proxy via UDS socket
+- **Capability (Trust + Grant)**: Host authority is controlled with two-step approval
 
-既存環境で HMAC 署名なしの設定ファイルを再署名する場合:
+To re-sign configuration files without HMAC signatures in an existing environment:
 
 ```bash
 python -m rumi_ai migrate-hmac
@@ -116,10 +120,10 @@ python -m rumi_ai migrate-hmac
 
 ---
 
-## プロジェクト構造
+## Project structure
 
 <details>
-<summary>ディレクトリツリー（クリックで展開）</summary>
+<summary>Directory tree (click to expand)</summary>
 
 <pre><code>
 project_root/
@@ -279,37 +283,37 @@ project_root/
 
 </details>
 
-### 主要ディレクトリ
+### Main directory
 
-| ディレクトリ | 役割 |
+| Directory | Role |
 |---|---|
-| `core_runtime/` | カーネル — Flow 実行エンジン・セキュリティ・権限管理 |
-| `core_runtime/shared_dict/` | 共有辞書システム（スナップショット・ジャーナル） |
-| `core_runtime/core_pack/` | 公式 Capability 実装（Store, Secrets, Flow, Communication, Docker） |
-| `backend_core/ecosystem/` | エコシステム基盤 — Pack/Component 読み込み・初期化 |
-| `ecosystem/` | Pack 格納（外部供給物） |
-| `user_data/` | 実行時永続データ（監査ログ・承認・Secrets・Store） |
-| `rumi_setup/` | セットアップ支援（CLI / Web / ガイド） |
-| `flows/` | 公式 Flow（起動・基盤） |
-| `lang/` | 多言語メッセージ |
-| `tests/` | テスト |
-| `docs/` | ドキュメント |
+| `core_runtime/` | Kernel — Flow execution engine, security, and privilege management |
+| `core_runtime/shared_dict/` | Shared dictionary system (snapshot journal) |
+| `core_runtime/core_pack/` | Official Capability implementation (Store, Secrets, Flow, Communication, Docker) |
+| `backend_core/ecosystem/` | Ecosystem foundation — Pack/Component loading/initialization |
+| `ecosystem/` | Pack storage (external supplies) |
+| `user_data/` | Runtime persistent data (audit log, approval, Secrets, Store) |
+| `rumi_setup/` | Setup assistance (CLI / Web / Guide) |
+| `flows/` | Official Flow (startup/base) |
+| `lang/` | Multilingual messages |
+| `tests/` | Test |
+| `docs/` | Document |
 
-### 主要ファイル
+### Main files
 
-| ファイル | 役割 |
+| File | Role |
 |---|---|
-| `app.py` | OS エントリポイント |
-| `bootstrap.py` | セットアップエントリポイント |
-| `kernel.py` | Mixin 組み立て・ハンドラ登録 |
-| `kernel_core.py` | Flow 実行エンジン本体 |
-| `python_file_executor.py` | `python_file_call` 実行 |
-| `secure_executor.py` | Docker 隔離実行 |
-| `approval_manager.py` | Pack 承認管理 |
-| `capability_proxy.py` | Capability Proxy サーバー（UDS） |
-| `egress_proxy.py` | 外部通信プロキシ（UDS） |
-| `flow_loader.py` | Flow YAML ローダー |
-| `flow_modifier.py` | Flow modifier 適用 |
+| `app.py` | OS entry point |
+| `bootstrap.py` | Setup entry point |
+| `kernel.py` | Mixin assembly/handler registration |
+| `kernel_core.py` | Flow execution engine body |
+| `python_file_executor.py` | `python_file_call` Execution |
+| `secure_executor.py` | Docker isolation execution |
+| `approval_manager.py` | Pack approval management |
+| `capability_proxy.py` | Capability Proxy Server (UDS) |
+| `egress_proxy.py` | External communication proxy (UDS) |
+| `flow_loader.py` | Flow YAML loader |
+| `flow_modifier.py` | Flow modifier application |
 | `pack_importer.py` | Pack import（zip/folder → staging） |
 | `pack_applier.py` | Pack apply（staging → ecosystem） |
 
@@ -320,31 +324,31 @@ The canonical frontend source for the control panel lives in `../rumi_viewer/fro
 
 Prompt behavior lives in `ecosystem/defaultspack/domain/prompt/` and `ecosystem/defaultspack/blocks/prompt/`. Tool behavior lives in `ecosystem/defaultspack/domain/tool/` and `ecosystem/defaultspack/blocks/tool/`. The old top-level `prompt/`, `tool/`, and `supporter/` import shims have been removed; new supporter-like behavior should be implemented as defaultspack functions, agents, prompts, memory, or extensions.
 
-`../rumi_viewer/frontend/src/pages/Flows.tsx` の graph editor は、Pack 特化の固定 UI ではなく、拡張用の graph metadata を持つ editor として扱います。
+The graph editor in `../rumi_viewer/frontend/src/pages/Flows.tsx` is treated as an editor with extensible graph metadata, rather than a fixed UI specialized for Packs.
 
-- 起点ノードは `rumi_start`
-- ノードは複数ポートを持てる
-- ポートは `contracts` を複数保持できる
-- `contracts` が一致しないポート同士は接続不可
-- YAML には `rumi_graph` を保存し、viewer 側の構造を復元する
+- The starting node is `rumi_start`
+- Nodes can have multiple ports
+- A port can hold multiple `contracts`
+- Ports that do not match `contracts` cannot be connected to each other.
+- Save `rumi_graph` in YAML and restore the structure on the viewer side
 
-この設計により、変換専用の特別機能を増やさなくても、異なる入力/出力契約を持つノードを Pack 側で定義すれば変換的な役割も表現できます。
+This design makes it possible to express transformational roles by defining nodes with different input/output contracts on the Pack side, without having to add special functionality dedicated to transformations.
 
 ## Basepack
 
-`ecosystem/setup_pack/basepack/pack.json` を追加し、Rumi AI が graph-first のベース起動プロファイルとして `basepack` を選べるようにしました。現時点では既存の `defaultspack` を起動対象にする薄い bootstrap profile として扱い、巨大な複製 Pack を増やさず安全に導入しています。
+Added `ecosystem/setup_pack/basepack/pack.json` to allow Rumi AI to choose `basepack` as the base launch profile for graph-first. At the moment, we are treating the existing `defaultspack` as a thin bootstrap profile to launch, and safely deploying it without increasing huge duplicate packs.
 
 ---
 
-## クイックスタート
+## Quick start
 
-### 必要条件
+### Requirements
 
 - Python 3.10+
-- Docker（本番環境で必須）
+- Docker (required for production environments)
 - Git
 
-### インストール
+### Installation
 
 ```bash
 git clone https://github.com/harupipipipi/rumiai.git
@@ -352,7 +356,7 @@ cd rumiai/rumi_ai_1_10
 python bootstrap.py --cli init
 ```
 
-### 起動
+### Start
 
 ```bash
 # 本番（Docker 必須）
@@ -362,7 +366,7 @@ python app.py
 python app.py --permissive
 ```
 
-### Pack 承認
+### Pack Approval
 
 ```bash
 curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
@@ -371,24 +375,24 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 
 ---
 
-## ドキュメント
+## Document
 
-| ドキュメント | 内容 |
+| Document | Contents |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | 設計と仕組みの全体像 |
-| [docs/pack-development.md](docs/pack-development.md) | Pack 開発ガイド |
-| [docs/pack-development-guide.md](docs/pack-development-guide.md) | Pack 開発クイックスタート |
-| [docs/operations.md](docs/operations.md) | 運用ガイド |
-| [docs/roadmap.md](docs/roadmap.md) | ロードマップ |
-| [docs/quality_pack/philosophy_memo.md](docs/quality_pack/philosophy_memo.md) | 開発判断に使う思想メモ |
-| [docs/quality_pack/claude_desktop_quality_pack.md](docs/quality_pack/claude_desktop_quality_pack.md) | 品質保証・監査・回帰検証パック |
+| [docs/architecture.md](./docs/architecture.md) | Overall picture of design and mechanism |
+| [docs/pack-development.md](./docs/pack-development.md) | Pack Development Guide |
+| [docs/pack-development-guide.md](./docs/pack-development-guide.md) | Pack development quick start |
+| [docs/operations.md](./docs/operations.md) | Operation guide |
+| [docs/roadmap.md](./docs/roadmap.md) | Roadmap |
+| [docs/quality_pack/philosophy_memo.md](docs/quality_pack/philosophy_memo.md) | Thought notes used for development decisions |
+| [docs/quality_pack/claude_desktop_quality_pack.md](./docs/quality_pack/claude_desktop_quality_pack.md) | Quality Assurance/Audit/Regression Verification Pack |
 
 ---
 
-## ライセンス
+## License
 
 MIT License
-詳細はリポジトリルートの LICENSE を参照してください。
+See LICENSE in the repository root for details.
 ## defaultspack source of truth
 
 The canonical defaultspack implementation in this repository is

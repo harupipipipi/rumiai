@@ -1,48 +1,52 @@
-# Rumi AI OS — セットアップ & デスクトップ配布 TODO
+<!-- docs-i18n-links:start -->
+[EN](./setuptodo.md) | [JP](./i18n/ja/setuptodo.md) | [KR](./i18n/ko/setuptodo.md) | [CN](./i18n/zh-cn/setuptodo.md)
+<!-- docs-i18n-links:end -->
 
-> **Legacy 計画メモ**: 実装計画の履歴です。現行方針は [roadmap.md](./roadmap.md) と [docs/README.md](./README.md) を参照してください。
+# Rumi AI OS — Setup & Desktop Distribution TODO
 
-最終更新: 2026-03-17
+> **Legacy planning memo**: History of the implementation plan. Please see [roadmap.md](./roadmap.md) and [docs/README.md](./README.md) for current policies.
 
-パターン C アーキテクチャに基づくロードマップです。Rust ランチャー（薄い）が Kernel プロセスを管理し、セットアップ UI・コントロールパネル・Flow エディタ等は全て Pack が提供する Web UI（React）です。React UI の実装はユーザーが担当します。
+Last updated: 2026-03-17
+
+A roadmap based on the Pattern C architecture. The Rust launcher (thin) manages the Kernel process, and the setup UI, control panel, Flow editor, etc. are all Web UI (React) provided by Pack. You are responsible for implementing React UI.
 
 ---
 
-## 1. 設計決定事項
+## 1. Design decisions
 
-### 1.1 パターン C 採用
+### 1.1 Adopting pattern C
 
-Rust ランチャー + Kernel + Pack の 3 層アーキテクチャ。
+Three-tier architecture: Rust Launcher + Kernel + Pack.
 
-- **Rust ランチャー**: PBS構築、Kernelプロセス管理、ヘルスチェック、トレイアイコン、ブラウザ open の 5 責務のみ
-- **Kernel**: Python ランタイム。Flow 実行、Pack 管理、API サーバー
-- **Pack**: 全ての UI 機能を Pack として提供（React Web UI）
+- **Rust Launcher**: Only 5 responsibilities: PBS construction, Kernel process management, health check, tray icon, browser open
+- **Kernel**: Python runtime. Flow execution, Pack management, API server
+- **Pack**: Provide all UI functions as a pack (React Web UI)
 
-### 1.2 認証・データ保存
+### 1.2 Authentication/Data storage
 
-- **認証**: Supabase Auth（OAuth のみ: Google / GitHub）。メール/パスワード認証はなし
-- **プロフィールデータ保存**: Cloudflare KV（Supabase には保存しない）
-- **ローカルプロフィール**: user_data/settings/profile.json
+- **Authentication**: Supabase Auth (OAuth only: Google / GitHub). No email/password authentication
+- **Save profile data**: Cloudflare KV (does not save on Supabase)
+- **Local Profile**: user_data/settings/profile.json
 
 ### 1.3 IPC
 
-既存の pack_api_server（HTTP localhost:8765）を使用。新規 IPC 不要。
+Use existing pack_api_server (HTTP localhost:8765). No new IPC required.
 
-### 1.4 UI 方針
+### 1.4 UI Policy
 
-- 全ての Web UI は React + TSX で作成
-- React UI はユーザーが担当。エージェントは Python バックエンド + Flow + API + Rust のみ
-- ランチャーのフロントエンド（コントロールパネル）も React
+- All web UI created with React + TSX
+- React UI is in the user's hands. Agent is only Python backend + Flow + API + Rust
+- The front end (control panel) of the launcher is also React
 
-### 1.5 アイコン方針
+### 1.5 Icon Policy
 
-- プリセットアイコンのみ（ユーザーのオリジナルアイコンアップロードは未対応）
-- icon フィールドにはプリセットの ID 文字列を保存（例: "cat", "avatar_03"）
-- 画像ファイルはローカルに保存。サイトから ID を受け取り、対応する画像を表示
+- Only preset icons (user's original icon upload is not supported)
+- The icon field stores a preset ID string (e.g. "cat", "avatar_03")
+- Image files are saved locally. Receive ID from site and display corresponding image
 
 ---
 
-## 2. アーキテクチャ概要
+## 2. Architecture overview
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -79,7 +83,7 @@ Rust ランチャー + Kernel + Pack の 3 層アーキテクチャ。
 
 ---
 
-## 3. profile.json スキーマ
+## 3. profile.json schema
 
 ```json
 {
@@ -93,148 +97,148 @@ Rust ランチャー + Kernel + Pack の 3 層アーキテクチャ。
 }
 ```
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |-----------|-----|------|
-| schema_version | int | スキーマバージョン |
-| initialized_at | string (ISO 8601) | セットアップ完了日時 |
-| username | string | ユーザーネーム（必須、100文字以内） |
-| language | string | 言語コード（ja, en, zh, ko, es, fr, de, pt, ru, ar） |
-| icon | string or null | プリセットアイコン ID |
-| occupation | string or null | 職業 |
-| setup_completed | bool | セットアップ完了フラグ |
+| schema_version | int | schema version |
+| initialized_at | string (ISO 8601) | Setup completion date and time |
+| username | string | Username (required, up to 100 characters) |
+| language | string | Language code (ja, en, zh, ko, es, fr, de, pt, ru, ar) |
+| icon | string or null | Preset icon ID |
+| occupation | string or null | occupation |
+| setup_completed | bool | Setup completed flag |
 
 ---
 
-## 4. 進行状況
+## 4. Progress
 
-### 完了済み
+### Completed
 
-| タスク | 内容 |
+| Task | Contents |
 |--------|------|
-| コードレビュー | C+ ランク。セキュリティ・アーキテクチャの問題を特定 |
-| SEC-1 | secure_executor.py: Docker image ダイジェスト固定 + _sanitize_context 強化 |
-| SEC-2 | python_file_executor.py: Docker image ダイジェスト固定 |
-| APP-1 | app.py: permissive ガード強化（ホワイトリスト方式） |
-| 調査 1 | Python 梱包: PBS + uv で CONDITIONAL GO |
-| 調査 2 | コントロールパネル + ランチャー + マーケットプレイス構想 |
-| 調査 3 | Pack + Flow でセットアップ実現可否 → パターン C 採用 |
-| Phase B | core_setup Pack Python バックエンド + Flow 定義 |
-| Phase A | Kernel API 拡張: /health, /api/setup/status, /api/setup/complete, 静的ファイル配信 |
-| サイトデプロイ | Cloudflare Pages (rumi-setup.pages.dev) |
-| サイト認証 | Supabase Auth OAuth (Google / GitHub) 動作確認済み |
+| Code review | C+ rank. Identify security architecture issues |
+| SEC-1 | secure_executor.py: Docker image digest fixation + _sanitize_context enhancement |
+| SEC-2 | python_file_executor.py: Docker image digest fixed |
+| APP-1 | app.py: Permissive guard enhancement (whitelist method) |
+| Investigation 1 | Python packaging: CONDITIONAL GO with PBS + uv |
+| Survey 2 | Control panel + launcher + marketplace concept |
+| Investigation 3 | Is it possible to set up with Pack + Flow? → Adopt pattern C |
+| Phase B | core_setup Pack Python backend + Flow definition |
+| Phase A | Kernel API extensions: /health, /api/setup/status, /api/setup/complete, static file delivery |
+| Site deployment | Cloudflare Pages (rumi-setup.pages.dev) |
+| Site authentication | Supabase Auth OAuth (Google / GitHub) operation confirmed |
 
-### 進行中
+### In progress
 
-| タスク | 担当 | 内容 |
+| Task | Responsibility | Contents |
 |--------|------|------|
-| サイト仕上げ | ユーザー | ダミーフォーム削除、言語10言語化、職業追加、KV保存実装 |
-| アプリ連携承認画面 | ユーザー | /authorize ページ（設計確定、実装待ち） |
-| プリセットアイコン作成 | ユーザー | ID命名 + 画像作成 |
+| Site finishing | User | Delete dummy form, change to 10 languages, add occupation, implement KV storage |
+| App collaboration approval screen | User | /authorize page (design finalized, waiting for implementation) |
+| Preset icon creation | User | ID naming + image creation |
 
-### 未着手
+### Not started
 
-| タスク | 担当 | 内容 |
+| Task | Responsibility | Contents |
 |--------|------|------|
-| R Phase | エージェント(Rust) + ユーザー(React) | Rust ランチャー + アップデート機構 |
-| Phase C | エージェント(Python) + ユーザー(React) | core_control_panel Pack |
-| Phase U | エージェント | アップデート機構 |
-| Phase D/E | エージェント + ユーザー | マーケットプレイス（最後に回す） |
-| Phase F | エージェント | Pack 開発者 CLI |
-| Phase G | エージェント | セキュリティ強化 |
+| R Phase | Agent (Rust) + User (React) | Rust launcher + update mechanism |
+| Phase C | Agent (Python) + User (React) | core_control_panel Pack |
+| Phase U | Agent | Update Mechanism |
+| Phase D/E | Agent + User | Marketplace (last turn) |
+| Phase F | Agent | Pack Developer CLI |
+| Phase G | Agent | Security enhancement |
 
 ---
 
-## 5. Phase 構成
+## 5. Phase configuration
 
-### R Phase: Rust ランチャー（担当: エージェント + ユーザー）
+### R Phase: Rust Launcher (Responsible for: Agent + User)
 
-Rust 製の薄いランチャーバイナリ。
+A thin launcher binary made in Rust.
 
-**エージェント担当:**
+**Agent in charge:**
 
-- R-1: Cargo プロジェクト初期化 + クロスプラットフォームビルド設定
-- R-2: PBS ダウンロード・展開（macOS / Windows / Linux）
-- R-3: venv 作成 + uv pip install
-- R-4: Kernel プロセス spawn + stdout/stderr パイプ
-- R-5: ヘルスチェックループ（localhost:8765/health、タイムアウト 30s）
-- R-6: システムトレイ（tray-icon crate）
-- R-7: ブラウザ open（open crate）
-- R-8: graceful shutdown（SIGTERM → Kernel 停止 → プロセス終了）
+- R-1: Cargo project initialization + cross-platform build settings
+- R-2: PBS download/extract (macOS / Windows / Linux)
+- R-3: venv creation + uv pip install
+- R-4: Kernel process spawn + stdout/stderr pipe
+- R-5: Health check loop (localhost:8765/health, timeout 30s)
+- R-6: System tray (tray-icon crate)
+- R-7: Browser open (open crate)
+- R-8: graceful shutdown (SIGTERM → Kernel stop → process end)
 
-**ユーザー担当:**
+**User Responsible:**
 
-- なし（ランチャー自体は UI を持たない。UIは core_control_panel の React）
+- None (The launcher itself has no UI. UI is core_control_panel React)
 
-### Phase A: Kernel API 拡張 ★完了
+### Phase A: Kernel API extension ★Complete
 
-- GET /health — ヘルスチェック（認証不要）
-- GET /api/setup/status — セットアップ状態（認証不要）
-- POST /api/setup/complete — セットアップ完了（認証不要）
-- 静的ファイル配信ミドルウェア
+- GET /health — Health check (no authentication required)
+- GET /api/setup/status — setup status (no authentication required)
+- POST /api/setup/complete — Setup complete (no authentication required)
+- Static file distribution middleware
 - AppLifecycleManager
 
-### Phase B: core_setup Pack ★Python バックエンド完了
+### Phase B: core_setup Pack ★Python backend completed
 
-**完了:**
+**Complete:**
 
 - ecosystem.json, check_profile.py, save_profile.py, launch_setup_ui.py
-- setup_wizard.flow.yaml, 00_startup.flow.yaml 修正
+- Fixed setup_wizard.flow.yaml, 00_startup.flow.yaml
 
-**残タスク（ユーザー担当）:**
+**Remaining tasks (user responsibility):**
 
-- B-1: サイト仕上げ（ダミーフォーム削除、言語10言語化、職業追加）
-- B-2: Cloudflare KV プロフィール保存実装
-- B-3: アプリ連携承認画面（/authorize）
-- B-4: プリセットアイコン作成
+- B-1: Site finishing (dummy form removed, 10 languages added, occupation added)
+- B-2: Cloudflare KV profile storage implementation
+- B-3: App cooperation approval screen (/authorize)
+- B-4: Preset icon creation
 
-### Phase C: core_control_panel Pack（担当: エージェント + ユーザー）
+### Phase C: core_control_panel Pack (Responsible for: Agent + User)
 
-ダッシュボード + Pack 管理 + Flow エディタ + 設定画面 + アップデート確認。
+Dashboard + Pack management + Flow editor + Settings screen + Update confirmation.
 
-**エージェント担当（Python バックエンド）:**
+**Agent responsible (Python backend):**
 
-- C-1: ecosystem.json 作成
-- C-2: ダッシュボード API（Pack 一覧、Flow 一覧、システム状態）
-- C-3: Pack 管理 API（インストール、アンインストール、有効化/無効化）
-- C-4: Flow エディタ API（Flow CRUD、ステップ編集、実行）
-- C-5: 設定 API（profile.json 編集、環境設定）
-- C-6: アップデート確認 API
+- C-1: Create ecosystem.json
+- C-2: Dashboard API (Pack list, Flow list, system status)
+- C-3: Pack management API (install, uninstall, enable/disable)
+- C-4: Flow Editor API (Flow CRUD, step editing, execution)
+- C-5: Settings API (edit profile.json, environment settings)
+- C-6: Update confirmation API
 
-**ユーザー担当（React UI）:**
+**User Responsible (React UI):**
 
-- C-7: ダッシュボード画面
-- C-8: Pack 管理画面（Steam ライブラリ風）
-- C-9: Flow エディタ画面（React Flow）
-- C-10: 設定画面
-- C-11: アップデート画面
+- C-7: Dashboard screen
+- C-8: Pack management screen (Steam library style)
+- C-9: Flow editor screen (React Flow)
+- C-10: Settings screen
+- C-11: Update screen
 
-### Phase U: アップデート機構（担当: エージェント）
+### Phase U: Update mechanism (in charge: agent)
 
-- U-1: バージョン管理（現在のバージョン、最新バージョンの取得）
-- U-2: アップデートチェック API（Cloudflare Workers or R2 のバージョンファイル）
-- U-3: Rust ランチャーのセルフアップデート
-- U-4: Kernel（Python）のアップデート（ソースコード差し替え）
-- U-5: Pack のアップデート
+- U-1: Version control (current version, get latest version)
+- U-2: Update check API (Cloudflare Workers or R2 version file)
+- U-3: Rust launcher self-update
+- U-4: Kernel (Python) update (source code replacement)
+- U-5: Pack update
 
-### Phase D: マーケットプレイス BE（最後に回す）
+### Phase D: Marketplace BE (last turn)
 
 Cloudflare Workers + R2 + D1 + Supabase Auth
 
-### Phase E: マーケットプレイス FE（最後に回す）
+### Phase E: Marketplace FE (last turn)
 
-Cloudflare Pages + ランチャー内統合
+Cloudflare Pages + in-launcher integration
 
-### Phase F: Pack 開発者 CLI
+### Phase F: Pack Developer CLI
 
 rumi-pack init / validate / build / publish / test
 
-### Phase G: セキュリティ強化
+### Phase G: Enhanced security
 
-Pack 署名検証、コード署名、CSP ヘッダー
+Pack signature verification, code signing, CSP headers
 
 ---
 
-## 6. 依存関係
+## 6. Dependencies
 
 ```
 R Phase ──────┐
@@ -253,23 +257,23 @@ Phase D ──── Phase E（最後）
 
 ---
 
-## 7. MVP 定義
+## 7. MVP definition
 
-MVP = R Phase + Phase A + Phase B + Phase C の最小構成 + Phase U（アップデート）。マーケットプレイスなし。
+MVP = R Phase + Phase A + Phase B + Minimum configuration of Phase C + Phase U (update). No marketplace.
 
 ---
 
-## 8. アプリ連携フロー
+## 8. App linkage flow
 
-### セットアップ時の流れ
+### Setup flow
 
-1. デスクトップアプリがブラウザで `https://rumi-setup.pages.dev/authorize?callback=http://localhost:8765/api/setup/complete` を開く
-2. サイト側でログイン済みか確認 → 未ログインなら /login → ログイン済みなら承認画面
-3. 承認画面: 「このアプリにプロフィール情報を送信しますか？」
-4. 承認 → fetch で localhost:8765/api/setup/complete に POST
-5. アプリ側で profile.json 保存 → セットアップ完了
+1. Desktop app opens `https://rumi-setup.pages.dev/authorize?callback=http://localhost:8765/api/setup/complete` in browser
+2. Check if you are logged in on the site → /login if not logged in → Approval screen if logged in
+3. Approval screen: “Do you want to send your profile information to this app?”
+4. Authorize → POST to localhost:8765/api/setup/complete with fetch
+5. Save profile.json on the app side → Setup complete
 
-### POST /api/setup/complete の JSON
+### JSON for POST /api/setup/complete
 
 ```json
 {
@@ -282,42 +286,42 @@ MVP = R Phase + Phase A + Phase B + Phase C の最小構成 + Phase U（アッ�
 
 ---
 
-## 9. 起動シーケンス
+## 9. Boot sequence
 
-### 初回起動
+### First launch
 
-1. Rust ランチャー起動
-2. PBS チェック → なければダウンロード・展開・venv 作成・依存インストール
-3. Kernel spawn → ヘルスチェック → ready 待機
+1. Start Rust launcher
+2. PBS check → If not, download, extract, create venv, install dependencies
+3. Kernel spawn → health check → ready
 4. startup flow: setup_check → needs_setup: true
-5. ブラウザで rumi-setup.pages.dev/authorize を開く
-6. ユーザーが承認 → localhost:8765 に POST → profile.json 保存
-7. セットアップ完了 → コントロールパネル表示
+5. Open rumi-setup.pages.dev/authorize in your browser
+6. User approves → POST to localhost:8765 → Save profile.json
+7. Setup complete → Control panel display
 
-### 通常起動
+### Normal startup
 
-1. Rust ランチャー起動
-2. PBS チェック → 存在 → スキップ
-3. Kernel spawn → ヘルスチェック → ready
+1. Start Rust launcher
+2. PBS check → Existence → Skip
+3. Kernel spawn → health check → ready
 4. startup flow: setup_check → needs_setup: false
-5. ブラウザでコントロールパネル表示
+5. Display control panel in browser
 
 ---
 
-## 10. インフラ構成
+## 10. Infrastructure configuration
 
-| サービス | 用途 |
+| Service | Application |
 |----------|------|
-| Cloudflare Pages | サイト (rumi-setup.pages.dev) |
-| Cloudflare KV | プロフィールデータ保存 |
-| Cloudflare Workers | アップデートチェック API、将来のマーケットプレイス API |
-| Cloudflare R2 | PBS/uv 配布、将来の Pack 配布 |
-| Cloudflare D1 | 将来のマーケットプレイス DB |
-| Supabase Auth | ユーザー認証（OAuth: Google / GitHub） |
+| Cloudflare Pages | Site (rumi-setup.pages.dev) |
+| Cloudflare KV | Save profile data |
+| Cloudflare Workers | Update Check API, Future Marketplace API |
+| Cloudflare R2 | PBS/uv distribution, future Pack distribution |
+| Cloudflare D1 | Future Marketplace DB |
+| Supabase Auth | User authentication (OAuth: Google / GitHub) |
 
 ---
 
-## 11. 配布構成
+## 11. Distribution configuration
 
 ### macOS
 
@@ -353,17 +357,17 @@ rumi-ai/
 
 ---
 
-## 12. 未決定事項
+## 12. Undecided items
 
-- セットアップ収集項目の最終リスト
-- 言語パックの配布方式
-- セットアップの「やり直し」機能
-- Windows での user_data パス
-- ビルド CI/CD パイプライン
-- Python バージョン固定方針
+- Final list of setup collection items
+- Language pack distribution method
+- Setup "undo" function
+- user_data path on Windows
+- Build CI/CD pipeline
+- Python version fixed policy
 - macOS codesigning / notarization
-- Windows コード署名
-- core_control_panel の Web UI 配信方法
-- Rust ランチャーの crate 選定
-- Pack 開発者 CLI の言語
-- アップデートのバージョンファイル形式・配布方法
+- Windows code signing
+- Web UI delivery method for core_control_panel
+- Rust launcher crate selection
+- Pack developer CLI language
+- Update version file format and distribution method

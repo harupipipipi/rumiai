@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./input-dispatcher.md) | [JP](./i18n/ja/input-dispatcher.md) | [KR](./i18n/ko/input-dispatcher.md) | [CN](./i18n/zh-cn/input-dispatcher.md)
+<!-- docs-i18n-links:end -->
+
 # Input Dispatcher
 
 `submit_input` remains the public compatibility entrypoint, but the canonical

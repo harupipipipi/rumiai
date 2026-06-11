@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./subagents.md) | [JP](./i18n/ja/subagents.md) | [KR](./i18n/ko/subagents.md) | [CN](./i18n/zh-cn/subagents.md)
+<!-- docs-i18n-links:end -->
+
 # Delegation Compatibility
 
 Rumi no longer treats "subagent" as a primary architecture concept.

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./browser_computer_use_optional_design.md) | [JP](./i18n/ja/browser_computer_use_optional_design.md) | [KR](./i18n/ko/browser_computer_use_optional_design.md) | [CN](./i18n/zh-cn/browser_computer_use_optional_design.md)
+<!-- docs-i18n-links:end -->
+
 # Browser Computer Use Optional Design
 
 Browser and computer use are optional capabilities.

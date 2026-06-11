@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./custom_node_pack_guide.md) | [JP](./i18n/ja/custom_node_pack_guide.md) | [KR](./i18n/ko/custom_node_pack_guide.md) | [CN](./i18n/zh-cn/custom_node_pack_guide.md)
+<!-- docs-i18n-links:end -->
+
 # Custom Node Pack Guide
 
 Capability Graph packs can add nodes without changing core runtime code.

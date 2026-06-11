@@ -1,12 +1,16 @@
+<!-- docs-i18n-links:start -->
+[EN](./architecture.md) | [JP](./i18n/ja/architecture.md) | [KR](./i18n/ko/architecture.md) | [CN](./i18n/zh-cn/architecture.md)
+<!-- docs-i18n-links:end -->
+
 # Architecture
 
-defaults Pack のアーキテクチャを解説します。
+Describes the defaults pack architecture.
 
-## 全体図: カーネル ↔ defaults Pack の関係
+## Big picture: Kernel ↔ defaults pack relationship
 
-rumiai カーネルは ecosystem 全体を管理するコアランタイムです。defaults Pack はカーネルに登録される標準アプリケーション Pack で、チャット・エージェント・コーディング・AI クライアント・ツール・プロンプト・メモリ・メディア・フロントエンド・開発ツールの機能を提供します。
+The rumiai kernel is the core runtime that manages the entire ecosystem. The defaults pack is a standard application pack that is registered in the kernel and provides functionality for chat, agents, coding, AI clients, tools, prompts, memory, media, front ends, and development tools.
 
-カーネルは `ecosystem.json` を読み取って Pack の構造を認識し、各 handler の名前解決と呼び出しを行います。defaults Pack はカーネルの `KernelFacade` を介してインターフェースの取得（`get_interface`）、イベントの発火（`emit`）、他 Pack の handler の呼び出しを行います。
+The kernel reads `ecosystem.json` to understand the structure of the Pack and resolves and calls each handler. The defaults Pack uses the kernel's `KernelFacade` to obtain the interface (`get_interface`), fire events (`emit`), and call handlers of other Packs.
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -40,23 +44,21 @@ rumiai カーネルは ecosystem 全体を管理するコアランタイムで�
 └──────────────────────────────────────────────────┘
 ```
 
-## レイヤー構成
+## Layer configuration
 
-defaults Pack は4つのレイヤーで構成されています。
+The defaults pack consists of four layers.
 
-**transport 層**（`transport/`）は外部からのリクエストを受け付けます。`transport/http.py` の `DefaultsHttpServer` クラスがルーティングを行い、URLパスとHTTPメソッドに基づいて適切な handler を呼び出します。`transport/stdio.py` と `transport/uds.py` はそれぞれ標準入出力と Unix Domain Socket によるトランスポートを提供します。
+The **transport layer** (`transport/`) accepts requests from outside. The `DefaultsHttpServer` class in `transport/http.py` does the routing and calls the appropriate handler based on the URL path and HTTP method. `transport/stdio.py` and `transport/uds.py` provide standard input/output and Unix Domain Socket transport, respectively.
 
-**blocks 層**（`blocks/`）は handler の集合です。各 handler は `def run(input_data, context)` というシグネチャを持ち、`input_data`（dict）でリクエストパラメータを受け取り、`context`（dict）でフロー情報や `call_handler` 関数を受け取ります。handler は domain 層のロジックを呼び出し、結果を `ok(data)` または `error(message, code)` の形式で返します。
+The **blocks layer** (`blocks/`) is a collection of handlers. Each handler has a signature `def run(input_data, context)`, receives request parameters in `input_data` (dict), and receives flow information and `call_handler` functions in `context` (dict). handler calls logic in the domain layer and returns results in the form of `ok(data)` or `error(message, code)`.
 
-**domain 層**（`domain/`）はビジネスロジックを実装します。`domain/chat/store.py`（ChatStore）、`domain/agent/engine.py`（AgentEngine）、`domain/tool/registry.py`（ToolRegistry）、`domain/prompt/manager.py`（PromptManager）などが含まれます。handler は直接 domain 層のクラスをインポートして使用します。
+The **domain layer** (`domain/`) implements the business logic. Includes `domain/chat/store.py` (ChatStore), `domain/agent/engine.py` (AgentEngine), `domain/tool/registry.py` (ToolRegistry), `domain/prompt/manager.py` (PromptManager), etc. handler directly imports and uses the domain layer class.**External API layer** communicates with AI providers (OpenAI, Anthropic, etc.) through `domain/ai_client/`.
 
-**外部 API 層** は `domain/ai_client/` を通じて AI プロバイダー（OpenAI、Anthropic 等）と通信します。
+## Data flow
 
-## データフロー
+A typical request processing flow is as follows.
 
-典型的なリクエストの処理フローは以下の通りです。
-
-HTTP リクエストが `transport/http.py` の `_RequestHandler` に到着すると、`_handle_request()` メソッドが呼ばれます。URL パスに対応するハンドラ関数が `_match_route()` で解決され、リクエストボディが JSON としてパースされます。ハンドラ関数は `_build_context()` で context を構築し、`blocks/` 配下の handler の `run()` 関数を呼び出します。handler は domain 層のロジックを実行し、必要に応じて `call_handler` 経由で他の handler（例: `defaults.ai.complete`）を呼び出します。結果は `{"status": "ok", "data": ...}` または `{"status": "error", "error": {...}}` の形式で HTTP レスポンスとして返されます。
+When an HTTP request arrives at `_RequestHandler` of `transport/http.py`, the `_handle_request()` method is called. The handler function corresponding to the URL path is resolved in `_match_route()` and the request body is parsed as JSON. The handler function constructs a context in `_build_context()` and calls the `run()` function of handler under `blocks/`. The handler executes the domain layer logic and calls other handlers (e.g. `defaults.ai.complete`) via `call_handler` as necessary. The results are returned as an HTTP response in the format `{"status": "ok", "data": ...}` or `{"status": "error", "error": {...}}`.
 
 ```
 HTTP POST /api/chat/conversations/{id}/messages
@@ -87,7 +89,7 @@ assistant_msg = store.add_message(conversation_id, assistant_msg_dict)
 HTTP 200 {"status": "ok", "data": assistant_msg}
 ```
 
-## ディレクトリ構成と各ディレクトリの役割
+## Directory structure and role of each directory
 
 ```
 rumiai_defaults/
@@ -180,30 +182,14 @@ rumiai_defaults/
 └── docs/                   ドキュメント
 ```
 
-## ecosystem.json の構造と意味
+## Structure and meaning of ecosystem.json
 
-`ecosystem.json` はカーネルが Pack を認識するための構造定義ファイルです。実際のファイル内容に基づく構造は以下の通りです。
+`ecosystem.json` is a structure definition file for the kernel to recognize Pack. The structure based on the actual file contents is as follows.
 
-**`pack_id`**（`"defaults"`）は Pack の一意識別子です。handler 名の先頭部分（`defaults.chat.send` の `defaults`）に使われます。
+**`pack_id`** (`"defaults"`) is the Pack's unique identifier. Used as the first part of the handler name (`defaults` of `defaults.chat.send`).**`pack_identity`** (`"github:harupipipipi/rumiai-defaults"`) is the Pack's remote identifier.**`version`** (`"1.0.0"`) is the Pack version.**`vocabulary.types`** is a list of component types provided by Pack. 10 of `["chat", "agent", "coding", "ai_client", "tool", "prompt", "memory", "media", "frontend", "dev"]` are defined.**`components`** is the definition of each component. Each component has `type`, `id`, `path` (directory path within blocks), and `connectivity.provides` (list of handler names to provide). For example, the `chat` component is located in `path: "blocks/chat"` and provides 18 handlers from `defaults.chat.create_conversation` to `defaults.chat.auto_trim`.**`load_order`** is the component initialization order. They are loaded in the following order: `memory` → `prompt` → `media` → `ai_client` → `tool` → `coding` → `chat` → `agent` → `dev` → `frontend`.**`metadata`** is Pack meta information (description, author, license).
 
-**`pack_identity`**（`"github:harupipipipi/rumiai-defaults"`）は Pack のリモート識別子です。
+## Contact point with KernelFacade
 
-**`version`**（`"1.0.0"`）は Pack のバージョンです。
+The defaults pack interacts with the kernel at three main points:
 
-**`vocabulary.types`** は Pack が提供するコンポーネントの型の一覧です。`["chat", "agent", "coding", "ai_client", "tool", "prompt", "memory", "media", "frontend", "dev"]` の10が定義されています。
-
-**`components`** は各コンポーネントの定義です。各コンポーネントは `type`、`id`、`path`（blocks 内のディレクトリパス）、`connectivity.provides`（提供する handler 名のリスト）を持ちます。例えば `chat` コンポーネントは `path: "blocks/chat"` に位置し、`defaults.chat.create_conversation` から `defaults.chat.auto_trim` まで18個の handler を提供します。
-
-**`load_order`** はコンポーネントの初期化順序です。`memory` → `prompt` → `media` → `ai_client` → `tool` → `coding` → `chat` → `agent` → `dev` → `frontend` の順でロードされます。
-
-**`metadata`** は Pack のメタ情報（description, author, license）です。
-
-## KernelFacade との接点
-
-defaults Pack は以下の3つの主要な接点でカーネルと連携します。
-
-**`io.http.server`**: `blocks/frontend/start.py` がカーネルから `facade` を受け取り、`transport/http.py` の `start_http_server(facade)` に渡して HTTP サーバーを起動します。facade は `DefaultsHttpServer` のインスタンスに保持され、`_handle_context_info()` で `facade.list_interfaces()` を呼び出してインターフェース一覧を返します。
-
-**`get_interface` / `list_interfaces`**: カーネルが登録している InterfaceRegistry から、他の Pack やカーネル自身が提供するインターフェースを取得するために使用されます。`/api/context` エンドポイントで現在利用可能なインターフェース一覧を確認できます。
-
-**`emit`（EventBus）**: handler の `context` 経由で `call_handler` が提供され、これを通じて他の handler を呼び出します。`call_handler("defaults.ai.complete", params)` のように handler 名とパラメータを指定して呼び出します。これはカーネルの EventBus / InterfaceRegistry を通じて名前解決されます。
+**`io.http.server`**: `blocks/frontend/start.py` receives `facade` from the kernel and passes it to `start_http_server(facade)` in `transport/http.py` to start the HTTP server. The facade is held in an instance of `DefaultsHttpServer`, and `_handle_context_info()` calls `facade.list_interfaces()` to return a list of interfaces.**`get_interface` / `list_interfaces`**: Used to retrieve interfaces provided by other Packs or the kernel itself from the InterfaceRegistry registered by the kernel. `/api/context` You can check the list of interfaces currently available on the endpoint.**`emit` (EventBus)**: `call_handler` is provided via the handler's `context`, through which it calls other handlers. Call it by specifying the handler name and parameters like `call_handler("defaults.ai.complete", params)`. This is resolved through the kernel's EventBus / InterfaceRegistry.

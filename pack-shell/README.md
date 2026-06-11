@@ -1,26 +1,30 @@
+<!-- docs-i18n-links:start -->
+[EN](./README.md) | [JP](./i18n/ja/README.md) | [KR](./i18n/ko/README.md) | [CN](./i18n/zh-cn/README.md)
+<!-- docs-i18n-links:end -->
+
 # pack-shell
 
-Pack デスクトップアプリを起動するためのヘルパーバイナリ。
+Helper binaries for launching Pack desktop apps.
 
-## 概要
+## Overview
 
-pack-shell は以下のフローを自動化します:
+pack-shell automates the following flow:
 
-1. Kernel の /health エンドポイントを確認
-2. Kernel が起動していなければ自動起動
-3. /api/desktop/token で認証トークンを取得
-4. 環境変数 (RUMI_TOKEN, RUMI_PORT, RUMI_PACK_ID) を設定してアプリを起動
+1. Check the /health endpoint of the Kernel
+2. If Kernel is not started, it will start automatically.
+3. Get the authentication token at /api/desktop/token
+4. Set environment variables (RUMI_TOKEN, RUMI_PORT, RUMI_PACK_ID) and start the app
 
-## ビルド
+## Build
 
 ```bash
 cd pack-shell
 cargo build --release
 ```
 
-ビルド成果物: `target/release/pack-shell`
+Build artifacts: `target/release/pack-shell`
 
-## 使い方
+## How to use
 
 ```bash
 # 基本的な使い方
@@ -39,7 +43,7 @@ pack-shell run my-pack-123 \
 pack-shell version
 ```
 
-## 起動フロー
+## Startup flow
 
 ```
 pack-shell run
@@ -70,25 +74,25 @@ Spawn app subprocess (--command)
 Wait for app exit → return exit code
 ```
 
-## 環境変数
+## Environment variables
 
-### 入力（pack-shell が読む）
+### Input (read by pack-shell)
 
-| 変数 | 説明 | 備考 |
+| Variable | Description | Notes |
 |------|------|------|
-| RUMI_API_TOKEN | API 認証トークン | --api-token の代替 |
+| RUMI_API_TOKEN | API authentication token | --api-token alternative |
 
-`DesktopAppManager` から起動される desktop app は `RUMI_API_TOKEN` を環境変数で受け取る契約です。
+A desktop app launched from `DesktopAppManager` is a contract that receives `RUMI_API_TOKEN` as an environment variable.
 
-### 出力（アプリに渡す）
+### Output (pass to app)
 
-| 変数 | 説明 |
+| Variable | Description |
 |------|------|
-| RUMI_TOKEN | デスクトップ用一時トークン |
-| RUMI_PORT | Kernel API ポート |
-| RUMI_PACK_ID | 対象 Pack ID |
+| RUMI_TOKEN | Temporary token for desktop |
+| RUMI_PORT | Kernel API port |
+| RUMI_PACK_ID | Target Pack ID |
 
-## クロスビルド
+## Cross build
 
 ```bash
 # macOS (Apple Silicon)

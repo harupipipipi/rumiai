@@ -1,25 +1,29 @@
-# defaultspack Extension Migration Plan (PR統合版)
+<!-- docs-i18n-links:start -->
+[EN](./defaultspack_extension_migration_plan.md) | [JP](./i18n/ja/defaultspack_extension_migration_plan.md) | [KR](./i18n/ko/defaultspack_extension_migration_plan.md) | [CN](./i18n/zh-cn/defaultspack_extension_migration_plan.md)
+<!-- docs-i18n-links:end -->
 
-## 背景と目的
+# defaultspack Extension Migration Plan (PR integrated version)
 
-defaultspack には、以下の集中実装が残っている。
+## Background and purpose
 
-- LLM provider / model の中央定義（`domain/ai_client/providers/__init__.py` と `model_profiles.py`）
-- prompt / tool / knowledge / transport の重複管理パス
-- `transport/http.py` の巨大な fallback ルート表
+The following centralized implementation remains in defaultspack.
 
-本変更では **manifest駆動 + ファイルドロップ拡張** を基盤にし、互換を保ったまま段階移行できる土台を作る。
+- Central definition of LLM provider/model (`domain/ai_client/providers/__init__.py` and `model_profiles.py`)
+- Duplicate management path for prompt / tool / knowledge / transport
+- Huge fallback route table for `transport/http.py`
 
-## 実装方針（このPRで完了させる範囲）
+This change is based on **manifest drive + file drop extension** and creates a foundation that allows for phase transition while maintaining compatibility.
 
-1. 拡張カテゴリを固定文字列で定義し、カテゴリごとの discovery ルールを明示する。
-2. manifest 検証と extension registry を追加し、中央ハードコードからの脱却を開始する。
-3. LLM provider/model は extension manifest 優先で読み込み、既存ロジックは互換 fallback として残す。
-4. OpenRouter は静的一覧を持たず、API同期 + キャッシュ + fallback で扱う。
-5. prompt / tool / knowledge / transport は既存 manager を壊さず、extension registry 側を一次ソースに寄せる。
-6. 既存 API/呼び出しシグネチャ（`AIClient.complete(model, messages, tools, params)`）は維持する。
+## Implementation policy (scope to be completed with this PR)
 
-## 拡張カテゴリ（foundation）
+1. Define extended categories with fixed strings and specify discovery rules for each category.
+2. Add manifest validation and extension registry to start moving away from central hardcode.
+3. LLM provider/model is loaded with extension manifest priority, leaving existing logic as a compatibility fallback.
+4. OpenRouter does not have a static list and handles it with API synchronization + cache + fallback.
+5. Prompt / tool / knowledge / transport does not break the existing manager and brings the extension registry side to the primary source.
+6. Existing API/call signature (`AIClient.complete(model, messages, tools, params)`) will be maintained.
+
+## Extension category (foundation)
 
 - `llm_provider`
 - `llm_model`
@@ -32,7 +36,7 @@ defaultspack には、以下の集中実装が残っている。
 - `ui_surface`
 - `policy`
 
-## ディレクトリ規約（foundation）
+## Directory foundation
 
 ```text
 ecosystem/defaultspack/extensions/
@@ -48,90 +52,90 @@ ecosystem/defaultspack/extensions/
   policies/<policy_id>/manifest.json
 ```
 
-## Detailed TODO（受け入れ基準つき）
+## Detailed TODO (with acceptance criteria)
 
 ### A. Foundation
 
-- [x] A1: 作業ブランチを作成
-  - 受け入れ: `codex/defaultspack-extension-refactor` で作業する
-- [x] A2: defaultspack 主要テストのベースラインを確認
-  - 受け入れ: extension 追加後も phase5 テストは維持される
-- [x] A3: 本 migration plan を追加
-  - 受け入れ: 目的・範囲・カテゴリ・互換方針・TODO が明記される
-- [x] A4: Extension discovery / manifest validation / registry 実装
-  - 受け入れ: カテゴリ別に manifest を検出し、検証エラーを取得できる
-- [ ] A5: legacy import path と canonical package path の二重化を解消
-  - 受け入れ: manifest entrypoint 読み込みで `domain.*` と `ecosystem.defaultspack.*` が衝突しない
+- [x] A1: Create working branch
+  - Acceptance: Working with `codex/defaultspack-extension-refactor`
+- [x] A2: defaultspack Check baseline for major tests
+  - Acceptance: phase5 tests are maintained after adding the extension
+- [x] A3: Added this migration plan
+  - Acceptance: Purpose, scope, category, compatibility policy, and TODO are specified.
+- [x] A4: Extension discovery / manifest validation / registry implementation
+  - Acceptance: Can detect manifests by category and get validation errors
+- [ ] A5: Eliminate duplication of legacy import path and canonical package path.
+  - Acceptance: `domain.*` and `ecosystem.defaultspack.*` no longer conflict when loading manifest entrypoint
 
-### B. LLM / Provider 移行（互換維持）
+### B. LLM / Provider migration (maintaining compatibility)
 
-- [ ] B1: `domain.ai_client.providers.__init__` を extension manifest 駆動へ置換
-  - 受け入れ: 中央 `_PROVIDER_REGISTRY` 依存が解消される
-- [ ] B2: OpenAI互換 generic adapter を追加
-  - 受け入れ: manifest の env/base_url 設定だけで provider を追加できる
-- [ ] B3: OpenRouter provider を追加（動的モデル同期）
-  - 受け入れ: ハードコードモデル一覧なし、`GET /api/v1/models` 同期 + キャッシュ + fallback が動く
-- [ ] B4: 既定モデル選択を manifest / model metadata ベースに移行
-  - 受け入れ: stale 固定値に依存しない（例: OpenAI は `gpt-5.4`、Anthropic は Claude 4.6 系、Google は Gemini 2.5 系）
-- [ ] B5: OpenAI / Anthropic / Google の modern catalog を manifest 側へ寄せる
-  - 受け入れ: `ProfileLoader` の default / fast / large / embedding が registry 起点で決まる
-- [ ] B6: OpenRouter と generic OpenAI-compatible を分離する
-  - 受け入れ: OpenRouter 固有同期ロジックと generic endpoint adapter が別実装になる
+- [ ] B1: Replace `domain.ai_client.providers.__init__` with extension manifest driven
+  - Acceptance: Central `_PROVIDER_REGISTRY` Dependency removed.
+- [ ] B2: Added OpenAI compatible generic adapter
+  - Acceptance: provider can be added just by setting env/base_url in manifest
+- [ ] B3: Added OpenRouter provider (dynamic model synchronization)
+  - Acceptance: No hardcoded model list, `GET /api/v1/models` Sync + cache + fallback works
+- [ ] B4: Migrate default model selection to manifest / model metadata based
+  - Acceptance: Does not depend on fixed stale values (e.g. OpenAI is `gpt-5.4`, Anthropic is Claude 4.6 series, Google is Gemini 2.5 series)
+- [ ] B5: Move OpenAI / Anthropic / Google's modern catalog to the manifest side
+  - Acceptance: default / fast / large / embedding of `ProfileLoader` is determined by registry origin
+- [ ] B6: Separate OpenRouter and generic OpenAI-compatible
+  - Acceptance: OpenRouter specific synchronization logic and generic endpoint adapter are now implemented separately.
 
-### C. Prompt / Tool / Knowledge / Transport 接続
+### C. Prompt / Tool / Knowledge / Transport Connection
 
-- [ ] C1: prompt registry を PromptManager に接続
-  - 受け入れ: extension prompt が list/get/render でき、user_data prompt 編集は継続する
-- [ ] C2: tool registry を ToolRegistry に接続
-  - 受け入れ: built-in tool は manifest 起点で読み込まれ、dynamic tool CRUD は継続する
-- [ ] C3: knowledge backend manifest を backend registry に接続
-  - 受け入れ: entrypoint から backend を生成できる
-- [ ] C4: chat_mode / agent_mode runner を entrypoint 解決可能にする
-  - 受け入れ: mode manifest が runner 呼び出しの起点になる
-- [ ] C5: transport/http.py の fallback ルート表を外出しする
-  - 受け入れ: ルート定義が transport registry module 側へ寄り、`http.py` は dispatcher 中心になる
-- [ ] C6: prompt / tool / chat_mode / agent_mode / knowledge_backend / transport / ui / policy の manifest 雛形を完成させる
-  - 受け入れ: discovery 結果に全カテゴリが現れる
+- [ ] C1: Connect prompt registry to PromptManager
+  - Accepted: extension prompt can list/get/render, user_data prompt editing continues
+- [ ] C2: Connect tool registry to ToolRegistry
+  - Acceptance: built-in tool is loaded at manifest origin, dynamic tool CRUD continues
+- [ ] C3: Connect knowledge backend manifest to backend registry
+  - Acceptance: backend can be generated from entrypoint
+- [ ] C4: Make chat_mode / agent_mode runner entrypoint resolvable
+  - Accept: mode manifest becomes the starting point for runner calls
+- [ ] C5: Export fallback route table in transport/http.py
+  - Acceptance: Route definitions move closer to transport registry module, `http.py` becomes dispatcher-centric
+- [ ] C6: Complete the manifest template for prompt / tool / chat_mode / agent_mode / knowledge_backend / transport / ui / policy
+  - Acceptance: All categories appear in discovery results
 
-### D. テスト
+### D. Test
 
-- [ ] D1: manifest validation テスト
-  - 受け入れ: 必須項目欠落・カテゴリ不一致を検知
-- [ ] D2: extension discovery テスト
-  - 受け入れ: 全カテゴリが検出される
-- [ ] D3: provider/model loading テスト
-  - 受け入れ: manifest 駆動の provider 検出・model 優先解決が動く
-- [ ] D4: OpenRouter 同期/キャッシュテスト
-  - 受け入れ: API成功時にキャッシュ更新、API失敗時にキャッシュ fallback
-- [ ] D5: PromptManager / ToolRegistry extension 接続テスト
-  - 受け入れ: extension 由来の prompt/tool が既存 API から見える
-- [ ] D6: transport route registration テスト
-  - 受け入れ: fallback route 定義が registry module から構築される
-- [ ] D7: legacy shim removal テスト
-  - 受け入れ: `prompt.prompt_loader` / `tool.tool_loader` の互換 import ができない
+- [ ] D1: manifest validation test
+  - Acceptance: Detects missing required items and mismatched categories
+- [ ] D2: extension discovery test
+  - Accept: All categories are detected
+- [ ] D3: provider/model loading test
+  - Acceptance: manifest-driven provider detection/model priority resolution works
+- [ ] D4: OpenRouter sync/cache test
+  - Acceptance: Cache update on API success, cache fallback on API failure
+- [ ] D5: PromptManager / ToolRegistry extension connection test
+  - Acceptance: prompt/tool from extension is visible from existing API
+- [ ] D6: transport route registration test
+  - Acceptance: fallback route definition is built from registry module
+- [ ] D7: legacy shim removal test
+  - Acceptance: Compatible import of `prompt.prompt_loader` / `tool.tool_loader` is not possible.
 
-## 互換方針
+## Compatibility policy
 
-- API surface は維持する（`AIClient` 呼び出しシグネチャは変更しない）。
-- extension 未配置時は fail-soft で既存挙動にフォールバックする。
-- `transport/http.py` の fallback ルート表は互換用途として残すが、定義そのものは registry module 側へ寄せる。
+- Maintain API surface (`AIClient` call signature unchanged).
+- If extension is not placed, fall back to the existing behavior with fail-soft.
+- The fallback route table of `transport/http.py` will be left for compatible purposes, but the definition itself will be moved to the registry module side.
 - top-level `prompt.*` / `tool.*` legacy shims have been removed; use defaultspack registries and functions.
 
-## 前提と仮定
+## Assumptions and assumptions
 
-- `ecosystem/defaultspack` を refactor 対象とし、`ecosystem/defaults` はこのPRでは非対象。
-- OpenRouter のモデル取得は `/models` エンドポイントを一次ソースとし、ネットワーク不可時はローカルキャッシュを使用する。
-- provider 追加は「manifest追加 + 必要なら adapter 指定」で成立するようにする。
+- `ecosystem/defaultspack` is targeted for refactor, `ecosystem/defaults` is not targeted for this PR.
+- OpenRouter model acquisition uses the `/models` endpoint as the primary source, and uses the local cache when the network is unavailable.
+- Adding a provider should be done by "adding manifest + specifying adapter if necessary".
 
 ## Current Status
 
-- discovery / registry / basic manifests は追加済み
-- provider migration は途中で、package import path の正規化と model metadata の寄せ先整理が必要
-- prompt / tool / transport は雛形追加済みだが、既存 manager / route table への接続が未完了
-- setup pack selection がある環境では、backend/frontend extension discovery は
-  `defaultspack` と選択済み target pack に絞られる。selection がない開発環境では
-  互換のため全 sibling pack を読み込む
-- Copilot 変更には互換 shim 削除が含まれていたため、このPRでは shim を戻して互換優先にする
+- discovery / registry / basic manifests added
+- During provider migration, it is necessary to normalize the package import path and organize the model metadata destination.
+- The templates for prompt / tool / transport have been added, but the connection to the existing manager / route table is not completed.
+- In environments with setup pack selection, backend/frontend extension discovery is
+  Narrowed down to `defaultspack` and selected target pack. In a development environment without selection
+  Load all sibling packs for compatibility
+- The Copilot change included removing a compatibility shim, so this PR will bring back the shim to prioritize compatibility.
 ## Local-first completion status
 
 This PR fixes the local-first runtime baseline without moving Cloudflare,

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./conflict_resolution.md) | [JP](./i18n/ja/conflict_resolution.md) | [KR](./i18n/ko/conflict_resolution.md) | [CN](./i18n/zh-cn/conflict_resolution.md)
+<!-- docs-i18n-links:end -->
+
 # Rumi AI OS Defaults Conflict Resolution
 
 As the Rumi AI OS ecosystem grows, multiple packs will inevitably offer similar functionality (e.g., `tool_search`, `file_editor`). This document details how the `defaults` pack handles naming collisions, user preferences, and secure feature imports to guarantee stability and prevent malicious hijacking.

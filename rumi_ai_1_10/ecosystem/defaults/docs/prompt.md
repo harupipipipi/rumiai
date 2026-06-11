@@ -1,24 +1,27 @@
-```markdown
-# prompt.md — Rumi AI OS プロンプト設計書
+<!-- docs-i18n-links:start -->
+[EN](./prompt.md) | [JP](./i18n/ja/prompt.md) | [KR](./i18n/ko/prompt.md) | [CN](./i18n/zh-cn/prompt.md)
+<!-- docs-i18n-links:end -->
 
-## 1. 概要
+# prompt.md — Rumi AI OS prompt design document
 
-prompt モジュールは Rumi AI OS におけるプロンプトの定義、管理、レンダリングを担うコンポーネントである。
+## 1. Overview
 
-prompt は「変数を受け取りテキストを返す関数」である。prompt モジュールは完全に受動的であり、呼び出し側（agent、chat 等）が `prompt_manager.render(prompt_id, variables)` を呼んで初めて機能する。prompt モジュール自身が何かを起動したり、他のモジュールに介入したりすることはない。
+The prompt module is a component responsible for defining, managing, and rendering prompts in Rumi AI OS.
 
-テンプレートファイル（Jinja2 構文）による宣言的な定義と、Python ファイル（prompt.py）によるプログラマブルな拡張の両方をサポートする。
+prompt is a ``function that receives a variable and returns text.'' The prompt module is completely passive and only works when the caller (agent, chat, etc.) calls `prompt_manager.render(prompt_id, variables)`. The prompt module itself does not start anything or interfere with other modules.
+
+Supports both declarative definition using template files (Jinja2 syntax) and programmable extension using Python files (prompt.py).
 
 
-## 2. 設計思想
+## 2. Design philosophy
 
-### 2.1 受動的モジュール
+### 2.1 Passive modules
 
-prompt モジュールは「聞かれたら答える辞書」である。ai_client が system prompt を必要とするとき、agent が圧縮テンプレートを必要とするとき、chat がシステムメッセージを必要とするとき、それぞれの呼び出し側が prompt_manager.render を呼ぶ。prompt が使われるかどうかは呼び出し側の設計に依存する。
+The prompt module is a ``dictionary that answers questions when asked.'' Each caller calls prompt_manager.render when ai_client needs a system prompt, an agent needs a compressed template, and chat needs a system message. Whether prompt is used depends on the caller's design.
 
-### 2.2 拡張性を最優先する
+### 2.2 Prioritize scalability
 
-prompt はエージェントの品質を最も大きく左右するパーツである。ai_client や tool と同等の拡張性を持たせる。
+The prompt is the part that most influences the quality of the agent. Provide extensibility equivalent to ai_client and tool.
 
 ```
 ai_client → provider.py で拡張
@@ -26,22 +29,22 @@ tool      → handler.py で拡張
 prompt    → prompt.py で拡張
 ```
 
-### 2.3 2 つの構成モード
+### 2.3 Two configuration modes
 
-最小構成は template.md のみ。動的処理が不要な場合はテンプレートファイルを 1 つ置くだけで prompt が完成する。
+The minimum configuration is only template.md. If dynamic processing is not required, prompt can be completed by simply placing one template file.
 
-フル構成は prompt.py 一本。メタデータ、変数定義、動的処理、テンプレートの全てを Python で記述する。tool の handler.py と同じ拡張パターンである。
+The full configuration consists of one prompt.py. All metadata, variable definitions, dynamic processing, and templates are written in Python. This is the same extension pattern as handler.py of tool.
 
-### 2.4 変数は無制限
+### 2.4 Unlimited variables
 
-prompt 定義者は好きなだけ変数を定義でき、prompt.py の中で動的に変数を生成することもできる。Pack 変数プロバイダからの注入も無制限である。制限があるとすればレンダリング後のテキストサイズのみである。
+The prompt definer can define as many variables as he or she likes, and can even create variables dynamically in prompt.py. Injection from the Pack variable provider is also unlimited. The only limitation is the rendered text size.
 
-### 2.5 ID の正規化は vocab で行う
+### 2.5 ID normalization is done with vocab
 
-prompt_id の表記揺れ（systemprompt、system_prompt、system-prompt 等）は vocab モジュールで解決する。新たなエイリアスの仕組みは作らない。
+The problem with the notation of prompt_id (systemprompt, system_prompt, system-prompt, etc.) is resolved using the vocab module. No new alias mechanism will be created.
 
 
-## 3. ディレクトリ構造
+## 3. Directory structure
 
 ```
 ecosystem/default/backend/blocks/prompt/
@@ -89,9 +92,9 @@ user_data/packs/coding_pro_prompts/
 ```
 
 
-## 4. 最小構成 — template.md のみ
+## 4. Minimal configuration — template.md only
 
-template.md を 1 ファイル配置するだけで動作する最も簡単な構成。
+The simplest configuration that works just by placing one file, template.md.
 
 `user_data/shared/prompts/my_prompt/template.md`:
 
@@ -107,14 +110,14 @@ template.md を 1 ファイル配置するだけで動作する最も簡単な�
 {% endif %}
 ```
 
-この場合、メタデータはデフォルト値が適用される。prompt_id はディレクトリ名（`my_prompt`）から自動決定される。変数は呼び出し側が渡したものがそのまま使われ、存在しない変数は空文字になる。
+In this case, default values are applied to the metadata. prompt_id is automatically determined from the directory name (`my_prompt`). The variables passed by the caller are used as they are, and non-existent variables become empty strings.
 
 
-## 5. フル構成 — prompt.py
+## 5. Full configuration — prompt.py
 
-prompt.py は prompt のメタデータ、変数定義、動的処理を全て担う Python ファイルである。
+prompt.py is a Python file that handles all prompt metadata, variable definitions, and dynamic processing.
 
-### 5.1 インターフェース
+### 5.1 Interface
 
 ```python
 # user_data/shared/prompts/coding_system/prompt.py
@@ -216,9 +219,9 @@ async def post_render(rendered_text: str, variables: dict, context: dict) -> str
     return rendered_text
 ```
 
-### 5.2 prompt.py が存在しない場合
+### 5.2 If prompt.py does not exist
 
-template.md のみの最小構成では、以下のデフォルトが適用される。
+In a minimal configuration with only template.md, the following defaults apply:
 
 ```python
 METADATA = {
@@ -234,11 +237,11 @@ PERMISSIONS = {}
 LIMITS = {"max_execution_time": 5, "max_output_size": 50000}
 ```
 
-pre_render と post_render は実行されない。
+pre_render and post_render are not executed.
 
-### 5.3 prompt.py のみでテンプレートを内包する場合
+### 5.3 When including a template only in prompt.py
 
-template.md を使わず、Python 文字列としてテンプレートを定義することもできる。
+You can also define templates as Python strings without using template.md.
 
 ```python
 METADATA = {
@@ -258,21 +261,21 @@ VARIABLES = {
 }
 ```
 
-`METADATA["template"]` が None で `TEMPLATE` 文字列が存在する場合、その文字列をテンプレートとして使用する。
+If `METADATA["template"]` is None and `TEMPLATE` string exists, use that string as a template.
 
 
-## 6. テンプレート構文
+## 6. Template syntax
 
-テンプレートは Jinja2 構文の Markdown ファイルである。
+The template is a Markdown file with Jinja2 syntax.
 
-### 6.1 変数埋め込み
+### 6.1 Variable embedding
 
 ```markdown
 あなたは {{ agent_name }} です。
 {{ code_style }} なコードを書いてください。
 ```
 
-### 6.2 条件分岐
+### 6.2 Conditional branching
 
 ```markdown
 {% if project_memory %}
@@ -281,7 +284,7 @@ VARIABLES = {
 {% endif %}
 ```
 
-### 6.3 ループ
+### 6.3 Loop
 
 ```markdown
 ## 利用可能なツール
@@ -291,18 +294,18 @@ VARIABLES = {
 {% endfor %}
 ```
 
-### 6.4 include（部品の読み込み）
+### 6.4 include (loading parts)
 
 ```markdown
 {% include "partials/safety_rules.md" %}
 {% include "partials/output_format.md" %}
 ```
 
-`partials/` ディレクトリに共通パーツを配置し、複数の prompt から再利用する。パスは `user_data/shared/prompts/` からの相対パスで解決される。
+`partials/` Place common parts in the directory and reuse them from multiple prompts. The path is resolved relative to `user_data/shared/prompts/`.
 
-### 6.5 継承（extends）
+### 6.5 Inheritance (extends)
 
-親テンプレート（general_system/template.md）:
+Parent template (general_system/template.md):
 
 ```markdown
 あなたは {{ agent_name }} です。
@@ -326,7 +329,7 @@ VARIABLES = {
 {% include "partials/safety_rules.md" %}
 ```
 
-子テンプレート（coding_system/template.md）:
+Child template (coding_system/template.md):
 
 ```markdown
 {% extends "general_system/template.md" %}
@@ -345,32 +348,28 @@ VARIABLES = {
 ```
 
 
-## 7. 変数システム
+## 7. Variable system
 
-### 7.1 変数の分類
+### 7.1 Classification of variables
 
-**required** は呼び出し元が必ず値を渡す変数。渡されなかった場合は validator がエラーを返す。
+**required** is a variable whose value must be passed by the caller. If not passed, validator will return an error.**optional** is a variable whose default value will be used even if it is not passed. Specifying `source: system` causes variable_resolver to automatically retrieve the value from the system.**custom** is a customization point specific to this prompt. The user of prompt (prompt_variables in agent.json or calling code) can override the value. Used by prompt pack users to fine-tune prompt behavior.
 
-**optional** は渡されなくてもデフォルト値が使われる変数。`source: system` を指定すると variable_resolver が自動的にシステムから値を取得する。
+There is no limit to the number of variables. You can also dynamically generate and return variables within pre_render in prompt.py.
 
-**custom** はこの prompt 固有のカスタマイズポイント。prompt を使う側（agent.json の prompt_variables や呼び出しコード）が値を上書きできる。prompt pack の利用者がプロンプトの振る舞いを微調整するために使う。
+### 7.2 Variable resolution order
 
-変数の数に制限はない。prompt.py の pre_render 内で動的に変数を生成して返すこともできる。
+variable_resolver.py resolves variables in the following priority order. The later one overwrites the earlier one.
 
-### 7.2 変数の解決順序
+1. Custom default value for VARIABLES (lowest priority)
+2. Optional default value for VARIABLES
+3. system variables (datetime, os_info, etc., automatically obtained with `source: system`)
+4. Values provided by the Pack variable provider
+5. Value specified in prompt_variables in agent.json
+6. Parameters passed during invocation (highest priority)
 
-variable_resolver.py は以下の優先順位で変数を解決する。後のものが前のものを上書きする。
+### 7.3 System variables
 
-1. VARIABLES の custom デフォルト値（最低優先度）
-2. VARIABLES の optional デフォルト値
-3. system 変数（datetime、os_info 等、`source: system` で自動取得）
-4. Pack 変数プロバイダが提供する値
-5. agent.json の prompt_variables で指定された値
-6. 呼び出し時に渡されたパラメータ（最高優先度）
-
-### 7.3 システム変数
-
-variable_resolver.py が自動的に提供する変数。全ての prompt で利用可能。
+Variables automatically provided by variable_resolver.py. Available for all prompts.
 
 ```
 system.datetime       → "2026-02-20T15:30:00+09:00"
@@ -386,11 +385,11 @@ system.workspace_path → "/workspace/my-project"
 system.language       → "ja"
 ```
 
-### 7.4 Pack 変数プロバイダ
+### 7.4 Pack Variable Provider
 
-Pack は独自の変数プロバイダを登録できる。プロバイダは Python ファイルで、namespace 付きの変数 dict を返す。
+Packs can register their own variable providers. The provider is a Python file that returns a namespaced variable dict.
 
-pack.json での宣言:
+Declaration in pack.json:
 
 ```json
 {
@@ -426,7 +425,7 @@ async def provide(context: dict) -> dict:
     }
 ```
 
-テンプレートでの使用:
+Use in templates:
 
 ```markdown
 {% if git.available %}
@@ -434,9 +433,9 @@ async def provide(context: dict) -> dict:
 {% endif %}
 ```
 
-パフォーマンスのために、テンプレート内で実際に参照されている namespace のプロバイダのみ実行する。loader がテンプレートを事前解析して使用されている namespace を検出する。
+For performance, only run providers for namespaces that are actually referenced in the template. The loader pre-parses the template to detect namespaces being used.
 
-### 7.5 agent.json からのカスタム変数上書き
+### 7.5 Overriding custom variables from agent.json
 
 ```json
 {
@@ -451,9 +450,9 @@ async def provide(context: dict) -> dict:
 ```
 
 
-## 8. 呼び出しインターフェース
+## 8. Calling interface
 
-### 8.1 manager.py の API
+### 8.1 manager.py API
 
 ```python
 class PromptManager:
@@ -477,7 +476,7 @@ class PromptManager:
         """変数の検証を行う"""
 ```
 
-### 8.2 各モジュールからの呼び出し例
+### 8.2 Examples of calls from each module
 
 agent/context_builder.py:
 
@@ -508,7 +507,7 @@ update_prompt = await prompt_manager.render("memory_update", {
 })
 ```
 
-chat モジュール:
+chat module:
 
 ```python
 system_prompt = await prompt_manager.render("general_system", {
@@ -517,7 +516,7 @@ system_prompt = await prompt_manager.render("general_system", {
 ```
 
 
-## 9. レンダリングパイプライン
+## 9. Rendering pipeline
 
 ```
 render(prompt_id, variables, context) が呼ばれる
@@ -554,23 +553,23 @@ render(prompt_id, variables, context) が呼ばれる
 ```
 
 
-## 10. 衝突解決
+## 10. Conflict resolution
 
-### 10.1 検索パス
+### 10.1 Search path
 
-loader.py は以下の順序で全検索パスを走査し、同一 prompt_id の候補を全て収集する。
+loader.py scans all search paths in the following order and collects all candidates with the same prompt_id.
 
 1. `user_data/shared/prompts/{prompt_id}/`
-2. `user_data/packs/*/prompts/{prompt_id}/`（全 Pack）
+2. `user_data/packs/*/prompts/{prompt_id}/` (All Packs)
 3. `ecosystem/default/prompts/{prompt_id}/`
 
-### 10.2 衝突検知
+### 10.2 Collision detection
 
-候補が 1 つなら即採用。候補が複数ある場合は衝突として扱い、resolution.json を確認する。
+If there is only one candidate, we will hire you immediately. If there are multiple candidates, treat it as a conflict and check resolution.json.
 
 ### 10.3 resolution.json
 
-ユーザーが選択した衝突解決の記録。
+Records of user-selected conflict resolutions.
 
 ```json
 {
@@ -586,9 +585,9 @@ loader.py は以下の順序で全検索パスを走査し、同一 prompt_id �
 }
 ```
 
-### 10.4 未解決の衝突
+### 10.4 Unresolved conflicts
 
-resolution.json に記録がない衝突は、render 時に `PromptConflictError` を返す。エラーには候補リストが含まれ、フロントエンドがユーザーに選択 UI を表示する。
+Conflicts that are not recorded in resolution.json will return `PromptConflictError` at render time. The error contains a suggestion list, and the frontend displays a selection UI to the user.
 
 ```python
 class PromptConflictError(Exception):
@@ -597,7 +596,7 @@ class PromptConflictError(Exception):
         self.candidates = candidates
 ```
 
-### 10.5 バックエンド API
+### 10.5 Backend API
 
 ```python
 # 候補の取得
@@ -612,9 +611,9 @@ await prompt_manager.set_resolution("coding_system", "user_data/packs/advanced_c
 ```
 
 
-## 11. Pack による差し替え提案
+## 11. Replacement suggestion by Pack
 
-Pack が既存の prompt を自身の prompt で差し替えたい場合、pack.json の `replaces` フィールドで提案できる。
+If a Pack wants to replace an existing prompt with its own prompt, it can make a suggestion in the `replaces` field of pack.json.
 
 ```json
 {
@@ -628,9 +627,9 @@ Pack が既存の prompt を自身の prompt で差し替えたい場合、pack.
 }
 ```
 
-Pack インストール時にフロントエンドが「このPackは coding_system を my_coding_system に置き換えます。許可しますか？」と表示する。ユーザーが許可した場合、resolution.json に記録される。
+When installing a Pack, the front end displays "This Pack replaces coding_system with my_coding_system. Do you want to allow this?" If the user allows it, it will be recorded in resolution.json.
 
-`replaces` は prompt に限らず tool や flow の差し替えにも汎用的に使用できる。
+`replaces` can be used not only for prompt but also for replacing tool and flow.
 
 ```json
 "replaces": {
@@ -641,11 +640,11 @@ Pack インストール時にフロントエンドが「このPackは coding_sys
 ```
 
 
-## 12. vocab による ID 正規化
+## 12. ID normalization with vocab
 
-prompt_id の表記揺れは vocab モジュールで解決する。
+The problem with the notation of prompt_id is resolved by using the vocab module.
 
-vocab の拡張:
+Extending vocab:
 
 ```json
 {
@@ -656,7 +655,7 @@ vocab の拡張:
 }
 ```
 
-loader.py は prompt_id を受け取ったとき、まず自動正規化（snake_case 変換）を行い、それでも見つからなければ vocab に問い合わせる。
+When loader.py receives prompt_id, it first performs automatic normalization (snake_case conversion), and if it still cannot find it, it queries vocab.
 
 ```python
 # loader.py 内
@@ -679,46 +678,46 @@ async def resolve_prompt_id(self, raw_id):
     raise PromptNotFoundError(f"Prompt '{raw_id}' not found")
 ```
 
-vocab エントリはユーザーや Pack が自由に追加できる。
+Users and packs can freely add vocab entries.
 
 
-## 13. context に注入される機能
+## 13. Functions injected into context
 
-prompt.py の pre_render / post_render に渡される context には以下の機能が注入される。
+The following functions are injected into the context passed to pre_render / post_render of prompt.py.
 
-`context["read_file"]` はワークスペース内のファイル読み取り。PERMISSIONS で `read_file: true` が必要。
+`context["read_file"]` Reads files in workspace. Requires `read_file: true` in PERMISSIONS.
 
-`context["http_request"]` は外部 HTTP リクエスト。PERMISSIONS で `http_request: true` が必要。
+`context["http_request"]` is an external HTTP request. Requires `http_request: true` in PERMISSIONS.
 
-`context["llm_call"]` は制限付き LLM 呼び出し。PERMISSIONS で `llm_call: true` が必要。
+`context["llm_call"]` is a restricted LLM call. Requires `llm_call: true` in PERMISSIONS.
 
-`context["session_state"]` はセッション状態の読み取り。PERMISSIONS で `session_state: true` が必要。
+`context["session_state"]` Read session state. Requires `session_state: true` in PERMISSIONS.
 
-`context["render_template"]` は部分テンプレートのレンダリング。常に利用可能。
+`context["render_template"]` is partial template rendering. Always available.
 
-`context["get_variable"]` は他の変数プロバイダの値を明示的に取得する。常に利用可能。
+`context["get_variable"]` explicitly retrieves the value of another variable provider. Always available.
 
-`context["workspace_path"]` はワークスペースのパス。常に利用可能。
+`context["workspace_path"]` is the workspace path. Always available.
 
-`context["session"]` はセッション情報。常に利用可能。
+`context["session"]` is session information. Always available.
 
-PERMISSIONS で宣言されていない機能は context に存在しない。
+Features not declared in PERMISSIONS do not exist in context.
 
 
-## 14. セキュリティ
+## 14. Security
 
-prompt.py はサーバーサイドで実行される。以下の制限を適用する。
+prompt.py is executed on the server side. The following restrictions apply.
 
-PERMISSIONS で宣言された context 機能のみが注入される。実行時間は LIMITS の `max_execution_time`（デフォルト 5 秒）で制限される。出力サイズは LIMITS の `max_output_size`（デフォルト 50,000 文字）で制限される。
+Only context functionality declared in PERMISSIONS is injected. Execution time is limited by LIMITS `max_execution_time` (default 5 seconds). Output size is limited by LIMITS `max_output_size` (default 50,000 characters).
 
-Pack からインストールした prompt.py は、Pack の承認フローでユーザーがコードを確認・承認済みであることが前提となる。
+prompt.py installed from Pack assumes that the user has already verified and approved the code through Pack's approval flow.
 
-テンプレートインジェクション対策として、Jinja2 の SandboxedEnvironment を使用する。
+Use Jinja2's SandboxedEnvironment as a template injection countermeasure.
 
 
 ## 15. Prompt Pack
 
-### 15.1 構成
+### 15.1 Configuration
 
 ```
 user_data/packs/advanced_coding_prompts/
@@ -761,41 +760,35 @@ user_data/packs/advanced_coding_prompts/
 }
 ```
 
-### 15.3 Prompt Pack の種類
+### 15.3 Prompt Pack Types
 
-**System Prompt Pack** はエージェントの人格と行動規範を定義するプロンプト集。
-
-**Utility Prompt Pack** は内部処理用テンプレート集（圧縮、メモリ更新、プランニング等）。
-
-**Partial Pack** は他のプロンプトから include される部品集。
-
-**Full Agent Pack** はプロンプト、ツール、エージェント定義を全て含む完全パッケージ。
+**System Prompt Pack** is a collection of prompts that define an agent's personality and code of conduct.**Utility Prompt Pack** is a collection of templates for internal processing (compression, memory update, planning, etc.).**Partial Pack** is a collection of parts included from other prompts.**Full Agent Pack** is a complete package containing all prompts, tools, and agent definitions.
 
 
-## 16. 組み込みプロンプト
+## 16. Built-in prompt
 
-Rumi AI OS がデフォルトで提供する prompt の一覧。
+A list of prompts provided by Rumi AI OS by default.
 
-| prompt_id | type | extends | 用途 |
+| prompt_id | type | extends | usage |
 |-----------|------|---------|------|
-| general_system | system | — | 汎用 system prompt。全エージェントの基盤 |
-| coding_system | system | general_system | コーディング特化 system prompt |
-| history_compression | compression | — | 会話履歴の圧縮 |
-| memory_update | memory_update | — | project.md / user.md の更新 |
-| planning_task_decomposition | planning | — | タスク分解 |
+| general_system | system | — | General system prompt. Foundation of all agents |
+| coding_system | system | general_system | Coding-specific system prompt |
+| history_compression | compression | — | Conversation history compression |
+| memory_update | memory_update | — | Update project.md / user.md |
+| planning_task_decomposition | planning | — | Task decomposition |
 
 partials:
 
-| ファイル | 用途 |
+| File | Usage |
 |----------|------|
-| partials/safety_rules.md | 安全規則 |
-| partials/tool_instructions.md | ツール使用の一般指針 |
-| partials/output_format.md | 出力フォーマットの指定 |
+| partials/safety_rules.md | Safety rules |
+| partials/tool_instructions.md | General guidelines for using the tool |
+| partials/output_format.md | Specifying output format |
 
-テンプレートの実際の文面は未作成。構造のみ確定。
+The actual text of the template has not yet been created. Only the structure is confirmed.
 
 
-## 17. コアモジュール
+## 17. Core module
 
 ### 17.1 manager.py
 
@@ -930,26 +923,25 @@ class PromptLoader:
 ```
 
 
-## 18. 新規プロンプト作成手順
+## 18. Steps to create a new prompt
 
-### 18.1 最小構成（template.md のみ）
+### 18.1 Minimum configuration (template.md only)
 
-`user_data/shared/prompts/my_prompt/template.md` を 1 ファイル配置するだけ。
+Just place one file of `user_data/shared/prompts/my_prompt/template.md`.
 
-### 18.2 フル構成（prompt.py）
+### 18.2 Full configuration (prompt.py)
 
-`user_data/shared/prompts/my_prompt/prompt.py` に METADATA、VARIABLES、必要に応じて pre_render を定義。テンプレートは TEMPLATE 文字列か template.md で指定。
+Define METADATA, VARIABLES, and pre_render if necessary in `user_data/shared/prompts/my_prompt/prompt.py`. The template is specified by the TEMPLATE string or template.md.
 
-### 18.3 既存プロンプトの継承
+### 18.3 Inheriting existing prompts
 
-prompt.py の `METADATA["extends"]` で親を指定し、template.md で `{% extends %}` を使ってブロックを上書き。
+Specify the parent with `METADATA["extends"]` in prompt.py and overwrite the block using `{% extends %}` in template.md.
 
-### 18.4 Prompt Pack として配布
+### Distributed as 18.4 Prompt Pack
 
-pack.json に prompts リストを記述し、prompts/ ディレクトリに配置。必要に応じて variable_providers と replaces を定義。
+Write the prompts list in pack.json and place it in the prompts/ directory. Define variable_providers and replaces as needed.
 
 
-## 19. まとめ
+## 19. Summary
 
-prompt モジュールは呼び出し側が使うと決めて初めて機能する受動的なモジュールである。最小構成は template.md の 1 ファイル、フル構成は prompt.py で Python による無制限の拡張が可能。変数は無制限に定義でき、Pack 変数プロバイダからの注入も自由。ID の表記揺れは vocab モジュールで吸収し、衝突はユーザーの選択で解決する。Pack は replaces で既存 prompt の差し替えを提案でき、最終決定権はユーザーにある。
-```
+The prompt module is a passive module that only functions when the caller decides to use it. The minimum configuration is a single file template.md, and the full configuration is prompt.py, allowing unlimited extension with Python. An unlimited number of variables can be defined and can be freely injected from the Pack variable provider. ID notation fluctuations are absorbed by the vocab module, and conflicts are resolved by user selection. Packs can suggest replacements for existing prompts using replaces, and the final decision rests with the user.

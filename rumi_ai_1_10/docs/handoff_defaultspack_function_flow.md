@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./handoff_defaultspack_function_flow.md) | [JP](./i18n/ja/handoff_defaultspack_function_flow.md) | [KR](./i18n/ko/handoff_defaultspack_function_flow.md) | [CN](./i18n/zh-cn/handoff_defaultspack_function_flow.md)
+<!-- docs-i18n-links:end -->
+
 # Handoff: defaultspack Function/Flow Runtime
 
 This handoff is self-contained. Assume the next engineer only knows the

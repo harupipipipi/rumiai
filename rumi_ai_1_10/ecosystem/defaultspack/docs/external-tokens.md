@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./external-tokens.md) | [JP](./i18n/ja/external-tokens.md) | [KR](./i18n/ko/external-tokens.md) | [CN](./i18n/zh-cn/external-tokens.md)
+<!-- docs-i18n-links:end -->
+
 # External Tokens
 
 External input providers require secrets for verification and outbound replies.

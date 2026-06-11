@@ -1,31 +1,35 @@
-# Rumi AI OS — Pack 開発ガイド
+<!-- docs-i18n-links:start -->
+[EN](./pack_development_guide.md) | [JP](./i18n/ja/pack_development_guide.md) | [KR](./i18n/ko/pack_development_guide.md) | [CN](./i18n/zh-cn/pack_development_guide.md)
+<!-- docs-i18n-links:end -->
 
-> **Legacy ドキュメント**: 互換参照のため残しています。新規参照は [pack-development.md](./pack-development.md) と [pack-development-guide.md](./pack-development-guide.md) を優先してください。
+# Rumi AI OS — Pack Development Guide
 
-最終更新: 2026-03-23
+> **Legacy Document**: Retained for compatibility reference. New references should take precedence over [pack-development.md](./pack-development.md) and [pack-development-guide.md](./pack-development-guide.md).
 
-本ドキュメントは Rumi AI OS の Pack を開発するための総合ガイドです。Pack の概要から構造、ライフサイクル、権限システム、Docker 隔離、開発ワークフローまでを網羅します。
+Last updated: 2026-03-23
 
----
-
-## 1. Pack とは何か
-
-Pack は Rumi AI OS の機能拡張単位です。OS 本体（Kernel）が提供するコア機能の上に、Pack が独自の機能を追加します。
-
-Pack には以下の要素を含めることができます:
-
-- **Functions**: API 的に呼び出せる処理単位（JSON in → JSON out）
-- **Components**: UI コンポーネントやデータモデル
-- **Routes**: HTTP エンドポイントの定義
-- **Flows**: 複数の Function を組み合わせたワークフロー
-
-Pack は `ecosystem.json` というマニフェストファイルによって定義されます。Kernel はこのファイルを読み取り、Pack 内の Functions を FunctionRegistry に登録し、実行可能な状態にします。
+This document is a comprehensive guide for developing Rumi AI OS Packs. We cover Pack overview, structure, lifecycle, permission system, Docker isolation, and development workflow.
 
 ---
 
-## 2. Pack の構造
+## 1. What is Pack?
 
-### 2.1 ディレクトリ構成
+A pack is a functional extension unit of Rumi AI OS. Packs add unique functions on top of the core functions provided by the OS itself (Kernel).
+
+A Pack can contain the following elements:
+
+- **Functions**: Processing units that can be called via API (JSON in → JSON out)
+- **Components**: UI components and data models
+- **Routes**: HTTP endpoint definition
+- **Flows**: Workflow that combines multiple functions
+
+Packs are defined by a manifest file called `ecosystem.json`. The Kernel reads this file, registers the Functions in the Pack with the FunctionRegistry, and makes them executable.
+
+---
+
+## 2. Pack structure
+
+### 2.1 Directory structure
 
 ```
 my_pack/
@@ -45,7 +49,7 @@ my_pack/
     └── my_flow.flow.yaml
 ```
 
-### 2.2 ecosystem.json の全フィールド
+### 2.2 All fields in ecosystem.json
 
 ```json
 {
@@ -75,79 +79,79 @@ my_pack/
 }
 ```
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |-----------|-----|------|------|
-| pack_id | string | ✅ | Pack の一意な識別子 |
-| pack_identity | string | — | vendor:user/name 形式の正式な識別子 |
-| version | string | ✅ | セマンティックバージョニング |
-| metadata.name | string | ✅ | 人間が読む Pack 名 |
-| metadata.description | string | — | Pack の説明 |
-| metadata.author | string | — | 著者名 |
-| metadata.license | string | — | ライセンス |
-| metadata.is_core_pack | bool | — | core_pack かどうか（通常は false） |
-| vocabulary.types | array | — | Vocab タイプ定義 |
-| dependencies | object | — | 依存する他の Pack |
-| components | object | — | コンポーネント定義 |
-| runtime | object | — | ランタイム設定（多言語 Pack 用。詳細は multilang_pack_guide.md を参照） |
+| pack_id | string | ✅ | Pack unique identifier |
+| pack_identity | string | — | Formal identifier in vendor:user/name format |
+| version | string | ✅ | Semantic versioning |
+| metadata.name | string | ✅ | Human-readable Pack name |
+| metadata.description | string | — | Pack description |
+| metadata.author | string | — | Author name |
+| metadata.license | string | — | License |
+| metadata.is_core_pack | bool | — | Is core_pack (usually false) |
+| vocabulary.types | array | — | Vocab type definition |
+| dependencies | object | — | Other Packs that depend on |
+| components | object | — | component definition |
+| runtime | object | — | Runtime settings (for multilingual packs, see multilang_pack_guide.md for details) |
 
-### 2.3 Function マニフェスト
+### 2.3 Function manifest
 
-各 Function は ecosystem.json の `functions` セクション、または `functions/<function_id>/` ディレクトリ内のマニフェストで定義されます。
+Each Function is defined in the `functions` section of ecosystem.json or in a manifest in the `functions/<function_id>/` directory.
 
-Function マニフェストの主要フィールド:
+Key fields in the Function manifest:
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |-----------|-----|------|
-| description | string | Function の説明 |
+| description | string | Function description |
 | runtime | string | `"python"` / `"binary"` / `"command"` |
-| main | string | バイナリの相対パス（runtime=binary 時） |
-| command | array[string] | 実行コマンド（runtime=command 時） |
-| entrypoint | string | Python エントリーポイント（例: `"main.py:run"`） |
-| calling_convention | string | 実行方式（後述） |
-| host_execution | bool | ホスト上で直接実行するか |
-| requires | array[string] | 必要なパーミッション |
-| caller_requires | array[string] | 呼び出し元に要求するパーミッション |
-| input_schema | object | 入力の JSON Schema |
-| output_schema | object | 出力の JSON Schema |
-| tags | array[string] | 検索用タグ |
-| vocab_aliases | array[string] | Vocab エイリアス |
-| grant_config | object | Grant 設定（timeout 等） |
-| docker_image | string | Docker イメージ（デフォルト: python:3.11-slim） |
-| extensions | object | 拡張メタデータ |
+| main | string | Binary relative path (when runtime=binary) |
+| command | array[string] | Execution command (when runtime=command) |
+| entrypoint | string | Python entry point (e.g. `"main.py:run"`) |
+| calling_convention | string | Execution method (described later) |
+| host_execution | bool | Execute directly on host |
+| requires | array[string] | required permissions |
+| caller_requires | array[string] | Permissions requested from caller |
+| input_schema | object | Input JSON Schema |
+| output_schema | object | Output JSON Schema |
+| tags | array[string] | Search tags |
+| vocab_aliases | array[string] | Vocab aliases |
+| grant_config | object | Grant settings (timeout etc.) |
+| docker_image | string | Docker image (default: python:3.11-slim) |
+| extensions | object | extension metadata |
 
 ---
 
-## 3. Pack のライフサイクル
+## 3. Pack lifecycle
 
-Pack は以下のライフサイクルで管理されます:
+Packs are managed through the following lifecycle:
 
-### 3.1 Scan（スキャン）
+### 3.1 Scan
 
-Kernel の PackImporter が Pack ディレクトリをスキャンし、`ecosystem.json` を読み取ります。各 Pack の構造を検証し、Function を発見します。
+The Kernel's PackImporter scans the Pack directory and reads `ecosystem.json`. Examine the structure of each Pack and discover its Function.
 
-### 3.2 Approve（承認）
+### 3.2 Approve
 
-ApprovalManager が Pack の承認状態を管理します。承認されていない Pack の Function は実行できません。core_pack（`pack_id` が `core_` プレフィックスで始まる）は自動的に承認されます。
+ApprovalManager manages the approval state of a Pack. Functions from unapproved packs cannot be executed. core_pack (where `pack_id` starts with the `core_` prefix) is automatically approved.
 
-### 3.3 Load（ロード）
+### 3.3 Load
 
-承認された Pack の Functions が FunctionRegistry に登録されます。各 Function について以下が行われます:
+Functions of the approved Pack will be registered in FunctionRegistry. For each Function:
 
-1. FunctionEntry の構築（マニフェストからフィールドを読み取り）
-2. runtime に応じた `main_py_path` / `main_binary_path` / `command` の解決
-3. パストラバーサル検証（バイナリパスが function_dir 内に収まっているか）
-4. FunctionRegistry への登録（qualified_name = `pack_id:function_id`）
-5. vocab_aliases の登録
+1. Constructing FunctionEntry (reading fields from manifest)
+2. Solving `main_py_path` / `main_binary_path` / `command` according to runtime
+3. Path traversal verification (does the binary path fit within function_dir?)
+4. Register with FunctionRegistry (qualified_name = `pack_id:function_id`)
+5. Registering vocab_aliases
 
-### 3.4 Execute（実行）
+### 3.4 Execute
 
-CapabilityExecutor が実行を担当します。実行フローは以下の通りです:
+CapabilityExecutor is responsible for execution. The execution flow is as follows:
 
-1. **FunctionRegistry 解決**: permission_id または qualified_name から FunctionEntry を検索
-2. **Trust チェック**: TrustStore で sha256 ハッシュを検証（core_pack は免除）
-3. **Grant チェック**: GrantManager で principal × permission の権限を検証
-4. **calling_convention 分岐**: Function の実行方式に応じて適切なハンドラに分岐
-5. **監査ログ記録**: 全ての実行結果を監査ログに記録
+1. **FunctionRegistry resolution**: Search FunctionEntry by permission_id or qualified_name
+2. **Trust Check**: Validate sha256 hash in TrustStore (core_pack is exempt)
+3. **Grant check**: Verify principal × permission in GrantManager
+4. **calling_convention branch**: Branch to the appropriate handler depending on the execution method of the Function
+5. **Audit logging**: Record all execution results in the audit log
 
 ---
 
@@ -155,58 +159,58 @@ CapabilityExecutor が実行を担当します。実行フローは以下の通�
 
 ### core_pack
 
-- `pack_id` が `core_` プレフィックスで始まる
-- Kernel に同梱されている
-- Trust チェックが簡略化される（sha256 は記録されるが、TrustStore での検証は省略）
-- 自動的に承認される
-- `core_runtime/core_pack/` ディレクトリに配置
+- `pack_id` starts with `core_` prefix
+- Included in Kernel
+- Trust checks are simplified (sha256 is logged but verification in TrustStore is omitted)
+- Automatically approved
+- Placed in the `core_runtime/core_pack/` directory
 
 ### ecosystem Pack
 
-- サードパーティまたはユーザーが開発する Pack
-- Trust チェックが必須（sha256 が TrustStore に登録されている必要がある）
-- 明示的な承認が必要
-- `ecosystem/` ディレクトリに配置
+- Packs developed by third parties or users
+- Trust check is required (sha256 must be registered in TrustStore)
+- Requires explicit approval
+- Placed in the `ecosystem/` directory
 
 ---
 
-## 5. Functions, Components, Routes, Flows の違い
+## 5. Difference between Functions, Components, Routes, and Flows
 
 ### Functions
 
-最も基本的な処理単位です。JSON 入力を受け取り、JSON 出力を返します。Python、コンパイル済みバイナリ、またはコマンドで実装できます。
+It is the most basic processing unit. Accepts JSON input and returns JSON output. Can be implemented in Python, compiled binaries, or commands.
 
 ### Components
 
-UI コンポーネントやデータモデルの定義です。Pack 間で共有可能な構造化データを提供します。
+Definition of UI components and data models. Provides structured data that can be shared between Packs.
 
 ### Routes
 
-HTTP エンドポイントの定義です。pack_api_server に登録され、外部からアクセス可能な API を提供します。
+HTTP endpoint definition. It is registered with pack_api_server and provides an externally accessible API.
 
 ### Flows
 
-複数の Function を組み合わせたワークフローです。YAML で定義され、Flow Engine が実行します。条件分岐やループ、エラーハンドリングを含むことができます。
+This is a workflow that combines multiple functions. Defined in YAML and executed by Flow Engine. It can include conditional branches, loops, and error handling.
 
 ---
 
-## 6. Capability（権限）の仕組み
+## 6. How Capability works
 
-Rumi AI OS は 3 層の権限システムを持ちます:
+Rumi AI OS has a three-tier permission system:
 
-### 6.1 Trust（信頼）
+### 6.1 Trust
 
-TrustStore がハンドラーファイルの sha256 ハッシュを管理します。登録されたハッシュと実行時のハッシュが一致しない場合、実行は拒否されます。これにより、ファイルの改竄を検出します。
+TrustStore manages the sha256 hash of the handler file. If the registered hash and the run-time hash do not match, the execution is rejected. This detects file tampering.
 
-### 6.2 Grant（認可）
+### 6.2 Grant
 
-GrantManager が「誰が（principal_id）」「何を（permission_id）」できるかを管理します。grant_config により、タイムアウトなどの細かい制御が可能です。
+GrantManager manages who (principal_id) and what (permission_id) can do. grant_config allows fine-grained control such as timeouts.
 
-### 6.3 Rate Limit（レート制限）
+### 6.3 Rate Limit
 
-特定の permission_id（例: `secrets.get`）に対して、1 分間あたりの呼び出し回数を制限します。デフォルトは 60 回/分/principal です。
+Limits the number of calls per minute for a specific permission_id (e.g. `secrets.get`). The default is 60 times/minute/principal.
 
-### 6.4 Capability フロー
+### 6.4 Capability Flow
 
 ```
 リクエスト
@@ -221,63 +225,63 @@ GrantManager が「誰が（principal_id）」「何を（permission_id）」で
 
 ---
 
-## 7. calling_convention（実行方式）
+## 7. calling_convention (execution method)
 
-calling_convention は Function の実行方式を決定します。
+calling_convention determines how the Function is executed.
 
-| calling_convention | 説明 | 対象言語 |
+| calling_convention | Description | Target language |
 |-------------------|------|---------|
-| kernel | Kernel 内部から直接呼び出し | — |
-| subprocess | Python サブプロセスで実行 | Python |
-| block | core_pack の DI ベースのハンドラ | Python |
-| python_host | ホストプロセス上で Python を実行 | Python |
-| python_docker | Docker コンテナ内で Python を実行 | Python |
-| binary | コンパイル済みバイナリを実行（stdin/stdout JSON） | Rust, Go, C/C++ 等 |
-| command | コマンドリストでプロセスを起動（stdin/stdout JSON） | Node.js, Ruby, 任意 |
+| kernel | Directly called from inside the kernel | — |
+| subprocess | Run in Python subprocess | Python |
+| block | DI-based handler for core_pack | Python |
+| python_host | Run Python on the host process | Python |
+| python_docker | Run Python inside a Docker container | Python |
+| binary | Run compiled binary (stdin/stdout JSON) | Rust, Go, C/C++, etc. |
+| command | Start a process with command list (stdin/stdout JSON) | Node.js, Ruby, arbitrary |
 
-`binary` と `command` が多言語 Pack 開発の核心です。詳細は [多言語 Pack 開発ガイド](multilang_pack_guide.md) を参照してください。
-
----
-
-## 8. Docker 隔離の仕組み
-
-### 8.1 概要
-
-ecosystem Pack（非 core_pack）の Python Function は、デフォルトで Docker コンテナ内で実行されます。これにより、ホストシステムへの影響を防ぎます。
-
-### 8.2 Docker 実行フロー
-
-1. 一時ファイルに入力 JSON を書き出し
-2. DockerRunBuilder でコンテナを構築
-3. function_dir を `/function:ro`（読み取り専用）でマウント
-4. 入力 JSON ファイルを `/input.json:ro` でマウント
-5. 環境変数 `RUMI_PACK_ID`, `RUMI_FUNCTION_ID` を設定
-6. コンテナ内で Python ランナースクリプトを実行
-7. stdout から JSON を読み取り
-8. タイムアウト時は `docker kill` でコンテナを強制停止
-
-### 8.3 Docker が利用できない場合
-
-Docker が利用できない場合、ホスト上のサブプロセスにフォールバックします（警告ログが出力されます）。
-
-### 8.4 バイナリ/コマンド Function の実行
-
-`binary` および `command` の calling_convention を持つ Function は、Docker ではなくホスト上のサブプロセスとして実行されます。ただし、`host_execution=false` かつ `runtime != "python"` の場合はセキュリティ違反としてエラーになります。
+`binary` and `command` are the core of multilingual Pack development. For details, please refer to [Multilingual Pack Development Guide](./multilang_pack_guide.md).
 
 ---
 
-## 9. 開発 → テスト → 配布のワークフロー
+## 8. How Docker isolation works
 
-### 9.1 開発
+### 8.1 Overview
 
-1. Pack ディレクトリを作成
-2. `ecosystem.json` を作成
-3. `functions/` ディレクトリに Function を実装
-4. 必要に応じて Flows、Components、Routes を作成
+Python Functions from ecosystem packs (non-core_pack) run in Docker containers by default. This prevents any impact on the host system.
 
-### 9.2 テスト
+### 8.2 Docker execution flow
 
-Function は stdin/stdout の JSON プロトコルに従うため、コマンドラインで直接テストできます:
+1. Write out the input JSON to a temporary file
+2. Build a container with DockerRunBuilder
+3. Mount function_dir with `/function:ro` (read-only)
+4. Mount the input JSON file with `/input.json:ro`
+5. Set environment variables `RUMI_PACK_ID`, `RUMI_FUNCTION_ID`
+6. Run the Python runner script inside the container
+7. Read JSON from stdout
+8. Forcibly stop the container with `docker kill` when timeout occurs
+
+### 8.3 If Docker is not available
+
+If Docker is unavailable, it will fall back to a subprocess on the host (warning logs will be output).
+
+### 8.4 Binary/Command Function Execution
+
+Functions with calling_convention in `binary` and `command` run as subprocesses on the host rather than in Docker. However, in the case of `host_execution=false` and `runtime != "python"`, an error will occur as a security violation.
+
+---
+
+## 9. Development → Test → Distribution Workflow
+
+### 9.1 Development
+
+1. Create a Pack directory
+2. Create `ecosystem.json`
+3. Implement Function in the `functions/` directory
+4. Create Flows, Components, and Routes as needed
+
+### 9.2 Test
+
+Function follows the JSON protocol for stdin/stdout, so you can test it directly on the command line:
 
 ```bash
 # Python Function
@@ -290,18 +294,18 @@ echo '{"context":{"principal_id":"test","pack_id":"my_pack","function_id":"my_fu
 echo '{"context":{"principal_id":"test","pack_id":"my_pack","function_id":"my_func","request_id":"1","ts":"2026-01-01T00:00:00Z"},"args":{"key":"value"}}' | node index.js
 ```
 
-### 9.3 配布
+### 9.3 Distribution
 
-1. Pack ディレクトリを zip で配布、または Git リポジトリで公開
-2. ユーザーが `ecosystem/` に配置
-3. Kernel が次回起動時にスキャンして登録
-4. 将来的にはマーケットプレイス（Phase D/E）で配布
+1. Distribute the Pack directory as a zip or publish it in a Git repository
+2. User placed in `ecosystem/`
+3. Kernel scans and registers at next startup
+4. In the future, it will be distributed on the marketplace (Phase D/E)
 
 ---
 
 ## 10. CapabilityResponse
 
-全ての Function 呼び出しの結果は CapabilityResponse として返されます。
+The results of every Function call are returned as a CapabilityResponse.
 
 ```json
 {
@@ -313,36 +317,36 @@ echo '{"context":{"principal_id":"test","pack_id":"my_pack","function_id":"my_fu
 }
 ```
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |-----------|-----|------|
-| success | bool | 実行成功か |
-| output | any | 出力データ（JSON） |
-| error | string / null | エラーメッセージ |
-| error_type | string / null | エラー種別 |
-| latency_ms | float | 実行にかかった時間（ミリ秒） |
+| success | bool | Successful execution |
+| output | any | Output data (JSON) |
+| error | string / null | error message |
+| error_type | string / null | error type |
+| latency_ms | float | Time taken to execute (ms) |
 
-### エラー種別一覧
+### List of error types
 
-| error_type | 説明 |
+| error_type | description |
 |-----------|------|
-| invalid_request | リクエストの形式が不正 |
-| handler_not_found | ハンドラーが見つからない |
-| trust_denied | Trust チェック失敗 |
-| grant_denied | Grant チェック失敗 |
-| rate_limited | レート制限に達した |
-| timeout | タイムアウト |
-| response_too_large | レスポンスサイズ超過（1MB） |
-| function_execution_error | Function 実行中のエラー |
-| invalid_json_output | stdout が有効な JSON でない |
-| binary_not_found | バイナリが見つからない |
-| security_violation | セキュリティ違反（パストラバーサル等） |
-| initialization_error | 初期化エラー |
-| internal_error | 内部エラー |
+| invalid_request | Invalid request format |
+| handler_not_found | Handler not found |
+| trust_denied | Trust check failed |
+| grant_denied | Grant check failed |
+| rate_limited | Rate limit reached |
+| timeout | timeout |
+| response_too_large | Response size exceeded (1MB) |
+| function_execution_error | Error during Function execution |
+| invalid_json_output | stdout is not valid JSON |
+| binary_not_found | Binary not found |
+| security_violation | Security violation (path traversal, etc.) |
+| initialization_error | initialization error |
+| internal_error | Internal error |
 
 ---
 
-## 関連ドキュメント
+## Related documents
 
-- [多言語 Pack 開発ガイド](multilang_pack_guide.md) — Python 以外の言語で Pack を開発する方法
-- [Pack デスクトップアプリ開発ガイド](pack_desktop_app_guide.md) — デスクトップアプリ対応の Pack を開発する方法
-- [ロードマップ](roadmap.md) — Rumi AI OS の全体計画
+- [Multilingual Pack Development Guide](./multilang_pack_guide.md) — How to develop Packs in languages other than Python
+- [Pack Desktop App Development Guide](./pack_desktop_app_guide.md) — How to develop a Pack for desktop apps
+- [Roadmap](./roadmap.md) — Rumi AI OS overall plan

@@ -1,22 +1,25 @@
-```markdown
+<!-- docs-i18n-links:start -->
+[EN](./tool.md) | [JP](./i18n/ja/tool.md) | [KR](./i18n/ko/tool.md) | [CN](./i18n/zh-cn/tool.md)
+<!-- docs-i18n-links:end -->
+
 # Tool Module
 
-## 1. 設計思想
+## 1. Design philosophy
 
-Tool モジュールは Rumi AI OS において LLM がユーザーの代わりに外部操作を行うための仕組みである。
+The Tool module is a mechanism for LLM to perform external operations on behalf of the user in Rumi AI OS.
 
-設計原則:
-- **データ駆動**: ツール定義は JSON/YAML ファイル。ロジックは handler.py。ディレクトリ追加だけでツールを拡張できる。
-- **汎用プリミティブのみ**: handler.py に注入される context API は汎用プリミティブのみで構成される。チャット操作、エージェント起動、メモリ読み書き等のドメイン操作は全て汎用プリミティブの組み合わせで実現する。特定のドメインに特化した API は存在しない。
-- **段階的開示**: ツール数が多い場合、LLM にはまずカタログ（名前・要約）だけ渡し、選択後に詳細スキーマを渡す。トークンを節約し選択精度を上げる。
-- **最小権限**: handler.py が使える context API は permission.json の宣言に基づいて注入される。宣言していない API は使えない。
-- **外部依存解決**: ツールが必要とする capability や Pack が未導入の場合、GitHub リポジトリから git なしで自動取得できる。
+Design principles:
+- **Data-driven**: Tool definition is a JSON/YAML file. The logic is handler.py. You can extend the tool by simply adding directories.
+- **General-purpose primitives only**: The context API injected into handler.py consists only of general-purpose primitives. All domain operations such as chat operations, agent activation, memory reading and writing are realized by a combination of general-purpose primitives. There are no domain-specific APIs.
+- **Step-by-step disclosure**: If there are many tools, first pass only the catalog (name/summary) to LLM, then pass the detailed schema after selection. Save tokens and increase selection accuracy.
+- **Minimum privilege**: The context API that handler.py can use is injected based on the declaration in permission.json. APIs that are not declared cannot be used.
+- **External dependency resolution**: If the capabilities or packs required by a tool have not been installed, they can be automatically acquired from the GitHub repository without using git.
 
 ---
 
-## 2. ディレクトリ構成
+## 2. Directory structure
 
-### ツール配置
+### Tool placement
 
 ```
 user_data/shared/tools/
@@ -51,9 +54,9 @@ user_data/shared/tools/
     └── ...
 ```
 
-Pack 提供のツールは `user_data/packs/*/tools/` に配置される。
+Pack-provided tools are placed in `user_data/packs/*/tools/`.
 
-### バックエンドコード
+### Backend code
 
 ```
 ecosystem/default/backend/blocks/tool/
@@ -65,7 +68,7 @@ ecosystem/default/backend/blocks/tool/
 └── mcp_client.py              # MCP サーバー接続
 ```
 
-### Pack 管理コード
+### Pack management code
 
 ```
 ecosystem/default/backend/blocks/pack/
@@ -78,11 +81,11 @@ ecosystem/default/backend/blocks/pack/
 
 ---
 
-## 3. ツール定義ファイル
+## 3. Tool definition file
 
-### 3.1 tool.json（必須）
+### 3.1 tool.json (required)
 
-ツールのメタ情報。段階的開示の Stage 1 で LLM に渡される。
+Tool meta information. Passed to LLM at Stage 1 of the staged disclosure.
 
 ```json
 {
@@ -113,18 +116,18 @@ ecosystem/default/backend/blocks/pack/
 }
 ```
 
-**execution.type の種類:**
+**execution.type type:**
 
-| type | 説明 | 動作場所 |
+| type | Description | Operating location |
 |------|------|----------|
-| `local` | handler.py を直接実行 | Docker 内 |
-| `capability` | Capability Handler 経由 | ホスト側 |
-| `mcp` | MCP サーバー経由 | 外部プロセス |
-| `http` | HTTP リクエスト | llm_network 経由 |
+| `local` | Run handler.py directly | In Docker |
+| `capability` | Via Capability Handler | Host side |
+| `mcp` | Via MCP server | External process |
+| `http` | HTTP request | via llm_network |
 
-### 3.2 schema.json（必須）
+### 3.2 schema.json (required)
 
-入出力の JSON Schema 定義。段階的開示の Stage 2 で LLM に渡される。
+JSON Schema definition for input and output. Passed to LLM at Stage 2 of the staged disclosure.
 
 ```json
 {
@@ -176,7 +179,7 @@ ecosystem/default/backend/blocks/pack/
 
 ### 3.3 guide.json
 
-使い方の詳細。段階的開示の Stage 2 で LLM に description に注入される。
+Details on how to use. The description is injected into the LLM at Stage 2 of gradual disclosure.
 
 ```json
 {
@@ -229,7 +232,7 @@ ecosystem/default/backend/blocks/pack/
 
 ### 3.4 conditions.json
 
-モデルの能力に応じた動作分岐。
+Behavior branching according to model capabilities.
 
 ```json
 {
@@ -281,7 +284,7 @@ ecosystem/default/backend/blocks/pack/
 
 ### 3.5 permission.json
 
-権限・承認・制限。
+Authority/approval/restriction.
 
 ```json
 {
@@ -310,11 +313,9 @@ ecosystem/default/backend/blocks/pack/
 }
 ```
 
-**`pack_dependencies`**: このツールが必要とする外部 Pack。指定した Pack が未導入の場合、`repo` から自動取得を提案する。
+**`pack_dependencies`**: External Packs required by this tool. If the specified Pack has not been installed, automatic acquisition will be suggested from `repo`.**`capabilities_required`**: Capability declaration injected into handler.py's context. Only the capabilities declared here are injected into the context.
 
-**`capabilities_required`**: handler.py の context に注入される capability の宣言。ここに宣言した capability のみが context に注入される。
-
-`llm_call` を使う場合は `llm_call_allowed: true` に設定し、制限を記述できる:
+When using `llm_call`, you can set it to `llm_call_allowed: true` and write the restrictions:
 
 ```json
 {
@@ -329,7 +330,7 @@ ecosystem/default/backend/blocks/pack/
 
 ### 3.6 relations.json
 
-連携ツール・チェーンパターン・依存。
+Cooperation tools, chain patterns, and dependencies.
 
 ```json
 {
@@ -356,44 +357,44 @@ ecosystem/default/backend/blocks/pack/
 }
 ```
 
-### 3.7 handler.py（必須）
+### 3.7 handler.py (required)
 
-ツールの実行ロジック。
+Tool execution logic.
 
 #### context API
 
-handler.py に注入される context は汎用プリミティブのみで構成される。特定のドメイン（チャット、エージェント等）に特化した API は存在しない。全てのドメイン操作は汎用プリミティブの組み合わせで実現する。
+The context injected into handler.py consists only of general-purpose primitives. There are no APIs specific to specific domains (chat, agents, etc.). All domain operations are realized by combinations of general-purpose primitives.
 
-**常に注入される（宣言不要）:**
+**Always injected (no declaration required):**
 
-| context キー | 説明 |
+| context key | description |
 |---|---|
-| `context["call_handler"]` | 任意の handler を呼び出す。Grant で許可された権限の範囲内でのみ実行可能 |
-| `context["emit_event"]` | イベントを発行する。handler、Flow、フロントエンドが受信可能 |
-| `context["wait_event"]` | イベントを待つ。タイムアウト指定可能 |
-| `context["emit_widget"]` | Widget JSON を UI に送出する |
-| `context["cancel_check"]` | キャンセル確認 |
-| `context["handler_config"]` | conditions.json の behavior_variants から注入された設定 |
-| `context["session"]` | セッション情報（session_id、workspace 等） |
+| `context["call_handler"]` | Call any handler. Can only be executed within the scope of permissions granted by Grant |
+| `context["emit_event"]` | Publish an event. handler, flow, front end can receive |
+| `context["wait_event"]` | Wait for an event. Timeout can be specified |
+| `context["emit_widget"]` | Send Widget JSON to the UI |
+| `context["cancel_check"]` | Cancellation confirmation |
+| `context["handler_config"]` | Settings injected from behavior_variants in conditions.json |
+| `context["session"]` | Session information (session_id, workspace, etc.) |
 
-**permission.json の `capabilities_required` で宣言して注入されるもの:**
+**Declared and injected in `capabilities_required` of permission.json:**
 
-| capability_id | 説明 | context キー | リスク |
+| capability_id | description | context key | risk |
 |---|---|---|---|
-| `data_read` | user_data 配下のファイル読み取り | `context["data_read"](path) → str` | 低 |
-| `data_write` | user_data 配下のファイル書き込み | `context["data_write"](path, content)` | 中 |
-| `execute_flow` | Flow を起動する | `context["execute_flow"](flow_id, input) → FlowResult` | 中 |
-| `shell_exec` | シェルコマンド実行 | `context["capability"]("shell_exec", {...})` | 高 |
-| `browser_control` | ブラウザ操作 | `context["capability"]("browser_control", {...})` | 高 |
-| `container_exec` | Docker コンテナの起動・操作・破棄 | `context["capability"]("container_exec", {...})` | 高 |
-| `app_control` | ホストアプリ操作 | `context["capability"]("app_control", {...})` | 高 |
-| `http_request` | 外部 HTTP 通信 | `context["capability"]("http_request", {...})` | 中 |
-| `llm_call` | ツール内 LLM 呼び出し | `context["capability"]("llm_call", {...})` | 中 |
-| `session_state` | セッション状態読み書き | `context["capability"]("session_state", {...})` | 低 |
+| `data_read` | Read file under user_data | `context["data_read"](path) → str` | Low |
+| `data_write` | Writing files under user_data | `context["data_write"](path, content)` | Medium |
+| `execute_flow` | Start Flow | `context["execute_flow"](flow_id, input) → FlowResult` | Medium |
+| `shell_exec` | Shell command execution | `context["capability"]("shell_exec", {...})` | High |
+| `browser_control` | Browser operation | `context["capability"]("browser_control", {...})` | High |
+| `container_exec` | Starting, operating, and destroying Docker containers | `context["capability"]("container_exec", {...})` | High |
+| `app_control` | Host application operation | `context["capability"]("app_control", {...})` | High |
+| `http_request` | External HTTP communication | `context["capability"]("http_request", {...})` | Medium |
+| `llm_call` | In-tool LLM call | `context["capability"]("llm_call", {...})` | Medium |
+| `session_state` | Session state read/write | `context["capability"]("session_state", {...})` | Low |
 
 #### call_handler
 
-任意の handler を呼び出す汎用ゲートウェイ。defaults や Pack が登録した全ての handler を呼べる。handler は README.md の handler 体系に定義されている。
+Generic gateway that calls any handler. All handlers registered by defaults and Pack can be called. handler is defined in the handler system in README.md.
 
 ```python
 result = context["call_handler"](
@@ -405,13 +406,13 @@ result = context["call_handler"](
 )
 ```
 
-call_handler は以下の順序で処理する。呼び出し元 tool の permission.json に宣言された権限を確認する。呼び出し先 handler が要求する権限が呼び出し元の権限に含まれるか検証する。含まれなければ PermissionError で拒否する。含まれていれば handler を実行し結果を返す。
+call_handler processes in the following order. Check the permissions declared in permission.json of the calling tool. Verify that the caller's permissions include the permissions requested by the called handler. If it is not included, it will be rejected with PermissionError. If it is included, execute handler and return the result.
 
-これにより tool は自分が持つ権限の範囲内でシステム上の任意の handler を呼び出せる。チャット操作、エージェント起動、メモリ読み書き、プロンプトレンダリング、全てが call_handler 経由で行える。
+This allows tool to call any handler on the system within its authority. Chat operations, agent activation, memory read/write, prompt rendering, all can be done via call_handler.
 
 #### emit_event / wait_event
 
-イベントはシステム全体の汎用通信メカニズムである。
+Events are a general purpose communication mechanism throughout the system.
 
 ```python
 context["emit_event"]("my_tool.task_complete", {
@@ -426,22 +427,22 @@ response = context["wait_event"](
 )
 ```
 
-イベントの受信者は handler、Flow のイベントトリガー、フロントエンドの Asset のいずれでもよい。emit_event はイベントバスに発行するだけであり誰が受け取るかは発行側の関知するところではない。
+The recipient of the event can be a handler, a Flow event trigger, or a front-end Asset. emit_event only issues it to the event bus, and the issuer is not concerned with who receives it.
 
 #### data_read / data_write
 
-user_data 配下の任意のファイルを読み書きする汎用ファイル I/O。
+General purpose file I/O to read and write any file under user_data.
 
 ```python
 content = context["data_read"]("chat/conversations/conv-1.json")
 context["data_write"]("knowledge/sources/notes.md", content)
 ```
 
-パスは user_data/ からの相対パス。user_data の外へのアクセスは拒否される。
+The path is relative to user_data/. Access outside user_data is denied.
 
 #### execute_flow
 
-任意の Flow を起動する。Flow Engine 経由で実行される。
+Launch any Flow. Executed via Flow Engine.
 
 ```python
 result = context["execute_flow"](
@@ -452,7 +453,7 @@ result = context["execute_flow"](
 
 #### container_exec capability
 
-Docker コンテナのライフサイクルを操作する汎用 capability。
+A general-purpose capability to manipulate the Docker container lifecycle.
 
 ```python
 container = context["capability"]("container_exec", {
@@ -490,33 +491,33 @@ context["capability"]("container_exec", {
 })
 ```
 
-display オプションが true の場合、コンテナ内に Xvfb（仮想フレームバッファ）が起動し、screenshot アクションと input アクション（click, type, key, scroll）が使用可能になる。
+If the display option is true, Xvfb (virtual framebuffer) is started in the container and screenshot and input actions (click, type, key, scroll) are available.
 
-container_exec のアクション一覧:
+List of container_exec actions:
 
-| action | 説明 | 必須パラメータ |
+| action | description | required parameters |
 |---|---|---|
-| `create` | コンテナ作成・起動 | image, options |
-| `exec` | コンテナ内コマンド実行 | container_id, command |
-| `screenshot` | ディスプレイのスクリーンショット取得 | container_id |
-| `input` | ディスプレイへの入力 | container_id, input_type, (x, y / text / key) |
-| `upload` | ファイルをコンテナに送る | container_id, host_path, container_path |
-| `download` | ファイルをコンテナから取得 | container_id, container_path |
-| `destroy` | コンテナ破棄 | container_id |
-| `list` | 実行中コンテナ一覧 | なし |
+| `create` | Container creation/startup | image, options |
+| `exec` | Command execution in container | container_id, command |
+| `screenshot` | Get display screenshot | container_id |
+| `input` | Input to display | container_id, input_type, (x, y / text / key) |
+| `upload` | Send file to container | container_id, host_path, container_path |
+| `download` | Get file from container | container_id, container_path |
+| `destroy` | Container destruction | container_id |
+| `list` | List of running containers | None |
 
-input_type の種類:
+Type of input_type:
 
-| input_type | 説明 | パラメータ |
+| input_type | description | parameters |
 |---|---|---|
-| `click` | 座標クリック | x, y, button(left/right/middle) |
-| `double_click` | ダブルクリック | x, y |
-| `type` | テキスト入力 | text |
-| `key` | キー送信 | key (例: "Enter", "Ctrl+C") |
-| `scroll` | スクロール | x, y, delta |
-| `drag` | ドラッグ | from_x, from_y, to_x, to_y |
+| `click` | Coordinate click | x, y, button(left/right/middle) |
+| `double_click` | Double click | x, y |
+| `type` | Text input | text |
+| `key` | Key transmission | key (e.g. "Enter", "Ctrl+C") |
+| `scroll` | Scroll | x, y, delta |
+| `drag` | Drag | from_x, from_y, to_x, to_y |
 
-#### handler.py の返り値
+#### Return value of handler.py
 
 ```python
 def run(params: dict, context: dict) -> dict:
@@ -541,11 +542,11 @@ def run(params: dict, context: dict) -> dict:
     """
 ```
 
-Widget JSON は widget.md で定義された統一形式に従う。rumi_widgets Python ヘルパーライブラリを使用してもよいし、直接 dict で返してもよい。
+Widget JSON follows a uniform format defined in widget.md. You can use the rumi_widgets Python helper library or return it directly as a dict.
 
-#### handler.py 使用例
+#### handler.py usage example
 
-**例1: ファイル読み取り（data_read のみ）**
+**Example 1: File read (data_read only)**
 
 ```python
 def run(params, context):
@@ -561,7 +562,7 @@ def run(params, context):
     }
 ```
 
-**例2: チャットのメッセージを操作する（call_handler）**
+**Example 2: Handling chat messages (call_handler)**
 
 ```python
 def run(params, context):
@@ -572,7 +573,7 @@ def run(params, context):
     return {"result": "Message deleted"}
 ```
 
-**例3: ユーザーに確認ポップアップを出す（emit_event + wait_event）**
+**Example 3: Show confirmation popup to user (emit_event + wait_event)**
 
 ```python
 def run(params, context):
@@ -597,7 +598,7 @@ def run(params, context):
         return {"result": "Cancelled"}
 ```
 
-**例4: 別のエージェントにタスクを依頼する（call_handler）**
+**Example 4: Request a task to another agent (call_handler)**
 
 ```python
 def run(params, context):
@@ -615,7 +616,7 @@ def run(params, context):
     return {"result": result["final_text"]}
 ```
 
-**例5: Docker コンテナ内で GUI 操作する（capability）**
+**Example 5: GUI operation within a Docker container (capability)**
 
 ```python
 def run(params, context):
@@ -660,7 +661,7 @@ def run(params, context):
     }
 ```
 
-**例6: 定期実行を Flow 経由で登録する（execute_flow）**
+**Example 6: Register periodic execution via Flow (execute_flow)**
 
 ```python
 def run(params, context):
@@ -672,7 +673,7 @@ def run(params, context):
     return {"result": f"Scheduled: {params['cron']}"}
 ```
 
-**例7: ナレッジを検索して結果を返す（call_handler + data_read）**
+**Example 7: Search knowledge and return results (call_handler + data_read)**
 
 ```python
 def run(params, context):
@@ -694,7 +695,7 @@ def run(params, context):
     }
 ```
 
-**例8: 新しいツールを生成する（data_write）**
+**Example 8: Generate a new tool (data_write)**
 
 ```python
 import json
@@ -725,11 +726,11 @@ def run(params, context):
     return {"result": f"Tool '{tool_id}' created at user_data/{base_path}/"}
 ```
 
-全てが call_handler、emit_event、wait_event、data_read、data_write、capability、execute_flow、emit_widget の汎用プリミティブで構成されている。新しい handler や Flow が追加されれば、tool はそれらを同じプリミティブで呼び出せる。
+Everything consists of the following generic primitives: call_handler, emit_event, wait_event, data_read, data_write, capability, execute_flow, and emit_widget. If new handlers or Flows are added, the tool can call them on the same primitive.
 
-### 3.8 capability/ ディレクトリ（任意）
+### 3.8 capability/ directory (optional)
 
-ツールがホスト側 Capability Handler を同梱する場合。
+If the tool ships with a host-side Capability Handler.
 
 ```
 bash/capability/
@@ -766,15 +767,15 @@ bash/capability/
 }
 ```
 
-`scope`: `"public"` は他のツールも `capabilities_required` で使える。`"private"` はこのツール専用。
+`scope`: `"public"` can also use other tools with `capabilities_required`. `"private"` is exclusive to this tool.
 
-ホスト側 handler.py はユーザーの明示承認 + ハッシュ記録 + 改変検知の対象となる。
+The host side handler.py is subject to user explicit approval + hash record + modification detection.
 
 ---
 
 ## 4. defaults.json
 
-全ツール共通のグローバル設定。
+Global settings common to all tools.
 
 ```json
 {
@@ -855,30 +856,30 @@ bash/capability/
 }
 ```
 
-| キー | 説明 |
+| Key | Description |
 |------|------|
-| `stage_threshold` | この数以上のツールがある場合、段階的開示を使う |
+| `stage_threshold` | If you have more than this number of tools, use gradual disclosure |
 | `approval.global_approval_mode` | `per_call` / `per_session` / `auto` |
-| `approval.auto_approve_verified_packs` | marketplace 検証済み Pack のツールを自動承認するか |
-| `rate_limit.max_total_calls_per_minute` | 全ツール合計の1分あたり呼び出し上限 |
-| `cache.ttl_seconds` | idempotent ツールの結果キャッシュ時間 |
-| `shell.*` | 永続シェルセッションの設定 |
-| `container.*` | Docker コンテナの設定 |
-| `llm_call.*` | ツール内 LLM 呼び出しのデフォルト制限 |
-| `agent.*` | サブエージェント（Task ツール）の制限 |
-| `display.max_images_in_context` | LLM に渡す画像の最大数 |
-| `display.max_output_chars` | ツール出力の切り詰め閾値 |
-| `disabled_tools` | 無効化するツール ID のリスト |
-| `sync.*` | ツール定義の同期元 GitHub リポジトリ |
-| `pack_install.*` | Pack 導入関連の設定 |
+| `approval.auto_approve_verified_packs` | Auto-approve tools for marketplace verified packs |
+| `rate_limit.max_total_calls_per_minute` | Total call limit for all tools per minute |
+| `cache.ttl_seconds` | idempotent tool result cache time |
+| `shell.*` | Configuring a persistent shell session |
+| `container.*` | Configuring Docker containers |
+| `llm_call.*` | Default limits for in-tool LLM calls |
+| `agent.*` | Subagent (Task tool) limitations |
+| `display.max_images_in_context` | Maximum number of images to pass to LLM |
+| `display.max_output_chars` | Tool output truncation threshold |
+| `disabled_tools` | List of tool IDs to disable |
+| `sync.*` | GitHub repository from which tool definitions are synchronized |
+| `pack_install.*` | Pack installation related settings |
 
 ---
 
-## 5. 外部依存とPack連携
+## 5. External dependencies and Pack coordination
 
-### 5.1 ツールが Pack を要求する
+### 5.1 Tools ask for Packs
 
-permission.json の `pack_dependencies` で、ツールが外部 Pack を要求できる。
+`pack_dependencies` in permission.json allows tools to request external Packs.
 
 ```json
 {
@@ -894,7 +895,7 @@ permission.json の `pack_dependencies` で、ツールが外部 Pack を要求�
 }
 ```
 
-executor.py がツール実行前にチェックし、未導入の Pack があればユーザーに導入を提案する:
+Before running the tool, executor.py checks and suggests to the user to install any uninstalled packs:
 
 ```
 ⚠️ ツール「browser_navigate」は以下の Pack が必要です:
@@ -905,9 +906,9 @@ executor.py がツール実行前にチェックし、未導入の Pack があ�
 [導入して続行] [キャンセル]
 ```
 
-### 5.2 Pack の依存解決
+### 5.2 Pack dependency resolution
 
-Pack 自体も他の Pack に依存できる（pack.json の `dependencies`）。
+Packs themselves can also depend on other Packs (`dependencies` in pack.json).
 
 ```json
 {
@@ -933,19 +934,19 @@ Pack 自体も他の Pack に依存できる（pack.json の `dependencies`）�
 }
 ```
 
-### 5.3 ダウンロード（git なし）
+### 5.3 Download (without git)
 
-GitHub API の zipball を使用。git コマンド不要。
+Uses GitHub API's zipball. No git command required.
 
 ```
 GET https://api.github.com/repos/{owner}/{repo}/zipball/{ref}
 ```
 
-ダウンロード後、`path` で指定されたディレクトリだけ解凍・抽出して `user_data/packs/` に配置する。認証が必要な private リポジトリは `GITHUB_TOKEN` 環境変数を使用。
+After downloading, unzip and extract only the directory specified in `path` and place it in `user_data/packs/`. Private repositories that require authentication use the `GITHUB_TOKEN` environment variable.
 
-### 5.4 Marketplace レジストリ
+### 5.4 Marketplace Registry
 
-`harupipipipi/rumi-marketplace` リポジトリの `registry.json`:
+`harupipipipi/rumi-marketplace` Repository `registry.json`:
 
 ```json
 {
@@ -967,11 +968,11 @@ GET https://api.github.com/repos/{owner}/{repo}/zipball/{ref}
 }
 ```
 
-ステータス: `"verified"` は Rumi チームが検証済み。`"unverified"` は未検証。`"blacklisted"` は危険と判定。
+Status: `"verified"` has been verified by the Rumi team. `"unverified"` has not been verified. `"blacklisted"` is determined to be dangerous.
 
 ### 5.5 .pack_meta.json
 
-ダウンロードした Pack に自動生成される管理ファイル。
+Management file that is automatically generated in the downloaded Pack.
 
 ```json
 {
@@ -996,7 +997,7 @@ GET https://api.github.com/repos/{owner}/{repo}/zipball/{ref}
 }
 ```
 
-### 5.6 導入フロー
+### 5.6 Implementation flow
 
 ```
 ユーザーまたはツールが Pack を要求
@@ -1026,23 +1027,23 @@ GET https://api.github.com/repos/{owner}/{repo}/zipball/{ref}
       └─ flow → 利用可能に
 ```
 
-### 5.7 capability の探索優先順位
+### 5.7 Capability search priority
 
-executor.py がツールの `capabilities_required` を解決する順序:
+The order in which executor.py resolves `capabilities_required` for tools:
 
-1. システム組み込み（`ecosystem/default/backend/capabilities/`）
-2. 共有 capability（`user_data/shared/capabilities/`）
-3. ツール同梱（`tools/xxx/capability/`）
-4. Pack 提供（`user_data/packs/xxx/capabilities/`）
-5. `pack_dependencies` から自動取得 → 4 に配置
+1. System integration (`ecosystem/default/backend/capabilities/`)
+2. Shared capability (`user_data/shared/capabilities/`)
+3. Tool included (`tools/xxx/capability/`)
+4. Pack provided (`user_data/packs/xxx/capabilities/`)
+5. Automatically obtained from `pack_dependencies` → placed in 4
 
 ---
 
-## 6. 段階的開示
+## 6. Gradual disclosure
 
-### Stage 1: カタログ（ツール数 > stage_threshold の場合）
+### Stage 1: Catalog (if number of tools > stage_threshold)
 
-LLM の system prompt に軽量なツールカタログを注入:
+Inject a lightweight tool catalog into LLM's system prompt:
 
 ```
 利用可能なツール:
@@ -1056,27 +1057,27 @@ LLM の system prompt に軽量なツールカタログを注入:
 使用したいツールの名前を返してください。
 ```
 
-各ツールから `tool.json` の `name`, `summary`, `tags`, `use_cases` のみを抽出。
+Extract only `name`, `summary`, `tags`, `use_cases` of `tool.json` from each tool.
 
-### Stage 2: 詳細（選択されたツール or ツール数 ≤ stage_threshold）
+### Stage 2: Details (selected tools or number of tools ≤ stage_threshold)
 
-LLM の `tools` パラメータに完全なスキーマを渡す。`guide.json` の `usage_guide` と `tips` を description に注入する。
+Pass the complete schema to the LLM's `tools` parameter. Inject `usage_guide` and `tips` of `guide.json` into description.
 
-### Stage 3: 実行時
+### Stage 3: Runtime
 
-`conditions.json` の評価 → `handler_config` 注入 → `handler.py` 実行。
+Evaluation of `conditions.json` → `handler_config` Injection → `handler.py` Execution.
 
 ---
 
-## 7. Widget 統合
+## 7. Widget integration
 
-handler.py が返す `widget` フィールドは widget.md で定義された統一 Widget 体系に従う。全てのドメイン（tool、prompt、ai_client、chat、agent）が同じ Widget 形式で UI 表示を宣言する。
+The `widget` fields returned by handler.py follow the unified widget scheme defined in widget.md. All domains (tool, prompt, ai_client, chat, agent) declare UI display in the same widget format.
 
-handler.py からの Widget 送出方法は 2 つある。
+There are two ways to send Widgets from handler.py.
 
-返り値の `widget` フィールドに最終結果の Widget を含める。これはツール実行完了後に表示される。
+Include the final result Widget in the `widget` field of the return value. This will be displayed after the tool has finished running.
 
-`context["emit_widget"]` で実行中にリアルタイムで Widget を送出する。進捗表示やストリーミング表示に使う。
+Send a widget in real time during execution with `context["emit_widget"]`. Used for progress display and streaming display.
 
 ```python
 def run(params, context):
@@ -1104,13 +1105,13 @@ def run(params, context):
     }
 ```
 
-Widget の型一覧、JSON 形式、テーマ連携については widget.md を参照。rumi_widgets Python ヘルパーライブラリ（`ecosystem/defaults/lib/rumi_widgets/`）を import すればクラスベースで Widget を構築できるが、直接 dict で返しても等価である。
+For a list of widget types, JSON format, and theme integration, see widget.md. You can build a widget on a class basis by importing the rumi_widgets Python helper library (`ecosystem/defaults/lib/rumi_widgets/`), but it is equivalent to return it directly as a dict.
 
 ---
 
-## 8. バックエンド処理
+## 8. Backend processing
 
-### 8.1 executor.py のフロー
+### 8.1 Executor.py flow
 
 ```
 tool_call 受信
@@ -1158,14 +1159,14 @@ tool_call 受信
   └─ 結果返却
 ```
 
-### 8.2 converter.py の4方向変換
+### 8.2 4-way conversion in converter.py
 
-1. **ツール定義 → LLM 形式**: tool.json + schema.json → OpenAI function / Anthropic tool 形式
-2. **LLM tool_calls → Rumi 統一形式**: プロバイダーごとの tool_call 形式を統一
-3. **実行結果 → LLM メッセージ形式**: result / llm_content → プロバイダーごとのメッセージ形式
-4. **prompt_based 対応**: tool_calls 非対応モデル用にプロンプト埋め込み + 応答パース
+1. **Tool definition → LLM format**: tool.json + schema.json → OpenAI function / Anthropic tool format
+2. **LLM tool_calls → Rumi unified format**: Unify tool_call format for each provider
+3. **Execution result → LLM message format**: result / llm_content → message format for each provider
+4. **prompt_based support**: prompt embedding + response parsing for models that do not support tool_calls
 
-画像対応は `capabilities.json` の `tool_result_image_support` で分岐: `true`（Anthropic）は tool_result 内に画像を含められる。`false`（OpenAI）は次の user メッセージとして画像を送信。
+Image support branches at `tool_result_image_support` of `capabilities.json`: `true` (Anthropic) can include images in tool_result. `false` (OpenAI) sends the image as the following user message.
 
 ### 8.3 session_manager.py
 
@@ -1204,28 +1205,28 @@ class SessionState:
     def delete(self, key): ...
 ```
 
-### 8.4 loader.py の走査順序
+### 8.4 loader.py traversal order
 
-1. `user_data/shared/tools/`（ユーザー管理）
-2. `user_data/packs/*/tools/`（Pack 提供）
-3. MCP サーバーから動的取得
+1. `user_data/shared/tools/` (User management)
+2. `user_data/packs/*/tools/` (provided by Pack)
+3. Dynamic acquisition from MCP server
 
-同名ツールは shared が優先。
+For tools with the same name, shared takes precedence.
 
 ### 8.5 mcp_client.py
 
-MCP の全機能に対応:
+Compatible with all MCP features:
 
-| MCP 機能 | 実装 |
+| MCP Features | Implementation |
 |----------|------|
-| Tools (tools/list, tools/call) | ツールとして登録、execution.type = "mcp" |
-| Resources (resources/list, resources/read, resources/subscribe) | Flow の context に注入 |
-| Prompts (prompts/list, prompts/get) | テンプレートとして利用可能に |
-| Sampling (sampling/createMessage) | ai_client 経由で LLM 呼び出し |
-| Roots (roots/list) | workspace パスを通知 |
-| Elicitation (elicitation/create) | emit_event でユーザーに問い合わせ |
+| Tools (tools/list, tools/call) | Register as a tool, execution.type = "mcp" |
+| Resources (resources/list, resources/read, resources/subscribe) | Injected into Flow context |
+| Prompts (prompts/list, prompts/get) | Available as a template |
+| Sampling (sampling/createMessage) | LLM call via ai_client |
+| Roots (roots/list) | Notify workspace path |
+| Elicitation (elicitation/create) | Contact user with emit_event |
 
-mcp.json 設定例:
+mcp.json configuration example:
 
 ```json
 {
@@ -1254,9 +1255,9 @@ mcp.json 設定例:
 
 ---
 
-## 9. Flow 連携
+## 9. Flow integration
 
-### 基本チャット + ツール
+### Basic Chat + Tools
 
 ```yaml
 # flows/simple_chat/flow.yaml
@@ -1290,7 +1291,7 @@ async def run(ctx):
     ...
 ```
 
-### エージェントチャット
+### Agent chat
 
 ```yaml
 # flows/agent_chat/flow.yaml
@@ -1305,9 +1306,9 @@ blocks_used:
   - memory.save
 ```
 
-### カスタムフロー（user_data）
+### Custom flow (user_data)
 
-ユーザーやPackが `user_data/shared/flows/` にフローを追加する。ツールの handler.py から `context["execute_flow"]` で起動可能。Flow のイベントトリガーを使えば、user_input 到着時にナレッジ検索ツールを自動実行する等のフックも実現できる。
+Users or Packs add flows to `user_data/shared/flows/`. Can be started from the tool's handler.py with `context["execute_flow"]`. By using Flow's event trigger, you can also implement hooks such as automatically running a knowledge search tool when user_input arrives.
 
 ```yaml
 # user_data/shared/flows/knowledge_hook/flow.yaml
@@ -1333,7 +1334,7 @@ nodes:
 
 ## 10. Readiness Check
 
-ツールに `readiness/check.py` を配置すると、実行前に環境検知を行える。
+By placing `readiness/check.py` in the tool, you can detect the environment before execution.
 
 ```python
 # readiness/check.py
@@ -1352,5 +1353,4 @@ def check(context: dict) -> dict:
     return {"ready": True, "message": "OK"}
 ```
 
-実行タイミング: Pack 承認時、アプリ起動時（並列）、リソース使用直前（キャッシュ優先）、ユーザー手動。キャッシュ TTL はデフォルト 300 秒。readiness が False のリソースは UI 上で警告マークが付くが、ユーザーが意図的に使うことは可能。
-```
+Execution timing: Upon pack approval, at app startup (parallel), immediately before resource usage (cache priority), manually by user. Cache TTL defaults to 300 seconds. Resources with readiness set to False will be marked with a warning mark on the UI, but users can use them intentionally.

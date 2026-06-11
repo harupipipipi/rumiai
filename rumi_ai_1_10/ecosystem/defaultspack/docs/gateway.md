@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./gateway.md) | [JP](./i18n/ja/gateway.md) | [KR](./i18n/ko/gateway.md) | [CN](./i18n/zh-cn/gateway.md)
+<!-- docs-i18n-links:end -->
+
 # Gateway
 
 `domain/gateway` provides a local control-plane shell with session routing and

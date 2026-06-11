@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./multi-agent.md) | [JP](./i18n/ja/multi-agent.md) | [KR](./i18n/ko/multi-agent.md) | [CN](./i18n/zh-cn/multi-agent.md)
+<!-- docs-i18n-links:end -->
+
 # Team Workspace Runtime
 
 The primary user-facing coordination path is the team workspace runtime.

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./defaultspack_integration_todo.md) | [JP](./i18n/ja/defaultspack_integration_todo.md) | [KR](./i18n/ko/defaultspack_integration_todo.md) | [CN](./i18n/zh-cn/defaultspack_integration_todo.md)
+<!-- docs-i18n-links:end -->
+
 # defaultspack Integration TODO
 
 ## Goal

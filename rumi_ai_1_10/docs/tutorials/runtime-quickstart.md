@@ -1,66 +1,70 @@
+<!-- docs-i18n-links:start -->
+[EN](./runtime-quickstart.md) | [JP](../i18n/ja/tutorials/runtime-quickstart.md) | [KR](../i18n/ko/tutorials/runtime-quickstart.md) | [CN](../i18n/zh-cn/tutorials/runtime-quickstart.md)
+<!-- docs-i18n-links:end -->
+
 # Tutorial: Runtime Quickstart
 
-このチュートリアルは **「今のリポジトリで runtime が動くところまで」** を最短で確認する手順です。
+This tutorial is the quickest way to get to the point where runtime is working with your current repository.
 
-## 前提
+## Assumptions
 
-- repo ルートで作業する
-- Python が使える
+- work in repo route
+- Can use Python
 
-## Step 1. ヘルスチェックを実行
+## Step 1. Run health check
 
 ```bash
 python -m rumi_ai --health
 ```
 
-`status: "UP"` または `status: "DEGRADED"` が返れば runtime は起動可能状態です（`DOWN` は要調査）。
+If `status: "UP"` or `status: "DEGRADED"` is returned, the runtime is ready to start (`DOWN` needs to be investigated).
 
-## Step 2. runtime を起動
+## Step 2. Start runtime
 
 ```bash
 python -m rumi_ai --headless
 ```
 
-`[Rumi] startup.success` が出れば起動完了です。
+If `[Rumi] startup.success` appears, startup is complete.
 
-## Step 3. API の疎通確認
+## Step 3. API communication confirmation
 
-別ターミナルで:
+In another terminal:
 
 ```bash
 curl http://127.0.0.1:8765/health
 ```
 
-HTTP 200 と JSON が返れば API は利用可能です。
+If it returns HTTP 200 and JSON, the API is available.
 
-## Step 4. panel ルート確認（任意）
+## Step 4. Panel route confirmation (optional)
 
-ブラウザで `http://127.0.0.1:8765/panel/` を開き、画面が表示されることを確認します。
+Open `http://127.0.0.1:8765/panel/` in your browser and make sure the screen is visible.
 
-## Step 5. 停止
+## Step 5. Stop
 
-起動したターミナルで `Ctrl+C`。
+In the launched terminal, `Ctrl+C`.
 
-## 検証スクリーンショット
+## Verification screenshot
 
-> 実行確認で取得した画像です。環境により表示は多少変わります。
+> This is an image obtained during execution confirmation. The display may vary slightly depending on the environment.
 
-### /health（ブラウザ表示）
+### /health (browser display)
 
 ![Runtime health screenshot](../assets/tutorials/runtime-health.png)
 
-### /panel（ブラウザ表示）
+### /panel (browser display)
 
 ![Runtime panel screenshot](../assets/tutorials/runtime-panel.png)
 
-## 実行ログ
+## Execution log
 
-実行時の生ログは以下に保存しています。
+The raw log of execution is saved below.
 
 - [../assets/tutorials/runtime-quickstart.log](../assets/tutorials/runtime-quickstart.log)
 
-## 次に読む
+## Read next
 
-- 仕組みを追う: [../concepts/system-mechanism.md](../concepts/system-mechanism.md)
-- 運用/API 詳細: [../operations.md](../operations.md)
-- viewer 側の起動経路: [../rumi_viewer_start.md](../rumi_viewer_start.md)
+- Follow the mechanism: [../concepts/system-mechanism.md](../concepts/system-mechanism.md)
+- Operation/API details: [../operations.md](../operations.md)
+- Viewer side startup path: [../rumi_viewer_start.md](../rumi_viewer_start.md)

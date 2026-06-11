@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./defaultspack-explained.md) | [JP](./i18n/ja/defaultspack-explained.md) | [KR](./i18n/ko/defaultspack-explained.md) | [CN](./i18n/zh-cn/defaultspack-explained.md)
+<!-- docs-i18n-links:end -->
+
 # defaultspack Explained
 
 This document is the PR97 orientation map for defaultspack. It explains how the

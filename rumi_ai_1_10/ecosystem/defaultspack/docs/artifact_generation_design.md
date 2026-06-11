@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./artifact_generation_design.md) | [JP](./i18n/ja/artifact_generation_design.md) | [KR](./i18n/ko/artifact_generation_design.md) | [CN](./i18n/zh-cn/artifact_generation_design.md)
+<!-- docs-i18n-links:end -->
+
 # Artifact Generation Design
 
 Artifacts are local deliverables with metadata:

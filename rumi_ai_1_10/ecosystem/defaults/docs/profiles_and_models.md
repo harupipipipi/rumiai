@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./profiles_and_models.md) | [JP](./i18n/ja/profiles_and_models.md) | [KR](./i18n/ko/profiles_and_models.md) | [CN](./i18n/zh-cn/profiles_and_models.md)
+<!-- docs-i18n-links:end -->
+
 # Rumi AI OS Defaults Profiles and Models
 
 This document details how the `defaults` pack manages AI profiles, tool configurations, and user data to fulfill the requirements for extreme flexibility, custom instructions, and advanced model orchestration (like Mixture of Agents).
@@ -48,7 +52,7 @@ Instead of modifying the core engine to support MoA, the `defaults` pack encoura
 *   **Delegation:** When the Agent sends a message to `moa_router`, the `moa_router` pack's backend handler takes over. It can then spawn sub-requests to various actual models (GPT-4, Claude, etc.), synthesize the results (the MoA process), and return the final response back to the Agent.
 
 ### 2. Multi-Model Agents
-Alternatively, the `defaults` pack's `agent.json` schema allows specifying a primary model, and an optional **Fallback Model** or a specific model for **Planning/Reasoning** vs. **Tool Execution**.
+Alternatively, the `defaults` pack's `agent.json` schema allows specifying a primary model, and an optional **Fallback Model** or a specific model for**Planning/Reasoning** vs.**Tool Execution**.
 
 ```json
 {

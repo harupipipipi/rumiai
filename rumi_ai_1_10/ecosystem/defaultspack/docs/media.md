@@ -1,17 +1,21 @@
-# Media 機能ガイド
+<!-- docs-i18n-links:start -->
+[EN](./media.md) | [JP](./i18n/ja/media.md) | [KR](./i18n/ko/media.md) | [CN](./i18n/zh-cn/media.md)
+<!-- docs-i18n-links:end -->
 
-## 1. 概要
+# Media feature guide
 
-media モジュールは defaults の `domain/media/` に配置されるドメインコードであり、画像操作・ドキュメントパース・クリップボード操作・スクリーンショットの handler を提供する。マルチモーダル AI 連携のための前処理・後処理を担う。
+## 1. Overview
+
+The media module is a domain code placed in `domain/media/` of defaults and provides handlers for image manipulation, document parsing, clipboard manipulation, and screenshots. Responsible for pre-processing and post-processing for multimodal AI collaboration.
 
 
-## 2. 画像操作
+## 2. Image manipulation
 
 ### defaults.media.image_read
 
-画像ファイルを読み取り、メタデータと base64 データを返す。
+Reads an image file and returns metadata and base64 data.
 
-権限: `media.image.read`
+Permissions: `media.image.read`
 
 input_data:
 ```json
@@ -22,9 +26,9 @@ input_data:
 }
 ```
 
-`resize` で `{"width": 800, "height": 600}` を指定するとリサイズして返す。`format` で `"jpeg"` / `"png"` / `"webp"` を指定すると変換する。
+If `{"width": 800, "height": 600}` is specified in `resize`, it will be resized and returned. Convert when `"jpeg"` / `"png"` / `"webp"` is specified in `format`.
 
-戻り値:
+Return value:
 ```json
 {
   "data": "base64...",
@@ -38,9 +42,9 @@ input_data:
 
 ### defaults.media.image_transform
 
-画像に変換処理を適用する。
+Apply transformations to images.
 
-権限: `media.image.transform`
+Permissions: `media.image.transform`
 
 input_data:
 ```json
@@ -56,9 +60,9 @@ input_data:
 }
 ```
 
-`output_path` を指定するとファイルに保存。省略すると base64 で返す。
+If `output_path` is specified, save to file. If omitted, base64 is returned.
 
-戻り値:
+Return value:
 ```json
 {
   "data": "base64...",
@@ -70,13 +74,13 @@ input_data:
 ```
 
 
-## 3. ドキュメントパース
+## 3. Document parsing
 
 ### defaults.media.doc_parse
 
-PDF・Word・PowerPoint 等のドキュメントファイルからテキストを抽出する。
+Extract text from document files such as PDF, Word, and PowerPoint.
 
-権限: `media.document.parse`
+Permissions: `media.document.parse`
 
 input_data:
 ```json
@@ -88,9 +92,9 @@ input_data:
 }
 ```
 
-`pages` で `[1, 2, 3]` を指定すると特定ページのみ。`extract_images` が true で画像も抽出。`ocr` が true で OCR を適用。
+If `[1, 2, 3]` is specified in `pages`, only specific pages will be displayed. If `extract_images` is true, images are also extracted. `ocr` is true and OCR is applied.
 
-戻り値:
+Return value:
 ```json
 {
   "text": "ドキュメントの全文テキスト...",
@@ -109,20 +113,20 @@ input_data:
 ```
 
 
-## 4. クリップボード操作
+## 4. Clipboard operations
 
 ### defaults.media.clipboard_read
 
-システムクリップボードの内容を読み取る。
+Read the contents of the system clipboard.
 
-権限: `media.clipboard.read`
+Permissions: `media.clipboard.read`
 
 input_data:
 ```json
 {}
 ```
 
-戻り値:
+Return value:
 ```json
 {
   "content_type": "text",
@@ -131,7 +135,7 @@ input_data:
 }
 ```
 
-画像がクリップボードにある場合:
+If the image is on the clipboard:
 ```json
 {
   "content_type": "image",
@@ -147,9 +151,9 @@ input_data:
 
 ### defaults.media.clipboard_write
 
-システムクリップボードに書き込む。
+Write to the system clipboard.
 
-権限: `media.clipboard.write`
+Permissions: `media.clipboard.write`
 
 input_data:
 ```json
@@ -160,7 +164,7 @@ input_data:
 }
 ```
 
-戻り値:
+Return value:
 ```json
 {
   "success": true,
@@ -169,13 +173,13 @@ input_data:
 ```
 
 
-## 5. スクリーンショット
+## 5. Screenshot
 
 ### defaults.media.screenshot
 
-画面のスクリーンショットを取得する。
+Take a screenshot of the screen.
 
-権限: `media.screenshot`
+Permissions: `media.screenshot`
 
 input_data:
 ```json
@@ -187,9 +191,9 @@ input_data:
 }
 ```
 
-`target` は `"screen"`（画面全体）または `"window"`（アクティブウィンドウ）。`region` で `{"x": 0, "y": 0, "width": 800, "height": 600}` を指定すると部分キャプチャ。
+`target` is `"screen"` (full screen) or `"window"` (active window). Partial capture when `{"x": 0, "y": 0, "width": 800, "height": 600}` is specified in `region`.
 
-戻り値:
+Return value:
 ```json
 {
   "data": "base64...",

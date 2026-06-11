@@ -1,6 +1,10 @@
+<!-- docs-i18n-links:start -->
+[EN](./defaultspack_v2.md) | [JP](./i18n/ja/defaultspack_v2.md) | [KR](./i18n/ko/defaultspack_v2.md) | [CN](./i18n/zh-cn/defaultspack_v2.md)
+<!-- docs-i18n-links:end -->
+
 # defaultspack v2
 
-> **Legacy メモ**: 概要のみの旧メモです。現行の説明は [defaultspack-v2.md](./defaultspack-v2.md) を参照してください。
+> **Legacy memo**: This is an old memo with only a summary. See [defaultspack-v2.md](./defaultspack-v2.md) for current explanation.
 
 `defaultspack` is now a tracked first-class pack under `ecosystem/defaultspack/`.
 

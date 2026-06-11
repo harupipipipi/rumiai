@@ -1,76 +1,80 @@
-# Widgets ガイド
+<!-- docs-i18n-links:start -->
+[EN](./widgets.md) | [JP](./i18n/ja/widgets.md) | [KR](./i18n/ko/widgets.md) | [CN](./i18n/zh-cn/widgets.md)
+<!-- docs-i18n-links:end -->
 
-## 1. ウィジェットの概念
+# Widgets Guide
 
-Widget はバックエンドが「このデータをこう表示してほしい」と宣言するための統一的な JSON データ形式である。Widget は UI ライブラリではなく純粋なデータである。
+## 1. Widget concept
 
-バックエンドのあらゆるコード（handler、tool の handler.py、prompt、Flow ノード）が Widget JSON を生成し、`emit_widget` で送出する。フロントエンドの shell.html 内の Widget レンダラーがこの JSON を受け取り、テーマに従って描画する。
+Widget is a unified JSON data format that allows the backend to declare ``I want this data to be displayed like this.'' Widgets are pure data, not UI libraries.
 
-Widget はドメイン非依存である。「チャット用Widget」「エージェント用Widget」は存在しない。テキスト、コードブロック、画像、テーブル、プログレスバーといった汎用的な表示プリミティブのみを定義する。全 29 種（表示 14 + コントロール 6 + レイアウト 6 + ストリーミング 2 + カスタム 1）。
+Every code in the backend (handler, tool's handler.py, prompt, Flow node) generates Widget JSON and sends it out with `emit_widget`. The Widget renderer in shell.html on the front end receives this JSON and draws it according to the theme.
+
+Widgets are domain independent. There are no "chat widgets" or "agent widgets." Define only general-purpose display primitives such as text, code blocks, images, tables, and progress bars. Total of 29 types (Display 14 + Control 6 + Layout 6 + Streaming 2 + Custom 1).
 
 
-## 2. lib/rumi_widgets/ のクラス一覧と用途
+## 2. Class list and usage of lib/rumi_widgets/
 
-`ecosystem/defaults/lib/rumi_widgets/` に配置される Python ヘルパーライブラリ。使用は任意であり、直接 dict を返しても等価。
+Python helper library located in `ecosystem/defaults/lib/rumi_widgets/`. Usage is optional and equivalent to returning a dict directly.
 
-### display.py（表示系 14 種）
+### display.py (14 display types)
 
-| クラス | 用途 | 主要パラメータ |
+| Class | Usage | Main parameters |
 |---|---|---|
-| `Text` | テキスト表示 | `text` |
-| `CodeBlock` | ソースコード表示 | `language`, `content`, `filename`, `line_start` |
-| `Diff` | 差分表示 | `old_content`, `new_content`, `filename` |
-| `Image` | 画像表示 | `src`, `alt`, `width`, `height` |
-| `Screenshot` | スクリーンショット表示 | `src`, `url`, `title` |
-| `Progress` | 進捗表示 | `label`, `current`, `total`, `state` |
-| `Terminal` | ターミナル出力表示 | `command`, `output`, `exit_code` |
-| `Table` | テーブル表示 | `headers`, `rows` |
-| `Chart` | グラフ表示 | `chart_type`, `labels`, `data` |
-| `FileTree` | ファイルツリー表示 | `tree` |
-| `Markdown` | Markdown レンダリング | `content` |
-| `Audio` | 音声再生 | `src`, `duration` |
-| `Video` | 動画再生 | `src`, `duration` |
-| `Map` | 地図表示 | `lat`, `lng`, `zoom` |
+| `Text` | Text display | `text` |
+| `CodeBlock` | View source code | `language`, `content`, `filename`, `line_start` |
+| `Diff` | Difference display | `old_content`, `new_content`, `filename` |
+| `Image` | Image display | `src`, `alt`, `width`, `height` |
+| `Screenshot` | Screenshot display | `src`, `url`, `title` |
+| `Progress` | Progress display | `label`, `current`, `total`, `state` |
+| `Terminal` | Terminal output display | `command`, `output`, `exit_code` |
+| `Table` | Table display | `headers`, `rows` |
+| `Chart` | Graph display | `chart_type`, `labels`, `data` |
+| `FileTree` | File tree display | `tree` |
+| `Markdown` | Markdown rendering | `content` |
+| `Audio` | Audio playback | `src`, `duration` |
+| `Video` | Video playback | `src`, `duration` |
+| `Map` | Map display | `lat`, `lng`, `zoom` |
 
-### controls.py（コントロール系 6 種）
+### controls.py (6 types of controls)
 
-| クラス | 用途 | 主要パラメータ |
+| Class | Usage | Main parameters |
 |---|---|---|
-| `Input` | テキスト入力 | `placeholder`, `value`, `multiline` |
-| `Button` | ボタン | `label`, `action`, `variant` |
-| `Select` | 選択 | `options`, `value`, `multiple` |
-| `Toggle` | トグルスイッチ | `label`, `value` |
-| `Slider` | スライダー | `min`, `max`, `value`, `step` |
-| `Checkbox` | チェックボックス | `label`, `checked` |
+| `Input` | Text input | `placeholder`, `value`, `multiline` |
+| `Button` | Button | `label`, `action`, `variant` |
+| `Select` | Selection | `options`, `value`, `multiple` |
+| `Toggle` | Toggle switch | `label`, `value` |
+| `Slider` | Slider | `min`, `max`, `value`, `step` |
+| `Checkbox` | Checkbox | `label`, `checked` |
 
-### layout.py（レイアウト系 6 種）
+### layout.py (6 layout types)
 
-| クラス | 用途 | 主要パラメータ |
+| Class | Usage | Main parameters |
 |---|---|---|
-| `Container` | 汎用コンテナ | `children` |
-| `Row` | 横並びレイアウト | `children`, `gap` |
-| `Column` | 縦並びレイアウト | `children`, `gap` |
-| `Tabs` | タブ切り替え | `tabs` (各 `{label, content}`) |
-| `Collapsible` | 折りたたみ | `label`, `default_open`, `children` |
-| `Card` | ヘッダ/ボディ/フッタ付きカード | `header`, `body`, `footer` |
+| `Container` | General purpose container | `children` |
+| `Row` | Side-by-side layout | `children`, `gap` |
+| `Column` | Vertical layout | `children`, `gap` |
+| `Tabs` | Tab switching | `tabs` (each `{label, content}`) |
+| `Collapsible` | Collapse | `label`, `default_open`, `children` |
+| `Card` | Card with header/body/footer | `header`, `body`, `footer` |
 
-### stream.py（ストリーミング系 2 種）
+### stream.py (2 types of streaming type)
 
-| クラス | 用途 | 主要パラメータ |
+| Class | Usage | Main parameters |
 |---|---|---|
-| `Stream` | 状態ベースストリーム表示 | `states` (dict) |
-| `Indicator` | 単一状態インジケータ | `label`, `state`, `animation` |
+| `Stream` | State-based stream display | `states` (dict) |
+| `Indicator` | Single state indicators | `label`, `state`, `animation` |
 
-### custom.py（カスタム 1 種）
+### custom.py (1 type of custom)
 
-| クラス | 用途 | 主要パラメータ |
+| Class | Usage | Main parameters |
 |---|---|---|
-| `Custom` | 定義外Widget | `custom_type`, `fallback`, `data` |
+| `Custom` | Undefined Widget | `custom_type`, `fallback`, `data` |
 
 
-## 3. Python 側での JSON 生成方法
+## 3. How to generate JSON on the Python side
 
-### rumi_widgets ヘルパーを使う方法
+### How to use the rumi_widgets helper
 
 ```python
 from rumi_widgets import Card, Indicator, CodeBlock, Text, Row, Button
@@ -88,9 +92,9 @@ widget = Card(
 return {"result": "File content", "widget": widget}
 ```
 
-`emit_widget` に渡す場合は `.to_dict()` 不要（内部で自動呼び出し）。return の `widget` フィールドに渡す場合も自動変換される。
+`.to_dict()` is not required when passing to `emit_widget` (automatically called internally). It will also be automatically converted when passed to the `widget` field of return.
 
-### 直接 dict で返す方法
+### How to return directly as dict
 
 ```python
 widget = {
@@ -108,18 +112,18 @@ widget = {
 return {"result": "File content", "widget": widget}
 ```
 
-両方とも完全に等価な結果を生む。
+Both produce completely equivalent results.
 
 
-## 4. フロントエンド側での描画方法
+## 4. How to draw on the front end side
 
-Widget レンダラーは shell.html に組み込まれ、全 Asset が共有する。
+The Widget renderer is built into shell.html and shared by all Assets.
 
-Asset の JS から Widget を描画する方法は 2 つある。
+There are two ways to draw a widget from Asset's JS.
 
-postMessage 方式: iframe 内の JS が親ウィンドウに Widget JSON を postMessage で送り、親の Widget レンダラーが描画結果を返す。
+postMessage method: JS in the iframe sends Widget JSON to the parent window using postMessage, and the parent Widget renderer returns the drawing result.
 
-直接呼び出し方式: shell が提供する `widget-renderer.js` を Asset が `<script>` で取り込み、`renderWidget(widgetJson, targetElement)` を直接呼び出す。
+Direct call method: Asset imports `widget-renderer.js` provided by the shell with `<script>` and calls `renderWidget(widgetJson, targetElement)` directly.
 
 ```javascript
 // Asset の JS 内
@@ -134,12 +138,12 @@ window.parent.postMessage({
 renderWidget(widgetJson, document.getElementById("my-container"));
 ```
 
-未知の Widget type はテキストにフォールバックする。`custom` type は `user_data/widget_renderers/` にカスタムレンダラーが登録されていれば専用描画、なければ `fallback` Widget を描画する。
+Unknown widget types fall back to text. `custom` type will use dedicated drawing if a custom renderer is registered in `user_data/widget_renderers/`, otherwise it will draw `fallback` Widget.
 
 
-## 5. 使い方の例
+## 5. Examples of usage
 
-### 例1: ファイル読み取り結果を Widget で表示
+### Example 1: Displaying file reading results in widget
 
 ```python
 def run(params, context):
@@ -156,7 +160,7 @@ def run(params, context):
     }
 ```
 
-### 例2: 進捗をリアルタイム表示
+### Example 2: Display progress in real time
 
 ```python
 def run(params, context):
@@ -181,7 +185,7 @@ def run(params, context):
     return {"result": f"Processed {len(files)} files"}
 ```
 
-### 例3: ユーザー確認ボタン
+### Example 3: User confirmation button
 
 ```python
 def run(params, context):
@@ -202,7 +206,7 @@ def run(params, context):
     return {"result": "Cancelled"}
 ```
 
-### 例4: 検索結果を折りたたみ表示
+### Example 4: Collapse search results
 
 ```python
 def run(params, context):
@@ -223,7 +227,7 @@ def run(params, context):
     }
 ```
 
-### 例5: ストリーミング中のインジケータ
+### Example 5: Streaming indicator
 
 ```python
 context["emit_widget"]({
@@ -234,4 +238,4 @@ context["emit_widget"]({
 })
 ```
 
-animation はテーマの `animations` セクションで定義された名前を指定する。テーマが認識しない animation 名は無視される。
+animation specifies the name defined in the theme's `animations` section. Animation names not recognized by the theme will be ignored.

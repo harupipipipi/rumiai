@@ -1,16 +1,20 @@
-# CI/CD ビルドガイド — rumi_viewer デスクトップアプリ
+<!-- docs-i18n-links:start -->
+[EN](./ci_build_guide.md) | [JP](./i18n/ja/ci_build_guide.md) | [KR](./i18n/ko/ci_build_guide.md) | [CN](./i18n/zh-cn/ci_build_guide.md)
+<!-- docs-i18n-links:end -->
 
-最終更新: 2026-03-29
+# CI/CD build guide — rumi_viewer desktop app
 
-rumi_viewer（Tauri v2 デスクトップアプリ）の CI ビルド・リリースの手順と、過去の障害記録をまとめたドキュメント。
+Last updated: 2026-03-29
+
+A document that summarizes CI build and release procedures for rumi_viewer (Tauri v2 desktop app) and past failure records.
 
 ---
 
-## 1. 概要
+## 1. Overview
 
-GitHub Actions の `release.yml` が tag push をトリガーに 4 プラットフォーム同時ビルドを行い、GitHub Releases に draft としてアーティファクトをアップロードする。
+`release.yml` of GitHub Actions triggers a tag push to perform a simultaneous build on 4 platforms, and uploads the artifact as a draft to GitHub Releases.
 
-| プラットフォーム | ランナー | ターゲット | 成果物 |
+| Platform | Runner | Target | Artifact |
 |-----------------|---------|-----------|--------|
 | macOS ARM | macos-latest | aarch64-apple-darwin | .dmg |
 | macOS Intel | macos-15-intel | x86_64-apple-darwin | .dmg |
@@ -19,9 +23,9 @@ GitHub Actions の `release.yml` が tag push をトリガーに 4 プラット�
 
 ---
 
-## 2. リリース手順
+## 2. Release procedure
 
-### 2.1 通常リリース
+### 2.1 Regular release
 
 ```bash
 # 1. バージョンを更新（tauri.conf.json と Cargo.toml の version）
@@ -43,7 +47,7 @@ git push origin v0.2.0
 # 5. GitHub の Releases ページで draft を確認 → 公開
 ```
 
-### 2.2 テストリリース（CI 動作確認用）
+### 2.2 Test release (for CI operation check)
 
 ```bash
 # test tag はインクリメントする（v0.1.0-test.1, .2, .3, ...）
@@ -58,7 +62,7 @@ git push origin v0.1.0-test.4
 # https://github.com/harupipipipi/rumiai/actions
 ```
 
-### 2.3 CI 結果の確認方法
+### 2.3 How to check CI results
 
 ```bash
 # ブラウザで確認
@@ -85,15 +89,15 @@ for j in jobs:
 
 ---
 
-## 3. release.yml の構造
+## 3. Structure of release.yml
 
 ```
 .github/workflows/release.yml
 ```
 
-- **トリガー**: `push.tags: ["v*"]` — `v` で始まる tag push
-- **マトリクス**: 4 つの os × target の組み合わせ
-- **主要ステップ**:
+- **Trigger**: `push.tags: ["v*"]` — tag push starting with `v`
+- **Matrix**: combination of 4 os x target
+- **Main steps**:
   1. Checkout
   2. Set up Python / Rust / Node
   3. Build panel frontend and defaultspack frontend
@@ -102,39 +106,39 @@ for j in jobs:
   6. Build (`cargo tauri build --target $target`)
   7. Upload release artifacts (`softprops/action-gh-release`)
 
-`rumi_viewer/src-tauri/gen/app` は Git 管理しない。CI では
-`.github/scripts/prepare_tauri_resources.py` が runtime tools を stage し、Tauri
-の `build.rs` も同じ除外ルールで `gen/app` を再生成する。生成対象には
-`app.py`, `core_runtime/`, `ecosystem/defaultspack/`, build 済み panel/defaultspack UI,
-`bundled/uv`, `bundled/pack-shell` が入る。`.venv`, `node_modules`,
-`user_data`, `__pycache__`, `.rumi_snapshots`, `tests/` は配布物から除外する。
+`rumi_viewer/src-tauri/gen/app` is not managed by Git. In CI
+`.github/scripts/prepare_tauri_resources.py` stages runtime tools and Tauri
+`build.rs` also regenerates `gen/app` with the same exclusion rules. For generation target
+`app.py`, `core_runtime/`, `ecosystem/defaultspack/`, built panel/defaultspack UI,
+`bundled/uv`, `bundled/pack-shell` are included. `.venv`, `node_modules`,
+`user_data`, `__pycache__`, `.rumi_snapshots`, `tests/` are excluded from the distribution.
 
-PR 上で配布物を確認したい場合は、手動実行もできる
-`.github/workflows/desktop-installers.yml` を使う。Windows NSIS, macOS DMG, Linux
-DEB/AppImage を Actions artifact としてアップロードする。代表的な出力先は以下。
+If you want to check the distribution on PR, you can also run it manually.
+Use `.github/workflows/desktop-installers.yml`. Windows NSIS, macOS DMG, Linux
+Upload DEB/AppImage as Actions artifact. Typical output destinations are below.
 
 - Windows: `rumi_viewer/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe`
 - macOS: `rumi_viewer/src-tauri/target/{target}/release/bundle/dmg/*.dmg`
 - Linux: `rumi_viewer/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/{deb,appimage}/`
 
-### ランナー選定の注意
+### Notes on runner selection
 
-GitHub Actions のランナーは定期的に廃止される。廃止されたランナーを指定するとジョブがキューに入ったまま失敗する。
+GitHub Actions runners are periodically retired. Specifying an obsolete runner causes the job to remain in the queue and fail.
 
-| 廃止されたランナー | 廃止日 | 代替 |
+| Obsolete Runner | Obsolescence Date | Replacement |
 |-------------------|--------|------|
-| macos-12 | 2024年後半 | macos-13 → macos-15 |
+| macos-12 | Late 2024 | macos-13 → macos-15 |
 | macos-13 | 2025-12 | macos-15-intel |
 
-**確認方法**: https://github.com/actions/runner-images を参照。
+**How to check**: See https://github.com/actions/runner-images.
 
 ---
 
-## 4. アイコンファイル管理
+## 4. Icon file management
 
-### 4.1 必須ファイル
+### 4.1 Required files
 
-Tauri v2 のビルドには以下のアイコンファイルが必要:
+Building Tauri v2 requires the following icon files:
 
 ```
 rumi_viewer/src-tauri/icons/
@@ -146,20 +150,20 @@ rumi_viewer/src-tauri/icons/
 └── icon.icns         — macOS 用 ICNS（128/256/512 サイズ埋め込み）
 ```
 
-### 4.2 絶対に守ること
+### 4.2 Must be observed
 
-- **PNG は RGBA (color_type=6) でなければならない**。RGB (color_type=2) だと Tauri の `generate_context!()` マクロがコンパイル時にパニックする
-- **PNG は正方形 (width == height) でなければならない**。非正方形だと tauri-bundler が AppImage バンドル時にパニックする
-- **icon.ico は必須**。存在しないと Windows の `build.rs` でコンパイルエラー
-- **tauri.conf.json の bundle.icon にパスを列挙する**。未設定だとデフォルトパスを探しに行き、見つからなければエラー
+- **PNG must be RGBA (color_type=6)**. Tauri's `generate_context!()` macro panics at compile time when using RGB (color_type=2)
+- **PNG must be square (width == height)**. tauri-bundler panics when bundling AppImage if it is non-square
+- **icon.ico is required**. Compile error with `build.rs` on Windows if it does not exist
+- **Enumerate paths in bundle.icon of tauri.conf.json**. If not set, the default path will be searched, and if not found, an error will occur.
 
-### 4.3 現在のアイコン
+### 4.3 Current icon
 
-プレースホルダー（単色 R=100, G=100, B=200 の青い四角）。正式アイコンが決まったら差し替える。
+Placeholder (solid blue square with R=100, G=100, B=200). Once the official icon is decided, it will be replaced.
 
-### 4.4 アイコン差し替え手順
+### 4.4 Icon replacement procedure
 
-正式アイコンを用意したら:
+After preparing the official icon:
 
 ```bash
 # 方法 1: cargo tauri icon コマンド（Tauri CLI がインストール済みの場合）
@@ -178,7 +182,7 @@ git tag v0.x.y-test.1
 git push origin v0.x.y-test.1
 ```
 
-### 4.5 tauri.conf.json の bundle.icon 設定
+### 4.5 bundle.icon settings in tauri.conf.json
 
 ```json
 {
@@ -194,35 +198,35 @@ git push origin v0.x.y-test.1
 }
 ```
 
-icon.png は bundle.icon に含めなくてよい（trayIcon.iconPath で使用）。
+icon.png does not need to be included in bundle.icon (used in trayIcon.iconPath).
 
 ---
 
-## 5. アップデート機構
+## 5. Update mechanism
 
-### 5.1 現状: 未実装
+### 5.1 Current status: Not implemented
 
-2026-03-29 時点で、アプリの自動アップデート機構は **未実装**。
+As of 2026-03-29, the automatic update mechanism for the app is **not implemented**.
 
-- `tauri-plugin-updater` は Cargo.toml に含まれていない
-- `tauri.conf.json` に `plugins.updater` セクションなし
-- `capabilities/default.json` に updater パーミッションなし
+- `tauri-plugin-updater` is not included in Cargo.toml
+- No section in `tauri.conf.json` to `plugins.updater`
+- No updater permission on `capabilities/default.json`
 
-ユーザーがアップデートするには、GitHub Releases から新しいバイナリを手動でダウンロードして再インストールする必要がある。
+To update, users must manually download and reinstall new binaries from GitHub Releases.
 
-### 5.2 将来計画: Phase U
+### 5.2 Future Plan: Phase U
 
-roadmap.md のアップデート計画で実装予定:
+Scheduled to be implemented in roadmap.md update plan:
 
-- **U-1**: バージョン管理（現在のバージョン取得、最新バージョンの取得）
-- **U-2**: アップデートチェック API（Cloudflare Workers or R2）
-- **U-3**: Rust ランチャーのセルフアップデート
-- **U-4**: Kernel（Python ソースコード）のアップデート
-- **U-5**: Pack のアップデート
+- **U-1**: Version control (get current version, get latest version)
+- **U-2**: Update check API (Cloudflare Workers or R2)
+- **U-3**: Rust launcher self-update
+- **U-4**: Kernel (Python source code) update
+- **U-5**: Pack update
 
-### 5.3 Tauri v2 の updater プラグイン（参考）
+### 5.3 Tauri v2 updater plugin (reference)
 
-Tauri v2 には公式の updater プラグインがある。導入する場合のステップ:
+Tauri v2 has an official updater plugin. Steps to implement:
 
 ```
 1. cargo add tauri-plugin-updater  (Cargo.toml)
@@ -232,58 +236,55 @@ Tauri v2 には公式の updater プラグインがある。導入する場合�
 5. Rust 側で updater::Builder を初期化
 ```
 
-ただし、Rumi AI のアーキテクチャでは Rust ランチャーだけでなく Python Kernel と Packs のアップデートも必要なため、Tauri 標準の updater だけでは不十分。Phase U で独自のアップデートフローを設計する。
+However, Rumi AI's architecture requires updating not only the Rust launcher but also the Python Kernel and Packs, so Tauri's standard updater alone is not sufficient. Design your own update flow in Phase U.
 
 ---
 
-## 6. 障害記録
+## 6. Failure record
 
-### 6.1 v0.1.0-test.1 — 初回 CI 実行（全滅）
+### 6.1 v0.1.0-test.1 — First CI run (annihilation)
 
-**日時**: 2026-03-28 19:17 UTC
-**結果**: 手動キャンセル（4ジョブ中、成功前にキャンセル）
-**原因**: 3 つの独立した問題が同時に発生
+**Date and time**: 2026-03-28 19:17 UTC**Result**: Manual cancellation (out of 4 jobs, canceled before success)**Cause**: Three independent issues occurring at the same time
 
-#### 問題 1: macOS Intel ランナー廃止
+#### Issue 1: macOS Intel runner deprecated
 
-- **症状**: `macos-13` ランナーを指定したジョブがキューに入ったまま進まない
-- **原因**: GitHub Actions が `macos-13` ランナーを 2025年12月に完全削除済み
-- **根拠**: GitHub 公式のランナーイメージ廃止スケジュール
+- **Symptom**: `macos-13` A job with a runner specified remains in the queue and does not proceed.
+- **Cause**: GitHub Actions permanently removed the `macos-13` runner in December 2025
+- **Rationale**: GitHub official runner image retirement schedule
 
-#### 問題 2: Windows の icon.ico 不在
+#### Problem 2: icon.ico missing on Windows
 
-- **症状**: Windows ビルドで `build.rs` がコンパイルエラー
-- **原因**: `tauri-build` の `build.rs` が `icons/icon.ico` を必須としている。リポジトリには 83 バイトの 16×16 `icon.png` しかなかった
-- **根拠**: Tauri v2 の `build.rs` はリソースとして `.ico` を Windows バイナリに埋め込む
+- **Symptom**: `build.rs` compile error on Windows build
+- **Cause**: `build.rs` of `tauri-build` requires `icons/icon.ico`. The repository only had 83 bytes of 16×16 `icon.png`
+- **Rationale**: `build.rs` in Tauri v2 embeds `.ico` as a resource in Windows binaries.
 
-#### 問題 3: Linux の AppImage バンドル失敗
+#### Issue 3: AppImage bundle failure on Linux
 
-- **症状**: `tauri-bundler` が AppImage バンドル時にパニック
-- **原因**: `tauri-bundler` が正方形 PNG (width == height) を icons ディレクトリからフィルタした結果 0 件になった。既存の `icon.png` は 16×16 だったが、bundler が要求する最小サイズを満たさなかった可能性、または bundler が `icon.png` を見つけられなかった
-- **備考**: deb/rpm バンドルは成功していた。AppImage のみ失敗
+- **Symptom**: `tauri-bundler` panics when bundling AppImage
+- **Cause**: `tauri-bundler` filtered square PNGs (width == height) from the icons directory, resulting in 0 results. The existing `icon.png` was 16×16, but it may not have met the minimum size required by the bundler, or the bundler could not find the `icon.png`
+- **Note**: deb/rpm bundle was successful. Only AppImage fails
 
-### 6.2 v0.1.0-test.2 — ランナー修正 + アイコン生成（RGB 版）
+### 6.2 v0.1.0-test.2 — Runner fix + icon generation (RGB version)
 
-**日時**: 2026-03-28 20:15 UTC
-**結果**: 4ジョブ中 2 失敗、2 成功予想だったが最終的に全滅
+**Date and time**: 2026-03-28 20:15 UTC**Result**: Out of 4 jobs, 2 failed, 2 were expected to be successful, but in the end they were wiped out.
 
-| ジョブ | 結果 | 失敗ステップ |
+| Job | Result | Failed Step |
 |--------|------|------------|
 | macOS ARM (macos-latest) | failure | Build with cargo tauri |
 | macOS Intel (macos-15-intel) | failure | Build with cargo tauri |
 | Linux (ubuntu-latest) | failure | Build with cargo tauri |
 | Windows (windows-latest) | failure | Build with cargo tauri |
 
-**修正内容（v0.1.0-test.2 で適用したもの）**:
-- `macos-13` → `macos-15-intel` に置換 → **ランナー問題は解決**（ジョブが起動してビルドまで進んだ）
-- Python 標準ライブラリ（struct + zlib）で PNG / ICO / ICNS を生成 → ファイルは正常に生成された
-- `tauri.conf.json` に `bundle.icon` を追加
+**Modifications (applied in v0.1.0-test.2)**:
+- `macos-13` → Replaced with `macos-15-intel` → **Runner problem solved** (Job started and progressed to build)
+- Generate PNG/ICO/ICNS with Python standard library (struct + zlib) → File was generated successfully
+- Added `bundle.icon` to `tauri.conf.json`
 
-**新たに判明した問題**:
+**Newly discovered issues**:
 
-#### 問題 4: PNG が RGB で Tauri が RGBA を要求
+#### Problem 4: PNG is RGB and Tauri requires RGBA
 
-- **症状**: 全プラットフォームで同一エラー
+- **Symptom**: Same error on all platforms
   ```
   error: proc macro panicked
    --> src/lib.rs:150:14
@@ -293,36 +294,35 @@ Tauri v2 には公式の updater プラグインがある。導入する場合�
     |
     = help: message: icon .../icons/32x32.png is not RGBA
   ```
-- **原因**: Python で生成した PNG の color_type が `2` (RGB, 3 bytes/pixel) だった。Tauri の `generate_context!()` マクロはコンパイル時に PNG をデコードし、RGBA (color_type=6, 4 bytes/pixel) でないとパニックする
-- **教訓**: **Tauri のアイコン PNG は必ず RGBA (color_type=6) で生成すること**。RGB は不可
+- **Cause**: The color_type of PNG generated by Python was `2` (RGB, 3 bytes/pixel). Tauri's `generate_context!()` macro decodes PNG at compile time and panics if it is not RGBA (color_type=6, 4 bytes/pixel)
+- **Lesson learned**:**Be sure to generate Tauri's icon PNG in RGBA (color_type=6)**. RGB not allowed
 
-### 6.3 v0.1.0-test.3 — RGBA 修正版（全成功）
+### 6.3 v0.1.0-test.3 — RGBA fix (full success)
 
-**日時**: 2026-03-28 22:21 UTC
-**結果**: 全 4 ジョブ成功
+**Date and time**: 2026-03-28 22:21 UTC**Result**: All 4 jobs successful
 
-| ジョブ | 結果 | ビルド時間 |
+| Job | Results | Build Time |
 |--------|------|-----------|
 | macOS ARM (macos-latest) | success | ~3 min |
 | macOS Intel (macos-15-intel) | success | ~5.5 min |
 | Linux (ubuntu-latest) | success | ~4 min |
 | Windows (windows-latest) | success | ~5.5 min |
 
-**修正内容**:
-- PNG 生成の `color_type` を `2` (RGB) → `6` (RGBA) に変更
-- ピクセルデータを `bytes([r, g, b])` → `bytes([r, g, b, 255])` に変更
-- 検証ステップに IHDR の color_type=6 チェックを追加
+**Modification details**:
+- Changed `color_type` of PNG generation to `2` (RGB) → `6` (RGBA)
+- Changed pixel data from `bytes([r, g, b])` → `bytes([r, g, b, 255])`
+- Added IHDR color_type=6 check to validation step
 
-**全ステップ成功を確認**:
-- Checkout → Install Rust → Install Tauri CLI → **Build with cargo tauri** → **Upload release artifacts** すべて success
+**Check success of all steps**:
+- Checkout → Install Rust → Install Tauri CLI → **Build with cargo tauri** →**Upload release artifacts** All success
 
 ---
 
-## 7. トラブルシューティング
+## 7. Troubleshooting
 
-### 「icon ... is not RGBA」エラー
+### "icon ... is not RGBA" error
 
-PNG が RGB モードになっている。RGBA (アルファチャンネル付き) で再生成すること。
+PNG is in RGB mode. Must be reproduced in RGBA (with alpha channel).
 
 ```bash
 # 確認方法
@@ -339,23 +339,23 @@ with open('rumi_viewer/src-tauri/icons/32x32.png', 'rb') as f:
 "
 ```
 
-### ランナーがキューのまま進まない
+### Runner stays in queue and doesn't progress
 
-ランナーが廃止されている可能性がある。`release.yml` の `runs-on` を確認。
+The runner may be obsolete. Check `runs-on` of `release.yml`.
 
 ```bash
 grep "runs-on\|os:" .github/workflows/release.yml
 ```
 
-https://github.com/actions/runner-images で現在利用可能なランナーを確認。
+See currently available runners on https://github.com/actions/runner-images.
 
-### AppImage バンドルでパニック
+### Panic on AppImage bundle
 
-icons ディレクトリに正方形 (width == height) の PNG が存在しないか、サイズが不足している。`ls -la rumi_viewer/src-tauri/icons/` で確認。
+There is no square (width == height) PNG in the icons directory, or the size is insufficient. Confirmed in `ls -la rumi_viewer/src-tauri/icons/`.
 
-### draft release が作られない
+### Draft release not created
 
-`softprops/action-gh-release@v2` は `files` パターンにマッチするファイルがない場合、release を作らない可能性がある。ビルド成果物のパスを確認:
+`softprops/action-gh-release@v2` may not create a release if there are no files matching the `files` pattern. Check the build artifact path:
 
 ```
 rumi_viewer/src-tauri/target/<target>/release/bundle/
@@ -367,8 +367,8 @@ rumi_viewer/src-tauri/target/<target>/release/bundle/
 
 ---
 
-## 8. 変更履歴
+## 8. Change history
 
-| 日付 | 内容 |
+| Date | Contents |
 |------|------|
-| 2026-03-29 | 初版作成。v0.1.0-test.1〜3 の障害記録、ビルド手順、アイコン管理、アップデート機構の現状を記載 |
+| 2026-03-29 | First edition created. Describes the current status of failure records, build procedures, icon management, and update mechanism for v0.1.0-test.1 to 3 |

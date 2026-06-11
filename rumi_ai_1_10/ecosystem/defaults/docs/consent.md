@@ -1,25 +1,29 @@
-# 同意（Consent）ガイド
+<!-- docs-i18n-links:start -->
+[EN](./consent.md) | [JP](./i18n/ja/consent.md) | [KR](./i18n/ko/consent.md) | [CN](./i18n/zh-cn/consent.md)
+<!-- docs-i18n-links:end -->
 
-## 1. 概念と目的
+# Consent Guide
 
-同意 tool は、AI の応答が投資助言・医療助言・法律助言など専門領域に該当する場合に、ユーザーに免責事項を表示して同意を求めるための仕組みである。
+## 1. Concept and purpose
 
-defaults Pack は同意の仕組み全体（判定ロジック・handler・UI ポップアップ連携・イベント通信）を提供する。具体的には以下のファイルが defaults Pack 内に配置されている。
+The consent tool is a mechanism that displays a disclaimer to the user and requests consent when the AI response falls under specialized fields such as investment advice, medical advice, and legal advice.
 
-| ファイル | 説明 |
+The defaults pack provides the entire consent mechanism (judgment logic, handler, UI popup collaboration, event communication). Specifically, the following files are placed in the defaults pack.
+
+| File | Description |
 |---|---|
-| `blocks/tool/consent_check.py` | 判定 handler（`defaults.tool.consent_check`） |
-| `blocks/tool/consent_confirm.py` | 同意記録 handler（`defaults.tool.consent_confirm`） |
-| `domain/tool/consent.py` | `ConsentChecker` クラス（判定ロジック・同意記録管理） |
+| `blocks/tool/consent_check.py` | Judgment handler (`defaults.tool.consent_check`) |
+| `blocks/tool/consent_confirm.py` | Consent record handler (`defaults.tool.consent_confirm`) |
+| `domain/tool/consent.py` | `ConsentChecker` Class (determination logic/consent record management) |
 
-`ecosystem.json` の `tool` コンポーネントの `provides` に `defaults.tool.consent_check` と `defaults.tool.consent_confirm` が宣言されている。HTTP transport では `POST /api/consent/check` と `POST /api/consent/{id}/confirm` のルートでアクセスできる。
+`defaults.tool.consent_check` and `defaults.tool.consent_confirm` are declared in `provides` of the `tool` component of `ecosystem.json`. HTTP transport can be accessed using the routes `POST /api/consent/check` and `POST /api/consent/{id}/confirm`.
 
 
-## 2. 判定の仕組み
+## 2. Judgment mechanism
 
-### キーワードベース判定
+### Keyword-based judgment
 
-軽量・高速な一次判定。応答テキストに特定のキーワードが含まれるかチェックする。`domain/tool/consent.py` の `ConsentChecker.check_keywords()` が実行する。カテゴリとキーワードは `CATEGORIES` dict としてモジュール内にハードコードされている。
+Lightweight and fast primary judgment. Check if the response text contains a specific keyword. `ConsentChecker.check_keywords()` of `domain/tool/consent.py` is executed. Categories and keywords are hard-coded into modules as `CATEGORIES` dicts.
 
 ```python
 # domain/tool/consent.py より抜粋
@@ -59,9 +63,9 @@ CATEGORIES = {
 }
 ```
 
-### AI ベース判定
+### AI based judgment
 
-`consent_check` handler の `use_ai` パラメータを `true` にすると、`ConsentChecker.check_ai()` が AI ベース判定を実行する。内部で `AIClient.complete()` を呼び出し、テキストがセンシティブカテゴリに該当するかを分類する。
+If you set the `use_ai` parameter of `consent_check` handler to `true`, `ConsentChecker.check_ai()` will perform AI-based judgment. Calls `AIClient.complete()` internally to classify whether the text falls into a sensitive category.
 
 ```python
 # domain/tool/consent.py の AI 判定用システムプロンプト
@@ -76,26 +80,24 @@ _AI_JUDGE_SYSTEM = (
 )
 ```
 
-`ConsentChecker.check()` はキーワード判定と AI 判定を組み合わせる。キーワード判定は偽陽性が多いが漏れが少なく、AI 判定は偽陽性が少ないが遅い。
+`ConsentChecker.check()` combines keyword judgment and AI judgment. Keyword judgment has many false positives but few omissions, and AI judgment has few false positives but is slow.
 
 
 ## 3. handler API
 
 ### defaults.tool.consent_check
 
-テキストを判定し、同意が必要かどうかを返す。
+Determines the text and returns whether consent is required.
 
-**HTTP**: `POST /api/consent/check`
+**HTTP**: `POST /api/consent/check`**input_data**:
 
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `text` | `string` | Yes | 判定対象テキスト |
-| `use_ai` | `bool` | No | AI 判定を使うか（デフォルト `false`） |
-| `model` | `string` | No | AI 判定時のモデル指定（デフォルト `"stub/default"`） |
+| `text` | `string` | Yes | Judgment target text |
+| `use_ai` | `bool` | No | Use AI judgment (default `false`) |
+| `model` | `string` | No | Model specification during AI judgment (default `"stub/default"`) |
 
-**戻り値**:
+**Return value**:
 
 ```json
 {
@@ -112,22 +114,20 @@ _AI_JUDGE_SYSTEM = (
 }
 ```
 
-`requires_consent` が `false` の場合、`categories` は空配列、`consent_id` は `null`、`disclaimers` は空 dict になる。
+If `requires_consent` is `false`, `categories` is an empty array, `consent_id` is `null`, and `disclaimers` is an empty dict.
 
 ### defaults.tool.consent_confirm
 
-ユーザーの同意/拒否を記録する。
+Record user consent/refusal.
 
-**HTTP**: `POST /api/consent/{id}/confirm`
+**HTTP**: `POST /api/consent/{id}/confirm`**input_data**:
 
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `consent_id` | `string` | Yes | `consent_check` が返した consent_id（HTTP ではパスパラメータから注入） |
-| `accepted` | `bool` | Yes | ユーザーが同意したか |
+| `consent_id` | `string` | Yes | consent_id returned by `consent_check` (injected from path parameter in HTTP) |
+| `accepted` | `bool` | Yes | User consent |
 
-**戻り値**:
+**Return value**:
 
 ```json
 {
@@ -140,12 +140,12 @@ _AI_JUDGE_SYSTEM = (
 }
 ```
 
-同意記録は `user_data/shared/consent_log/{consent_id}.json` に永続化される（`ConsentChecker._persist()` で書き込み）。
+The consent record is made permanent in `user_data/shared/consent_log/{consent_id}.json` (written in `ConsentChecker._persist()`).
 
 
-## 4. chat.send への統合方法（案）
+## 4. How to integrate into chat.send (proposed)
 
-`blocks/tool/consent_check.py` のドキュメントストリングに記載されている統合案:
+Suggested integration as described in the docstring for `blocks/tool/consent_check.py`:
 
 ```python
 # blocks/chat/send.py の assistant_msg 生成後に追加
@@ -169,13 +169,13 @@ if consent_result["data"]["requires_consent"]:
 ```
 
 
-## 5. フロントエンドでの表示
+## 5. Display on front end
 
-同意ポップアップは `emit_widget` または `emit_event("ui.popup.show", ...)` で表示される。フロントエンド側の Asset がこのイベントを受信し、ポップアップを描画する。
+Consent pop-up is displayed in `emit_widget` or `emit_event("ui.popup.show", ...)`. Asset on the front end receives this event and draws a popup.
 
-Asset の JS が `event.broadcast` を受信し、`event_type` が `"ui.popup.show"` であればポップアップを表示する。ユーザーがボタンをクリックしたら `event.broadcast` で `"ui.popup.response"` イベントを返送する。
+If Asset's JS receives `event.broadcast` and `event_type` is `"ui.popup.show"`, it will display a popup. When the user clicks the button, `event.broadcast` sends back the `"ui.popup.response"` event.
 
-Widget としてポップアップを表現する場合:
+When expressing a popup as a widget:
 
 ```json
 {
@@ -193,4 +193,4 @@ Widget としてポップアップを表現する場合:
 }
 ```
 
-同意 tool のポップアップはフロントエンドの Asset が描画する。defaults は emit_event / wait_event / emit_widget という汎用通信の仕組みと、判定・記録の handler を提供する。
+The consent tool popup is drawn by the front end Asset. defaults provides a general-purpose communication mechanism called emit_event / wait_event / emit_widget and a handler for judgment and recording.

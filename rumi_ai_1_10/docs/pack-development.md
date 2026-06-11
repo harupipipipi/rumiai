@@ -1,70 +1,72 @@
+<!-- docs-i18n-links:start -->
+[EN](./pack-development.md) | [JP](./i18n/ja/pack-development.md) | [KR](./i18n/ko/pack-development.md) | [CN](./i18n/zh-cn/pack-development.md)
+<!-- docs-i18n-links:end -->
 
-
-> **クイックスタートガイド**: Pack 開発を始める方は [Pack 開発クイックスタートガイド](pack-development-guide.md) を参照してください。
+> **Quick Start Guide**: If you want to start Pack development, please refer to [Pack Development Quick Start Guide](./pack-development-guide.md).
 # Rumi AI OS — Pack Development Guide
 
-Pack 開発者向けのガイドです。設計の全体像は [architecture.md](architecture.md)、運用手順は [operations.md](operations.md) を参照してください。
+A guide for Pack developers. Please refer to [architecture.md](./architecture.md) for the overall design and [operations.md](./operations.md) for operational instructions.
 
 ---
 
-## 目次
+## Table of Contents
 
-1. [開発の流れ](#開発の流れ)
-2. [最小構成](#最小構成)
+1. [Development flow](#development-flow)
+2. [Minimum configuration](#minimum-configuration)
 3. [ecosystem.json](#ecosystemjson)
-4. [ブロック（blocks）](#ブロックblocks)
-5. [型ヒント・バリデーション](#型ヒントバリデーション)
-6. [Flow 定義](#flow-定義)
-7. [Flow → HTTP レスポンスマッピング](#flow--http-レスポンスマッピング)
+4. [blocks](#blocks)
+5. [Type hints/validation](#type-hintsvalidation)
+6. [Flow definition](#flow-definition)
+7. [Flow → HTTP Response Mapping](#flow--http-response-mapping)
 8. [Flow Modifier](#flow-modifier)
-9. [ネットワークアクセス](#ネットワークアクセス)
-10. [context\["http\_request"\] 詳細仕様](#contexthttp_request-詳細仕様)
-11. [Secrets の利用（Pack から）](#secrets-の利用pack-から)
-12. [Capability の利用](#capability-の利用)
-13. [Store API（Capability 経由）](#store-apicapability-経由)
-14. [Pack 間連携パターン](#pack-間連携パターン)
+9. [Network Access](#network-access)
+10. [context\["http\_request"\] Detailed specifications](#contexthttp_request-Detailed specifications)
+11. [Using Secrets (from Pack)](#using-secrets-from-pack)
+12. [Using Capability](#using-capabilities)
+13. [Store API (via Capability)](#store-api-via-capability)
+14. [Inter-Pack cooperation pattern](#inter-pack-cooperation-pattern)
 15. [lib（install / update）](#libinstall--update)
-16. [pip 依存（requirements.lock）](#pip-依存requirementslock)
+16. [pip dependency (requirements.lock)](#pip-dependency-requirementslock)
 17. [permissions.json](#permissionsjson)
-18. [Capability Handler の同梱](#capability-handler-の同梱)
-19. [vocab / converter（上級）](#vocab--converter上級)
-20. [Component（上級）](#component上級)
-21. [Pack 独自エンドポイント（routes.json）](#pack-独自エンドポイントroutesjson)
-22. [HTTP ステータスコード制御](#http-ステータスコード制御)
-23. [エラーハンドリング ベストプラクティス](#エラーハンドリング-ベストプラクティス)
-24. [Flow Modifier 推奨パターン](#flow-modifier-推奨パターン)
-25. [ハンドラ API 分類](#ハンドラ-api-分類)
-26. [出力キー命名規則（詳細）](#出力キー命名規則詳細)
-24. [注意事項](#注意事項)
-25. [API リファレンス](#api-リファレンス)
-26. [チュートリアル: 簡単な Pack を作る](#チュートリアル-簡単な-pack-を作る)
+18. [Including Capability Handler](#includes-capability-handler)
+19. [vocab/converter (advanced)](#vocabconverter-advanced)
+20. [Component (advanced)](#component-advanced)
+21. [Pack-specific endpoint (routes.json)](#pack-specific-endpoint-routesjson)
+22. [HTTP status code control](#http-status-code-control)
+23. [Error Handling Best Practices](#error-handling-best-practices)
+24. [Flow Modifier Recommended Pattern](#flow-modifier-recommended-pattern)
+25. [Handler API classification](#handler-api-classification)
+26. [Output key naming convention (details)](#output-key-naming-convention-details)
+27. [Notes](#notes)
+28. [API Reference](#api-reference)
+29. [Tutorial: Creating a simple Pack](#tutorial-create-a-simple-pack)
 
 ---
 
-## 開発の流れ
+## Development flow
 
-### Step 0: テンプレートで雛形を生成
+### Step 0: Generate a template using a template
 
 ```bash
 python -m core_runtime.pack_scaffold my-pack --template minimal --output-dir ecosystem/
 ```
 
-テンプレート種別:
-- `minimal`: 最小構成（ecosystem.json + run.py）
-- `capability`: Capability Handler 付き
-- `flow`: Flow 定義付き
-- `full`: 全部入り
+Template type:
+- `minimal`: Minimal configuration (ecosystem.json + run.py)
+- `capability`: With Capability Handler
+- `flow`: With Flow definition
+- `full`: All included
 
-1. **Pack を作る** — `ecosystem/<pack_id>/backend/` にファイルを配置
-2. **ecosystem.json を書く** — Pack のメタデータ（`pack_id`, `pack_identity` 必須）
-3. **blocks/ を書く** — `python_file_call` で呼ばれるコード
-4. **Flow を書く** — `user_data/shared/flows/` または Pack 内 `flows/` に配置し、blocks を結線
-5. **承認を得る** — ユーザーが Pack を承認
-6. **実行** — 承認後、Flow 実行時に blocks が呼ばれる
+1. **Create a Pack** — Place files in `ecosystem/<pack_id>/backend/`
+2. **Write ecosystem.json** — Pack metadata (`pack_id`, `pack_identity` required)
+3. **Write blocks/** — code called in `python_file_call`
+4. **Write Flow** — Place in `user_data/shared/flows/` or `flows/` in Pack and connect blocks
+5. **Get approval** — User approves the pack
+6. **Execution** — After approval, blocks is called when executing the Flow
 
 ---
 
-## 最小構成
+## Minimal configuration
 
 ```
 ecosystem/my_pack/
@@ -74,7 +76,7 @@ ecosystem/my_pack/
         └── hello.py
 ```
 
-> **パスについて**: `ecosystem/<pack_id>/` が推奨パスです。`ecosystem/packs/<pack_id>/` も互換パスとしてサポートされますが、同一 `pack_id` が両方に存在する場合、`ecosystem/<pack_id>/` が優先されます。
+> **About the path**: `ecosystem/<pack_id>/` is the recommended path. `ecosystem/packs/<pack_id>/` is also supported as a compatible path, but if the same `pack_id` exists in both, `ecosystem/<pack_id>/` takes precedence.
 
 ---
 
@@ -90,20 +92,20 @@ ecosystem/my_pack/
 }
 ```
 
-| フィールド | 必須 | 説明 |
+| Field | Required | Description |
 |-----------|------|------|
-| `pack_id` | ✅ | Pack の識別子。ディレクトリ名と一致させる |
-| `pack_identity` | ✅ | 配布元を示す識別子（例: `github:author/repo`）。Pack 更新時にこの値が変わると apply が拒否される |
-| `version` | 任意 | セマンティックバージョニング |
-| `description` | 任意 | 説明 |
-| `pack_identity_vocabulary` | 任意 | Pack が使用する語彙のリスト。vocab.txt との連携に使用 |
-| `required_secrets` | 任意 | 必要なシークレットキーのリスト（例: `["OPENAI_API_KEY"]`）。ユーザーへの情報提供用 |
-| `required_network` | 任意 | ネットワーク要件（例: `{"allowed_domains": ["api.example.com"], "allowed_ports": [443]}`）。ユーザーへの情報提供用 |
-| `host_execution` | 任意 | ホスト実行の必要性（`true` / `false`）。`true` の場合、コンテナ隔離ではなくホストプロセスとして実行される |
+| `pack_id` | ✅ | Pack identifier. Match directory name |
+| `pack_identity` | ✅ | Distributor identifier (e.g. `github:author/repo`). If this value changes during Pack update, apply will be rejected |
+| `version` | Optional | Semantic Versioning |
+| `description` | Optional | Description |
+| `pack_identity_vocabulary` | Optional | List of vocabulary used by Pack. Used for collaboration with vocab.txt |
+| `required_secrets` | Optional | List of required secret keys (e.g. `["OPENAI_API_KEY"]`). For providing information to users |
+| `required_network` | Optional | Network requirements (e.g. `{"allowed_domains": ["api.example.com"], "allowed_ports": [443]}`). For providing information to users |
+| `host_execution` | Optional | Need for host execution (`true` / `false`). For `true`, run as a host process instead of container isolation |
 
-### connectivity（Pack 間依存宣言）
+### connectivity (inter-pack dependency declaration)
 
-`ecosystem.json` に `connectivity` フィールドを追加することで、Pack 間の依存関係を宣言できます。
+You can declare dependencies between Packs by adding the `connectivity` field to `ecosystem.json`.
 
 ```json
 {
@@ -116,35 +118,35 @@ ecosystem/my_pack/
 }
 ```
 
-| フィールド | 説明 |
+| Field | Description |
 |-----------|------|
-| `provides` | この Pack が提供するサービス名のリスト |
-| `requires` | この Pack が必要とするサービス名のリスト |
+| `provides` | List of service names provided by this Pack |
+| `requires` | List of service names required by this Pack |
 
-connectivity の `requires` / `provides` は、起動時の Pack ロード順序（load_order）の自動解決に使用されます。`requires` で指定したサービスを `provides` する Pack が先にロードされます。
+The connectivity `requires` / `provides` is used to automatically resolve the Pack load order (load_order) at startup. Packs that `provides` the services specified in `requires` are loaded first.
 
-手動指定（`ecosystem.json` の `load_order` フィールド）が存在する場合はそちらが優先されます。手動指定がない場合にのみ自動解決が適用されます。
+If manual specification (`load_order` field of `ecosystem.json`) exists, it will take precedence. Automatic resolution is applied only in the absence of manual specification.
 
-現時点では connectivity のランタイムでの効果は load_order 自動解決のみです。将来的に拡張される可能性があります。
+Currently, the only runtime effect of connectivity is automatic load_order resolution. It may be expanded in the future.
 
-#### connectivity パターン例
+#### Connectivity pattern example
 
-| provides | 意味 | 典型的な Pack |
+| provides | Meaning | Typical Pack |
 |----------|------|--------------|
-| `ai.client` | AI API クライアント | OpenAI / Anthropic クライアント |
-| `tool.registry` | ツール登録 | ツールマネージャー |
-| `memory.store` | 記憶ストア | メモリ管理 |
-| `ui.chat` | チャット UI | フロントエンド |
+| `ai.client` | AI API Client | OpenAI / Anthropic Client |
+| `tool.registry` | Tool registration | Tool manager |
+| `memory.store` | Memory Store | Memory Management |
+| `ui.chat` | Chat UI | Frontend |
 
-provides / requires の値はドット区切りの自由文字列です。OS は値の意味を解釈せず、load_order の自動解決にのみ使用します。Pack 開発者間で名前を合わせてください。
+The provides / requires values are dot-separated free strings. The OS does not interpret the meaning of the value and only uses it for automatic resolution of load_order. Please match the names among pack developers.
 
 ---
 
-## ブロック（blocks）
+## blocks
 
-`python_file_call` で呼ばれる Python ファイルです。
+Python file called by `python_file_call`.
 
-### 基本形
+### Basic form
 
 ```python
 # ecosystem/my_pack/backend/blocks/hello.py
@@ -171,19 +173,19 @@ def run(input_data, context=None):
     return {"message": f"Hello, {name}!"}
 ```
 
-`run` 関数は `input_data` のみの 1 引数版も許可されます。
+The `run` function also allows a one-argument version of `input_data` only.
 
-### 戻り値
+### Return value
 
-JSON 互換の dict を返してください。戻り値は Flow の `output` フィールドで指定したコンテキストキーにそのまま格納されます。Kernel 内部のラッパー（`_kernel_step_status` 等）は自動的に除去され、ブロックが返した値がそのまま `ctx[output_key]` に入ります。
+Please return a JSON compatible dict. The returned value is stored as is in the context key specified in the Flow's `output` field. The wrappers inside the Kernel (such as `_kernel_step_status`) are automatically removed, and the value returned by the block goes directly into `ctx[output_key]`.
 
-### 出力キー命名規則
+### Output key naming convention
 
-Flow ステップの `output` に格納される値のキー名について以下の規則があります。
+The following rules apply to the key name of the value stored in `output` of a Flow step.
 
-`_` プレフィックスで始まるキーは Kernel 内部キーとして予約されています。`python_file_call` の `run()` が返す dict に `_` プレフィックスのキー（例: `_kernel_step_status`、`_debug`）が含まれていた場合、Flow の `output` コンテキストに格納される際に自動除外されます。
+Keys starting with the `_` prefix are reserved as Kernel internal keys. If the dict returned by `run()` of `python_file_call` contains keys with the `_` prefix (e.g. `_kernel_step_status`, `_debug`), they will be automatically excluded when stored in the `output` context of Flow.
 
-Pack のブロックが返す出力キーには `_` プレフィックスを使用しないでください。意図せず除外される原因になります。
+Do not use the `_` prefix on output keys returned by Pack blocks. This may cause you to be unintentionally excluded.
 
 ```python
 # NG: _ プレフィックスは除外される
@@ -198,11 +200,11 @@ def run(input_data, context=None):
 
 ---
 
-## 型ヒント・バリデーション
+## Type hints/validation
 
-### run() 関数のシグネチャ
+### run() function signature
 
-`python_file_call` で呼び出される `run()` 関数は、以下の3パターンのいずれかを受け付けます。実行エンジンが `inspect.signature` で引数の数を自動検出します。
+The `run()` function called by `python_file_call` accepts one of the following three patterns. The execution engine auto-detects the number of arguments in `inspect.signature`.
 
 ```python
 # パターン1: 入力データとコンテキストの両方を受け取る（推奨）
@@ -218,45 +220,45 @@ def run() -> dict | None:
     ...
 ```
 
-### input_data の型保証
+### Type safety for input_data
 
-`input_data` は Flow 定義の `input` フィールドを JSON シリアライズ/デシリアライズした値です。したがって、含まれる型は JSON 由来の以下の型に限定されます。
+`input_data` is the JSON serialized/deserialized value of the `input` field of the Flow definition. Therefore, the included types are limited to the following JSON-derived types:
 
-| JSON 型 | Python 型 |
+| JSON type | Python type |
 |---------|----------|
 | object | `dict` |
 | array | `list` |
 | string | `str` |
-| number（整数） | `int` |
-| number（小数） | `float` |
+| number (integer) | `int` |
+| number (decimal) | `float` |
 | boolean | `bool` |
 | null | `None` |
 
-`input_data` 自体は通常 `dict` ですが、Flow 定義で直接スカラー値やリストを指定した場合はその型になります。
+`input_data` itself is usually `dict`, but if you specify a scalar value or list directly in the Flow definition, it will be of that type.
 
-### context の型
+### context type
 
-`context` は `dict[str, Any]` です。主なキーは以下の通りです。
+`context` is `dict[str, Any]`. The main keys are:
 
-| キー | 型 | 説明 |
+| Key | Type | Description |
 |------|----|------|
-| `flow_id` | `str` | 実行中の Flow ID |
-| `step_id` | `str` | 実行中のステップ ID |
-| `phase` | `str` | 実行フェーズ名 |
-| `ts` | `str` | 実行開始タイムスタンプ（ISO 8601 UTC） |
-| `owner_pack` | `str \| None` | 所有 Pack ID |
-| `inputs` | `dict` | input_data と同一 |
-| `http_request` | `Callable` | HTTP リクエスト関数（[context\["http\_request"\] 詳細仕様](#contexthttp_request-詳細仕様) 参照） |
-| `network_check` | `Callable` | ネットワークアクセスチェック関数 |
-| `capability_socket` | `str \| None` | Capability UDS ソケットパス |
+| `flow_id` | `str` | Running Flow ID |
+| `step_id` | `str` | Running step ID |
+| `phase` | `str` | Execution phase name |
+| `ts` | `str` | Execution start timestamp (ISO 8601 UTC) |
+| `owner_pack` | `str \| None` | Owned Pack ID |
+| `inputs` | `dict` | Same as input_data |
+| `http_request` | `Callable` | HTTP request function (see [context\["http\_request"\] detailed specifications](#contexthttp_request-detailed specifications)) |
+| `network_check` | `Callable` | Network access check function |
+| `capability_socket` | `str \| None` | Capability UDS Socket Path |
 
-### 戻り値の型
+### Return type
 
-`run()` の戻り値は JSON シリアライズ可能な値（`dict`、`list`、`str`、`int`、`float`、`bool`、`None`）であることが必要です。`None` を返した場合、Flow の output は `null` として扱われます。戻り値が `dict` の場合、その内容が Flow の `output` 変数に格納されます。
+The return value of `run()` must be a JSON serializable value (`dict`, `list`, `str`, `int`, `float`, `bool`, `None`). If you return `None`, the Flow output will be treated as `null`. If the return value is `dict`, its contents are stored in the `output` variable of the Flow.
 
-### バリデーションのベストプラクティス
+### Validation best practices
 
-`input_data` の内容は外部（Flow 定義やユーザー入力）由来であるため、必ずバリデーションを行ってください。
+The contents of `input_data` are derived from external sources (Flow definitions and user input), so be sure to validate them.
 
 ```python
 def run(input_data: dict, context: dict) -> dict:
@@ -290,25 +292,25 @@ def run(input_data: dict, context: dict) -> dict:
     return {"result": result}
 ```
 
-**推奨事項:**
+**Recommendation:**
 
-- 例外を投げるのではなく、`{"error": "..."}` を返して正常終了させる
-- 必須フィールドは関数の先頭でまとめてチェックする
-- `isinstance()` で型を厳密に確認する
-- 数値の範囲やリストの長さにも上限を設ける
+- Instead of throwing an exception, return `{"error": "..."}` and exit normally.
+- Check all required fields at the beginning of the function
+- Check types strictly with `isinstance()`
+- Set limits on numerical ranges and list lengths
 
 ---
 
-## Flow 定義
+## Flow definition
 
-### 配置パス
+### Placement path
 
-| パス | 用途 |
+| Path | Purpose |
 |------|------|
-| `user_data/shared/flows/` | 共有 Flow。複数 Pack をまたぐ結線に適しています |
-| `ecosystem/<pack_id>/backend/flows/` | Pack 固有の Flow |
+| `user_data/shared/flows/` | Share Flow. Suitable for wiring across multiple packs |
+| `ecosystem/<pack_id>/backend/flows/` | Pack-specific Flow |
 
-### 例
+### Example
 
 ```yaml
 # user_data/shared/flows/hello.flow.yaml
@@ -334,7 +336,7 @@ steps:
     output: greeting
 ```
 
-### ステップの書き方
+### How to write steps
 
 #### python_file_call
 
@@ -351,17 +353,17 @@ steps:
   timeout_seconds: 60
 ```
 
-| フィールド | 必須 | 説明 |
+| Field | Required | Description |
 |-----------|------|------|
-| `id` | ✅ | ステップ ID（Flow 内で一意） |
-| `phase` | ✅ | 所属フェーズ |
-| `priority` | 任意 | 実行優先度（昇順。デフォルト 100） |
+| `id` | ✅ | Step ID (unique within the Flow) |
+| `phase` | ✅ | Affiliation phase |
+| `priority` | Optional | Execution priority (ascending order; default 100) |
 | `type` | ✅ | `python_file_call` |
-| `owner_pack` | 任意 | 所有 Pack（パスから推測される場合は省略可） |
-| `file` | ✅ | 実行ファイルの相対パス |
-| `input` | 任意 | 入力データ（変数展開可能） |
-| `output` | 任意 | 出力先コンテキストキー |
-| `timeout_seconds` | 任意 | タイムアウト秒数（デフォルト 60） |
+| `owner_pack` | Optional | Owned Pack (can be omitted if inferred from the path) |
+| `file` | ✅ | Relative path of executable file |
+| `input` | Any | Input data (variable expansion possible) |
+| `output` | Optional | Output destination context key |
+| `timeout_seconds` | Optional | Timeout seconds (default 60) |
 
 #### handler
 
@@ -377,7 +379,7 @@ steps:
   output: context
 ```
 
-`handler` タイプは `input.handler` で指定された Kernel ハンドラー（`kernel:*`）または InterfaceRegistry 登録済みハンドラーを直接呼び出します。`input.args` がハンドラーの引数として渡されます。
+The `handler` type directly calls the Kernel handler specified in `input.handler` (`kernel:*`) or the InterfaceRegistry registered handler. `input.args` is passed as an argument to the handler.
 
 #### set
 
@@ -391,9 +393,9 @@ steps:
     value: "gpt-4"
 ```
 
-> **注意**: `set` タイプは InterfaceRegistry に登録された `flow.construct.set` ハンドラーによって処理されます。Flow ローダーは `set` を標準ステップタイプとして解釈しますが、実行は construct 経由です。`set` construct が登録されていない場合、ステップはスキップされます。
+> **Note**: The `set` type is handled by the `flow.construct.set` handler registered in the InterfaceRegistry. The Flow loader interprets `set` as a standard step type, but execution is via construct. `set` If construct is not registered, the step is skipped.
 
-#### flow（サブ Flow 呼び出し）
+#### flow (sub Flow call)
 
 ```yaml
 - id: run_sub_pipeline
@@ -406,9 +408,9 @@ steps:
   output: sub_result
 ```
 
-`flow` タイプは別の Flow をサブ Flow として呼び出します。再帰的な呼び出し（循環参照）は自動検出され、エラーになります。サブ Flow のコンテキストは親からディープコピーされ、`args` で指定した値が追加されます。
+The `flow` type calls another Flow as a sub-Flow. Recursive calls (circular references) are automatically detected and result in an error. The context of the sub Flow is deep copied from the parent and the values ​​specified in `args` are added.
 
-#### function（Capability 関数呼び出し）
+#### function (Capability function call)
 
 ```yaml
 - id: read_store
@@ -422,25 +424,25 @@ steps:
   output: store_result
 ```
 
-`function` タイプは FunctionRegistry に登録された関数を `capability_executor` 経由で実行します。`function` フィールドに `permission_id`（例: `store.get`）を指定します。実行には対応する Capability Grant が必要です。
+The `function` type executes the function registered in the FunctionRegistry via `capability_executor`. Specify `permission_id` (for example, `store.get`) in the `function` field. A corresponding Capability Grant is required for execution.
 
-| フィールド | 必須 | 説明 |
+| Field | Required | Description |
 |-----------|------|------|
 | `type` | ✅ | `function` |
-| `function` | ✅ | 実行する関数の permission_id（例: `store.get`, `docker.run`） |
-| `input` | 任意 | 関数への引数（変数展開可能） |
-| `output` | 任意 | 出力先コンテキストキー |
-| `vocab_normalize` | 任意 | `true` の場合、`function` の値を vocab 正規化してから解決する |
+| `function` | ✅ | permission_id of the function to be executed (e.g. `store.get`, `docker.run`) |
+| `input` | Any | Argument to the function (variable expansion possible) |
+| `output` | Optional | Output destination context key |
+| `vocab_normalize` | Optional | For `true`, vocab normalize the value of `function` before solving |
 
-### 変数展開
+### Variable expansion
 
-`${ctx.key}` でコンテキスト内の値を参照できます。ネスト参照（`${ctx.user.id}`）も可能です。参照先が存在しない場合は `null` になります。
+You can reference the value in context with `${ctx.key}`. Nested references (`${ctx.user.id}`) are also possible. If the reference does not exist, it will be `null`.
 
-### スケジュール実行
+### Schedule execution
 
-Flow に `schedule` フィールドを追加することで、定期実行が可能です。
+Regular execution is possible by adding the `schedule` field to the Flow.
 
-#### cron 式（5 フィールド: 分 時 日 月 曜日）
+#### cron expression (5 fields: minute, hour, day, month, day of the week)
 
 ```yaml
 flow_id: daily_cleanup
@@ -453,7 +455,7 @@ steps:
   # ...
 ```
 
-#### interval（秒指定、最小 10 秒）
+#### interval (seconds specified, minimum 10 seconds)
 
 ```yaml
 flow_id: health_check
@@ -466,13 +468,13 @@ steps:
   # ...
 ```
 
-cron 式は `*`、`*/N`、数値、カンマ区切り、範囲（`N-M`）、範囲+ステップ（`N-M/S`）をサポートします。スケジューラーは 10 秒間隔の tick で評価されるため、cron の精度は分単位です。同一 Flow の重複実行は自動的に防止されます。
+cron expressions support `*`, `*/N`, numeric, comma-separated, range (`N-M`), and range+step (`N-M/S`). The scheduler is evaluated in ticks every 10 seconds, so cron's precision is in minutes. Duplicate execution of the same Flow is automatically prevented.
 
-### Flow 制御プロトコル
+### Flow control protocol
 
-ブロックの返り値で `__flow_control` キーを返すことで、Flow の実行を制御できます。
+You can control the execution of the Flow by returning the `__flow_control` key in the block's return value.
 
-#### フロー中断
+#### Flow interruption
 
 ```python
 def run(input_data, context=None):
@@ -481,19 +483,19 @@ def run(input_data, context=None):
     return {"result": "ok"}
 ```
 
-`{"__flow_control": "abort", "reason": "..."}` を返すと、以降のステップは実行されずにフローが中断されます。中断理由は diagnostics に記録されます。
+Returning `{"__flow_control": "abort", "reason": "..."}` interrupts the flow without executing any further steps. The reason for suspension is recorded in diagnostics.
 
-> 現時点で `__flow_control` がサポートする値は `"abort"` のみです。その他の値は無視されます。
+> Currently, `__flow_control` only supports `"abort"`. Other values ​​are ignored.
 
 ---
 
-## Flow → HTTP レスポンスマッピング
+## Flow → HTTP response mapping
 
-Pack の `routes.json` で定義したエンドポイントが HTTP リクエストを受けると、Pack API Server（`pack_api_server.py`）は対応する Flow を実行し、その結果を HTTP レスポンスに変換して返却します。
+When the endpoint defined in Pack's `routes.json` receives an HTTP request, the Pack API Server (`pack_api_server.py`) executes the corresponding Flow, converts the result into an HTTP response, and returns it.
 
-### レスポンス変換の仕組み
+### How response conversion works
 
-現在の実装では、Flow の実行結果（`outputs`）は **常に JSON 形式で返却** されます。レスポンスは `APIResponse` データクラスを経由して生成されます。
+In the current implementation, Flow execution results (`outputs`) are **always returned in JSON format**. Responses are generated via the `APIResponse` data class.
 
 ```python
 @dataclass
@@ -506,7 +508,7 @@ class APIResponse:
         return json.dumps(asdict(self), ensure_ascii=False, indent=2)
 ```
 
-Flow の実行が成功した場合:
+If the Flow runs successfully:
 
 ```json
 {
@@ -516,7 +518,7 @@ Flow の実行が成功した場合:
 }
 ```
 
-Flow の実行が失敗した場合:
+If the Flow execution fails:
 
 ```json
 {
@@ -526,46 +528,46 @@ Flow の実行が失敗した場合:
 }
 ```
 
-### ステータスコード
+### Status code
 
-Pack API Server の `_send_response` は以下の HTTP ステータスコードを使用します。
+Pack API Server's `_send_response` uses the following HTTP status codes.
 
-| 状況 | ステータスコード |
+| Status | Status Code |
 |------|-----------------|
-| Flow 実行成功 | `200 OK` |
-| 認証失敗 | `401 Unauthorized` |
-| 入力不正 | `400 Bad Request` |
-| ルート未発見 | `404 Not Found` |
-| 内部エラー | `500 Internal Server Error` |
+| Flow execution successful | `200 OK` |
+| Authentication failure | `401 Unauthorized` |
+| Invalid input | `400 Bad Request` |
+| Route not found | `404 Not Found` |
+| Internal error | `500 Internal Server Error` |
 
-### ヘッダー
+### Header
 
-レスポンスには以下のヘッダーが自動付与されます。
+The following headers are automatically added to the response.
 
-| ヘッダー | 値 | 条件 |
+| Header | Value | Condition |
 |---------|-----|------|
-| `Content-Type` | `application/json; charset=utf-8` | 常に付与 |
-| `Access-Control-Allow-Origin` | リクエスト元 Origin | CORS 許可リストに一致する場合 |
-| `Vary` | `Origin` | CORS ヘッダー付与時 |
+| `Content-Type` | `application/json; charset=utf-8` | Always granted |
+| `Access-Control-Allow-Origin` | Requested by Origin | Matches CORS allow list |
+| `Vary` | `Origin` | When adding CORS header |
 
-### 特殊キーによる制御
+### Control with special keys
 
-現時点では `_status_code`、`_headers`、`_body` 等の特殊キーによる HTTP レスポンスの直接制御は **サポートされていません**。Flow の outputs は常に `APIResponse` の `data` フィールドに格納され、`application/json` 形式で返却されます。
+Direct control of HTTP responses using special keys such as `_status_code`, `_headers`, `_body` is **not supported** at this time. Flow outputs are always stored in the `data` field of `APIResponse` and returned in `application/json` format.
 
-カスタムステータスコードやヘッダーの制御が必要な場合は、[HTTP ステータスコード制御](#http-ステータスコード制御) を参照してください。
+If you need custom status code or header control, see [HTTP Status Code Control](#http-status-code-control).
 
 ---
 
 ## Flow Modifier
 
-既存 Flow に後から機能を差し込む仕組みです。
+This is a mechanism for inserting functions into an existing Flow later.
 
-### 配置パス
+### Placement path
 
 - `user_data/shared/flows/modifiers/`
 - `ecosystem/<pack_id>/backend/flows/modifiers/`
 
-### 例
+### Example
 
 ```yaml
 # user_data/shared/flows/modifiers/add_logging.modifier.yaml
@@ -586,30 +588,30 @@ step:
     response: "${ctx.response}"
 ```
 
-### 使用可能なアクション
+### Available actions
 
-| action | 説明 |
+| action | description |
 |--------|------|
-| `inject_before` | 指定ステップの前に挿入 |
-| `inject_after` | 指定ステップの後に挿入 |
-| `append` | フェーズの末尾に追加 |
-| `replace` | 指定ステップを置換 |
-| `remove` | 指定ステップを削除 |
+| `inject_before` | Insert before specified step |
+| `inject_after` | Insert after specified step |
+| `append` | Add to end of phase |
+| `replace` | Replace specified step |
+| `remove` | Delete specified step |
 
-> **phase の制約**: Modifier の `phase` は対象 Flow の `phases` リストに含まれている必要があります。存在しない phase を指定した場合、Modifier はスキップされます。
+> **phase constraints**: Modifier's `phase` must be included in the target Flow's `phases` list. If you specify a phase that does not exist, the Modifier will be skipped.
 
-> **適用順序**: Modifier は phase → priority → modifier_id の順でソートされ、決定的に適用されます。同一注入点（同じ `target_step_id` への `inject_before` / `inject_after`）に複数の Modifier がある場合は priority → step.id → modifier_id の順で一括挿入され、インデックスずれによる非決定性を防ぎます。`replace` / `remove` は inject / append より先に適用されます。
+> **Application order**: Modifiers are sorted by phase → priority → modifier_id and applied deterministically. If there are multiple modifiers at the same injection point (`inject_before` / `inject_after` to the same `target_step_id`), they are inserted all at once in the order of priority → step.id → modifier_id to prevent non-determinism due to index shift. `replace` / `remove` are applied before inject / append.
 
-### ワイルドカード target_flow_id
+### Wildcard target_flow_id
 
-`target_flow_id` にワイルドカードパターンを使用して、複数の Flow に同時に Modifier を適用できます。
+You can use a wildcard pattern in `target_flow_id` to apply Modifiers to multiple Flows at the same time.
 
-| パターン | 意味 |
+| Pattern | Meaning |
 |----------|------|
-| `*` | 全ての Flow に適用 |
-| `my_pack.*` | `my_pack.` で始まる全ての Flow に適用 |
+| `*` | Applies to all Flows |
+| `my_pack.*` | Applies to all Flows starting with `my_pack.` |
 
-マッチングには Python の `fnmatch` が使用されます。
+Python's `fnmatch` is used for matching.
 
 ```yaml
 modifier_id: global_logging
@@ -624,7 +626,7 @@ step:
   file: blocks/log.py
 ```
 
-### requires 条件
+### requires condition
 
 ```yaml
 requires:
@@ -634,17 +636,17 @@ requires:
     - "tool_support"
 ```
 
-条件が満たされない場合、Modifier はスキップされます。
+If the condition is not met, the Modifier will be skipped.
 
 ---
 
-## ネットワークアクセス
+## Network access
 
-### 概要
+### Overview
 
-Pack は Docker `--network=none` で隔離されるため、直接外部通信できません。外部通信には Network Grant の付与が必要で、全てのリクエストは Egress Proxy（UDS ソケット）を経由します。
+Packs are isolated in Docker `--network=none` and cannot communicate directly externally. A Network Grant is required for external communication, and all requests go through the Egress Proxy (UDS socket).
 
-### ブロック内での HTTP リクエスト
+### HTTP requests inside blocks
 
 ```python
 def run(input_data, context=None):
@@ -669,9 +671,9 @@ def run(input_data, context=None):
         return {"error": result["error"]}
 ```
 
-> **タイムアウト上限**: `timeout_seconds` の最大値は 120 秒です。120 を超える値を指定しても 120 秒に切り詰められます。この上限は `rumi_syscall` と `rumi_capability` の両方に適用されます。
+> **Timeout limit**: The maximum value for `timeout_seconds` is 120 seconds. Any value greater than 120 will be truncated to 120 seconds. This limit applies to both `rumi_syscall` and `rumi_capability`.
 
-### アクセス可否の事前チェック
+### Pre-check access availability
 
 ```python
 def run(input_data, context=None):
@@ -684,17 +686,17 @@ def run(input_data, context=None):
     # 通信可能
 ```
 
-### Grant の取得方法
+### How to get a grant
 
-ユーザーまたは運用者が API で付与します。詳細は [operations.md](operations.md) の「ネットワーク権限管理」を参照してください。
+Granted by user or operator via API. For more information, see ``Network Permission Management'' in [operations.md](./operations.md).
 
 ---
 
-## context["http_request"] 詳細仕様
+## context["http_request"] Detailed specifications
 
-`python_file_call` の `run(input_data, context)` で渡される `context["http_request"]` は、Pack コードが外部 HTTP 通信を行うための唯一の手段です。
+The `context["http_request"]` passed in `run(input_data, context)` of `python_file_call` is the only means by which the Pack code has external HTTP communication.
 
-### 関数シグネチャ
+### Function signature
 
 ```python
 def http_request(
@@ -707,19 +709,19 @@ def http_request(
     ...
 ```
 
-### パラメータ
+### Parameters
 
-| パラメータ | 型 | デフォルト | 説明 |
+| Parameters | Type | Default | Description |
 |------------|-----|-----------|------|
-| `method` | `str` | （必須） | HTTP メソッド。`GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD` |
-| `url` | `str` | （必須） | リクエスト先の完全な URL |
-| `headers` | `dict[str, str] \| None` | `None` | HTTP リクエストヘッダー |
-| `body` | `str \| None` | `None` | リクエストボディ（文字列）。JSON を送る場合は `json.dumps()` した文字列を渡す |
-| `timeout_seconds` | `float` | `30.0` | タイムアウト秒数。最大 `120.0` 秒に制限される |
+| `method` | `str` | (Required) | HTTP method. `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD` |
+| `url` | `str` | (required) | Complete URL to request |
+| `headers` | `dict[str, str] \| None` | `None` | HTTP request headers |
+| `body` | `str \| None` | `None` | Request body (string). When sending JSON, pass the `json.dumps()` string |
+| `timeout_seconds` | `float` | `30.0` | Timeout seconds. Limited to maximum `120.0` seconds |
 
-### 戻り値
+### Return value
 
-成功時:
+On success:
 
 ```python
 {
@@ -734,7 +736,7 @@ def http_request(
 }
 ```
 
-失敗時:
+On failure:
 
 ```python
 {
@@ -744,23 +746,23 @@ def http_request(
 }
 ```
 
-### error_type 一覧
+### error_type list
 
-| error_type | 説明 |
+| error_type | description |
 |------------|------|
-| `socket_not_found` | Egress Proxy ソケットが見つからない |
-| `permission_denied` | ソケットへのアクセス権限がない |
-| `connection_refused` | Egress Proxy への接続が拒否された |
-| `timeout` | リクエストがタイムアウトした |
-| `syscall_error` | プロトコルレベルのエラー |
-| `json_decode_error` | レスポンスの JSON パースに失敗 |
-| `grant_denied` | Network Grant によりアクセスが拒否された |
+| `socket_not_found` | Egress Proxy socket not found |
+| `permission_denied` | No permission to access socket |
+| `connection_refused` | Connection to Egress Proxy was refused |
+| `timeout` | Request timed out |
+| `syscall_error` | Protocol level error |
+| `json_decode_error` | JSON parsing of response failed |
+| `grant_denied` | Access denied due to Network Grant |
 
-### UDS Egress Proxy 経由の通信
+### Communication via UDS Egress Proxy
 
-Pack コードからの全ての外部 HTTP 通信は **UDS（Unix Domain Socket）Egress Proxy** を経由します。Pack コードが直接ネットワーク通信を行うことはできません。
+All external HTTP communication from the Pack code goes through the **UDS (Unix Domain Socket) Egress Proxy**. Pack code cannot do direct network communication.
 
-通信フロー:
+Communication flow:
 
 ```
 Pack コード (run関数)
@@ -772,21 +774,21 @@ Pack コード (run関数)
           → 拒否されていれば grant_denied エラーを返却
 ```
 
-> ソケットパスは `RUMI_EGRESS_SOCK_DIR` 環境変数で変更可能です。デフォルトは `/run/rumi/egress/packs` です。
+> The socket path can be changed with the `RUMI_EGRESS_SOCK_DIR` environment variable. The default is `/run/rumi/egress/packs`.
 
-### コンテナモードとホストモードの違い
+### Difference between container mode and host mode
 
-| 項目 | コンテナモード（strict） | ホストモード（permissive） |
+| Item | Container mode (strict) | Host mode (permissive) |
 |------|--------------------------|---------------------------|
-| ネットワーク | `--network=none`（完全隔離） | ホストのネットワークを使用 |
-| 通信経路 | UDS ソケット経由のみ | UDS ソケット経由（ヘルパー関数経由） |
-| ソケットパス | `/run/rumi/egress/packs/{pack_id}.sock`（コンテナ内マウント） | `{RUMI_EGRESS_SOCK_DIR}/{pack_id}.sock` |
-| Grant 検証 | Egress Proxy が検証 | Egress Proxy が検証 |
-| セキュリティ | Docker 隔離 + UDS 制限 | 警告付きで実行（本番非推奨） |
+| Network | `--network=none` (Complete isolation) | Use host network |
+| Communication path | Only via UDS socket | Via UDS socket (via helper function) |
+| Socket path | `/run/rumi/egress/packs/{pack_id}.sock` (Inside container mount) | `{RUMI_EGRESS_SOCK_DIR}/{pack_id}.sock` |
+| Grant Validated | Egress Proxy Validated | Egress Proxy Validated |
+| Security | Docker Quarantine + UDS Restrictions | Run with warnings (not recommended for production) |
 
-コンテナモード（`RUMI_SECURITY_MODE=strict`）では、Docker コンテナは `--network=none` で起動されるため、UDS ソケット以外の通信手段はありません。ホストモード（`RUMI_SECURITY_MODE=permissive`）では Docker なしで実行されますが、`context["http_request"]` は同様に Egress Proxy を経由するため、Network Grant による制御は有効です。
+In container mode (`RUMI_SECURITY_MODE=strict`), the Docker container is started with `--network=none`, so there is no other means of communication other than UDS sockets. Host mode (`RUMI_SECURITY_MODE=permissive`) runs without Docker, but `context["http_request"]` also goes through the Egress Proxy, so control by Network Grant is effective.
 
-### 使用例
+### Usage example
 
 ```python
 def run(input_data: dict, context: dict) -> dict:
@@ -825,11 +827,11 @@ def run(input_data: dict, context: dict) -> dict:
 
 ---
 
-## Secrets の利用（Pack から）
+## Using Secrets (from Pack)
 
-Pack がシークレット（API キー等）を取得するには、`secrets.get` Capability を使用します。運用者が Secrets の登録と Grant の付与を行った後に利用可能になります。
+Packs use `secrets.get` Capability to obtain secrets (such as API keys). It becomes available after the operator registers Secrets and grants grants.
 
-### 使用例
+### Usage example
 
 ```python
 import rumi_capability
@@ -842,9 +844,9 @@ else:
     error = result["output"]["error"]
 ```
 
-### アクセス制御
+### Access control
 
-`secrets.get` の Grant には `grant_config.allowed_keys` でアクセス可能なキーを明示的に指定する必要があります。`allowed_keys` が空または未指定の場合、全てのキーへのアクセスが拒否されます（fail-closed）。
+The `secrets.get` grant must explicitly specify a key that is accessible in `grant_config.allowed_keys`. If `allowed_keys` is empty or unspecified, access to all keys is denied (fail-closed).
 
 ```bash
 curl -X POST http://localhost:8765/api/capability/grants/grant \
@@ -857,25 +859,25 @@ curl -X POST http://localhost:8765/api/capability/grants/grant \
   }'
 ```
 
-### 重要な制約
+### Important constraints
 
-- `get` は Capability 経由のみで取得可能です。シークレットの値を直接再表示する API は存在しません
-- `secrets.get` には rate limit が適用されます（デフォルト 60 回/分/Pack、環境変数 `RUMI_SECRET_GET_RATE_LIMIT` で変更可能、sliding window 方式）
-- 値はログ・監査・例外メッセージに一切含まれません
-- キーの存在有無もエラーメッセージからは判別できません（"Access denied or secret not found" で統一）
+- `get` can only be obtained via Capability. No API exists to directly redisplay secret values
+- Rate limit is applied to `secrets.get` (default 60 times/min/Pack, can be changed with environment variable `RUMI_SECRET_GET_RATE_LIMIT`, sliding window method)
+- Values are never included in logs, audits, or exception messages
+- Whether the key exists or not cannot be determined from the error message (unified by "Access denied or secret not found")
 
 ---
 
-## Capability の利用
+## Using Capabilities
 
-Pack が capability handler（例: ファイルシステム読み取り、外部ツール実行等）を使用するには、該当する permission の Grant が Pack に付与されている必要があります。
+For a Pack to use a capability handler (e.g. read the file system, run an external tool, etc.), the Pack must be granted the appropriate permission grant.
 
-### Trust と Grant の関係
+### Relationship between Trust and Grant
 
-Capability の利用には 2 段階の承認が必要です。
+Capability requires two levels of approval.
 
-1. **Trust 登録**（handler 承認）: handler のコード（sha256）を信頼済みとして登録
-2. **Grant 付与**（権限付与）: 承認済み handler の permission を Pack に付与
+1. **Trust registration** (handler authorization): Register handler's code (sha256) as trusted
+2. **Grant** (permission grant): Grant permission of approved handler to Pack.
 
 ```
 handler.py が信頼される（Trust 登録）
@@ -885,9 +887,9 @@ Pack に permission が付与される（Grant 付与）
 Pack が capability を使用可能
 ```
 
-Trust が登録されていても Grant がなければ使用できません。逆に、Grant があっても Trust が登録されていない handler は実行できません。
+Even if a Trust is registered, it cannot be used without a Grant. Conversely, even if there is a grant, a handler with no trust registered cannot be executed.
 
-### Capability の呼び出し方
+### How to call Capability
 
 ```python
 import rumi_capability
@@ -902,29 +904,29 @@ else:
 
 ### Built-in Capability Handler
 
-以下の Capability Handler はコアランタイムに同梱されており、Trust 登録なしで利用可能です（Grant は別途必要）。
+The following Capability Handlers are included in the core runtime and can be used without trust registration (separate grant required).
 
-| permission_id | handler_id | 説明 | risk |
+| permission_id | handler_id | description | risk |
 |---------------|-----------|------|------|
-| `secrets.get` | `core.secrets.get` | シークレット値の取得 | high |
-| `store.get` | `core.store.get` | Store からの値の読み取り | low |
-| `store.set` | `core.store.set` | Store への値の書き込み | medium |
-| `store.delete` | `core.store.delete` | Store からの値の削除 | medium |
-| `store.list` | `core.store.list` | Store 内のキー一覧取得 | low |
-| `store.batch_get` | `core.store.batch_get` | Store からの一括取得（最大 100 キー） | low |
-| `store.cas` | `core.store.cas` | Store Compare-And-Swap（楽観的排他制御） | medium |
-| `pack.inbox.send` | `core.communication.send` | 他 Pack コンポーネントの inbox へ JSON メッセージ送信 | medium |
-| `pack.update.propose_patch` | `core.communication.propose_patch` | 他 Pack へのファイル変更を提案（ステージング作成、自動適用なし） | high |
-| `flow.run` | `core.flow.run` | 同期 Flow-to-Flow 呼び出し | medium |
-| `docker.run` | `core.docker.run` | Docker コンテナ実行 | — |
-| `docker.exec` | `core.docker.exec` | Docker コンテナ内コマンド実行 | — |
-| `docker.stop` | `core.docker.stop` | Docker コンテナ停止 | — |
-| `docker.logs` | `core.docker.logs` | Docker コンテナログ取得 | — |
-| `docker.list` | `core.docker.list` | Docker コンテナ一覧 | — |
+| `secrets.get` | `core.secrets.get` | Get secret value | high |
+| `store.get` | `core.store.get` | Reading value from Store | low |
+| `store.set` | `core.store.set` | Writing value to Store | medium |
+| `store.delete` | `core.store.delete` | Removing a value from a Store | medium |
+| `store.list` | `core.store.list` | Get list of keys in Store | low |
+| `store.batch_get` | `core.store.batch_get` | Bulk retrieval from Store (up to 100 keys) | low |
+| `store.cas` | `core.store.cas` | Store Compare-And-Swap (optimistic exclusive control) | medium |
+| `pack.inbox.send` | `core.communication.send` | Send JSON message to inbox of other Pack components | medium |
+| `pack.update.propose_patch` | `core.communication.propose_patch` | Propose file changes to other Packs (staging creation, no automatic application) | high |
+| `flow.run` | `core.flow.run` | Synchronous Flow-to-Flow calls | medium |
+| `docker.run` | `core.docker.run` | Docker container execution | — |
+| `docker.exec` | `core.docker.exec` | Command execution inside Docker container | — |
+| `docker.stop` | `core.docker.stop` | Stopping Docker container | — |
+| `docker.logs` | `core.docker.logs` | Docker container log acquisition | — |
+| `docker.list` | `core.docker.list` | Docker container list | — |
 
-### Grant の付与
+### Grant Grant
 
-Grant の付与はユーザーまたは運用者が API で行います。詳細は [operations.md](operations.md) の「Capability Grant 管理」を参照してください。
+Grants are granted by users or operators using the API. For more information, see ``Capability Grant Management'' in [operations.md](./operations.md).
 
 ```bash
 # 例: store.get の Grant を付与
@@ -934,21 +936,21 @@ curl -X POST http://localhost:8765/api/capability/grants/grant \
   -d '{"principal_id": "my_pack", "permission_id": "store.get", "config": {"allowed_store_ids": ["my_store"]}}'
 ```
 
-### Grant の設定（grant_config）
+### Grant configuration (grant_config)
 
-Grant には `config` で制限を設定できます。設定内容は permission ごとに異なります。
+Grants can have limits set in `config`. Settings differ depending on permission.
 
-| permission_id | grant_config キー | 説明 |
+| permission_id | grant_config key | description |
 |---------------|-------------------|------|
-| `secrets.get` | `allowed_keys` | アクセス可能なキー名のリスト（必須、空なら全拒否） |
-| `store.get/set/delete/list` | `allowed_store_ids` | アクセス可能な store_id のリスト（必須、空なら全拒否） |
-| `store.set` | `max_value_bytes` | 書き込み最大サイズ（バイト、デフォルト 1MB） |
+| `secrets.get` | `allowed_keys` | List of accessible key names (required, completely denied if empty) |
+| `store.get/set/delete/list` | `allowed_store_ids` | List of accessible store_ids (required, completely rejected if empty) |
+| `store.set` | `max_value_bytes` | Maximum write size (bytes, default 1MB) |
 
-`allowed_keys` / `allowed_store_ids` は fail-closed です。空リストまたは未指定の場合、全てのアクセスが拒否されます。
+`allowed_keys` / `allowed_store_ids` are fail-closed. If the list is empty or unspecified, all access will be denied.
 
-### エラーハンドリング
+### Error handling
 
-Capability 呼び出しが失敗した場合、`success: False` を含む dict が返されます。
+If the Capability call fails, a dict containing `success: False` is returned.
 
 ```python
 import rumi_capability
@@ -975,33 +977,33 @@ if not result.get("success", False):
         pass
 ```
 
-| error_type | 説明 |
+| error_type | description |
 |------------|------|
-| `grant_denied` | Pack に permission の Grant が付与されていない |
-| `trust_denied` | handler の sha256 が Trust Store に登録されていない |
-| `handler_not_found` | 指定された permission_id に対応する handler が存在しない |
-| `execution_error` | handler の実行中にエラーが発生 |
-| `timeout` | 実行がタイムアウトした |
-| `socket_not_found` | Capability ソケットが見つからない |
+| `grant_denied` | Pack has no permission grant |
+| `trust_denied` | sha256 of handler is not registered in Trust Store |
+| `handler_not_found` | The handler corresponding to the specified permission_id does not exist |
+| `execution_error` | Error while running handler |
+| `timeout` | Execution timed out |
+| `socket_not_found` | Capability socket not found |
 
 ---
 
-## Store API（Capability 経由）
+## Store API (via Capability)
 
-### 概要
+### Overview
 
-Store は Pack 間で共有可能なキーバリューストアです。Store の操作は Capability 経由で行います。運用者が Capability の Grant を Pack に付与することでアクセスが有効になります。
+A Store is a key-value store that can be shared between Packs. Store operations are performed via Capability. Access is enabled when an operator grants a Capability Grant to a pack.
 
-### 利用可能な permission_id
+### Available permission_id
 
-| permission_id | 説明 | args |
+| permission_id | description | args |
 |---------------|------|------|
-| `store.get` | Store から値を読み取り | `store_id`, `key` |
-| `store.set` | Store に値を書き込み | `store_id`, `key`, `value` |
-| `store.delete` | Store から値を削除 | `store_id`, `key` |
-| `store.list` | Store 内のキー一覧を取得 | `store_id`, `prefix`（任意） |
+| `store.get` | Read value from Store | `store_id`, `key` |
+| `store.set` | Write value to Store | `store_id`, `key`, `value` |
+| `store.delete` | Remove value from Store | `store_id`, `key` |
+| `store.list` | Get list of keys in Store | `store_id`, `prefix` (optional) |
 
-### 使用例
+### Usage example
 
 ```python
 import rumi_capability
@@ -1030,7 +1032,7 @@ result = rumi_capability.call("store.list", args={
 })
 ```
 
-> `store.list` の `output` には `success`（bool）と `keys`（キー名の配列）が含まれます。
+> `output` of `store.list` contains `success` (bool) and `keys` (array of key names).
 
 ```python
 # 値の削除
@@ -1040,20 +1042,20 @@ result = rumi_capability.call("store.delete", args={
 })
 ```
 
-### Grant 設定
+### Grant settings
 
-`store.*` の Grant には `grant_config` で制限を設定できます:
+Grants in `store.*` can have limits set in `grant_config`:
 
-| grant_config キー | 説明 | デフォルト |
+| grant_config key | Description | Default |
 |-------------------|------|-----------|
-| `allowed_store_ids` | アクセスを許可する store_id のリスト | `[]`（空リストの場合、全 Store へのアクセスが拒否される。アクセスするには明示的に store_id を指定する必要がある） |
-| `max_value_bytes` | `store.set` の最大値サイズ（バイト） | 1MB（1048576） |
+| `allowed_store_ids` | List of store_ids to allow access | `[]` (If the list is empty, access to all Stores is denied. Store_id must be explicitly specified to access) |
+| `max_value_bytes` | `store.set` maximum size (bytes) | 1MB (1048576) |
 
-`allowed_store_ids` は fail-closed です。Grant 作成時に `allowed_store_ids` を指定しない、または空リスト `[]` を指定した場合、その Grant では全ての Store へのアクセスが拒否されます。Pack が Store にアクセスするには、運用者が明示的に store_id をリストに追加する必要があります。
+`allowed_store_ids` is fail-closed. If you do not specify `allowed_store_ids` or specify an empty list `[]` when creating a Grant, access to all Stores will be denied for that Grant. For a Pack to access a Store, the operator must explicitly add the store_id to the list.
 
-### Store の作成
+### Create a Store
 
-Store の作成は運用 API で行います:
+Store creation is done using the operational API:
 
 ```bash
 curl -X POST http://localhost:8765/api/stores/create \
@@ -1062,37 +1064,37 @@ curl -X POST http://localhost:8765/api/stores/create \
   -d '{"store_id": "my_store", "root_path": "user_data/stores/my_store"}'
 ```
 
-> **store_id の制約**: `store_id` は `^[a-zA-Z0-9_-]{1,64}$` に一致する必要があります。
+> **store_id constraints**: `store_id` must match `^[a-zA-Z0-9_-]{1,64}$`.
 
-### Built-in Capability Handler 一覧
+### Built-in Capability Handler list
 
-以下の Capability Handler はコアランタイムに同梱されており、Trust 登録なしで利用可能です（Grant は別途必要）。
+The following Capability Handlers are included in the core runtime and can be used without trust registration (separate grant required).
 
-| permission_id | handler_id | 説明 | risk |
+| permission_id | handler_id | description | risk |
 |---------------|-----------|------|------|
-| `secrets.get` | `core.secrets.get` | シークレット値の取得 | high |
-| `store.get` | `core.store.get` | Store からの値の読み取り | low |
-| `store.set` | `core.store.set` | Store への値の書き込み | medium |
-| `store.delete` | `core.store.delete` | Store からの値の削除 | medium |
-| `store.list` | `core.store.list` | Store 内のキー一覧取得 | low |
-| `store.batch_get` | `core.store.batch_get` | Store からの一括取得（最大 100 キー） | low |
-| `store.cas` | `core.store.cas` | Store Compare-And-Swap（楽観的排他制御） | medium |
-| `pack.inbox.send` | `core.communication.send` | 他 Pack コンポーネントの inbox へ JSON メッセージ送信 | medium |
-| `pack.update.propose_patch` | `core.communication.propose_patch` | 他 Pack へのファイル変更を提案（ステージング作成、自動適用なし） | high |
-| `flow.run` | `core.flow.run` | 同期 Flow-to-Flow 呼び出し | medium |
-| `docker.run` | `core.docker.run` | Docker コンテナ実行 | — |
-| `docker.exec` | `core.docker.exec` | Docker コンテナ内コマンド実行 | — |
-| `docker.stop` | `core.docker.stop` | Docker コンテナ停止 | — |
-| `docker.logs` | `core.docker.logs` | Docker コンテナログ取得 | — |
-| `docker.list` | `core.docker.list` | Docker コンテナ一覧 | — |
+| `secrets.get` | `core.secrets.get` | Get secret value | high |
+| `store.get` | `core.store.get` | Reading value from Store | low |
+| `store.set` | `core.store.set` | Writing value to Store | medium |
+| `store.delete` | `core.store.delete` | Removing a value from a Store | medium |
+| `store.list` | `core.store.list` | Get list of keys in Store | low |
+| `store.batch_get` | `core.store.batch_get` | Bulk retrieval from Store (up to 100 keys) | low |
+| `store.cas` | `core.store.cas` | Store Compare-And-Swap (optimistic exclusive control) | medium |
+| `pack.inbox.send` | `core.communication.send` | Send JSON message to inbox of other Pack components | medium |
+| `pack.update.propose_patch` | `core.communication.propose_patch` | Propose file changes to other Packs (staging creation, no automatic application) | high |
+| `flow.run` | `core.flow.run` | Synchronous Flow-to-Flow calls | medium |
+| `docker.run` | `core.docker.run` | Docker container execution | — |
+| `docker.exec` | `core.docker.exec` | Command execution inside Docker container | — |
+| `docker.stop` | `core.docker.stop` | Stopping Docker container | — |
+| `docker.logs` | `core.docker.logs` | Docker container log acquisition | — |
+| `docker.list` | `core.docker.list` | Docker container list | — |
 
 ---
 
-## Pack 間連携パターン
+## Inter-pack cooperation pattern
 
-### 共有 Flow での結線
+### Wiring with shared Flow
 
-複数の Pack のブロックを `user_data/shared/flows/` に配置した Flow で結線できます。各 Pack は互いを知る必要がありません。
+Blocks from multiple Packs can be connected using a Flow placed in `user_data/shared/flows/`. Packs do not need to know about each other.
 
 ```yaml
 # user_data/shared/flows/ai_pipeline.flow.yaml
@@ -1122,9 +1124,9 @@ steps:
     output: response
 ```
 
-### Store 経由のデータ受け渡し
+### Data delivery via Store
 
-異なる Flow で動作する Pack 間でデータを共有するには、Store を使用します。
+Use Stores to share data between Packs working in different Flows.
 
 ```python
 # Pack A: データを Store に書き込む
@@ -1153,11 +1155,11 @@ if result["success"]:
 
 ## lib（install / update）
 
-### 概要
+### Overview
 
-Pack の初期化・更新時に一度だけ実行されるスクリプトです。普段は実行されません。
+This is a script that is executed only once when the Pack is initialized or updated. It is not normally executed.
 
-### ファイル構成
+### File structure
 
 ```
 ecosystem/<pack_id>/backend/lib/
@@ -1165,7 +1167,7 @@ ecosystem/<pack_id>/backend/lib/
 └── update.py     # ハッシュ変更時に実行（なければ install.py が実行される）
 ```
 
-### install.py の例
+### install.py example
 
 ```python
 def run(context=None):
@@ -1182,49 +1184,49 @@ def run(context=None):
     return {"status": "installed"}
 ```
 
-### context で提供される情報
+### Information provided by context
 
-| キー | 説明 |
+| Key | Description |
 |------|------|
 | `pack_id` | Pack ID |
-| `lib_type` | `"install"` または `"update"` |
-| `ts` | タイムスタンプ |
-| `lib_dir` | lib ディレクトリパス（コンテナ内: `/lib`） |
-| `data_dir` | 書き込み可能ディレクトリ（コンテナ内: `/data`、ホスト: `user_data/packs/{pack_id}/`） |
+| `lib_type` | `"install"` or `"update"` |
+| `ts` | Timestamp |
+| `lib_dir` | lib directory path (inside container: `/lib`) |
+| `data_dir` | Writable directory (in container: `/data`, host: `user_data/packs/{pack_id}/`) |
 
-### セキュリティ制約
+### Security constraints
 
-strict モードでは Docker コンテナ内で隔離実行されます。`--network=none`、`--read-only`。書き込みは `/data`（= `user_data/packs/{pack_id}/`）のみ可能です。
+In strict mode, it runs isolated inside a Docker container. `--network=none`, `--read-only`. Writing is possible only to `/data` (= `user_data/packs/{pack_id}/`).
 
 ---
 
-## pip 依存（requirements.lock）
+## pip dependency (requirements.lock)
 
-### 概要
+### Overview
 
-Pack が PyPI パッケージに依存する場合、`requirements.lock` を同梱します。
+If your pack depends on a PyPI package, include `requirements.lock`.
 
-### 配置パス
+### Placement path
 
-以下の順に探索されます:
+Searched in the following order:
 
 1. `<pack_subdir>/requirements.lock`
-2. `<pack_subdir>/backend/requirements.lock`（互換）
+2. `<pack_subdir>/backend/requirements.lock` (compatible)
 
-### フォーマット
+### Format
 
-`NAME==VERSION` 行のみ許可です。コメント行と空行は可。
+Only the `NAME==VERSION` line is allowed. Comment lines and blank lines are allowed.
 
 ```
 requests==2.31.0
 flask==3.0.0
 ```
 
-以下は禁止されます: `-e`、`git+`、`http://`、`https://`、`file:`、`../`、`/`、`--` オプション行、`@` direct reference。
+The following are prohibited: `-e`, `git+`, `http://`, `https://`, `file:`, `../`, `/`, `--` optional lines, `@` direct reference.
 
-### Pack コードからの利用
+### Usage from Pack code
 
-承認・インストール後は通常通り `import` するだけです。
+After approval and installation, just run `import` as usual.
 
 ```python
 import requests  # pip で導入された依存
@@ -1234,17 +1236,17 @@ def run(input_data, context=None):
     return {"data": resp.json()}
 ```
 
-実行コンテナでは site-packages が `/pip-packages:ro` としてマウントされ、`PYTHONPATH` に追加されます。
+In the execution container, site-packages are mounted as `/pip-packages:ro` and added to `PYTHONPATH`.
 
-### 承認の取得方法
+### How to get approval
 
-ユーザーまたは運用者が API で承認します。詳細は [operations.md](operations.md) の「pip 依存ライブラリ管理」を参照してください。
+User or operator approves via API. For more information, see ``pip dependency library management'' in [operations.md](./operations.md).
 
 ---
 
 ## permissions.json
 
-Pack が必要とする権限を宣言するファイルです。
+A file that declares the permissions required by the Pack.
 
 ```json
 {
@@ -1260,15 +1262,15 @@ Pack が必要とする権限を宣言するファイルです。
 }
 ```
 
-permissions.json は宣言的であり、ランタイムで強制されません。実際のアクセス制御は Capability Grant と Network Grant で行われます。このファイルはユーザーへの情報提供（この Pack がどのような権限を必要とするか）を目的としています。
+permissions.json is declarative and not enforced at runtime. Actual access control is done through Capability Grants and Network Grants. This file is for informational purposes to users (what permissions this Pack requires).
 
 ---
 
-## Capability Handler の同梱
+## Include Capability Handler
 
-Pack が capability handler を提供する場合、以下の規約に従います。
+When a Pack provides a capability handler, it follows the following conventions:
 
-### 配置
+### Placement
 
 ```
 ecosystem/<pack_id>/
@@ -1280,7 +1282,7 @@ ecosystem/<pack_id>/
                 └── handler.py
 ```
 
-Pack の `pack_subdir`（通常 `ecosystem/<pack_id>/backend/`）配下の `share/capability_handlers/<slug>/` に配置します。
+Place it in `share/capability_handlers/<slug>/` under `pack_subdir` (usually `ecosystem/<pack_id>/backend/`) of the Pack.
 
 ### handler.json
 
@@ -1294,23 +1296,23 @@ Pack の `pack_subdir`（通常 `ecosystem/<pack_id>/backend/`）配下の `shar
 }
 ```
 
-| フィールド | 必須 | 説明 |
+| Field | Required | Description |
 |-----------|------|------|
-| `handler_id` | ✅ | ハンドラーの一意識別子 |
-| `permission_id` | ✅ | 要求される権限 ID |
-| `entrypoint` | ✅ | 実行エントリポイント（例: `handler.py:execute`） |
-| `description` | 任意 | 説明 |
-| `risk` | 任意 | リスクの説明 |
+| `handler_id` | ✅ | Unique identifier of the handler |
+| `permission_id` | ✅ | Requested permission ID |
+| `entrypoint` | ✅ | Execution entry point (e.g. `handler.py:execute`) |
+| `description` | Optional | Description |
+| `risk` | Optional | Risk description |
 
-候補は scan で検出され、ユーザーの approve を経て `user_data/capabilities/handlers/<slug>/` にコピーされます。approve は Trust（sha256 allowlist）のみを登録し、Grant は別途必要です。
+Candidates are detected by scan, approved by the user, and copied to `user_data/capabilities/handlers/<slug>/`. Approve only registers Trust (sha256 allowlist), Grant is required separately.
 
-> 上記は旧方式（互換）です。新しい Pack では以下の functions/ 方式を推奨します。
+> The above is the old method (compatible). The following functions/ method is recommended for the new Pack:
 
-### functions/ 方式（推奨）
+### functions/ method (recommended)
 
-Pack が Capability 関数を提供する場合、`functions/` ディレクトリに配置します。
+If your Pack provides Capability functions, place them in the `functions/` directory.
 
-#### 配置
+#### Placement
 
 ```
 ecosystem/<pack_id>/
@@ -1352,22 +1354,22 @@ ecosystem/<pack_id>/
 }
 ```
 
-| フィールド | 必須 | 説明 |
+| Field | Required | Description |
 |-----------|------|------|
-| `function_id` | ✅ | 関数の識別子 |
-| `description` | 任意 | 関数の説明 |
-| `requires` | ✅ | この関数の実行に必要な permission_id のリスト（例: `["store.get"]`） |
-| `caller_requires` | 任意 | 呼び出し元に要求する追加権限のリスト |
-| `host_execution` | 任意 | `true` の場合、コンテナではなくホストプロセスで実行される |
-| `tags` | 任意 | 分類用タグのリスト |
-| `risk` | 任意 | リスクレベル（`low`, `medium`, `high`）。docker 系など一部の関数では省略される |
-| `vocab_aliases` | 任意 | vocab 正規化に使用されるエイリアスのリスト |
-| `input_schema` | 任意 | 入力の JSON Schema |
-| `output_schema` | 任意 | 出力の JSON Schema |
-| `grant_config` | 任意 | Grant のデフォルト設定（docker 系で使用） |
-| `calling_convention` | 任意 | 呼び出し規約。`block`（デフォルト、core_pack 標準）= `execute(context, args)` パターン |
+| `function_id` | ✅ | Function identifier |
+| `description` | Optional | Function description |
+| `requires` | ✅ | List of permission_ids required to run this function (e.g. `["store.get"]`) |
+| `caller_requires` | Optional | List of additional privileges to request from the caller |
+| `host_execution` | Optional | If `true`, run in the host process instead of the container |
+| `tags` | Optional | List of classification tags |
+| `risk` | Optional | Risk level (`low`, `medium`, `high`). It is omitted in some functions such as docker type |
+| `vocab_aliases` | Optional | List of aliases used for vocab normalization |
+| `input_schema` | Optional | Input JSON Schema |
+| `output_schema` | Optional | Output JSON Schema |
+| `grant_config` | Optional | Default settings for Grant (used in docker systems) |
+| `calling_convention` | Optional | Calling convention. `block` (default, core_pack standard) = `execute(context, args)` Pattern |
 
-> **注意**: manifest.json に `permission_id` フィールドは存在しません。権限の指定には `requires` 配列を使用してください。
+> **Note**: The `permission_id` field does not exist in manifest.json. Use the `requires` array to specify permissions.
 
 #### main.py
 
@@ -1390,13 +1392,13 @@ def execute(context: dict, args: dict) -> dict:
     return {"success": True, "value": result}
 ```
 
-`calling_convention` が `block`（デフォルト）の場合、エントリポイントは `execute(context, args)` です。`context` には `grant_config` 等の実行情報が含まれ、`args` には Flow ステップの `input` で指定された値が渡されます。
+If `calling_convention` is `block` (default), the entry point is `execute(context, args)`. `context` contains execution information such as `grant_config`, and `args` is passed the value specified in `input` of the Flow step.
 
 ---
 
-## vocab / converter（上級）
+## vocab/converter (advanced)
 
-> 通常の Pack 開発では使用する必要はありません。互換性吸収のための高度な機能です。
+> There is no need to use it in normal Pack development. Advanced features for compatibility absorption.
 
 ### vocab.txt
 
@@ -1405,7 +1407,7 @@ tool, function_calling, tools, tooluse
 thinking_budget, reasoning_effort
 ```
 
-同じ行に書かれた語は同義として扱われます。
+Words written on the same line are treated as synonyms.
 
 ### converters
 
@@ -1418,9 +1420,9 @@ def convert(data, context=None):
 
 ---
 
-## Component（上級）
+## Component (advanced)
 
-Component は `components/{component_id}/manifest.json` を持つ単位で、ライフサイクル管理（setup 等）に使用されます。`python_file_call` は components を特別扱いしないため、`file` フィールドに相対パスを明示してください。
+Component is a unit with `components/{component_id}/manifest.json` and is used for lifecycle management (setup, etc.). `python_file_call` does not treat components specially, so please specify the relative path in the `file` field.
 
 ```yaml
 type: python_file_call
@@ -1428,9 +1430,9 @@ owner_pack: my_pack
 file: components/comp1/blocks/foo.py
 ```
 
-### setup.py の基本パターン
+### Basic pattern of setup.py
 
-Component の初期化処理は `components/{component_id}/setup.py` に記述します。
+The initialization process of Component is described in `components/{component_id}/setup.py`.
 
 ```python
 # ecosystem/my_pack/backend/components/my_component/setup.py
@@ -1455,21 +1457,21 @@ def setup(context=None):
     return {"status": "initialized"}
 ```
 
-setup は起動時の `kernel:component.load` ステップで実行されます。
+setup is executed in the `kernel:component.load` step at startup.
 
 ---
 
-## Pack 独自エンドポイント（routes.json）
+## Pack-specific endpoint (routes.json)
 
-### 概要
+### Overview
 
-Pack は `routes.json` を同梱することで、HTTP API サーバーに独自のエンドポイントを登録できます。受信したリクエストは指定された Flow を実行し、その結果をレスポンスとして返します。
+Packs can include `routes.json` to register their own endpoints on the HTTP API server. The received request executes the specified Flow and returns the result as a response.
 
-### 配置パス
+### Placement path
 
 `ecosystem/<pack_id>/backend/routes.json`
 
-### routes.json の形式
+### routes.json format
 
 ```json
 {
@@ -1490,35 +1492,35 @@ Pack は `routes.json` を同梱することで、HTTP API サーバーに独自
 }
 ```
 
-### パスパラメータ
+### Path parameters
 
-`{param}` 記法でパスパラメータを定義できます。パスパラメータの値は Flow の `inputs` に自動的に含まれます。
+Path parameters can be defined using the `{param}` notation. The path parameter values ​​are automatically included in the Flow's `inputs`.
 
-例: `/api/orgs/{org_id}/tasks/{task_id}` にリクエストした場合、`inputs.org_id` と `inputs.task_id` にそれぞれの値が入ります。
+Example: If you request `/api/orgs/{org_id}/tasks/{task_id}`, `inputs.org_id` and `inputs.task_id` will have their respective values.
 
-### GET クエリパラメータ
+### GET query parameters
 
-GET リクエストのクエリパラメータも `inputs` に含まれます。
+Query parameters for GET requests are also included in `inputs`.
 
-### Raw Body / Headers の取得
+### Get Raw Body / Headers
 
-Flow の `inputs` には以下の特殊キーも含まれます:
+Flow's `inputs` also includes the following special keys:
 
-| キー | 説明 |
+| Key | Description |
 |------|------|
-| `_raw_body` | リクエストボディの base64 エンコード値 |
-| `_headers` | リクエストヘッダーの dict |
-| `_method` | HTTP メソッド（GET, POST 等） |
-| `_path` | リクエストパス |
+| `_raw_body` | base64 encoded value of request body |
+| `_headers` | dict of request headers |
+| `_method` | HTTP methods (GET, POST, etc.) |
+| `_path` | Request path |
 
-### ルートの再読み込み
+### Reload route
 
 ```bash
 curl -X POST http://localhost:8765/api/routes/reload \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### 登録済みルートの確認
+### Check registered routes
 
 ```bash
 curl http://localhost:8765/api/routes \
@@ -1527,32 +1529,32 @@ curl http://localhost:8765/api/routes \
 
 ---
 
-## HTTP ステータスコード制御
+## HTTP status code control
 
-### 現在の仕様
+### Current specifications
 
-現在の Pack API Server の実装では、Pack の `routes.json` エンドポイントから返却される HTTP ステータスコードを Pack 側から **直接制御することはできません**。
+The current Pack API Server implementation **does not allow Pack to directly control the HTTP status code returned from the Pack's `routes.json` endpoint.
 
-Flow の outputs に `_status_code` 等の特殊キーを含めても、それはレスポンスの `data` フィールドにそのまま含まれるだけで、HTTP ステータスコードには反映されません。
+Even if you include a special key such as `_status_code` in the Flow's outputs, it will only be included in the `data` field of the response and will not be reflected in the HTTP status code.
 
-### ステータスコードの決定ロジック
+### Status code determination logic
 
-Pack API Server は以下のロジックでステータスコードを決定します。
+Pack API Server determines the status code using the following logic.
 
-| 判定順 | 状況 | ステータスコード |
+| Judgment order | Status | Status code |
 |--------|------|-----------------|
-| 1 | 認証失敗 | `401` |
-| 2 | 入力バリデーション失敗 | `400` |
-| 3 | ルート未発見 | `404` |
-| 4 | Flow 実行成功 | `200`（固定） |
-| 5 | Flow 実行でエラー dict 返却 | `200`（data にエラーが含まれるが HTTP は 200） |
-| 6 | Flow 実行で例外発生 | `500` |
+| 1 | Authentication failure | `401` |
+| 2 | Input validation failure | `400` |
+| 3 | Route not found | `404` |
+| 4 | Flow execution successful | `200` (fixed) |
+| 5 | Error dict returned when running Flow | `200` (data contains error but HTTP is 200) |
+| 6 | Exception occurs during Flow execution | `500` |
 
-つまり、Flow が正常に完了して `{"error": "not found"}` を返した場合でも、HTTP ステータスコードは `200 OK` になります。
+This means that even if the Flow completes successfully and returns `{"error": "not found"}`, the HTTP status code will be `200 OK`.
 
-### 推奨パターン
+### Recommended pattern
 
-現在の制約のもとでは、エラーをクライアントに伝える場合はレスポンスボディ内の `success` フィールドと `error` フィールドを使用してください。
+Under current constraints, use the `success` and `error` fields in the response body to communicate errors to the client.
 
 ```python
 def run(input_data: dict, context: dict) -> dict:
@@ -1568,29 +1570,27 @@ def run(input_data: dict, context: dict) -> dict:
     return {"item": item_data}
 ```
 
-クライアント側では `data.error` の有無で成功/失敗を判定します。
+On the client side, success/failure is determined by the presence or absence of `data.error`.
 
-### 将来対応予定
+### Planned for future support
 
-将来のバージョンで、Flow outputs 内の特殊キー（`_status_code`、`_headers` 等）を認識して HTTP レスポンスに反映する機能の追加が検討されています。
+In a future version, we are considering adding the ability to recognize special keys (`_status_code`, `_headers`, etc.) in Flow outputs and reflect them in the HTTP response.
 
 ---
 
-## エラーハンドリング ベストプラクティス
+## Error handling best practices
 
-### python_file_call の run() で例外が発生した場合
+### If an exception occurs in run() of python_file_call
 
-`run()` 関数内で捕捉されない例外が発生すると、実行エンジンは以下の処理を行います。
+`run()` When an uncaught exception occurs within a function, the execution engine does the following:
 
-**コンテナモード**: Docker プロセスが非ゼロの終了コードで終了し、stderr の内容がエラーメッセージとして記録されます。`ExecutionResult` の `success` は `False`、`error_type` は `"container_execution_error"` になります。
+**Container mode**: The Docker process exits with a non-zero exit code and the contents of stderr are logged as an error message. `success` of `ExecutionResult` becomes `False`, and `error_type` becomes `"container_execution_error"`.**Host mode (permissive)**: The exception propagates from `Future` in `ThreadPoolExecutor`, and similarly `success` in `ExecutionResult` becomes `False`.
 
-**ホストモード（permissive）**: 例外が `ThreadPoolExecutor` の `Future` から伝播し、同様に `ExecutionResult` の `success` が `False` になります。
+In either case, the Kernel's handler (`_h_python_file_call`) returns `_kernel_step_status: "failed"`.
 
-いずれの場合も、Kernel のハンドラ（`_h_python_file_call`）は `_kernel_step_status: "failed"` を返します。
+### Recommended: wrap in try-except and return error dict
 
-### 推奨: try-except で包んで error dict を return する
-
-例外を外に漏らすと、スタックトレースがログに記録されるだけで呼び出し元の Flow に有用な情報が渡りません。必ず try-except で包み、構造化されたエラー情報を返してください。
+If you leak the exception, only the stack trace will be logged and no useful information will be passed to the calling Flow. Be sure to wrap it in try-except and return structured error information.
 
 ```python
 def run(input_data: dict, context: dict) -> dict:
@@ -1616,23 +1616,23 @@ def run(input_data: dict, context: dict) -> dict:
         return {"error": str(e), "error_type": type(e).__name__}
 ```
 
-### Flow の step 失敗時の動作
+### Behavior when Flow step fails
 
-Flow 内のステップが失敗した場合の動作は、Flow 定義の `defaults` とステップごとの `on_error` 設定によって決まります。
+The behavior when a step in a Flow fails is determined by the `defaults` and per-step `on_error` settings in the Flow definition.
 
-| 設定 | 動作 |
+| Settings | Behavior |
 |------|------|
-| `defaults.fail_soft: true`（デフォルト） | ステップ失敗を記録して次のステップへ進む |
-| `defaults.fail_soft: false` | ステップ失敗時に Flow 全体を中断する |
-| `on_error.action: "abort"` | このステップの失敗時に Flow を中断する |
-| `on_error.action: "continue"` | このステップの失敗時でも次へ進む |
-| `on_error.action: "disable_target"` | 対象を無効化して次へ進む |
+| `defaults.fail_soft: true` (default) | Record step failure and proceed to next step |
+| `defaults.fail_soft: false` | Interrupt the entire Flow when a step fails |
+| `on_error.action: "abort"` | Abort Flow if this step fails |
+| `on_error.action: "continue"` | Continue even if this step fails |
+| `on_error.action: "disable_target"` | Disable target and proceed |
 
-Flow レベルのエラーハンドラが InterfaceRegistry に `flow.error_handler` として登録されている場合、ステップ例外発生時にそのハンドラが呼び出されます。エラーハンドラは `"abort"`（中断）、`"retry"`（再試行）、またはそれ以外（継続）を返すことで動作を制御できます。
+If a Flow level error handler is registered in the InterfaceRegistry as `flow.error_handler`, that handler will be called when a step exception occurs. Error handlers can control behavior by returning `"abort"` (abort), `"retry"` (retry), or something else (continue).
 
-### capability.call() 失敗時の戻り値の扱い方
+### How to handle the return value in case of capability.call() failure
 
-`rumi_capability` モジュール経由で Capability を呼び出した場合、失敗時は `success: False` を含む dict が返されます。
+If you call Capability via the `rumi_capability` module, a dict containing `success: False` will be returned on failure.
 
 ```python
 import rumi_capability
@@ -1652,31 +1652,31 @@ if not result.get("success", False):
 value = result.get("output", {}).get("value")
 ```
 
-Capability 呼び出しの失敗原因には以下があります。
+Possible reasons for a Capability call to fail include:
 
-| error_type | 説明 |
+| error_type | description |
 |------------|------|
-| `approval_denied` | Capability の使用が承認されていない |
-| `grant_denied` | Capability Grant が付与されていない |
-| `trust_denied` | Trust Store による検証に失敗した |
-| `handler_not_found` | 指定された Capability Handler が存在しない |
-| `execution_error` | Handler の実行中にエラーが発生した |
-| `timeout` | 実行がタイムアウトした |
-| `socket_not_found` | Capability ソケットが見つからない |
+| `approval_denied` | Not authorized for use of Capability |
+| `grant_denied` | Capability Grant not granted |
+| `trust_denied` | Trust Store verification failed |
+| `handler_not_found` | The specified Capability Handler does not exist |
+| `execution_error` | An error occurred while running Handler |
+| `timeout` | Execution timed out |
+| `socket_not_found` | Capability socket not found |
 
-これらのエラーも try-except ではなく、戻り値の `success` フィールドで判定することを推奨します。
-
----
+We recommend that you check these errors using the `success` field of the return value instead of using try-except.
 
 ---
 
-## Flow Modifier 推奨パターン
+---
 
-Flow Modifier は強力な機能ですが、最初から全てのアクションを使おうとすると複雑になります。以下の2つのパターンから始めることを推奨します。
+## Flow Modifier recommended pattern
 
-### パターン 1: append（フェーズ末尾に追加）
+Flow Modifier is a powerful feature, but it can be complicated if you try to use all actions from the beginning. We recommend starting with the following two patterns.
 
-最も安全で理解しやすいパターンです。既存の Flow を変更せず、末尾に処理を追加します。
+### Pattern 1: append (add to end of phase)
+
+This is the safest and easiest to understand pattern. Add processing to the end without changing the existing Flow.
 
 ```yaml
 modifier_id: add_logging
@@ -1694,11 +1694,11 @@ step:
     response: "${ctx.response}"
 ```
 
-使いどころ: ロギング、監査、通知、後処理の追加
+When to use: Add logging, auditing, notifications, and post-processing
 
-### パターン 2: replace（ステップの置換）
+### Pattern 2: replace (step replacement)
 
-既存ステップの実装を差し替えるパターンです。例えば、AI クライアントを OpenAI から Anthropic に切り替える場合に使います。
+This is a pattern that replaces the implementation of an existing step. For example, use this when switching your AI client from OpenAI to Anthropic.
 
 ```yaml
 modifier_id: swap_ai_client
@@ -1718,75 +1718,75 @@ step:
   output: ai_output
 ```
 
-使いどころ: 実装の差し替え、プロバイダの切り替え
+When to use: Replacing implementation, switching provider
 
-### いつ inject_before / inject_after を使うか
+### When to use inject_before / inject_after
 
-inject_before / inject_after は特定のステップの前後に処理を差し込みたい場合に使います。ただし、対象ステップの id に依存するため、Flow の構造変更に弱くなります。以下の場合にのみ使用を検討してください。
+inject_before / inject_after are used when you want to insert processing before and after a specific step. However, since it depends on the id of the target step, it is vulnerable to changes in the flow structure. Consider using it only if:
 
-- 特定のステップの入力データを事前変換する必要がある場合（inject_before）
-- 特定のステップの出力データを後処理する必要がある場合（inject_after）
-- append では実行タイミングが遅すぎる場合
+- If input data for a particular step needs to be pre-transformed (inject_before)
+- If you need to post-process the output data of a particular step (inject_after)
+- If the execution timing is too slow for append
 
-### remove は最後の手段
+### remove is a last resort
 
-remove は既存ステップを削除するため、Flow の動作を大きく変える可能性があります。通常は replace で代替実装を提供する方が安全です。
+remove removes an existing step and can significantly change the behavior of the Flow. It is usually safer to provide an alternative implementation with replace.
 
 ---
 
-## ハンドラ API 分類
+## Handler API classification
 
-Kernel が提供するハンドラには「Pack 開発者向け」と「内部 API」の2種類があります。
+There are two types of handlers provided by Kernel: "For Pack developers" and "Internal API".
 
-### Pack 開発者向け API
+### Pack Developer API
 
-Flow 定義で直接使用できるハンドラです。安定したインターフェースが保証されます。
+This is a handler that can be used directly in the Flow definition. A stable interface is guaranteed.
 
-| ハンドラ | 説明 | Flow での使い方 |
+| Handler | Description | How to use in Flow |
 |---------|------|----------------|
-| `python_file_call` | Python ファイルを実行 | `type: python_file_call` |
-| `flow` | サブ Flow を呼び出し | `type: flow` |
-| `function` | Capability 関数を実行 | `type: function` |
-| `set` | コンテキストに値を設定 | `type: set` |
-| `handler` | 登録済みハンドラを直接呼び出し | `type: handler` |
+| `python_file_call` | Run Python file | `type: python_file_call` |
+| `flow` | Call sub Flow | `type: flow` |
+| `function` | Execute Capability function | `type: function` |
+| `set` | Set value in context | `type: set` |
+| `handler` | Directly call registered handler | `type: handler` |
 
-### 内部 API（Pack 開発者は使用しない）
+### Internal API (not used by Pack developers)
 
-Kernel の内部動作に使用されるハンドラです。Pack 開発者がこれらを直接呼び出す必要はありません。
+A handler used for internal kernel operations. Pack developers do not need to call these directly.
 
-| カテゴリ | 例 | 説明 |
+| Category | Examples | Description |
 |---------|-----|------|
-| `kernel:*` | `kernel:ctx.get`, `kernel:ctx.set` | Kernel 内部のコンテキスト操作 |
-| `flow.hooks.*` | `flow.hooks.pre_step`, `flow.hooks.post_step` | Flow ライフサイクルフック |
-| `flow.construct.*` | `flow.construct.set`, `flow.construct.if` | Flow 構文の内部実装 |
-| `component_phase:*` | `component_phase:setup`, `component_phase:startup` | コンポーネントライフサイクル |
+| `kernel:*` | `kernel:ctx.get`, `kernel:ctx.set` | Context operations inside the Kernel |
+| `flow.hooks.*` | `flow.hooks.pre_step`, `flow.hooks.post_step` | Flow lifecycle hook |
+| `flow.construct.*` | `flow.construct.set`, `flow.construct.if` | Internal implementation of Flow syntax |
+| `component_phase:*` | `component_phase:setup`, `component_phase:startup` | Component life cycle |
 
-> **注意**: 内部 API は予告なく変更される可能性があります。Pack の Flow 定義からはこれらを直接参照しないでください。
+> **Note**: Internal APIs are subject to change without notice. Do not reference these directly from the Pack's Flow definition.
 
 ---
 
-## 出力キー命名規則（詳細）
+## Output key naming convention (details)
 
-### Kernel 内部キーの除外ルール
+### Kernel internal key exclusion rules
 
-Flow 実行結果が HTTP レスポンスとして返される際、以下のプレフィックスで始まるキーは **Kernel 内部キー** として自動的に除外されます。
+When Flow execution results are returned as an HTTP response, keys starting with the following prefixes are automatically excluded as **Kernel internal keys**.
 
-| プレフィックス | 説明 |
+| Prefix | Description |
 |---------------|------|
-| `_flow_` | Flow 制御情報 |
-| `_kernel_` | Kernel ステップメタデータ |
-| `_step_out.` | ステップ出力の内部参照 |
-| `_current_step` | 現在のステップ番号 |
-| `_total_steps` | 総ステップ数 |
-| `_parent_flow` | 親 Flow 情報 |
-| `_principal_id` | 実行者ID |
-| `_flow_control` | フロー制御シグナル |
-| `_error` | エラー情報 |
-| `_flow_defaults` | Flow デフォルト値 |
+| `_flow_` | Flow control information |
+| `_kernel_` | Kernel step metadata |
+| `_step_out.` | Step output internal reference |
+| `_current_step` | Current step number |
+| `_total_steps` | Total number of steps |
+| `_parent_flow` | Parent Flow information |
+| `_principal_id` | Executor ID |
+| `_flow_control` | Flow control signal |
+| `_error` | Error information |
+| `_flow_defaults` | Flow default value |
 
-### Pack 開発者が `_` プレフィックスキーを返した場合
+### If the Pack developer returns the `_` prefix key
 
-上記の Kernel 内部プレフィックスに **一致しない** `_` プレフィックスキー（例: `_debug`, `_my_internal`）は、レスポンスから除外されません。ただし、警告ログが記録されます。
+`_` prefix keys that **do not match** the Kernel internal prefixes listed above (e.g. `_debug`, `_my_internal`) are not excluded from the response. However, a warning is logged.
 
 ```python
 # この例では _debug は除外されず、レスポンスに含まれる（警告ログ付き）
@@ -1797,11 +1797,11 @@ def run(input_data, context=None):
     }
 ```
 
-### 推奨事項
+### Recommendations
 
-- Pack の出力キーには `_` プレフィックスを使わないことを推奨します
-- デバッグ情報を含めたい場合は `debug` や `metadata` のような通常のキー名を使用してください
-- Kernel 内部プレフィックスと偶然一致するキー名（例: `_flow_result`）は意図せず除外されるため、特に避けてください
+- We recommend not using the `_` prefix for Pack output keys
+- If you want to include debug information, use regular key names like `debug` or `metadata`
+- Key names that happen to match Kernel internal prefixes (e.g. `_flow_result`) should be specifically avoided as they will be unintentionally excluded.
 
 ```python
 # ✅ 推奨
@@ -1829,26 +1829,26 @@ def run(input_data, context=None):
 ```
 
 
-## 注意事項
+## Notes
 
-- **InterfaceRegistry は内部 API です。** Pack から直接 IR を操作しないでください。
-- **外部通信は必ず Egress Proxy 経由**で行ってください。`context["http_request"]` を使用します。
-- **lib の書き込み先は `/data` のみです。** それ以外のパスへの書き込みは `--read-only` により失敗します。
-- **pack_identity を変更しないでください。** 更新時に `pack_identity` が変わると apply が拒否されます。
-- **principal_id は v1 では owner_pack に強制上書きされます。** Flow 定義や Modifier で `principal_id` を指定しても、実行時には `owner_pack` の値が principal として使用されます。不一致が検出された場合は監査ログに警告が記録されます。
-- **レスポンスサイズ上限について**: Egress Proxy（`rumi_syscall`）および Capability クライアント（`rumi_capability`）のレスポンス上限は 4MB（`RUMI_MAX_RESPONSE_BYTES` で変更可能）です。ただし、Capability Executor（サーバー側サブプロセス実行）のレスポンス上限は 1MB です。
-- **store.set の値サイズ上限はデフォルト 1MB です。** Grant の `grant_config.max_value_bytes` で変更可能です。
-- **FlowScheduler の interval 最小値は 10 秒です。** 10 秒未満を指定しても 10 秒に切り上げられます。
-- **同時 Flow 実行数はデフォルト 10 です。** `RUMI_MAX_CONCURRENT_FLOWS` 環境変数で変更可能です。
-- **Capability 実行のタイムアウト上限は 120 秒です。** `rumi_capability.call()` の `timeout_seconds` に 120 を超える値を指定しても 120 秒に制限されます。デフォルトは 30 秒です。
+- **InterfaceRegistry is an internal API.** Do not operate the IR directly from the Pack.
+- **External communication must be done via Egress Proxy**. Use `context["http_request"]`.
+- **lib can only be written to `/data`.** Writing to any other path will fail due to `--read-only`.
+- Do not change **pack_identity.** apply will be rejected if `pack_identity` changes during update.
+- **principal_id is forced to be overwritten by owner_pack in v1.** Even if you specify `principal_id` in the Flow definition or Modifier, the value of `owner_pack` will be used as the principal at runtime. If a discrepancy is detected, a warning is logged in the audit log.
+- **About response size limit**: The response limit for Egress Proxy (`rumi_syscall`) and Capability Client (`rumi_capability`) is 4MB (can be changed in `RUMI_MAX_RESPONSE_BYTES`). However, the response limit for Capability Executor (server side subprocess execution) is 1MB.
+- The default value size limit for **store.set is 1MB.** Can be changed with Grant's `grant_config.max_value_bytes`.
+- **The minimum interval value of FlowScheduler is 10 seconds.** If you specify less than 10 seconds, it will be rounded up to the next 10 seconds.
+- **The default number of simultaneous Flow executions is 10.** Can be changed using the `RUMI_MAX_CONCURRENT_FLOWS` environment variable.
+- **Capability execution timeout limit is 120 seconds.** Even if you specify a value greater than 120 for `timeout_seconds` of `rumi_capability.call()`, it will be limited to 120 seconds. Default is 30 seconds.
 
-### ハードリンクの非サポート
+### Hard links not supported
 
-Pack ディレクトリ（`ecosystem/<pack_id>/`）内でのハードリンクの使用は **非サポート** です。
+The use of hard links within Pack directories (`ecosystem/<pack_id>/`) is **unsupported**.
 
-#### 理由
+#### Reason
 
-Pack 承認・ハッシュ検証システムは、ファイルパスを `Path.resolve()` で正規化した値をキャッシュキーとして使用します。シンボリックリンクは `resolve()` によって実体パスに解決されるため、リンク元とリンク先が同一キャッシュエントリに統合されます。一方、ハードリンクは `resolve()` で統合されません（各パスエントリが独立して保持される）。そのため、同一 inode を指す複数パスが別々のキャッシュエントリとして扱われ、一方のパス経由でファイルを変更しても他方のハッシュ検証に反映されない可能性があります。
+The Pack authorization/hash verification system uses the file path normalized with `Path.resolve()` as the cache key. Symbolic links are resolved into real paths by `resolve()`, so the source and destination are combined into the same cache entry. On the other hand, hard links are not unified in `resolve()` (each path entry is kept independent). Therefore, multiple paths pointing to the same inode are treated as separate cache entries, and changes to a file via one path may not be reflected in hash validation on the other.
 
 ```
 hardlink_a.py ─┐
@@ -1863,43 +1863,43 @@ symlink.py → target.py:
   symlink.py → /abs/path/target.py         ← target.py と同一キー ✓
 ```
 
-#### 推奨代替
+#### Recommended Alternatives
 
-- **シンボリックリンク**: `resolve()` で実体パスに解決されるため、ハッシュ検証との整合性が保たれます。ただし、シンボリックリンクの参照先は **pack_subdir boundary 内** に限定されます。boundary 外を指すシンボリックリンクは実行時に拒否されます。
-- **ファイルコピー**: 最も安全な方法です。各ファイルが独立したハッシュを持ち、検証に問題が生じません。
+- **Symbolic link**: Resolves to a real path in `resolve()`, making it consistent with hash validation. However, the reference destination of the symbolic link is limited to**within the pack_subdir boundary**. Symbolic links pointing outside the boundary are rejected at runtime.
+- **File Copy**: The safest method. Each file has an independent hash and there are no verification issues.
 
 ---
 
-## API リファレンス
+## API Reference
 
-### rumi_syscall（外部通信）
+### rumi_syscall (external communication)
 
-コンテナ内から外部 HTTP 通信を行うためのモジュールです。`import rumi_syscall` で使用します。
+This is a module for performing external HTTP communication from within a container. Used in `import rumi_syscall`.
 
-| 関数 | 説明 |
+| Function | Description |
 |------|------|
-| `http_request(method, url, headers=None, body=None, timeout_seconds=30.0)` | 汎用 HTTP リクエスト |
-| `get(url, headers=None, timeout_seconds=30.0)` | GET ショートカット |
-| `post(url, body=None, headers=None, timeout_seconds=30.0)` | POST ショートカット |
-| `post_json(url, data, headers=None, timeout_seconds=30.0)` | JSON POST ショートカット（Content-Type 自動設定） |
-| `put(url, body=None, headers=None, timeout_seconds=30.0)` | PUT ショートカット |
-| `delete(url, headers=None, timeout_seconds=30.0)` | DELETE ショートカット |
-| `patch(url, body=None, headers=None, timeout_seconds=30.0)` | PATCH ショートカット |
-| `head(url, headers=None, timeout_seconds=30.0)` | HEAD ショートカット |
+| `http_request(method, url, headers=None, body=None, timeout_seconds=30.0)` | Generic HTTP request |
+| `get(url, headers=None, timeout_seconds=30.0)` | GET shortcut |
+| `post(url, body=None, headers=None, timeout_seconds=30.0)` | POST shortcut |
+| `post_json(url, data, headers=None, timeout_seconds=30.0)` | JSON POST shortcut (Content-Type automatic setting) |
+| `put(url, body=None, headers=None, timeout_seconds=30.0)` | PUT shortcut |
+| `delete(url, headers=None, timeout_seconds=30.0)` | DELETE shortcut |
+| `patch(url, body=None, headers=None, timeout_seconds=30.0)` | PATCH shortcut |
+| `head(url, headers=None, timeout_seconds=30.0)` | HEAD shortcut |
 
-戻り値は dict で、`success`（bool）、`status_code`（int）、`headers`（dict）、`body`（str）、`error`（str）、`error_type`（str）、`latency_ms`（float）、`redirect_hops`（int）、`bytes_read`（int）、`final_url`（str）等を含みます。
+The return value is a dict containing `success` (bool), `status_code` (int), `headers` (dict), `body` (str), `error` (str), `error_type` (str), `latency_ms` (float), `redirect_hops` (int), `bytes_read` (int), `final_url` (str), etc.
 
-`request` は `http_request` のエイリアスです。`rumi_syscall.request(...)` でも同じ動作になります。
+`request` is an alias for `http_request`. `rumi_syscall.request(...)` has the same behavior.
 
-### rumi_capability（Capability 呼び出し）
+### rumi_capability (Capability call)
 
-コンテナ内から Capability を呼び出すためのモジュールです。`import rumi_capability` で使用します。
+A module for calling Capability from within a container. Used in `import rumi_capability`.
 
-| 関数 | 説明 |
+| Function | Description |
 |------|------|
-| `call(permission_id, args=None, timeout_seconds=30.0, request_id=None)` | Capability を実行 |
+| `call(permission_id, args=None, timeout_seconds=30.0, request_id=None)` | Execute Capability |
 
-戻り値は dict で、`success`（bool）、`output`（Any）、`error`（str）、`error_type`（str）、`latency_ms`（float）を含みます。
+The return value is a dict containing `success` (bool), `output` (Any), `error` (str), `error_type` (str), `latency_ms` (float).
 
 ```python
 import rumi_capability
@@ -1911,11 +1911,11 @@ if result["success"]:
 
 ---
 
-## チュートリアル: 簡単な Pack を作る
+## Tutorial: Create a simple Pack
 
-外部 API からデータを取得し、Store に保存し、HTTP エンドポイントで返却する Pack を作ります。
+Create a Pack that retrieves data from an external API, stores it in a Store, and returns it via an HTTP endpoint.
 
-### 1. ディレクトリ構成
+### 1. Directory structure
 
 ```
 ecosystem/weather_pack/
@@ -1941,7 +1941,7 @@ ecosystem/weather_pack/
 }
 ```
 
-### 3. ブロック: fetch_weather.py
+### 3. Block: fetch_weather.py
 
 ```python
 import rumi_syscall
@@ -1971,7 +1971,7 @@ def run(input_data, context=None):
     return {"weather": weather}
 ```
 
-### 4. ブロック: get_cached_weather.py
+### 4. Block: get_cached_weather.py
 
 ```python
 import rumi_capability
@@ -1989,7 +1989,7 @@ def run(input_data, context=None):
     return {"error": "No cached data"}
 ```
 
-### 5. Flow 定義
+### 5. Flow definition
 
 ```yaml
 # flows/fetch_weather.flow.yaml
@@ -2042,7 +2042,7 @@ steps:
 }
 ```
 
-### 7. 運用手順
+### 7. Operational procedures
 
 ```bash
 # Pack を承認

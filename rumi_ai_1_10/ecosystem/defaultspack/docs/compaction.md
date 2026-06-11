@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./compaction.md) | [JP](./i18n/ja/compaction.md) | [KR](./i18n/ko/compaction.md) | [CN](./i18n/zh-cn/compaction.md)
+<!-- docs-i18n-links:end -->
+
 # Compaction
 
 `domain/context_engine` provides token estimation, stable prompt layers,

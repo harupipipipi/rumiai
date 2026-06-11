@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./competitive_agent_install_eval.md) | [JP](./i18n/ja/competitive_agent_install_eval.md) | [KR](./i18n/ko/competitive_agent_install_eval.md) | [CN](./i18n/zh-cn/competitive_agent_install_eval.md)
+<!-- docs-i18n-links:end -->
+
 # Competitive Agent Install Evaluation
 
 Date: 2026-06-03

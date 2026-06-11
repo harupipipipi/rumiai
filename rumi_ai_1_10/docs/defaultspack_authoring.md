@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./defaultspack_authoring.md) | [JP](./i18n/ja/defaultspack_authoring.md) | [KR](./i18n/ko/defaultspack_authoring.md) | [CN](./i18n/zh-cn/defaultspack_authoring.md)
+<!-- docs-i18n-links:end -->
+
 # Defaultspack Authoring
 
 Defaultspack resources are authored as components, blocks, functions, flows, prompts, nodes, and graphs.

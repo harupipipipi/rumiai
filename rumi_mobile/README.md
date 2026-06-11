@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./README.md) | [JP](./i18n/ja/README.md) | [KR](./i18n/ko/README.md) | [CN](./i18n/zh-cn/README.md)
+<!-- docs-i18n-links:end -->
+
 # Rumi Remote Mobile
 
 Rumi Remote Mobile is the Flutter client for managing a PC-hosted Rumi

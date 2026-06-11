@@ -1,32 +1,36 @@
-# Rumi AI OS — 多言語 Pack 開発ガイド
+<!-- docs-i18n-links:start -->
+[EN](./multilang_pack_guide.md) | [JP](./i18n/ja/multilang_pack_guide.md) | [KR](./i18n/ko/multilang_pack_guide.md) | [CN](./i18n/zh-cn/multilang_pack_guide.md)
+<!-- docs-i18n-links:end -->
 
-最終更新: 2026-03-23
+# Rumi AI OS — Multilingual Pack Development Guide
 
-本ドキュメントは Rumi AI OS の Pack を **Python 以外の言語**（Rust, Go, Node.js, C/C++ 等）で開発するためのガイドです。stdin/stdout JSON プロトコルの仕様、チュートリアル、ベストプラクティスを含みます。
+Last updated: 2026-03-23
+
+This document is a guide for developing Rumi AI OS Packs in languages other than Python (Rust, Go, Node.js, C/C++, etc.). Contains specifications, tutorials, and best practices for the stdin/stdout JSON protocol.
 
 ---
 
-## 1. 多言語 Pack の概要
+## 1. Multilingual Pack Overview
 
-Rumi AI OS の capability_executor.py には `binary` と `command` の 2 つの calling_convention が実装されています。どちらも **stdin に JSON を渡し、stdout から JSON を読み取る** という共通のプロトコルを使用します。
+Rumi AI OS's capability_executor.py implements two calling_conventions: `binary` and `command`. Both use a common protocol: passing JSON on stdin and reading JSON from stdout.
 
-これにより、stdin/stdout で JSON を読み書きできる任意の言語で Pack の Function を実装できます。
+This allows you to implement Pack's Functions in any language that can read and write JSON on stdin/stdout.
 
 ### binary vs command
 
-| 特性 | binary | command |
+| characteristics | binary | command |
 |------|--------|---------|
-| 実行方法 | コンパイル済みバイナリを直接実行 | コマンドリストでプロセスを起動 |
-| 適した言語 | Rust, Go, C, C++ | Node.js, Ruby, Python (別バージョン), シェルスクリプト |
-| ecosystem.json の指定 | `"runtime": "binary"`, `"main": "path/to/binary"` | `"runtime": "command"`, `"command": ["node", "index.js"]` |
-| FunctionEntry フィールド | `main_binary_path` | `command` (List[str]) |
-| パストラバーサル検証 | あり（バイナリが function_dir 内か検証） | コマンドに依存 |
+| How to run | Directly run the compiled binary | Start the process with a command list |
+| Suitable languages | Rust, Go, C, C++ | Node.js, Ruby, Python (different versions), shell scripting |
+| Specifying ecosystem.json | `"runtime": "binary"`, `"main": "path/to/binary"` | `"runtime": "command"`, `"command": ["node", "index.js"]` |
+| FunctionEntry field | `main_binary_path` | `command` (List[str]) |
+| Path traversal verification | Yes (verifies whether binary is in function_dir) | Depends on command |
 
 ---
 
-## 2. runtime セクションの仕様
+## 2. runtime section specifications
 
-ecosystem.json に `runtime` セクションを追加することで、多言語 Pack のビルドと実行に必要な情報を宣言できます。
+You can declare the information needed to build and run a multilingual pack by adding a `runtime` section to ecosystem.json.
 
 ```json
 {
@@ -47,22 +51,22 @@ ecosystem.json に `runtime` セクションを追加することで、多言語
 }
 ```
 
-### runtime フィールド
+### runtime field
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |-----------|-----|------|
 | type | string | `"binary"` / `"command"` / `"python"` |
-| build.command | string | ビルドコマンド |
-| build.output | string | ビルド成果物のパス |
-| binary | string | 実行するバイナリのパス（type=binary 時） |
+| build.command | string | build command |
+| build.output | string | Build artifact path |
+| binary | string | Path of the binary to be executed (when type=binary) |
 
 ---
 
-## 3. stdin/stdout JSON プロトコル仕様
+## 3. stdin/stdout JSON protocol specification
 
-### 3.1 入力（stdin）
+### 3.1 Input (stdin)
 
-Kernel は Function を起動する際、stdin に以下の JSON を渡します。
+When the Kernel starts the Function, it passes the following JSON to stdin.
 
 ```json
 {
@@ -80,23 +84,23 @@ Kernel は Function を起動する際、stdin に以下の JSON を渡します
 }
 ```
 
-#### context フィールド
+#### context field
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |-----------|-----|------|
-| principal_id | string | リクエストを発行した主体の ID（UDS 由来） |
-| pack_id | string | 実行される Function が属する Pack の ID |
-| function_id | string | 実行される Function の ID |
-| request_id | string | リクエストの一意な ID |
-| ts | string | リクエストのタイムスタンプ（ISO 8601、UTC） |
+| principal_id | string | ID of the principal that issued the request (from UDS) |
+| pack_id | string | ID of the Pack to which the executed Function belongs |
+| function_id | string | ID of the Function to be executed |
+| request_id | string | Unique ID of the request |
+| ts | string | Request timestamp (ISO 8601, UTC) |
 
-#### args フィールド
+#### args field
 
-呼び出し元が指定した引数の辞書です。内容は Function ごとに異なります。`input_schema` で定義した構造に従います。
+A dictionary of arguments specified by the caller. The contents vary depending on the Function. Follows the structure defined in `input_schema`.
 
-### 3.2 出力（stdout）— 成功時
+### 3.2 Output (stdout) — on success
 
-Function は処理結果を stdout に JSON として出力します。
+Function outputs the processing result to stdout as JSON.
 
 ```json
 {
@@ -105,43 +109,43 @@ Function は処理結果を stdout に JSON として出力します。
 }
 ```
 
-出力の JSON はそのまま `CapabilityResponse.output` に格納されます。出力が空（stdout に何も書かない）の場合、`output` は `null` になります。
+The output JSON is stored as is in `CapabilityResponse.output`. If the output is empty (nothing written to stdout), `output` becomes `null`.
 
-### 3.3 出力（stderr）— エラー時
+### 3.3 Output (stderr) — on error
 
-エラーが発生した場合は、**非ゼロの exit code** で終了してください。stderr に書かれた内容がエラーメッセージとして記録されます（先頭 500 文字まで）。
+If an error occurs, exit with a non-zero exit code. The content written to stderr is recorded as an error message (up to the first 500 characters).
 
 ```
 # 正常終了: exit code 0 + stdout に JSON
 # エラー:  exit code 1 + stderr にメッセージ
 ```
 
-**重要**: エラー情報を stdout に JSON として出力する方法もありますが、Kernel は exit code で成功/失敗を判定します。非ゼロ exit code の場合、stdout は無視され、stderr がエラーメッセージとして使用されます。
+**Important**: There is also a way to output error information to stdout as JSON, but the Kernel determines success/failure using the exit code. For non-zero exit code, stdout is ignored and stderr is used as the error message.
 
-### 3.4 タイムアウト
+### 3.4 Timeout
 
-| 設定 | 値 | ソース |
+| Setting | Value | Source |
 |------|-----|--------|
-| デフォルトタイムアウト | 30 秒 | `DEFAULT_FUNCTION_TIMEOUT = 30.0` |
-| 最大タイムアウト | 120 秒 | `MAX_TIMEOUT = 120.0` |
-| 最小タイムアウト | 1 秒 | `max(t, 1.0)` |
-| カスタマイズ | Function マニフェストの `grant_config.timeout` で指定 |
+| Default timeout | 30 seconds | `DEFAULT_FUNCTION_TIMEOUT = 30.0` |
+| Maximum timeout | 120 seconds | `MAX_TIMEOUT = 120.0` |
+| Minimum timeout | 1 second | `max(t, 1.0)` |
+| Customization | Specified in `grant_config.timeout` of the Function manifest |
 
-タイムアウトに達すると、プロセスは強制終了され、`error_type: "timeout"` の CapabilityResponse が返されます。
+If the timeout is reached, the process is killed and a CapabilityResponse of `error_type: "timeout"` is returned.
 
-### 3.5 レスポンスサイズ制限
+### 3.5 Response size limit
 
-stdout の出力は **1 MB**（`MAX_RESPONSE_SIZE = 1 * 1024 * 1024` バイト）以下でなければなりません。超過した場合、`error_type: "response_too_large"` のエラーになります。
+Output on stdout must be less than or equal to **1 MB** (`MAX_RESPONSE_SIZE = 1 * 1024 * 1024` bytes). If it is exceeded, it will result in a `error_type: "response_too_large"` error.
 
 ---
 
-## 4. calling_convention: binary の詳細
+## 4. calling_convention: binary details
 
-### 4.1 概要
+### 4.1 Overview
 
-コンパイル済みバイナリを直接実行する方式です。Rust, Go, C, C++ などの言語に適しています。
+This method directly executes the compiled binary. Suitable for languages ​​such as Rust, Go, C, and C++.
 
-### 4.2 実行フロー
+### 4.2 Execution flow
 
 ```
 Kernel
@@ -165,7 +169,7 @@ Kernel
   └─ 9. JSON パース → CapabilityResponse(success=True, output=...)
 ```
 
-### 4.3 ecosystem.json の設定例
+### 4.3 ecosystem.json configuration example
 
 ```json
 {
@@ -185,7 +189,7 @@ Kernel
 }
 ```
 
-Function マニフェスト（functions セクション内）:
+Function manifest (in the functions section):
 ```json
 {
   "my_function": {
@@ -206,24 +210,24 @@ Function マニフェスト（functions セクション内）:
 }
 ```
 
-### 4.4 セキュリティ
+### 4.4 Security
 
-- **パストラバーサル防止**: バイナリパスを `resolve()` した結果が `function_dir` の配下であることを検証します。`../../` 等で function_dir の外に出ようとすると `security_violation` エラーになります。
-- **作業ディレクトリ**: プロセスの cwd は `function_dir` に設定されます。
+- **Path traversal prevention**: Verifies that the result of `resolve()` on a binary path is under `function_dir`. If you try to go outside function_dir with `../../` etc., a `security_violation` error will occur.
+- **Working directory**: The process's cwd is set to `function_dir`.
 
 ---
 
-## 5. calling_convention: command の詳細
+## 5. calling_convention: command details
 
-### 5.1 概要
+### 5.1 Overview
 
-コマンドリストでプロセスを起動する方式です。インタプリタ言語（Node.js, Ruby, Python の別バージョン等）に適しています。
+This method starts processes using a command list. Suitable for interpreted languages ​​(Node.js, Ruby, different versions of Python, etc.).
 
-### 5.2 実行フロー
+### 5.2 Execution flow
 
-`binary` と同じ stdin/stdout JSON プロトコルを使用します。違いは、バイナリパスの代わりに `entry.command`（List[str]）をプロセスコマンドとして使用する点です。
+Uses the same stdin/stdout JSON protocol as `binary`. The difference is that we use `entry.command`(List[str]) as the process command instead of the binary path.
 
-### 5.3 ecosystem.json の設定例
+### 5.3 ecosystem.json configuration example
 
 ```json
 {
@@ -242,7 +246,7 @@ Function マニフェスト（functions セクション内）:
 }
 ```
 
-Function マニフェスト:
+Function manifest:
 ```json
 {
   "my_function": {
@@ -262,11 +266,11 @@ Function マニフェスト:
 
 ---
 
-## 6. セキュリティ制約
+## 6. Security constraints
 
-### 6.1 パストラバーサル防止（binary）
+### 6.1 Path traversal prevention (binary)
 
-`_execute_binary_function` は以下の検証を行います:
+`_execute_binary_function` performs the following validations:
 
 ```python
 func_dir = Path(entry.function_dir).resolve()
@@ -274,30 +278,30 @@ if not Path(binary_path).resolve().is_relative_to(func_dir):
     # security_violation エラー
 ```
 
-バイナリは必ず Pack の function_dir 内に配置してください。シンボリックリンクや `../` による脱出は検出されます。
+Be sure to place the binaries in the Pack's function_dir. Escapes via symbolic links or `../` are detected.
 
-### 6.2 レスポンスサイズ制限
+### 6.2 Response size limit
 
-stdout の出力が 1 MB を超えると、レスポンスは破棄され `response_too_large` エラーになります。大量のデータを返す必要がある場合は、ファイルに書き出してパスを返すか、ページネーションを実装してください。
+If the stdout output exceeds 1 MB, the response is discarded and a `response_too_large` error occurs. If you need to return large amounts of data, write it out to a file and return a path, or implement pagination.
 
-### 6.3 タイムアウト
+### 6.3 Timeout
 
-Function は最大 120 秒以内に完了する必要があります。タイムアウトに達するとプロセスは強制終了されます。長時間実行が必要な処理は、非同期パターン（ジョブキューなど）を検討してください。
+The Function must complete within a maximum of 120 seconds. The process will be killed when the timeout is reached. Consider asynchronous patterns (such as job queues) for processes that require long execution times.
 
-### 6.4 環境変数
+### 6.4 Environment variables
 
-Docker で実行される Python Function には `RUMI_PACK_ID` と `RUMI_FUNCTION_ID` が環境変数として渡されます。binary/command Function にはこれらは渡されません。必要な情報は stdin の `context` から取得してください。
+`RUMI_PACK_ID` and `RUMI_FUNCTION_ID` are passed as environment variables to the Python Function executed in Docker. These are not passed to the binary/command Function. Get the necessary information from stdin's `context`.
 
 ---
 
-## 7. Rust Pack チュートリアル
+## 7. Rust Pack Tutorial
 
-### 7.1 前提条件
+### 7.1 Prerequisites
 
-- Rust ツールチェーンがインストール済み（`rustup` + `cargo`）
-- Rumi AI OS が動作する環境
+- Rust toolchain installed (`rustup` + `cargo`)
+- Environment where Rumi AI OS operates
 
-### 7.2 プロジェクト作成
+### 7.2 Project creation
 
 ```bash
 mkdir -p my_rust_pack/functions/hello
@@ -305,7 +309,7 @@ cd my_rust_pack/functions/hello
 cargo init --name hello_pack
 ```
 
-### 7.3 依存クレートの追加
+### 7.3 Adding dependent crates
 
 `Cargo.toml`:
 ```toml
@@ -319,7 +323,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```
 
-### 7.4 実装
+### 7.4 Implementation
 
 `src/main.rs`:
 ```rust
@@ -374,19 +378,19 @@ fn main() {
 }
 ```
 
-### 7.5 ビルド
+### 7.5 Build
 
 ```bash
 cargo build --release
 ```
 
-### 7.6 テスト
+### 7.6 Test
 
 ```bash
 echo '{"context":{"principal_id":"test_user","pack_id":"my_rust_pack","function_id":"hello","request_id":"1","ts":"2026-01-01T00:00:00Z"},"args":{"name":"Rumi"}}' | ./target/release/hello_pack
 ```
 
-期待される出力:
+Expected output:
 ```json
 {"message":"Hello, Rumi!","greeted_by":"my_rust_pack:hello","principal":"test_user"}
 ```
@@ -411,19 +415,19 @@ echo '{"context":{"principal_id":"test_user","pack_id":"my_rust_pack","function_
 }
 ```
 
-### 7.8 配置
+### 7.8 Placement
 
-ビルド済みバイナリを function_dir 内にコピーまたはシンボリックリンクして、Rumi AI OS の `ecosystem/` に Pack ディレクトリを配置します。
+Place the Pack directory in `ecosystem/` of Rumi AI OS by copying or symbolic linking the prebuilt binaries into function_dir.
 
 ---
 
-## 8. Go Pack チュートリアル
+## 8. Go Pack Tutorial
 
-### 8.1 前提条件
+### 8.1 Prerequisites
 
-- Go がインストール済み（1.21 以上推奨）
+- Go installed (1.21 or higher recommended)
 
-### 8.2 プロジェクト作成
+### 8.2 Project creation
 
 ```bash
 mkdir -p my_go_pack/functions/hello
@@ -431,7 +435,7 @@ cd my_go_pack/functions/hello
 go mod init hello_pack
 ```
 
-### 8.3 実装
+### 8.3 Implementation
 
 `main.go`:
 ```go
@@ -497,7 +501,7 @@ func main() {
 }
 ```
 
-### 8.4 ビルドとテスト
+### 8.4 Build and test
 
 ```bash
 go build -o hello_pack .
@@ -506,13 +510,13 @@ echo '{"context":{"principal_id":"test_user","pack_id":"my_go_pack","function_id
 
 ---
 
-## 9. Node.js Pack チュートリアル
+## 9. Node.js Pack Tutorial
 
-### 9.1 前提条件
+### 9.1 Prerequisites
 
-- Node.js がインストール済み（18 以上推奨）
+- Node.js installed (18+ recommended)
 
-### 9.2 プロジェクト作成
+### 9.2 Project creation
 
 ```bash
 mkdir -p my_node_pack/functions/hello
@@ -520,7 +524,7 @@ cd my_node_pack/functions/hello
 npm init -y
 ```
 
-### 9.3 実装
+### 9.3 Implementation
 
 `index.js`:
 ```javascript
@@ -556,7 +560,7 @@ process.stdin.on('end', () => {
 });
 ```
 
-### 9.4 テスト
+### 9.4 Test
 
 ```bash
 echo '{"context":{"principal_id":"test_user","pack_id":"my_node_pack","function_id":"hello","request_id":"1","ts":"2026-01-01T00:00:00Z"},"args":{"name":"Rumi"}}' | node index.js
@@ -583,11 +587,11 @@ echo '{"context":{"principal_id":"test_user","pack_id":"my_node_pack","function_
 
 ---
 
-## 10. デバッグ方法
+## 10. Debugging method
 
-### 10.1 コマンドラインでのテスト
+### 10.1 Testing on the command line
 
-全ての多言語 Pack Function は stdin/stdout プロトコルに従うため、コマンドラインで直接テストできます:
+All multilingual Pack Functions follow the stdin/stdout protocol, so you can test them directly on the command line:
 
 ```bash
 # テスト入力 JSON を作成
@@ -616,28 +620,28 @@ cat /tmp/test_input.json | node index.js
 cat /tmp/test_input.json | ./my_binary | jq .
 ```
 
-### 10.2 exit code の確認
+### 10.2 Check exit code
 
 ```bash
 cat /tmp/test_input.json | ./my_binary
 echo "Exit code: $?"
 ```
 
-### 10.3 stderr の確認
+### 10.3 Checking stderr
 
 ```bash
 cat /tmp/test_input.json | ./my_binary 2>/tmp/stderr.log
 cat /tmp/stderr.log
 ```
 
-### 10.4 タイムアウトのシミュレーション
+### 10.4 Simulating timeouts
 
 ```bash
 timeout 30 sh -c 'cat /tmp/test_input.json | ./my_binary'
 echo "Exit code: $?"
 ```
 
-### 10.5 レスポンスサイズの確認
+### 10.5 Checking the response size
 
 ```bash
 cat /tmp/test_input.json | ./my_binary | wc -c
@@ -646,52 +650,52 @@ cat /tmp/test_input.json | ./my_binary | wc -c
 
 ---
 
-## 11. ベストプラクティス
+## 11. Best Practices
 
-### 11.1 エラーハンドリング
+### 11.1 Error handling
 
-- stdin の読み取り失敗時は stderr にメッセージを書いて exit code 1 で終了する
-- JSON パースエラー時も同様に stderr + exit code 1
-- 処理中のエラーも stderr + 非ゼロ exit code
-- パニック/クラッシュは避ける（Rust では `unwrap()` の代わりにエラーハンドリングを推奨）
+- When reading stdin fails, write a message to stderr and exit with exit code 1.
+- Similarly when there is a JSON parsing error, stderr + exit code 1
+- Errors during processing also include stderr + non-zero exit code
+- Avoid panics/crashes (Rust recommends error handling instead of `unwrap()`)
 
-### 11.2 出力
+### 11.2 Output
 
-- 成功時は stdout に有効な JSON を 1 行で出力する
-- 余計な改行やログを stdout に混ぜない（stderr を使う）
-- stdout にデバッグ出力を混ぜると JSON パースエラーになる
-- 出力サイズを 1 MB 以下に抑える
+- If successful, output valid JSON in one line to stdout
+- Don't mix extra line breaks or logs into stdout (use stderr)
+- Mixing debug output with stdout results in JSON parsing error
+- Keep output size below 1 MB
 
-### 11.3 パフォーマンス
+### 11.3 Performance
 
-- 起動時間を短くする（タイムアウトには起動時間も含まれる）
-- 大量のデータ処理はストリーミングではなく一括処理（stdin は一度に全て渡される）
-- Rust/Go はスタティックリンクでバイナリサイズを最適化
+- Shorten startup time (timeout includes startup time)
+- Large amounts of data are processed in batches instead of streaming (stdin is passed all at once)
+- Rust/Go optimizes binary size with static linking
 
-### 11.4 セキュリティ
+### 11.4 Security
 
-- 環境変数から機密情報を読み取らない（context から取得する）
-- ファイルアクセスは function_dir 内に限定する
-- 外部ネットワークアクセスは requires で適切なパーミッションを宣言する
-- ユーザー入力（args）を信頼しない。バリデーションを行う
+- Do not read sensitive information from environment variables (get it from context)
+- File access is limited to function_dir
+- External network access declares appropriate permissions with requires
+- Don't trust user input (args). perform validation
 
-### 11.5 クロスプラットフォーム
+### 11.5 Cross-platform
 
-- Rust: `cross` クレートでクロスコンパイル
-- Go: `GOOS` / `GOARCH` 環境変数でクロスコンパイル
-- Node.js: プラットフォーム依存のネイティブモジュールに注意
-- バイナリ名に拡張子を含めない（Windows 以外では不要）
+- Rust: `cross` Cross-compiled in crate
+- Go: `GOOS` / `GOARCH` Cross-compile with environment variables
+- Node.js: Beware of platform-dependent native modules
+- Do not include the extension in the binary name (unnecessary on non-Windows)
 
-### 11.6 テスト
+### 11.6 Test
 
-- CI/CD でテスト入力 JSON を用意し、期待出力と比較する
-- 複数の args パターンをテストする
-- 空の args、不正な JSON、巨大な入力などのエッジケースもテストする
-- exit code が正しいことを確認する
+- Prepare test input JSON in CI/CD and compare it with expected output
+- Test multiple args patterns
+- Also test for edge cases such as empty args, malformed JSON, and large inputs
+- Make sure the exit code is correct
 
 ---
 
-## 付録 A: プロトコル早見表
+## Appendix A: Protocol Quick Reference
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -730,24 +734,24 @@ cat /tmp/test_input.json | ./my_binary | wc -c
 
 ---
 
-## 付録 B: CapabilityResponse フィールド対応表
+## Appendix B: CapabilityResponse field correspondence table
 
-| Function の動作 | CapabilityResponse |
+| Function behavior | CapabilityResponse |
 |----------------|-------------------|
-| exit 0 + stdout に JSON | `success=true, output=<parsed JSON>` |
-| exit 0 + stdout 空 | `success=true, output=null` |
-| exit 0 + stdout が不正な JSON | `success=false, error_type="invalid_json_output"` |
+| exit 0 + JSON to stdout | `success=true, output=<parsed JSON>` |
+| exit 0 + stdout empty | `success=true, output=null` |
+| exit 0 + stdout is invalid JSON | `success=false, error_type="invalid_json_output"` |
 | exit 0 + stdout > 1MB | `success=false, error_type="response_too_large"` |
-| exit 非ゼロ | `success=false, error_type="function_execution_error"` |
-| タイムアウト | `success=false, error_type="timeout"` |
-| バイナリ未発見 | `success=false, error_type="binary_not_found"` |
-| パストラバーサル検出 | `success=false, error_type="security_violation"` |
+| exit non-zero | `success=false, error_type="function_execution_error"` |
+| Timeout | `success=false, error_type="timeout"` |
+| Binary not found | `success=false, error_type="binary_not_found"` |
+| Path traversal detection | `success=false, error_type="security_violation"` |
 
 ---
 
-## 関連ドキュメント
+## Related documents
 
-- [Pack 開発ガイド](pack-development.md) — Pack の全体像
-- [サンプルコード: Rust Pack](examples/rust_pack/) — Rust Pack の完全なサンプル
-- [サンプルコード: Go Pack](examples/go_pack/) — Go Pack の完全なサンプル
-- [サンプルコード: Node.js Pack](examples/node_pack/) — Node.js Pack の完全なサンプル
+- [Pack Development Guide](./pack-development.md) — Overview of Pack
+- [Sample Code: Rust Pack](examples/rust_pack/) — Complete sample of Rust Pack
+- [Sample Code: Go Pack](examples/go_pack/) — Complete Go Pack sample
+- [Sample Code: Node.js Pack](examples/node_pack/) — Complete sample of Node.js Pack

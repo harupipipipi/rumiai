@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./local_first_policy.md) | [JP](./i18n/ja/local_first_policy.md) | [KR](./i18n/ko/local_first_policy.md) | [CN](./i18n/zh-cn/local_first_policy.md)
+<!-- docs-i18n-links:end -->
+
 # Local First Policy
 
 defaultspack core is usable without cloud API keys.
