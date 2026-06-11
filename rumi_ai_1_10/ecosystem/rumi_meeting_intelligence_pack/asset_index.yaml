@@ -1,0 +1,49 @@
+asset_index:
+  pack_id: rumi_meeting_intelligence_pack
+  version: 0.1.0
+  generated_from: ecosystem.metadata.asset_index
+  categories:
+    index:
+      - asset_index.yaml
+    catalog:
+      - catalog/meeting_workflow_catalog.yaml
+      - catalog/decision_action_taxonomy.yaml
+      - catalog/evidence_bundle_catalog.yaml
+      - catalog/handoff_surface_matrix.yaml
+    schemas:
+      - schemas/meeting_input.schema.json
+      - schemas/decision_record.schema.json
+      - schemas/recap_bundle.schema.json
+    policies:
+      - policies/local_first_meeting.policy.yaml
+      - policies/evidence_linking.policy.yaml
+      - policies/boundary_handoff.policy.yaml
+    templates:
+      - templates/meeting_prep_brief.template.yaml
+      - templates/follow_up_draft.template.yaml
+      - templates/evidence_linked_recap_bundle.template.yaml
+    checklists:
+      - checklists/meeting_prep.checklist.yaml
+      - checklists/recap_bundle_quality.checklist.yaml
+    ledgers:
+      - ledgers/meeting_evidence_ledger.schema.yaml
+    profiles:
+      - profiles/meeting_intelligence_reviewer.profile.yaml
+    prompts:
+      - prompts/meeting_intelligence_reviewer.system.md
+      - prompts/follow_up_drafter.system.md
+    presets:
+      - presets/safe_default.preset.yaml
+      - presets/prep_brief.preset.yaml
+      - presets/recap_quality_gate.preset.yaml
+    examples:
+      - examples/prep_from_notes.example.yaml
+      - examples/transcript_to_decisions.example.yaml
+      - examples/follow_up_draft_handoff.example.yaml
+      - examples/evidence_recap_bundle.example.yaml
+    docs:
+      - README.md
+      - docs/README.md
+      - docs/architecture.md
+      - docs/interfaces.md
+      - docs/operations.md

@@ -1,0 +1,80 @@
+{
+  "pack_id": "rumi_sop_mining_pack",
+  "display_name": "Rumi SOP Mining Pack",
+  "description": "Declarative pack for turning local chat, tool, and audit traces into repeatable SOPs, checklists, runbooks, and human-approved workflow recipes.",
+  "target_pack_id": "rumi_sop_mining_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "live_trace_capture": "handoff_to_rumi_observability_pack_or_defaultspack_runtime",
+    "browser_control": "handoff_to_rumi_browser_automation_pack",
+    "computer_control": "handoff_to_defaultspack_computer_runtime",
+    "scheduled_jobs": "handoff_to_defaultspack_scheduler",
+    "tool_creation": "handoff_to_rumi_default_tools_pack",
+    "automation_execution": "handoff_to_runtime_owner_pack",
+    "sop_pattern_catalog": "owned_by_rumi_sop_mining_pack",
+    "trace_schema": "owned_by_rumi_sop_mining_pack",
+    "redaction_policy": "owned_by_rumi_sop_mining_pack",
+    "runbook_template": "owned_by_rumi_sop_mining_pack",
+    "human_approval_recipe": "owned_by_rumi_sop_mining_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "SOP mining is a declarative documentation and review pack. defaultspack remains the runtime, tool, automation, browser, computer, and scheduler owner.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "redaction_policy_reviewed",
+      "human_approval_workflow_reviewed",
+      "promotion_requires_maintainer_approved_runtime_owner"
+    ],
+    "promotion_blockers": [
+      "no_executable_runtime",
+      "documentation_contract_only",
+      "does_not_capture_new_live_traces",
+      "does_not_execute_automation",
+      "does_not_control_browsers_or_computers",
+      "does_not_schedule_jobs",
+      "does_not_create_or_invoke_tools",
+      "requires_human_approval_evidence_before_recipe_promotion"
+    ],
+    "promotion_evidence_required": [
+      "maintainer_approved_runtime_owner",
+      "redaction_audit_for_example_traces",
+      "human_approval_ledger_for_promoted_sops",
+      "non_execution_boundary_review",
+      "documented_defaultspack_replacement_plan"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.sop_mining_pack",
+    "channel": "experimental",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "operations-knowledge"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default.",
+    "The pack only documents patterns found in already available evidence."
+  ],
+  "conflict_notes": [
+    "This pack records SOP extraction boundaries and handoff policy instead of owning trace capture, automation, browser control, computer control, scheduling, or tool creation."
+  ]
+}

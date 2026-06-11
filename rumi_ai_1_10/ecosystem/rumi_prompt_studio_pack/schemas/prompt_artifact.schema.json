@@ -1,0 +1,154 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://rumi.local/schemas/prompt_studio/prompt_artifact.schema.json",
+  "title": "Prompt Studio Prompt Artifact",
+  "type": "object",
+  "required": [
+    "id",
+    "version",
+    "title",
+    "audience",
+    "objective",
+    "instruction_hierarchy",
+    "slots",
+    "style_preset_refs",
+    "lint_rubric_refs",
+    "fixture_refs",
+    "owner_surface",
+    "handoff_boundaries"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 3
+    },
+    "audience": {
+      "type": "string",
+      "minLength": 3
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 12
+    },
+    "instruction_hierarchy": {
+      "type": "object",
+      "required": [
+        "system_role",
+        "developer_constraints",
+        "user_slot_policy",
+        "conflict_resolution"
+      ],
+      "properties": {
+        "system_role": {
+          "type": "string"
+        },
+        "developer_constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "user_slot_policy": {
+          "type": "string"
+        },
+        "conflict_resolution": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "slots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "required",
+          "description",
+          "validation"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "validation": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "style_preset_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "lint_rubric_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "fixture_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "owner_surface": {
+      "type": "string",
+      "enum": [
+        "prompt_library",
+        "prompt_lint_rubrics",
+        "persona_style_presets",
+        "custom_instruction_migration",
+        "local_fixture_dry_runs"
+      ]
+    },
+    "handoff_boundaries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "surface",
+          "owner_pack",
+          "reason"
+        ],
+        "properties": {
+          "surface": {
+            "type": "string"
+          },
+          "owner_pack": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

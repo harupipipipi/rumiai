@@ -1,0 +1,94 @@
+{
+  "pack_id": "rumi_meeting_intelligence_pack",
+  "display_name": "Rumi Meeting Intelligence Pack",
+  "description": "Local-first meeting prep, transcript-to-decisions, action extraction, follow-up draft, and evidence-linked recap bundle workflow pack.",
+  "target_pack_id": "rumi_meeting_intelligence_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "compatibility": {
+    "target_pack_version": ">=0.1.0",
+    "python": ">=3.10",
+    "platforms": [
+      "windows",
+      "linux",
+      "macos"
+    ]
+  },
+  "overlap_policy": {
+    "connectors": "handoff_to_rumi_connector_gateway_pack",
+    "scheduler": "handoff_to_rumi_workflow_scheduler_pack",
+    "voice_capture": "handoff_to_rumi_voice_mobile_pack",
+    "business_ops_workflows": "handoff_to_rumi_business_ops_pack",
+    "document_parsing": "handoff_to_rumi_document_intelligence_pack",
+    "message_sending": "handoff_to_connector_or_business_ops_owner",
+    "calendar_booking": "handoff_to_scheduler_or_connector_owner",
+    "local_first_meeting_prep": "owned_by_rumi_meeting_intelligence_pack",
+    "transcript_decision_extraction": "owned_by_rumi_meeting_intelligence_pack",
+    "action_extraction": "owned_by_rumi_meeting_intelligence_pack",
+    "follow_up_drafts": "owned_by_rumi_meeting_intelligence_pack",
+    "evidence_linked_recap_bundles": "owned_by_rumi_meeting_intelligence_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Meeting intelligence is a local-first analysis and drafting overlay; defaultspack remains the runtime and execution owner.",
+    "criteria": [
+      "contract_tests_pass",
+      "ecosystem_schema_validation_passes",
+      "overlap_policy_reviewed",
+      "human_review_gate_documented",
+      "evidence_linking_quality_reviewed"
+    ],
+    "promotion_blockers": [
+      "no_executable_runtime",
+      "no_connector_ownership",
+      "no_scheduler_ownership",
+      "no_voice_capture_ownership",
+      "no_business_ops_execution",
+      "no_document_parser_ownership",
+      "human_review_required_before_external_action"
+    ],
+    "promotion_evidence_required": [
+      "maintainer_approved_runtime_owner",
+      "local_first_privacy_review",
+      "evidence_linked_recap_examples_reviewed",
+      "handoff_surface_acceptance_by_owner_packs",
+      "documented_defaultspack_replacement_plan"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.meeting_intelligence_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "meeting-intelligence",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default.",
+    "Follow-ups are drafts until a human or owner pack executes them."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding connector, scheduler, voice capture, business operations, or document parsing tools.",
+    "Remote context retrieval remains in rumi_connector_gateway_pack.",
+    "Reminders and recurring workflows remain in rumi_workflow_scheduler_pack.",
+    "Live meeting capture and transcription remain in rumi_voice_mobile_pack.",
+    "CRM, ticket, and outbound execution remain in rumi_business_ops_pack.",
+    "Document parsing remains in rumi_document_intelligence_pack."
+  ]
+}

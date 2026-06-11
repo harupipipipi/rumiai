@@ -1,0 +1,85 @@
+{
+  "pack_id": "rumi_prompt_studio_pack",
+  "display_name": "Rumi Prompt Studio Pack",
+  "description": "Declarative prompt library, linting rubric, persona/style presets, custom-instruction migration, and local fixture dry-run pack.",
+  "target_pack_id": "rumi_prompt_studio_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "prompt_library": "owned_by_rumi_prompt_studio_pack",
+    "prompt_lint_rubrics": "owned_by_rumi_prompt_studio_pack",
+    "persona_style_presets": "owned_by_rumi_prompt_studio_pack",
+    "custom_instruction_migration": "owned_by_rumi_prompt_studio_pack",
+    "local_fixture_dry_runs": "owned_by_rumi_prompt_studio_pack",
+    "model_benchmarking": "handoff_to_rumi_model_evals_pack",
+    "model_routing": "handoff_to_defaultspack_or_model_catalog_owner",
+    "memory_storage": "handoff_to_rumi_memory_pack",
+    "tool_or_api_creation": "handoff_to_tooling_owner",
+    "runtime_execution": "handoff_to_defaultspack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Prompt Studio is a review and artifact pack; defaultspack remains the runtime, setup, and execution owner.",
+    "criteria": [
+      "contract_tests_pass",
+      "asset_index_complete",
+      "prompt_review_policy_approved",
+      "migration_fixture_reviewed"
+    ],
+    "promotion_blockers": [
+      "no_executable_runtime",
+      "prompt_artifacts_only",
+      "no_model_router_or_benchmark_owner",
+      "no_memory_store_owner",
+      "no_tool_or_api_owner",
+      "requires_defaultspack_runtime_owner_for_execution"
+    ],
+    "promotion_evidence_required": [
+      "maintainer_approved_runtime_owner",
+      "stable_prompt_artifact_schema",
+      "migration_fidelity_review_evidence",
+      "local_fixture_dry_run_ledger",
+      "documented_defaultspack_replacement_plan"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.prompt_studio_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "prompt-engineering",
+    "channel": "experimental",
+    "keywords": [
+      "prompt-library",
+      "prompt-linting",
+      "persona-presets",
+      "instruction-migration",
+      "local-fixtures"
+    ]
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default.",
+    "Fixtures are static local text and YAML artifacts."
+  ],
+  "conflict_notes": [
+    "This pack owns prompt artifacts and review rules only.",
+    "It does not benchmark models, route models, store memory, or create tools/APIs.",
+    "Runtime execution remains owned by defaultspack."
+  ]
+}

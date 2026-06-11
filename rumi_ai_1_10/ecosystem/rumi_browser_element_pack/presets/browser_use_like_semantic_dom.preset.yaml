@@ -1,0 +1,14 @@
+preset_id: rumi_browser_element_pack.browser_use_like_semantic_dom
+name: Browser Use Like Semantic DOM
+profile: rumi_browser_element_pack.browser_element_agent
+strategy:
+  snapshot_first: true
+  prefer_element_id: true
+  highlight_evidence: true
+  verify_after_action: true
+fallbacks:
+  - browser_companion.page.snapshot
+  - browser_companion.page.capture
+  - computer_use.visible_window
+conflict_resolution:
+  browser_control: "Prefer paired browser_companion for live cookies; prefer CDP/headless for isolated test runs."

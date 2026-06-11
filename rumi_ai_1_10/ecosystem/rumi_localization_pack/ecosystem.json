@@ -1,0 +1,110 @@
+{
+  "pack_id": "rumi_localization_pack",
+  "pack_identity": "rumi:ecosystem/rumi_localization_pack",
+  "display_name": "Rumi Localization Pack",
+  "description": "Declarative translation, terminology, tone-preservation, locale QA, protected-term, and localization issue-triage workflow pack.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "vocabulary": {
+    "types": [
+      "localization",
+      "catalog",
+      "schema",
+      "policy",
+      "checklist",
+      "template",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": [],
+  "metadata": {
+    "runtime_type": "declarative_pack",
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "declarative_only": true,
+    "owner_surfaces": [
+      "translation_review",
+      "terminology_glossary",
+      "protected_term_policy",
+      "tone_preservation",
+      "locale_qa_matrix",
+      "locale_issue_schema",
+      "localization_issue_triage",
+      "localization_evidence_ledger"
+    ],
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_documents_pack",
+        "reason": "Document intelligence and rich document mutation remain with document owners; this pack supplies language review contracts."
+      },
+      {
+        "pack_id": "rumi_reference_ui_pack",
+        "reason": "Frontend design and layout implementation remain with UI owners; this pack records locale risk and copy decisions."
+      },
+      {
+        "pack_id": "rumi_workspace_export_pack",
+        "reason": "Workspace export generation remains with export owners; this pack supplies translation readiness evidence."
+      },
+      {
+        "pack_id": "rumi_connector_delivery_pack",
+        "reason": "Connector delivery remains with connector owners; this pack declares localized message quality and handoff checks."
+      }
+    ],
+    "asset_index": {
+      "readme": [
+        "README.md"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "catalog": [
+        "catalog/glossary.yaml",
+        "catalog/locale_qa_matrix.yaml",
+        "catalog/tone_locale_guide.yaml"
+      ],
+      "schema": [
+        "schemas/locale_issue.schema.json"
+      ],
+      "policy": [
+        "policies/protected_terms.policy.yaml",
+        "policies/localization_handoff.policy.yaml"
+      ],
+      "checklist": [
+        "checklists/translation_review.checklist.yaml"
+      ],
+      "template": [
+        "templates/localization_evidence_ledger.template.yaml"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/locale_qa_gate.preset.yaml"
+      ],
+      "profiles": [
+        "profiles/localization_reviewer.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/localization_reviewer.system.md",
+        "prompts/terminology_guard.system.md"
+      ],
+      "example": [
+        "examples/app_strings_review.example.yaml",
+        "examples/docs_localization_review.example.yaml",
+        "examples/support_copy_triage.example.yaml"
+      ]
+    }
+  }
+}

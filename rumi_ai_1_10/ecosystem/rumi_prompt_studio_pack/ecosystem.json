@@ -1,0 +1,140 @@
+{
+  "pack_id": "rumi_prompt_studio_pack",
+  "pack_identity": "rumi:ecosystem/rumi_prompt_studio_pack",
+  "display_name": "Rumi Prompt Studio Pack",
+  "description": "Declarative prompt library, lint rubric, persona/style preset, instruction migration, and local fixture dry-run pack.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "schema",
+      "policy",
+      "checklist",
+      "ledger",
+      "template",
+      "fixture",
+      "profile",
+      "prompt",
+      "preset",
+      "example",
+      "documentation"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": [],
+  "metadata": {
+    "runtime_type": "declarative_pack",
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "declarative_only": true,
+    "local_fixture_dry_runs_only": true,
+    "owner_surfaces": [
+      "prompt_library",
+      "prompt_lint_rubrics",
+      "prompt_review_rules",
+      "persona_style_presets",
+      "custom_instruction_migration",
+      "local_fixture_dry_runs",
+      "prompt_artifact_schema",
+      "prompt_review_ledger",
+      "prompt_release_checklist"
+    ],
+    "non_owner_surfaces": [
+      "model_benchmarking",
+      "model_routing",
+      "memory_storage",
+      "tool_or_api_creation",
+      "remote_runtime_execution",
+      "production_telemetry"
+    ],
+    "optional_integrations": [
+      {
+        "pack_id": "defaultspack",
+        "reason": "defaultspack remains the runtime loader and execution owner; this pack contributes reviewable prompt artifacts only."
+      },
+      {
+        "pack_id": "rumi_model_evals_pack",
+        "reason": "Model scoring and benchmark claims are delegated to model evaluation owners."
+      },
+      {
+        "pack_id": "rumi_memory_pack",
+        "reason": "Long-term memory, preference storage, and user profile persistence are delegated to memory owners."
+      },
+      {
+        "pack_id": "rumi_tooling_pack",
+        "reason": "Tool and API creation are delegated to tooling owners; this pack may document tool-use wording but cannot define tools."
+      }
+    ],
+    "asset_index": {
+      "index": [
+        "asset_index.json"
+      ],
+      "docs": [
+        "README.md",
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "catalog": [
+        "catalog/prompt_library.yaml",
+        "catalog/prompt_lint_rubrics.yaml",
+        "catalog/custom_instruction_migration_map.yaml",
+        "catalog/style_persona_catalog.yaml",
+        "catalog/local_fixture_dry_runs.yaml"
+      ],
+      "schemas": [
+        "schemas/prompt_artifact.schema.json",
+        "schemas/instruction_migration_record.schema.json",
+        "schemas/prompt_lint_result.schema.json"
+      ],
+      "policies": [
+        "policies/prompt_studio_review.policy.yaml",
+        "policies/custom_instruction_migration.policy.yaml"
+      ],
+      "checklists": [
+        "checklists/prompt_release.checklist.yaml"
+      ],
+      "ledgers": [
+        "ledgers/prompt_studio_review_ledger.schema.yaml"
+      ],
+      "templates": [
+        "templates/prompt_review_report.template.yaml",
+        "templates/custom_instruction_migration.template.yaml"
+      ],
+      "fixtures": [
+        "fixtures/chatgpt_custom_instructions.fixture.md",
+        "fixtures/claude_project_instructions.fixture.md",
+        "fixtures/gemini_gem_instruction.fixture.md",
+        "fixtures/local_dry_run_cases.yaml"
+      ],
+      "profiles": [
+        "profiles/prompt_librarian.profile.yaml",
+        "profiles/instruction_migration_reviewer.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/prompt_librarian.system.md",
+        "prompts/instruction_migration_reviewer.system.md"
+      ],
+      "presets": [
+        "presets/concise_operator.preset.yaml",
+        "presets/warm_research_partner.preset.yaml",
+        "presets/code_review_senior.preset.yaml",
+        "presets/technical_writer_plain.preset.yaml"
+      ],
+      "examples": [
+        "examples/prompt_library_entry.example.yaml",
+        "examples/chatgpt_instruction_migration.example.yaml",
+        "examples/claude_instruction_migration.example.yaml",
+        "examples/local_fixture_dry_run.example.yaml"
+      ]
+    }
+  }
+}

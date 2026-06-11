@@ -1,0 +1,76 @@
+{
+  "pack_id": "rumi_localization_pack",
+  "display_name": "Rumi Localization Pack",
+  "description": "Declarative translation, terminology, protected-term, tone-preservation, locale QA, and localization issue-triage review pack.",
+  "target_pack_id": "rumi_localization_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "document_intelligence": "handoff_to_rumi_documents_pack",
+    "frontend_design": "handoff_to_rumi_reference_ui_pack",
+    "workspace_export_generation": "handoff_to_rumi_workspace_export_pack",
+    "connector_delivery": "handoff_to_connector_packs",
+    "generic_qa": "handoff_to_rumi_agentic_qa_pack",
+    "model_quality_evals": "handoff_to_rumi_model_evals_pack",
+    "terminology_glossary": "owned_by_rumi_localization_pack",
+    "protected_term_policy": "owned_by_rumi_localization_pack",
+    "tone_preservation": "owned_by_rumi_localization_pack",
+    "locale_qa_matrix": "owned_by_rumi_localization_pack",
+    "locale_issue_schema": "owned_by_rumi_localization_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Localization is a language policy and review recipe pack, not a replacement for defaultspack runtime startup, workspace export, connector delivery, document intelligence, or frontend ownership.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "terminology_governance_reviewed",
+      "locale_issue_schema_adopted_by_owner_packs"
+    ],
+    "promotion_blockers": [
+      "no_executable_runtime",
+      "localization_contract_only",
+      "does_not_generate_workspace_exports",
+      "requires_document_owner_for_source_extraction",
+      "requires_frontend_owner_for_layout_changes",
+      "requires_connector_owner_for_delivery"
+    ],
+    "promotion_evidence_required": [
+      "maintainer_approved_language_policy_owner",
+      "glossary_change_control_evidence",
+      "locale_issue_triage_examples",
+      "protected_term_exception_review",
+      "documented_defaultspack_replacement_plan"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.localization_pack",
+    "channel": "experimental",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "localization"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares language review boundaries and handoff policy instead of overriding document, frontend, export, connector, QA, or eval tools."
+  ]
+}

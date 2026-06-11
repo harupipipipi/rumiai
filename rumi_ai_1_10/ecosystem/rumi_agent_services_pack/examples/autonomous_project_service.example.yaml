@@ -1,0 +1,21 @@
+example_id: rumi_agent_services.examples.autonomous_project_service
+preset: openclaw_hermes_local_service
+title: Coordinate a local multi-role project
+goal: Split a bounded project into research, coding, synthesis, and review tracks, then deliver one integrated result.
+constraints:
+  local_first: true
+  subagents: optional_with_approval
+  file_write: approval_required
+  terminal: approval_required
+  network: deny_by_default
+deliverable:
+  type: integrated_project_summary
+handoffs:
+  - target_role: service_director
+    objective: Create the mission brief and work packages.
+  - target_role: coding_operator
+    objective: Handle local implementation work if required.
+  - target_role: synthesis_writer
+    objective: Integrate track outputs.
+  - target_role: quality_reviewer
+    objective: Review before final delivery.

@@ -1,0 +1,137 @@
+{
+  "pack_id": "rumi_meeting_intelligence_pack",
+  "pack_identity": "rumi:ecosystem/rumi_meeting_intelligence_pack",
+  "display_name": "Rumi Meeting Intelligence Pack",
+  "description": "Declarative local-first meeting prep, transcript-to-decisions, action extraction, follow-up draft, and evidence-linked recap bundle pack.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "schema",
+      "policy",
+      "profile",
+      "prompt",
+      "preset",
+      "example",
+      "checklist",
+      "ledger",
+      "template",
+      "docs"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": [],
+  "metadata": {
+    "runtime_type": "declarative_pack",
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "declarative_only": true,
+    "required_secrets": [],
+    "consumes_existing_sources_only": true,
+    "output_effect": "draft_and_bundle_only",
+    "owner_surfaces": [
+      "local_first_meeting_prep",
+      "transcript_to_decisions",
+      "action_extraction",
+      "follow_up_drafts",
+      "evidence_linked_recap_bundles",
+      "meeting_artifact_quality_gate",
+      "local_first_redaction"
+    ],
+    "non_owner_surfaces": [
+      "connectors",
+      "scheduler",
+      "voice_capture",
+      "business_ops_workflows",
+      "document_parsing",
+      "message_sending",
+      "calendar_booking"
+    ],
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_connector_gateway_pack",
+        "reason": "Connector gateway owns fetching remote calendars, mail, chat, and drive context; this pack consumes already supplied local files and transcript exports."
+      },
+      {
+        "pack_id": "rumi_workflow_scheduler_pack",
+        "reason": "Scheduler owns reminders, recurring prep, and timed follow-up execution; this pack produces handoff-ready tasks only."
+      },
+      {
+        "pack_id": "rumi_voice_mobile_pack",
+        "reason": "Voice and mobile packs own live capture, audio transcription, and meeting recording; this pack starts from existing transcript or notes files."
+      },
+      {
+        "pack_id": "rumi_business_ops_pack",
+        "reason": "Business operations owns CRM, project system, ticket, and outbound workflow execution; this pack creates reviewed handoff records."
+      },
+      {
+        "pack_id": "rumi_document_intelligence_pack",
+        "reason": "Document intelligence owns document parsing and conversion; this pack consumes text that has already been made available."
+      }
+    ],
+    "asset_index": {
+      "index": [
+        "asset_index.yaml"
+      ],
+      "catalog": [
+        "catalog/meeting_workflow_catalog.yaml",
+        "catalog/decision_action_taxonomy.yaml",
+        "catalog/evidence_bundle_catalog.yaml",
+        "catalog/handoff_surface_matrix.yaml"
+      ],
+      "schemas": [
+        "schemas/meeting_input.schema.json",
+        "schemas/decision_record.schema.json",
+        "schemas/recap_bundle.schema.json"
+      ],
+      "policies": [
+        "policies/local_first_meeting.policy.yaml",
+        "policies/evidence_linking.policy.yaml",
+        "policies/boundary_handoff.policy.yaml"
+      ],
+      "templates": [
+        "templates/meeting_prep_brief.template.yaml",
+        "templates/follow_up_draft.template.yaml",
+        "templates/evidence_linked_recap_bundle.template.yaml"
+      ],
+      "checklists": [
+        "checklists/meeting_prep.checklist.yaml",
+        "checklists/recap_bundle_quality.checklist.yaml"
+      ],
+      "ledgers": [
+        "ledgers/meeting_evidence_ledger.schema.yaml"
+      ],
+      "profiles": [
+        "profiles/meeting_intelligence_reviewer.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/meeting_intelligence_reviewer.system.md",
+        "prompts/follow_up_drafter.system.md"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/prep_brief.preset.yaml",
+        "presets/recap_quality_gate.preset.yaml"
+      ],
+      "examples": [
+        "examples/prep_from_notes.example.yaml",
+        "examples/transcript_to_decisions.example.yaml",
+        "examples/follow_up_draft_handoff.example.yaml",
+        "examples/evidence_recap_bundle.example.yaml"
+      ],
+      "docs": [
+        "README.md",
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ]
+    }
+  }
+}

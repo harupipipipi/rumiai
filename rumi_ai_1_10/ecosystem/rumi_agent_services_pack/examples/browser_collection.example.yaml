@@ -1,0 +1,16 @@
+example_id: rumi_agent_services.examples.browser_collection
+preset: manus_project_service
+title: Collect approved page observations
+goal: Use an approved browser target to collect visible information and return a structured observation log.
+constraints:
+  browser_scope: user_approved_target_only
+  authenticated_actions: explicit_approval_required
+  form_submit: deny_by_default
+  network: optional_with_approval
+deliverable:
+  type: observation_log
+handoffs:
+  - target_role: browser_operator
+    objective: Observe and collect approved visible information.
+  - target_role: quality_reviewer
+    objective: Check consent scope and unsupported claims.
