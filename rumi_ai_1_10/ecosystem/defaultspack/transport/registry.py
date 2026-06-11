@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,13 +15,40 @@ from ecosystem.defaultspack.domain.tool.security import is_trusted_pack_id
 class HttpRouteSpec:
     method: str
     pattern: str
-    block_module: str = ""
-    function_name: str = ""
+    function_id: str = ""
+    legacy_block_module: str = ""
     flow_id: str = ""
-    fallback_block_module: str = ""
     handler_name: str = ""
     path_inject: Dict[str, str] = field(default_factory=dict)
     defaults: Dict[str, Any] = field(default_factory=dict)
+    pre_auth: bool = False
+    sensitive: bool = False
+    block_module: str = ""
+    function_name: str = ""
+    fallback_block_module: str = ""
+
+    def __post_init__(self) -> None:
+        resolved_function_id = str(self.function_id or self.function_name or "").strip()
+        resolved_legacy_block = str(
+            self.legacy_block_module or self.fallback_block_module or ""
+        ).strip()
+        if self.block_module and not resolved_function_id:
+            try:
+                from domain.function_runtime.registry import function_id_for_block_module
+
+                resolved_function_id = str(
+                    function_id_for_block_module(self.block_module) or ""
+                ).strip()
+            except Exception:
+                resolved_function_id = ""
+        if self.block_module and not resolved_legacy_block:
+            resolved_legacy_block = str(self.block_module).strip()
+        if resolved_function_id and not self.function_name:
+            object.__setattr__(self, "function_name", resolved_function_id)
+        if resolved_legacy_block and not self.fallback_block_module:
+            object.__setattr__(self, "fallback_block_module", resolved_legacy_block)
+        object.__setattr__(self, "function_id", resolved_function_id)
+        object.__setattr__(self, "legacy_block_module", resolved_legacy_block)
 
 
 _ROUTE_PARAM_RE = re.compile(r"\{(\w+)\}")
@@ -134,6 +162,13 @@ def _component_route_specs() -> List[HttpRouteSpec]:
             method = str(route.get("method") or "").strip().upper()
             pattern = str(route.get("path") or route.get("pattern") or "").strip()
             block_module = str(route.get("block_module") or "").strip()
+            function_id = str(
+                route.get("function_id")
+                or route.get("function_name")
+                or route.get("qualified_name")
+                or route.get("function")
+                or ""
+            ).strip()
             function_name = str(
                 route.get("function_name")
                 or route.get("qualified_name")
@@ -144,8 +179,15 @@ def _component_route_specs() -> List[HttpRouteSpec]:
             fallback_block_module = str(
                 route.get("fallback_block_module") or route.get("fallback_block") or ""
             ).strip()
+            legacy_block_module = str(route.get("legacy_block_module") or "").strip()
             handler_name = str(route.get("handler_name") or "").strip()
-            if not method or not pattern or not (block_module or function_name or flow_id or handler_name):
+            if not method or not pattern or not (
+                block_module
+                or function_id
+                or function_name
+                or flow_id
+                or handler_name
+            ):
                 continue
             if not _component_route_target_allowed(
                 source_pack_id=source_pack_id,
@@ -160,6 +202,8 @@ def _component_route_specs() -> List[HttpRouteSpec]:
                 HttpRouteSpec(
                     method,
                     pattern,
+                    function_id=function_id,
+                    legacy_block_module=legacy_block_module,
                     block_module=block_module,
                     function_name=function_name,
                     flow_id=flow_id,
@@ -198,14 +242,55 @@ def _defaultspack_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _read_flow_yaml(path: Path) -> dict[str, Any]:
+def _read_yaml(path: Path) -> dict[str, Any]:
     try:
         import yaml
 
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _read_flow_yaml(path: Path) -> dict[str, Any]:
+    return _read_yaml(path)
+
+
+def _legacy_http_routes_path() -> Path:
+    return _defaultspack_root() / "docs" / "legacy_http_routes.yaml"
+
+
+@lru_cache(maxsize=1)
+def load_legacy_http_route_allowlist() -> dict[tuple[str, str, str], dict[str, Any]]:
+    data = _read_yaml(_legacy_http_routes_path())
+    allowlist: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for route in data.get("legacy_routes") or []:
+        if not isinstance(route, dict):
+            continue
+        method = str(route.get("method") or "").strip().upper()
+        pattern = str(route.get("pattern") or "").strip()
+        legacy_block_module = str(route.get("legacy_block_module") or "").strip()
+        if not method or not pattern or not legacy_block_module:
+            continue
+        allowlist[(method, pattern, legacy_block_module)] = route
+    return allowlist
+
+
+def require_legacy_route_allowlisted(spec: HttpRouteSpec) -> None:
+    legacy_block_module = str(spec.legacy_block_module or "").strip()
+    if not legacy_block_module:
+        return
+    key = (
+        str(spec.method or "").upper(),
+        str(spec.pattern or "").strip(),
+        legacy_block_module,
+    )
+    if key in load_legacy_http_route_allowlist():
+        return
+    raise ValueError(
+        "legacy HTTP route is not allowlisted: "
+        f"{key[0]} {key[1]} -> {legacy_block_module}"
+    )
 
 
 def flow_http_route_specs() -> List[HttpRouteSpec]:
@@ -681,13 +766,14 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
     ]
     for spec in ordered_specs:
         compiled = compile_http_route_pattern(spec.pattern)
+        require_legacy_route_allowlisted(spec)
         if spec.flow_id:
             def _handler(
                 request_data,
                 path_params,
                 *,
                 flow_id=spec.flow_id,
-                fallback_block_module=spec.fallback_block_module,
+                fallback_block_module=spec.legacy_block_module or spec.fallback_block_module,
                 path_inject=dict(spec.path_inject),
                 route_defaults=dict(spec.defaults),
                 route_method=spec.method,
@@ -703,13 +789,13 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
                     fallback_block_module=fallback_block_module,
                 )
             handler = _handler
-        elif spec.function_name:
+        elif spec.function_id:
             def _handler(
                 request_data,
                 path_params,
                 *,
-                function_name=spec.function_name,
-                fallback_block_module=spec.fallback_block_module,
+                function_name=spec.function_id,
+                fallback_block_module=spec.legacy_block_module or spec.fallback_block_module,
                 path_inject=dict(spec.path_inject),
                 route_defaults=dict(spec.defaults),
                 route_method=spec.method,
@@ -717,20 +803,30 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
                 payload = dict(request_data or {})
                 payload.update(route_defaults)
                 payload["_method"] = route_method
-                return server._invoke_function_route(
-                    function_name,
-                    payload,
-                    path_params,
-                    path_inject,
-                    fallback_block_module=fallback_block_module,
-                )
+                function_route = getattr(server, "_invoke_function_route", None)
+                if callable(function_route):
+                    return function_route(
+                        function_name,
+                        payload,
+                        path_params,
+                        path_inject,
+                        fallback_block_module=fallback_block_module,
+                    )
+                if fallback_block_module:
+                    return server._invoke_fallback_block(
+                        fallback_block_module,
+                        payload,
+                        path_params,
+                        path_inject,
+                    )
+                raise AttributeError("_invoke_function_route")
             handler = _handler
-        elif spec.block_module:
+        elif spec.legacy_block_module or spec.block_module:
             def _handler(
                 request_data,
                 path_params,
                 *,
-                block_module=spec.block_module,
+                block_module=spec.legacy_block_module or spec.block_module,
                 path_inject=dict(spec.path_inject),
                 route_defaults=dict(spec.defaults),
                 route_method=spec.method,

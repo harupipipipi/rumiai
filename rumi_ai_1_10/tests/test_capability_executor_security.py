@@ -12,10 +12,10 @@ import json
 import time
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, PropertyMock
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-from types import SimpleNamespace
 
 import pytest
 
@@ -42,8 +42,8 @@ class _MockFunctionEntry:
     pack_id: str = "test_pack"
     function_id: str = "test_func"
     qualified_name: str = "test_pack.test_func"
-    function_dir: Optional[str] = "/tmp/test_func_dir"
-    main_py_path: Optional[str] = "/tmp/test_func_dir/main.py"
+    function_dir: Optional[str] = str(Path(__file__).resolve().parent)
+    main_py_path: Optional[str] = str(Path(__file__).resolve())
     main_binary_path: Optional[str] = None
     entrypoint: Optional[str] = "main.py:run"
     calling_convention: Optional[str] = None
@@ -188,13 +188,10 @@ class TestHighRiskApprovalCallerRequires:
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
     def test_permissive_permission_manager_does_not_satisfy_high_risk_approval(self, mock_audit):
         executor = _make_test_executor()
-        func_dir = _project_root / "ecosystem" / "rumi_default_tools_pack" / "functions" / "computer_use"
         entry = _MockFunctionEntry(
-            pack_id="rumi_default_tools_pack",
+            pack_id="third_party_tools_pack",
             function_id="computer_use",
-            qualified_name="rumi_default_tools_pack:computer_use",
-            function_dir=str(func_dir),
-            main_py_path=str(func_dir / "main.py"),
+            qualified_name="third_party_tools_pack:computer_use",
             caller_requires=["user.approved.high_risk"],
         )
         executor._function_registry.get.return_value = entry
@@ -203,10 +200,10 @@ class TestHighRiskApprovalCallerRequires:
         executor._permission_manager.check_caller_requires.return_value = True
 
         resp = executor.execute(
-            "rumi_default_tools_pack",
+            "third_party_tools_pack",
             {
                 "type": "function.call",
-                "qualified_name": "rumi_default_tools_pack:computer_use",
+                "qualified_name": "third_party_tools_pack:computer_use",
                 "args": {"action": "click"},
             },
         )
@@ -223,9 +220,9 @@ class TestHighRiskApprovalCallerRequires:
         main_py = func_dir / "main.py"
         main_py.write_text('def run(context, args): return {"ok": True}', encoding="utf-8")
         entry = _MockFunctionEntry(
-            pack_id="rumi_default_tools_pack",
+            pack_id="third_party_tools_pack",
             function_id="coding_terminal_exec",
-            qualified_name="rumi_default_tools_pack:coding_terminal_exec",
+            qualified_name="third_party_tools_pack:coding_terminal_exec",
             function_dir=str(func_dir),
             main_py_path=str(main_py),
             calling_convention="subprocess",
@@ -277,7 +274,11 @@ class TestHighRiskApprovalCallerRequires:
         executor._trust_store.is_trusted.return_value = SimpleNamespace(trusted=True, reason="trusted")
         executor._permission_manager = MagicMock()
         executor._permission_manager.has_permission.return_value = False
-        executor._grant_manager.check.return_value = SimpleNamespace(allowed=False, reason="not granted", config={})
+        executor._grant_manager.check.return_value = SimpleNamespace(
+            allowed=False,
+            reason="not granted",
+            config={},
+        )
 
         with patch.object(executor, "_dispatch_by_calling_convention") as mock_dispatch:
             resp = executor.execute(
@@ -293,7 +294,6 @@ class TestHighRiskApprovalCallerRequires:
         mock_dispatch.assert_not_called()
 
 
-
 class TestTrustedBuiltinPackIdentity:
     """Reserved built-in pack IDs must resolve to shipped built-in paths."""
 
@@ -302,12 +302,14 @@ class TestTrustedBuiltinPackIdentity:
         executor = _make_test_executor()
         evil_dir = tmp_path / "00evil" / "functions" / "spoof"
         evil_dir.mkdir(parents=True)
+        main_py = evil_dir / "main.py"
+        main_py.write_text('def run(context, args): return {"ok": True}', encoding="utf-8")
         entry = _MockFunctionEntry(
             pack_id="defaultspack",
             function_id="spoof",
             qualified_name="defaultspack:spoof",
             function_dir=str(evil_dir),
-            main_py_path=str(evil_dir / "main.py"),
+            main_py_path=str(main_py),
             requires=["definitely.not.granted"],
         )
         executor._function_registry.get.return_value = entry
@@ -329,6 +331,7 @@ class TestTrustedBuiltinPackIdentity:
         assert resp.error_type == "pack_not_approved"
         executor._approval_manager.is_pack_approved_and_verified.assert_not_called()
         executor._permission_manager.has_permission.assert_not_called()
+
 
 # ===========================================================================
 # Wave 1-2: _execute_command_function ガード
@@ -380,8 +383,25 @@ class TestCommandFunctionPathTraversal:
         assert resp.error_type == "security_violation"
         assert "escapes" in resp.error.lower()
 
+    def test_command_requires_absolute_executable_path(self, monkeypatch):
+        monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
+        executor = _make_test_executor()
+        entry = _MockFunctionEntry(command=["bash", "-lc", "echo hi"], host_execution=True)
+
+        resp = executor._execute_command_function(
+            principal_id="test_principal",
+            entry=entry,
+            args={},
+            request_id="req_004b",
+            start_time=time.time(),
+        )
+
+        assert not resp.success
+        assert resp.error_type == "security_violation"
+        assert "absolute executable path" in resp.error.lower()
+
     def test_python_command_cannot_use_inline_code(self, monkeypatch, tmp_path):
-        """sys.executable + -c は function_dir 境界を回避できないこと"""
+        """sys.executable + -c cannot bypass the function_dir boundary."""
         monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
         executor = _make_test_executor()
 
@@ -405,7 +425,7 @@ class TestCommandFunctionPathTraversal:
         assert "inside function directory" in resp.error.lower()
 
     def test_python_command_outside_script_blocked(self, monkeypatch, tmp_path):
-        """sys.executable + function_dir 外のスクリプトは拒否されること"""
+        """sys.executable + a script outside function_dir is rejected."""
         monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
         executor = _make_test_executor()
 
