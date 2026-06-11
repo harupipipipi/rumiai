@@ -1,0 +1,59 @@
+{
+  "version": "rumi.computer_control.gateway_evidence.v1",
+  "pack_id": "rumi_computer_control_pack",
+  "network_default": "none",
+  "design_evidence": {
+    "openclaw": {
+      "themes": [
+        "local_first_gateway",
+        "desktop_surface",
+        "voice_surface",
+        "canvas_surface",
+        "node_surface",
+        "tool_surface",
+        "sandbox_distinction"
+      ],
+      "applied_as": "Vocabulary for local gateway and surface classification; no OpenClaw code or runtime is included."
+    },
+    "hermes": {
+      "themes": [
+        "terminal_backend_local",
+        "terminal_backend_docker",
+        "terminal_backend_ssh",
+        "terminal_backend_modal",
+        "terminal_backend_daytona",
+        "messaging_gateway",
+        "cli_gateway"
+      ],
+      "applied_as": "Vocabulary for terminal backend and gateway classification; no Hermes code or runtime is included."
+    },
+    "user_request": {
+      "themes": [
+        "computer_plugin_local_testing",
+        "chrome_plugin_local_testing",
+        "unrestricted_local_testing_request"
+      ],
+      "applied_as": "Evidence and approval contract for local testing; not an unrestricted grant."
+    }
+  },
+  "gateway_contexts": [
+    {
+      "id": "host_desktop",
+      "boundary": "host",
+      "default_network": "none",
+      "state_change_requires": ["visible_target", "expected_effect", "approval_if_required"]
+    },
+    {
+      "id": "local_sandbox",
+      "boundary": "sandbox",
+      "default_network": "none",
+      "state_change_requires": ["sandbox_identity", "workspace_path", "escape_path_absent"]
+    },
+    {
+      "id": "terminal_backend",
+      "boundary": "classified_per_session",
+      "default_network": "none",
+      "state_change_requires": ["backend_type", "command_risk", "approval_if_required"]
+    }
+  ]
+}

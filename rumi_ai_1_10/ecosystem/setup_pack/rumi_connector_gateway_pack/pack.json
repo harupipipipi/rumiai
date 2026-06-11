@@ -1,0 +1,55 @@
+{
+  "pack_id": "rumi_connector_gateway_pack",
+  "display_name": "Rumi Connector Gateway Pack",
+  "description": "Declarative connector and channel gateway policy for Slack, Gmail, Drive, Notion, GitHub, and messaging surfaces.",
+  "target_pack_id": "rumi_connector_gateway_pack",
+  "version": "0.1.0",
+  "compatibility": {
+    "target_pack_version": ">=0.1.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "connector_execution": "do_not_override_installed_connector_tools",
+    "mcp_gateway": "mcp_servers_use_defaultspack_mcp_registry",
+    "workflow_delivery": "handoff_schedules_to_defaultspack_scheduler",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "criteria": [
+      "connector_scope_reviews",
+      "prompt_injection_regression_tests",
+      "channel_delivery_contracts"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.connector_gateway_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "connector-gateway",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No OAuth tokens or API keys are bundled.",
+    "Connector execution remains owned by installed connector tools and defaultspack grants."
+  ],
+  "conflict_notes": [
+    "This pack owns connector policy and handoff contracts, not transport implementations."
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "pack_id": "rumi_runtime_benchmark_pack",
+  "display_name": "Rumi Runtime Benchmark Pack",
+  "description": "Declarative runtime benchmark, latency, cost, reproducibility, sampling, and environment-capture workflow pack.",
+  "target_pack_id": "rumi_runtime_benchmark_pack",
+  "version": "0.1.0",
+  "compatibility": {
+    "target_pack_version": ">=0.1.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "model_quality_metrics": "handoff_to_rumi_model_evals_pack",
+    "run_event_logging": "handoff_to_rumi_observability_pack",
+    "isolated_execution": "handoff_to_rumi_sandbox_runtime_pack",
+    "release_gate_reporting": "handoff_to_rumi_devops_release_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Runtime benchmarking is an optional measurement overlay; defaultspack remains the runtime and execution owner.",
+    "promotion_blockers": [
+      "No executable benchmark runner is owned by this pack.",
+      "Latency and cost thresholds require maintainer-approved production-like evidence.",
+      "Sampling and environment capture must prove reproducibility before promotion."
+    ],
+    "promotion_evidence_required": [
+      "contract_tests_pass",
+      "ecosystem_schema_validation_passes",
+      "overlap_policy_reviewed",
+      "environment_capture_reviewed",
+      "sample_size_confidence_reviewed",
+      "release_gate_thresholds_accepted_by_maintainers"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.runtime_benchmark_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "runtime-benchmark",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools.",
+    "Model quality metrics remain in rumi_model_evals_pack.",
+    "Run event logging remains in rumi_observability_pack.",
+    "Isolated execution remains in rumi_sandbox_runtime_pack.",
+    "Release gate reporting remains in rumi_devops_release_pack."
+  ]
+}

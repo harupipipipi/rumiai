@@ -1,0 +1,96 @@
+{
+  "pack_id": "rumi_voice_mobile_pack",
+  "pack_identity": "rumi:ecosystem/rumi_voice_mobile_pack",
+  "display_name": "Rumi Voice Mobile Pack",
+  "version": "0.1.0",
+  "description": "Declarative voice, mobile, intent, consent, notification, and handoff receipt pack for on-the-go Rumi interactions.",
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "policy",
+      "profile",
+      "prompt",
+      "preset",
+      "example",
+      "spec",
+      "checklist",
+      "template",
+      "evidence"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": [],
+  "host_execution": false,
+  "metadata": {
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "registers_tools": false,
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_connector_gateway_pack",
+        "reason": "Owns notification and channel delivery; this pack only records consent and handoff receipts."
+      },
+      {
+        "pack_id": "rumi_workflow_scheduler_pack",
+        "reason": "Owns scheduled briefing execution; this pack only defines mobile briefing contracts."
+      },
+      {
+        "pack_id": "rumi_multimodal_media_pack",
+        "reason": "Owns audio capture/transcription runtime; this pack only defines transcript consent and review policy."
+      },
+      {
+        "pack_id": "rumi_computer_control_pack",
+        "reason": "Owns device and desktop actions; this pack only classifies mobile action safety."
+      }
+    ],
+    "owner_surfaces": [
+      "voice_memo_contracts",
+      "mobile_notification_handoffs",
+      "speech_command_safety",
+      "on_the_go_briefings",
+      "intent_taxonomy",
+      "transcription_consent",
+      "notification_consent",
+      "mobile_action_safety",
+      "handoff_receipts"
+    ],
+    "asset_index": {
+      "readme": ["README.md"],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "catalogs": ["catalog/voice_mobile_workflows.yaml"],
+      "policies": [
+        "policies/voice_mobile_safety.policy.yaml",
+        "policies/transcription_notification_consent.policy.yaml"
+      ],
+      "profiles": ["profiles/voice_mobile_operator.profile.yaml"],
+      "prompts": ["prompts/voice_mobile_operator.system.md"],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "examples": [
+        "examples/voice_memo_task.example.yaml",
+        "examples/morning_brief.example.yaml",
+        "examples/mobile_followup.example.yaml"
+      ],
+      "specs": [
+        "specs/intent_taxonomy.yaml",
+        "specs/handoff_receipt.schema.yaml"
+      ],
+      "checklists": ["checklists/mobile_action_safety_checklist.yaml"],
+      "templates": ["templates/mobile_handoff_receipt.template.yaml"]
+    }
+  }
+}

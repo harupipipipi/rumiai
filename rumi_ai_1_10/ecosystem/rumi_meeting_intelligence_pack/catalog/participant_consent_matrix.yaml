@@ -1,0 +1,12 @@
+participant_consent_matrix:
+  consent_states:
+  - id: internal_only
+    external_send_allowed: false
+  - id: participant_reviewed
+    external_send_allowed: true
+  - id: recording_derived
+    external_send_allowed: false
+  blocked_without_consent:
+  - external follow-up send
+  - calendar invite creation
+  - attributed quote sharing

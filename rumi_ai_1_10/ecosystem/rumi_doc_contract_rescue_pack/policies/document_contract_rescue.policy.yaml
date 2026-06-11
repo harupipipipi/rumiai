@@ -1,0 +1,16 @@
+policy_id: document_contract_rescue
+pack_id: rumi_doc_contract_rescue_pack
+defaults:
+  network_policy: none_by_default
+  destructive_edits: deny_without_explicit_user_approval
+  preserve_review_state: true
+rules:
+  - id: no_silent_reference_substitution
+    requirement: Missing sources must be disclosed before replacement or synthesis.
+  - id: preserve_redline_semantics
+    requirement: Tracked changes and comments must not be flattened unless the output format requires it and the change log records the loss.
+  - id: citation_verification_gate
+    requirement: Export-ready documents must separate verified citations from unresolved placeholders.
+  - id: render_before_delivery
+    requirement: Final deliverables must include a render or openability check when the target format supports it.
+

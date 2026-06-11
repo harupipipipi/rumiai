@@ -1,0 +1,12 @@
+id: rumi_openclaw_parity_pack
+category: parity-catalog
+openclaw_surface: official OpenClaw runtime, plugin, channel, provider, skill, memory, automation, security, media, and node surfaces
+capabilities:
+  - Map OpenClaw surfaces to Rumiai pack ownership.
+  - Keep setup-pack install choices visible without granting execution power.
+  - Provide a compact checklist for future behavior packs.
+safety_notes:
+  - Declarative metadata only.
+  - No secrets, remote endpoints, npm installs, or executable handlers.
+  - Runtime enforcement remains in defaultspack and the owning behavior packs.
+

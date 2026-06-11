@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/tool_approval_prompt.schema.json",
+  "title": "Tool Approval Prompt",
+  "description": "Approval prompt required before tool or MCP calls.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "approval_id",
+    "artifact_id",
+    "tool_ref",
+    "scope",
+    "approval_state",
+    "first_call",
+    "receipt",
+    "approval_required",
+    "requires_approval",
+    "approval_request_id",
+    "operation",
+    "risk_level",
+    "args_hash",
+    "expires_at",
+    "display_summary",
+    "redacted_arguments",
+    "client_supplied_approved_trusted",
+    "tool_call_id",
+    "payload",
+    "execution_owner",
+    "trusted_authority",
+    "server_issued_approval_token_required"
+  ],
+  "properties": {
+    "approval_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tool_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "owner_pack",
+        "name"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "mcp",
+            "api",
+            "browser",
+            "media"
+          ]
+        },
+        "owner_pack": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "scope": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "approval_state": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "pending",
+        "approved",
+        "denied",
+        "expired"
+      ]
+    },
+    "first_call": {
+      "type": "boolean"
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approved_by",
+        "approved_at",
+        "scope_hash"
+      ],
+      "properties": {
+        "approved_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approved_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope_hash": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "approval_required": {
+      "type": "boolean",
+      "const": true
+    },
+    "requires_approval": {
+      "type": "boolean",
+      "const": true
+    },
+    "approval_request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operation": {
+      "type": "string",
+      "pattern": "^tool\\.[A-Za-z0-9_.:-]+$"
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "args_hash": {
+      "type": "string",
+      "minLength": 8
+    },
+    "expires_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "display_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "redacted_arguments": {
+      "type": "object"
+    },
+    "client_supplied_approved_trusted": {
+      "type": "boolean",
+      "const": false
+    },
+    "tool_call_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload": {
+      "type": "object"
+    },
+    "execution_owner": {
+      "type": "string",
+      "const": "defaultspack"
+    },
+    "trusted_authority": {
+      "type": "string",
+      "const": "server_issued_approval_token"
+    },
+    "server_issued_approval_token_required": {
+      "type": "boolean",
+      "const": true
+    }
+  }
+}

@@ -1,0 +1,106 @@
+contract_fixture:
+  participants:
+  - participant_id: participant_alpha
+    segment: admin_user
+    consent_state: granted
+    redaction_state: redacted
+    allowed_use:
+    - synthesis
+    - quote_with_review
+    source_system: local_transcript
+  - participant_id: participant_revoked
+    segment: admin_user
+    consent_state: revoked
+    redaction_state: raw_blocked
+    allowed_use:
+    - do_not_use
+    source_system: local_transcript
+  consent_records:
+  - consent_id: consent_alpha
+    participant_id: participant_alpha
+    consent_state: granted
+    allowed_use:
+    - synthesis
+    - quote_with_review
+    expires_at_state: none
+    evidence_ids:
+    - consent_form_alpha
+    review_owner: rumi_customer_research_pack
+  - consent_id: consent_revoked
+    participant_id: participant_revoked
+    consent_state: revoked
+    allowed_use:
+    - do_not_use
+    expires_at_state: explicit
+    evidence_ids:
+    - consent_revocation_notice
+    review_owner: rumi_customer_research_pack
+  interview_evidence:
+  - interview_id: interview_alpha
+    participant_id: participant_alpha
+    quotes:
+    - quote_id: quote_alpha_001
+      redacted_quote: The export step felt risky because I could not see which fields would be shared.
+      source_span_id: span_alpha_001
+      allowed_for_insight: true
+    - quote_id: quote_alpha_002
+      redacted_quote: I trust the summary more when each insight links back to the exact source note.
+      source_span_id: span_alpha_002
+      allowed_for_insight: true
+    source_span_ids:
+    - span_alpha_001
+    - span_alpha_002
+    consent_state: granted
+    redaction_state: redacted
+    themes:
+    - export_review
+    - evidence_traceability
+  - interview_id: interview_revoked
+    participant_id: participant_revoked
+    quotes:
+    - quote_id: quote_revoked_001
+      redacted_quote: Withheld because participant consent was revoked.
+      source_span_id: span_revoked_001
+      allowed_for_insight: false
+    source_span_ids:
+    - span_revoked_001
+    consent_state: revoked
+    redaction_state: raw_blocked
+    themes:
+    - consent_blocked
+  insight_cards:
+  - insight_id: insight_export_review
+    claim: Admin users need clearer review before sharing exported research summaries.
+    opportunity_area: export_review
+    confidence: medium
+    supporting_evidence_ids:
+    - quote_alpha_001
+    - quote_alpha_002
+    source_quote_ids:
+    - quote_alpha_001
+    - quote_alpha_002
+    counter_evidence_ids: []
+    redaction_state: redacted
+    recommended_handoff:
+      owner_pack: future_product_strategy_owner
+      reason: Product owner should decide whether this becomes roadmap work.
+      artifact_path: artifacts/customer_research/insight_export_review.yaml
+  blocked_synthesis:
+  - participant_id: participant_revoked
+    consent_state: revoked
+    required_decision: do_not_use
+    prohibited_outputs:
+    - insight_card
+    - source_quote_reuse
+    - external_action
+  positive_cases:
+  - id: interview_synthesis_positive
+    given: redacted quotes with granted consent
+    expected: insight card with source quote IDs
+    participant_id: participant_alpha
+    expected_insight_id: insight_export_review
+  minimum_expected:
+  - schema_valid
+  - evidence_linked
+  - handoff_scoped
+  - revoked_consent_blocked

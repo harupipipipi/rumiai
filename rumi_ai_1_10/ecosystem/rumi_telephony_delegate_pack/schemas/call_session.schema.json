@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/call_session.schema.json",
+  "title": "Call Session",
+  "description": "Contract schema for Call Session.",
+  "type": "object",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "ready_for_provider_handoff"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "consent_state": {
+            "const": "granted"
+          },
+          "takeover_required": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "consent_state": {
+            "const": "declined"
+          }
+        },
+        "required": [
+          "consent_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "state": {
+            "const": "aborted"
+          },
+          "takeover_required": {
+            "const": true
+          },
+          "escalation_reasons": {
+            "contains": {
+              "const": "consent_declined"
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "takeover_required": {
+            "const": true
+          }
+        },
+        "required": [
+          "takeover_required"
+        ]
+      },
+      "then": {
+        "properties": {
+          "escalation_reasons": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "required": [
+    "session_id",
+    "call_task_id",
+    "state",
+    "consent_state",
+    "takeover_required",
+    "escalation_reasons",
+    "transcript_redaction_id"
+  ],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "call_task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "not_started",
+        "ready_for_provider_handoff",
+        "in_progress_by_external_owner",
+        "ended",
+        "aborted"
+      ]
+    },
+    "consent_state": {
+      "type": "string",
+      "enum": [
+        "not_asked",
+        "granted",
+        "declined",
+        "unknown"
+      ]
+    },
+    "takeover_required": {
+      "type": "boolean"
+    },
+    "escalation_reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "transcript_redaction_id": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

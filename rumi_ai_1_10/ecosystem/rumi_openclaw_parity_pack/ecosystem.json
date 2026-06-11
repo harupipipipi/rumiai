@@ -1,0 +1,56 @@
+{
+  "pack_id": "rumi_openclaw_parity_pack",
+  "pack_identity": "rumi:ecosystem/rumi_openclaw_parity_pack",
+  "version": "1.0.0",
+  "metadata": {
+    "name": "Rumi OpenClaw Parity Pack",
+    "description": "Declarative OpenClaw parity catalog that maps official OpenClaw runtime, channel, provider, skill, memory, automation, security, media, and node surfaces to Rumiai packs.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "declarative_only": true,
+    "owner_surfaces": [
+      "openclaw_surface_map",
+      "channel_gap_catalog",
+      "provider_gap_catalog",
+      "skill_pack_catalog",
+      "runtime_pack_mapping"
+    ],
+    "asset_index": {
+      "catalog": [
+        "catalog/overview.yaml",
+        "catalog/openclaw_surface_map.yaml"
+      ],
+      "profile": [
+        "profiles/openclaw_parity_curator.profile.yaml"
+      ],
+      "prompt": [
+        "prompts/openclaw_parity_curator.system.md"
+      ],
+      "example": [
+        "examples/openclaw_parity_review.example.yaml"
+      ],
+      "docs": [
+        "docs/README.md"
+      ]
+    }
+  },
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "profile",
+      "prompt",
+      "example",
+      "openclaw_surface",
+      "parity_mapping",
+      "channel",
+      "provider",
+      "skill",
+      "runtime"
+    ]
+  },
+  "components": {},
+  "load_order": []
+}

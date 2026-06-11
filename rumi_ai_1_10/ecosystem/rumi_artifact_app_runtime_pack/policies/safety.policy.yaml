@@ -1,0 +1,34 @@
+policy:
+  id: artifact_app_runtime_safety_policy
+  default_mode: draft_and_handoff_only
+  blocked_by_default:
+  - execute artifact code directly
+  - call MCP tools before approval
+  - allow network by default
+  - persist files without workspace handoff
+  - bypass sandbox runtime owner
+  - trust client supplied approved flag
+  - create share links directly
+  - zip/export files directly
+  - run media transforms
+  - mutate defaultspack stores
+  allowed_outputs:
+  - schema_valid_packet
+  - review_packet
+  - handoff_packet
+  - ui_contract
+  requires_human_review_before:
+  - external_action
+  - connector_io
+  - tool_execution
+  - file_write
+  - schedule_mutation
+  evidence_rules:
+  - source records or approval receipts must be cited
+  - missing evidence creates blocked state
+  - adjacent runtime actions name owner pack
+  owner_execution_policy:
+    defaultspack_tool_execution: handoff_only
+    defaultspack_artifact_store: read_only_selector_only
+    defaultspack_share_links: package_contract_only
+    mcp_api_media_runtime: handoff_only

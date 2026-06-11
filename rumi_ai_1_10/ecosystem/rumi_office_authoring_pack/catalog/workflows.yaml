@@ -1,0 +1,76 @@
+workflows:
+  pack_id: rumi_office_authoring_pack
+  default_execution: no_runtime_action
+  ownership:
+    owned:
+    - slide_deck_authoring_contract
+    - slide_storyboard
+    - slide_layout_brief
+    - speaker_notes_contract
+    - spreadsheet_workbook_authoring_contract
+    - sheet_tab_plan
+    - formula_map
+    - data_validation_plan
+    - doc_authoring_contract
+    - document_outline
+    - style_and_tone_brief
+    - citation_insertion_plan
+    - chart_embedding_contract
+    - pdf_export_plan
+    - office_review_gate
+    - office_suite_handoff_packet
+    handoff:
+    - workspace broad artifact catalog and lifecycle
+    - document parsing and redline understanding
+    - data cleaning and statistical analysis
+    - claim graph and citation ledger credibility
+    - PPTX DOCX XLSX PDF rendering
+    - artifact app runtime approval
+    - external retrieval and connectors
+  items:
+  - id: deck_storyboard_authoring
+    execution: declarative_only
+    description: Plans slide sequence, layout intent, speaker notes, citations, and asset references before workspace rendering.
+    handoffs:
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_rumi_evidence_dossier_pack
+    produces: deck_storyboard_authoring_handoff_packet
+  - id: workbook_formula_planning
+    execution: declarative_only
+    description: Plans workbook tabs, table contracts, formula dependencies, validation rules, and chart placeholders without calculating values.
+    handoffs:
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_rumi_data_analysis_pack
+    produces: workbook_formula_planning_handoff_packet
+  - id: doc_outline_citation_plan
+    execution: declarative_only
+    description: Plans document structure, style brief, citation insertion targets, and review gates without parsing source documents.
+    handoffs:
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_rumi_document_intelligence_pack
+    - handoff_to_rumi_evidence_dossier_pack
+    produces: doc_outline_citation_plan_handoff_packet
+  - id: chart_embedding_review
+    execution: declarative_only
+    description: Maps existing chart specs into deck, sheet, or doc targets with alt text and owner-pack rendering handoffs.
+    handoffs:
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_rumi_data_analysis_pack
+    produces: chart_embedding_review_handoff_packet
+  - id: pdf_export_gate
+    execution: declarative_only
+    description: Creates manifest-only export plans and blocks verified PDF output until pagination, citation, layout, formula, and accessibility gates pass.
+    handoffs:
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_rumi_evidence_dossier_pack
+    produces: pdf_export_gate_handoff_packet
+  - id: office_suite_handoff
+    execution: declarative_only
+    description: Bundles deck, workbook, document, chart, citation, review, and export plans into a handoff packet for owner packs.
+    handoffs:
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_rumi_document_intelligence_pack
+    - handoff_to_rumi_data_analysis_pack
+    - handoff_to_rumi_evidence_dossier_pack
+    - handoff_to_rumi_artifact_app_runtime_pack
+    produces: office_suite_handoff_handoff_packet

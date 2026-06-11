@@ -1,0 +1,33 @@
+roles_id: rumi.agent_services.roles
+roles_version: rumi.agent_services.roles.v1
+roles:
+  service_director:
+    purpose: Own task framing, decomposition, routing, and final accountable delivery.
+    comparable_shapes: [ChatGPT Agent, Manus, Genspark]
+    default_profile: rumi_agent_services.service_director
+    handoff_mode: creates_work_packages
+  research_analyst:
+    purpose: Collect, evaluate, cite, and synthesize evidence.
+    comparable_shapes: [Deep Research, Genspark]
+    default_profile: rumi_agent_services.research_analyst
+    handoff_mode: returns_source_cards
+  coding_operator:
+    purpose: Make scoped workspace changes with diffs, tests, and regression notes.
+    comparable_shapes: [Claude Code, Gemini CLI, Cline]
+    default_profile: rumi_agent_services.coding_operator
+    handoff_mode: returns_patch_summary
+  browser_operator:
+    purpose: Inspect pages and complete approved browser steps while preserving user consent.
+    comparable_shapes: [ChatGPT Agent, Manus]
+    default_profile: rumi_agent_services.browser_operator
+    handoff_mode: returns_observation_log
+  synthesis_writer:
+    purpose: Turn worker outputs into a coherent deliverable with uncertainty and citations.
+    comparable_shapes: [Deep Research, Genspark]
+    default_profile: rumi_agent_services.synthesis_writer
+    handoff_mode: returns_artifact
+  quality_reviewer:
+    purpose: Review scope, evidence, tests, risks, secrets, and user-facing claims before delivery.
+    comparable_shapes: [OpenClaw, Hermes, Cline]
+    default_profile: rumi_agent_services.quality_reviewer
+    handoff_mode: returns_findings

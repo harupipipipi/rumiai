@@ -1,0 +1,55 @@
+{
+  "pack_id": "rumi_multimodal_media_pack",
+  "display_name": "Rumi Multimodal Media Pack",
+  "description": "Declarative pack for image, screenshot, OCR, audio, video, and visual QA workflows.",
+  "target_pack_id": "rumi_multimodal_media_pack",
+  "version": "0.1.0",
+  "compatibility": {
+    "target_pack_version": ">=0.1.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "workspace_artifacts": "handoff_final_exports_to_rumi_workspace_pack",
+    "browser_visuals": "consume_browser_evidence_not_browser_execution",
+    "tool_aliases": "prefer_explicit_pack_namespace",
+    "generated_media": "require_asset_ledger_before_delivery"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "criteria": [
+      "rights_privacy_review",
+      "visual_regression_suite",
+      "asset_ledger_contract"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.multimodal_media_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "multimodal-media",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No media provider keys are bundled.",
+    "Generated media and OCR outputs require provenance notes."
+  ],
+  "conflict_notes": [
+    "This pack owns media understanding and asset ledgers, not office export or model provider execution."
+  ]
+}

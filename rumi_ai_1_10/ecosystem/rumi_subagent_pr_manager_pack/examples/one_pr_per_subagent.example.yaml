@@ -1,0 +1,12 @@
+example:
+  id: one_pr_per_subagent
+  pack_id: rumi_subagent_pr_manager_pack
+  workflow: assign_subagent_to_pr
+  intent: Assign one named subagent to exactly one pack PR candidate, with reviewer and fallback roles recorded before work starts.
+  evidence:
+    - branch_name
+    - pr_url
+    - assigned_subagent_id
+    - validation_commands
+  handoff: handoff_to_rumi_code_ide_pack
+  expected_result: scoped_assignment_brief_with_owned_paths_forbidden_paths_and_validation_commands

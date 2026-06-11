@@ -1,0 +1,13 @@
+example_id: rumi_data_analysis.examples.chart_spec_handoff
+preset: claude_artifact_chart_brief
+title: Create chart specs for a workspace report
+goal: Convert result tables into accessible chart specs that a workspace artifact pack can render later.
+inputs:
+  files: [local_exports/result_tables.csv]
+  handoff_target: rumi_workspace_pack_optional
+constraints:
+  network: none
+  workspace_export: approval_required
+deliverable:
+  type: chart_spec_bundle
+  required_sections: [chart_specs, result_table_notes, alt_text, caveats, workspace_handoff_payload]

@@ -1,0 +1,11 @@
+catalog_id: rumi_frontend_design.workflows
+schema_version: 1
+workflows:
+  - workflow_id: design_to_component_brief
+    phases: [intent, audience, design_system_fit, acceptance_criteria, handoff]
+  - workflow_id: responsive_visual_qa
+    phases: [viewport_matrix, screenshot_capture, classify_defects, fix_handoff]
+  - workflow_id: app_surface_review
+    phases: [navigation_map, common_workflows, empty_error_loading_states, accessibility_notes]
+  - workflow_id: landing_or_tool_page_review
+    phases: [first_viewport_signal, asset_use, copy_fit, mobile_check]

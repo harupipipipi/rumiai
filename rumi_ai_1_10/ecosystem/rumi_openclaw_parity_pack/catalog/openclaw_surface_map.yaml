@@ -1,0 +1,157 @@
+snapshot:
+  source_repo: https://github.com/openclaw/openclaw
+  source_ref: 418d7e1e83c560c14139cd8c1e043b8f374a446c
+  checked_on: "2026-06-11"
+  local_checkout: C:/Users/ai/OneDrive/Desktop/rumiai/openclaw_reference
+sources:
+  agent_runtime:
+    - docs/agent-runtime-architecture.md
+    - docs/openclaw-agent-runtime.md
+    - src/agents/
+    - packages/agent-core/
+  channels:
+    - docs/channels/index.md
+    - src/channels/
+    - scripts/lib/official-external-channel-catalog.json
+  plugins:
+    - docs/plugins/manifest.md
+    - docs/plugins/plugin-inventory.md
+    - scripts/lib/official-external-plugin-catalog.json
+  providers:
+    - docs/providers/index.md
+    - scripts/lib/official-external-provider-catalog.json
+    - extensions/*/openclaw.plugin.json
+  skills:
+    - docs/tools/skills.md
+    - skills/
+    - src/skills/
+  memory:
+    - docs/concepts/memory.md
+    - docs/concepts/active-memory.md
+    - src/memory/
+  automation:
+    - docs/automation/index.md
+    - docs/automation/cron-jobs.md
+    - src/cron/
+    - src/commitments/
+    - src/tasks/
+  security:
+    - docs/gateway/security/index.md
+    - docs/gateway/operator-scopes.md
+    - src/security/
+  media:
+    - docs/tools/media-overview.md
+    - docs/tools/image-generation.md
+    - docs/tools/video-generation.md
+    - src/media-generation/
+    - src/media-understanding/
+  nodes_canvas:
+    - docs/nodes/index.md
+    - src/node-host/
+    - src/gateway/
+channels:
+  - discord
+  - feishu
+  - googlechat
+  - imessage
+  - line
+  - matrix
+  - mattermost
+  - msteams
+  - nextcloud-talk
+  - nostr
+  - qqbot
+  - signal
+  - slack
+  - sms
+  - synology-chat
+  - telegram
+  - twitch
+  - whatsapp
+  - wecom
+  - weixin
+  - yuanbao
+  - zalo
+  - zalouser
+plugins:
+  - acpx
+  - brave
+  - copilot
+  - diagnostics-otel
+  - diagnostics-prometheus
+  - diffs
+  - google-meet
+  - lobster
+  - memory-lancedb
+  - openshell
+  - pixverse
+  - tokenjuice
+  - voice-call
+providers:
+  - amazon-bedrock
+  - anthropic-vertex
+  - codex
+  - deepinfra
+  - fireworks
+  - google
+  - grok
+  - llama-cpp
+  - lmstudio
+  - minimax
+  - mistral
+  - ollama
+  - openai
+  - openrouter
+  - perplexity
+  - pixverse
+  - qwen
+  - together
+  - vllm
+  - xai
+skills:
+  - coding-agent
+  - diagram-maker
+  - gh-issues
+  - github
+  - model-usage
+  - nano-pdf
+  - node-connect
+  - obsidian
+  - openai-whisper
+  - session-logs
+  - skill-creator
+  - slack
+  - summarize
+  - taskflow
+  - tmux
+  - voice-call
+  - weather
+runtime_surfaces:
+  - built_in_agent_runner
+  - plugin_runtime_harnesses
+  - session_persistence
+  - tool_policy_groups
+  - compaction_hooks
+  - mcp_gateway
+  - active_memory
+  - cron_and_commitments
+  - device_pairing
+  - node_command_policy
+  - exec_approvals
+  - media_task_lifecycle
+mapping_to_rumi_packs:
+  plugin_manifest: rumi_connector_gateway_pack
+  channels: rumi_omnichannel_agent_inbox_pack
+  providers: rumi_model_catalog_pack
+  media_modalities: rumi_multimodal_media_pack
+  web_research: rumi_research_pack
+  skills: rumi_knowledge_marketplace_pack
+  memory: rumi_memory_knowledge_pack
+  agent_runtime: rumi_agent_services_pack
+  tool_policy: rumi_security_review_pack
+  automation: rumi_workflow_scheduler_pack
+  nodes_canvas: rumi_computer_control_pack
+  browser_elements: rumi_browser_element_pack
+  browser_automation: rumi_browser_automation_pack
+  document_contracts: rumi_doc_contract_rescue_pack
+

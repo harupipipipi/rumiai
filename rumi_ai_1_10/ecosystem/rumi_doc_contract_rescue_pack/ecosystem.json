@@ -1,0 +1,56 @@
+{
+  "pack_id": "rumi_doc_contract_rescue_pack",
+  "pack_identity": "rumi:ecosystem/rumi_doc_contract_rescue_pack",
+  "version": "0.1.0",
+  "metadata": {
+    "name": "Rumi Doc Contract Rescue Pack",
+    "description": "Declarative document rescue contracts for references, citations, redlines, comments, and export readiness.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "declarative_only": true,
+    "owner_surfaces": [
+      "document_contract_repair",
+      "missing_reference_triage",
+      "citation_rescue",
+      "redline_comment_reconciliation",
+      "export_readiness_gate"
+    ],
+    "asset_index": {
+      "catalog": [
+        "catalog/document_contract_rescue_catalog.yaml"
+      ],
+      "policy": [
+        "policies/document_contract_rescue.policy.yaml"
+      ],
+      "profile": [
+        "profiles/document_contract_rescuer.profile.yaml"
+      ],
+      "prompt": [
+        "prompts/document_contract_rescuer.system.md"
+      ],
+      "example": [
+        "examples/missing_reference_rescue.example.yaml"
+      ],
+      "docs": [
+        "docs/README.md"
+      ]
+    }
+  },
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "policy",
+      "profile",
+      "prompt",
+      "example",
+      "document_contract",
+      "export_gate"
+    ]
+  },
+  "components": {},
+  "load_order": []
+}
+

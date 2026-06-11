@@ -1,0 +1,66 @@
+{
+  "pack_id": "rumi_frontend_design_pack",
+  "display_name": "Rumi Frontend Design Pack",
+  "description": "Declarative frontend, UI design, visual QA, and app-building workflow pack.",
+  "target_pack_id": "rumi_frontend_design_pack",
+  "version": "0.1.0",
+  "compatibility": {
+    "target_pack_version": ">=0.1.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "conflicts_with": [],
+  "overlap_policy": {
+    "code_edits": "handoff_to_rumi_code_ide_pack",
+    "visual_asset_review": "handoff_to_rumi_multimodal_media_pack",
+    "browser_qa": "handoff_to_rumi_browser_automation_pack",
+    "design_system_fit_rubric": "owned_by_rumi_frontend_design_pack",
+    "responsive_qa_matrix": "owned_by_rumi_frontend_design_pack",
+    "component_acceptance_schema": "owned_by_rumi_frontend_design_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Frontend design is a declarative planning and QA contract pack; it must not replace defaultspack runtime startup or implementation ownership.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required"
+    ],
+    "promotion_blockers": [
+      "no_executable_runtime",
+      "design_contract_only",
+      "requires_code_pack_for_implementation",
+      "requires_browser_pack_for_rendered_evidence"
+    ],
+    "promotion_evidence_required": [
+      "maintainer_approved_runtime_owner",
+      "successful_component_acceptance_cycles",
+      "browser_qa_evidence_across_viewports",
+      "documented_defaultspack_replacement_plan"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.frontend_design_pack",
+    "channel": "experimental",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "frontend"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools."
+  ]
+}

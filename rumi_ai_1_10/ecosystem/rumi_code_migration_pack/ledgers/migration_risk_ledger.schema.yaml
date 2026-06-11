@@ -1,0 +1,12 @@
+evidence_ledger_schema:
+  pack_id: rumi_code_migration_pack
+  fields:
+  - ledger_id
+  - entry_id
+  - evidence_ref
+  - review_state
+  - handoff_owner
+  - created_at
+  completion_rules:
+    external_actions_are_handoffs: true
+    minimum_pass: all_blocking_checks

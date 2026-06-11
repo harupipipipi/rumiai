@@ -1,0 +1,31 @@
+catalog_id: rumi_workspace_pack.export_targets
+version: 1.0.0
+export_targets:
+  editable_document:
+    formats: [docx, md]
+    fidelity_checks: [headings_preserved, tables_preserved, links_resolved]
+    default_extension: docx
+  slide_deck:
+    formats: [pptx, pdf, html]
+    fidelity_checks: [layout_non_overlapping, speaker_notes_present, image_refs_valid]
+    default_extension: pptx
+  spreadsheet:
+    formats: [xlsx, csv]
+    fidelity_checks: [formula_cells_present, tab_names_valid, charts_linked_to_data]
+    default_extension: xlsx
+  chart_asset:
+    formats: [png, svg]
+    fidelity_checks: [axis_labels_present, legend_readable, alt_text_present]
+    default_extension: png
+  paginated_report:
+    formats: [pdf]
+    fidelity_checks: [page_count_expected, no_clipped_text, table_splits_reviewed]
+    default_extension: pdf
+  workspace_bundle:
+    formats: [zip]
+    fidelity_checks: [manifest_present, paths_exist, checksums_present]
+    default_extension: zip
+naming_policy:
+  path_template: "{workspace}/{job_slug}/{artifact_slug}.{extension}"
+  slug_style: lower-kebab
+  collision_policy: increment_suffix

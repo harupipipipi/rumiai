@@ -1,0 +1,53 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://rumi.local/schemas/migration_handoff_packet.schema.json
+title: Migration Handoff Packet
+description: Code migration planning contract schema.
+type: object
+additionalProperties: false
+required:
+- packet_id
+- inventory_summary
+- chosen_migration_strategy
+- shard_briefs
+- risks
+- test_gates
+- rollback_plan
+- downstream_owner_pack
+- external_action
+properties:
+  packet_id:
+    type: string
+    minLength: 1
+  inventory_summary:
+    type: string
+    minLength: 1
+  chosen_migration_strategy:
+    type: string
+    minLength: 1
+  shard_briefs:
+    type: array
+    items:
+      type: string
+  risks:
+    type: array
+    items:
+      type: string
+  test_gates:
+    type: array
+    items:
+      type: string
+  rollback_plan:
+    type: string
+    minLength: 1
+  downstream_owner_pack:
+    type: string
+    enum:
+    - rumi_code_ide_pack
+    - rumi_subagent_pr_manager_pack
+    - rumi_devops_release_pack
+    - rumi_security_review_pack
+    - rumi_model_evals_pack
+    - rumi_observability_pack
+    minLength: 1
+  external_action:
+    const: handoff_only

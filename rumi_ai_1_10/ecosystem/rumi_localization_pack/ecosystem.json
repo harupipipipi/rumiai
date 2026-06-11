@@ -1,0 +1,132 @@
+{
+  "pack_id": "rumi_localization_pack",
+  "pack_identity": "rumi:ecosystem/rumi_localization_pack",
+  "display_name": "Rumi Localization Pack",
+  "version": "0.1.0",
+  "description": "Declarative terminology, protected-term, translation review, locale QA, and localization issue triage pack.",
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "schema",
+      "policy",
+      "checklist",
+      "ledger",
+      "template",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "connectivity": {
+    "requires": [
+      "defaultspack"
+    ],
+    "provides": []
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "host_execution": false,
+  "metadata": {
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "declarative_only": true,
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_document_intelligence_pack",
+        "reason": "Adjacent owner for rumi_document_intelligence_pack handoff; this pack keeps declarative evidence only."
+      },
+      {
+        "pack_id": "rumi_frontend_design_pack",
+        "reason": "Adjacent owner for rumi_frontend_design_pack handoff; this pack keeps declarative evidence only."
+      },
+      {
+        "pack_id": "rumi_workspace_pack",
+        "reason": "Adjacent owner for rumi_workspace_pack handoff; this pack keeps declarative evidence only."
+      },
+      {
+        "pack_id": "rumi_connector_gateway_pack",
+        "reason": "Adjacent owner for rumi_connector_gateway_pack handoff; this pack keeps declarative evidence only."
+      },
+      {
+        "pack_id": "rumi_agentic_qa_pack",
+        "reason": "Adjacent owner for rumi_agentic_qa_pack handoff; this pack keeps declarative evidence only."
+      },
+      {
+        "pack_id": "rumi_model_evals_pack",
+        "reason": "Adjacent owner for rumi_model_evals_pack handoff; this pack keeps declarative evidence only."
+      }
+    ],
+    "owner_surfaces": [
+      "terminology_glossary",
+      "protected_terms_policy",
+      "locale_qa_matrix",
+      "translation_review_checklist",
+      "tone_preservation",
+      "translation_issue_triage",
+      "segment_evidence_map",
+      "localization_handoff_packet"
+    ],
+    "asset_index": {
+      "readme": [
+        "README.md"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "catalog": [
+        "catalog/localization_workflows.yaml",
+        "catalog/localization_quality_matrix.yaml"
+      ],
+      "schema": [
+        "schemas/locale_issue.schema.json",
+        "schemas/localization_record.schema.json"
+      ],
+      "policy": [
+        "policies/protected_terms.policy.yaml",
+        "policies/localization_safety.policy.yaml"
+      ],
+      "checklist": [
+        "checklists/localization_review.checklist.yaml"
+      ],
+      "ledger": [
+        "ledgers/localization_evidence_ledger.schema.yaml"
+      ],
+      "template": [
+        "templates/localization_handoff.template.md",
+        "templates/locale_review_report.template.md"
+      ],
+      "profiles": [
+        "profiles/localization_reviewer.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/translation_reviewer.system.md"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "example": [
+        "examples/ja_en_product_copy.example.yaml",
+        "examples/support_macro_es.example.yaml",
+        "examples/app_strings_locale_qa.example.yaml"
+      ],
+      "glossary": [
+        "glossaries/example_glossary.yaml"
+      ]
+    }
+  }
+}

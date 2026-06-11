@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/health_note.schema.json",
+  "title": "Health Note",
+  "description": "Agent continuity contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "note_id",
+    "run_ref",
+    "health_status",
+    "attention_state",
+    "context_budget_state",
+    "staleness_risk",
+    "handoff_readiness",
+    "human_readable_note"
+  ],
+  "properties": {
+    "note_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "health_status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attention_state": {
+      "type": "string",
+      "minLength": 1
+    },
+    "context_budget_state": {
+      "type": "string",
+      "minLength": 1
+    },
+    "staleness_risk": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoff_readiness": {
+      "type": "string",
+      "minLength": 1
+    },
+    "human_readable_note": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "version": "rumi.computer_control.session_observation.v1",
+  "pack_id": "rumi_computer_control_pack",
+  "description": "Schema-like record for observing a computer, browser, terminal, or gateway session before control actions.",
+  "required_fields": [
+    "surface",
+    "boundary",
+    "evidence",
+    "intended_action",
+    "risk_class",
+    "approval_state"
+  ],
+  "fields": {
+    "surface": {
+      "allowed": ["macos_desktop", "browser_window", "terminal_session", "messaging_gateway", "cli_gateway", "canvas_or_node_surface"]
+    },
+    "boundary": {
+      "allowed": ["host", "local_sandbox", "container", "ssh_remote", "modal_remote", "daytona_remote", "browser_remote_page", "unknown"]
+    },
+    "terminal_backend": {
+      "allowed": ["local", "docker", "ssh", "modal", "daytona", "unknown", "not_terminal"]
+    },
+    "evidence": {
+      "items": ["screenshot", "foreground_app", "window_title", "terminal_prompt", "working_directory", "target_control", "expected_state_change"]
+    },
+    "approval_state": {
+      "allowed": ["not_required_read_only", "required_not_requested", "requested", "approved", "denied"]
+    },
+    "risk_class": {
+      "allowed": ["read_only", "reversible_local", "state_changing_local", "high_risk", "remote_or_production"]
+    }
+  },
+  "network_default": "none"
+}

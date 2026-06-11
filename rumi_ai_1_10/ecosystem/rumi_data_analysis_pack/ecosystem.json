@@ -1,0 +1,126 @@
+{
+  "pack_id": "rumi_data_analysis_pack",
+  "pack_identity": "rumi:ecosystem/rumi_data_analysis_pack",
+  "version": "1.0.0",
+  "metadata": {
+    "name": "Rumi Data Analysis Pack",
+    "description": "Declarative, local-first data analysis profiles, prompts, presets, catalogs, and reproducible recipe specs.",
+    "author": "Rumi AI Team",
+    "license": "MIT"
+  },
+  "runtime": {
+    "type": "declarative_pack"
+  },
+  "vocabulary": {
+    "types": [
+      "analysis_profile",
+      "analysis_prompt",
+      "analysis_preset",
+      "capability_catalog",
+      "data_recipe",
+      "chart_spec",
+      "audit_trail"
+    ]
+  },
+  "components": {
+    "analysis_capabilities": {
+      "type": "capability_catalog",
+      "id": "data_analysis_capabilities",
+      "path": "catalog/capabilities.yaml",
+      "connectivity": {
+        "requires": [
+          "rumi.default_tools.file_reader",
+          "rumi.default_tools.calculator",
+          "rumi.local_agent.profiles"
+        ],
+        "provides": [
+          "rumi.data_analysis.capability_catalog"
+        ]
+      }
+    },
+    "chart_kind_catalog": {
+      "type": "capability_catalog",
+      "id": "chart_kind_catalog",
+      "path": "catalog/chart_kinds.json",
+      "connectivity": {
+        "provides": [
+          "rumi.data_analysis.chart_kind_catalog"
+        ]
+      }
+    },
+    "analysis_profiles": {
+      "type": "analysis_profile",
+      "id": "data_analysis_profiles",
+      "path": "profiles",
+      "connectivity": {
+        "requires": [
+          "rumi.local_agent.profiles"
+        ],
+        "provides": [
+          "rumi.data_analysis.profiles"
+        ]
+      }
+    },
+    "analysis_prompts": {
+      "type": "analysis_prompt",
+      "id": "data_analysis_prompts",
+      "path": "prompts",
+      "connectivity": {
+        "provides": [
+          "rumi.data_analysis.prompts"
+        ]
+      }
+    },
+    "analysis_recipes": {
+      "type": "data_recipe",
+      "id": "reproducible_data_recipes",
+      "path": "recipes",
+      "connectivity": {
+        "provides": [
+          "rumi.data_analysis.recipes"
+        ]
+      }
+    },
+    "analysis_specs": {
+      "type": "chart_spec",
+      "id": "analysis_specs",
+      "path": "specs",
+      "connectivity": {
+        "provides": [
+          "rumi.data_analysis.chart_specs",
+          "rumi.data_analysis.audit_trail_specs"
+        ]
+      }
+    },
+    "analysis_presets": {
+      "type": "analysis_preset",
+      "id": "data_analysis_presets",
+      "path": "presets",
+      "connectivity": {
+        "provides": [
+          "rumi.data_analysis.presets"
+        ]
+      }
+    },
+    "analysis_examples": {
+      "type": "example",
+      "id": "data_analysis_examples",
+      "path": "examples",
+      "connectivity": {
+        "provides": [
+          "rumi.data_analysis.examples"
+        ]
+      }
+    }
+  },
+  "load_order": [
+    "capability_catalog:data_analysis_capabilities",
+    "capability_catalog:chart_kind_catalog",
+    "analysis_profile:data_analysis_profiles",
+    "analysis_prompt:data_analysis_prompts",
+    "data_recipe:reproducible_data_recipes",
+    "chart_spec:analysis_specs",
+    "analysis_preset:data_analysis_presets",
+    "example:data_analysis_examples"
+  ]
+}

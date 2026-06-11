@@ -1,0 +1,24 @@
+policy:
+  id: evidence_dossier_safety_policy
+  default_mode: draft_and_handoff_only
+  blocked_by_default:
+  - export verified dossier with uncited claims
+  - hide unresolved contradictions
+  - retrieve sources directly
+  - render final documents directly
+  - score model outputs directly
+  allowed_outputs:
+  - schema_valid_packet
+  - review_packet
+  - handoff_packet
+  - ui_contract
+  requires_human_review_before:
+  - external_action
+  - connector_io
+  - tool_execution
+  - file_write
+  - schedule_mutation
+  evidence_rules:
+  - source records or approval receipts must be cited
+  - missing evidence creates blocked state
+  - adjacent runtime actions name owner pack

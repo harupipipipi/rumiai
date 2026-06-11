@@ -1,0 +1,42 @@
+pack_id: rumi_doc_contract_rescue_pack
+rescue_surfaces:
+  - id: missing_reference
+    description: Source material named by the document contract is unavailable, ambiguous, or stale.
+    required_evidence:
+      - requested_reference
+      - search_attempts
+      - substitute_source_decision
+      - user_visible_assumption
+  - id: citation_rescue
+    description: Citations need verification, replacement, deduplication, or style normalization.
+    required_evidence:
+      - citation_inventory
+      - verified_sources
+      - unresolved_citation_list
+      - bibliography_delta
+  - id: redline_comment_rescue
+    description: Tracked changes or comments must be preserved, reconciled, or converted into an explicit change log.
+    required_evidence:
+      - redline_inventory
+      - comment_thread_inventory
+      - accepted_rejected_change_log
+      - unresolved_decision_list
+  - id: export_readiness
+    description: Final artifact must be safe to export with intact layout, references, metadata, and review state.
+    required_evidence:
+      - format_targets
+      - render_check
+      - cross_reference_check
+      - final_known_issues
+contract_states:
+  - received
+  - blocked_on_reference
+  - repairing
+  - needs_user_decision
+  - ready_for_export
+  - exported_with_known_issues
+handoff_targets:
+  document_intelligence: rumi_document_intelligence_pack
+  office_authoring: rumi_office_authoring_pack
+  evidence_dossier: rumi_evidence_dossier_pack
+

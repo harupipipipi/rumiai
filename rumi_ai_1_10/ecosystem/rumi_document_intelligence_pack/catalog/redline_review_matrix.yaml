@@ -1,0 +1,43 @@
+version: rumi.document_intelligence.redline_matrix.v1
+pack_id: rumi_document_intelligence_pack
+network_default: none
+
+change_classes:
+  - id: insertion
+    evidence_required:
+      - target_page_span
+      - inserted_text_summary
+      - reason_for_change
+      - citation_if_claim_added
+  - id: deletion
+    evidence_required:
+      - source_page_span
+      - deleted_text_summary
+      - risk_if_removed
+      - stakeholder_review_needed
+  - id: substitution
+    evidence_required:
+      - source_page_span
+      - target_page_span
+      - semantic_delta
+      - citation_delta
+  - id: formatting_only
+    evidence_required:
+      - affected_page_span
+      - confirmation_no_semantic_change
+
+risk_flags:
+  - legal_obligation_changed
+  - date_or_amount_changed
+  - party_name_changed
+  - confidentiality_scope_changed
+  - termination_or_liability_changed
+  - citation_removed_or_weakened
+  - privacy_sensitive_text_added
+
+handoff_outputs:
+  - redline_summary
+  - high_risk_delta_table
+  - page_span_evidence_map
+  - reviewer_questions
+  - privacy_review_status

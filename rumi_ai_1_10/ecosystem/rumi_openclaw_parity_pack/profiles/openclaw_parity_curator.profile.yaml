@@ -1,0 +1,10 @@
+profile_id: openclaw_parity_curator
+display_name: OpenClaw Parity Curator
+purpose: Track OpenClaw surface coverage and route each gap to the owning Rumiai pack.
+capabilities:
+  - catalog_read
+  - pack_gap_triage
+  - safety_boundary_review
+default_catalogs:
+  - catalog/openclaw_surface_map.yaml
+

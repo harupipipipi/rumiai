@@ -1,0 +1,9 @@
+task: openclaw_parity_review
+inputs:
+  surface: channels
+  source_catalog: catalog/openclaw_surface_map.yaml
+expected_output:
+  - list_missing_channel_ids
+  - route_each_gap_to_owner_pack
+  - note_required_runtime_or_secret_boundary
+

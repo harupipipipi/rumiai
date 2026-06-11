@@ -1,0 +1,70 @@
+{
+  "pack_id": "rumi_document_intelligence_pack",
+  "display_name": "Rumi Document Intelligence Pack",
+  "description": "Declarative PDF, contract, citation, page-span, redline, and privacy-aware document review workflow pack.",
+  "target_pack_id": "rumi_document_intelligence_pack",
+  "version": "0.1.0",
+  "compatibility": {
+    "target_pack_version": ">=0.1.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "slide_sheet_doc_creation": "handoff_to_rumi_workspace_pack",
+    "web_research": "handoff_to_rumi_research_pack",
+    "image_or_scan_analysis": "handoff_to_rumi_multimodal_media_pack",
+    "sensitive_document_review": "handoff_to_rumi_security_review_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Document intelligence is an optional review overlay; defaultspack remains the runtime, grant, and tool-routing owner.",
+    "promotion_blockers": [
+      "No runtime handlers or document parsers are owned by this pack.",
+      "Citation and redline quality requires real-world reviewer evidence.",
+      "Privacy review must remain explicit and opt-in before any broader default behavior."
+    ],
+    "promotion_evidence_required": [
+      "contract_tests_pass",
+      "ecosystem_schema_validation_passes",
+      "overlap_policy_reviewed",
+      "citation_page_span_accuracy_reviewed",
+      "redline_operation_reviewed",
+      "privacy_review_workflows_accepted_by_maintainers"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.document_intelligence_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "document-intelligence",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools.",
+    "Document creation remains in rumi_workspace_pack.",
+    "External research remains in rumi_research_pack.",
+    "Scan and media analysis remain in rumi_multimodal_media_pack.",
+    "Sensitive document review may hand off to rumi_security_review_pack."
+  ]
+}

@@ -1,0 +1,24 @@
+case_id: missing-reference-rescue-001
+contract:
+  requested_artifact: board_brief.docx
+  missing_references:
+    - "Appendix B market sizing workbook"
+    - "Legal comments from May review"
+triage:
+  state: blocked_on_reference
+  attempted_recovery:
+    - searched workspace inventory for workbook title
+    - checked prior comment export for legal review notes
+  user_decisions_needed:
+    - approve substitute market sizing source
+    - confirm whether legal comments can be summarized from the review log
+repair_plan:
+  preserve:
+    - unresolved comments
+    - original citation labels
+    - redline author attribution when present
+  output:
+    - repaired document
+    - citation delta
+    - export readiness note
+

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/dom_snapshot_evidence.schema.json",
+  "title": "Dom Snapshot Evidence",
+  "description": "Browser session replay contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "snapshot_id",
+    "trace_id",
+    "semantic_dom_ref",
+    "semantic_owner",
+    "captured_at",
+    "redaction_state",
+    "text_included_policy",
+    "node_refs",
+    "checksum"
+  ],
+  "properties": {
+    "snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "semantic_dom_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "semantic_owner": {
+      "const": "rumi_browser_element_pack"
+    },
+    "captured_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": [
+        "partially_redacted",
+        "redacted",
+        "blocked_sensitive"
+      ]
+    },
+    "text_included_policy": {
+      "type": "string",
+      "enum": [
+        "redacted_text_only",
+        "labels_and_roles_only",
+        "blocked_sensitive"
+      ]
+    },
+    "node_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "checksum": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "minLength": 1
+    }
+  }
+}

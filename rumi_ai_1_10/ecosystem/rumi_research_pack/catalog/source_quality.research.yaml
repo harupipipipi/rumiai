@@ -1,0 +1,34 @@
+catalog_id: rumi_research_pack.source_quality
+version: 1.0.0
+dimensions:
+  authority:
+    description: Whether the source has relevant expertise, institutional reliability, or primary-source status.
+    scale: [unknown, weak, acceptable, strong]
+  recency:
+    description: Whether the source is current enough for the research question.
+    scale: [unknown, stale, acceptable, current]
+  proximity:
+    description: Whether the source is primary, secondary, tertiary, or commentary.
+    scale: [commentary, tertiary, secondary, primary]
+  specificity:
+    description: Whether the source directly supports the claim being made.
+    scale: [indirect, partial, direct]
+  corroboration:
+    description: Whether independent sources agree with this evidence.
+    scale: [uncorroborated, mixed, corroborated]
+review_labels:
+  - label: primary_anchor
+    meaning: Use as a core citation for a central claim.
+  - label: supporting_context
+    meaning: Useful background or framing source.
+  - label: contradiction
+    meaning: Conflicts with another evidence card and requires review.
+  - label: weak_source
+    meaning: Keep visible but avoid relying on it for a final claim.
+  - label: exclude
+    meaning: Do not cite except to explain exclusion.
+minimum_synthesis_rules:
+  central_claims_need_evidence: true
+  unresolved_contradictions_visible: true
+  weak_sources_marked: true
+  citation_required_for_non_obvious_factual_claims: true

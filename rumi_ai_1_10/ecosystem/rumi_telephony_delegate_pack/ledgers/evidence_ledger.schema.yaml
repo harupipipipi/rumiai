@@ -1,0 +1,21 @@
+evidence_ledger_schema:
+  ledger_id: telephony_delegation_evidence_ledger
+  required_fields:
+  - record_id
+  - artifact_type
+  - source_ids
+  - source_spans
+  - claim_summary
+  - uncertainty
+  - review_state
+  - handoff_owner
+  completion_rules:
+    every_record_has_evidence: true
+    uncertainty_allowed: true
+    external_actions_are_handoffs: true
+    human_review_required_for_handoffs: true
+  review_states:
+  - draft
+  - needs_evidence
+  - ready_for_handoff
+  - blocked

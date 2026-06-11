@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/attention_drift_recovery.schema.json",
+  "title": "Attention Drift Recovery",
+  "description": "Agent continuity contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "drift_id",
+    "detected_signal",
+    "expected_focus",
+    "observed_drift",
+    "recovery_prompt",
+    "discarded_threads",
+    "next_check"
+  ],
+  "properties": {
+    "drift_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "detected_signal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expected_focus": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observed_drift": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recovery_prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "discarded_threads": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_check": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

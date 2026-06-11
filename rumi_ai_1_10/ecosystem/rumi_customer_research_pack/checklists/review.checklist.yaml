@@ -1,0 +1,42 @@
+review_checklist:
+  minimum_pass: all_blocking_items
+  items:
+  - id: consent_state_present
+    question: Every evidence item has granted, limited, revoked, or unknown consent.
+    blocking: true
+  - id: redaction_state
+    question: No raw personal identifiers enter insight cards.
+    blocking: true
+  - id: source_quote_ids
+    question: Each claim links to source quote or response IDs.
+    blocking: true
+  - id: source_quote_coverage
+    question: Every insight card source quote resolves to redacted, allowed evidence.
+    blocking: true
+  - id: revoked_consent_excluded
+    question: Revoked or do_not_use participants are excluded from insight cards and reusable quote IDs.
+    blocking: true
+  - id: counter_evidence_checked
+    question: Conflicting evidence is listed or marked absent.
+    blocking: true
+  - id: no_live_recruiting
+    question: The pack never recruits, emails, updates CRM records, or performs generic web research.
+    blocking: true
+  - id: sample_limit_noted
+    question: Survey limitations are explicit.
+    blocking: true
+  - id: decision_boundary_present
+    question: Opportunity maps do not become roadmap decisions.
+    blocking: true
+  - id: handoff_owner_named
+    question: External actions name an owner pack.
+    blocking: true
+  - id: no_credentials_or_network
+    question: Confirm the pack declares no credentials and no network by default.
+    blocking: true
+  - id: defaultspack_not_eligible
+    question: Confirm defaultspack promotion remains false until evidence is supplied.
+    blocking: true
+  - id: owner_boundary_review
+    question: Confirm adjacent runtime ownership is expressed as handoff policy.
+    blocking: true

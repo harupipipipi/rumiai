@@ -1,0 +1,27 @@
+{
+  "pack_id": "rumi_doc_contract_rescue_pack",
+  "display_name": "Rumi Doc Contract Rescue Pack",
+  "description": "Installable document rescue contracts for missing references, citations, redlines, comments, and export readiness.",
+  "target_pack_id": "rumi_doc_contract_rescue_pack",
+  "version": "0.1.0",
+  "compatibility": {
+    "target_pack_version": ">=0.1.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "marketplace": {
+    "id": "rumi.doc_contract_rescue_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "documents"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": false,
+  "risk_level": "low",
+  "supports_all_ok": true
+}
+

@@ -1,0 +1,12 @@
+example:
+  id: checkout_review
+  pack_id: rumi_browser_form_operator_pack
+  workflow: stage_form_values_for_review
+  intent: Classify checkout fields, block payment submission pending security review, and prepare a redacted pre-submit summary for explicit user approval.
+  evidence:
+    - field_selector_map
+    - before_after_screenshot_ids
+    - submit_intent
+    - receipt_url
+  handoff: handoff_to_rumi_browser_element_pack
+  expected_result: high_risk_field_map_with_submission_block_and_security_handoff

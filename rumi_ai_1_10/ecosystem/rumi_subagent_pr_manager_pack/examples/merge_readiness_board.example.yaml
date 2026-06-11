@@ -1,0 +1,12 @@
+example:
+  id: merge_readiness_board
+  pack_id: rumi_subagent_pr_manager_pack
+  workflow: track_pack_pr_readiness
+  intent: Build a merge readiness board for pack PR candidates, showing assigned subagents, focused tests, blockers, and reviewer decisions.
+  evidence:
+    - branch_name
+    - pr_url
+    - assigned_subagent_id
+    - validation_commands
+  handoff: handoff_to_rumi_observability_pack_when_persistent_metrics_are_requested
+  expected_result: merge_readiness_board_with_blockers_validation_results_and_owner_subagents

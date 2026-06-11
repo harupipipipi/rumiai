@@ -1,0 +1,30 @@
+schema_id: rumi_voice_mobile.handoff_receipt.v1
+owner: rumi_voice_mobile_pack
+purpose: Receipt schema for voice/mobile handoffs to connector, scheduler, media, or computer-control owner packs.
+required_fields:
+  - receipt_id
+  - intent_class
+  - risk_level
+  - transcript_ref
+  - consent_refs
+  - handoff_target_pack
+  - requested_action_summary
+  - owner_pack_decision
+  - delivery_or_action_state
+  - evidence_refs
+delivery_or_action_state_values:
+  - staged_only
+  - blocked_for_consent
+  - handed_off_for_delivery
+  - handed_off_for_transcription
+  - handed_off_for_device_action
+  - cancelled
+redaction_policy:
+  redact_sensitive_transcript_segments: true
+  preserve_intent_class: true
+  preserve_consent_refs: true
+quality_gates:
+  - consent_refs_present
+  - owner_pack_matches_overlap_policy
+  - no_transport_credentials_recorded
+  - action_state_recorded

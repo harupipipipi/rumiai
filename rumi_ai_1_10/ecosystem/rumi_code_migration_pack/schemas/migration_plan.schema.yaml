@@ -1,0 +1,50 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://rumi.local/schemas/migration_plan.schema.json
+title: Migration Plan
+description: Code migration planning contract schema.
+type: object
+additionalProperties: false
+required:
+- plan_id
+- current_state
+- target_state
+- non_goals
+- phases
+- prerequisites
+- invariants
+- compatibility_constraints
+- acceptance_gates
+properties:
+  plan_id:
+    type: string
+    minLength: 1
+  current_state:
+    type: string
+    minLength: 1
+  target_state:
+    type: string
+    minLength: 1
+  non_goals:
+    type: array
+    items:
+      type: string
+  phases:
+    type: array
+    items:
+      type: string
+  prerequisites:
+    type: array
+    items:
+      type: string
+  invariants:
+    type: array
+    items:
+      type: string
+  compatibility_constraints:
+    type: array
+    items:
+      type: string
+  acceptance_gates:
+    type: array
+    items:
+      type: string

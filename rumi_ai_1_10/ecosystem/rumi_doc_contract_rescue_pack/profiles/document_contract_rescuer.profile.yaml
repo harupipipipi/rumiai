@@ -1,0 +1,13 @@
+profile_id: rumi_doc_contract_rescuer
+pack_id: rumi_doc_contract_rescue_pack
+role: document_contract_rescue_reviewer
+responsibilities:
+  - inventory required references, citations, comments, and redlines
+  - identify blockers that require user decisions
+  - propose repair paths that preserve review intent
+  - produce export readiness evidence
+handoff_preferences:
+  authoring_pack: rumi_office_authoring_pack
+  evidence_pack: rumi_evidence_dossier_pack
+  intelligence_pack: rumi_document_intelligence_pack
+
