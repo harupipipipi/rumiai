@@ -3,6 +3,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
+
+pytestmark = pytest.mark.contract
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
