@@ -478,15 +478,18 @@ class AIClient:
                 return provider_id
         return ""
 
-    def _check_authority_for_model_api(
+    def _check_authority_for_provider_api(
         self,
         *,
+        permission_id,
+        resource_kind,
         provider_id,
         api_id,
         model_id,
         model_ref,
         params,
         stream=False,
+        reason=None,
     ):
         provider_id = str(provider_id or "").strip()
         if provider_id in {"", "stub", "rumi"}:
@@ -495,7 +498,7 @@ class AIClient:
         context = self._authority_context_from_params(params)
         principal_id = str(context.get("principal_id") or "defaultspack")
         resource = {
-            "kind": "model",
+            "kind": str(resource_kind or permission_id).strip(),
             "provider_id": provider_id,
             "api_id": str(api_id or "legacy").strip() or "legacy",
             "model_id": str(model_id or "").strip(),
@@ -507,9 +510,9 @@ class AIClient:
 
         decision = get_authority_service().check(
             principal_id=principal_id,
-            permission_id="model.invoke",
+            permission_id=permission_id,
             resource=resource,
-            reason="Model invocation: {}/{}".format(provider_id, model_id),
+            reason=reason or "{}: {}/{}".format(permission_id, provider_id, model_id),
             conversation_id=context.get("conversation_id"),
             profile_id=context.get("profile_id"),
             node_id=context.get("node_id"),
@@ -519,6 +522,50 @@ class AIClient:
         )
         if not decision.allowed:
             raise AuthorityApprovalRequired(decision)
+
+    def _check_authority_for_model_api(
+        self,
+        *,
+        provider_id,
+        api_id,
+        model_id,
+        model_ref,
+        params,
+        stream=False,
+    ):
+        self._check_authority_for_provider_api(
+            permission_id="model.invoke",
+            resource_kind="model",
+            provider_id=provider_id,
+            api_id=api_id,
+            model_id=model_id,
+            model_ref=model_ref,
+            params=params,
+            stream=stream,
+            reason="Model invocation: {}/{}".format(provider_id, model_id),
+        )
+
+    def _check_authority_for_api_key_use(
+        self,
+        *,
+        provider_id,
+        api_id,
+        model_id,
+        model_ref,
+        params,
+        stream=False,
+    ):
+        self._check_authority_for_provider_api(
+            permission_id="api_key.use",
+            resource_kind="api_key",
+            provider_id=provider_id,
+            api_id=api_id,
+            model_id=model_id,
+            model_ref=model_ref,
+            params=params,
+            stream=stream,
+            reason="Provider API key use: {}/{}".format(provider_id, api_id or "legacy"),
+        )
 
     def _api_route_attempts(self, model, route_refs, params=None, stream=False):
         attempts = []
@@ -533,6 +580,14 @@ class AIClient:
             if not self._provider_api_key_may_exist(provider_id, api_id):
                 continue
             self._check_authority_for_model_api(
+                provider_id=provider_id,
+                api_id=api_id,
+                model_id=model_name,
+                model_ref=model,
+                params=params,
+                stream=stream,
+            )
+            self._check_authority_for_api_key_use(
                 provider_id=provider_id,
                 api_id=api_id,
                 model_id=model_name,
@@ -583,6 +638,14 @@ class AIClient:
         if provider.__class__.__name__ == "StubProvider":
             return None, False
         self._check_authority_for_model_api(
+            provider_id=provider_id,
+            api_id=api_id,
+            model_id=model_id,
+            model_ref=model,
+            params=params,
+            stream=(method_name == "stream"),
+        )
+        self._check_authority_for_api_key_use(
             provider_id=provider_id,
             api_id=api_id,
             model_id=model_id,
@@ -1014,6 +1077,14 @@ class AIClient:
                 params=params,
                 stream=False,
             )
+            self._check_authority_for_api_key_use(
+                provider_id=provider_id,
+                api_id="legacy",
+                model_id=model_name,
+                model_ref=model,
+                params=params,
+                stream=False,
+            )
         try:
             return provider.complete(model_name, messages, tools or [], self._strip_authority_params(params))
         except NotImplementedError as e:
@@ -1040,6 +1111,14 @@ class AIClient:
         provider_id = self._provider_id_for_provider(provider, model)
         if self._provider_api_key_may_exist(provider_id, "legacy"):
             self._check_authority_for_model_api(
+                provider_id=provider_id,
+                api_id="legacy",
+                model_id=model_name,
+                model_ref=model,
+                params=params,
+                stream=True,
+            )
+            self._check_authority_for_api_key_use(
                 provider_id=provider_id,
                 api_id="legacy",
                 model_id=model_name,
