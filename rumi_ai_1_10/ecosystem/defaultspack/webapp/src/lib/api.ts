@@ -697,6 +697,35 @@ export type ConversationSearchOptions = {
   offset?: number;
 };
 
+export type SystemPromptRecord = {
+  id: string;
+  name: string;
+  description?: string;
+  body: string;
+  content?: string;
+  tags?: string[];
+  variables?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+  source?: string;
+  source_pack_id?: string;
+  read_only?: boolean;
+  active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  char_count?: number;
+  token_estimate?: number;
+  variable_count?: number;
+};
+
+export type SystemPromptListResponse = {
+  prompts: SystemPromptRecord[];
+  active_id?: string;
+  active_content?: string;
+  inline_content?: string;
+  prompt?: SystemPromptRecord;
+  deleted?: boolean;
+};
+
 export type SidebarCategory = "tool" | "widget" | "system" | "integration" | "capability";
 
 export type SidebarFieldOption = {
@@ -1530,6 +1559,39 @@ export const api = {
     return request<ConversationSteerResponse>("/api/chat/steer", {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+  },
+
+  listSystemPrompts() {
+    return request<SystemPromptListResponse>("/api/system-prompts", {
+      cache: "no-store",
+    });
+  },
+
+  createSystemPrompt(payload: Partial<SystemPromptRecord> & { activate?: boolean }) {
+    return request<SystemPromptListResponse>("/api/system-prompts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  updateSystemPrompt(promptId: string, updates: Partial<SystemPromptRecord>) {
+    return request<SystemPromptListResponse>(`/api/system-prompts/${encodeURIComponent(promptId)}`, {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    });
+  },
+
+  deleteSystemPrompt(promptId: string) {
+    return request<SystemPromptListResponse>(`/api/system-prompts/${encodeURIComponent(promptId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  activateSystemPrompt(promptId: string) {
+    return request<SystemPromptListResponse>(`/api/system-prompts/${encodeURIComponent(promptId)}/activate`, {
+      method: "POST",
+      body: JSON.stringify({}),
     });
   },
 

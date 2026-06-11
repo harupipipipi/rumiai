@@ -70,6 +70,30 @@ def _safe_filename(name: str) -> str:
     return safe or "unnamed"
 
 
+def _slugify_prompt_id(value: str, fallback: str = "system_prompt") -> str:
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or "").strip()).strip("_-").lower()
+    return slug or fallback
+
+
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _prompt_text(prompt: dict | None) -> str:
+    if not isinstance(prompt, dict):
+        return ""
+    return str(prompt.get("body") or prompt.get("content") or "")
+
+
+def _get_shared_dir() -> Path:
+    prompts_dir = Path(_get_prompts_dir())
+    return prompts_dir.parent if prompts_dir.name == "prompts" else prompts_dir
+
+
+def _get_system_prompt_state_path() -> Path:
+    return _get_shared_dir() / "system_prompt_state.json"
+
+
 def _read_pack_id(pack_root: Path) -> str:
     try:
         raw = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
@@ -121,6 +145,7 @@ class PromptManager:
     def _save_prompt(self, prompt: dict) -> None:
         """プロンプトを JSON ファイルに保存する。"""
         prompts_dir = _get_prompts_dir()
+        os.makedirs(prompts_dir, exist_ok=True)
         name = prompt.get("name", "unnamed")
         fname = _safe_filename(name) + ".json"
         fpath = os.path.join(prompts_dir, fname)
@@ -369,6 +394,228 @@ class PromptManager:
         del self._name_index[name]
         return True
 
+    # -- System prompt profiles --------------------------------------------
+    def _read_system_prompt_state(self) -> dict:
+        path = _get_system_prompt_state_path()
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _write_system_prompt_state(self, state: dict) -> None:
+        path = _get_system_prompt_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _system_prompt_record(self, prompt: dict, active_id: str = "") -> dict:
+        metadata = prompt.get("metadata") if isinstance(prompt.get("metadata"), dict) else {}
+        prompt_id = str(prompt.get("id") or prompt.get("name") or "")
+        name = str(prompt.get("name") or prompt_id)
+        body = _prompt_text(prompt)
+        tags = prompt.get("tags", metadata.get("tags", []))
+        if not isinstance(tags, list):
+            tags = []
+        variables = prompt.get("variables", [])
+        if not isinstance(variables, list):
+            variables = []
+        source = str(metadata.get("source") or ("user" if prompt_id in self._prompts else "prompt"))
+        is_active = bool(active_id and (active_id == prompt_id or active_id == name))
+        return {
+            "id": prompt_id,
+            "name": name,
+            "description": str(prompt.get("description") or ""),
+            "body": body,
+            "content": body,
+            "tags": [str(tag) for tag in tags],
+            "variables": variables,
+            "metadata": metadata,
+            "source": source,
+            "source_pack_id": str(prompt.get("source_pack_id") or metadata.get("source_pack_id") or ""),
+            "read_only": bool(prompt.get("read_only")) or prompt_id not in self._prompts,
+            "active": is_active,
+            "created_at": str(prompt.get("created_at") or ""),
+            "updated_at": str(prompt.get("updated_at") or ""),
+            "char_count": len(body),
+            "token_estimate": max(0, int(round(len(body) / 4))),
+            "variable_count": len(variables),
+        }
+
+    def _mutable_prompt_id(self, prompt_id_or_name: str) -> str | None:
+        self._ensure_loaded()
+        key = str(prompt_id_or_name or "").strip()
+        if not key:
+            return None
+        if key in self._prompts:
+            return key
+        pid = self._name_index.get(key)
+        if pid in self._prompts:
+            return pid
+        return None
+
+    def _unique_system_prompt_id(self, requested_id: str, name: str) -> str:
+        base = _slugify_prompt_id(requested_id or name)
+        if not base.startswith("system_"):
+            base = "system_" + base
+        existing_ids = {str(prompt.get("id") or "") for prompt in self.list_prompts()}
+        if base not in existing_ids:
+            return base
+        index = 2
+        while f"{base}_{index}" in existing_ids:
+            index += 1
+        return f"{base}_{index}"
+
+    def list_system_prompts(self) -> dict:
+        state = self._read_system_prompt_state()
+        active_id = str(state.get("active_id") or "").strip()
+        active_content = self.get_system_prompt()
+        records = []
+        seen: set[str] = set()
+        for prompt in self.list_prompts():
+            prompt_id = str(prompt.get("id") or prompt.get("name") or "")
+            if not prompt_id or prompt_id in seen:
+                continue
+            seen.add(prompt_id)
+            records.append(self._system_prompt_record(prompt, active_id))
+        records.sort(key=lambda item: (
+            not bool(item.get("active")),
+            bool(item.get("read_only")),
+            str(item.get("name") or item.get("id") or "").lower(),
+        ))
+        return {
+            "prompts": records,
+            "active_id": active_id,
+            "active_content": active_content,
+            "inline_content": str(state.get("content") or ""),
+        }
+
+    def create_system_prompt(self, data: dict) -> dict:
+        self._ensure_loaded()
+        name = str(data.get("name") or "").strip() or "System Prompt"
+        body = str(data.get("body", data.get("content", "")))
+        requested_id = str(data.get("id") or data.get("prompt_id") or "").strip()
+        prompt_id = self._unique_system_prompt_id(requested_id, name)
+        existing_names = {str(prompt.get("name") or "") for prompt in self.list_prompts()}
+        if name in existing_names:
+            suffix = 2
+            base_name = name
+            while f"{base_name} {suffix}" in existing_names:
+                suffix += 1
+            name = f"{base_name} {suffix}"
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        metadata = {
+            **metadata,
+            "kind": "system_prompt",
+            "source": metadata.get("source") or "user",
+        }
+        tags = data.get("tags", metadata.get("tags", []))
+        if not isinstance(tags, list):
+            tags = []
+        now = _now_iso()
+        prompt = {
+            "id": prompt_id,
+            "name": name,
+            "content": body,
+            "body": body,
+            "description": str(data.get("description") or ""),
+            "variables": _normalize_variables(data.get("variables", [])),
+            "metadata": metadata,
+            "tags": [str(tag) for tag in tags if str(tag).strip()],
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._prompts[prompt_id] = prompt
+        self._name_index[name] = prompt_id
+        self._save_prompt(prompt)
+        if data.get("activate"):
+            self.activate_system_prompt(prompt_id)
+        return self._system_prompt_record(prompt, prompt_id if data.get("activate") else "")
+
+    def update_system_prompt(self, prompt_id_or_name: str, updates: dict) -> dict | None:
+        pid = self._mutable_prompt_id(prompt_id_or_name)
+        if pid is None:
+            return None
+        prompt = self._prompts[pid]
+        old_name = str(prompt.get("name") or "")
+        now = _now_iso()
+
+        if "description" in updates:
+            prompt["description"] = str(updates.get("description") or "")
+        if "metadata" in updates and isinstance(updates.get("metadata"), dict):
+            metadata = dict(updates["metadata"])
+            metadata.setdefault("kind", "system_prompt")
+            metadata.setdefault("source", "user")
+            prompt["metadata"] = metadata
+        elif isinstance(prompt.get("metadata"), dict):
+            prompt["metadata"] = {**prompt["metadata"], "kind": "system_prompt"}
+        if "tags" in updates:
+            tags = updates.get("tags")
+            prompt["tags"] = [str(tag) for tag in tags] if isinstance(tags, list) else []
+        if "variables" in updates:
+            prompt["variables"] = _normalize_variables(updates["variables"])
+        if "content" in updates or "body" in updates:
+            new_body = str(updates.get("body", updates.get("content", prompt.get("body", ""))))
+            prompt["body"] = new_body
+            prompt["content"] = new_body
+        if "name" in updates:
+            new_name = str(updates.get("name") or "").strip()
+            if new_name and new_name != old_name:
+                if new_name in self._name_index and self._name_index[new_name] != pid:
+                    return None
+                self._delete_prompt_file(old_name)
+                self._name_index.pop(old_name, None)
+                prompt["name"] = new_name
+                self._name_index[new_name] = pid
+
+        prompt["updated_at"] = now
+        self._save_prompt(prompt)
+        active_id = str(self._read_system_prompt_state().get("active_id") or "")
+        if active_id in (pid, old_name, str(prompt.get("name") or "")):
+            self.activate_system_prompt(pid)
+            active_id = pid
+        return self._system_prompt_record(prompt, active_id)
+
+    def delete_system_prompt(self, prompt_id_or_name: str) -> bool:
+        pid = self._mutable_prompt_id(prompt_id_or_name)
+        if pid is None:
+            return False
+        prompt = self._prompts.get(pid)
+        if prompt is None:
+            return False
+        name = str(prompt.get("name") or "")
+        self._delete_prompt_file(name)
+        self._prompts.pop(pid, None)
+        self._name_index.pop(name, None)
+        state = self._read_system_prompt_state()
+        active_id = str(state.get("active_id") or "")
+        if active_id in (pid, name):
+            self._system_prompt = ""
+            self._write_system_prompt_state({
+                "active_id": "",
+                "content": "",
+                "updated_at": _now_iso(),
+            })
+        return True
+
+    def activate_system_prompt(self, prompt_id_or_name: str) -> dict | None:
+        key = str(prompt_id_or_name or "").strip()
+        prompt = self.get_prompt(key) or self.get_prompt_by_name(key)
+        if prompt is None:
+            return None
+        prompt_id = str(prompt.get("id") or prompt.get("name") or key)
+        content = _prompt_text(prompt)
+        self._system_prompt = content
+        self._write_system_prompt_state({
+            "active_id": prompt_id,
+            "content": content,
+            "updated_at": _now_iso(),
+        })
+        return {
+            "active_id": prompt_id,
+            "content": content,
+            "prompt": self._system_prompt_record(prompt, prompt_id),
+        }
+
     # -- テンプレート変換 -----------------------------------------------------
     def to_template(self, name: str) -> PromptTemplate | None:
         """保存済みプロンプトを PromptTemplate に変換する。"""
@@ -430,11 +677,28 @@ class PromptManager:
     # -- システムプロンプト ---------------------------------------------------
     def get_system_prompt(self) -> str:
         """システムプロンプトを取得する。"""
+        state = self._read_system_prompt_state()
+        active_id = str(state.get("active_id") or "").strip()
+        if active_id:
+            prompt = self.get_prompt(active_id) or self.get_prompt_by_name(active_id)
+            content = _prompt_text(prompt)
+            if content:
+                self._system_prompt = content
+                return self._system_prompt
+        content = str(state.get("content") or "")
+        if content:
+            self._system_prompt = content
+            return self._system_prompt
         return self._system_prompt
 
     def set_system_prompt(self, content: str) -> str:
         """システムプロンプトを設定して返す。"""
         self._system_prompt = str(content)
+        self._write_system_prompt_state({
+            "active_id": "",
+            "content": self._system_prompt,
+            "updated_at": _now_iso(),
+        })
         return self._system_prompt
 
 

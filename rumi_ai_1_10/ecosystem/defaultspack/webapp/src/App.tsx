@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
+import { SystemPromptManager } from "./components/SystemPromptManager";
 import { WarmActionIcon } from "./components/WarmActionIcon";
 import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
@@ -4850,6 +4851,7 @@ export default function App() {
             selectedToolIds={selectedToolIds}
             companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />}
             codingPanel={codingSidebarPanel}
+            systemPromptPanel={<SystemPromptManager />}
             keyboardButtonNavigation={keyboardButtonNavigation}
             selectedProfile={activeProfile}
             toolFilterEntries={toolFilterEntries}

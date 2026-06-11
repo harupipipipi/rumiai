@@ -211,6 +211,7 @@ export type RightSidebarRendererProps = {
   selectedToolIds?: string[];
   companyPanel?: ReactNode;
   codingPanel?: ReactNode;
+  systemPromptPanel?: ReactNode;
   keyboardButtonNavigation?: boolean;
   attachedFiles?: AttachedFile[];
   selectedProfile?: ModelProfile | null;

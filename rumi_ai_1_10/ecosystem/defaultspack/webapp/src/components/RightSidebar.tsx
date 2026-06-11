@@ -776,6 +776,7 @@ export function RightSidebar({
   selectedToolIds = [],
   companyPanel,
   codingPanel,
+  systemPromptPanel,
   keyboardButtonNavigation = false,
   selectedProfile = null,
   toolFilterEntries = [],
@@ -796,6 +797,7 @@ export function RightSidebar({
   selectedToolIds?: string[];
   companyPanel?: ReactNode;
   codingPanel?: ReactNode;
+  systemPromptPanel?: ReactNode;
   keyboardButtonNavigation?: boolean;
   selectedProfile?: ModelProfile | null;
   toolFilterEntries?: ToolFilterEntry[];
@@ -924,13 +926,14 @@ export function RightSidebar({
     if (activePanel === "__runtime_status__") return;
     if (activePanel === "__company_workspace__" && companyPanel) return;
     if (activePanel === "__coding_widget__" && codingPanel) return;
+    if (activePanel === "__system_prompt_manager__" && systemPromptPanel) return;
     if (activePanel.startsWith(PLACEMENT_PANEL_PREFIX) && placementManifestMap.has(activePanel.slice(PLACEMENT_PANEL_PREFIX.length))) {
       return;
     }
     if (!items.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
-  }, [activePanel, codingPanel, companyPanel, items, placementManifestMap]);
+  }, [activePanel, codingPanel, companyPanel, items, placementManifestMap, systemPromptPanel]);
 
   useEffect(() => {
     if (!activePanel || categoryFilter === "all") return;
@@ -1045,7 +1048,7 @@ export function RightSidebar({
     [hiddenToolIdSet, items, searchQuery, tagMap],
   );
   useEffect(() => {
-    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || !searchQuery.trim()) return;
+    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || activePanel === "__system_prompt_manager__" || !searchQuery.trim()) return;
     if (!searchFilteredItems.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
@@ -1128,6 +1131,7 @@ export function RightSidebar({
   const isRuntimeStatusActive = activePanel === "__runtime_status__";
   const isCompanyPanelActive = activePanel === "__company_workspace__" && Boolean(companyPanel);
   const isCodingPanelActive = activePanel === "__coding_widget__" && Boolean(codingPanel);
+  const isSystemPromptPanelActive = activePanel === "__system_prompt_manager__" && Boolean(systemPromptPanel);
   const isPlacementPanelActive = Boolean(activePlacementManifest);
   const activeToolGroupId = activeItem?.category === "tool" ? toolGroupFor(activeItem).id : null;
   const shouldCompactToolRail = categoryFilter === "tool" && !searchQuery.trim() && !activeTagFilter && !showStarredOnly;
@@ -1476,7 +1480,7 @@ export function RightSidebar({
 
   return (
     <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
-      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isCompanyPanelActive || isCodingPanelActive) && (
+      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isCompanyPanelActive || isCodingPanelActive || isSystemPromptPanelActive) && (
         <div
           className="relative flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200"
           style={{ width: panelWidthPx }}
@@ -1490,8 +1494,8 @@ export function RightSidebar({
           />
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
-              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Team Workspace" : isCodingPanelActive ? "Coding widget" : isToolFilterLogActive ? "Tool filter log" : isRuntimeStatusActive ? "Runtime status" : "Tool manager")}</h3>
+              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isSystemPromptPanelActive ? "bg-violet-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
+              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Team Workspace" : isCodingPanelActive ? "Coding widget" : isSystemPromptPanelActive ? "System Prompts" : isToolFilterLogActive ? "Tool filter log" : isRuntimeStatusActive ? "Runtime status" : "Tool manager")}</h3>
               {activeItem?.badge && (
                 <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.5 rounded-full font-bold flex-shrink-0">
                   {activeItem.badge}
@@ -1586,9 +1590,11 @@ export function RightSidebar({
             </div>
           )}
 
-          <div className={cn("flex-1 overflow-y-auto", isCompanyPanelActive ? "p-0" : "p-2.5")}>
+          <div className={cn("flex-1 overflow-y-auto", isCompanyPanelActive || isSystemPromptPanelActive ? "p-0" : "p-2.5")}>
             {isCompanyPanelActive ? (
               companyPanel
+            ) : isSystemPromptPanelActive ? (
+              systemPromptPanel
             ) : isCodingPanelActive ? (
               codingPanel
             ) : isPlacementPanelActive && activePlacementManifest ? (
@@ -1969,6 +1975,22 @@ export function RightSidebar({
               </span>
             )}
           </button>
+          {systemPromptPanel && (
+            <button
+              type="button"
+              tabIndex={buttonTabIndex}
+              onClick={() => setActivePanel((current) => (current === "__system_prompt_manager__" ? null : "__system_prompt_manager__"))}
+              className={cn(
+                RAIL_BUTTON_CLASS,
+                activePanel === "__system_prompt_manager__"
+                  ? "bg-violet-500/15 text-violet-200 ring-1 ring-violet-500/30"
+                  : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+              )}
+              title="System prompts"
+            >
+              <FilePenLine size={16} className="h-4 w-4 shrink-0" />
+            </button>
+          )}
           <div className="relative">
             <button
               type="button"

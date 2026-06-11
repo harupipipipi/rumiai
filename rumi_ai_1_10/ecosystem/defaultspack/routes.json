@@ -110,6 +110,36 @@
     },
     {
       "method": "GET",
+      "path": "/api/system-prompts",
+      "flow_id": "transport_direct",
+      "description": "List system prompt profiles"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system-prompts",
+      "flow_id": "transport_direct",
+      "description": "Create a system prompt profile"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system-prompts/{prompt_id}",
+      "flow_id": "transport_direct",
+      "description": "Update a system prompt profile"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/system-prompts/{prompt_id}",
+      "flow_id": "transport_direct",
+      "description": "Delete a system prompt profile"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system-prompts/{prompt_id}/activate",
+      "flow_id": "transport_direct",
+      "description": "Activate a system prompt profile"
+    },
+    {
+      "method": "GET",
       "path": "/api/artifacts",
       "flow_id": "transport_direct",
       "description": "List local artifacts"

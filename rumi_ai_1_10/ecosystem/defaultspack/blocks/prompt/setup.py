@@ -27,8 +27,22 @@ def run(context):
             return fn(request_data, context)
         return handler
 
+    def _lazy_with_defaults(module_path, defaults, func_name="run"):
+        handler = _lazy(module_path, func_name)
+
+        def wrapped(request_data, context):
+            payload = {**request_data, **defaults}
+            return handler(payload, context)
+
+        return wrapped
+
     routes = [
         # --- 既存ルート ---
+        ("GET", "/api/system-prompts", _lazy("blocks.prompt.system_profiles"), {}),
+        ("POST", "/api/system-prompts", _lazy("blocks.prompt.system_profiles"), {}),
+        ("PUT", "/api/system-prompts/{prompt_id}", _lazy("blocks.prompt.system_profiles"), {"prompt_id": "prompt_id"}),
+        ("DELETE", "/api/system-prompts/{prompt_id}", _lazy("blocks.prompt.system_profiles"), {"prompt_id": "prompt_id"}),
+        ("POST", "/api/system-prompts/{prompt_id}/activate", _lazy_with_defaults("blocks.prompt.system_profiles", {"action": "activate"}), {"prompt_id": "prompt_id"}),
         ("PUT", "/api/prompts/{name}", _lazy("blocks.prompt.update"), {"name": "name"}),
         ("DELETE", "/api/prompts/{name}", _lazy("blocks.prompt.delete"), {"name": "name"}),
         ("POST", "/api/prompts/convert", _lazy("blocks.prompt.convert"), {}),

@@ -160,6 +160,48 @@ test("listModelProfiles bypasses browser cache", async () => {
   assert.equal(requestCache, "no-store");
 });
 
+test("system prompt APIs use profile management routes", async () => {
+  const calls: Array<{ url: string; method: string; cache?: RequestCache; body?: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      url: String(input),
+      method: init?.method ?? "GET",
+      cache: init?.cache,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        prompts: [],
+        active_id: "",
+        active_content: "",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.listSystemPrompts();
+    await api.createSystemPrompt({ name: "Support", body: "Answer clearly.", activate: true });
+    await api.updateSystemPrompt("system/support", { body: "Answer briefly." });
+    await api.activateSystemPrompt("system/support");
+    await api.deleteSystemPrompt("system/support");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(calls.map((call) => [call.method, call.url]), [
+    ["GET", "/api/system-prompts"],
+    ["POST", "/api/system-prompts"],
+    ["PUT", "/api/system-prompts/system%2Fsupport"],
+    ["POST", "/api/system-prompts/system%2Fsupport/activate"],
+    ["DELETE", "/api/system-prompts/system%2Fsupport"],
+  ]);
+  assert.equal(calls[0].cache, "no-store");
+  assert.deepEqual(calls[1].body, { name: "Support", body: "Answer clearly.", activate: true });
+  assert.deepEqual(calls[2].body, { body: "Answer briefly." });
+});
+
 test("defaultspack API errors include status and recovery context", () => {
   const message = explainDefaultspackApiError(403, {
     code: "FORBIDDEN",
