@@ -1,0 +1,33 @@
+qa_evidence_ledger_schema:
+  id: rumi_agentic_qa_pack.qa_evidence_ledger
+  required_records:
+    - scenario_id
+    - lane
+    - scenario_runner
+    - adversarial_tester
+    - regression_analyst
+    - evidence_reviewer
+    - pack_handoff_coordinator
+    - expected_observation
+    - actual_observation
+    - evidence_references
+    - triage_owner_pack
+    - reviewer_decision
+  evidence_reference:
+    required_fields:
+      - kind
+      - locator
+      - summary
+    allowed_kinds:
+      - command_output
+      - local_log
+      - screenshot
+      - trace
+      - test_result
+      - changed_file_manifest
+  completion_rules:
+    actual_observation_required: true
+    expected_observation_required: true
+    triage_owner_pack_required_on_failure: true
+    at_least_four_subagent_roles: true
+    network_default_none: true

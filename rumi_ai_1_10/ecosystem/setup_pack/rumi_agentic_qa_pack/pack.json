@@ -1,0 +1,69 @@
+{
+  "pack_id": "rumi_agentic_qa_pack",
+  "display_name": "Rumi Agentic QA Pack",
+  "description": "Declarative end-to-end agent QA, scenario replay, acceptance, and regression triage pack.",
+  "target_pack_id": "rumi_agentic_qa_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "model_scoring": "handoff_to_rumi_model_evals_pack",
+    "browser_e2e_steps": "handoff_to_rumi_browser_automation_pack",
+    "unsafe_behavior": "handoff_to_rumi_security_review_pack",
+    "run_ledger": "handoff_to_rumi_observability_pack",
+    "qa_routing_matrix": "owned_by_rumi_agentic_qa_pack",
+    "acceptance_rubric": "owned_by_rumi_agentic_qa_pack",
+    "qa_evidence_ledger": "owned_by_rumi_agentic_qa_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Agentic QA is an acceptance and triage contract pack, not a replacement for defaultspack runtime startup or execution ownership.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required",
+      "promotion_requires_real_world_success_cases"
+    ],
+    "promotion_blockers": [
+      "no_executable_runtime",
+      "qa_contract_only",
+      "requires_external_owner_for_browser_replay",
+      "requires_external_owner_for_model_scoring"
+    ],
+    "promotion_evidence_required": [
+      "maintainer_approved_runtime_owner",
+      "stable_replay_integration_surface",
+      "observability_evidence_for_scenario_runs",
+      "documented_defaultspack_replacement_plan"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.agentic_qa_pack",
+    "channel": "experimental",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "quality"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools."
+  ]
+}
