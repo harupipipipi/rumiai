@@ -7,7 +7,10 @@ from pathlib import Path
 import yaml
 
 from ecosystem.setup_pack.pack_selector import PackSelector
+import pytest
 
+
+pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parent.parent
 PACK_ID = "rumi_mcp_gateway_pack"

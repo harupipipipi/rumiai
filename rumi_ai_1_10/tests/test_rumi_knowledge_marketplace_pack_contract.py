@@ -9,6 +9,9 @@ import yaml
 from backend_core.ecosystem.spec.schema.validator import validate_ecosystem
 from core_runtime.setup_pack import SetupPackManager
 from ecosystem.setup_pack.pack_selector import PackSelector
+import pytest
+
+pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parent.parent
 PACK_ID = "rumi_knowledge_marketplace_pack"

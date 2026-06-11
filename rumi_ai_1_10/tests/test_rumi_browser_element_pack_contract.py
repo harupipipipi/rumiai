@@ -4,7 +4,10 @@ import json
 from pathlib import Path
 
 import yaml
+import pytest
 
+
+pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parent.parent
 PACK_ROOT = ROOT / "ecosystem" / "rumi_browser_element_pack"

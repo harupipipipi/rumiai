@@ -8,6 +8,9 @@ import yaml
 
 from backend_core.ecosystem.spec.schema.validator import validate_ecosystem
 from ecosystem.setup_pack.pack_selector import PackSelector
+import pytest
+
+pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parent.parent
 PACK_ID = "rumi_browser_form_operator_pack"

@@ -4,7 +4,10 @@ import json
 from pathlib import Path
 
 from ecosystem.setup_pack.pack_selector import PackSelector
+import pytest
 
+
+pytestmark = pytest.mark.contract
 
 PACK_ID = "rumi_workspace_pack"
 

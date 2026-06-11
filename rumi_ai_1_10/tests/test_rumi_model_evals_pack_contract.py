@@ -6,13 +6,16 @@ import sys
 from pathlib import Path
 
 import yaml
+import pytest
 
+
+pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ecosystem.setup_pack.pack_selector import PackSelector
+from ecosystem.setup_pack.pack_selector import PackSelector  # noqa: E402
 
 
 PACK_ID = "rumi_model_evals_pack"
