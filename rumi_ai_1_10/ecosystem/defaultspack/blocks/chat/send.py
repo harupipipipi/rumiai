@@ -47,6 +47,10 @@ _NON_RETRYABLE_AI_ERROR_RE = re.compile(
     r"(api key|not configured|unauthorized|forbidden|authentication|invalid api|invalid request|bad request|\b400\b|\b401\b|\b403\b)",
     re.IGNORECASE,
 )
+_RETRYABLE_RATE_LIMIT_OVERRIDE_RE = re.compile(
+    r"\b429\b|rate limit|rate_limit|router_queue_limitation|quota|resource_exhausted",
+    re.IGNORECASE,
+)
 _COMPUTER_USE_REQUEST_RE = re.compile(
     r"compute[\s_-]*use|compu?ter[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
     r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,80}(操作|送信|入力|クリック|開いて|開く)",
@@ -64,22 +68,8 @@ _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECAS
 
 
 def _conversation_system_prompt(conv, manager):
-    prompt_id = str((conv or {}).get("system_prompt_id") or "").strip()
-    if not prompt_id:
-        return manager.get_system_prompt()
-    prompt = manager.get_prompt(prompt_id) or manager.get_prompt_by_name(prompt_id)
-    if isinstance(prompt, dict):
-        body = prompt.get("body") or prompt.get("content")
-        if body:
-            return str(body)
-    if _PROMPT_ID_RE.match(prompt_id):
-        prompt_path = Path(__file__).resolve().parents[2] / "prompts" / (prompt_id + ".system.md")
-        try:
-            if prompt_path.is_file():
-                return prompt_path.read_text(encoding="utf-8")
-        except OSError:
-            pass
-    return manager.get_system_prompt()
+    from blocks.chat._prompt_helpers import resolve_conversation_system_prompt
+    return resolve_conversation_system_prompt(conv, manager)
 
 
 def _has_real_provider(gateway, model):
@@ -120,6 +110,10 @@ def _ai_retry_delay(params, retry_index):
 def _is_retryable_ai_error(message):
     text = str(message or "")
     if not text:
+        return True
+    # Some providers wrap a transient inner 429 in an outer HTTP 400 envelope.
+    # Prefer the inner rate-limit signal so we still back off and retry.
+    if _RETRYABLE_RATE_LIMIT_OVERRIDE_RE.search(text):
         return True
     if _NON_RETRYABLE_AI_ERROR_RE.search(text):
         return False
@@ -730,6 +724,40 @@ def _tool_limit_message(limit, tool_uses):
     )
 
 
+def _unconnected_tool_call_response(tool_name, tool_call_id, connected_names):
+    connected = sorted(str(name) for name in connected_names if name)
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    f"{tool_name} はこの会話に接続されていないため実行しませんでした。"
+                    "接続済みの tool だけを使用してください。"
+                ),
+            }
+        ],
+        "finish_reason": "tool_call_rejected",
+        "usage": {},
+        "metadata": {
+            "tool_call_rejected": True,
+            "rejected_tool_name": tool_name,
+            "rejected_tool_call_id": tool_call_id,
+            "connected_tools": connected,
+        },
+    }
+
+
+def _reject_unconnected_tool_use(tool_uses, connected_names):
+    allowed = {str(name) for name in connected_names if name}
+    for block in tool_uses:
+        tool_name = str(block.get("name") or block.get("tool_name") or "").strip()
+        if not tool_name or tool_name in allowed:
+            continue
+        tool_call_id = str(block.get("id") or block.get("tool_call_id") or "")
+        return tool_name, tool_call_id
+    return None
+
+
 def _tool_result_data(result):
     if not isinstance(result, dict):
         return {}
@@ -798,6 +826,8 @@ def _tool_result_recovery_kind(result):
     kind = str(recovery.get("kind") or "").strip()
     if kind:
         return kind
+    if not _tool_result_is_error(result):
+        return ""
     reason = _tool_result_reason(result).lower()
     if "visible window" in reason or "background computer-use is disabled" in reason:
         return "visible_window_required"
@@ -1592,6 +1622,24 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             )
             break
         if not tool_uses:
+            break
+
+        rejected_tool_call = _reject_unconnected_tool_use(tool_uses, connected_names)
+        if rejected_tool_call is not None:
+            rejected_tool_name, rejected_tool_call_id = rejected_tool_call
+            response = _unconnected_tool_call_response(rejected_tool_name, rejected_tool_call_id, connected_names)
+            _append_event(
+                events,
+                context,
+                _event(
+                    "tool_call_rejected",
+                    "接続されていない tool call を拒否しました",
+                    phase="tool_call_rejected",
+                    tool_name=rejected_tool_name,
+                    tool_call_id=rejected_tool_call_id,
+                    connected_tools=sorted(str(name) for name in connected_names if name),
+                )
+            )
             break
 
         _append_assistant_tool_use_message(working_messages, tool_uses)

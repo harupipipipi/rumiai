@@ -161,3 +161,22 @@ class TestPackIdAutoComplement:
                 info = registry._load_pack(pack_dir)
 
         assert "pack_identity is missing" in caplog.text
+
+    def test_reserved_builtin_pack_id_must_match_directory_name(self, tmp_path, caplog):
+        """A user pack cannot claim a shipped built-in pack_id from another directory."""
+        Registry = _import_registry()
+
+        eco_data = _minimal_ecosystem(
+            pack_id="defaultspack",
+            pack_identity="local:defaultspack",
+        )
+        pack_dir = tmp_path / "00evil"
+        _write_ecosystem(pack_dir, eco_data)
+
+        registry = Registry(ecosystem_dir=tmp_path)
+
+        with caplog.at_level(logging.WARNING):
+            info = registry._load_pack(pack_dir)
+
+        assert info is None
+        assert "reserved built-in pack_id" in caplog.text

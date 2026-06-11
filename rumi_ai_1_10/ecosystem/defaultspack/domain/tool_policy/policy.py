@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from domain.tool.autonomy import autonomous_tool_execution_allowed
 from domain.tool.schema_adapter import policy_from_context, tool_name_from_definition
 from domain.tool.security import is_safe_first_party_memo_tool
 
@@ -27,6 +28,7 @@ def decide_tool_policy(
     context: dict[str, Any] | None,
     *,
     tool_name: str = "",
+    arguments: dict[str, Any] | None = None,
     approval_granted: bool = False,
 ) -> PolicyDecision:
     context = context if isinstance(context, dict) else {}
@@ -47,6 +49,15 @@ def decide_tool_policy(
         return PolicyDecision(False, risk, action="deny", reason="network tools disabled", matched_by="allow_network", matched_value="false")
     if risk in {"file_write", "file_delete"} and policy.get("allow_file_write") is False:
         return PolicyDecision(False, risk, action="deny", reason="file writes disabled", matched_by="allow_file_write", matched_value="false")
+
+    if autonomous_tool_execution_allowed(name, arguments, context):
+        return PolicyDecision(
+            True,
+            risk,
+            action="allow",
+            sandbox_mode=choose_sandbox_mode(policy, risk),
+            metadata={"autonomous_profile": str(context.get("profile_id") or "")},
+        )
 
     requires_approval = _requires_approval(tool_def, policy, risk, name)
     if requires_approval and not approval_granted:

@@ -129,6 +129,35 @@ class CapabilityCatalog:
                 )
         return prompts
 
+    def prompt(self, prompt_id: str, source_pack_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        target_id = str(prompt_id or "").strip()
+        target_pack = str(source_pack_id or "").strip()
+        if not target_id:
+            return None
+        for prompt in self.prompts():
+            if str(prompt.get("id") or "").strip() != target_id:
+                continue
+            if target_pack and str(prompt.get("source_pack_id") or "").strip() != target_pack:
+                continue
+            return prompt
+        return None
+
+    def prompt_text(self, prompt_id: str, source_pack_id: Optional[str] = None) -> Optional[str]:
+        prompt = self.prompt(prompt_id, source_pack_id=source_pack_id)
+        if not isinstance(prompt, dict):
+            return None
+        content_ref = str(prompt.get("content_ref") or "").strip()
+        prompt_pack_id = str(prompt.get("source_pack_id") or source_pack_id or "").strip()
+        if not content_ref:
+            return None
+        for pack_root in self._catalog_roots():
+            if prompt_pack_id and self._pack_id(pack_root) != prompt_pack_id:
+                continue
+            path = pack_root / content_ref
+            if path.is_file():
+                return path.read_text(encoding="utf-8")
+        return None
+
     def feature_catalog(self) -> Dict[str, Any]:
         path = self.pack_root / "docs" / "ai_agent_services_feature_catalog.md"
         return {

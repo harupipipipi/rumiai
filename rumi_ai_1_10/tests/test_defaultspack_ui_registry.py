@@ -160,6 +160,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("api_keys", apis_field_ids)
         self.assertNotIn("model_api_routes", apis_field_ids)
         self.assertIn("operations_company", section_ids)
+        self.assertIn("mimo_coding_company", section_ids)
+        self.assertIn("mimo-coding-company", sidebar_ids)
+        mimo_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "mimo_coding_company")
+        mimo_field_ids = {field["id"] for field in mimo_section["fields"]}
+        self.assertIn("docker_worker_count", mimo_field_ids)
+        self.assertIn("docker_personas", mimo_field_ids)
         self.assertNotIn("research", section_ids)
         self.assertNotIn("browser_computer", section_ids)
         self.assertNotIn("collaboration", section_ids)
@@ -843,6 +849,65 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(reloaded["models"]["google_api_key"], "")
         self.assertNotIn("google-secret", settings_text)
         self.assertTrue(has_secret)
+
+    def test_update_settings_external_tokens_are_not_secret_write_sink(self):
+        from domain.external.token_store import read_external_token
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                registry = FrontendRegistry(pack_root=pack_root)
+                for section_id in ("external_output", "external_inputs"):
+                    values = registry.update_settings(
+                        {
+                            section_id: {
+                                "external_tokens": {
+                                    "action": "upsert",
+                                    "provider_id": "line",
+                                    "token_id": "main",
+                                    "kind": "channel_secret",
+                                    "value": f"attacker-secret-{section_id}",
+                                }
+                            }
+                        }
+                    )
+
+            token_value = read_external_token("line", token_id="main", pack_root=pack_root)
+            settings_text = (pack_root / "user_data" / "shared" / "frontend_settings.json").read_text(
+                encoding="utf-8"
+            )
+
+        self.assertIsInstance(values["external_output"]["external_tokens"], list)
+        self.assertEqual(token_value, "")
+        self.assertNotIn("attacker-secret", settings_text)
+
+    def test_update_settings_api_keys_do_not_mirror_external_tokens(self):
+        from domain.external.token_store import read_external_token
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                FrontendRegistry(pack_root=pack_root).update_settings(
+                    {
+                        "apis": {
+                            "api_keys": {
+                                "action": "upsert",
+                                "provider_id": "line",
+                                "name": "main",
+                                "kind": "channel_secret",
+                                "value": "line-provider-secret",
+                            }
+                        }
+                    }
+                )
+
+            token_value = read_external_token("line", token_id="main", pack_root=pack_root)
+
+        self.assertEqual(token_value, "")
 
     def test_openrouter_key_status_is_derived_from_secret_store(self):
         from core_runtime.secrets_store import SecretsStore

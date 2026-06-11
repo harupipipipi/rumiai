@@ -1,0 +1,163 @@
+name: Defaultspack v2 Soak Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_hours:
+        description: "Soak duration in hours"
+        required: false
+        default: "24"
+      task_count:
+        description: "Number of improvement tasks per cycle"
+        required: false
+        default: "3"
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    name: 24h Self-Improvement Soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 1500
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pytest
+
+      - name: Run soak test
+        env:
+          XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY: ${{ secrets.XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY }}
+        run: |
+          set -o pipefail
+          python -c "
+          import sys, os, json, time, shutil, subprocess
+          from pathlib import Path
+
+          sys.path.insert(0, 'rumi_ai_1_10/ecosystem/defaultspack')
+          sys.path.insert(0, 'rumi_ai_1_10')
+
+          from domain.agent.self_improvement_live_loop import run_multi_task_dogfood, run_vision_qa
+          from domain.agent.self_improvement_runtime import create_mimo_profile
+          from domain.agent.soak_test_runner import SoakTestRunner
+
+          duration_hours = float('${{ github.event.inputs.duration_hours || 24 }}')
+          task_count = int('${{ github.event.inputs.task_count || 3 }}')
+          workspace = Path('soak_workspace')
+          report_path = Path('soak_report')
+
+          workspace.mkdir(exist_ok=True)
+          report_path.mkdir(exist_ok=True)
+
+          # Init workspace
+          subprocess.run(['git', 'init'], cwd=workspace, check=True, capture_output=True)
+          subprocess.run(['git', 'config', 'user.email', 'soak@mimo.dev'], cwd=workspace, check=True, capture_output=True)
+          subprocess.run(['git', 'config', 'user.name', 'Soak Test'], cwd=workspace, check=True, capture_output=True)
+
+          # Seed files
+          files = {
+              'math_utils.py': 'import os\nimport sys\n\ndef add(a, b):\n    return a + b\n\ndef subtract(a, b):\n    return a - b\n',
+              'string_utils.py': 'import json\nimport re\n\ndef capitalize(s):\n    return s[0].upper() + s[1:] if s else s\n\ndef reverse(s):\n    return s[::-1]\n',
+              'list_utils.py': 'import collections\nfrom typing import List\n\ndef flatten(lst):\n    r = []\n    for i in lst:\n        r.extend(flatten(i)) if isinstance(i, list) else r.append(i)\n    return r\n\ndef unique(lst):\n    return list(dict.fromkeys(lst))\n',
+              'test_math_utils.py': 'from math_utils import add, subtract\n\ndef test_add():\n    assert add(1, 2) == 3\n\ndef test_sub():\n    assert subtract(5, 3) == 2\n',
+              'test_string_utils.py': 'from string_utils import capitalize, reverse\n\ndef test_cap():\n    assert capitalize(\"hello\") == \"Hello\"\n\ndef test_rev():\n    assert reverse(\"abc\") == \"cba\"\n',
+              'test_list_utils.py': 'from list_utils import flatten, unique\n\ndef test_flat():\n    assert flatten([1, [2, [3]]]) == [1, 2, 3]\n\ndef test_uniq():\n    assert unique([1, 1, 2]) == [1, 2]\n',
+          }
+          for name, content in files.items():
+              (workspace / name).write_text(content)
+          subprocess.run(['git', 'add', '.'], cwd=workspace, check=True)
+          subprocess.run(['git', 'commit', '-m', 'seed'], cwd=workspace, check=True, capture_output=True)
+
+          runtime = create_mimo_profile(workspace_root=workspace)
+          runner = SoakTestRunner(runtime, state_path=report_path / 'soak_state.json')
+          runner.save_task_queue(runner.load_task_queue())
+
+          all_results = []
+          hourly_summaries = []
+          start = time.time()
+          cycle = 0
+
+          while (time.time() - start) / 3600 < duration_hours:
+              cycle += 1
+              # Reset workspace to seed state for each cycle
+              subprocess.run(['git', 'checkout', 'HEAD', '--', '.'], cwd=workspace, capture_output=True)
+
+              result = run_multi_task_dogfood(workspace_root=workspace, task_count=task_count)
+              all_results.append(result)
+
+              summary = {
+                  'cycle': cycle,
+                  'successful': result['successful'],
+                  'failed': result['failed'],
+                  'results': result['results'],
+                  'elapsed_hours': round((time.time() - start) / 3600, 2),
+              }
+              hourly_summaries.append(summary)
+              runner.record_hourly_summary(summary)
+
+              for r in result['results']:
+                  runner.record_task_result(
+                      r['task_id'],
+                      status='completed' if r['success'] else 'failed',
+                      model_role='main',
+                      model_id=r.get('model', ''),
+                      files_read=r.get('files_read', []),
+                      files_modified=r.get('files_modified', []),
+                      test_result='pass' if r.get('test_exit_code') == 0 else 'fail',
+                      failures=[r['error']] if r.get('error') else [],
+                  )
+
+              print(f'Cycle {cycle}: {result[\"successful\"]}/{result[\"total_tasks\"]} successful', flush=True)
+              time.sleep(5)
+
+          final_report = runner.generate_final_report()
+          final_report['cycles'] = len(all_results)
+          final_report['total_improvement_tasks'] = sum(r['total_tasks'] for r in all_results)
+          final_report['total_successful'] = sum(r['successful'] for r in all_results)
+          final_report['total_failed'] = sum(r['failed'] for r in all_results)
+          final_report['duration_hours'] = round((time.time() - start) / 3600, 2)
+
+          (report_path / 'final_report.json').write_text(json.dumps(final_report, indent=2, ensure_ascii=False, default=str))
+
+          md_lines = ['# Defaultspack v2 Soak Test Report', '', f'Duration: {final_report[\"duration_hours\"]}h', f'Cycles: {final_report[\"cycles\"]}', f'Total tasks: {final_report[\"total_improvement_tasks\"]}', f'Successful: {final_report[\"total_successful\"]}', f'Failed: {final_report[\"total_failed\"]}', '', '## Friction Points', '']
+          for fp in final_report.get('friction_points', []):
+              md_lines.append(f'- {fp[\"task_id\"]}: {fp.get(\"friction\", \"no detail\")}')
+          if not final_report.get('friction_points'):
+              md_lines.append('No friction points recorded.')
+          md_lines.extend(['', '## Hourly Summaries', ''])
+          for hs in final_report.get('hourly_summaries', []):
+              s = hs.get('summary', {})
+              md_lines.append(f'- Cycle {s.get(\"cycle\", \"?\")}: {s.get(\"successful\", 0)}/{s.get(\"successful\", 0) + s.get(\"failed\", 0)} successful ({s.get(\"elapsed_hours\", 0)}h)')
+          (report_path / 'final_report.md').write_text('\n'.join(md_lines))
+          print('\n=== FINAL REPORT ===')
+          print((report_path / 'final_report.md').read_text())
+          "
+
+      - name: Upload soak report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: defaultspack-v2-soak-report-${{ github.run_id }}
+          path: soak_report/
+          if-no-files-found: error
+
+      - name: Upload soak workspace git log
+        if: always()
+        run: |
+          cd soak_workspace && git log --oneline > ../soak_report/git_log.txt 2>/dev/null || true
+          cd ..
+
+      - name: Upload final artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: defaultspack-v2-soak-full-${{ github.run_id }}
+          path: soak_report/
+          if-no-files-found: ignore

@@ -614,6 +614,31 @@ class FileOps:
         with open(resolved, "r", encoding="utf-8") as f:
             return f.read()
 
+    def read_file_lines(self, path, start_line=None, end_line=None):
+        """Read a 1-based inclusive line window from a text file."""
+        resolved = self._resolve_user_path(path, operation="read")
+        if not os.path.isfile(resolved):
+            raise FileNotFoundError(f"File not found: {path}")
+        self._ensure_text_size(resolved)
+        if self._looks_binary(resolved):
+            raise ValueError("Binary file cannot be read as text: " + str(path))
+        with open(resolved, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        total_lines = len(lines)
+        start = int(start_line or 1)
+        end = int(end_line or total_lines)
+        start_index = max(0, start - 1)
+        end_index = max(start_index, end)
+        content = "".join(lines[start_index:end_index])
+        actual_end = min(total_lines, end)
+        return {
+            "content": content,
+            "start_line": start,
+            "end_line": actual_end,
+            "total_lines": total_lines,
+            "truncated": start > 1 or actual_end < total_lines,
+        }
+
     def write_file(self, path, content):
         """ファイルに書き込み、書き込んだバイト数を返す。
 

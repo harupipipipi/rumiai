@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -9,6 +10,22 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+def test_computer_use_action_suffix_tool_name_is_normalized():
+    from domain.chat.stream_engine import _normalize_tool_call_name_and_arguments
+
+    tool_name, arguments = _normalize_tool_call_name_and_arguments(
+        "computer_use:open_url",
+        {"url": "https://www.google.com", "app": "Google Chrome"},
+    )
+
+    assert tool_name == "computer_use"
+    assert arguments == {
+        "action": "open_url",
+        "url": "https://www.google.com",
+        "app": "Google Chrome",
+    }
 
 
 def test_send_and_stream_wrappers_consume_same_engine_final_message(tmp_path, monkeypatch):
@@ -238,6 +255,48 @@ def test_prepare_chat_run_forwards_approval_followup_token_to_tool_context(tmp_p
     assert prepared.tool_context["tool_approval_tokens"] == expected
     ChatStore._instance = None
 
+def test_prepare_chat_run_promotes_profile_and_agent_ids_into_tool_context(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="stub/default",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "scheduled review",
+                "metadata": {
+                    "profile_id": "defaultspack.mimo_coding_company",
+                    "agent_id": "project_manager",
+                },
+            },
+            "params": {
+                "tool_policy": {
+                    "profile_id": "defaultspack.mimo_coding_company",
+                    "tool_choice": "auto",
+                }
+            },
+            "tools": ["todo"],
+        },
+        {"run_source": "scheduler"},
+    )
+
+    assert prepared.request_context["profile_id"] == "defaultspack.mimo_coding_company"
+    assert prepared.tool_context["profile_id"] == "defaultspack.mimo_coding_company"
+    assert prepared.request_context["agent_id"] == "project_manager"
+    assert prepared.tool_context["agent_id"] == "project_manager"
+    ChatStore._instance = None
+
 
 def test_prepare_chat_run_maps_computer_approval_followup_aliases(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
@@ -249,7 +308,6 @@ def test_prepare_chat_run_maps_computer_approval_followup_aliases(tmp_path, monk
 
     store = ChatStore()
     conversation = store.create_conversation(model="stub/default")
-
     prepared = prepare_chat_run(
         {
             "conversation_id": conversation["id"],
@@ -283,6 +341,93 @@ def test_prepare_chat_run_maps_computer_approval_followup_aliases(tmp_path, monk
     ChatStore._instance = None
 
 
+def test_approval_followup_executes_exact_payload_before_model_turn(tmp_path, monkeypatch):
+    from domain.chat.stream_engine import ChatRunEngine
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    captured = {}
+
+    def fake_execute_tool(self, prepared, tool_name, tool_call_id, arguments):
+        captured["tool_name"] = tool_name
+        captured["tool_call_id"] = tool_call_id
+        captured["arguments"] = dict(arguments)
+        captured["approval_tokens"] = dict(prepared.tool_context.get("tool_approval_tokens") or {})
+        return {"status": "ok", "data": {"action": arguments.get("action"), "executed": True}}
+
+    def fake_model_turn(self, prepared, messages, draft):
+        captured["model_messages"] = list(messages)
+        return {"content": [{"type": "text", "text": "done"}], "finish_reason": "stop", "usage": {}}, []
+
+    monkeypatch.setattr(ChatRunEngine, "_execute_tool", fake_execute_tool)
+    monkeypatch.setattr(ChatRunEngine, "_model_turn", fake_model_turn)
+
+    engine = ChatRunEngine()
+    events = list(engine.stream(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "ユーザーが許可しました。承認済みの操作を続行してください。",
+                "metadata": {
+                    "approval_followup": {
+                        "approval_token": "tok_followup",
+                        "action": "computer.click",
+                        "operation": "computer.click",
+                        "payload": {"action": "click", "x": 10, "y": 20},
+                        "request_id": "apr_followup",
+                        "tool_call_id": "call_original",
+                        "tool_name": "computer_use",
+                    },
+                },
+            },
+            "tools": ["computer_use"],
+            "params": {"max_tool_calls": 2},
+        },
+        {},
+    ))
+
+    assert captured["tool_name"] == "computer_use"
+    assert captured["tool_call_id"] == "call_original"
+    assert captured["arguments"] == {"action": "click", "x": 10, "y": 20}
+    assert captured["approval_tokens"]["computer.click"] == "tok_followup"
+    assert captured["approval_tokens"]["apr_followup"] == "tok_followup"
+    assert "tok_followup" not in json.dumps(captured["model_messages"], ensure_ascii=False)
+    assert any(message.get("role") == "tool" for message in captured["model_messages"])
+    assert any(event.get("type") == "tool_call_completed" for event in events)
+    ChatStore._instance = None
+
+
+def test_approval_request_payload_preserves_original_tool_arguments():
+    from domain.chat.stream_engine import _approval_request_from_tool_result
+
+    request = _approval_request_from_tool_result(
+        "computer_use",
+        "call_1",
+        {"action": "click", "x": 10, "y": 10},
+        {
+            "status": "ok",
+            "data": {
+                "widget": {
+                    "type": "approval_request",
+                    "requires_approval": True,
+                    "action": "computer.click",
+                    "operation": "computer.click",
+                    "payload": {"action": "computer.click", "args_hash": "server-bound"},
+                    "approval_request_id": "apr_1",
+                },
+            },
+        },
+    )
+
+    assert request is not None
+    assert request["payload"] == {"action": "click", "x": 10, "y": 10}
+    assert request["operation"] == "computer.click"
 def test_prepare_chat_run_injects_matched_skill_and_chat_references(tmp_path, monkeypatch):
     import json
 
@@ -479,6 +624,59 @@ def test_complete_turn_retries_transient_ai_error_after_tool_use():
     assert any(event.get("type") == "ai_retry_scheduled" for event in engine._activity_events)
 
 
+def test_complete_turn_retries_wrapped_429_after_tool_use():
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+
+    class FlakyClient:
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, model, messages, tools=None, params=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError(
+                    'OpenAI API error 400: {"error":{"code":"429","message":"Cluster rate limit exceeded, request queued but not admitted","param":"","type":"router_queue_limitation"}}'
+                )
+            return {
+                "content": [{"type": "text", "text": "continued after wrapped 429"}],
+                "finish_reason": "stop",
+            }
+
+    client = FlakyClient()
+    engine = ChatRunEngine(store=object(), client=client)
+    engine._tool_logs = [{"tool_name": "coding_file_read", "result": {"status": "ok"}}]
+    prepared = PreparedChatRun(
+        conversation_id="conv-1",
+        conversation={"id": "conv-1"},
+        input_data={},
+        request_id="req-1",
+        content=[],
+        metadata=None,
+        user_message={"id": "user-1"},
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        params={"retry": {"max_attempts": 2, "delays": [0]}},
+        request_context={},
+        tool_context={},
+        standard_messages=[],
+        user_text="hello",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=[],
+        provider_tools=[],
+        tools_called=[],
+        connected_tool_names=set(),
+        call_handler=None,
+        model_routing={},
+    )
+
+    response = engine._complete_turn(prepared, [{"role": "user", "content": "hello"}])
+
+    assert client.calls == 2
+    assert response["content"] == [{"type": "text", "text": "continued after wrapped 429"}]
+    assert any(event.get("type") == "ai_retry_scheduled" for event in engine._activity_events)
+
+
 def test_stream_empty_thinking_retry_preserves_tools_for_tool_calls():
     from domain.chat.run_request import PreparedChatRun
     from domain.chat.stream_engine import ChatRunEngine
@@ -567,6 +765,54 @@ def test_stream_empty_thinking_retry_preserves_tools_for_tool_calls():
     assert response["metadata"]["fallback_kept_tools"] is True
     assert tool_uses[0]["name"] == "browser_computer"
     assert any(event.get("type") == "thinking_delta" for event in events)
+
+
+def test_complete_with_tools_rejects_unattached_model_tool_call():
+    from blocks.chat import send
+
+    ai_calls = 0
+    invoked_tools = []
+
+    def call_handler(name, payload):
+        nonlocal ai_calls
+        if name == "defaults.ai.complete":
+            ai_calls += 1
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call-danger",
+                            "name": "dangerous_tool",
+                            "input": {"payload": "owned"},
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            invoked_tools.append(payload["tool_name"])
+            return {"status": "ok", "data": {"result": "should not run", "is_error": False}}
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "google/gemma-4-31b-it",
+        [{"role": "user", "content": "hello"}],
+        [{"name": "allowed_tool"}],
+        {},
+        call_handler,
+        {"max_tool_calls": 3},
+    )
+
+    assert ai_calls == 1
+    assert invoked_tools == []
+    assert response["finish_reason"] == "tool_call_rejected"
+    assert response["metadata"]["tool_call_rejected"] is True
+    assert response["metadata"]["rejected_tool_name"] == "dangerous_tool"
+    assert response["metadata"]["connected_tools"] == ["allowed_tool"]
+    assert response["tool_logs"] == []
+    assert any(event.get("phase") == "tool_call_rejected" for event in response["events"])
 
 
 def test_legacy_complete_with_tools_retries_transient_ai_error_after_tool_use():

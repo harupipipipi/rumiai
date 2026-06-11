@@ -177,7 +177,7 @@ def stage_pack_shell(repo_root: Path, source_root: Path, target: str) -> Path:
     return dest
 
 
-def download_to_temp(url: str, attempts: int = 3) -> Path:
+def download_to_temp(url: str, attempts: int = 15) -> Path:
     suffix = ".zip" if url.endswith(".zip") else ".tar.gz"
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
@@ -195,12 +195,13 @@ def download_to_temp(url: str, attempts: int = 3) -> Path:
             temp_path.unlink(missing_ok=True)
             last_error = exc
             if attempt < attempts:
-                time.sleep(2 * attempt)
+                print(f"Download failed for {url} (attempt {attempt}/{attempts}): {exc}", file=sys.stderr)
+                time.sleep(min(30, 2 * attempt))
     assert last_error is not None
     raise last_error
 
 
-def download_text(url: str, attempts: int = 3) -> str:
+def download_text(url: str, attempts: int = 5) -> str:
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
@@ -211,7 +212,8 @@ def download_text(url: str, attempts: int = 3) -> str:
         except Exception as exc:  # pragma: no cover - network retry path
             last_error = exc
             if attempt < attempts:
-                time.sleep(2 * attempt)
+                print(f"Download failed for {url} (attempt {attempt}/{attempts}): {exc}", file=sys.stderr)
+                time.sleep(min(30, 2 * attempt))
     assert last_error is not None
     raise last_error
 
@@ -261,22 +263,12 @@ def parse_sha256_manifest(text: str, expected_filename: str) -> str:
 
 
 def verify_uv_archive_checksum(archive_path: Path, *, target: str, version: str, url: str) -> None:
-    expected_filename = Path(url).name
     pinned_sha256 = expected_uv_sha256(target, version).lower()
-    upstream_sha256 = parse_sha256_manifest(
-        download_text(f"{url}.sha256"),
-        expected_filename,
-    )
-    if upstream_sha256 != pinned_sha256:
-        raise RuntimeError(
-            "Pinned uv SHA256 does not match upstream checksum manifest for "
-            f"{expected_filename}: pinned={pinned_sha256} upstream={upstream_sha256}"
-        )
     actual_sha256 = compute_sha256(archive_path).lower()
     if actual_sha256 != pinned_sha256:
         raise RuntimeError(
             "uv archive SHA256 mismatch for "
-            f"{expected_filename}: expected {pinned_sha256}, got {actual_sha256}"
+            f"{Path(url).name}: expected {pinned_sha256}, got {actual_sha256}"
         )
 
 

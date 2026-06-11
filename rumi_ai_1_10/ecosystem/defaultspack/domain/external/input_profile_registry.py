@@ -20,10 +20,11 @@ class InputProfileRegistry:
                 profile = self._load(path)
                 if profile is not None:
                     profiles.append(profile)
-        profiles.extend(
-            InputProfile.from_dict(spec)
-            for spec in profile_specs_from_components(self.pack_root, "input_profiles")
-        )
+        builtin_ids = {profile.id for profile in profiles}
+        for spec in profile_specs_from_components(self.pack_root, "input_profiles"):
+            profile = InputProfile.from_dict(spec)
+            if profile.id not in builtin_ids:
+                profiles.append(profile)
         for directory in self._custom_profile_dirs():
             for path in sorted(directory.glob("*.profile.yaml")):
                 profile = self._load(path)

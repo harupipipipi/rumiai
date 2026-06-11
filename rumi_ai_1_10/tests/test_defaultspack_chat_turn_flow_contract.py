@@ -27,10 +27,19 @@ def _stream_flow():
 def test_chat_turn_flow_has_profile_workspace_steps():
     steps = _flow()["steps"]
     ids = [step["id"] for step in steps]
-    assert ids[:2] == ["load_active_profile", "load_profile_workspace"]
+    assert ids[:3] == ["load_conversation", "load_active_profile", "load_profile_workspace"]
     functions = {step["id"]: step["function"] for step in steps if step.get("type") == "function"}
+    assert functions["load_conversation"] == "defaults.chat.get_conversation"
     assert functions["load_active_profile"] == "defaults.profile.load_active"
     assert functions["load_profile_workspace"] == "defaults.profile.workspace"
+
+
+def test_chat_turn_flow_uses_conversation_model_and_prompt_metadata():
+    steps = {step["id"]: step for step in _flow()["steps"]}
+
+    assert steps["load_active_profile"]["input"]["profile_id"] == "{{input.profile_id || conversation.metadata.profile_id}}"
+    assert steps["load_system_prompt"]["input"]["system_prompt_id"] == "{{conversation.system_prompt_id}}"
+    assert steps["route_model"]["input"]["preferred_model"] == "{{conversation.model}}"
 
 
 def test_chat_turn_flow_has_permission_filter_before_call_ai():
@@ -88,6 +97,12 @@ def test_chat_turn_declarative_runner_executes_function_steps(monkeypatch):
     def fake_invoke(function_name, step_input, flow_context):
         calls.append((function_name, step_input))
         data_by_function = {
+            "defaults.chat.get_conversation": {
+                "id": "conversation-1",
+                "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "system_prompt_id": "mimo_coding_company",
+                "metadata": {"profile_id": "profile-1"},
+            },
             "defaults.profile.load_active": {"profile_id": "profile-1", "policy": {}},
             "defaults.profile.workspace": {"root": "/tmp/work"},
             "defaults.chat.detect_modalities": {"text": True},
@@ -124,9 +139,26 @@ def test_chat_turn_declarative_runner_executes_function_steps(monkeypatch):
     assert result.is_success()
     assert result.metadata["runner"] == "declarative_flow_engine"
     assert calls[0] == (
+        "defaults.chat.get_conversation",
+        {"conversation_id": "conversation-1"},
+    )
+    assert calls[1] == (
         "defaults.profile.load_active",
         {"profile_id": "profile-1"},
     )
+    prompt_call = next(step_input for function_name, step_input in calls if function_name == "defaults.prompt.load_effective")
+    assert prompt_call["profile_id"] == "profile-1"
+    assert prompt_call["conversation_id"] == "conversation-1"
+    assert prompt_call["system_prompt_id"] == "mimo_coding_company"
+    assert prompt_call["workspace"] == {"root": "/tmp/work"}
+
+    route_call = next(step_input for function_name, step_input in calls if function_name == "defaults.ai.route_model")
+    assert route_call["conversation_id"] == "conversation-1"
+    assert route_call["profile_id"] == "profile-1"
+    assert route_call["message"] == {"content": "hi"}
+    assert route_call["modalities"] == {"text": True}
+    assert route_call["tools"] == ["search"]
+    assert route_call["preferred_model"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
     assert "defaults.vision.describe_images" not in [call[0] for call in calls]
     outputs = result.metadata["outputs"]
     assert outputs["ai_response"] == {"id": "assistant-1"}
@@ -165,6 +197,12 @@ def test_chat_turn_runs_optional_post_turn_subflow(monkeypatch):
         if function_name == "test.webhook.forward":
             return {"status": "ok", "data": {"sent": True, "to": "line"}}
         data_by_function = {
+            "defaults.chat.get_conversation": {
+                "id": "conversation-1",
+                "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "system_prompt_id": "mimo_coding_company",
+                "metadata": {"profile_id": "profile-1"},
+            },
             "defaults.profile.load_active": {"profile_id": "profile-1", "policy": {"post_turn_flow": "test.post_turn"}},
             "defaults.profile.workspace": {"root": "/tmp/work"},
             "defaults.chat.detect_modalities": {"text": True},
@@ -228,6 +266,12 @@ def test_chat_turn_ignores_request_controlled_post_turn_subflow(monkeypatch):
         if function_name == "test.webhook.forward":
             return {"status": "ok", "data": {"sent": True}}
         data_by_function = {
+            "defaults.chat.get_conversation": {
+                "id": "conversation-1",
+                "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "system_prompt_id": "mimo_coding_company",
+                "metadata": {"profile_id": "profile-1"},
+            },
             "defaults.profile.load_active": {"profile_id": "profile-1", "policy": {}},
             "defaults.profile.workspace": {"root": "/tmp/work"},
             "defaults.chat.detect_modalities": {"text": True},

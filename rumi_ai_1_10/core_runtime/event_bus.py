@@ -2,6 +2,9 @@
 event_bus.py - publish/subscribe(疎結合通信)
 
 スレッドセーフ版
+ワイルドカード対応:
+  - `*` は1セグメントに一致 (例: `agent.*` → `agent.created`)
+  - `#` は1以上のセグメントに一致 (例: `agent.#` → `agent.created`, `agent.x.y`)
 """
 
 from __future__ import annotations
@@ -15,10 +18,38 @@ from threading import RLock
 Handler = Callable[[Dict[str, Any]], None]
 
 
+def _topic_matches(pattern: str, topic: str) -> bool:
+    """Return True if *pattern* (may contain ``*``/``#``) matches *topic*.
+
+    Matching rules (AMQP-style):
+    - ``*`` matches exactly one segment  (``agent.*`` → ``agent.created``)
+    - ``#`` matches zero or more segments (``#.status`` → ``status``, ``agent.status``)
+    """
+    p_parts = pattern.split(".")
+    t_parts = topic.split(".")
+    return _match_parts(p_parts, t_parts)
+
+
+def _match_parts(p_parts: list[str], t_parts: list[str]) -> bool:
+    if not p_parts:
+        return not t_parts
+    if p_parts[0] == "#":
+        for i in range(len(t_parts) + 1):
+            if _match_parts(p_parts[1:], t_parts[i:]):
+                return True
+        return False
+    if not t_parts:
+        return False
+    if p_parts[0] == "*" or p_parts[0] == t_parts[0]:
+        return _match_parts(p_parts[1:], t_parts[1:])
+    return False
+
+
 @dataclass
 class EventBus:
     """
     シンプルなEvent Bus（スレッドセーフ）
+    ワイルドカード購読対応 (`*`, `#`)
     """
 
     _subs: Dict[str, List[Tuple[str, Handler]]] = field(default_factory=dict)
@@ -26,7 +57,12 @@ class EventBus:
     _id_counter: int = field(default=0)
 
     def subscribe(self, topic: str, handler: Handler, handler_id: Optional[str] = None) -> str:
-        """Subscribe handler to topic（スレッドセーフ、カウンタベースID）"""
+        """Subscribe handler to topic（スレッドセーフ、カウンタベースID）
+
+        *topic* may contain wildcards:
+        - ``*`` matches exactly one segment  (e.g. ``agent.*``)
+        - ``#`` matches zero or more segments (e.g. ``#.status``)
+        """
         with self._lock:
             if handler_id is None:
                 self._id_counter += 1
@@ -34,16 +70,28 @@ class EventBus:
             self._subs.setdefault(topic, []).append((handler_id, handler))
             return handler_id
 
+    def _matching_handlers(self, topic: str) -> List[Tuple[str, Handler]]:
+        """Return all handlers whose subscription pattern matches *topic*."""
+        matched: List[Tuple[str, Handler]] = []
+        for pattern, handlers in self._subs.items():
+            if _topic_matches(pattern, topic):
+                matched.extend(handlers)
+        return matched
+
     def publish(self, topic: str, payload: Dict[str, Any]) -> None:
-        """Publish event to topic（スレッドセーフ）"""
+        """Publish event to topic（スレッドセーフ、ワイルドカード購読にも配信）"""
         with self._lock:
-            handlers = list(self._subs.get(topic, []))
-        
+            seen_ids: set[str] = set()
+            handlers: List[Tuple[str, Handler]] = []
+            for hid, h in self._matching_handlers(topic):
+                if hid not in seen_ids:
+                    seen_ids.add(hid)
+                    handlers.append((hid, h))
+
         for handler_id, handler in handlers:
             try:
                 handler(payload)
             except Exception as e:
-                # エラーを可視化するが、publishは継続
                 print(f"[EventBus] Handler '{handler_id}' error on topic '{topic}': {e}", file=sys.stderr)
                 continue
 
@@ -78,10 +126,10 @@ class EventBus:
                 count = sum(len(handlers) for handlers in self._subs.values())
                 self._subs.clear()
                 return count
-            
+
             if topic in self._subs:
                 count = len(self._subs[topic])
                 del self._subs[topic]
                 return count
-            
+
             return 0

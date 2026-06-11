@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .openai_provider import OpenAIProvider
@@ -42,6 +47,9 @@ class OpenAICompatibleProvider(OpenAIProvider):
         default_base_url: str = "",
         credential_required: bool = True,
         extra_headers: Optional[Dict[str, str]] = None,
+        remote_model_discovery: bool | None = None,
+        remote_model_list_path: str | None = None,
+        remote_model_cache_ttl_seconds: int | None = None,
     ):
         super().__init__()
         default_provider_id = str(provider_id or getattr(self.__class__, "provider_name", "") or "openai_compatible")
@@ -54,6 +62,18 @@ class OpenAICompatibleProvider(OpenAIProvider):
         self._default_base_url = str(default_base_url or self.BASE_URL).strip().rstrip("/")
         self._credential_required = bool(credential_required)
         self._extra_headers = dict(extra_headers or {})
+        if remote_model_discovery is None:
+            remote_model_discovery = bool(getattr(self.__class__, "remote_model_discovery", False))
+        if remote_model_list_path is None:
+            remote_model_list_path = str(getattr(self.__class__, "remote_model_list_path", "/models") or "/models")
+        if remote_model_cache_ttl_seconds is None:
+            remote_model_cache_ttl_seconds = getattr(self.__class__, "remote_model_cache_ttl_seconds", 21600)
+        self._remote_model_discovery = bool(remote_model_discovery)
+        self._remote_model_list_path = str(remote_model_list_path or "/models").strip() or "/models"
+        try:
+            self._remote_model_cache_ttl_seconds = max(60, int(remote_model_cache_ttl_seconds))
+        except (TypeError, ValueError):
+            self._remote_model_cache_ttl_seconds = 21600
 
         env_api_key = ""
         for env_name in self._api_key_envs:
@@ -152,6 +172,9 @@ class OpenAICompatibleProvider(OpenAIProvider):
             credential_required=bool(manifest.get("credential_required", True)),
             known_models=known_models,
             extra_headers=dict(manifest.get("headers", {})),
+            remote_model_discovery=str(((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_sync") or "").strip().lower() in {"remote_merge", "remote_discovery"},
+            remote_model_list_path=str(((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_list_path") or "/models"),
+            remote_model_cache_ttl_seconds=((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_cache_ttl_seconds", 21600),
         )
 
     @staticmethod
@@ -326,8 +349,173 @@ class OpenAICompatibleProvider(OpenAIProvider):
         provider_name = str(self.provider_id or getattr(self, "provider_name", "") or "").strip()
         profile_dir = self.profile_dir()
         if provider_name and profile_dir is not None:
-            return merge_curated_and_profiles(provider_name, self.KNOWN_MODELS, profile_dir)
-        return [dict(model) for model in self.KNOWN_MODELS]
+            base_models = merge_curated_and_profiles(provider_name, self.KNOWN_MODELS, profile_dir)
+        else:
+            base_models = [dict(model) for model in self.KNOWN_MODELS]
+        return self._merge_remote_models(base_models)
+
+    def _merge_remote_models(self, base_models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        merged: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in base_models:
+            normalized = self._normalize_known_model(item)
+            if normalized is None:
+                continue
+            model_id = str(normalized.get("id") or "").strip()
+            if not model_id or model_id in seen:
+                continue
+            seen.add(model_id)
+            merged.append(normalized)
+        for item in self._remote_discovered_models():
+            normalized = self._normalize_known_model(item)
+            if normalized is None:
+                continue
+            model_id = str(normalized.get("id") or "").strip()
+            if not model_id or model_id in seen:
+                continue
+            seen.add(model_id)
+            merged.append(normalized)
+        return merged
+
+    def _remote_discovered_models(self) -> List[Dict[str, Any]]:
+        if not self._remote_model_discovery or not self._api_key or not self._base_url:
+            return []
+        cache = self._load_remote_model_cache()
+        now = int(time.time())
+        if cache and int(cache.get("expires_at") or 0) > now:
+            return self._normalize_remote_models(cache.get("models"))
+        try:
+            fetched = self._fetch_remote_models()
+        except Exception:
+            fetched = []
+        if fetched:
+            self._save_remote_model_cache(fetched, now=now)
+            return fetched
+        return self._normalize_remote_models(cache.get("models")) if cache else []
+
+    def _remote_model_cache_path(self) -> Path:
+        cache_root = Path(__file__).resolve().parents[3] / "user_data" / "shared" / "provider_model_cache"
+        cache_root.mkdir(parents=True, exist_ok=True)
+        return cache_root / f"{self.provider_id}.models.json"
+
+    def _load_remote_model_cache(self) -> Dict[str, Any] | None:
+        path = self._remote_model_cache_path()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, ValueError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _save_remote_model_cache(self, models: List[Dict[str, Any]], *, now: int | None = None) -> None:
+        path = self._remote_model_cache_path()
+        timestamp = int(now if now is not None else time.time())
+        payload = {
+            "provider_id": self.provider_id,
+            "saved_at": timestamp,
+            "expires_at": timestamp + self._remote_model_cache_ttl_seconds,
+            "models": models,
+        }
+        try:
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except OSError:
+            return
+
+    def _fetch_remote_models(self) -> List[Dict[str, Any]]:
+        url = self._base_url.rstrip("/") + self._remote_model_list_path
+        req = urllib.request.Request(url, headers=self._headers(content_type=""), method="GET")
+        timeout_seconds = max(2, min(20, int(os.environ.get("RUMI_DEFAULTSPACK_REMOTE_MODEL_DISCOVERY_TIMEOUT", "6") or "6")))
+        try:
+            with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout_seconds) as resp:
+                raw_bytes = resp.read().decode("utf-8")
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError):
+            return []
+        try:
+            payload = json.loads(raw_bytes)
+        except (json.JSONDecodeError, ValueError):
+            return []
+        raw_models = payload.get("data") if isinstance(payload, dict) else []
+        return self._normalize_remote_models(raw_models)
+
+    def _normalize_remote_models(self, raw_models: Any) -> List[Dict[str, Any]]:
+        if not isinstance(raw_models, list):
+            return []
+        normalized: List[Dict[str, Any]] = []
+        for raw in raw_models:
+            model = self._normalize_remote_model(raw)
+            if model is not None:
+                normalized.append(model)
+        return normalized
+
+    def _normalize_remote_model(self, raw: Any) -> Dict[str, Any] | None:
+        if not isinstance(raw, dict):
+            return None
+        model_id = str(raw.get("id") or raw.get("model") or "").strip()
+        if not model_id:
+            return None
+        qualified_model_id = model_id if model_id.startswith(f"{self.provider_id}/") else f"{self.provider_id}/{model_id}"
+        model_type = self._remote_model_type(model_id)
+        capability_map = self._remote_model_capabilities(model_id, model_type)
+        metadata: Dict[str, Any] = {
+            "source": "remote_models_endpoint",
+        }
+        for key in ("owned_by", "object", "created"):
+            value = raw.get(key)
+            if value not in (None, ""):
+                metadata[f"remote_{key}"] = value
+        return {
+            "id": qualified_model_id,
+            "model_id": model_id,
+            "provider_id": self.provider_id,
+            "provider": self.provider_id,
+            "display_name": str(raw.get("display_name") or raw.get("name") or model_id),
+            "name": str(raw.get("display_name") or raw.get("name") or model_id),
+            "type": model_type,
+            "capabilities": capability_map,
+            "supports_thinking": bool(capability_map.get("reasoning")),
+            "thinking_levels": ["low", "medium", "high", "xhigh"] if capability_map.get("reasoning") else [],
+            "default_thinking_level": "medium" if capability_map.get("reasoning") else None,
+            "metadata": metadata,
+        }
+
+    @staticmethod
+    def _remote_model_type(model_id: str) -> str:
+        lowered = str(model_id or "").strip().lower()
+        if not lowered:
+            return "chat"
+        if "embed" in lowered:
+            return "embedding"
+        if any(token in lowered for token in ("tts", "speech")):
+            return "tts"
+        if any(token in lowered for token in ("transcribe", "stt", "whisper")):
+            return "transcription"
+        if any(token in lowered for token in ("guard", "moderation", "safeguard")):
+            return "moderation"
+        if any(token in lowered for token in ("omni", "vision", "vl", "scout", "maverick")):
+            return "vision"
+        if any(token in lowered for token in ("reason", "thinking", "r1", "gpt-oss", "glm")):
+            return "reasoning"
+        return "chat"
+
+    @classmethod
+    def _remote_model_capabilities(cls, model_id: str, model_type: str) -> Dict[str, Any]:
+        lowered = str(model_id or "").strip().lower()
+        is_chat_like = model_type in {"chat", "reasoning", "vision"}
+        supports_reasoning = model_type == "reasoning" or any(
+            token in lowered for token in ("reason", "thinking", "r1", "gpt-oss", "glm")
+        )
+        supports_vision = model_type == "vision"
+        supports_tool_calls = (
+            is_chat_like
+            and model_type not in {"moderation", "tts", "transcription"}
+            and "compound" not in lowered
+        )
+        return {
+            "chat": is_chat_like,
+            "streaming": is_chat_like,
+            "reasoning": supports_reasoning,
+            "tool_calls": supports_tool_calls,
+            "vision": supports_vision,
+        }
 
     def _headers(self, content_type="application/json"):
         headers = dict(self._extra_headers)

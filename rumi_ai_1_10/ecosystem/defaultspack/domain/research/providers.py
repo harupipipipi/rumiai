@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import ipaddress
 import re
@@ -13,12 +14,35 @@ from typing import Any, Callable
 
 FetchFn = Callable[[str, float], str]
 MAX_RESPONSE_BYTES = 1024 * 1024
+MAX_SEARCH_SCAN_RESULTS = 20
+ENRICHED_SUMMARY_LIMIT = 500
 ALLOWED_CONTENT_PREFIXES = (
     "application/json",
     "application/x-json",
     "text/html",
     "text/plain",
 )
+OFFICIAL_DOMAIN_HINTS: dict[str, tuple[str, ...]] = {
+    "anthropic": ("anthropic.com", "docs.anthropic.com"),
+    "cerebras": ("cerebras.ai", "docs.cerebras.ai", "inference-docs.cerebras.ai"),
+    "cloudflare": ("cloudflare.com", "developers.cloudflare.com"),
+    "docker": ("docker.com", "docs.docker.com"),
+    "github": ("github.com", "docs.github.com"),
+    "google": ("google.com", "ai.google.dev", "developers.google.com"),
+    "groq": ("groq.com", "console.groq.com"),
+    "nextjs": ("nextjs.org", "vercel.com"),
+    "node": ("nodejs.org",),
+    "npm": ("npmjs.com", "docs.npmjs.com"),
+    "openai": ("openai.com", "platform.openai.com"),
+    "playwright": ("playwright.dev",),
+    "python": ("python.org", "docs.python.org"),
+    "react": ("react.dev",),
+    "supabase": ("supabase.com", "supabase.com/docs"),
+    "typescript": ("typescriptlang.org", "www.typescriptlang.org"),
+    "vercel": ("vercel.com", "nextjs.org"),
+    "xiaomi": ("xiaomimimo.com", "platform.mi.com"),
+    "mimo": ("xiaomimimo.com", "platform.mi.com"),
+}
 
 
 def _validate_public_http_url(url: str) -> str:
@@ -89,6 +113,71 @@ def _html_title(value: str) -> str:
     return _strip_html(match.group(1), limit=160)
 
 
+def _hostname(url: str) -> str:
+    parsed = urllib.parse.urlparse(str(url or ""))
+    return str(parsed.hostname or "").strip("[]").lower()
+
+
+def _normalize_domains(domains: Any) -> list[str]:
+    if domains is None:
+        return []
+    if isinstance(domains, str):
+        items = domains.replace(",", "\n").splitlines()
+    elif isinstance(domains, (list, tuple, set)):
+        items = list(domains)
+    else:
+        items = [domains]
+    cleaned: list[str] = []
+    for item in items:
+        domain = str(item or "").strip().lower()
+        if not domain:
+            continue
+        domain = domain.removeprefix("https://").removeprefix("http://")
+        domain = domain.split("/", 1)[0].strip("[]")
+        if domain and domain not in cleaned:
+            cleaned.append(domain)
+    return cleaned
+
+
+def _domain_matches(host: str, domains: list[str]) -> bool:
+    host = str(host or "").lower()
+    for domain in domains:
+        if host == domain or host.endswith("." + domain):
+            return True
+    return False
+
+
+def _official_domains_for_query(query: str, extra_domains: list[str] | None = None) -> list[str]:
+    text = str(query or "").lower()
+    matched: list[str] = []
+    for keyword, domains in OFFICIAL_DOMAIN_HINTS.items():
+        if keyword not in text:
+            continue
+        for domain in domains:
+            if domain not in matched:
+                matched.append(domain)
+    for domain in extra_domains or []:
+        if domain not in matched:
+            matched.append(domain)
+    return matched
+
+
+def _page_excerpt(value: str, title: str = "") -> str:
+    clean = _strip_html(value, limit=ENRICHED_SUMMARY_LIMIT * 3)
+    if title and clean.lower().startswith(title.lower()):
+        clean = clean[len(title) :].strip(" -:\n\t")
+    return clean[:ENRICHED_SUMMARY_LIMIT]
+
+
+def _query_terms(query: str) -> list[str]:
+    return [term for term in re.split(r"\W+", str(query or "").lower()) if len(term) >= 2]
+
+
+def _html_attr(attrs: str, name: str) -> str:
+    match = re.search(rf"""\b{name}\s*=\s*(['"])(.*?)\1""", attrs, flags=re.I | re.S)
+    return html.unescape(match.group(2)).strip() if match else ""
+
+
 @dataclass
 class ProviderResult:
     query: str
@@ -119,42 +208,161 @@ class ExternalWebProvider:
     def __init__(self, fetcher: FetchFn | None = None) -> None:
         self._fetcher = fetcher or _default_fetch
 
-    def search(self, query: str, *, limit: int = 5, allow_network: bool = True, timeout: float = 8.0) -> ProviderResult:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        allow_network: bool = True,
+        timeout: float = 8.0,
+        domains: list[str] | str | None = None,
+        official_only: bool = False,
+        fetch_pages: bool = False,
+    ) -> ProviderResult:
         query = str(query or "").strip()
         if not query:
             raise ValueError("'query' is required")
         if not allow_network:
             return ProviderResult(query, self.provider_id, [], "External web access is disabled.", False)
-
-        url = query if query.startswith(("http://", "https://")) else "https://duckduckgo.com/html/?" + urllib.parse.urlencode({"q": query})
+        requested_domains = _normalize_domains(domains)
+        preferred_domains = _official_domains_for_query(query, requested_domains if official_only else None)
+        direct_url = query.startswith(("http://", "https://"))
+        url = query if direct_url else "https://duckduckgo.com/lite/?" + urllib.parse.urlencode({"q": query})
         try:
             body = self._fetcher(url, timeout)
         except Exception as exc:
             return ProviderResult(query, self.provider_id, [], f"External web request failed: {exc}", True)
 
-        sources = self._parse_duckduckgo(body, query, limit)
-        if not sources and url.startswith(("http://", "https://")):
+        sources: list[dict[str, Any]]
+        if direct_url:
             title = _html_title(body) or url
-            sources.append(self._source(query, title, url, _strip_html(body)))
-        return ProviderResult(query, self.provider_id, sources[:limit], f"Found {len(sources[:limit])} external web sources.", True)
+            sources = [self._source(query, title, url, _page_excerpt(body, title))]
+        else:
+            sources = self._parse_duckduckgo(body, query, min(MAX_SEARCH_SCAN_RESULTS, max(limit * 4, limit)))
+        if requested_domains:
+            sources = self._filter_sources_by_domains(sources, requested_domains)
+        if official_only:
+            if preferred_domains:
+                sources = self._filter_sources_by_domains(sources, preferred_domains)
+            else:
+                return ProviderResult(query, self.provider_id, [], "No official-domain hints matched the query.", True)
+        if fetch_pages:
+            sources = self._enrich_sources(sources, timeout=timeout)
+        sources = self._rank_sources(sources, query, preferred_domains if official_only else requested_domains or preferred_domains)
+        limited = sources[: max(1, min(int(limit), MAX_SEARCH_SCAN_RESULTS))]
+        filters: list[str] = []
+        if requested_domains:
+            filters.append("domains=" + ",".join(requested_domains))
+        if official_only:
+            filters.append("official_only")
+        if fetch_pages:
+            filters.append("page_fetch")
+        filter_text = f" ({'; '.join(filters)})" if filters else ""
+        return ProviderResult(query, self.provider_id, limited, f"Found {len(limited)} external web sources{filter_text}.", True)
 
     def _parse_duckduckgo(self, body: str, query: str, limit: int) -> list[dict[str, Any]]:
-        matches = re.findall(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>', body, flags=re.I | re.S)
-        snippets = re.findall(r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>|<div[^>]+class="result__snippet"[^>]*>(.*?)</div>', body, flags=re.I | re.S)
+        matches: list[tuple[str, str]] = []
+        for anchor in re.finditer(r"<a(?P<attrs>[^>]*)>(?P<title>.*?)</a>", body, flags=re.I | re.S):
+            attrs = anchor.group("attrs")
+            classes = {
+                token.strip().lower()
+                for token in _html_attr(attrs, "class").split()
+                if token.strip()
+            }
+            if not classes.intersection({"result__a", "result-link"}):
+                continue
+            href = _html_attr(attrs, "href")
+            if not href:
+                continue
+            matches.append((href, anchor.group("title")))
+
+        snippets: list[str] = []
+        for node in re.finditer(
+            r"<(?P<tag>a|div|td)(?P<attrs>[^>]*)>(?P<content>.*?)</(?P=tag)>",
+            body,
+            flags=re.I | re.S,
+        ):
+            attrs = node.group("attrs")
+            classes = {
+                token.strip().lower()
+                for token in _html_attr(attrs, "class").split()
+                if token.strip()
+            }
+            if not classes.intersection({"result__snippet", "result-snippet"}):
+                continue
+            snippets.append(_strip_html(node.group("content"), limit=500))
+
         sources: list[dict[str, Any]] = []
         for index, (href, title_html) in enumerate(matches[:limit]):
             title = _strip_html(title_html, limit=180) or f"Result {index + 1}"
             parsed_href = urllib.parse.unquote(href)
+            if parsed_href.startswith("//"):
+                parsed_href = "https:" + parsed_href
             url = parsed_href
             if "uddg=" in parsed_href:
                 params = urllib.parse.parse_qs(urllib.parse.urlparse(parsed_href).query)
                 url = params.get("uddg", [parsed_href])[0]
-            snippet_parts = snippets[index] if index < len(snippets) else ("", "")
-            snippet = _strip_html(" ".join(part for part in snippet_parts if part), limit=500)
+            snippet = snippets[index] if index < len(snippets) else ""
             sources.append(self._source(query, title, url, snippet))
         return sources
 
+    def _filter_sources_by_domains(self, sources: list[dict[str, Any]], domains: list[str]) -> list[dict[str, Any]]:
+        filtered: list[dict[str, Any]] = []
+        for source in sources:
+            host = _hostname(source.get("url", ""))
+            if _domain_matches(host, domains):
+                filtered.append(source)
+        return filtered
+
+    def _enrich_sources(self, sources: list[dict[str, Any]], *, timeout: float) -> list[dict[str, Any]]:
+        enriched: list[dict[str, Any]] = []
+        for source in sources:
+            item = dict(source)
+            metadata = dict(item.get("metadata") if isinstance(item.get("metadata"), dict) else {})
+            try:
+                body = self._fetcher(str(item.get("url") or ""), timeout)
+                title = _html_title(body) or str(item.get("title") or "")
+                excerpt = _page_excerpt(body, title)
+                if title:
+                    item["title"] = title
+                if excerpt:
+                    item["summary"] = excerpt
+                metadata["enriched_from_page"] = True
+            except Exception as exc:
+                metadata["enrichment_error"] = str(exc)
+            item["metadata"] = metadata
+            enriched.append(item)
+        return enriched
+
+    def _rank_sources(self, sources: list[dict[str, Any]], query: str, preferred_domains: list[str]) -> list[dict[str, Any]]:
+        preferred_domains = _normalize_domains(preferred_domains)
+        terms = _query_terms(query)
+        ranked: list[dict[str, Any]] = []
+        for index, source in enumerate(sources):
+            item = dict(source)
+            metadata = dict(item.get("metadata") if isinstance(item.get("metadata"), dict) else {})
+            title = str(item.get("title") or "").lower()
+            summary = str(item.get("summary") or "").lower()
+            url = str(item.get("url") or "").lower()
+            domain = _hostname(url)
+            score = max(0, 200 - (index * 5))
+            for term in terms:
+                score += title.count(term) * 8
+                score += summary.count(term) * 4
+                score += url.count(term) * 2
+            if preferred_domains and _domain_matches(domain, preferred_domains):
+                score += 60
+                metadata["official"] = True
+                item["trust_level"] = "high"
+            metadata["domain"] = domain
+            metadata["rank_score"] = score
+            item["metadata"] = metadata
+            ranked.append(item)
+        ranked.sort(key=lambda entry: int(((entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}) or {}).get("rank_score", 0)), reverse=True)
+        return ranked
+
     def _source(self, query: str, title: str, url: str, summary: str) -> dict[str, Any]:
+        host = _hostname(url)
         return {
             "source_id": "web:" + url,
             "type": "external_web",
@@ -164,7 +372,7 @@ class ExternalWebProvider:
             "summary": summary,
             "provider": self.provider_id,
             "retrieved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "metadata": {"query": query},
+            "metadata": {"query": query, "domain": host},
         }
 
 
