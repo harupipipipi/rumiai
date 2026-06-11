@@ -19,6 +19,9 @@ class LLMGateway:
         messages = _messages_with_temporal_context(request)
         tools = list(request.get("tools", []))
         params = dict(request.get("params", {}))
+        authority_context = request.get("authority_context")
+        if isinstance(authority_context, dict):
+            params["_authority_context"] = dict(authority_context)
         return self._client.complete(model, messages, tools=tools, params=params)
 
     def stream(self, request: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
@@ -26,6 +29,9 @@ class LLMGateway:
         messages = _messages_with_temporal_context(request)
         tools = list(request.get("tools", []))
         params = dict(request.get("params", {}))
+        authority_context = request.get("authority_context")
+        if isinstance(authority_context, dict):
+            params["_authority_context"] = dict(authority_context)
         return self._client.stream(model, messages, tools=tools, params=params)
 
     def supports_stream(self, model: str) -> bool:

@@ -28,6 +28,12 @@ from domain.ai_client.providers import (
 _HIDDEN_RUNTIME_LIST_PROVIDER_IDS = {"human-operator", "rumi"}
 
 
+class AuthorityApprovalRequired(RuntimeError):
+    def __init__(self, decision):
+        self.decision = decision
+        super().__init__(getattr(decision, "reason", "") or "Authority approval required")
+
+
 class AIClient:
     """AI Client - provider routing with profile and catalog compatibility."""
 
@@ -441,18 +447,105 @@ class AIClient:
             "Configure a real or local AI provider before sending a message."
         )
 
-    def _api_route_attempts(self, model, route_refs):
+    @staticmethod
+    def _authority_context_from_params(params):
+        if not isinstance(params, dict):
+            return {}
+        value = params.get("_authority_context")
+        return dict(value) if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _strip_authority_params(params):
+        clean = dict(params or {})
+        clean.pop("_authority_context", None)
+        return clean
+
+    @staticmethod
+    def _provider_api_key_may_exist(provider_id, api_id):
+        provider_id = str(provider_id or "").strip()
+        api_id = str(api_id or "").strip() or "legacy"
+        if not provider_id:
+            return False
+        if api_id not in {"", "main", "legacy"}:
+            for item in provider_named_api_keys(provider_id):
+                if str(item.get("api_id") or "").strip() == api_id and item.get("configured"):
+                    return True
+        return provider_has_api_key(provider_id)
+
+    def _provider_id_for_provider(self, provider, model_ref=""):
+        if isinstance(model_ref, str) and "/" in model_ref:
+            provider_id = model_ref.split("/", 1)[0].strip()
+            if provider_id:
+                return provider_id
+        for provider_id, candidate in self._providers.items():
+            if candidate is provider:
+                return provider_id
+        return ""
+
+    def _check_authority_for_model_api(
+        self,
+        *,
+        provider_id,
+        api_id,
+        model_id,
+        model_ref,
+        params,
+        stream=False,
+    ):
+        provider_id = str(provider_id or "").strip()
+        if provider_id in {"", "stub", "rumi"}:
+            return
+
+        context = self._authority_context_from_params(params)
+        principal_id = str(context.get("principal_id") or "defaultspack")
+        resource = {
+            "kind": "model",
+            "provider_id": provider_id,
+            "api_id": str(api_id or "legacy").strip() or "legacy",
+            "model_id": str(model_id or "").strip(),
+            "model_ref": str(model_ref or "").strip(),
+            "stream": bool(stream),
+        }
+
+        from core_runtime.authority import get_authority_service
+
+        decision = get_authority_service().check(
+            principal_id=principal_id,
+            permission_id="model.invoke",
+            resource=resource,
+            reason="Model invocation: {}/{}".format(provider_id, model_id),
+            conversation_id=context.get("conversation_id"),
+            profile_id=context.get("profile_id"),
+            node_id=context.get("node_id"),
+            graph_id=context.get("graph_id"),
+            request_id=context.get("request_id"),
+            approval_token=context.get("approval_token"),
+        )
+        if not decision.allowed:
+            raise AuthorityApprovalRequired(decision)
+
+    def _api_route_attempts(self, model, route_refs, params=None, stream=False):
         attempts = []
         for route_ref in route_refs:
             provider_id, api_id = self._route_parts(route_ref)
             if not provider_id:
                 continue
-            api_key = read_provider_api_key(provider_id, api_id)
-            if not api_key:
-                continue
             route_model = self._model_for_route(model, provider_id)
             provider, model_name = self.resolve_provider(route_model)
             if provider.__class__.__name__ == "StubProvider":
+                continue
+            if not self._provider_api_key_may_exist(provider_id, api_id):
+                continue
+            self._check_authority_for_model_api(
+                provider_id=provider_id,
+                api_id=api_id,
+                model_id=model_name,
+                model_ref=model,
+                params=params,
+                stream=stream,
+            )
+            api_key = read_provider_api_key(provider_id, api_id)
+            if not api_key:
                 continue
             attempts.append((provider, model_name, api_key, provider_api_metadata(provider_id, api_id)))
         return attempts
@@ -478,8 +571,6 @@ class AIClient:
         )
         if not named_key:
             return None
-        if not read_provider_api_key(provider_id, api_id):
-            return None
         metadata = provider_api_metadata(provider_id, api_id)
         allowed = {str(item) for item in metadata.get("allowed_models", []) if str(item or "").strip()}
         if allowed and model_id not in allowed and f"{provider_id}/{model_id}" not in allowed:
@@ -491,10 +582,20 @@ class AIClient:
         if parts is None:
             return None, False
         provider_id, api_id, model_id, metadata = parts
-        api_key = read_provider_api_key(provider_id, api_id)
         route_model = f"{provider_id}/{model_id}"
         provider, model_name = self.resolve_provider(route_model)
         if provider.__class__.__name__ == "StubProvider":
+            return None, False
+        self._check_authority_for_model_api(
+            provider_id=provider_id,
+            api_id=api_id,
+            model_id=model_id,
+            model_ref=model,
+            params=params,
+            stream=(method_name == "stream"),
+        )
+        api_key = read_provider_api_key(provider_id, api_id)
+        if not api_key:
             return None, False
         if method_name == "stream":
             return self._stream_with_api_routes([(provider, model_name, api_key, metadata)], messages, tools, params), True
@@ -512,7 +613,7 @@ class AIClient:
                 provider._base_url = base_url
                 provider.BASE_URL = base_url
             method = getattr(provider, method_name)
-            return method(model_name, messages, tools or [], params or {})
+            return method(model_name, messages, tools or [], self._strip_authority_params(params))
         finally:
             if previous_key is not None:
                 provider._api_key = previous_key
@@ -529,24 +630,13 @@ class AIClient:
             return None, False
 
         if method_name == "stream":
-            route_attempts = self._api_route_attempts(model, route_refs)
+            route_attempts = self._api_route_attempts(model, route_refs, params=params, stream=True)
             if not route_attempts:
                 return None, False
             return self._stream_with_api_routes(route_attempts, messages, tools, params), True
 
         last_error = None
-        for route_ref in route_refs:
-            provider_id, api_id = self._route_parts(route_ref)
-            if not provider_id:
-                continue
-            api_key = read_provider_api_key(provider_id, api_id)
-            if not api_key:
-                continue
-            route_model = self._model_for_route(model, provider_id)
-            provider, model_name = self.resolve_provider(route_model)
-            if provider.__class__.__name__ == "StubProvider":
-                continue
-            metadata = provider_api_metadata(provider_id, api_id)
+        for provider, model_name, api_key, metadata in self._api_route_attempts(model, route_refs, params=params, stream=False):
             try:
                 return self._call_provider_with_overrides(provider, model_name, api_key, metadata, method_name, messages, tools, params), True
             except Exception as exc:
@@ -571,7 +661,7 @@ class AIClient:
                 if base_url and previous_base_url is not None:
                     provider._base_url = base_url
                     provider.BASE_URL = base_url
-                for chunk in provider.stream(model_name, messages, tools or [], params or {}):
+                for chunk in provider.stream(model_name, messages, tools or [], self._strip_authority_params(params)):
                     yielded = True
                     yield chunk
                 return
@@ -1056,8 +1146,18 @@ class AIClient:
         provider, model_name = self.resolve_provider(model)
         if provider.__class__.__name__ == "StubProvider":
             raise RuntimeError(self._provider_unconfigured_message(model))
+        provider_id = self._provider_id_for_provider(provider, model)
+        if self._provider_api_key_may_exist(provider_id, "legacy"):
+            self._check_authority_for_model_api(
+                provider_id=provider_id,
+                api_id="legacy",
+                model_id=model_name,
+                model_ref=model,
+                params=params,
+                stream=False,
+            )
         try:
-            return provider.complete(model_name, messages, tools or [], provider_params or {})
+            return provider.complete(model_name, messages, tools or [], self._strip_authority_params(provider_params))
         except NotImplementedError as e:
             raise RuntimeError(str(e)) from None
 
@@ -1080,8 +1180,18 @@ class AIClient:
         provider, model_name = self.resolve_provider(model)
         if provider.__class__.__name__ == "StubProvider":
             raise RuntimeError(self._provider_unconfigured_message(model))
+        provider_id = self._provider_id_for_provider(provider, model)
+        if self._provider_api_key_may_exist(provider_id, "legacy"):
+            self._check_authority_for_model_api(
+                provider_id=provider_id,
+                api_id="legacy",
+                model_id=model_name,
+                model_ref=model,
+                params=params,
+                stream=True,
+            )
         try:
-            return provider.stream(model_name, messages, tools or [], provider_params or {})
+            return provider.stream(model_name, messages, tools or [], self._strip_authority_params(provider_params))
         except NotImplementedError as e:
             raise RuntimeError(str(e)) from None
 
@@ -1098,6 +1208,7 @@ class AIClient:
             "deepthink_loop_breaker",
             "rumi_base_model_override",
             "rumi_require_intended_base_model",
+            "_authority_context",
         ):
             provider_params.pop(key, None)
         return provider_params

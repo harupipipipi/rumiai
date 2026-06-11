@@ -257,6 +257,10 @@ def _register_defaults(container: DIContainer) -> None:
         from .capability_trust_store import CapabilityTrustStore
         return CapabilityTrustStore()
 
+    def _capability_grant_manager_factory() -> "CapabilityGrantManager":  # noqa: F821
+        from .capability_grant_manager import get_capability_grant_manager
+        return get_capability_grant_manager()
+
     # --- Wave 4: orchestration / composition ---
     def _container_orchestrator_factory() -> "ContainerOrchestrator":  # noqa: F821
         from .container_orchestrator import ContainerOrchestrator
@@ -325,6 +329,16 @@ def _register_defaults(container: DIContainer) -> None:
         instance = CapabilityExecutor()
         instance.initialize()
         return instance
+
+    def _authority_service_factory() -> "AuthorityService":  # noqa: F821
+        from .authority.service import AuthorityService
+        return AuthorityService(
+            capability_grant_manager=container.get("capability_grant_manager"),
+            secrets_grant_manager=container.get("secrets_grant_manager"),
+            network_grant_manager=container.get("network_grant_manager"),
+            host_privilege_manager=container.get("host_privilege_manager"),
+            hmac_key_manager=container.get("hmac_key_manager"),
+        )
 
     # --- Wave 8: Kernel core services ---
     def _diagnostics_factory() -> "Diagnostics":  # noqa: F821
@@ -397,6 +411,7 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("approval_manager", _approval_manager_factory)
     container.register("permission_manager", _permission_manager_factory)
     container.register("capability_trust_store", _capability_trust_store_factory)
+    container.register("capability_grant_manager", _capability_grant_manager_factory)
     container.register("container_orchestrator", _container_orchestrator_factory)
     container.register("host_privilege_manager", _host_privilege_manager_factory)
     container.register("flow_composer", _flow_composer_factory)
@@ -412,6 +427,7 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("lib_executor", _lib_executor_factory)
     container.register("unit_executor", _unit_executor_factory)
     container.register("capability_executor", _capability_executor_factory)
+    container.register("authority_service", _authority_service_factory)
     container.register("diagnostics", _diagnostics_factory)
     container.register("install_journal", _install_journal_factory)
     container.register("interface_registry", _interface_registry_factory)
@@ -424,3 +440,8 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("viewer_capability_handler", _viewer_capability_handler_factory)
     container.register("desktop_capability_handler", _desktop_capability_handler_factory)
     container.register("function_registry", _function_registry_factory)
+
+
+def get_authority_service():
+    """Return the process-wide AuthorityService."""
+    return get_container().get("authority_service")
