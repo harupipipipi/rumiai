@@ -7,6 +7,7 @@ from domain.ai_client.gateway import LLMGateway
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.dev.inspector import Inspector
 from domain.prompt.manager import get_manager
+from domain.temporal_context import add_temporal_context_message, current_datetime_context
 
 
 def run(input_data, context):
@@ -16,6 +17,7 @@ def run(input_data, context):
         return error("model is required", "MISSING_PARAM")
     if not messages:
         return error("messages is required", "MISSING_PARAM")
+    messages = list(messages)
     tools = input_data.get("tools", [])
     params = dict(input_data.get("params") or {})
     if "thinking_level" not in params:
@@ -25,6 +27,18 @@ def run(input_data, context):
         )["level"]
 
     # P1-4: Inspector 用のリクエストID を生成
+    temporal_context = current_datetime_context(
+        {
+            **(context if isinstance(context, dict) else {}),
+            **(input_data if isinstance(input_data, dict) else {}),
+            **params,
+        }
+    )
+    add_temporal_context_message(
+        messages,
+        context if isinstance(context, dict) else {},
+        temporal_context=temporal_context,
+    )
     request_id = gen_id()
 
     try:
