@@ -1,0 +1,133 @@
+{
+  "pack_id": "rumi_experiment_design_pack",
+  "pack_identity": "rumi:ecosystem/rumi_experiment_design_pack",
+  "display_name": "Rumi Experiment Design Pack",
+  "version": "0.1.0",
+  "description": "Declarative hypothesis, metric, sample-size, assignment, guardrail, instrumentation, and decision-record design pack.",
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "schema",
+      "policy",
+      "checklist",
+      "ledger",
+      "template",
+      "fixture",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": [],
+  "host_execution": false,
+  "metadata": {
+    "runtime_type": "declarative_setup_pack",
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "declarative_only": true,
+    "consumes_existing_sources_only": true,
+    "output_effect": "draft_and_handoff_only",
+    "defaultspack_promotion_eligible": false,
+    "owner_surfaces": [
+      "hypothesis_contract",
+      "metric_plan",
+      "sample_size_plan",
+      "assignment_plan",
+      "guardrail_plan",
+      "instrumentation_requirements",
+      "decision_record",
+      "experiment_readiness_packet"
+    ],
+    "non_owner_surfaces": [
+      "analytics query execution",
+      "production rollout",
+      "runtime telemetry collection",
+      "model benchmark execution",
+      "business decision execution",
+      "feature flag mutation"
+    ],
+    "optional_integrations": [
+      {
+        "pack_id": "defaultspack",
+        "reason": "Provide runtime tooling for analytics queries, telemetry-adjacent work, rollout preparation, feature-flag handoff packets, and model-benchmark handoffs outside this pack."
+      },
+      {
+        "pack_id": "rumi_operations_company_pack",
+        "reason": "Own approval-aware downstream business execution when a design packet is ready for operating review."
+      }
+    ],
+    "asset_index": {
+      "index": [
+        "asset_index.yaml"
+      ],
+      "readme": [
+        "README.md"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "catalog": [
+        "catalog/workflows.yaml",
+        "catalog/quality_matrix.yaml",
+        "catalog/taxonomy.yaml",
+        "catalog/handoff_matrix.yaml"
+      ],
+      "schema": [
+        "schemas/assignment_plan.schema.json",
+        "schemas/decision_record.schema.json",
+        "schemas/guardrail_plan.schema.json",
+        "schemas/hypothesis.schema.json",
+        "schemas/instrumentation_request.schema.json",
+        "schemas/metric_plan.schema.json",
+        "schemas/sample_size_plan.schema.json"
+      ],
+      "policy": [
+        "policies/safety.policy.yaml",
+        "policies/handoff.policy.yaml"
+      ],
+      "checklist": [
+        "checklists/review.checklist.yaml"
+      ],
+      "ledger": [
+        "ledgers/evidence_ledger.schema.yaml"
+      ],
+      "template": [
+        "templates/handoff.template.md",
+        "templates/review_report.template.md",
+        "templates/artifact_card.template.md"
+      ],
+      "fixtures": [
+        "fixtures/contract_fixture.yaml",
+        "fixtures/negative_cases.yaml"
+      ],
+      "profiles": [
+        "profiles/experiment_designer.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/experiment_planner.system.md"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "example": [
+        "examples/ab_test_checkout_copy.example.yaml",
+        "examples/instrumentation_request.example.yaml",
+        "examples/quasi_experiment_pricing.example.yaml",
+        "examples/rollout_guardrail_plan.example.yaml"
+      ]
+    }
+  }
+}
