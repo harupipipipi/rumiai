@@ -244,12 +244,51 @@ def _defaultspack_root() -> Path:
 
 def _read_yaml(path: Path) -> dict[str, Any]:
     try:
-        import yaml
-
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
     except Exception:
         return {}
+    try:
+        import yaml
+
+        data = yaml.safe_load(text)
+    except Exception:
+        if path.name == "legacy_http_routes.yaml":
+            return _read_legacy_routes_yaml_without_pyyaml(text)
+        return {}
     return data if isinstance(data, dict) else {}
+
+
+def _read_legacy_routes_yaml_without_pyyaml(text: str) -> dict[str, Any]:
+    """Parse the simple legacy route allowlist when PyYAML is unavailable."""
+    routes: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    in_legacy_routes = False
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].rstrip()
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("- "):
+            if not in_legacy_routes:
+                continue
+            if current:
+                routes.append(current)
+            current = {}
+            stripped = stripped[2:].strip()
+            if not stripped:
+                continue
+        elif not line.startswith(" "):
+            in_legacy_routes = stripped == "legacy_routes:"
+            continue
+        if not in_legacy_routes:
+            continue
+        if current is None or ":" not in stripped:
+            continue
+        key, value = stripped.split(":", 1)
+        current[key.strip()] = value.strip().strip("\"'")
+    if current:
+        routes.append(current)
+    return {"legacy_routes": routes} if routes else {}
 
 
 def _read_flow_yaml(path: Path) -> dict[str, Any]:
