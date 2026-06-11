@@ -968,6 +968,47 @@ test("coding context, branch, and workspace read helpers use existing API routes
   });
 });
 
+test("rumi log helpers target local coding history routes", async () => {
+  const seen: Array<{ input: string; method: string; body?: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({
+      input: String(input),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        rumi_dir: "/repo/.rumi",
+        events: [],
+        summary: { total: 0, commit_count: 0, push_count: 0, agent_ids: [] },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.listRumiLogs({ workspace_id: "ws1", limit: 10, kind: "git.commit" });
+    await api.seedRumiLogPlan({ workspace_id: "ws1" });
+    await api.appendRumiLog({ workspace_id: "ws1", kind: "agent.note", message: "watch commit pair" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(seen[0].input, "/api/coding/rumi-log?workspace_id=ws1&limit=10&kind=git.commit");
+  assert.equal(seen[0].method, "GET");
+  assert.deepEqual(seen[1], {
+    input: "/api/coding/rumi-log",
+    method: "POST",
+    body: { action: "seed_local_plan", workspace_id: "ws1" },
+  });
+  assert.deepEqual(seen[2], {
+    input: "/api/coding/rumi-log",
+    method: "POST",
+    body: { action: "append", workspace_id: "ws1", kind: "agent.note", message: "watch commit pair" },
+  });
+});
+
 test("listConversations serializes metadata filters", async () => {
   let requestUrl = "";
   const originalFetch = globalThis.fetch;

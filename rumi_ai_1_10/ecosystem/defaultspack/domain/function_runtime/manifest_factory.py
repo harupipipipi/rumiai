@@ -308,6 +308,7 @@ CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("coding_git_branch_create", "Create a git branch.", "high", "blocks.coding.git_branch"),
         ("coding_git_commit", "Create a git commit.", "high", "blocks.coding.git_commit"),
         ("coding_git_push", "Push git changes.", "high", "blocks.coding.git_push"),
+        ("coding_rumi_log", "List or append local .rumi coding history.", "medium", "blocks.coding.rumi_log"),
         ("coding_approval_list", "List pending coding approvals.", "low", "blocks.coding.approval_list"),
         ("coding_approval_approve", "Approve a pending coding operation.", "medium", "blocks.coding.approval_approve"),
         ("coding_approval_deny", "Deny a pending coding operation.", "medium", "blocks.coding.approval_deny"),

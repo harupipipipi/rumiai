@@ -153,6 +153,48 @@ export type CodingCheckpoint = {
   [key: string]: unknown;
 };
 
+export type RumiLogEvent = {
+  event_id: string;
+  created_at: string;
+  kind: string;
+  actor_id?: string;
+  agent_role?: string;
+  session_id?: string;
+  status?: string;
+  message?: string;
+  branch?: string;
+  commit_hash?: string;
+  remote?: string;
+  paths?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type RumiLogSummary = {
+  total: number;
+  by_kind?: Record<string, number>;
+  by_status?: Record<string, number>;
+  agent_ids?: string[];
+  commit_count?: number;
+  push_count?: number;
+  plan_count?: number;
+  task_count?: number;
+  conversation_count?: number;
+  mention_count?: number;
+  last_event_at?: string | null;
+  last_commit_hash?: string | null;
+};
+
+export type RumiLogResponse = {
+  rumi_dir: string;
+  events_path?: string;
+  event?: RumiLogEvent;
+  events: RumiLogEvent[];
+  summary: RumiLogSummary;
+  created?: boolean;
+  workspace_id?: string | null;
+  workspace_root?: string | null;
+};
+
 export type CodingDiffResponse = {
   diff: string;
   stat?: string;
@@ -2408,6 +2450,48 @@ export const api = {
         body: JSON.stringify(payload ?? {}),
       },
     );
+  },
+
+  listRumiLogs(options?: { workspace_id?: string | null; limit?: number; kind?: string | string[] | null }) {
+    return request<RumiLogResponse>(
+      withQuery("/api/coding/rumi-log", {
+        workspace_id: options?.workspace_id,
+        limit: options?.limit,
+        kind: options?.kind,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  appendRumiLog(payload: {
+    workspace_id?: string | null;
+    kind?: string;
+    actor_id?: string;
+    agent_role?: string;
+    session_id?: string;
+    status?: string;
+    message?: string;
+    branch?: string;
+    commit_hash?: string;
+    remote?: string;
+    paths?: string[];
+    mentions?: string[];
+    task_id?: string;
+    task_title?: string;
+    task_status?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<RumiLogResponse>("/api/coding/rumi-log", {
+      method: "POST",
+      body: JSON.stringify({ action: "append", ...payload }),
+    });
+  },
+
+  seedRumiLogPlan(payload?: { workspace_id?: string | null }) {
+    return request<RumiLogResponse>("/api/coding/rumi-log", {
+      method: "POST",
+      body: JSON.stringify({ action: "seed_local_plan", ...(payload ?? {}) }),
+    });
   },
 
   restoreCodingSnapshot(snapshotId: string, options?: {
