@@ -1,0 +1,43 @@
+profile_id: rumi_devops_release_pack.rollback_planner
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+
+display_name:
+  ja: Rollback Planner
+  en: Rollback Planner
+
+description:
+  ja: ロールバック判断、手順、復旧確認、連絡文を組み立てるプロファイル。
+  en: Profile for rollback decisions, steps, recovery checks, and communications.
+
+default_graph: defaultspack.coding_workspace
+default_flow: agent_chat
+
+surfaces:
+  preferred: cli
+  enabled:
+    - cli
+    - desktop
+
+prompt_layers:
+  system:
+    - prompts/rollback_runbook.system.md
+
+catalogs:
+  - catalog/release_gate_catalog.yaml
+
+policy:
+  network_default: none
+  rollback_execution_allowed: false
+  production_actions_require_approval: true
+  terminal_actions_require_approval: true
+  audit_level: detailed
+
+metadata:
+  pack_id: rumi_devops_release_pack
+  category: incident_response
+  owns:
+    - rollback planning
+    - recovery verification
+    - incident followup evidence
