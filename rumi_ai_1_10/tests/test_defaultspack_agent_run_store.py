@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.agent.engine import AgentEngine  # noqa: E402
+from domain.agent_runtime.context_snapshot import build_run_context_snapshot  # noqa: E402
 from domain.agent_runtime.models import AgentRun  # noqa: E402
 from domain.agent_runtime.run_store import AgentRunStore  # noqa: E402
 from domain.agent_runtime.transcript import TranscriptStore  # noqa: E402
@@ -127,6 +128,56 @@ def test_agent_run_store_redacts_tool_arguments_before_persisting(tmp_path, monk
 
     assert "sk-live" not in row["arguments_json"]
     assert "[REDACTED]" in row["arguments_json"]
+
+
+def test_agent_run_snapshot_builds_compact_packet_fields(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(tmp_path / "agent_runtime"))
+    AgentRunStore._instance = None
+    store = AgentRunStore()
+    store.upsert_run(
+        AgentRun(
+            run_id="run_snapshot",
+            session_key="agent:test:main",
+            task="patch the thing",
+            status="running",
+            result_json={"next_steps": ["run focused tests"]},
+            execution_json={"files_modified": ["app.py"]},
+        )
+    )
+    store.replace_steps(
+        "run_snapshot",
+        [
+            {"step_no": 1, "step_type": "read", "status": "completed", "content": {"summary": "read app.py"}},
+            {"step_no": 2, "step_type": "test", "status": "failed", "content": {"summary": "pytest failed"}},
+        ],
+    )
+    store.record_tool_call(
+        "run_snapshot",
+        "call_test",
+        "coding_terminal_exec",
+        {"command": "pytest", "api_key": "sk-live"},
+        status="failed",
+        result={
+            "command": "pytest tests/test_app.py",
+            "exit_code": 1,
+            "stderr": "boom",
+            "stderr_artifact_path": str(tmp_path / "full-stderr.txt"),
+        },
+    )
+
+    snapshot = build_run_context_snapshot("run_snapshot", store=store)
+
+    assert snapshot["progress"]["in_progress"] == ["patch the thing"]
+    assert "read app.py" in snapshot["progress"]["done"]
+    assert "pytest failed" in snapshot["progress"]["blocked"]
+    assert snapshot["changed_files"] == ["app.py"]
+    assert snapshot["next_steps"] == ["run focused tests"]
+    assert snapshot["tool_results"][0]["tool"] == "coding_terminal_exec"
+    assert snapshot["terminal_results"][0]["tool"] == "coding_terminal_exec"
+    assert snapshot["terminal_results"][0]["output_artifact_paths"] == [
+        str(tmp_path / "full-stderr.txt")
+    ]
+    assert "sk-live" not in str(snapshot)
 
 
 def test_multi_agent_session_records_isolated_workspace_contracts(tmp_path, monkeypatch):

@@ -2,6 +2,7 @@ import time
 
 from domain.chat.history_editor import (
     identify_compactable_segments,
+    normalize_compaction_range,
     replace_range_with_message,
 )
 from domain.chat.message_converter import convert_to_standard
@@ -124,14 +125,30 @@ def select_oldest_safe_segment(messages, protect_last_messages, start_message_id
             start_idx, end_idx = end_idx, start_idx
         if end_idx >= protected_start:
             return None, "Selected range overlaps the protected tail"
-        if end_idx - start_idx + 1 < 2:
-            return None, "At least 2 messages are required for compaction"
+        normalized = normalize_compaction_range(
+            messages,
+            start_idx,
+            end_idx,
+            protected_start=protected_start,
+        )
+        if normalized is None:
+            return None, "Selected range cannot be compacted safely"
+        start_idx, end_idx = normalized
         return segment_for_range(messages, start_idx, end_idx, reason="explicit_range"), None
 
     end_idx = protected_start - 1
     if end_idx < 1:
         return None, "No compactable range outside the protected tail"
-    return segment_for_range(messages, 0, end_idx), None
+    normalized = normalize_compaction_range(
+        messages,
+        0,
+        end_idx,
+        protected_start=protected_start,
+    )
+    if normalized is None:
+        return None, "No compactable range outside the protected tail"
+    start_idx, end_idx = normalized
+    return segment_for_range(messages, start_idx, end_idx), None
 
 
 def select_auto_segment(messages, protect_last_messages):
@@ -149,6 +166,15 @@ def select_auto_segment(messages, protect_last_messages):
             start_idx, end_idx = end_idx, start_idx
         if end_idx >= protected_start or end_idx - start_idx + 1 < 2:
             continue
+        normalized = normalize_compaction_range(
+            messages,
+            start_idx,
+            end_idx,
+            protected_start=protected_start,
+        )
+        if normalized is None:
+            continue
+        start_idx, end_idx = normalized
         return segment_for_range(
             messages,
             start_idx,

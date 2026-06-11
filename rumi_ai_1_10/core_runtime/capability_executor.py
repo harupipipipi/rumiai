@@ -217,21 +217,56 @@ _SECURE_TMP_DIR: Optional[Path] = None
 _secure_tmp_lock = threading.Lock()
 
 
+def _capability_executor_module_candidates() -> list[Any]:
+    candidates = []
+    for name in (
+        "core_runtime.capability_executor",
+        "rumi_ai_1_10.core_runtime.capability_executor",
+        __name__,
+    ):
+        module = sys.modules.get(name)
+        if module is not None and module not in candidates:
+            candidates.append(module)
+    return candidates
+
+
+def _secure_tmp_base_from_module_file() -> Path:
+    modules = _capability_executor_module_candidates()
+    reset_modules = [module for module in modules if getattr(module, "_SECURE_TMP_DIR", None) is None]
+    for module in reset_modules + modules:
+        module_file = getattr(module, "__file__", None)
+        if module_file:
+            return Path(module_file).resolve().parent.parent / "user_data" / "tmp"
+    return Path(__file__).resolve().parent.parent / "user_data" / "tmp"
+
+
+def _sync_secure_tmp_dir(path: Path) -> None:
+    for module in _capability_executor_module_candidates():
+        if hasattr(module, "_SECURE_TMP_DIR"):
+            module._SECURE_TMP_DIR = path
+
+
 def _get_secure_tmp_dir() -> str:
     """user_data/tmp/ 配下に安全な一時ディレクトリを返す（パーミッション 0700）。
 
     ディレクトリが存在しない場合は作成する。
     """
     global _SECURE_TMP_DIR
-    if _SECURE_TMP_DIR is not None and _SECURE_TMP_DIR.is_dir():
+    base = _secure_tmp_base_from_module_file()
+    if _SECURE_TMP_DIR is not None and _SECURE_TMP_DIR == base and _SECURE_TMP_DIR.is_dir():
         return str(_SECURE_TMP_DIR)
     with _secure_tmp_lock:
-        if _SECURE_TMP_DIR is not None and _SECURE_TMP_DIR.is_dir():
+        base = _secure_tmp_base_from_module_file()
+        if _SECURE_TMP_DIR is not None and _SECURE_TMP_DIR == base and _SECURE_TMP_DIR.is_dir():
             return str(_SECURE_TMP_DIR)
-        base = Path(__file__).resolve().parent.parent / "user_data" / "tmp"
+        for module in _capability_executor_module_candidates():
+            cached = getattr(module, "_SECURE_TMP_DIR", None)
+            if isinstance(cached, Path) and cached == base and cached.is_dir():
+                _sync_secure_tmp_dir(cached)
+                return str(cached)
         base.mkdir(parents=True, exist_ok=True)
         os.chmod(str(base), 0o700)
-        _SECURE_TMP_DIR = base
+        _sync_secure_tmp_dir(base)
         return str(_SECURE_TMP_DIR)
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 import threading
@@ -453,7 +452,6 @@ class AgentRunStore:
             for message in messages:
                 role = str(message.get("role") or "")
                 tool_name = message.get("name") or message.get("tool_name")
-                content = message.get("content")
                 token_estimate = estimate_tokens(message)
                 self.conn.execute(
                     """
@@ -488,6 +486,43 @@ class AgentRunStore:
         for row in reversed(rows):
             data = dict(row)
             data["content_json"] = json_loads(data.get("content_json"), {})
+            result.append(data)
+        return result
+
+    def list_steps(self, run_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        clean_limit = max(1, min(int(limit or 100), 1000))
+        rows = self.conn.execute(
+            """
+            SELECT * FROM agent_steps
+            WHERE run_id = ?
+            ORDER BY step_no DESC, id DESC
+            LIMIT ?
+            """,
+            (str(run_id), clean_limit),
+        ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in reversed(rows):
+            data = dict(row)
+            data["content_json"] = json_loads(data.get("content_json"), {})
+            result.append(data)
+        return result
+
+    def list_tool_calls(self, run_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        clean_limit = max(1, min(int(limit or 100), 1000))
+        rows = self.conn.execute(
+            """
+            SELECT * FROM agent_tool_calls
+            WHERE run_id = ?
+            ORDER BY COALESCE(completed_at, started_at) DESC, tool_call_id DESC
+            LIMIT ?
+            """,
+            (str(run_id), clean_limit),
+        ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in reversed(rows):
+            data = dict(row)
+            data["arguments_json"] = json_loads(data.get("arguments_json"), {})
+            data["result_json"] = json_loads(data.get("result_json"), None)
             result.append(data)
         return result
 

@@ -145,3 +145,23 @@ def test_blocked_terminal_command_is_not_executed_even_when_approved(tmp_path):
     assert result["exit_code"] is None
     assert result["approval_required"] is True
     assert "download_exec_pipe" in result["risk_reasons"]
+
+
+def test_terminal_preserves_full_truncated_stdout_in_artifact(tmp_path, monkeypatch):
+    import domain.coding.terminal as terminal_module
+
+    monkeypatch.setattr(terminal_module, "MAX_OUTPUT_BYTES", 32)
+    payload = "abc" * 40
+
+    result = terminal_module.Terminal(tmp_path).execute(
+        [sys.executable, "-c", f"import sys; sys.stdout.write({payload!r})"],
+        approved=True,
+    )
+
+    assert result["exit_code"] == 0
+    assert result["stdout_truncated"] is True
+    assert "[output truncated]" in result["stdout"]
+    artifact_path = Path(result["stdout_artifact_path"])
+    assert artifact_path.is_file()
+    assert tmp_path in artifact_path.parents
+    assert artifact_path.read_text(encoding="utf-8") == payload
