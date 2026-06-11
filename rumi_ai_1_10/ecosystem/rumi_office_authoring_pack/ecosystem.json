@@ -1,0 +1,174 @@
+{
+  "pack_id": "rumi_office_authoring_pack",
+  "pack_identity": "rumi:ecosystem/rumi_office_authoring_pack",
+  "version": "1.0.0",
+  "display_name": "Rumi Office Authoring Pack",
+  "description": "Declarative contracts for slide, sheet, document, chart, citation, export, and office-suite authoring handoffs.",
+  "author": {
+    "name": "rumi-ai"
+  },
+  "license": "MIT",
+  "vocabulary": {
+    "types": [
+      "capability_provider",
+      "policy_provider",
+      "profile_provider",
+      "schema_contract"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "runtime": {
+    "type": "declarative_pack"
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": [],
+  "host_execution": false,
+  "metadata": {
+    "runtime_type": "declarative_setup_pack",
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "declarative_only": true,
+    "consumes_existing_sources_only": true,
+    "output_effect": "draft_and_handoff_only",
+    "defaultspack_promotion_eligible": false,
+    "owner_surfaces": [
+      "slide_deck_authoring_contract",
+      "slide_storyboard",
+      "slide_layout_brief",
+      "speaker_notes_contract",
+      "spreadsheet_workbook_authoring_contract",
+      "sheet_tab_plan",
+      "formula_map",
+      "data_validation_plan",
+      "doc_authoring_contract",
+      "document_outline",
+      "style_and_tone_brief",
+      "citation_insertion_plan",
+      "chart_embedding_contract",
+      "pdf_export_plan",
+      "office_review_gate",
+      "office_suite_handoff_packet"
+    ],
+    "non_owner_surfaces": [
+      "workspace broad artifact catalog and lifecycle",
+      "document parsing and redline understanding",
+      "data cleaning and statistical analysis",
+      "claim graph and citation ledger credibility",
+      "PPTX DOCX XLSX PDF rendering",
+      "artifact app runtime approval",
+      "external retrieval and connectors"
+    ],
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_workspace_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      },
+      {
+        "pack_id": "rumi_document_intelligence_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      },
+      {
+        "pack_id": "rumi_data_analysis_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      },
+      {
+        "pack_id": "rumi_evidence_dossier_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      },
+      {
+        "pack_id": "rumi_artifact_app_runtime_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      },
+      {
+        "pack_id": "rumi_research_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      },
+      {
+        "pack_id": "rumi_connector_gateway_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      }
+    ],
+    "asset_index": {
+      "root": [
+        "README.md",
+        "asset_index.json",
+        "asset_index.yaml"
+      ],
+      "catalog": [
+        "catalog/handoff_matrix.yaml",
+        "catalog/office_authoring_patterns.yaml",
+        "catalog/quality_matrix.yaml",
+        "catalog/taxonomy.yaml",
+        "catalog/workflows.yaml"
+      ],
+      "checklists": [
+        "checklists/review.checklist.yaml"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md",
+        "docs/overlap_policy.md"
+      ],
+      "examples": [
+        "examples/board_update_deck.example.yaml",
+        "examples/cited_report_to_pdf.example.yaml",
+        "examples/financial_model_workbook.example.yaml",
+        "examples/office_suite_handoff_packet.example.yaml",
+        "examples/policy_brief_doc.example.yaml"
+      ],
+      "fixtures": [
+        "fixtures/contract_fixture.yaml",
+        "fixtures/negative_cases.yaml"
+      ],
+      "ledgers": [
+        "ledgers/authoring_decision_ledger.schema.yaml"
+      ],
+      "policies": [
+        "policies/handoff.policy.yaml",
+        "policies/safety.policy.yaml"
+      ],
+      "presets": [
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml",
+        "presets/safe_default.preset.yaml"
+      ],
+      "profiles": [
+        "profiles/office_authoring_reviewer.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/office_authoring_reviewer.system.md"
+      ],
+      "schemas": [
+        "schemas/chart_embedding_contract.schema.json",
+        "schemas/citation_insertion_plan.schema.json",
+        "schemas/doc_authoring_contract.schema.json",
+        "schemas/formula_map.schema.json",
+        "schemas/office_handoff_packet.schema.json",
+        "schemas/office_review_gate.schema.json",
+        "schemas/pdf_export_plan.schema.json",
+        "schemas/slide_deck_contract.schema.json",
+        "schemas/slide_record.schema.json",
+        "schemas/workbook_contract.schema.json"
+      ],
+      "templates": [
+        "templates/handoff.template.md",
+        "templates/review_report.template.md",
+        "templates/ui_contract.template.md"
+      ]
+    }
+  },
+  "capabilities": [
+    "rumi_office_authoring_pack.slide_deck_authoring_contract",
+    "rumi_office_authoring_pack.slide_storyboard",
+    "rumi_office_authoring_pack.slide_layout_brief",
+    "rumi_office_authoring_pack.speaker_notes_contract",
+    "rumi_office_authoring_pack.spreadsheet_workbook_authoring_contract",
+    "rumi_office_authoring_pack.sheet_tab_plan"
+  ]
+}

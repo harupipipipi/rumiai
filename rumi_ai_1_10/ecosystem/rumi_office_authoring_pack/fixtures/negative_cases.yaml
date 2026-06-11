@@ -1,0 +1,9 @@
+negative_cases:
+  pack_id: rumi_office_authoring_pack
+  cases:
+  - missing_citation_export
+  - unresolved_formula_dependency
+  - overlapping_slide_layout
+  - missing_chart_alt_text
+  - attempted_direct_render
+  expected_behavior: block_or_handoff_without_external_action
