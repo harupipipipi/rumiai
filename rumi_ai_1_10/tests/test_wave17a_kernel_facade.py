@@ -228,6 +228,71 @@ class TestExecPythonPathTraversal:
         assert result.get("error") == "Path traversal detected"
         assert result.get("status") == "blocked"
 
+    def test_absolute_path_blocked(self, tmp_path):
+        """絶対パスで任意の Python ファイルを指定できない。"""
+        from core_runtime.kernel_handlers_system import KernelSystemHandlersMixin
+
+        payload = tmp_path / "payload.py"
+        payload.write_text("def run(context):\n    pass\n", encoding="utf-8")
+
+        mixin = KernelSystemHandlersMixin()
+        mixin.interface_registry = _StubInterfaceRegistry()
+        mixin.event_bus = _StubEventBus()
+        mixin.diagnostics = MagicMock()
+        mixin.install_journal = MagicMock()
+        mixin.lifecycle = MagicMock()
+        mixin._now_ts = lambda: "2026-02-14T00:00:00Z"
+        mixin._resolve_value = lambda v, ctx: v
+
+        result = mixin._h_exec_python({"file": str(payload)}, {})
+
+        assert result["status"] == "blocked"
+        assert result["_kernel_step_meta"]["reason"] == "absolute_path_not_allowed"
+        mixin.lifecycle._exec_python_file.assert_not_called()
+
+    def test_untrusted_base_path_blocked(self, tmp_path):
+        """base_path を使って core_pack 外の Python ファイルを実行できない。"""
+        from core_runtime.kernel_handlers_system import KernelSystemHandlersMixin
+
+        payload = tmp_path / "payload.py"
+        payload.write_text("def run(context):\n    pass\n", encoding="utf-8")
+
+        mixin = KernelSystemHandlersMixin()
+        mixin.interface_registry = _StubInterfaceRegistry()
+        mixin.event_bus = _StubEventBus()
+        mixin.diagnostics = MagicMock()
+        mixin.install_journal = MagicMock()
+        mixin.lifecycle = MagicMock()
+        mixin._now_ts = lambda: "2026-02-14T00:00:00Z"
+        mixin._resolve_value = lambda v, ctx: v
+
+        result = mixin._h_exec_python({"file": payload.name, "base_path": str(tmp_path)}, {})
+
+        assert result["status"] == "blocked"
+        assert result["_kernel_step_meta"]["reason"] == "exec_python_target_not_allowed"
+        mixin.lifecycle._exec_python_file.assert_not_called()
+
+    def test_builtin_core_pack_relative_file_allowed(self):
+        """起動フローが使う core_pack 配下の相対 Python ファイルは維持される。"""
+        from core_runtime.kernel_handlers_system import KernelSystemHandlersMixin
+        from core_runtime.paths import BASE_DIR
+
+        mixin = KernelSystemHandlersMixin()
+        mixin.interface_registry = _StubInterfaceRegistry()
+        mixin.event_bus = _StubEventBus()
+        mixin.diagnostics = MagicMock()
+        mixin.install_journal = MagicMock()
+        mixin.lifecycle = MagicMock()
+        mixin._now_ts = lambda: "2026-02-14T00:00:00Z"
+        mixin._resolve_value = lambda v, ctx: v
+
+        result = mixin._h_exec_python({"file": "core_runtime/core_pack/core_setup/check_profile.py"}, {})
+
+        expected = (BASE_DIR / "core_runtime/core_pack/core_setup/check_profile.py").resolve()
+        assert result["_kernel_step_status"] == "success"
+        mixin.lifecycle._exec_python_file.assert_called_once()
+        assert mixin.lifecycle._exec_python_file.call_args.args[0] == expected
+
 
 # ---------------------------------------------------------------------------
 # Tests: inject ブロックリスト

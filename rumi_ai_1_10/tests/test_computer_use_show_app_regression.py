@@ -38,3 +38,25 @@ def test_show_app_stores_active_window_for_selected_app(monkeypatch, tmp_path):
     assert result["shown"] is True
     assert result["target_window"] == active_window
     assert controller._computer_state()["target_window"] == active_window
+
+
+def test_darwin_window_listing_times_out_automation_fallback(monkeypatch, tmp_path):
+    import subprocess
+
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    monkeypatch.setattr(controller, "_darwin_windows_quartz", lambda: [])
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen["timeout"] = kwargs.get("timeout")
+        raise subprocess.TimeoutExpired(command, kwargs.get("timeout"))
+
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    assert controller._darwin_windows() == []
+    assert seen["command"][:2] == ["osascript", "-e"]
+    assert seen["timeout"] == browser_computer._DARWIN_AUTOMATION_TIMEOUT_SECONDS

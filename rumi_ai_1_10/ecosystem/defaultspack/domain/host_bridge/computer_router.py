@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+from domain.tool_policy.internal_context import tool_server_approval_context_is_internal
 
 from .viewer_broker_client import ViewerBrokerClient
 
@@ -148,10 +149,31 @@ def _approval_token_from_context(
 def _context_has_server_approval(context: dict[str, Any] | None) -> bool:
     if not isinstance(context, dict):
         return False
-    return bool(
-        context.get("_tool_server_approved") is True
-        or context.get("_tool_server_approval_token_valid") is True
-    )
+    return tool_server_approval_context_is_internal(context) or _context_has_verified_server_approval_token(context)
+
+
+def _context_has_verified_server_approval_token(context: dict[str, Any]) -> bool:
+    token = str(context.get("_tool_server_approval_token") or "").strip()
+    operation = str(context.get("_tool_server_approval_operation") or "").strip()
+    args_hash = str(context.get("_tool_server_approval_args_hash") or "").strip()
+    if not token or not operation or not args_hash:
+        return False
+    pack_id = str(context.get("_tool_server_approval_pack_id") or "").strip()
+    conversation_id = str(context.get("_tool_server_approval_conversation_id") or "").strip()
+    try:
+        from domain.safety import approval
+
+        verification = approval.verify_execution_token(
+            token,
+            operation,
+            args_hash,
+            consume=False,
+            pack_id=pack_id,
+            conversation_id=conversation_id,
+        )
+    except Exception:
+        return False
+    return bool(getattr(verification, "valid", False))
 
 
 def _context_value(context: dict[str, Any] | None, *keys: str) -> str:
@@ -203,6 +225,7 @@ def _approval_required_response(
         },
     )
     wrapped = dict(result)
+    wrapped.pop("approval_token", None)
     wrapped.update(
         {
             "action": safe_action,

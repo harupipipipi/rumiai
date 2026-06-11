@@ -15,7 +15,16 @@ control panel frontend の source は `rumi_viewer/frontend` が所有し、kern
 repo ルートで次を実行します。
 
 ```bash
-cd rumi_viewer/src-tauri
+cd rumi_viewer/frontend
+npm install
+cd ..
+cargo tauri dev
+```
+
+2 回目以降、`rumi_viewer/frontend/node_modules` が残っている場合は次だけで起動できます。
+
+```bash
+cd rumi_viewer
 cargo tauri dev
 ```
 
@@ -36,7 +45,7 @@ cargo tauri dev
 例:
 
 ```bash
-cd rumi_viewer/src-tauri
+cd rumi_viewer
 RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
 
@@ -55,8 +64,9 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 - frontend source は viewer 側にありますが、配信経路は kernel の `/panel/` のままです
 - `defaultspack` 自体は kernel から component として読み込まれます
 - `defaultspack` の独立 HTTP frontend は `DEFAULTS_HTTP_PORT` 既定値 `8766` ですが、viewer の初期導線とは別です
-- viewer はまず `rumi_home/user_data/packs/defaultspack/current.json` を見て、移行互換として `app_data_dir/user_data/packs/defaultspack/current.json` も参照します
-- そのため setup/更新済みの `Defaultspack v2` が managed pack として切り替わっていれば、viewer からその実体を開けます
+- 開発起動 (`cargo tauri dev`) では repo 同梱の `rumi_ai_1_10/ecosystem/defaultspack/` を優先して開きます
+- 配布版 / bundle 起動では `rumi_home/user_data/packs/defaultspack/current.json` を見て、移行互換として `app_data_dir/user_data/packs/defaultspack/current.json` も参照します
+- そのため setup/更新済みの `Defaultspack v2` が managed pack として切り替わっていれば、配布版 viewer からその実体を開けます
 
 ## よくある詰まり方
 

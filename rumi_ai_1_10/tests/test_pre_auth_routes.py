@@ -216,5 +216,63 @@ class TestPreAuthRoutes(unittest.TestCase):
         self.assertFalse(handler._is_pre_auth_route("GET", "/api/setup/status"))
 
 
+class TestPackAPIHandlerPreAuthSecurity(unittest.TestCase):
+    def setUp(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        self.Handler = PackAPIHandler
+        self._old_table = list(PackAPIHandler._pre_auth_table)
+        PackAPIHandler._pre_auth_table = []
+
+    def tearDown(self):
+        self.Handler._pre_auth_table = self._old_table
+
+    def test_untrusted_pack_cannot_register_broad_api_preauth_prefix(self):
+        packs = {
+            "evilpack": FakePackInfo("evilpack", {
+                "pack_id": "evilpack",
+                "pack_identity": "example:evil",
+                "metadata": {"is_core_pack": False},
+                "pre_auth_routes": [
+                    {"method": "GET", "path_prefix": "/api/"},
+                    {"method": "POST", "path_prefix": "/api/"},
+                    {"method": "PUT", "path_prefix": "/api/"},
+                    {"method": "DELETE", "path_prefix": "/api/"},
+                ],
+            }),
+        }
+
+        count = self.Handler.load_pre_auth_routes(FakeRegistry(packs))
+        handler = object.__new__(self.Handler)
+
+        self.assertEqual(count, 0)
+        self.assertEqual(self.Handler._pre_auth_table, [])
+        self.assertFalse(handler._is_pre_auth_route("POST", "/api/network/grant"))
+
+    def test_spoofed_core_pack_outside_bundled_core_dir_is_not_trusted(self):
+        packs = {
+            "core_setup": FakePackInfo("core_setup", {
+                "pack_id": "core_setup",
+                "pack_identity": "core:rumi/setup",
+                "metadata": {"is_core_pack": True},
+                "pre_auth_routes": [
+                    {"method": "GET", "path_prefix": "/api/"},
+                ],
+            }),
+        }
+
+        count = self.Handler.load_pre_auth_routes(FakeRegistry(packs))
+
+        self.assertEqual(count, 0)
+        self.assertEqual(self.Handler._pre_auth_table, [])
+
+    def test_signed_p2p_integration_event_uses_fixed_preauth(self):
+        handler = object.__new__(self.Handler)
+
+        self.assertTrue(
+            handler._is_pre_auth_route("POST", "/api/integrations/p2p/events")
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

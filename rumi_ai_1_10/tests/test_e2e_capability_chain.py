@@ -8,6 +8,7 @@ test_e2e_capability_chain.py - Capability Trust → Grant → Execute E2E テス
 - Trust + Grant 付与済みだが、ネットワークアクセスが制限されている場合
 - 改ざんされた Grant ファイルの拒否
 - built-in ハンドラの Trust バイパス
+- cwd が違っても Grant の HMAC 検証が tamper 誤検知しないこと
 
 既存の test_capability_system.py / test_secure_execution.py の書き方に合わせる。
 """
@@ -433,6 +434,40 @@ class TestCapabilityChainE2E(unittest.TestCase):
 
         self.assertFalse(resp.success)
         self.assertEqual(resp.error_type, "grant_denied")
+
+    def test_grant_reload_from_same_path_different_cwd_no_false_tamper(self):
+        """cwd が違っても同一パスの Grant は tamper 誤検知しない回帰テスト。
+
+        CapabilityGrantManager が cwd に依存しないパス解決 (_PROJECT_ROOT) を
+        使用していることを確認する。
+        """
+        principal_id = "cwd_test_pack"
+        permission_id = "cwd.test.perm"
+
+        # 1. Grant を HMAC 署名付きで作成
+        self._setup_grant(principal_id, permission_id)
+
+        # 2. 同じパス + 同じ secret_key で CapabilityGrantManager を2回構築
+        #    (1回目: 現在の cwd、2回目: 異なる cwd に変更してから)
+        gm1 = CapabilityGrantManager(
+            grants_dir=str(self.grants_dir),
+            secret_key=self.secret_key,
+        )
+        result1 = gm1.check(principal_id, permission_id)
+        self.assertTrue(result1.allowed, f"First load should allow: {result1.reason}")
+
+        # cwd を変更してから再度同じパスで構築
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(self.tmpdir)  # tmpdir を cwd に変更
+            gm2 = CapabilityGrantManager(
+                grants_dir=str(self.grants_dir),
+                secret_key=self.secret_key,
+            )
+            result2 = gm2.check(principal_id, permission_id)
+            self.assertTrue(result2.allowed, f"Reload after cwd change should allow: {result2.reason}")
+        finally:
+            os.chdir(original_cwd)
 
 
 # =========================================================================

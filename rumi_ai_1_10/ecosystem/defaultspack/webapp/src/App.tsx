@@ -7,18 +7,18 @@ import { WarmActionIcon } from "./components/WarmActionIcon";
 import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
-import { pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
+import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
-import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText } from "./lib/composerWidgets";
+import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
-import { isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
+import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
@@ -907,7 +907,14 @@ function CalendarComposerPanel({
           aria-label={`${calendarRangeLabel(activeEditor.startKey, activeEditor.endKey)}に追加`}
           className="rumi-calendar-popover absolute rumi-layer-global-overlay w-[min(320px,calc(100%-24px))] rounded-2xl border border-zinc-700 bg-zinc-950/95 p-3 text-left shadow-[0_24px_70px_rgba(0,0,0,0.65)] backdrop-blur"
           style={popoverStyle}
-          onPointerDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => {
+            const target = event.target as HTMLElement | null;
+            if (target?.closest("button, input, textarea, label, [role='listbox'], [role='option']")) {
+              event.stopPropagation();
+              return;
+            }
+            dismissActiveEditorForSelection(true);
+          }}
           onClick={(event) => event.stopPropagation()}
           onSubmit={submitDraft}
         >
@@ -1424,41 +1431,22 @@ function runtimeApprovalRuntimeContent(approval: RuntimeApproval, token?: string
   ].join("\n");
 }
 
-function browserApprovalRuntimeContent(approval: BrowserApproval, token?: string): string {
-  const approvedArguments = approval.toolName === "browser_computer"
-    ? {
-        action: approval.action,
-        payload: {
-          ...approval.payload,
-          ...(token ? { approval_token: token } : {}),
-        },
-      }
-    : {
-        action: approval.action,
-        ...approval.payload,
-        ...(token ? { approval_token: token } : {}),
-      };
-  const payload = approvalPayloadPreview(approvedArguments);
-  return [
-    "The user approved the pending computer/browser operation.",
-    "Continue by calling the exact pending tool once with the approved arguments below.",
-    "Do not ask the user for the same approval again unless the tool returns a new approval_request_id.",
-    `Tool: ${approval.toolName}`,
-    `Operation: ${approval.action}`,
-    approval.requestId ? `Approval request id: ${approval.requestId}` : "",
-    "Approved arguments JSON:",
-    payload,
-  ].filter(Boolean).join("\n");
-}
-
 function staleRuntimeApprovalTitle(approval: StaleRuntimeApproval): string {
   const label = approval.operation || approval.toolName || "tool";
   return `${label} は再実行が必要です`;
 }
 
-function hasOperationsProfile(catalog: UICatalog | null): boolean {
+function hasAgentServiceProfile(catalog: UICatalog | null, profileId: string): boolean {
   const profiles = catalog?.agent_service?.profiles ?? [];
-  return profiles.some((profile) => String(profile.profile_id ?? profile.id ?? "") === "defaultspack.operations_company");
+  return profiles.some((profile) => String(profile.profile_id ?? profile.id ?? "") === profileId);
+}
+
+function hasOperationsProfile(catalog: UICatalog | null): boolean {
+  return hasAgentServiceProfile(catalog, "defaultspack.operations_company");
+}
+
+function hasMimoCodingProfile(catalog: UICatalog | null): boolean {
+  return hasAgentServiceProfile(catalog, "defaultspack.mimo_coding_company");
 }
 
 function isOperationsConversation(conversation: Conversation | null): boolean {
@@ -1467,6 +1455,15 @@ function isOperationsConversation(conversation: Conversation | null): boolean {
     conversation.conversation_kind === "operations_company"
     || conversation.metadata?.profile_id === "defaultspack.operations_company"
     || conversation.tags?.includes("operations-company")
+  );
+}
+
+function isMimoCodingConversation(conversation: Conversation | null): boolean {
+  if (!conversation) return false;
+  return (
+    conversation.conversation_kind === "mimo_coding_company"
+    || conversation.metadata?.profile_id === "defaultspack.mimo_coding_company"
+    || conversation.tags?.includes("mimo-coding-company")
   );
 }
 
@@ -1567,6 +1564,8 @@ const API_KEY_PROVIDER_IDS = new Set([
   "groq",
   "longcat",
   "mistral",
+  "opencode-go",
+  "opencode-zen",
   "openai",
   "openai_compatible",
   "openrouter",
@@ -1598,13 +1597,16 @@ function isUserFacingModelProfile(profile: ModelProfile, preferredModel: string)
   const providerId = String(profile.provider_id ?? "").trim();
   const modelId = String(profile.model_id ?? "").trim();
   const profileId = profile.profile_id || profile.qualified_model_id || `${providerId}/${modelId}`;
+  const availabilityStatus = String(profile.availability?.status ?? "").trim().toLowerCase();
 
   if (profileId === preferredModel) return true;
   if (!profileIsChatSelectable(profile)) return false;
   if (providerId === "rumi") return false;
   if (providerId === "stub") return modelId === "default";
   if (profile.local || profile.availability?.local || profile.availability?.offline || LOCAL_MODEL_PROVIDER_IDS.has(providerId)) return true;
-  return isConfiguredProfile(profile);
+  if (isConfiguredProfile(profile)) return true;
+  if (availabilityStatus === "route_required") return true;
+  return profileNeedsApiKey(profile);
 }
 
 function modelProfileSortKey(profile: ModelProfile): [number, number, string] {
@@ -2071,6 +2073,8 @@ export default function App() {
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const [operationsStatus, setOperationsStatus] = useState<OperationsCompanyStatus | null>(null);
   const [operationsBusy, setOperationsBusy] = useState(false);
+  const [mimoCodingStatus, setMimoCodingStatus] = useState<MimoCodingCompanyStatus | null>(null);
+  const [mimoCodingBusy, setMimoCodingBusy] = useState(false);
   const [activeSidebarItemId, setActiveSidebarItemId] = useState<string | null>(null);
   const [sidebarSelectionTick, setSidebarSelectionTick] = useState(0);
   const [yoloMode, setYoloMode] = useLocalStorage("rumi-yolo-mode", false);
@@ -2089,6 +2093,7 @@ export default function App() {
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isUnloadingRef = useRef(false);
+  const humanOperatorAutoOpenedPreviewRef = useRef<string | null>(null);
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
@@ -2262,6 +2267,19 @@ export default function App() {
   }, [messageToolPreviews, previews]);
   const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo) || liveBrowserState.state_revision >= 0;
   const effectiveShowPreview = showPreview && canShowCanvas;
+
+  useEffect(() => {
+    const preview = canvasPreviews.find(isHumanOperatorCanvasPreview);
+    if (!preview) {
+      humanOperatorAutoOpenedPreviewRef.current = null;
+      return;
+    }
+    if (humanOperatorAutoOpenedPreviewRef.current === preview.id) return;
+    humanOperatorAutoOpenedPreviewRef.current = preview.id;
+    setActivePreviewId(preview.id);
+    setShowPreview(true);
+  }, [canvasPreviews]);
+
   const composerCommands = useMemo(() => {
     const showAdvanced = settingsValues.commands?.show_advanced_commands === true;
     const fastCandidate = fastCandidateForProfile(activeProfile, selectableModelProfiles);
@@ -2288,6 +2306,7 @@ export default function App() {
   const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview;
   const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
+  const mimoCodingProfileAvailable = hasMimoCodingProfile(catalog);
 
   const startActivityPreviewResize = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -2424,6 +2443,18 @@ export default function App() {
       if (event.origin !== window.location.origin) return;
       const payload = event.data;
       if (!payload || typeof payload !== "object") return;
+      if ((payload as Record<string, unknown>).type === "rumi_human_operator_sync") {
+        const conversationId = String((payload as Record<string, unknown>).conversation_id ?? "").trim();
+        if (conversationId && conversationId === activeConversationId) {
+          void api.getConversation(conversationId)
+            .then((conversation) => {
+              setActiveConversation(conversation);
+              void refreshPreview(conversationId);
+            })
+            .catch(console.error);
+        }
+        return;
+      }
       if ((payload as Record<string, unknown>).type !== "rumi_provider_oauth") return;
       const providerId = String((payload as Record<string, unknown>).provider_id ?? "").trim();
       if (providerId) {
@@ -2436,7 +2467,7 @@ export default function App() {
     return () => {
       window.removeEventListener("message", handleOauthMessage);
     };
-  }, []);
+  }, [activeConversationId]);
 
   useEffect(() => {
     if (mode === "coding") {
@@ -2565,6 +2596,14 @@ export default function App() {
     }
   }
 
+  async function refreshMimoCodingStatus() {
+    try {
+      setMimoCodingStatus(await api.getMimoCodingCompanyStatus());
+    } catch (statusError) {
+      console.error(statusError);
+    }
+  }
+
   async function refreshPreview(conversationId: string | null) {
     if (!conversationId) {
       setPreviews([]);
@@ -2639,8 +2678,18 @@ export default function App() {
       }
       const shellBootstrap = Promise.all([refreshHealth(), refreshCatalog()])
         .then(([, nextCatalog]) => {
-          if (cancelled || !hasOperationsProfile(nextCatalog)) return;
-          return refreshOperationsStatus();
+          if (cancelled) return;
+          const statusRefreshes: Array<Promise<unknown>> = [];
+          if (hasOperationsProfile(nextCatalog)) {
+            statusRefreshes.push(refreshOperationsStatus());
+          }
+          if (hasMimoCodingProfile(nextCatalog)) {
+            statusRefreshes.push(refreshMimoCodingStatus());
+          }
+          if (statusRefreshes.length > 0) {
+            return Promise.all(statusRefreshes);
+          }
+          return undefined;
         })
         .catch((shellError) => {
           if (!cancelled) console.error(shellError);
@@ -2675,6 +2724,11 @@ export default function App() {
     if (!operationsProfileAvailable) return;
     void refreshOperationsStatus();
   }, [operationsProfileAvailable]);
+
+  useEffect(() => {
+    if (!mimoCodingProfileAvailable) return;
+    void refreshMimoCodingStatus();
+  }, [mimoCodingProfileAvailable]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -3614,7 +3668,8 @@ export default function App() {
   };
 
   const handleWidgetAction = (widget: DroppedWidget) => {
-    const action = widget.action;
+    const trustedAction = trustedComposerActionForWidget(widget, composerExtensions);
+    const action = trustedAction ?? (widget.action?.type === "call_endpoint" ? undefined : widget.action);
 
     if (!action) {
       const target = widget.sourceItemId || widget.id;
@@ -3673,6 +3728,11 @@ export default function App() {
           throw new Error(decision.reason || "approval failed");
         }
         approvalToken = decision.token ?? "";
+        setSettledRuntimeApprovalIds((ids) => (
+          ids.includes(browserApproval.requestId ?? "")
+            ? ids
+            : [...ids, browserApproval.requestId ?? ""].filter(Boolean).slice(-50)
+        ));
       }
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_choice: "required",
@@ -3694,7 +3754,9 @@ export default function App() {
             action: browserApproval.action,
             operation: browserApproval.action,
             approval_token: approvalToken,
+            payload: browserApproval.payload,
             request_id: browserApproval.requestId,
+            tool_call_id: browserApproval.toolCallId,
             tool_name: browserApproval.toolName,
           },
           runtime_content: browserApprovalRuntimeContent(browserApproval, approvalToken),
@@ -3755,7 +3817,9 @@ export default function App() {
             action: runtimeApproval.action,
             operation: runtimeApproval.operation,
             approval_token: decision.token,
+            payload: runtimeApproval.payload,
             request_id: runtimeApproval.requestId,
+            tool_call_id: runtimeApproval.toolCallId,
             tool_name: runtimeApproval.toolName,
           },
           runtime_content: runtimeApprovalRuntimeContent(runtimeApproval, decision.token),
@@ -3842,6 +3906,76 @@ export default function App() {
     await loadConversation(operationsStatus.conversation_id);
   };
 
+  const preferredMimoCodingModel = () => {
+    const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
+    const manifestAllowlist = mimoCodingStatus?.manifest.model_self_selection?.allowlist ?? [];
+    const effectiveAllowlist = allowlist.length ? allowlist : manifestAllowlist;
+    if (effectiveAllowlist.includes(preferredModel)) return preferredModel;
+    if (effectiveAllowlist.includes("xiaomi-token-plan-sgp/mimo-v2.5-pro")) return "xiaomi-token-plan-sgp/mimo-v2.5-pro";
+    if (effectiveAllowlist.includes("stub/default")) return "stub/default";
+    return effectiveAllowlist[0] ?? "xiaomi-token-plan-sgp/mimo-v2.5-pro";
+  };
+
+  const preferredMimoVisionModel = () => {
+    const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
+    const visionPreferred = allowlist.find((item) => /omni|vision|vl/i.test(item));
+    if (visionPreferred) return visionPreferred;
+    return "xiaomi-token-plan-sgp/mimo-v2-omni";
+  };
+
+  const preferredMimoFastModel = () => {
+    const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
+    const fastPreferred = allowlist.find((item) => /flash|mini/i.test(item));
+    if (fastPreferred) return fastPreferred;
+    return "xiaomi-token-plan-sgp/mimo-v2-flash";
+  };
+
+  const mimoCodingTargets = () => settingList(settingsValues.mimo_coding_company?.qa_targets);
+  const mimoCodingPersonas = () => settingList(settingsValues.mimo_coding_company?.docker_personas);
+
+  const handleStartMimoCodingCompany = async () => {
+    setMimoCodingBusy(true);
+    setError(null);
+    try {
+      const status = await api.bootstrapMimoCodingCompany({
+        start_nonstop: true,
+        heartbeat_minutes: Math.max(1, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.heartbeat_minutes, 30))),
+        review_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.review_interval_minutes, 180))),
+        qa_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.qa_interval_minutes, 240))),
+        model: preferredMimoCodingModel(),
+        vision_model: preferredMimoVisionModel(),
+        fast_model: preferredMimoFastModel(),
+        qa_targets: mimoCodingTargets(),
+        docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
+        docker_personas: mimoCodingPersonas(),
+        run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
+      });
+      setMimoCodingStatus(status);
+      await refreshConversations(status.conversation_id ?? null);
+    } catch (startError) {
+      setError(startError instanceof Error ? startError.message : "MiMo Coding Company の起動に失敗しました。");
+    } finally {
+      setMimoCodingBusy(false);
+    }
+  };
+
+  const handleOpenMimoCodingChat = async () => {
+    if (!mimoCodingStatus?.conversation_id) {
+      await handleStartMimoCodingCompany();
+      const refreshed = await api.getMimoCodingCompanyStatus();
+      setMimoCodingStatus(refreshed);
+      if (refreshed.conversation_id) {
+        setError(null);
+        await loadConversation(refreshed.conversation_id);
+        return refreshed.conversation_id;
+      }
+      return null;
+    }
+    setError(null);
+    await loadConversation(mimoCodingStatus.conversation_id);
+    return mimoCodingStatus.conversation_id;
+  };
+
   const handleTriggerOperationsHeartbeat = async () => {
     const heartbeat = operationsHeartbeatSchedule();
     if (!heartbeat?.id) return;
@@ -3916,6 +4050,27 @@ export default function App() {
           model: preferredOperationsModel(),
         });
         setOperationsStatus(result as OperationsCompanyStatus);
+      } else if (action.id === "mimo_company.status") {
+        result = await api.getMimoCodingCompanyStatus();
+        setMimoCodingStatus(result as MimoCodingCompanyStatus);
+      } else if (action.id === "mimo_company.bootstrap") {
+        result = await api.bootstrapMimoCodingCompany({
+          start_nonstop: true,
+          heartbeat_minutes: Math.max(1, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.heartbeat_minutes, 30))),
+          review_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.review_interval_minutes, 180))),
+          qa_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.qa_interval_minutes, 240))),
+          model: preferredMimoCodingModel(),
+          vision_model: preferredMimoVisionModel(),
+          fast_model: preferredMimoFastModel(),
+          qa_targets: mimoCodingTargets(),
+          docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
+          docker_personas: mimoCodingPersonas(),
+          run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
+        });
+        setMimoCodingStatus(result as MimoCodingCompanyStatus);
+      } else if (action.id === "mimo_company.open_chat") {
+        const conversationId = await handleOpenMimoCodingChat();
+        result = { opened: true, conversation_id: conversationId };
       } else if (action.endpoint) {
         if (!isSafeLocalEndpoint(action.endpoint) || action.requires_approval) {
           throw new Error("この action は安全な /api/ endpoint ではないか、承認が必要なため直接実行できません。");
@@ -4022,6 +4177,7 @@ export default function App() {
         setActiveConversationId(conversation.id);
       }
       const isOperationsMode = isOperationsConversation(conversation);
+      const isMimoCodingMode = isMimoCodingConversation(conversation);
       submittedConversationId = conversation.id;
       const requestStartedAt = Date.now();
       rememberPendingRequest({
@@ -4243,6 +4399,23 @@ export default function App() {
             ...(operationsToolDenylist.length ? { tool_denylist: operationsToolDenylist } : {}),
           }
         : {};
+      const mimoCodingModelAllowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
+      const mimoCodingToolAllowlist = mimoCodingStatus?.manifest.tool_policy?.allowlist ?? [];
+      const mimoCodingPolicy = isMimoCodingMode
+        ? {
+            profile_id: "defaultspack.mimo_coding_company",
+            non_stop: true,
+            allow_shell: true,
+            allow_file_write: true,
+            write_actions_require_approval: false,
+            delete_actions_require_approval: true,
+            terminal_actions_require_approval: false,
+            normal_status_silent: true,
+            max_concurrent_children: 6,
+            ...(mimoCodingModelAllowlist.length ? { model_allowlist: mimoCodingModelAllowlist } : {}),
+            ...(mimoCodingToolAllowlist.length ? { tool_allowlist: mimoCodingToolAllowlist } : {}),
+          }
+        : {};
       const shouldSendExplicitToolSelection = submittedToolIds.length > 0;
 
       await api.streamMessage(conversation.id, userText, {
@@ -4252,14 +4425,15 @@ export default function App() {
         tool_policy: {
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,
+          ...mimoCodingPolicy,
           ...(isCodingWorkspaceSubmit && workspaceIdForSubmit ? { workspace_id: workspaceIdForSubmit } : {}),
           ...(disabledToolIds.length ? { disabled_tools: disabledToolIds } : {}),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
+        tools: submittedToolIds,
         metadata: {
-          mode: isOperationsMode ? "operations_company" : isCodingWorkspaceSubmit ? "coding" : mode,
+          mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : mode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
           ...(rumiDataPathForSubmit ? { rumi_data_path: rumiDataPathForSubmit } : {}),
           ...(isOperationsMode ? {
@@ -4267,6 +4441,12 @@ export default function App() {
             agent_id: "client_manager",
             conversation_strategy: "one_agent_one_conversation",
             internal_channel: "ops-company",
+          } : {}),
+          ...(isMimoCodingMode ? {
+            profile_id: "defaultspack.mimo_coding_company",
+            agent_id: "client_manager",
+            conversation_strategy: "one_agent_one_conversation",
+            internal_channel: "mimo-coding-company",
           } : {}),
           ...(isCodingWorkspaceSubmit ? {
             workspace_id: workspaceIdForSubmit,
@@ -4419,7 +4599,7 @@ export default function App() {
 
       <div className="flex flex-1 min-h-0">
         {showRegion("history") && !isHistoryMinimized && (
-          <div className="w-[286px] max-w-[30vw] min-w-[240px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-2 fade-in duration-200 ease-out max-[900px]:w-[260px]">
+          <div className="w-[286px] max-w-[30vw] min-w-[240px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-2 fade-in duration-200 ease-out max-[900px]:w-[260px] rumi-anim-fade-left">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -4444,7 +4624,7 @@ export default function App() {
         )}
 
         {showRegion("history") && isHistoryMinimized && (
-          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-visible border-r border-zinc-800/60 animate-in slide-in-from-left-1 fade-in duration-150 ease-out">
+          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-visible border-r border-zinc-800/60 animate-in slide-in-from-left-1 fade-in duration-150 ease-out rumi-anim-fade-left">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -4473,7 +4653,7 @@ export default function App() {
           className={cn("rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative", isActivityPreviewVisible && "has-activity-preview")}
           style={{ "--rumi-activity-preview-width": `${activityPreviewWidthPx}px` } as CSSProperties}
         >
-          <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
+          <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0 rumi-anim-fade-up", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
             {showRegion("chat_header") && !isCalendarMode && (
               <Renderers.chatHeader
                 title={activeChatTitle}
@@ -4650,7 +4830,7 @@ export default function App() {
           )}
 
           {isActivityPreviewVisible && (
-            <aside className="rumi-activity-preview-pane" aria-label="Activity preview">
+            <aside className="rumi-activity-preview-pane rumi-anim-fade-right" aria-label="Activity preview">
               <Renderers.toolPreviewPanel
                 previews={canvasPreviews}
                 showPreview={effectiveShowPreview}
@@ -4666,13 +4846,14 @@ export default function App() {
         </main>
 
         {showRegion("right_sidebar") && (
+          <div className="rumi-anim-fade-right">
           <Renderers.rightSidebar
             items={sidebarItems}
             activeItemId={activeSidebarItemId ? `${activeSidebarItemId}:${sidebarSelectionTick}` : null}
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
-            companyPanel={<CompanyWorkspacePanel />}
+            companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />}
             codingPanel={codingSidebarPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
             selectedProfile={activeProfile}
@@ -4694,6 +4875,7 @@ export default function App() {
             onToolBatchSet={handleToolBatchSet}
             onPanelAction={handlePanelAction}
           />
+          </div>
         )}
       </div>
 

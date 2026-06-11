@@ -67,7 +67,9 @@ def run(input_data, context):
     conv = store.get_conversation(conversation_id)
     if conv is None:
         return error("Conversation not found", "NOT_FOUND")
-    get_chat_cancellation_registry().request_cancel(conversation_id)
+    cancellation_registry = get_chat_cancellation_registry()
+    if cancellation_registry.has_active_callbacks(conversation_id):
+        cancellation_registry.request_cancel(conversation_id)
     persisted_cancelled = _mark_latest_streaming_assistant_cancelled(store, conversation_id)
     stream_id = input_data.get("stream_id")
     call_handler = context.get("call_handler") if context else None

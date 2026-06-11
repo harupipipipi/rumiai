@@ -188,6 +188,43 @@ def test_file_read_write_with_workspace_id_and_context(tmp_path, coding_workspac
     assert context["data"]["files"] == ["README.md"]
 
 
+def test_file_read_supports_line_ranges(tmp_path, coding_workspace_store):
+    from blocks.coding.file_read import run as file_read_run
+    from domain.coding.workspace_store import WorkspaceStore
+
+    root = tmp_path / "project"
+    root.mkdir()
+    WorkspaceStore().create(root, workspace_id="ws1", trusted=True)
+    (root / "notes.txt").write_text("line1\nline2\nline3\nline4\n", encoding="utf-8")
+
+    read = file_read_run({"workspace_id": "ws1", "path": "notes.txt", "start_line": 2, "end_line": 3}, {})
+
+    assert read["status"] == "ok"
+    assert read["data"]["content"] == "line2\nline3\n"
+    assert read["data"]["start_line"] == 2
+    assert read["data"]["end_line"] == 3
+    assert read["data"]["total_lines"] == 4
+    assert read["data"]["truncated"] is True
+
+
+def test_file_read_rejects_invalid_line_ranges(tmp_path, coding_workspace_store):
+    from blocks.coding.file_read import run as file_read_run
+    from domain.coding.workspace_store import WorkspaceStore
+
+    root = tmp_path / "project"
+    root.mkdir()
+    WorkspaceStore().create(root, workspace_id="ws1", trusted=True)
+    (root / "notes.txt").write_text("line1\nline2\n", encoding="utf-8")
+
+    invalid_start = file_read_run({"workspace_id": "ws1", "path": "notes.txt", "start_line": 0}, {})
+    invalid_order = file_read_run({"workspace_id": "ws1", "path": "notes.txt", "start_line": 2, "end_line": 1}, {})
+
+    assert invalid_start["status"] == "error"
+    assert invalid_start["error"]["code"] == "INVALID_INPUT"
+    assert invalid_order["status"] == "error"
+    assert invalid_order["error"]["code"] == "INVALID_INPUT"
+
+
 def test_workspace_id_traversal_and_git_mutation_are_blocked(tmp_path, coding_workspace_store):
     from blocks.coding.file_read import run as file_read_run
     from blocks.coding.file_write import run as file_write_run

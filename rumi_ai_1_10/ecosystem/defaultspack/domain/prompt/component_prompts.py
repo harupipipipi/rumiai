@@ -12,10 +12,19 @@ def _component_file(manifest: dict[str, Any], entrypoint: str) -> Path | None:
     rel_path = entrypoints.get(entrypoint) if isinstance(entrypoints, dict) else None
     if not isinstance(rel_path, str) or not rel_path.strip():
         return None
+    entrypoint_path = Path(rel_path)
+    if entrypoint_path.is_absolute():
+        return None
     source_path = manifest.get("source_path")
     if not isinstance(source_path, str) or not source_path:
         return None
-    return (Path(source_path).parent / rel_path).resolve()
+    try:
+        component_dir = Path(source_path).parent.resolve()
+        candidate = (component_dir / entrypoint_path).resolve()
+        candidate.relative_to(component_dir)
+    except (OSError, ValueError):
+        return None
+    return candidate
 
 
 def _load_rules(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -48,7 +57,10 @@ def component_prompt_text(prompt_id: str) -> str | None:
     path = _component_file(manifest, "prompt")
     if path is None or not path.is_file():
         return None
-    return path.read_text(encoding="utf-8")
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
 
 
 def component_prompt_records() -> dict[str, dict[str, Any]]:

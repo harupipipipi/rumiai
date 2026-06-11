@@ -503,6 +503,7 @@ _BEST_MODEL_BY_PROVIDER = {
     "openrouter": "tencent/hy3-preview:free",
     "gitlawb-opengateway": "mimo-v2.5-pro",
     "opencode-go": "kimi-k2.6",
+    "opencode-zen": "minimax-m3-free",
     "deepseek": "deepseek-chat",
     "perplexity": "sonar-pro",
     "together": "llama-3.1-70b-instruct-turbo",
@@ -852,6 +853,7 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
 def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]:
     provider_id = str(entry.get("provider_id", "")).strip()
     credential_required = bool(entry.get("credential_required", True))
+    default_base_url = str(entry.get("default_base_url", "") or "").strip()
     if provider_id and provider_has_oauth_connection(provider_id):
         return True, "browser_oauth"
     if provider_id and provider_has_api_key(provider_id):
@@ -863,9 +865,11 @@ def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]
         for env_name in entry.get("base_url_envs", []):
             if _truthy_env(env_name):
                 return True, env_name
-    if entry.get("kind") == "local" and entry.get("default_base_url"):
+    if not credential_required and default_base_url.startswith("local://"):
+        return True, "builtin_local_provider"
+    if entry.get("kind") == "local" and default_base_url:
         return True, "default_local_endpoint"
-    if not credential_required and entry.get("default_base_url"):
+    if not credential_required and default_base_url:
         return True, "no_key_gateway"
     if entry["provider_id"] == "stub":
         return True, "builtin"
