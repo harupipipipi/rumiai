@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -99,6 +101,18 @@ class FakeDispatcher:
         }
 
 
+class BlockingDispatcher(FakeDispatcher):
+    def __init__(self, runtime_store, run_store):
+        super().__init__(runtime_store, run_store)
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def dispatch_task(self, *args, **kwargs):
+        self.started.set()
+        self.release.wait(timeout=2)
+        return super().dispatch_task(*args, **kwargs)
+
+
 def _gateway(*, status="running", approval=False):
     from domain.agent_runtime.run_store import AgentRunStore
     from domain.company.runtime_store import CompanyRuntimeStore
@@ -108,6 +122,15 @@ def _gateway(*, status="running", approval=False):
     run_store = AgentRunStore()
     fake = FakeDispatcher(runtime_store, run_store, status=status, approval=approval)
     return RemoteTaskGateway(runtime_store=runtime_store, run_store=run_store, run_dispatcher=fake), fake, runtime_store, run_store
+
+
+def _wait_until(predicate, *, timeout=2.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return
+        time.sleep(0.01)
+    assert predicate()
 
 
 def test_create_remote_task_bootstraps_default_company(remote_gateway_env):
@@ -127,10 +150,34 @@ def test_create_remote_task_dispatches_to_operations_manager_by_default(remote_g
 
     result = gateway.create_task({"input": "Run the remote task"}, {})
 
+    assert result["state"] == "queued"
+    assert result["dispatch"] == {"status": "queued"}
+    _wait_until(lambda: bool(_runtime_store.list_run_links("operations-company", task_id=result["task_id"])))
+    refreshed = gateway.get_task(result["task_id"], {}, {})
     assert fake.calls
-    assert result["state"] == "running"
-    assert result["run_links"][0]["agent_id"] == "operations_manager"
-    assert result["task"]["metadata"]["last_dispatch"]["policy"]["direct_tool_execution"] is False
+    assert refreshed["state"] == "running"
+    assert refreshed["run_links"][0]["agent_id"] == "operations_manager"
+    assert refreshed["task"]["metadata"]["last_dispatch"]["policy"]["direct_tool_execution"] is False
+
+
+def test_create_task_returns_before_dispatch_finishes(remote_gateway_env):
+    from domain.agent_runtime.run_store import AgentRunStore
+    from domain.company.runtime_store import CompanyRuntimeStore
+    from domain.remote.task_gateway import RemoteTaskGateway
+
+    runtime_store = CompanyRuntimeStore()
+    run_store = AgentRunStore()
+    fake = BlockingDispatcher(runtime_store, run_store)
+    gateway = RemoteTaskGateway(runtime_store=runtime_store, run_store=run_store, run_dispatcher=fake)
+
+    result = gateway.create_task({"input": "Run slowly"}, {})
+
+    assert result["state"] == "queued"
+    assert result["run_links"] == []
+    assert fake.started.wait(timeout=1)
+    assert runtime_store.list_run_links("operations-company", task_id=result["task_id"]) == []
+    fake.release.set()
+    _wait_until(lambda: bool(runtime_store.list_run_links("operations-company", task_id=result["task_id"])))
 
 
 def test_create_remote_task_accepts_explicit_target_agent(remote_gateway_env):
@@ -138,7 +185,9 @@ def test_create_remote_task_accepts_explicit_target_agent(remote_gateway_env):
 
     result = gateway.create_task({"input": "Patch a bug", "target_agent_ids": ["coding_engineer"]}, {})
 
-    assert result["run_links"][0]["agent_id"] == "coding_engineer"
+    _wait_until(lambda: bool(gateway.get_task(result["task_id"], {}, {})["run_links"]))
+    refreshed = gateway.get_task(result["task_id"], {}, {})
+    assert refreshed["run_links"][0]["agent_id"] == "coding_engineer"
     assert result["task"]["target_agent_ids"] == ["coding_engineer"]
 
 
@@ -157,12 +206,36 @@ def test_get_remote_task_returns_task_run_links_and_waiting_approvals(remote_gat
     gateway, _fake, _runtime_store, _run_store = _gateway(status="waiting_approval", approval=True)
     created = gateway.create_task({"input": "Needs approval"}, {})
 
+    _wait_until(lambda: bool(gateway.get_task(created["task_id"], {}, {})["run_links"]))
     result = gateway.get_task(created["task_id"], {}, {})
 
     assert result["state"] == "waiting_approval"
     assert result["run_links"][0]["status"] == "waiting_approval"
     assert result["agent_runs"][0]["status"] == "waiting_approval"
     assert result["waiting_approvals"][0]["approval_id"] == "approval_1"
+
+
+def test_remote_task_state_promotes_to_completed_when_all_linked_runs_complete(remote_gateway_env):
+    gateway, _fake, runtime_store, _run_store = _gateway(status="completed")
+    created = gateway.create_task({"input": "Finish remotely"}, {})
+
+    _wait_until(lambda: bool(gateway.get_task(created["task_id"], {}, {})["run_links"]))
+    result = gateway.get_task(created["task_id"], {}, {})
+
+    assert result["state"] == "completed"
+    assert runtime_store.get_task(created["task_id"], company_id="operations-company")["status"] == "completed"
+
+
+def test_remote_task_events_include_completed_task_state_after_run_completion(remote_gateway_env):
+    gateway, _fake, _runtime_store, _run_store = _gateway(status="completed")
+    created = gateway.create_task({"input": "Finish with events"}, {})
+
+    _wait_until(lambda: gateway.get_task(created["task_id"], {}, {})["state"] == "completed")
+    events = gateway.list_events(created["task_id"], {"limit": 50}, {})["events"]
+
+    assert any(event["type"] == "task.dispatched" for event in events)
+    assert any(event["type"] == "run.status" and event.get("status") == "completed" for event in events)
+    assert any(event["type"] == "task.state" and event.get("status") == "completed" for event in events)
 
 
 def test_remote_task_events_are_stable_and_cursor_based(remote_gateway_env):
@@ -183,6 +256,7 @@ def test_cancel_remote_task_marks_task_runs_links_and_inbox(remote_gateway_env):
     gateway, _fake, runtime_store, run_store = _gateway()
     created = gateway.create_task({"input": "Long running task"}, {})
 
+    _wait_until(lambda: bool(runtime_store.list_run_links("operations-company", task_id=created["task_id"])))
     result = gateway.cancel_task(created["task_id"], {"reason": "no longer needed"}, {})
 
     assert result["state"] == "cancelled"

@@ -268,6 +268,120 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             },
         )
 
+    def test_remote_api_route_unwraps_function_ok_envelope(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/remote/tasks"): {
+                "pack_id": "defaultspack",
+                "handler": "",
+                "function_id": "remote_task_create",
+                "pass_body": True,
+                "response_mode": "result",
+                "args": {},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        sent = []
+        handler._send_response = lambda response, status=200: sent.append((status, response))
+
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(
+                    success=True,
+                    output={"status": "ok", "data": {"remote_task_id": "task_123"}},
+                )
+            )
+        )
+        with patch("core_runtime.capability_executor.get_capability_executor", return_value=executor):
+            dispatched = handler._dispatch_api_route("POST", "/api/remote/tasks", {"input": "hello"})
+
+        self.assertTrue(dispatched)
+        self.assertEqual(sent[0][0], 200)
+        self.assertTrue(sent[0][1].success)
+        self.assertEqual(sent[0][1].data, {"remote_task_id": "task_123"})
+
+    def test_remote_api_route_invalid_input_returns_400(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/remote/tasks"): {
+                "pack_id": "defaultspack",
+                "handler": "",
+                "function_id": "remote_task_create",
+                "pass_body": True,
+                "response_mode": "result",
+                "args": {},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        sent = []
+        handler._send_response = lambda response, status=200: sent.append((status, response))
+
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(
+                    success=True,
+                    output={
+                        "status": "error",
+                        "error": {"code": "INVALID_INPUT", "message": "input is required"},
+                        "status_code": 400,
+                    },
+                )
+            )
+        )
+        with patch("core_runtime.capability_executor.get_capability_executor", return_value=executor):
+            dispatched = handler._dispatch_api_route("POST", "/api/remote/tasks", {})
+
+        self.assertTrue(dispatched)
+        self.assertEqual(sent[0][0], 400)
+        self.assertFalse(sent[0][1].success)
+        self.assertEqual(sent[0][1].error, {"code": "INVALID_INPUT", "message": "input is required"})
+
+    def test_remote_api_route_not_found_returns_404(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        route_entry = {
+            "pack_id": "defaultspack",
+            "handler": "",
+            "function_id": "remote_task_get",
+            "pass_body": False,
+            "response_mode": "result",
+            "args": {},
+            "path_param_map": {"task_id": "task_id"},
+        }
+        PackAPIHandler._api_route_exact = {}
+        PackAPIHandler._api_route_patterns = [
+            ("GET", re.compile(r"^/api/remote/tasks/(?P<task_id>[^/]+)$"), ["task_id"], route_entry)
+        ]
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        sent = []
+        handler._send_response = lambda response, status=200: sent.append((status, response))
+
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(
+                    success=True,
+                    output={
+                        "status": "error",
+                        "error": {"code": "NOT_FOUND", "message": "remote task not found: task_missing"},
+                        "status_code": 404,
+                    },
+                )
+            )
+        )
+        with patch("core_runtime.capability_executor.get_capability_executor", return_value=executor):
+            dispatched = handler._dispatch_api_route("GET", "/api/remote/tasks/task_missing")
+
+        self.assertTrue(dispatched)
+        self.assertEqual(sent[0][0], 404)
+        self.assertFalse(sent[0][1].success)
+        self.assertEqual(sent[0][1].error["code"], "NOT_FOUND")
+
 
 if __name__ == "__main__":
     unittest.main()

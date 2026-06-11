@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from typing import Any, Iterable
 
 from core_runtime.runtime_audit_helpers import audit_event, redact_sensitive
@@ -111,28 +112,17 @@ class RemoteTaskGateway:
         )
         routes: list[dict[str, Any]] = []
         dispatch_result: dict[str, Any] | None = None
-        if payload.get("dispatch", True) is not False:
-            dispatch_result = self.run_dispatcher.dispatch_task(
+        dispatch_requested = payload.get("dispatch", True) is not False
+        if dispatch_requested:
+            dispatch_result = {"status": "queued"}
+            self._append_event(
                 company_id,
                 str(task["task_id"]),
-                requested_by="remote_gateway",
-                policy={"mode": "agent_delegate", "direct_tool_execution": False},
-                context={**(context or {}), "remote_gateway": True, "remote_client": client},
+                "task.dispatch_queued",
+                "Remote task dispatch queued",
+                status="queued",
+                agent_ids=target_agent_ids,
             )
-            if isinstance(dispatch_result, dict):
-                task = dispatch_result.get("task") if isinstance(dispatch_result.get("task"), dict) else task
-                routes = _routes_from_run_links(dispatch_result.get("run_links") if isinstance(dispatch_result, dict) else [])
-                self._append_event(
-                    company_id,
-                    str(task["task_id"]),
-                    "task.dispatched",
-                    "Remote task dispatched",
-                    status=str((dispatch_result.get("dispatch") or {}).get("status") or task.get("status") or "running"),
-                    routes=routes,
-                )
-                for link in dispatch_result.get("run_links") or []:
-                    if isinstance(link, dict):
-                        self._append_run_status_event(company_id, str(task["task_id"]), link)
 
         audit_event(
             context,
@@ -141,7 +131,7 @@ class RemoteTaskGateway:
                 "company_id": company_id,
                 "task_id": task.get("task_id"),
                 "target_agent_ids": target_agent_ids,
-                "dispatch": payload.get("dispatch", True) is not False,
+                "dispatch": dispatch_requested,
             },
         )
         snapshot = self._snapshot(str(task["task_id"]), company_id=company_id)
@@ -153,6 +143,9 @@ class RemoteTaskGateway:
                 "dispatch": dispatch_result.get("dispatch") if isinstance(dispatch_result, dict) else None,
             }
         )
+        if dispatch_requested:
+            snapshot["dispatch"] = dispatch_result
+            self._start_dispatch_thread(company_id, str(task["task_id"]), context or {}, client)
         return snapshot
 
     def get_task(self, task_id: str, args: dict[str, Any] | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -292,6 +285,7 @@ class RemoteTaskGateway:
         state = self._normalized_state(task, run_links, agent_runs, waiting_approvals)
         if state not in REMOTE_STATES:
             state = "queued"
+        task = self._persist_normalized_task_state(company_id, task_id, state, task)
         self._sync_task_state_event(company_id, task_id, state, task)
         task = self._get_task_or_raise(task_id, company_id=company_id)
         return {
@@ -316,6 +310,66 @@ class RemoteTaskGateway:
         if task is None:
             raise RemoteTaskGatewayError("remote task not found: " + task_id, "NOT_FOUND")
         return task
+
+    def _start_dispatch_thread(
+        self,
+        company_id: str,
+        task_id: str,
+        context: dict[str, Any],
+        client: dict[str, Any],
+    ) -> None:
+        thread = threading.Thread(
+            target=self._dispatch_task_background,
+            args=(company_id, task_id, dict(context or {}), dict(client or {})),
+            name=f"remote-task-dispatch-{task_id}",
+            daemon=True,
+        )
+        thread.start()
+
+    def _dispatch_task_background(
+        self,
+        company_id: str,
+        task_id: str,
+        context: dict[str, Any],
+        client: dict[str, Any],
+    ) -> None:
+        try:
+            dispatch_result = self.run_dispatcher.dispatch_task(
+                company_id,
+                task_id,
+                requested_by="remote_gateway",
+                policy={"mode": "agent_delegate", "direct_tool_execution": False},
+                context={**context, "remote_gateway": True, "remote_client": client},
+            )
+            if not isinstance(dispatch_result, dict):
+                return
+            task = dispatch_result.get("task") if isinstance(dispatch_result.get("task"), dict) else {}
+            routes = _routes_from_run_links(dispatch_result.get("run_links"))
+            self._append_event(
+                company_id,
+                task_id,
+                "task.dispatched",
+                "Remote task dispatched",
+                status=str((dispatch_result.get("dispatch") or {}).get("status") or task.get("status") or "running"),
+                routes=routes,
+            )
+            for link in dispatch_result.get("run_links") or []:
+                if isinstance(link, dict):
+                    self._append_run_status_event(company_id, task_id, link)
+        except Exception as exc:
+            self.runtime_store.update_task(
+                task_id,
+                {"status": "blocked", "metadata": {"dispatch_error": str(exc)}},
+                company_id=company_id,
+            )
+            self._append_event(
+                company_id,
+                task_id,
+                "task.dispatch_failed",
+                "Remote task dispatch failed",
+                status="blocked",
+                error=str(exc),
+            )
 
     def _synced_run_links(self, company_id: str, task_id: str) -> list[dict[str, Any]]:
         links = self.runtime_store.list_run_links(company_id, task_id=task_id, limit=1000)
@@ -367,19 +421,42 @@ class RemoteTaskGateway:
             for item in [*run_links, *agent_runs]
             if isinstance(item, dict) and item.get("status")
         }
+        completed_statuses = {"completed", "complete", "done", "success", "succeeded"}
+        blocked_statuses = {"blocked", "failed", "error", "cancel_failed"}
         if task_status in {"cancelled", "canceled"} or "cancelled" in statuses or "canceled" in statuses:
             return "cancelled"
         if task_status in {"completed", "complete", "done"}:
+            return "completed"
+        if run_links and statuses and all(status in completed_statuses for status in statuses):
             return "completed"
         if task_status == "stale" or "stale" in statuses:
             return "stale"
         if waiting_approvals or task_status in {"waiting_approval", "waiting_user_input"} or statuses & {"waiting_approval", "waiting_user_input"}:
             return "waiting_approval"
-        if task_status in {"blocked", "failed", "error"} or statuses & {"blocked", "failed", "error"}:
+        if task_status in blocked_statuses or statuses & blocked_statuses:
             return "blocked"
         if task_status in {"running", "assigned"} or statuses & {"created", "queued", "running", "paused", "resumable"}:
             return "running"
         return "queued"
+
+    def _persist_normalized_task_state(
+        self,
+        company_id: str,
+        task_id: str,
+        state: str,
+        task: dict[str, Any],
+    ) -> dict[str, Any]:
+        task_status = str(task.get("status") or "").lower()
+        persisted_state = "cancelled" if state == "cancelled" else state
+        if state not in {"completed", "blocked", "cancelled", "stale"}:
+            return task
+        if task_status == persisted_state:
+            return task
+        return self.runtime_store.update_task(
+            task_id,
+            {"status": persisted_state, "metadata": {"remote_state_synced_at": utc_now()}},
+            company_id=company_id,
+        ) or task
 
     def _active_run_count(self, run_links: list[dict[str, Any]]) -> int:
         active: set[str] = set()
