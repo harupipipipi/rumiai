@@ -1,0 +1,24 @@
+id: rumi_code_ide_pack.gemini_cli_style_discovery
+name: Gemini CLI Style Discovery
+profile: rumi_code_ide_pack.code_cli_ide
+inspiration:
+  - Gemini CLI
+intent: command-line exploration, broad context gathering, and concise implementation choice
+enabled_capabilities:
+  - local_file
+  - terminal
+  - git
+  - project
+  - research
+  - safety
+ui_panels:
+  - chat
+  - terminal
+  - file_tree
+behavior:
+  - search_first
+  - compare_entrypoints
+  - command_output_summarization
+  - scoped_followthrough
+overlap_notes:
+  rumi_local_agent_pack: use this preset for CLI-heavy discovery rather than general local-agent sessions
