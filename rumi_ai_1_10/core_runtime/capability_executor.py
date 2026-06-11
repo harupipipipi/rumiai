@@ -1049,7 +1049,6 @@ class CapabilityExecutor:
             "binary",
             "command",
         }
-        legacy_grant_required = bool(getattr(entry, "legacy_grant_required", False))
         # Unified FunctionRegistry execution preserves the legacy capability
         # boundary: every principal x permission dispatch requires a grant.
         grant_required = True

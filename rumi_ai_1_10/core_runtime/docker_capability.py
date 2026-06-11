@@ -687,7 +687,7 @@ class DockerCapabilityHandler:
             timeout = int(args.get("timeout", 10))
             cmd = ["docker", "stop", f"--time={timeout}", container_name]
 
-            result = subprocess.run(
+            subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
