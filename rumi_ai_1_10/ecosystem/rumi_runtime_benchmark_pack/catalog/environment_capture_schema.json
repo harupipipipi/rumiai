@@ -1,0 +1,43 @@
+{
+  "version": "rumi.runtime_benchmark.environment_capture.v1",
+  "pack_id": "rumi_runtime_benchmark_pack",
+  "description": "Declarative environment capture schema for reproducible runtime benchmarks.",
+  "network_default": "none",
+  "required_fields": [
+    "benchmark_id",
+    "timestamp_local",
+    "runtime_surface",
+    "model_or_provider_label",
+    "tooling_profile",
+    "os_family",
+    "python_version",
+    "node_version",
+    "git_ref",
+    "dependency_lock_state",
+    "network_policy",
+    "cache_policy",
+    "sampling_plan_id"
+  ],
+  "optional_fields": [
+    "cpu_arch",
+    "memory_class",
+    "container_or_sandbox",
+    "temperature_or_seed",
+    "prompt_fixture_version",
+    "tool_fixture_version",
+    "redaction_notes"
+  ],
+  "redaction_rules": [
+    "do_not_record_secret_values",
+    "record_provider_or_model_labels_without_credentials",
+    "record environment class instead of private host identifiers",
+    "hash or omit sensitive paths when not needed for reproduction"
+  ],
+  "quality_gates": [
+    "network_policy_recorded",
+    "cache_policy_recorded",
+    "git_ref_or_fixture_version_recorded",
+    "sampling_plan_linked",
+    "latency_and_cost_units_declared"
+  ]
+}
