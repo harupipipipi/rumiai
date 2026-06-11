@@ -6,10 +6,18 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, List, Tuple, Set
+
+_this_module = sys.modules.get(__name__)
+if _this_module is not None:
+    if __name__.startswith("rumi_ai_1_10."):
+        sys.modules.setdefault(__name__.removeprefix("rumi_ai_1_10."), _this_module)
+    else:
+        sys.modules.setdefault(f"rumi_ai_1_10.{__name__}", _this_module)
 
 
 @dataclass
