@@ -5,6 +5,7 @@ import os
 import shlex
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -58,6 +59,99 @@ def test_runtime_registers_desktop_launch_handlers():
     handlers = Stub()._register_runtime_handlers()
     assert handlers["kernel:desktop.launch"].__name__ == "_h_desktop_launch"
     assert handlers["kernel:desktop.stop"].__name__ == "_h_desktop_stop"
+
+
+def test_runtime_desktop_launch_requires_granted_principal(monkeypatch):
+    from core_runtime import capability_grant_manager
+    from core_runtime.kernel_handlers_runtime import KernelRuntimeHandlersMixin
+
+    class Stub(KernelRuntimeHandlersMixin):
+        pass
+
+    class FakeGrantManager:
+        def check(self, principal_id, permission_id):
+            assert principal_id == "malicious"
+            assert permission_id == "desktop_app.execute"
+            return SimpleNamespace(
+                allowed=False,
+                reason="desktop_app.execute denied",
+                config={},
+            )
+
+    monkeypatch.setattr(
+        capability_grant_manager,
+        "get_capability_grant_manager",
+        lambda: FakeGrantManager(),
+    )
+
+    with mock.patch("core_runtime.desktop_app_manager.DesktopAppManager.launch_app") as direct_launch:
+        result = Stub()._h_desktop_launch(
+            {"pack_id": "victim"},
+            {"_principal_id": "malicious"},
+        )
+
+    assert result == {"success": False, "error": "desktop_app.execute denied"}
+    direct_launch.assert_not_called()
+
+
+def test_runtime_desktop_launch_uses_scoped_capability_path(monkeypatch):
+    from core_runtime import capability_grant_manager, di_container
+    from core_runtime.kernel_handlers_runtime import KernelRuntimeHandlersMixin
+
+    class Stub(KernelRuntimeHandlersMixin):
+        pass
+
+    class FakeGrantManager:
+        def check(self, principal_id, permission_id):
+            assert principal_id == "defaultspack"
+            assert permission_id == "desktop_app.execute"
+            return SimpleNamespace(
+                allowed=True,
+                reason="Granted",
+                config={"allowed_packs": ["defaultspack"]},
+            )
+
+    class FakeDesktopCapabilityHandler:
+        def __init__(self):
+            self.calls = []
+
+        def handle_execute(self, principal_id, args, grant_config):
+            self.calls.append((principal_id, args, grant_config))
+            return {
+                "token": "scoped-desktop-token",
+                "app": {"success": True, "status": "launched", "pid": 123},
+            }
+
+    handler = FakeDesktopCapabilityHandler()
+
+    class FakeContainer:
+        def get_or_none(self, name):
+            assert name == "desktop_capability_handler"
+            return handler
+
+    monkeypatch.setattr(
+        capability_grant_manager,
+        "get_capability_grant_manager",
+        lambda: FakeGrantManager(),
+    )
+    monkeypatch.setattr(di_container, "get_container", lambda: FakeContainer())
+
+    with mock.patch("core_runtime.desktop_app_manager.DesktopAppManager.launch_app") as direct_launch:
+        result = Stub()._h_desktop_launch(
+            {"pack_id": "defaultspack"},
+            {"_principal_id": "defaultspack"},
+        )
+
+    assert result == {"success": True, "data": {"success": True, "status": "launched", "pid": 123}}
+    assert handler.calls == [
+        (
+            "defaultspack",
+            {"pack_id": "defaultspack", "action": "launch"},
+            {"allowed_packs": ["defaultspack"]},
+        )
+    ]
+    assert "token" not in result["data"]
+    direct_launch.assert_not_called()
 
 
 def test_defaultspack_ecosystem_registers_desktop_app_metadata(tmp_path):
@@ -128,6 +222,20 @@ def test_desktop_capability_invalid_runtime_port_uses_grant_fallback(monkeypatch
 
     assert result["port"] == 8770
 
+
+def test_desktop_capability_rejects_invalid_target_pack_id():
+    from core_runtime.desktop_capability import DesktopCapabilityHandler
+
+    handler = DesktopCapabilityHandler()
+    with mock.patch("core_runtime.desktop_app_manager.DesktopAppManager.launch_app_with_env") as mock_launch:
+        result = handler.handle_execute(
+            principal_id="defaultspack",
+            args={"pack_id": "../user_data/evil", "action": "launch"},
+            grant_config={"allowed_packs": ["*"]},
+        )
+
+    assert result == {"error": "Invalid pack_id for desktop app execution: ../user_data/evil"}
+    mock_launch.assert_not_called()
 
 def test_desktop_capability_denies_empty_allowed_packs():
     from core_runtime.desktop_capability import DesktopCapabilityHandler

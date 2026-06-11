@@ -74,6 +74,20 @@ def _message_content_with_attachments(task, attachments):
     return content or str(task or "")
 
 
+def _text_from_content_blocks(content):
+    if not isinstance(content, list):
+        return content
+    parts = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            text = str(block.get("text") or "").strip()
+            if text:
+                parts.append(text)
+        elif isinstance(block, str) and block.strip():
+            parts.append(block.strip())
+    return "\n\n".join(parts) if parts else content
+
+
 def _route_agent_model(
     *,
     task,
@@ -499,6 +513,7 @@ class AgentEngine:
         content = ""
         if isinstance(data, dict):
             content = data.get("content", data.get("text", str(data)))
+            content = _text_from_content_blocks(content)
         elif isinstance(data, str):
             content = data
         else:

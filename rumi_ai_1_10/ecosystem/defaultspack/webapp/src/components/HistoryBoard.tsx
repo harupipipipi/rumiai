@@ -326,7 +326,7 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
         },
         {
           id: 'group-company',
-          title: 'Company',
+          title: 'Team',
           isCollapsed: false,
           chats: metadataBuckets.company,
           subGroups: [],

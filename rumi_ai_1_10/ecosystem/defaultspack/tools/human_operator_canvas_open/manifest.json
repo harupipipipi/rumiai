@@ -1,0 +1,65 @@
+{
+  "id": "human_operator_canvas_open",
+  "description": "Open a local Human Operator Canvas session for manual AI roleplay and context inspection.",
+  "config": {
+    "tool_id": "human_operator_canvas_open",
+    "name": "Human Operator Canvas Open",
+    "summary": "Open a local Human Operator Canvas session for manual AI roleplay and context inspection.",
+    "tool_category": "preview",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "preview",
+      "local_only",
+      "human_operator"
+    ],
+    "ui": {
+      "group_id": "preview",
+      "group_label": "Preview",
+      "group_icon": "eye",
+      "item_icon": "eye",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Human Operator Canvas Open",
+      "composer_description": "Open a local Human Operator Canvas session for manual AI roleplay and context inspection.",
+      "composer_icon": "eye"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array"
+          },
+          "params": {
+            "type": "object"
+          },
+          "tool_names": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "session_id"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.human_operator_tools:human_operator_canvas_open"
+    }
+  }
+}

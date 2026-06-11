@@ -5,6 +5,11 @@ import { cn } from '@/src/lib/utils';
 import { panelRoutes } from '@/src/lib/routes';
 import { BrainCircuit, Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route } from 'lucide-react';
 
+type NavGroup = {
+  id: 'workspace' | 'advanced';
+  items: { to: string; icon: typeof Home; label: string }[];
+};
+
 export function Sidebar() {
   const t = useT();
   const location = useLocation();
@@ -12,19 +17,34 @@ export function Sidebar() {
   const isSidebarOpen = useAppStore(state => state.isSidebarOpen);
   const setSidebarOpen = useAppStore(state => state.setSidebarOpen);
 
-  // Ordered: general user first → advanced/developer last
-  const links = [
-    { to: panelRoutes.home, icon: Home, label: t('nav.home') },
-    { to: panelRoutes.packs, icon: Folder, label: t('nav.packs') },
-    { to: panelRoutes.flows, icon: LayoutGrid, label: t('nav.flows') },
-    { to: panelRoutes.nodes, icon: Network, label: t('nav.nodes') },
-    { to: panelRoutes.graphEditor, icon: GitBranch, label: 'Graphs' },
-    { to: panelRoutes.profileGraph, icon: Share2, label: 'Profile Graph' },
-    { to: panelRoutes.aiInput, icon: BrainCircuit, label: 'AI Input' },
-    { to: panelRoutes.apiMap, icon: Route, label: 'API Map' },
-    { to: panelRoutes.profileWorkspace, icon: FolderCog, label: 'Profile Workspace' },
-    { to: panelRoutes.settings, icon: Settings, label: t('nav.settings') },
+  // Ordered: workspace surfaces first, advanced/developer surfaces last
+  const navGroups: NavGroup[] = [
+    {
+      id: 'workspace',
+      items: [
+        { to: panelRoutes.home, icon: Home, label: t('nav.home') },
+        { to: panelRoutes.packs, icon: Folder, label: t('nav.packs') },
+        { to: panelRoutes.flows, icon: LayoutGrid, label: t('nav.flows') },
+        { to: panelRoutes.nodes, icon: Network, label: t('nav.nodes') },
+      ],
+    },
+    {
+      id: 'advanced',
+      items: [
+        { to: panelRoutes.graphEditor, icon: GitBranch, label: 'Graphs' },
+        { to: panelRoutes.profileGraph, icon: Share2, label: 'Profile Graph' },
+        { to: panelRoutes.aiInput, icon: BrainCircuit, label: 'AI Input' },
+        { to: panelRoutes.apiMap, icon: Route, label: 'API Map' },
+        { to: panelRoutes.profileWorkspace, icon: FolderCog, label: 'Profile Workspace' },
+        { to: panelRoutes.settings, icon: Settings, label: t('nav.settings') },
+      ],
+    },
   ];
+
+  const groupLabels: Record<NavGroup['id'], string> = {
+    workspace: 'Workspace',
+    advanced: 'Advanced',
+  };
 
   return (
     <aside
@@ -49,34 +69,53 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className={cn("flex-1 overflow-y-auto py-3", isSidebarOpen ? "px-3" : "px-1.5")} aria-label="Main navigation">
-        <ul className="space-y-1">
-          {links.map((link) => {
-            const isActive =
-              location.pathname === link.to ||
-              (link.to !== panelRoutes.home && location.pathname.startsWith(link.to));
-            return (
-              <li key={link.to}>
-                <Link
-                  to={link.to}
-                  title={!isSidebarOpen ? link.label : undefined}
-                  aria-current={isActive ? 'page' : undefined}
+        <ul className="flex flex-col gap-4">
+          {navGroups.map((group, groupIndex) => (
+            <li key={group.id} className="flex flex-col gap-1">
+              {isSidebarOpen && (
+                <div
                   className={cn(
-                    "group relative flex items-center rounded-lg transition-colors duration-[var(--transition-fast)] text-sm font-medium",
-                    isSidebarOpen ? "gap-3 px-3 py-2" : "justify-center p-2.5",
-                    isActive
-                      ? "bg-accent/8 text-accent"
-                      : "text-text-muted hover:bg-bg-hover hover:text-text-main"
+                    "px-3 pt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-text-muted/70",
+                    groupIndex > 0 && "border-t border-border/60 pt-3",
                   )}
                 >
-                  {isActive && isSidebarOpen && (
-                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-accent rounded-r-full" />
-                  )}
-                  <link.icon className={cn("w-[18px] h-[18px] shrink-0", isActive ? "text-accent" : "text-text-muted group-hover:text-text-main")} />
-                  {isSidebarOpen && <span>{link.label}</span>}
-                </Link>
-              </li>
-            );
-          })}
+                  {groupLabels[group.id]}
+                </div>
+              )}
+              {groupIndex > 0 && !isSidebarOpen && (
+                <div className="mx-2 my-1 h-px bg-border/60" aria-hidden="true" />
+              )}
+              <ul className="flex flex-col gap-1">
+                {group.items.map((link) => {
+                  const isActive =
+                    location.pathname === link.to ||
+                    (link.to !== panelRoutes.home && location.pathname.startsWith(link.to));
+                  return (
+                    <li key={link.to}>
+                      <Link
+                        to={link.to}
+                        title={!isSidebarOpen ? link.label : undefined}
+                        aria-current={isActive ? 'page' : undefined}
+                        className={cn(
+                          "group relative flex items-center rounded-lg transition-colors duration-[var(--transition-fast)] text-sm font-medium",
+                          isSidebarOpen ? "gap-3 px-3 py-2" : "justify-center p-2.5",
+                          isActive
+                            ? "bg-accent/8 text-accent"
+                            : "text-text-muted hover:bg-bg-hover hover:text-text-main"
+                        )}
+                      >
+                        {isActive && isSidebarOpen && (
+                          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-accent rounded-r-full" />
+                        )}
+                        <link.icon className={cn("w-[18px] h-[18px] shrink-0", isActive ? "text-accent" : "text-text-muted group-hover:text-text-main")} />
+                        {isSidebarOpen && <span>{link.label}</span>}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </li>
+          ))}
         </ul>
       </nav>
 

@@ -1,11 +1,15 @@
 import { useLocation } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
+import { cn } from '@/src/lib/utils';
 import { panelRoutes } from '@/src/lib/routes';
+import { Loader2 } from 'lucide-react';
 
 export function Header() {
   const t = useT();
   const profile = useAppStore(state => state.profile);
+  const runtimeReady = useAppStore(state => state.runtimeReady);
+  const runtimeStatus = useAppStore(state => state.runtimeStatus);
   const location = useLocation();
   const isFlows = location.pathname === panelRoutes.flows;
 
@@ -22,6 +26,28 @@ export function Header() {
     return '';
   };
 
+  const runtimePill = (() => {
+    if (runtimeStatus === 'error') {
+      return {
+        label: 'Runtime error',
+        dotClass: 'bg-red-500',
+        textClass: 'text-red-600 dark:text-red-400',
+      };
+    }
+    if (!runtimeReady) {
+      return {
+        label: 'Warming up',
+        dotClass: 'bg-amber-500 animate-pulse',
+        textClass: 'text-amber-600 dark:text-amber-400',
+      };
+    }
+    return {
+      label: 'Runtime ready',
+      dotClass: 'bg-emerald-500',
+      textClass: 'text-emerald-600 dark:text-emerald-400',
+    };
+  })();
+
   return (
     <header className={`z-40 flex shrink-0 items-center justify-between border-b border-border bg-bg-header transition-colors duration-[var(--transition-base)] ${isFlows ? 'h-12 px-4' : 'h-14 px-6'}`}>
       <div className="flex items-center gap-2">
@@ -29,6 +55,22 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-3">
+        <div
+          className={cn(
+            "rumi-control-pill hidden md:inline-flex",
+            runtimePill.textClass,
+          )}
+          role="status"
+          aria-live="polite"
+          title={runtimePill.label}
+        >
+          {!runtimeReady && runtimeStatus !== 'error' ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <span className={cn("rumi-control-pill-dot", runtimePill.dotClass)} />
+          )}
+          <span>{runtimePill.label}</span>
+        </div>
         <span className="text-xs text-text-muted hidden sm:block">{profile.username}</span>
         {profile.avatar ? (
           <img

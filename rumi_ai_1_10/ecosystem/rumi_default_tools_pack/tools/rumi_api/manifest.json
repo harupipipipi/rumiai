@@ -38,7 +38,7 @@
       "type": "rumi_function",
       "qualified_name": "rumi_default_tools_pack:rumi_api"
     },
-    "requires_approval": false,
+    "requires_approval": true,
     "ui": {
       "group_id": "agent",
       "group_label": "Agent",
