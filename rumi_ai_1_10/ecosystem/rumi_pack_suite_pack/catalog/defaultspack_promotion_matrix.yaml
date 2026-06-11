@@ -1,0 +1,14 @@
+catalog_id: rumi_pack_suite.defaultspack_promotion
+schema_version: 1
+criteria:
+  - id: core_user_path
+    description: The capability is needed by most Rumi users in normal use.
+  - id: stable_contract
+    description: Schemas, prompts, docs, and tests are stable across releases.
+  - id: no_optional_secret_surface
+    description: Promotion does not force new third-party credentials.
+  - id: conflict_free
+    description: Ownership and overlap rules are explicit and validated.
+  - id: runtime_evidence
+    description: Local and integration evidence prove the pack works with defaultspack.
+review_states: [optional, candidate, blocked, promoted]
