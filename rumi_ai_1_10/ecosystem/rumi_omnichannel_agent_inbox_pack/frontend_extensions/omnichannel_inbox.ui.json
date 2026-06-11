@@ -1,0 +1,46 @@
+{
+  "ui_contract": {
+    "id": "rumi_omnichannel_agent_inbox.inbox",
+    "kind": "declarative_view",
+    "lanes": [
+      "new",
+      "triaged",
+      "waiting",
+      "routed",
+      "blocked",
+      "closed"
+    ],
+    "cards": [
+      "identity",
+      "channel",
+      "severity",
+      "acl_state",
+      "approval_state"
+    ],
+    "actions": [
+      "route_thread",
+      "approve_outbound",
+      "deny_outbound",
+      "block_channel"
+    ],
+    "forbidden_actions": [
+      "send_message",
+      "fetch_provider",
+      "issue_approval_token",
+      "issue_security_token",
+      "approve_tool",
+      "approve_outbound_from_remote",
+      "run_tool",
+      "execute_work",
+      "install_pack",
+      "mutate_settings",
+      "grant_acl",
+      "create_schedule",
+      "send_mobile_push"
+    ],
+    "remote_input_can_approve": false,
+    "remote_input_can_execute": false,
+    "provider_clients": [],
+    "secrets": []
+  }
+}
