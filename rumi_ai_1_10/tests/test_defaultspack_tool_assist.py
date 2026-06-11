@@ -127,12 +127,61 @@ def test_tool_search_returns_overview_and_schema_from_docs(tmp_path):
     assert schema[0]["schema"]["parameters"]["properties"]["path"]["description"] == "dataset path"
 
 
-def test_effective_tool_assist_defaults_to_all_and_maps_legacy_auto_to_vector():
+def test_effective_tool_assist_defaults_to_all_and_keeps_auto_mode():
     from domain.chat.tool_recommender import effective_tool_assist_mode
 
     assert effective_tool_assist_mode({}) == "all"
-    assert effective_tool_assist_mode({"tools": {"tool_assist_mode": "auto"}}) == "vector"
+    assert effective_tool_assist_mode({"tools": {"tool_assist_mode": "auto"}}) == "auto"
     assert effective_tool_assist_mode({"tools": {"tool_assist_mode": "vector"}}) == "vector"
+
+
+def test_tool_loading_defaults_to_vector_and_only_always_is_eager():
+    from domain.tool.loading import normalize_tool_loading_mode, split_tools_by_loading
+
+    assert normalize_tool_loading_mode(None) == "vector"
+    assert normalize_tool_loading_mode("all") == "vector"
+    assert normalize_tool_loading_mode("vector") == "vector"
+    assert normalize_tool_loading_mode("always") == "always"
+
+    always, vector = split_tools_by_loading(
+        [
+            {"tool_id": "tool_names", "loading": "always"},
+            {"tool_id": "web_search"},
+            {"tool_id": "calculator", "metadata": {"loading": "all"}},
+        ]
+    )
+
+    assert [tool["tool_id"] for tool in always] == ["tool_names"]
+    assert [tool["tool_id"] for tool in vector] == ["web_search", "calculator"]
+
+
+def test_select_relevant_keeps_always_tools_when_vector_matches_are_empty(monkeypatch):
+    from blocks.tool import select_relevant
+
+    fake_tools = [
+        {"tool_id": "tool_names", "summary": "List tool names.", "loading": "always"},
+        {"tool_id": "calculator", "summary": "Compute arithmetic.", "tags": ["math"]},
+    ]
+    captured = {}
+
+    class FakeRegistry:
+        def list_tools(self):
+            return list(fake_tools)
+
+    def fake_search_tools(query, tools, limit=8, threshold=0.0):
+        del query, limit, threshold
+        captured["candidate_ids"] = [tool["tool_id"] for tool in tools]
+        return []
+
+    monkeypatch.setattr(select_relevant, "ToolRegistry", lambda: FakeRegistry())
+    monkeypatch.setattr(select_relevant, "search_tools", fake_search_tools)
+
+    result = select_relevant.run({"query": "summarize this"}, {})
+
+    assert result["status"] == "ok"
+    assert [tool["tool_id"] for tool in result["data"]["tools"]] == ["tool_names"]
+    assert result["data"]["always_tools"] == ["tool_names"]
+    assert captured["candidate_ids"] == ["calculator"]
 
 
 def test_run_request_all_tool_assist_exposes_every_tool_when_tools_are_not_selected(monkeypatch):
@@ -245,6 +294,44 @@ def test_run_request_mimo_profile_prefers_vector_tool_assist_even_when_default_i
     assert unknown == []
     assert [tool["tool_id"] for tool in resolved] == ["coding_file_read", "coding_file_search"]
     assert context["tool_assist"]["mode"] == "vector"
+
+
+def test_run_request_auto_tool_assist_keeps_always_tools_and_vector_matches(monkeypatch):
+    from domain.chat import run_request
+
+    fake_tools = [
+        {"tool_id": "tool_names", "summary": "List tool names.", "loading": "always"},
+        {
+            "tool_id": "web_search",
+            "name": "Web Search",
+            "summary": "Search web pages and recent weather.",
+            "tags": ["web", "search"],
+        },
+        {"tool_id": "calculator", "summary": "Compute arithmetic.", "tags": ["math"]},
+    ]
+
+    class FakeRegistry:
+        def list_tools(self):
+            return list(fake_tools)
+
+        def get(self, tool_id):
+            return next((tool for tool in fake_tools if tool["tool_id"] == tool_id), None)
+
+    monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
+    monkeypatch.setattr(run_request, "effective_tool_assist_mode", lambda **_kwargs: "auto")
+    monkeypatch.setattr(run_request, "tool_assist_limit", lambda **_kwargs: 4)
+
+    context = {}
+    resolved, unknown = run_request._resolve_selected_tools(
+        None,
+        user_text="今日のweatherをwebで検索して",
+        context=context,
+    )
+
+    assert unknown == []
+    assert [tool["tool_id"] for tool in resolved] == ["tool_names", "web_search"]
+    assert context["tool_assist"]["mode"] == "auto"
+    assert context["tool_assist"]["always_tools"] == ["tool_names"]
 
 
 def test_run_request_tool_assist_off_keeps_unselected_tools_empty(monkeypatch):

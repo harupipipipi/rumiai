@@ -576,6 +576,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/prompts/lint", block_module="blocks.prompt.lint_prompt"),
     HttpRouteSpec("POST", "/api/prompts/compact", block_module="blocks.prompt.compact_prompt"),
     HttpRouteSpec("GET", "/api/tools", block_module="blocks.tool.list"),
+    HttpRouteSpec("GET", "/api/tools/names", block_module="blocks.tool.names"),
     HttpRouteSpec("GET", "/api/tools/mcp", block_module="blocks.tool.mcp_list"),
     HttpRouteSpec("POST", "/api/tools/mcp", block_module="blocks.tool.mcp_registry"),
     HttpRouteSpec("DELETE", "/api/tools/mcp", block_module="blocks.tool.mcp_registry"),
