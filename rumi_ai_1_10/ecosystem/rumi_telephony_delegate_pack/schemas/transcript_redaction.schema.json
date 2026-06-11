@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/transcript_redaction.schema.json",
+  "title": "Transcript Redaction",
+  "description": "Contract schema for Transcript Redaction.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "transcript_id",
+    "redaction_rules",
+    "redacted_segments",
+    "review_state",
+    "pii_classes",
+    "handoff_owner"
+  ],
+  "properties": {
+    "transcript_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "redaction_rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule_id",
+          "pii_class",
+          "replacement"
+        ],
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pii_class": {
+            "type": "string",
+            "enum": [
+              "phone",
+              "email",
+              "payment",
+              "address",
+              "account_id"
+            ]
+          },
+          "replacement": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "redacted_segments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "segment_id",
+          "pii_class",
+          "replacement",
+          "source_span_id"
+        ],
+        "properties": {
+          "segment_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pii_class": {
+            "type": "string",
+            "enum": [
+              "phone",
+              "email",
+              "payment",
+              "address",
+              "account_id"
+            ]
+          },
+          "replacement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_span_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "review_state": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "reviewed",
+        "blocked"
+      ]
+    },
+    "pii_classes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "phone",
+          "email",
+          "payment",
+          "address",
+          "account_id"
+        ]
+      }
+    },
+    "handoff_owner": {
+      "type": "string",
+      "const": "rumi_operations_company_pack"
+    }
+  }
+}

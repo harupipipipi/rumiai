@@ -1,0 +1,24 @@
+handoff_matrix:
+  pack_boundary_rule: owner_surface_wins_then_explicit_handoff
+  items:
+  - surface: actual_dialing
+    resolution: blocked_handoff_to_defaultspack_tool_runtime
+    requires_human_review: true
+  - surface: asr_tts_runtime
+    resolution: handoff_to_defaultspack_tool_runtime
+    requires_human_review: true
+  - surface: media_transcript_runtime
+    resolution: handoff_to_defaultspack_tool_runtime
+    requires_human_review: true
+  - surface: contact_or_calendar_lookup
+    resolution: handoff_to_defaultspack_tool_runtime
+    requires_human_review: true
+  - surface: meeting_recap
+    resolution: handoff_to_rumi_local_agent_pack
+    requires_human_review: true
+  - surface: external_business_action
+    resolution: handoff_to_rumi_operations_company_pack
+    requires_human_review: true
+  - surface: real_world_action_risk_review
+    resolution: handoff_to_rumi_operations_company_pack
+    requires_human_review: true
