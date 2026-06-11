@@ -374,6 +374,89 @@ class ControlPanelHandlersMixin:
             _log_internal_error("panel_compile_startup_profile_preview", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
+    def _panel_get_startup_profile_tool_permissions(self, profile_id: str) -> Dict[str, Any]:
+        try:
+            from ecosystem.defaultspack.domain.tool.registry import ToolRegistry
+            from ecosystem.defaultspack.domain.tool_policy.profile_permission import (
+                normalize_tool_permission_policy,
+                resolve_profile_tool_permission,
+            )
+
+            manager = self._panel_startup_profile_manager()
+            catalog = manager._build_catalog()
+            state = manager._load_state(catalog)
+            profile = manager._get_profile(state.get("profiles") or [], profile_id)
+            if profile is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+            policy = dict(profile.get("policy") if isinstance(profile.get("policy"), dict) else {})
+            tool_permission_policy = normalize_tool_permission_policy(
+                policy.get("tool_permission_policy") if isinstance(policy.get("tool_permission_policy"), dict) else {}
+            )
+            tools = []
+            try:
+                registry_tools = ToolRegistry().list_tools()
+            except Exception:
+                registry_tools = []
+            for tool_def in registry_tools:
+                if not isinstance(tool_def, dict):
+                    continue
+                name = str(tool_def.get("tool_id") or tool_def.get("name") or "").strip()
+                if not name:
+                    continue
+                decision = resolve_profile_tool_permission(
+                    tool_def,
+                    name,
+                    {},
+                    {"tool_permission_policy": tool_permission_policy},
+                )
+                tools.append({
+                    "tool_id": name,
+                    "name": str(tool_def.get("name") or name),
+                    "title": str(tool_def.get("title") or tool_def.get("summary") or name),
+                    "category": str(tool_def.get("category") or ""),
+                    "action_type": str(tool_def.get("action_type") or ""),
+                    "permission_decision": decision,
+                })
+            return {
+                "profile_id": profile_id,
+                "tool_permission_policy": tool_permission_policy,
+                "tools": tools,
+            }
+        except Exception as e:
+            _log_internal_error("panel_get_startup_profile_tool_permissions", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_update_startup_profile_tool_permissions(self, profile_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from ecosystem.defaultspack.domain.tool_policy.profile_permission import normalize_tool_permission_policy
+
+            manager = self._panel_startup_profile_manager()
+            catalog = manager._build_catalog()
+            state = manager._load_state(catalog)
+            profile = manager._get_profile(state.get("profiles") or [], profile_id)
+            if profile is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+            raw_policy = body.get("tool_permission_policy") if isinstance(body, dict) else None
+            if raw_policy is None and isinstance(body, dict):
+                candidate = body.get("policy")
+                if isinstance(candidate, dict) and isinstance(candidate.get("tool_permission_policy"), dict):
+                    raw_policy = candidate.get("tool_permission_policy")
+                else:
+                    raw_policy = candidate
+            if raw_policy is not None and not isinstance(raw_policy, dict):
+                return {"error": "tool_permission_policy must be an object", "status_code": 400}
+            current_policy = dict(profile.get("policy") if isinstance(profile.get("policy"), dict) else {})
+            current_policy["tool_permission_policy"] = normalize_tool_permission_policy(raw_policy or {})
+            result = manager.update_runtime_fields(profile_id, {"policy": current_policy})
+            if result.get("error"):
+                return result
+            return self._panel_get_startup_profile_tool_permissions(profile_id)
+        except ValueError as e:
+            return {"error": str(e), "status_code": 400}
+        except Exception as e:
+            _log_internal_error("panel_update_startup_profile_tool_permissions", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
     def _panel_get_startup_profile_graph(self, profile_id: str) -> Dict[str, Any]:
         try:
             from ..profile_graph_builder import build_startup_profile_graph_response

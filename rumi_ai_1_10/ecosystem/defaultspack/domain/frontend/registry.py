@@ -637,6 +637,27 @@ class FrontendRegistry:
                         "help": "Tab/Enterでcomposerや右サイドバーのボタンへ移動・実行できるようにします。Offでもslash候補のTab選択は使えます。",
                     },
                     {
+                        "id": "spotlight_shortcut_enabled",
+                        "label": "Spotlight Shortcut",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "Enable the global conversation Spotlight shortcut.",
+                    },
+                    {
+                        "id": "spotlight_shortcut",
+                        "label": "Spotlight Keys",
+                        "type": "text",
+                        "default": "Ctrl+K",
+                        "help": "Use combinations such as Ctrl+K, Ctrl+Alt+K, or Win+K where the browser receives Win-key events.",
+                    },
+                    {
+                        "id": "spotlight_shortcut_text_input",
+                        "label": "Shortcut In Text Inputs",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "Allow the Spotlight shortcut while an input or textarea is focused.",
+                    },
+                    {
                         "id": "language",
                         "label": "Language",
                         "type": "select",
@@ -2140,6 +2161,9 @@ class FrontendRegistry:
                 "composer_placeholder": "メッセージを入力...",
                 "show_activity_in_messages": True,
                 "keyboard_button_navigation": False,
+                "spotlight_shortcut_enabled": True,
+                "spotlight_shortcut": "Ctrl+K",
+                "spotlight_shortcut_text_input": True,
                 "language": "ja",
             },
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
@@ -2516,6 +2540,24 @@ class FrontendRegistry:
         return default
 
     @staticmethod
+    def _setting_bool(value: Any, default: bool) -> bool:
+        if value is None or value == "":
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if not normalized:
+                return default
+            if normalized in {"false", "0", "off", "no", "n", "disable", "disabled"}:
+                return False
+            if normalized in {"true", "1", "on", "yes", "y", "enable", "enabled"}:
+                return True
+        return bool(value)
+
+    @staticmethod
     def _clamped_float(value: Any, default: float, minimum: float, maximum: float) -> float:
         try:
             return max(minimum, min(maximum, float(value)))
@@ -2598,6 +2640,16 @@ class FrontendRegistry:
             refreshed["general"] = general
         language = str(general.get("language") or "ja").strip().lower()
         general["language"] = language if language in {"ja", "en", "auto"} else "ja"
+        general["spotlight_shortcut_enabled"] = self._setting_bool(
+            general.get("spotlight_shortcut_enabled"),
+            True,
+        )
+        shortcut = str(general.get("spotlight_shortcut") or "Ctrl+K").strip()
+        general["spotlight_shortcut"] = shortcut or "Ctrl+K"
+        general["spotlight_shortcut_text_input"] = self._setting_bool(
+            general.get("spotlight_shortcut_text_input"),
+            True,
+        )
 
         tools = refreshed.setdefault("tools", {})
         if not isinstance(tools, dict):
