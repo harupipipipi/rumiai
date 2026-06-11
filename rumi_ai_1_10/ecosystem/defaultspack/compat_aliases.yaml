@@ -1344,6 +1344,16 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.coding.github_pr_read
+  defaults.coding.rumi.log:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.coding.rumi_log
+  defaults.coding.rumi_log:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.coding.rumi_log
   defaults.coding.terminal.exec:
     owner: coding
     reason: legacy caller compatibility

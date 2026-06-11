@@ -16,6 +16,9 @@ class WebMountMixin:
         "core_control_panel": "core:rumi/control_panel",
         "core_setup": "core:rumi/setup",
     }
+    _FIXED_PRE_AUTH_ROUTES = {
+        ("POST", "/api/integrations/p2p/events"),
+    }
 
     @classmethod
     def _is_trusted_pre_auth_pack(cls, pack_id: str, pack_info: Any) -> bool:
@@ -166,6 +169,9 @@ class WebMountMixin:
             if request_path == prefix or request_path.startswith(prefix + "/"):
                 return {"path_prefix": prefix, **mount}
         return None
+
+    def _is_fixed_pre_auth_route(self, method: str, path: str) -> bool:
+        return (str(method or "").upper(), path) in self._FIXED_PRE_AUTH_ROUTES
 
     _MIME_TYPES = {
         ".html": "text/html; charset=utf-8",

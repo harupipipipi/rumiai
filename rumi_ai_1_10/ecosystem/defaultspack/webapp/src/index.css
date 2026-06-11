@@ -797,7 +797,7 @@ body {
 
   .rumi-composer-shell,
   .rumi-composer-shell-new {
-    width: calc(100vw - 24px);
+    width: min(100%, calc(100vw - 24px));
   }
 }
 

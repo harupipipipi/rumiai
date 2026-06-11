@@ -4,6 +4,40 @@
   let sequence = 0;
   let highlightTimer = null;
 
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) {
+      return;
+    }
+    const message = event.data;
+    if (!message || typeof message !== "object") {
+      return;
+    }
+    if (message.type === "rumi:search-home:set-route-state") {
+      chrome.runtime.sendMessage({
+        type: "rumi:search-home:set-route-state",
+        payload: message.payload || {}
+      });
+    }
+  });
+
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (!isSearchHomeHotkey(event)) {
+        return;
+      }
+      chrome.runtime.sendMessage({
+        type: "rumi:search-home:advance-candidate",
+        action: event.key === "ArrowLeft" ? "previous" : event.key === "ArrowRight" ? "next" : "open"
+      });
+    },
+    true
+  );
+
+  function isSearchHomeHotkey(event) {
+    return event.key === "ArrowRight" || event.key === "ArrowLeft" || event.key === "Enter";
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || !message.type) {
       return false;

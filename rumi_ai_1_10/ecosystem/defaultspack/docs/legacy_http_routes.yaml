@@ -1889,6 +1889,20 @@ legacy_routes:
   owner: coding
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: GET
+  pattern: /api/coding/rumi-log
+  legacy_block_module: blocks.coding.rumi_log
+  replacement_function_id: coding_rumi_log
+  owner: coding
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/coding/rumi-log
+  legacy_block_module: blocks.coding.rumi_log
+  replacement_function_id: coding_rumi_log
+  owner: coding
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
 - method: POST
   pattern: /api/context/compact
   legacy_block_module: blocks.context.compact

@@ -159,6 +159,12 @@ def _should_emit_model_routing_status(model_routing: dict[str, Any] | None) -> b
     return bool(selected and original and selected != original)
 
 
+def _provider_visible_params(params: dict[str, Any] | None) -> dict[str, Any]:
+    clean = dict(params or {})
+    clean.pop("_authority_context", None)
+    return clean
+
+
 def _normalize_tool_call_name_and_arguments(
     tool_name: str,
     arguments: dict[str, Any],
@@ -1528,7 +1534,7 @@ class ChatRunEngine:
                     prepared.model,
                     messages,
                     prepared.provider_tools,
-                    retry_params,
+                    _provider_visible_params(retry_params),
                     prepared.call_handler,
                     allow_retry=False,
                     authority_context=prepared.request_context.get("authority", {}),
@@ -2412,7 +2418,7 @@ class ChatRunEngine:
                         "model": prepared.model,
                         "messages": messages,
                         "tools": tools,
-                        "params": _params_without_thinking(prepared.params),
+                        "params": _provider_visible_params(_params_without_thinking(prepared.params)),
                         "authority_context": prepared.request_context.get("authority", {}),
                     }
                 )

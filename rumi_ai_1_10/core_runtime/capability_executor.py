@@ -609,6 +609,8 @@ class CapabilityExecutor:
             resolved_path = trust_path
         if not resolved_path.is_file():
             return "Executable path not found for trust verification"
+        if self._trust_store is None:
+            return "Trust store unavailable for execution-time verification"
         try:
             actual_sha256 = compute_file_sha256(resolved_path)
         except Exception:
@@ -1285,6 +1287,23 @@ class CapabilityExecutor:
             is_trusted_builtin = builtin_path_verdict
         is_core_builtin = self._is_core_builtin_trust_bypass_entry(entry)
         principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
+        if is_core and not is_core_builtin and not is_trusted_builtin:
+            resp = CapabilityResponse(
+                success=False,
+                error=f"No handler registered for core pack: {pack_id}",
+                error_type="unknown_core_function",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id,
+                "function.call",
+                None,
+                resp,
+                args,
+                request_id,
+                detail_reason=f"Rejected reserved core-prefixed function outside bundled core_pack: {qualified_name}",
+            )
+            return resp
         if not principal_is_trusted_builtin and principal_id == pack_id:
             principal_is_trusted_builtin = is_trusted_builtin
         if (
@@ -1467,6 +1486,12 @@ class CapabilityExecutor:
             if isinstance(result_config, dict):
                 dispatch_grant_config.update(result_config)
         allow_manifest_calling_convention = is_core_builtin or is_trusted_builtin
+        if is_core_builtin and not (
+            is_trusted_builtin
+            or self._is_bundled_core_pack_entry(entry)
+            or pack_id in self._core_function_handlers
+        ):
+            allow_manifest_calling_convention = False
         if (
             allow_manifest_calling_convention
             and calling_convention

@@ -20,7 +20,7 @@ class LLMGateway:
         tools = list(request.get("tools", []))
         params = dict(request.get("params", {}))
         authority_context = request.get("authority_context")
-        if isinstance(authority_context, dict):
+        if isinstance(self._client, AIClient) and isinstance(authority_context, dict):
             params["_authority_context"] = dict(authority_context)
         return self._client.complete(model, messages, tools=tools, params=params)
 
@@ -30,7 +30,7 @@ class LLMGateway:
         tools = list(request.get("tools", []))
         params = dict(request.get("params", {}))
         authority_context = request.get("authority_context")
-        if isinstance(authority_context, dict):
+        if isinstance(self._client, AIClient) and isinstance(authority_context, dict):
             params["_authority_context"] = dict(authority_context)
         return self._client.stream(model, messages, tools=tools, params=params)
 

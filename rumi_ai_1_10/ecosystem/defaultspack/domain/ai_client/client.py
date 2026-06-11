@@ -497,6 +497,8 @@ class AIClient:
             return
 
         context = self._authority_context_from_params(params)
+        if not context:
+            return
         principal_id = str(context.get("principal_id") or "defaultspack")
         resource = {
             "kind": "model",
@@ -534,8 +536,15 @@ class AIClient:
             provider, model_name = self.resolve_provider(route_model)
             if provider.__class__.__name__ == "StubProvider":
                 continue
-            if not self._provider_api_key_may_exist(provider_id, api_id):
-                continue
+            authority_context = self._authority_context_from_params(params)
+            may_have_key = self._provider_api_key_may_exist(provider_id, api_id)
+            api_key = ""
+            if not may_have_key:
+                if authority_context:
+                    continue
+                api_key = read_provider_api_key(provider_id, api_id)
+                if not api_key:
+                    continue
             self._check_authority_for_model_api(
                 provider_id=provider_id,
                 api_id=api_id,
@@ -544,7 +553,8 @@ class AIClient:
                 params=params,
                 stream=stream,
             )
-            api_key = read_provider_api_key(provider_id, api_id)
+            if not api_key:
+                api_key = read_provider_api_key(provider_id, api_id)
             if not api_key:
                 continue
             attempts.append((provider, model_name, api_key, provider_api_metadata(provider_id, api_id)))
@@ -602,24 +612,34 @@ class AIClient:
         return self._call_provider_with_overrides(provider, model_name, api_key, metadata, method_name, messages, tools, params), True
 
     def _call_provider_with_overrides(self, provider, model_name, api_key, metadata, method_name, messages, tools=None, params=None):
+        had_key = hasattr(provider, "_api_key")
         previous_key = getattr(provider, "_api_key", None)
+        had_base_url = hasattr(provider, "_base_url")
         previous_base_url = getattr(provider, "_base_url", None)
+        had_base_url_attr = hasattr(provider, "BASE_URL")
         previous_base_url_attr = getattr(provider, "BASE_URL", None)
         base_url = str((metadata or {}).get("base_url") or "").strip().rstrip("/")
         try:
-            if previous_key is not None and api_key:
+            if api_key:
                 provider._api_key = api_key
-            if base_url and previous_base_url is not None:
+            if base_url:
                 provider._base_url = base_url
                 provider.BASE_URL = base_url
             method = getattr(provider, method_name)
             return method(model_name, messages, tools or [], self._strip_authority_params(params))
         finally:
-            if previous_key is not None:
+            if had_key:
                 provider._api_key = previous_key
-            if previous_base_url is not None:
+            elif api_key and hasattr(provider, "_api_key"):
+                delattr(provider, "_api_key")
+            if had_base_url:
                 provider._base_url = previous_base_url
+            elif base_url and hasattr(provider, "_base_url"):
+                delattr(provider, "_base_url")
+            if had_base_url_attr:
                 provider.BASE_URL = previous_base_url_attr
+            elif base_url and hasattr(provider, "BASE_URL"):
+                delattr(provider, "BASE_URL")
 
     def _call_with_api_routes(self, method_name, model, messages, tools=None, params=None):
         routed, handled = self._call_api_bound_profile(method_name, model, messages, tools, params)
@@ -650,15 +670,18 @@ class AIClient:
     def _stream_with_api_routes(self, route_attempts, messages, tools=None, params=None):
         last_error = None
         for provider, model_name, api_key, metadata in route_attempts:
+            had_key = hasattr(provider, "_api_key")
             previous_key = getattr(provider, "_api_key", None)
+            had_base_url = hasattr(provider, "_base_url")
             previous_base_url = getattr(provider, "_base_url", None)
+            had_base_url_attr = hasattr(provider, "BASE_URL")
             previous_base_url_attr = getattr(provider, "BASE_URL", None)
             base_url = str((metadata or {}).get("base_url") or "").strip().rstrip("/")
             yielded = False
             try:
-                if previous_key is not None:
+                if api_key:
                     provider._api_key = api_key
-                if base_url and previous_base_url is not None:
+                if base_url:
                     provider._base_url = base_url
                     provider.BASE_URL = base_url
                 for chunk in provider.stream(model_name, messages, tools or [], self._strip_authority_params(params)):
@@ -670,11 +693,18 @@ class AIClient:
                 if yielded or not self._is_rate_limit_error(exc):
                     raise
             finally:
-                if previous_key is not None:
+                if had_key:
                     provider._api_key = previous_key
-                if previous_base_url is not None:
+                elif api_key and hasattr(provider, "_api_key"):
+                    delattr(provider, "_api_key")
+                if had_base_url:
                     provider._base_url = previous_base_url
+                elif base_url and hasattr(provider, "_base_url"):
+                    delattr(provider, "_base_url")
+                if had_base_url_attr:
                     provider.BASE_URL = previous_base_url_attr
+                elif base_url and hasattr(provider, "BASE_URL"):
+                    delattr(provider, "BASE_URL")
         if last_error is not None:
             raise last_error
 
@@ -1140,7 +1170,7 @@ class AIClient:
         if composite is not None:
             return self._complete_composite(composite, messages, tools, params)
         provider_params = self._provider_params(params)
-        routed, handled = self._call_with_api_routes("complete", model, messages, tools, provider_params)
+        routed, handled = self._call_with_api_routes("complete", model, messages, tools, params)
         if handled:
             return routed
         provider, model_name = self.resolve_provider(model)
@@ -1174,7 +1204,7 @@ class AIClient:
             text = self._response_text(response)
             return iter([{"type": "text_delta", "text": text}, {"finish_reason": response.get("finish_reason", "stop") if isinstance(response, dict) else "stop"}])
         provider_params = self._provider_params(params)
-        routed, handled = self._call_with_api_routes("stream", model, messages, tools, provider_params)
+        routed, handled = self._call_with_api_routes("stream", model, messages, tools, params)
         if handled:
             return routed
         provider, model_name = self.resolve_provider(model)

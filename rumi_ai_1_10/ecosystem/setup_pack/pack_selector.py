@@ -91,6 +91,36 @@ class PackSelector:
         return str(data.get("pack_identity", ""))
 
     @staticmethod
+    def _read_installed_pack_manifest(path: Path) -> Dict[str, Any]:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        pack_id = str(data.get("pack_id") or path.parent.name).strip()
+        if not pack_id:
+            return {}
+        return {
+            "pack_id": pack_id,
+            "version": str(data.get("version", "")),
+            "pack_identity": str(data.get("pack_identity", "")),
+        }
+
+    def _discover_installed_packs(self) -> Dict[str, Dict[str, Any]]:
+        setup_pack_root = self._resolve_setup_pack_root()
+        if setup_pack_root is None:
+            return {}
+        ecosystem_root = setup_pack_root.parent
+        installed: Dict[str, Dict[str, Any]] = {}
+        for manifest_path in sorted(ecosystem_root.glob("*/ecosystem.json")):
+            manifest = self._read_installed_pack_manifest(manifest_path)
+            pack_id = str(manifest.get("pack_id") or "").strip()
+            if pack_id:
+                installed[pack_id] = manifest
+        return installed
+
+    @staticmethod
     def _as_dict(value: Any) -> Dict[str, Any]:
         return as_dict(value)
 
@@ -252,7 +282,11 @@ class PackSelector:
         require_signed: bool = False,
     ) -> List[Dict[str, Any]]:
         """Validate setup-pack compatibility before granting/installing packs."""
-        installed_packs = installed_packs or {}
+        installed_packs = (
+            dict(installed_packs)
+            if installed_packs is not None
+            else self._discover_installed_packs()
+        )
         platform_aliases = self._platform_aliases(platform_name or sys.platform)
         python_version = python_version or platform.python_version()
         issues: List[Dict[str, Any]] = []

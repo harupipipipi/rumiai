@@ -419,6 +419,8 @@ class PackAPIHandler(
         }
         if (method_upper, path) in core_pre_auth_routes:
             return True
+        if self._is_fixed_pre_auth_route(method_upper, path):
+            return True
         # Provider webhooks must reach their own signature/shared-secret checks
         # before panel or bearer auth can apply.
         if method_upper == "POST":
