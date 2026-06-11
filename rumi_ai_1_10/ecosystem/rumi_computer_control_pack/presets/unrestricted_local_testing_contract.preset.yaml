@@ -1,0 +1,20 @@
+id: rumi_computer_control_pack.unrestricted_local_testing_contract
+name: Unrestricted Local Testing Contract
+profile: rumi_computer_control_pack.local_testing_observer
+intent: Represent user requests for @computer/@chrome unrestricted local testing as an evidence and approval contract.
+network_default: none
+grant_effect: none
+evidence_inputs:
+  - local_target
+  - sandbox_or_host_boundary
+  - intended_test_actions
+  - stop_conditions
+outputs:
+  - local_testing_scope
+  - evidence_before_action_checklist
+  - approval_required_actions
+  - handoff_to_actual_tool
+behavior:
+  - no_grant_override
+  - runtime_approval_still_applies
+  - no_network_without_explicit_request
