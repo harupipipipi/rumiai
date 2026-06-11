@@ -67,7 +67,7 @@ export function ToolSettingsPanel({
           className="min-w-0 flex-1 bg-transparent text-sm text-zinc-200 outline-none placeholder:text-zinc-600"
         />
       </label>
-      <div className="space-y-2">
+      <div className="space-y-2 rumi-stagger-tight">
         {filtered.map((tool) => {
           const disabled = disabledSet.has(tool.id);
           const hidden = hiddenSet.has(tool.id);

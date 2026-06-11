@@ -51,6 +51,28 @@ def test_conversation_steer_can_be_consumed_for_running_turn(monkeypatch, tmp_pa
     assert processed["data"]["processed"] == []
 
 
+def test_conversation_steer_consume_respects_auto_send_false(monkeypatch, tmp_path):
+    from blocks.conversation.steer import run as steer
+    from domain.chat.steer import ConversationSteerStore
+    from domain.chat.stream_engine import ChatRunEngine
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_STEER_STORE_PATH", str(tmp_path / "steer.json"))
+
+    queued = steer({"conversation_id": "conv-1", "prompt": "do not auto inject", "auto_send": False}, {})
+    working_messages: list[dict] = [{"role": "user", "content": "original request"}]
+
+    events = list(ChatRunEngine()._inject_conversation_steer("conv-1", working_messages))
+    remaining = ConversationSteerStore().list(status="queued")
+
+    assert queued["status"] == "ok"
+    assert queued["data"]["auto_send"] is False
+    assert events == []
+    assert working_messages == [{"role": "user", "content": "original request"}]
+    assert len(remaining) == 1
+    assert remaining[0]["status"] == "queued"
+    assert remaining[0]["prompt"] == "do not auto inject"
+
+
 def test_conversation_handoff_creates_move_card_without_initial_send(monkeypatch, tmp_path):
     from blocks.conversation.handoff import run as handoff
 

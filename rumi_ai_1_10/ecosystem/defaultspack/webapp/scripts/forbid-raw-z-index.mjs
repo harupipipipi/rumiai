@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = new URL("../src", import.meta.url).pathname;
+const root = fileURLToPath(new URL("../src", import.meta.url));
 const offenders = [];
 
 function isAllowed(rel) {

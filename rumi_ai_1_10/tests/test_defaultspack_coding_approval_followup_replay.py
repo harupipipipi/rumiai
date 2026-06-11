@@ -198,6 +198,7 @@ def test_approval_followup_deterministically_replays_tool_once(tmp_path, monkeyp
 
     approval.reset_approval_state_for_tests()
     args = {"message": "fix typo", "paths": ["a.txt"]}
+    original_tool_call_id = "call_commit_original"
     token, request_id = _approve_pending(
         args, tool_name="coding_git_commit", operation="tool.coding_git_commit",
     )
@@ -277,6 +278,7 @@ def test_approval_followup_deterministically_replays_tool_once(tmp_path, monkeyp
                             "approval_token": token,
                             "operation": "tool.coding_git_commit",
                             "request_id": request_id,
+                            "tool_call_id": original_tool_call_id,
                             "tool_name": "coding_git_commit",
                             "action": "git.commit",
                         },
@@ -303,13 +305,20 @@ def test_approval_followup_deterministically_replays_tool_once(tmp_path, monkeyp
     assert len(started) == 1
     assert started[0].get("approval_replay") is True
     assert started[0].get("tool_name") == "coding_git_commit"
+    assert started[0].get("tool_call_id") == original_tool_call_id
     assert len(completed) == 1
     assert completed[0].get("approval_replay") is True
+    assert completed[0].get("tool_call_id") == original_tool_call_id
 
     # The model turn must have run with provider_tools stripped, otherwise
     # the model could re-call the pending tool from the same followup turn.
     assert recorded.get("complete_calls"), "model was never invoked for the summary"
     assert recorded["complete_calls"][0]["tools"] == []
+    replay_messages = recorded["complete_calls"][0]["messages"]
+    assistant_tool_message = next(message for message in replay_messages if message.get("role") == "assistant" and message.get("tool_calls"))
+    tool_result_message = next(message for message in replay_messages if message.get("role") == "tool")
+    assert assistant_tool_message["tool_calls"][0]["id"] == original_tool_call_id
+    assert tool_result_message["tool_call_id"] == original_tool_call_id
 
     # The finalised assistant message must surface the deterministically
     # executed tool, which is the user-visible signal that ``executed_tools=[]``

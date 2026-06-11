@@ -153,6 +153,14 @@ class ToolRegistry:
             tool_def = self._tool_from_manifest(tool_manifest, source_pack_id=component.source_pack_id)
             if tool_def is None:
                 continue
+            if tool_def.get("tool_id") != component.id:
+                continue
+            existing = self.get(tool_def["tool_id"])
+            if existing is not None and not self._component_may_annotate_existing_tool(
+                existing,
+                component.source_pack_id,
+            ):
+                continue
             metadata = dict(tool_def.get("metadata", {}))
             metadata["source"] = "pack"
             metadata["source_pack_id"] = component.source_pack_id
@@ -164,6 +172,11 @@ class ToolRegistry:
             self.register(tool_def)
             loaded += 1
         return loaded
+
+    @staticmethod
+    def _component_may_annotate_existing_tool(existing: dict, source_pack_id: str) -> bool:
+        existing_pack_id = source_pack_id_from_manifest(existing)
+        return bool(existing_pack_id and existing_pack_id == str(source_pack_id or "").strip())
 
     @staticmethod
     def _tool_manifest_from_component(component_manifest: dict):

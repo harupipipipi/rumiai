@@ -26,6 +26,7 @@ from typing import Any, Dict, List
 from .logging_utils import get_structured_logger
 from .metrics import get_metrics_collector
 from .runtime_port import resolve_runtime_port
+from .paths import BASE_DIR, CORE_PACK_DIR
 
 _logger = get_structured_logger("rumi.kernel.handlers.system")
 
@@ -36,6 +37,27 @@ def _resolve_api_port(args: Dict[str, Any]) -> int:
 # ------------------------------------------------------------------
 # Wave 17-A: inject ブロックリスト — 内部サービス参照の注入を禁止
 # ------------------------------------------------------------------
+_EXEC_PYTHON_ALLOWED_ROOTS = (Path(CORE_PACK_DIR).resolve(),)
+
+
+def _path_relative_to(child: Path, parent: Path) -> bool:
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _blocked_exec_python(reason: str, **meta: Any) -> Dict[str, Any]:
+    details = {"reason": reason, **meta}
+    return {
+        "error": reason,
+        "status": "blocked",
+        "_kernel_step_status": "failed",
+        "_kernel_step_meta": details,
+    }
+
+
 _INJECT_BLOCKED_KEYS = frozenset({
     "interface_registry",
     "event_bus",
@@ -626,16 +648,34 @@ class KernelSystemHandlersMixin:
         file_arg = args.get("file")
         if not file_arg:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "missing 'file' argument"}}
-        base_path = args.get("base_path") or ctx.get("_foreach_current_path", ".")
-        full_path = Path(base_path) / file_arg if base_path and base_path != "." else Path(file_arg)
 
-        # Wave 17-A: パストラバーサル防止
-        full_path = full_path.resolve()
-        try:
-            full_path.relative_to(Path(base_path).resolve() if base_path and base_path != "." else Path(".").resolve())
-        except ValueError:
+        file_path = Path(str(file_arg))
+        if file_path.is_absolute():
+            _logger.warning(f"Absolute exec_python file path blocked: {file_arg}")
+            return _blocked_exec_python("absolute_path_not_allowed", path=str(file_arg))
+
+        base_path = args.get("base_path") or ctx.get("_foreach_current_path", ".")
+        base_candidate = Path(str(base_path)) if base_path else Path(".")
+        base_root = (base_candidate if base_candidate.is_absolute() else BASE_DIR / base_candidate).resolve()
+        full_path = (base_root / file_path).resolve()
+
+        # Flow YAML is declarative configuration, not a general host-code execution
+        # authority.  Only relative Python files from the built-in core pack may be
+        # executed by this bootstrap primitive; pack code should use the approved
+        # component/capability execution paths instead.
+        if not _path_relative_to(full_path, base_root):
             _logger.warning(f"Path traversal detected: {file_arg} (base: {base_path})")
-            return {"error": "Path traversal detected", "status": "blocked"}
+            return _blocked_exec_python("Path traversal detected", path=str(file_arg), base_path=str(base_path))
+        if not any(_path_relative_to(full_path, root) for root in _EXEC_PYTHON_ALLOWED_ROOTS):
+            _logger.warning(f"exec_python target outside trusted roots blocked: {full_path}")
+            return _blocked_exec_python(
+                "exec_python_target_not_allowed",
+                path=str(full_path),
+                allowed_roots=[str(root) for root in _EXEC_PYTHON_ALLOWED_ROOTS],
+            )
+        if full_path.suffix != ".py":
+            _logger.warning(f"Non-Python exec_python target blocked: {full_path}")
+            return _blocked_exec_python("exec_python_target_not_python", path=str(full_path))
         if not full_path.exists():
             return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "file_not_found", "path": str(full_path)}}
         phase = args.get("phase", "exec")
@@ -645,7 +685,7 @@ class KernelSystemHandlersMixin:
         # Wave 17-A: inject ブロックリストで内部サービス参照の注入を制限
         for k, v in args.get("inject", {}).items():
             if k in _INJECT_BLOCKED_KEYS:
-                _logger.warning("inject blocked for protected key: %s", k)
+                _logger.warning(f"inject blocked for protected key: {k}")
                 continue
             exec_ctx[k] = self._resolve_value(v, ctx)
         try:

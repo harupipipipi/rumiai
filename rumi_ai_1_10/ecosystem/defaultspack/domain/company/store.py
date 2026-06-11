@@ -202,6 +202,17 @@ class CompanyStore:
         total = len(items)
         return items[offset: offset + limit], total
 
+    def find_company_by_conversation_id(self, conversation_id: str) -> dict[str, Any] | None:
+        conversation_id = str(conversation_id or "").strip()
+        if not conversation_id:
+            return None
+        with self._lock:
+            for company in self._companies.values():
+                metadata = company.get("metadata") if isinstance(company.get("metadata"), dict) else {}
+                if str(metadata.get("conversation_id") or "").strip() == conversation_id:
+                    return public_company(company)
+        return None
+
     def update_company(self, company_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
         if not isinstance(updates, dict):
             return None

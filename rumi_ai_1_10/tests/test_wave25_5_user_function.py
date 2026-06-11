@@ -32,6 +32,7 @@ if str(_project_root) not in sys.path:
 from core_runtime.capability_executor import (
     CapabilityExecutor,
     CapabilityResponse,
+    FUNCTION_RUNNER_PATH,
     MAX_RESPONSE_SIZE,
     DEFAULT_FUNCTION_TIMEOUT,
 )
@@ -141,6 +142,31 @@ class TestUserFunctionDockerExecution(unittest.TestCase):
         )
         self.assertTrue(resp.success)
         self.assertEqual(resp.output, {"result": "hello"})
+
+    @patch("core_runtime.capability_executor.subprocess")
+    @patch("core_runtime.capability_executor.shutil")
+    def test_user_function_docker_mounts_only_runner_file_not_runtime_root(self, mock_shutil, mock_subprocess):
+        """Docker user functions do not receive a bind mount for the runtime root/user_data tree."""
+        mock_shutil.which.return_value = "/usr/bin/docker"
+        mock_subprocess.run.return_value = _make_subprocess_result(returncode=0, stdout="{}")
+        mock_subprocess.TimeoutExpired = TimeoutError
+
+        entry = _make_entry(pack_id="mypk", function_id="myfn", function_dir=self.tmpdir)
+        (Path(self.tmpdir) / "main.py").write_text("def run(ctx, args): return {}\n", encoding="utf-8")
+        entry.main_py_path = Path(self.tmpdir) / "main.py"
+
+        resp = self.executor._execute_user_function(
+            principal_id="p1", entry=entry, args={},
+            request_id="r1", start_time=time.time(),
+        )
+
+        self.assertTrue(resp.success)
+        cmd = mock_subprocess.run.call_args.args[0]
+        volumes = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-v"]
+        runtime_root = str(Path(__file__).resolve().parents[1])
+        self.assertNotIn(f"{runtime_root}:/runtime:ro", volumes)
+        self.assertIn(f"{FUNCTION_RUNNER_PATH.resolve()}:/tmp/function_runner.py:ro", volumes)
+        self.assertIn("/tmp/function_runner.py", cmd)
 
     @patch("core_runtime.capability_executor.subprocess")
     @patch("core_runtime.capability_executor.shutil")

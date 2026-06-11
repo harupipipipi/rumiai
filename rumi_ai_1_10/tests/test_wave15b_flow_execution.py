@@ -414,7 +414,7 @@ class TestFlowChainAndRecursion:
         fake_stack = [f"flow_{i}" for i in range(MAX_FLOW_CHAIN_DEPTH)]
 
         result = _run_async(
-            kernel._execute_flow_internal("deep", context={"_flow_call_stack": fake_stack})
+            kernel._execute_flow_internal("deep", trusted_context={"_flow_call_stack": fake_stack})
         )
 
         assert "_error" in result
@@ -426,7 +426,7 @@ class TestFlowChainAndRecursion:
         kernel.interface_registry.register("flow.loop", {"steps": []})
 
         result = _run_async(
-            kernel._execute_flow_internal("loop", context={"_flow_call_stack": ["loop"]})
+            kernel._execute_flow_internal("loop", trusted_context={"_flow_call_stack": ["loop"]})
         )
 
         assert "_error" in result
@@ -513,3 +513,108 @@ class TestHandlerStepBasic:
 
         result_ctx, result_val = _run_async(kernel._execute_handler_step_async(step, ctx))
         assert result_ctx["my_result"] == {"value": 42}
+
+
+class TestPackFlowKernelHandlerAuthorization:
+    """Pack-provided flows may not call privileged kernel handlers directly."""
+
+    def test_pack_flow_blocks_privileged_kernel_handler(self):
+        kernel = TestKernel()
+        called = False
+
+        def privileged_handler(args, ctx):
+            nonlocal called
+            called = True
+            return {"output": "host executed"}
+
+        kernel._resolve_handler = lambda handler, args=None: privileged_handler if handler == "kernel:exec_python" else None
+        kernel.interface_registry.register(
+            "flow.malicious_pack_flow",
+            {
+                "_source_type": "pack",
+                "_source_pack_id": "malicious.pack",
+                "steps": [
+                    {
+                        "id": "host_exec",
+                        "type": "handler",
+                        "handler": "kernel:exec_python",
+                        "args": {"file": "payload.py"},
+                    }
+                ],
+            },
+        )
+
+        result = _run_async(kernel._execute_flow_internal("malicious_pack_flow"))
+
+        assert called is False
+        assert "_error" not in result
+        blocked_steps = [
+            step for step in kernel.diagnostics.steps
+            if step.get("meta", {}).get("reason") == "pack_flow_kernel_handler_not_allowed"
+        ]
+        assert blocked_steps
+        assert blocked_steps[0]["handler"] == "kernel:exec_python"
+        assert blocked_steps[0]["status"] == "skipped"
+
+    def test_pack_flow_allows_sandboxed_python_file_call_handler(self):
+        kernel = TestKernel()
+        called = False
+
+        def sandboxed_handler(args, ctx):
+            nonlocal called
+            called = True
+            return {"output": {"ok": True}}
+
+        kernel._resolve_handler = lambda handler, args=None: sandboxed_handler if handler == "kernel:python_file_call" else None
+        kernel.interface_registry.register(
+            "flow.sandboxed_pack_flow",
+            {
+                "_source_type": "pack",
+                "_source_pack_id": "trusted.pack",
+                "steps": [
+                    {
+                        "id": "sandboxed_call",
+                        "type": "handler",
+                        "handler": "kernel:python_file_call",
+                        "args": {"file": "tool.py"},
+                        "output": "tool_result",
+                    }
+                ],
+            },
+        )
+
+        result = _run_async(kernel._execute_flow_internal("sandboxed_pack_flow"))
+
+        assert called is True
+        assert result["tool_result"] == {"ok": True}
+
+    def test_official_flow_can_still_resolve_kernel_handlers(self):
+        kernel = TestKernel()
+        called = False
+
+        def privileged_handler(args, ctx):
+            nonlocal called
+            called = True
+            return {"output": "official ok"}
+
+        kernel._resolve_handler = lambda handler, args=None: privileged_handler if handler == "kernel:exec_python" else None
+        kernel.interface_registry.register(
+            "flow.official_bootstrap",
+            {
+                "_source_type": "official",
+                "steps": [
+                    {
+                        "id": "official_exec",
+                        "type": "handler",
+                        "handler": "kernel:exec_python",
+                        "args": {"file": "bootstrap.py"},
+                        "output": "result",
+                    }
+                ],
+            },
+        )
+
+        result = _run_async(kernel._execute_flow_internal("official_bootstrap"))
+
+        assert called is True
+        assert result["result"] == "official ok"
