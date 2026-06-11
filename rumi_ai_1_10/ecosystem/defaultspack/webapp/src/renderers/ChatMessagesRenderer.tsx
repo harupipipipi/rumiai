@@ -308,6 +308,18 @@ export function messageCopyText(message: ChatMessagesRendererProps["messages"][n
   return blockText || String(message.rawText ?? "").trim();
 }
 
+export function formatMessageTimestamp(value: unknown): string {
+  const timestamp = timestampMs(value);
+  if (timestamp === null) return "";
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(timestamp);
+}
+
 async function writeClipboardText(text: string): Promise<void> {
   try {
     if (navigator.clipboard?.writeText) {
@@ -349,6 +361,7 @@ function MessageActionBar({
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
   const text = messageCopyText(message);
+  const timestampLabel = formatMessageTimestamp(message.createdAt);
   const actions: Array<{
     id: string;
     label: string;
@@ -397,6 +410,11 @@ function MessageActionBar({
           </button>
         );
       })}
+      {timestampLabel && (
+        <span className="ml-1 shrink-0 font-mono text-[10px] leading-none text-zinc-600 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+          {timestampLabel}
+        </span>
+      )}
     </div>
   );
 }

@@ -23,7 +23,16 @@ type TitleBarProps = {
   appIcon?: string;
 };
 
-export function TitleBar({ appName = "Console", appIcon }: TitleBarProps) {
+function displayAppName(value: string | undefined): string {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  const legacyConsoleName = ["rumi", "console"].join(" ");
+  if (!normalized || normalized === "console" || normalized === legacyConsoleName) {
+    return "rumi DP";
+  }
+  return value ?? "rumi DP";
+}
+
+export function TitleBar({ appName = "rumi DP", appIcon }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [isTauri, setIsTauri] = useState(false);
 
@@ -86,7 +95,7 @@ export function TitleBar({ appName = "Console", appIcon }: TitleBarProps) {
           </div>
         )}
         <span className="text-[11px] font-medium text-zinc-500">
-          {appName}
+          {displayAppName(appName)}
         </span>
       </div>
 
