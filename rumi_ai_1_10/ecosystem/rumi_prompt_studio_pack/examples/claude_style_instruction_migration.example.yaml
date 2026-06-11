@@ -1,0 +1,8 @@
+example:
+  intent: claude style instruction migration
+  inputs:
+  - local_evidence
+  expected_result: prompt_studio_handoff_packet
+  handoffs:
+  - rumi_model_evals_pack
+  - rumi_memory_knowledge_pack

@@ -1,0 +1,11 @@
+preset:
+  id: quality_gate
+  purpose: Block output when evidence, schema, or owner boundary is missing.
+  required_assets:
+  - schemas
+  - policies
+  - checklists
+  defaults:
+    network: none
+    grant_effect: none
+    human_review: true
