@@ -16,6 +16,8 @@ permissions:
 
 env:
   UV_VERSION: "0.11.14"
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: "10"
 
 jobs:
   build-installer:
@@ -81,7 +83,19 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if cargo install tauri-cli --version "^2" --locked; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit "$status"
+            fi
+            sleep $((attempt * 20))
+          done
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -126,8 +140,45 @@ jobs:
         run: cargo test --locked
 
       - name: Build desktop installer
+        if: runner.os == 'macOS'
         working-directory: rumi_viewer
         run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --ci ${{ matrix.signing_args }}
+
+      - name: Build desktop installer
+        if: runner.os == 'Windows'
+        working-directory: rumi_viewer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          $PSNativeCommandUseErrorActionPreference = $false
+          foreach ($attempt in 1..3) {
+            cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --ci ${{ matrix.signing_args }}
+            $status = $LASTEXITCODE
+            if ($status -eq 0) {
+              exit 0
+            }
+            if ($attempt -eq 3) {
+              exit $status
+            }
+            Start-Sleep -Seconds ($attempt * 20)
+          }
+
+      - name: Build desktop installer
+        if: runner.os == 'Linux'
+        working-directory: rumi_viewer
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --ci ${{ matrix.signing_args }}; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit "$status"
+            fi
+            sleep $((attempt * 20))
+          done
 
       - name: Upload desktop installer
         uses: actions/upload-artifact@v4

@@ -9,6 +9,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 | やりたいこと | まず読む場所 | 補足 |
 |---|---|---|
 | 目的別にドキュメントを辿りたい | [`rumi_ai_1_10/docs/README.md`](./rumi_ai_1_10/docs/README.md) | 「何をしたいか」から読む順番を案内します |
+| 用語の意味を揃えたい | [`rumi_ai_1_10/docs/terminology.md`](./rumi_ai_1_10/docs/terminology.md) | `rule`, `skill`, `team workspace`, `subagent` 互換名の整理です |
 | とにかく起動したい | [`README.md`](./README.md) の `Start` | 最短の起動コマンドだけを載せています |
 | runtime / kernel の全体像を知りたい | [`rumi_ai_1_10/README.md`](./rumi_ai_1_10/README.md) | アーキテクチャと主要ディレクトリの説明があります |
 | コードを読まずに仕組みを理解したい | [`rumi_ai_1_10/docs/concepts/system-mechanism.md`](./rumi_ai_1_10/docs/concepts/system-mechanism.md) | 起動・Flow・承認・Grant の流れを文章で追えます |
@@ -28,6 +29,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 - `pack-shell/`: desktop pack launcher
 - `rumi_viewer/`: desktop shell and control panel frontend source
 - `rumi_mobile/`: Flutter iOS/Android app for trusted-LAN defaultspack access
+- `rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/`: browser companion assets bundled with defaultspack
 
 ## Setup
 
@@ -139,6 +141,7 @@ python -m rumi_ai migrate-hmac
 - `pack-shell`: launches desktop packs and brokers token/bootstrap flow
 - `rumi_viewer`: viewer-side application shell and canonical panel frontend source
 - `rumi_mobile`: mobile remote client for the bearer-auth Kernel Pack API
+- `rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/rumi_browser_companion`: unpacked Chromium extension for the defaultspack `browser_companion` tool
 
 For architecture and runtime details, see [rumi_ai_1_10/README.md](./rumi_ai_1_10/README.md).
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from typing import Any
 
 from .dispatch import CompanyDispatchService
@@ -57,6 +59,44 @@ class CompanyService:
             conversation_group_id=(metadata or {}).get("conversation_group_id") or DEFAULT_CONVERSATION_GROUP_ID,
         )
 
+    def bootstrap_conversation_company(self, conversation_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        conversation_id = str(conversation_id or "").strip()
+        if not conversation_id:
+            raise ValueError("conversation_id is required")
+        existing = self.store.find_company_by_conversation_id(conversation_id)
+        employee_model = _conversation_employee_model(conversation_id, metadata)
+        merged_metadata = {
+            "profile_id": "defaultspack.operations_company",
+            "conversation_id": conversation_id,
+            "source": "chat",
+            "surface": "main_chat",
+            "user_role": "president",
+            "employee_model": employee_model,
+            **(metadata or {}),
+        }
+        company_id = str(existing.get("id") if existing else _conversation_company_id(conversation_id))
+        if existing:
+            return self.store.ensure_company(
+                company_id=company_id,
+                name=str(existing.get("name") or "Executive Team"),
+                description=str(existing.get("description") or "Employee group delegated from the current chat."),
+                agents=None,
+                metadata=merged_metadata,
+                conversation_group_id=str(
+                    existing.get("conversation_group_id")
+                    or (metadata or {}).get("conversation_group_id")
+                    or "company:" + company_id
+                ),
+            )
+        return self.store.ensure_company(
+            company_id=company_id,
+            name=str((metadata or {}).get("name") or "Executive Team"),
+            description="Employee group delegated from the current chat.",
+            agents=_default_agents_for_model(employee_model),
+            metadata=merged_metadata,
+            conversation_group_id=(metadata or {}).get("conversation_group_id") or "company:" + company_id,
+        )
+
     def status(self, company_id: str | None = None) -> dict[str, Any]:
         target_id = company_id or DEFAULT_COMPANY_ID
         company = self.store.get_company(target_id)
@@ -70,6 +110,25 @@ class CompanyService:
             "storage_file": str(self.store.storage_file),
             "runtime_db_path": str(runtime_store.db_path),
             "runtime": runtime_store.stats(target_id) if company is not None else {},
+        }
+
+    def status_for_conversation(self, conversation_id: str, *, bootstrap: bool = False) -> dict[str, Any]:
+        conversation_id = str(conversation_id or "").strip()
+        if not conversation_id:
+            return self.status(None)
+        company = self.store.find_company_by_conversation_id(conversation_id)
+        if company is None and bootstrap:
+            company = self.bootstrap_conversation_company(conversation_id)
+        runtime_store = CompanyRuntimeStore()
+        company_id = str(company.get("id") or _conversation_company_id(conversation_id)) if company else _conversation_company_id(conversation_id)
+        return {
+            "bootstrapped": company is not None,
+            "company_id": company_id,
+            "conversation_id": conversation_id,
+            "company": company,
+            "storage_file": str(self.store.storage_file),
+            "runtime_db_path": str(runtime_store.db_path),
+            "runtime": runtime_store.stats(company_id) if company is not None else {},
         }
 
     def mention(self, company_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
@@ -92,3 +151,38 @@ class CompanyService:
 
     def inbound_routes(self) -> CompanyInboundRouteService:
         return CompanyInboundRouteService(self.store)
+
+
+def _conversation_company_id(conversation_id: str) -> str:
+    clean = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(conversation_id or "").strip()).strip("-").lower()
+    if len(clean) > 40:
+        clean = clean[:40].strip("-")
+    digest = hashlib.sha1(str(conversation_id).encode("utf-8")).hexdigest()[:10]
+    return "chat-team-" + (clean or digest) + "-" + digest
+
+
+def _conversation_employee_model(conversation_id: str, metadata: dict[str, Any] | None) -> str:
+    for key in ("employee_model", "model", "preferred_model"):
+        candidate = str((metadata or {}).get(key) or "").strip()
+        if candidate:
+            return candidate
+    try:
+        from domain.chat.store import ChatStore
+
+        conversation = ChatStore().get_conversation(conversation_id) or {}
+        candidate = str(conversation.get("model") or "").strip()
+        if candidate:
+            return candidate
+    except Exception:
+        pass
+    return ""
+
+
+def _default_agents_for_model(model: str) -> list[dict[str, Any]]:
+    model = str(model or "").strip()
+    agents = default_agents()
+    if not model:
+        return agents
+    for agent in agents:
+        agent["model"] = model
+    return agents

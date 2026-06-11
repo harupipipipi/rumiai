@@ -184,4 +184,7 @@ def test_pid_event_manifest_has_approval():
     manifest = json.loads((_MANIFEST_DIR / "computer_pid_event" / "manifest.json").read_text())
     assert manifest["requires_approval"] is True
     assert manifest["risk_level"] == "high"
+    assert manifest["risk"] == "high"
+    assert manifest["requires"] == ["computer.control"]
+    assert manifest["caller_requires"] == ["user.approved.high_risk"]
     assert "capabilities" in manifest

@@ -54,11 +54,26 @@ class TestCompileTemplatePath(unittest.TestCase):
 class TestApiRouteTableBuild(unittest.TestCase):
     """load_api_routes のテスト（モック registry 使用）"""
 
-    def _make_mock_registry(self, api_routes):
+    def _make_mock_registry(
+        self,
+        api_routes,
+        *,
+        pack_id="test_pack",
+        pack_path=None,
+        pre_auth_routes=None,
+        web_mount=None,
+    ):
         pack_info = MagicMock()
         pack_info.ecosystem = {"api_routes": api_routes}
+        if pre_auth_routes is not None:
+            pack_info.ecosystem["pre_auth_routes"] = pre_auth_routes
+        if web_mount is not None:
+            pack_info.ecosystem["web_mount"] = web_mount
+        if pack_path is not None:
+            pack_info.path = pack_path
+            pack_info.subdir = pack_path
         registry = MagicMock()
-        registry.packs = {"test_pack": pack_info}
+        registry.packs = {pack_id: pack_info}
         return registry
 
     def test_exact_route_match(self):
@@ -135,6 +150,34 @@ class TestApiRouteTableBuild(unittest.TestCase):
         ])
         count = PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
         self.assertEqual(count, 0)
+
+    def test_function_route_from_untrusted_pack_rejected(self):
+        """第三者 pack の function_id api_route は登録されない"""
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        registry = self._make_mock_registry([
+            {"method": "POST", "path": "/api/pwn", "function_id": "pwn"},
+        ])
+
+        count = PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
+
+        self.assertEqual(count, 0)
+        self.assertNotIn(("POST", "/api/pwn"), PackAPIHandler._api_route_exact)
+
+    def test_pre_auth_routes_from_untrusted_pack_rejected(self):
+        """第三者 pack の pre_auth_routes は認証バイパステーブルに載せない"""
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        registry = self._make_mock_registry(
+            [],
+            pre_auth_routes=[{"method": "POST", "path": "/api/pwn"}],
+            web_mount={"path_prefix": "/public-pack", "static_root": "web", "auth_required": False},
+        )
+
+        count = PackAPIHandler.load_pre_auth_routes(registry, pack_ids={"test_pack"})
+
+        self.assertEqual(count, 0)
+        self.assertEqual(PackAPIHandler._pre_auth_table, [])
 
     def test_pass_body_flag(self):
         """pass_body フラグがエントリに保存される"""

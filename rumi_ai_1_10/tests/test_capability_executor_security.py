@@ -12,6 +12,7 @@ import json
 import time
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, PropertyMock
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -188,9 +189,9 @@ class TestHighRiskApprovalCallerRequires:
     def test_permissive_permission_manager_does_not_satisfy_high_risk_approval(self, mock_audit):
         executor = _make_test_executor()
         entry = _MockFunctionEntry(
-            pack_id="rumi_default_tools_pack",
+            pack_id="third_party_tools_pack",
             function_id="computer_use",
-            qualified_name="rumi_default_tools_pack:computer_use",
+            qualified_name="third_party_tools_pack:computer_use",
             caller_requires=["user.approved.high_risk"],
         )
         executor._function_registry.get.return_value = entry
@@ -199,10 +200,10 @@ class TestHighRiskApprovalCallerRequires:
         executor._permission_manager.check_caller_requires.return_value = True
 
         resp = executor.execute(
-            "rumi_default_tools_pack",
+            "third_party_tools_pack",
             {
                 "type": "function.call",
-                "qualified_name": "rumi_default_tools_pack:computer_use",
+                "qualified_name": "third_party_tools_pack:computer_use",
                 "args": {"action": "click"},
             },
         )
@@ -210,6 +211,126 @@ class TestHighRiskApprovalCallerRequires:
         assert resp.success is False
         assert resp.error_type == "caller_requires_denied"
         executor._permission_manager.check_caller_requires.assert_not_called()
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_direct_alias_enforces_high_risk_caller_requires(self, mock_audit, tmp_path):
+        executor = _make_test_executor()
+        func_dir = tmp_path / "coding_terminal_exec"
+        func_dir.mkdir()
+        main_py = func_dir / "main.py"
+        main_py.write_text('def run(context, args): return {"ok": True}', encoding="utf-8")
+        entry = _MockFunctionEntry(
+            pack_id="third_party_tools_pack",
+            function_id="coding_terminal_exec",
+            qualified_name="third_party_tools_pack:coding_terminal_exec",
+            function_dir=str(func_dir),
+            main_py_path=str(main_py),
+            calling_convention="subprocess",
+            grant_config=None,
+            vocab_aliases=["defaults.coding.terminal_exec"],
+            caller_requires=["user.approved.high_risk"],
+        )
+        executor._function_registry.get_by_permission_id.return_value = None
+        executor._function_registry.resolve_by_alias.return_value = entry
+        executor._trust_store.is_trusted.return_value = SimpleNamespace(trusted=True, reason="trusted")
+        executor._permission_manager = MagicMock()
+        executor._permission_manager.has_permission.return_value = True
+        executor._permission_manager.check_caller_requires.return_value = True
+
+        with patch.object(executor, "_dispatch_by_calling_convention") as mock_dispatch:
+            resp = executor.execute(
+                "low_privilege_pack",
+                {
+                    "permission_id": "defaults.coding.terminal_exec",
+                    "args": {"command": "cat /dev/null; python3 -c 'print(1)'"},
+                },
+            )
+
+        assert resp.success is False
+        assert resp.error_type == "caller_requires_denied"
+        executor._permission_manager.check_caller_requires.assert_not_called()
+        mock_dispatch.assert_not_called()
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_direct_alias_enforces_manifest_requires(self, mock_audit, tmp_path):
+        executor = _make_test_executor()
+        func_dir = tmp_path / "coding_terminal_exec"
+        func_dir.mkdir()
+        main_py = func_dir / "main.py"
+        main_py.write_text('def run(context, args): return {"ok": True}', encoding="utf-8")
+        entry = _MockFunctionEntry(
+            pack_id="third_party_pack",
+            function_id="coding_terminal_exec",
+            qualified_name="third_party_pack:coding_terminal_exec",
+            function_dir=str(func_dir),
+            main_py_path=str(main_py),
+            calling_convention="subprocess",
+            grant_config=None,
+            vocab_aliases=["third_party.coding_terminal_exec"],
+            requires=["coding.terminal.exec"],
+        )
+        executor._function_registry.get_by_permission_id.return_value = None
+        executor._function_registry.resolve_by_alias.return_value = entry
+        executor._trust_store.is_trusted.return_value = SimpleNamespace(trusted=True, reason="trusted")
+        executor._permission_manager = MagicMock()
+        executor._permission_manager.has_permission.return_value = False
+        executor._grant_manager.check.return_value = SimpleNamespace(
+            allowed=False,
+            reason="not granted",
+            config={},
+        )
+
+        with patch.object(executor, "_dispatch_by_calling_convention") as mock_dispatch:
+            resp = executor.execute(
+                "low_privilege_pack",
+                {
+                    "permission_id": "third_party.coding_terminal_exec",
+                    "args": {"command": "pwd"},
+                },
+            )
+
+        assert resp.success is False
+        assert resp.error_type == "requires_denied"
+        mock_dispatch.assert_not_called()
+
+
+class TestTrustedBuiltinPackIdentity:
+    """Reserved built-in pack IDs must resolve to shipped built-in paths."""
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_spoofed_builtin_pack_id_from_noncanonical_path_is_rejected(self, mock_audit, tmp_path):
+        executor = _make_test_executor()
+        evil_dir = tmp_path / "00evil" / "functions" / "spoof"
+        evil_dir.mkdir(parents=True)
+        main_py = evil_dir / "main.py"
+        main_py.write_text('def run(context, args): return {"ok": True}', encoding="utf-8")
+        entry = _MockFunctionEntry(
+            pack_id="defaultspack",
+            function_id="spoof",
+            qualified_name="defaultspack:spoof",
+            function_dir=str(evil_dir),
+            main_py_path=str(main_py),
+            requires=["definitely.not.granted"],
+        )
+        executor._function_registry.get.return_value = entry
+        executor._approval_manager = MagicMock()
+        executor._approval_manager.is_pack_approved_and_verified.return_value = (True, None)
+        executor._permission_manager = MagicMock()
+        executor._permission_manager.has_permission.return_value = True
+
+        resp = executor.execute(
+            "defaultspack",
+            {
+                "type": "function.call",
+                "qualified_name": "defaultspack:spoof",
+                "args": {},
+            },
+        )
+
+        assert resp.success is False
+        assert resp.error_type == "pack_not_approved"
+        executor._approval_manager.is_pack_approved_and_verified.assert_not_called()
+        executor._permission_manager.has_permission.assert_not_called()
 
 
 # ===========================================================================
@@ -222,7 +343,7 @@ class TestCommandFunctionHostExecutionGuard:
         """RUMI_ALLOW_HOST_EXECUTION 未設定 → host_execution_disabled"""
         monkeypatch.delenv("RUMI_ALLOW_HOST_EXECUTION", raising=False)
         executor = _make_test_executor()
-        entry = _MockFunctionEntry(command=["echo", "hello"])
+        entry = _MockFunctionEntry(command=["echo", "hello"], host_execution=True)
         resp = executor._execute_command_function(
             principal_id="test_principal",
             entry=entry,
@@ -249,6 +370,7 @@ class TestCommandFunctionPathTraversal:
         entry = _MockFunctionEntry(
             command=[str(outside_command)],
             function_dir=str(func_dir),
+            host_execution=True,
         )
         resp = executor._execute_command_function(
             principal_id="test_principal",
@@ -264,7 +386,7 @@ class TestCommandFunctionPathTraversal:
     def test_command_requires_absolute_executable_path(self, monkeypatch):
         monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
         executor = _make_test_executor()
-        entry = _MockFunctionEntry(command=["bash", "-lc", "echo hi"])
+        entry = _MockFunctionEntry(command=["bash", "-lc", "echo hi"], host_execution=True)
 
         resp = executor._execute_command_function(
             principal_id="test_principal",
@@ -277,6 +399,56 @@ class TestCommandFunctionPathTraversal:
         assert not resp.success
         assert resp.error_type == "security_violation"
         assert "absolute executable path" in resp.error.lower()
+
+    def test_python_command_cannot_use_inline_code(self, monkeypatch, tmp_path):
+        """sys.executable + -c cannot bypass the function_dir boundary."""
+        monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
+        executor = _make_test_executor()
+
+        func_dir = tmp_path / "func"
+        func_dir.mkdir()
+
+        entry = _MockFunctionEntry(
+            command=[sys.executable, "-c", "print('pwned')"],
+            function_dir=str(func_dir),
+            host_execution=True,
+        )
+        resp = executor._execute_command_function(
+            principal_id="test_principal",
+            entry=entry,
+            args={},
+            request_id="req_005",
+            start_time=time.time(),
+        )
+        assert not resp.success
+        assert resp.error_type == "security_violation"
+        assert "inside function directory" in resp.error.lower()
+
+    def test_python_command_outside_script_blocked(self, monkeypatch, tmp_path):
+        """sys.executable + a script outside function_dir is rejected."""
+        monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
+        executor = _make_test_executor()
+
+        func_dir = tmp_path / "func"
+        func_dir.mkdir()
+        outside_script = tmp_path / "outside.py"
+        outside_script.write_text("print('pwned')")
+
+        entry = _MockFunctionEntry(
+            command=[sys.executable, str(outside_script)],
+            function_dir=str(func_dir),
+            host_execution=True,
+        )
+        resp = executor._execute_command_function(
+            principal_id="test_principal",
+            entry=entry,
+            args={},
+            request_id="req_006",
+            start_time=time.time(),
+        )
+        assert not resp.success
+        assert resp.error_type == "security_violation"
+        assert "escapes" in resp.error.lower()
 
 
 # ===========================================================================

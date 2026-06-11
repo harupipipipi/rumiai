@@ -1094,6 +1094,14 @@ class PackAPIHandler(
                 health = alm.get_health()
             else:
                 health = {"status": "ok", "needs_setup": True}
+            challenge = self.headers.get("X-Rumi-Desktop-Health-Challenge", "")
+            bootstrap_secret = os.environ.get("RUMI_PANEL_BOOTSTRAP_SECRET", "")
+            if challenge and bootstrap_secret:
+                health["desktop_challenge_response"] = hmac.new(
+                    bootstrap_secret.encode("utf-8"),
+                    challenge.encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
             self._send_response(APIResponse(True, data=health))
             return True
 

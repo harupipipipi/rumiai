@@ -2120,3 +2120,17 @@ legacy_routes:
   owner: ui
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: GET
+  pattern: /api/human-operator/conversations/{conversation_id}/sessions/{session_id}
+  legacy_block_module: blocks.human_operator.page
+  replacement_function_id: ''
+  owner: human_operator
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/human-operator/conversations/{conversation_id}/sessions/{session_id}/messages
+  legacy_block_module: blocks.human_operator.append_message
+  replacement_function_id: ''
+  owner: human_operator
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4

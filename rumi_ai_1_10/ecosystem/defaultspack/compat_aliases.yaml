@@ -2434,6 +2434,21 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.vision.describe_images
+  defaults.tool.kanban:
+    owner: tool
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.tool.kanban
+  defaults.tool.kanban.agent.session:
+    owner: tool
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.tool.kanban.agent.session
+  defaults.tool.kanban_agent_session:
+    owner: tool
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.tool.kanban_agent_session
 canonical_prefix: defaultspack.
 compat_prefixes:
 - defaults.

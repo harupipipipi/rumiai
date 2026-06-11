@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -11,6 +12,48 @@ logger = logging.getLogger(__name__)
 
 
 class WebMountMixin:
+    _TRUSTED_PRE_AUTH_PACKS = {
+        "core_control_panel": "core:rumi/control_panel",
+        "core_setup": "core:rumi/setup",
+    }
+
+    @classmethod
+    def _is_trusted_pre_auth_pack(cls, pack_id: str, pack_info: Any) -> bool:
+        """Only bundled core packs may contribute global pre-auth routes."""
+        expected_identity = cls._TRUSTED_PRE_AUTH_PACKS.get(pack_id)
+        if expected_identity is None:
+            return False
+
+        ecosystem = getattr(pack_info, "ecosystem", {}) or {}
+        if ecosystem.get("pack_id", pack_id) != pack_id:
+            return False
+        if ecosystem.get("pack_identity") != expected_identity:
+            return False
+        if not (ecosystem.get("metadata", {}) or {}).get("is_core_pack", False):
+            return False
+
+        base_dir = Path(
+            str(getattr(pack_info, "subdir", None) or getattr(pack_info, "path", ""))
+        ).resolve()
+        expected_dir = (Path(__file__).resolve().parent.parent / "core_pack" / pack_id).resolve()
+        return base_dir == expected_dir
+
+    @staticmethod
+    def _resolve_pack_static_root(pack_info: Any, static_root_rel: str) -> Optional[Path]:
+        """Resolve a pack static root and reject paths escaping the pack directory."""
+        static_root_text = str(static_root_rel)
+        if Path(static_root_text).is_absolute() or static_root_text.startswith(("/", "\\")):
+            return None
+        if any(part == ".." for part in re.split(r"[\\/]+", static_root_text)):
+            return None
+        base_dir = Path(str(getattr(pack_info, "subdir", None) or pack_info.path)).resolve()
+        web_root = (base_dir / static_root_text).resolve()
+        try:
+            web_root.relative_to(base_dir)
+        except ValueError:
+            return None
+        return web_root
+
     @classmethod
     def load_web_mounts(cls, registry, pack_ids: Optional[set[str]] = None) -> int:
         cls._web_mounts = []
@@ -27,12 +70,14 @@ class WebMountMixin:
             static_root_rel = wm.get("static_root", "")
             if not path_prefix or not static_root_rel:
                 continue
-            base_dir = getattr(pack_info, "subdir", None) or pack_info.path
-            web_root = Path(str(base_dir)) / static_root_rel
+            web_root = cls._resolve_pack_static_root(pack_info, static_root_rel)
+            if web_root is None:
+                logger.warning("Skipping unsafe web_mount static_root for pack %s", pack_id)
+                continue
             cls._web_mounts.append(
                 {
                     "path_prefix": path_prefix,
-                    "web_root": web_root.resolve(),
+                    "web_root": web_root,
                     "spa_fallback": wm.get("spa_fallback", False),
                     "auth_required": wm.get("auth_required", True),
                     "pack_id": pack_id,
@@ -52,25 +97,32 @@ class WebMountMixin:
         for pack_id, pack_info in registry.packs.items():
             if pack_ids is not None and pack_id not in pack_ids:
                 continue
+            allow_pre_auth = cls._is_trusted_pre_auth_pack(pack_id, pack_info)
             routes = pack_info.ecosystem.get("pre_auth_routes")
             if routes and isinstance(routes, list):
-                for route in routes:
-                    if not isinstance(route, dict):
-                        continue
-                    method = route.get("method", "").upper()
-                    if not method:
-                        continue
-                    entry = {"method": method, "pack_id": pack_id}
-                    if "path" in route:
-                        entry["path"] = route["path"]
-                    if "path_prefix" in route:
-                        entry["path_prefix"] = route["path_prefix"]
-                    cls._pre_auth_table.append(entry)
-                    count += 1
+                if not allow_pre_auth:
+                    logger.warning(
+                        "Ignoring pre_auth_routes from non-first-party pack: %s",
+                        pack_id,
+                    )
+                else:
+                    for route in routes:
+                        if not isinstance(route, dict):
+                            continue
+                        method = route.get("method", "").upper()
+                        if not method:
+                            continue
+                        entry = {"method": method, "pack_id": pack_id}
+                        if "path" in route:
+                            entry["path"] = route["path"]
+                        if "path_prefix" in route:
+                            entry["path_prefix"] = route["path_prefix"]
+                        cls._pre_auth_table.append(entry)
+                        count += 1
             wm = pack_info.ecosystem.get("web_mount")
             if wm and isinstance(wm, dict) and not wm.get("auth_required", True):
                 prefix = wm.get("path_prefix", "")
-                if prefix:
+                if prefix and allow_pre_auth:
                     for method in ("GET", "POST", "PUT", "DELETE"):
                         cls._pre_auth_table.append(
                             {
@@ -81,6 +133,11 @@ class WebMountMixin:
                             }
                         )
                     count += 4
+                elif prefix:
+                    logger.warning(
+                        "Ignoring unauthenticated web_mount pre-auth expansion from non-first-party pack: %s",
+                        pack_id,
+                    )
         logger.info("Loaded %d pre_auth_route entries", count)
         return count
 

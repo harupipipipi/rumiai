@@ -3,6 +3,19 @@
 Start here when navigating defaultspack docs. The canonical implementation is
 `rumi_ai_1_10/ecosystem/defaultspack/`.
 
+Terminology in this section is intentional:
+
+- `rule`: always-on instruction layer within a scope
+- `skill`: trigger-based or on-demand instruction and workflow bundle
+- `prompt`: a source asset or rendered model text assembled at runtime
+- `system prompt`: the low-level API/runtime term for system-role prompt text
+- `delegation`: the canonical action for sending work to another agent
+- `team workspace`: the user-facing name for the company coordination surface;
+  internal ids and routes may still say `company` for compatibility
+
+For the repo-wide glossary and migration guidance, see
+[`../../../docs/terminology.md`](../../../docs/terminology.md).
+
 ## Orientation
 
 | Topic | Document |
@@ -22,7 +35,7 @@ Start here when navigating defaultspack docs. The canonical implementation is
 | UI and layout | [ui_and_layout.md](ui_and_layout.md) |
 | Chat module | [chat.md](chat.md) |
 | Agent runtime | [agent_runtime.md](agent_runtime.md) |
-| Company workspace runtime | [multi-agent.md](multi-agent.md) |
+| Team workspace runtime | [multi-agent.md](multi-agent.md) |
 | Scheduler | [scheduler.md](scheduler.md) |
 
 ## Runtime Primitives
@@ -32,7 +45,7 @@ Start here when navigating defaultspack docs. The canonical implementation is
 | Tools | [tool.md](tool.md) |
 | MCP | [mcp.md](mcp.md) |
 | Flow engine | [flow.md](flow.md) |
-| Prompt system | [prompt.md](prompt.md) |
+| Prompt and system-prompt plumbing | [prompt.md](prompt.md) |
 | Memory | [memory.md](memory.md) |
 | Media | [media.md](media.md) |
 | AI providers | [ai-providers.md](ai-providers.md) |

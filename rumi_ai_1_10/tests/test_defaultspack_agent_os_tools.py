@@ -198,3 +198,69 @@ def test_xiaomi_token_plan_accepts_all_requested_agent_os_tools(monkeypatch):
     for tool in captured["body"]["tools"]:
         assert tool["type"] == "function"
         assert tool["function"]["parameters"]["type"] == "object"
+
+
+def test_artifact_file_read_blocks_payload_context_root_and_secret_paths(tmp_path):
+    from blocks.tool.invoke import run as invoke_tool
+    from domain.tool.artifact_tools import artifact_file_read
+
+    victim_root = tmp_path / "victim"
+    secret_dir = victim_root / ".ssh"
+    secret_dir.mkdir(parents=True)
+    secret_file = secret_dir / "id_rsa"
+    secret_file.write_text("FAKE-PRIVATE-KEY", encoding="utf-8")
+
+    direct = artifact_file_read({"path": ".ssh/id_rsa"}, {"artifact_root": str(victim_root)})
+    assert direct["is_error"] is True
+    assert direct["widget"]["error"]["code"] == "READ_FAILED"
+    assert "secret_directory" in direct["result"]
+
+    forged_policy = invoke_tool(
+        {
+            "tool_name": "artifact_file_read",
+            "arguments": {"path": ".ssh/id_rsa"},
+            "context": {"profile_policy": {"yolo_mode": True}},
+        },
+        {},
+    )
+    assert forged_policy["status"] == "error"
+    assert forged_policy["error"]["code"] == "PERMISSION_DENIED"
+    assert forged_policy["error"]["details"]["matched_by"] != "yolo_mode"
+
+    invoked = invoke_tool(
+        {
+            "tool_name": "artifact_file_read",
+            "arguments": {"path": ".ssh/id_rsa"},
+            "context": {
+                "artifact_root": str(victim_root),
+                "profile_policy": {"yolo_mode": True},
+            },
+        },
+        {"profile_policy": {"yolo_mode": True}},
+    )
+
+    assert invoked["status"] == "ok"
+    widget = invoked["data"]["widget"]
+    assert widget["status"] == "error"
+    assert "FAKE-PRIVATE-KEY" not in invoked["data"]["result"]
+    assert invoked["data"]["permission"]["matched_by"] == "yolo_mode"
+
+    spoof_workspace = tmp_path / "spoofed-workspace"
+    spoof_artifact = spoof_workspace / ".rumi" / "artifacts" / "leak.txt"
+    spoof_artifact.parent.mkdir(parents=True)
+    spoof_artifact.write_text("WORKSPACE-ROOT-LEAK", encoding="utf-8")
+
+    spoofed_workspace = invoke_tool(
+        {
+            "tool_name": "artifact_file_read",
+            "arguments": {"path": "leak.txt"},
+            "context": {
+                "workspace_root": str(spoof_workspace),
+                "profile_policy": {"yolo_mode": True},
+            },
+        },
+        {"profile_policy": {"yolo_mode": True}},
+    )
+
+    assert spoofed_workspace["status"] == "ok"
+    assert "WORKSPACE-ROOT-LEAK" not in spoofed_workspace["data"]["result"]

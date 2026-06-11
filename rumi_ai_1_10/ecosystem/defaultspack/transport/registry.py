@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from ecosystem.defaultspack.domain.components import get_domain_component_registry
 from ecosystem.defaultspack.domain.extensions.runtime import get_extension_registry
+from ecosystem.defaultspack.domain.tool.security import is_trusted_pack_id
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,60 @@ class HttpRouteSpec:
 
 
 _ROUTE_PARAM_RE = re.compile(r"\{(\w+)\}")
+
+
+_ALLOWED_FIRST_PARTY_COMPONENT_ROUTE_BLOCK_MODULES = {
+    "blocks.integrations.discord",
+    "blocks.integrations.line",
+    "blocks.integrations.slack",
+    "blocks.ui.catalog",
+}
+
+
+def _pack_approved_for_component_routes(pack_id: str) -> bool:
+    pack_id = str(pack_id or "").strip()
+    if not pack_id:
+        return False
+    if is_trusted_pack_id(pack_id):
+        return True
+    try:
+        from core_runtime.approval_manager import get_approval_manager
+
+        approved, _reason = get_approval_manager().is_pack_approved_and_verified(pack_id)
+        return bool(approved)
+    except Exception:
+        return False
+
+
+def _safe_component_route_block_module(module_name: str, source_pack_id: str) -> bool:
+    module_name = str(module_name or "").strip()
+    if not module_name:
+        return True
+    return (
+        is_trusted_pack_id(source_pack_id)
+        and module_name in _ALLOWED_FIRST_PARTY_COMPONENT_ROUTE_BLOCK_MODULES
+    )
+
+
+def _component_route_target_allowed(
+    *,
+    source_pack_id: str,
+    block_module: str = "",
+    fallback_block_module: str = "",
+    handler_name: str = "",
+) -> bool:
+    if not _pack_approved_for_component_routes(source_pack_id):
+        return False
+    if block_module and not _safe_component_route_block_module(block_module, source_pack_id):
+        return False
+    if fallback_block_module and not _safe_component_route_block_module(
+        fallback_block_module,
+        source_pack_id,
+    ):
+        return False
+    if handler_name and not is_trusted_pack_id(source_pack_id):
+        return False
+    return True
 
 
 def http_route_sort_key(method: str, pattern: str, index: int = 0):
@@ -97,6 +152,7 @@ def _component_route_specs() -> List[HttpRouteSpec]:
         return specs
     for component in components:
         manifest = component.as_dict()
+        source_pack_id = str(getattr(component, "source_pack_id", "") or "").strip()
         routes = manifest.get("routes")
         if not isinstance(routes, list):
             continue
@@ -131,6 +187,13 @@ def _component_route_specs() -> List[HttpRouteSpec]:
                 or function_name
                 or flow_id
                 or handler_name
+            ):
+                continue
+            if not _component_route_target_allowed(
+                source_pack_id=source_pack_id,
+                block_module=block_module,
+                fallback_block_module=fallback_block_module,
+                handler_name=handler_name,
             ):
                 continue
             path_inject = route.get("path_inject")
@@ -378,6 +441,18 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/chat/conversations/{id}/run-results/{run_id}/browser-screenshots", block_module="blocks.chat.browser_screenshots", path_inject={"id": "conversation_id", "run_id": "run_id"}),
     HttpRouteSpec("GET", "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots", block_module="blocks.chat.browser_screenshots", path_inject={"id": "conversation_id", "run_id": "run_id"}),
     HttpRouteSpec("GET", "/api/chat/conversations/{id}/artifact-file", block_module="blocks.chat.artifact_file", path_inject={"id": "conversation_id"}),
+    HttpRouteSpec(
+        "GET",
+        "/api/human-operator/conversations/{conversation_id}/sessions/{session_id}",
+        block_module="blocks.human_operator.page",
+        path_inject={"conversation_id": "conversation_id", "session_id": "session_id"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/human-operator/conversations/{conversation_id}/sessions/{session_id}/messages",
+        block_module="blocks.human_operator.append_message",
+        path_inject={"conversation_id": "conversation_id", "session_id": "session_id"},
+    ),
     HttpRouteSpec("POST", "/api/chat/group-storage", block_module="blocks.chat.group_storage"),
     HttpRouteSpec("GET", "/api/integrations/secrets", block_module="blocks.integrations.secrets"),
     HttpRouteSpec("POST", "/api/integrations/secrets", block_module="blocks.integrations.secrets"),

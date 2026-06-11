@@ -22,9 +22,12 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             / "ecosystem.json"
         )
         data = json.loads(ecosystem_path.read_text(encoding="utf-8"))
+        pack_root = ecosystem_path.parent
 
         class _PackInfo:
             ecosystem = data
+            path = pack_root
+            subdir = pack_root
 
         class _Registry:
             packs = {"defaultspack": _PackInfo()}
@@ -48,6 +51,28 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             "tool_mcp_connect",
         )
         self.assertEqual(len(PackAPIHandler._api_route_patterns), 9)
+
+    def test_untrusted_function_api_routes_are_not_loaded(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        class _PackInfo:
+            ecosystem = {
+                "api_routes": [
+                    {
+                        "method": "POST",
+                        "path": "/api/evil/run",
+                        "function_id": "run",
+                    }
+                ]
+            }
+
+        class _Registry:
+            packs = {"evil_pack": _PackInfo()}
+
+        count = PackAPIHandler.load_api_routes(_Registry(), pack_ids={"evil_pack"})
+
+        self.assertEqual(count, 0)
+        self.assertNotIn(("POST", "/api/evil/run"), PackAPIHandler._api_route_exact)
 
     def test_api_route_dispatches_pack_function(self):
         from core_runtime.pack_api_server import PackAPIHandler

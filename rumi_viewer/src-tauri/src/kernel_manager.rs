@@ -140,7 +140,23 @@ impl KernelManager {
                 .map(|value| value.eq_ignore_ascii_case("true"))
                 .unwrap_or(false);
 
-        let child = process_utils::command(&venv_python)
+        let pack_shell_path = if self.config.is_dev_workspace() {
+            Some(
+                self.config
+                    .ensure_pack_shell_path()
+                    .context("failed to prepare pack-shell for dev Defaultspack launches")?,
+            )
+        } else {
+            self.config.pack_shell_path()
+        };
+        if let Some(ref path) = pack_shell_path {
+            info!("Kernel will use pack-shell at {}", path.display());
+        } else {
+            warn!("pack-shell was not found; Defaultspack desktop launch will be unavailable");
+        }
+
+        let mut command = process_utils::command(&venv_python);
+        command
             .args(["-m", "app"])
             .current_dir(&self.config.rumi_home)
             .env("RUMI_HOME", &self.config.rumi_home)
@@ -167,9 +183,13 @@ impl KernelManager {
                 if auto_approve_local { "true" } else { "false" },
             )
             .stdout(Stdio::from(log_file))
-            .stderr(Stdio::from(log_stderr))
-            .spawn()
-            .context("failed to spawn Kernel process")?;
+            .stderr(Stdio::from(log_stderr));
+
+        if let Some(ref path) = pack_shell_path {
+            command.env("RUMI_PACK_SHELL_PATH", path);
+        }
+
+        let child = command.spawn().context("failed to spawn Kernel process")?;
 
         info!("Kernel started (pid {})", child.id());
         self.child = Some(child);

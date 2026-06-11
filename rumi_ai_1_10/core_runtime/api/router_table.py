@@ -25,11 +25,33 @@ _FUNCTION_ROUTE_FORBIDDEN_ERRORS = {
 
 
 class APIRouteTableMixin:
+    @staticmethod
+    def _pack_root_hint(pack_info: Any) -> Optional[Any]:
+        for attr in ("subdir", "path", "pack_dir"):
+            value = getattr(pack_info, attr, None)
+            if isinstance(value, (str, Path)):
+                return value
+        return None
+
+    @classmethod
+    def _pack_allows_in_process_api_metadata(
+        cls,
+        pack_id: str,
+        pack_info: Any = None,
+    ) -> bool:
+        from ..pack_function_runtime import is_pack_function_in_process_allowed
+
+        hint = cls._pack_root_hint(pack_info) if pack_info is not None else None
+        if pack_info is not None and hint is None:
+            return False
+        return is_pack_function_in_process_allowed(pack_id, hint)
+
     @classmethod
     def _register_api_routes_from_manifest(
         cls,
         pack_id: str,
         ecosystem: dict[str, Any],
+        pack_info: Any = None,
     ) -> int:
         routes = ecosystem.get("api_routes")
         if not routes or not isinstance(routes, list):
@@ -42,6 +64,13 @@ class APIRouteTableMixin:
             handler_name = route.get("handler", "")
             function_id = route.get("function_id", route.get("function", ""))
             if not method or not (handler_name or function_id):
+                continue
+            if function_id and not cls._pack_allows_in_process_api_metadata(pack_id, pack_info):
+                logger.warning(
+                    "Ignoring function api_route from non-first-party pack: %s:%s",
+                    pack_id,
+                    function_id,
+                )
                 continue
             if handler_name and not HANDLER_NAME_RE.match(handler_name):
                 logger.warning("Invalid handler name in api_routes: %s", handler_name)
@@ -105,6 +134,7 @@ class APIRouteTableMixin:
                 count += cls._register_api_routes_from_manifest(
                     pack_id,
                     pack_info.ecosystem,
+                    pack_info,
                 )
         if include_builtin_core_control_panel:
             count += cls.load_builtin_core_api_routes()
