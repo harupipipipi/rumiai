@@ -4688,8 +4688,6 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             "approval_hint": "Approve the pending request in a trusted Rumi UI, then retry with the signed approval token.",
             "payload": payload,
         }
-        if action == "computer.observe":
-            response["approval_token"] = self._issue_legacy_approval(action, payload)
         warning = self._approval_warning(action, payload)
         if warning:
             response["approval_warning"] = warning
