@@ -1,0 +1,21 @@
+task:
+  title: Spreadsheet dashboard bundle
+  preset: rumi_workspace_pack.local_workspace_safe
+  goal: Build an editable workbook with raw data tabs, calculated metrics, charts, and a data quality note.
+  inputs:
+    tables:
+      - workspace/data/revenue.csv
+      - workspace/data/pipeline.csv
+    metrics: [monthly_revenue, conversion_rate, forecast_delta]
+  output:
+    folder: workspace/outputs/revenue_dashboard
+    artifacts:
+      - type: spreadsheet
+        path: revenue_dashboard.xlsx
+      - type: chart
+        path: charts/
+      - type: document
+        path: data_quality_notes.md
+  recipe: spreadsheet_dashboard
+  review:
+    checks: [formula_cells_present, tab_names_valid, charts_linked_to_data]
