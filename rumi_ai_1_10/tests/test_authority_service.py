@@ -107,3 +107,76 @@ def test_authority_approve_once_consumes_token(tmp_path, monkeypatch):
     assert first.allowed is True
     assert second.allowed is False
     assert second.approval_required is True
+
+
+def test_authority_service_resolves_from_di(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_AUTHORITY_MODE", "enforce")
+
+    from core_runtime.authority import AuthorityService, get_authority_service
+    from core_runtime.capability_grant_manager import reset_capability_grant_manager
+    from core_runtime.di_container import get_container, reset_container
+
+    reset_container()
+    reset_capability_grant_manager(
+        grants_dir=str(tmp_path / "capabilities"),
+        secret_key="capability-test-key-" + ("z" * 32),
+    )
+
+    try:
+        container = get_container()
+        assert container.has("capability_grant_manager")
+        assert isinstance(get_authority_service(), AuthorityService)
+    finally:
+        reset_container()
+
+
+def test_authority_persistent_approval_keeps_resource_constraints(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    resource = {"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"}
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="profile",
+        config={"allow_stream": True},
+    )
+
+    assert approval["success"] is True
+    assert approval["config"] == {
+        "provider_ids": ["openai"],
+        "api_ids": ["work"],
+        "model_ids": ["gpt-5.4"],
+    }
+
+    grant = grants.get_grant("profile:work")
+    assert grant is not None
+    assert grant.permissions["model.invoke"].config == approval["config"]
+
+    allowed = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    denied = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "anthropic", "api_id": "personal", "model_id": "claude"},
+        profile_id="work",
+    )
+
+    assert allowed.allowed is True
+    assert denied.allowed is False
+    assert denied.approval_required is True
+
+
+def test_authority_resource_allowed_rejects_empty_constraints():
+    from core_runtime.authority.service import AuthorityService
+
+    assert AuthorityService._resource_allowed({"provider_ids": []}, {"provider_id": "openai"}) is False

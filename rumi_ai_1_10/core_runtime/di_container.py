@@ -257,6 +257,10 @@ def _register_defaults(container: DIContainer) -> None:
         from .capability_trust_store import CapabilityTrustStore
         return CapabilityTrustStore()
 
+    def _capability_grant_manager_factory() -> "CapabilityGrantManager":  # noqa: F821
+        from .capability_grant_manager import get_capability_grant_manager
+        return get_capability_grant_manager()
+
     # --- Wave 4: orchestration / composition ---
     def _container_orchestrator_factory() -> "ContainerOrchestrator":  # noqa: F821
         from .container_orchestrator import ContainerOrchestrator
@@ -407,6 +411,7 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("approval_manager", _approval_manager_factory)
     container.register("permission_manager", _permission_manager_factory)
     container.register("capability_trust_store", _capability_trust_store_factory)
+    container.register("capability_grant_manager", _capability_grant_manager_factory)
     container.register("container_orchestrator", _container_orchestrator_factory)
     container.register("host_privilege_manager", _host_privilege_manager_factory)
     container.register("flow_composer", _flow_composer_factory)

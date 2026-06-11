@@ -159,7 +159,7 @@ class AuthorityService:
         grant_principal = self._principal_for_scope(request, scope)
         if not grant_principal:
             return {"success": False, "error": "Scope cannot be resolved for authority request", "status_code": 400}
-        grant_config = dict(config or self._grant_config_from_resource(request.resource))
+        grant_config = self._grant_config_for_persistent_approval(request.resource, config)
         manager = self._capability_grant_manager
         if manager is None or not callable(getattr(manager, "grant_permission", None)):
             return {"success": False, "error": "CapabilityGrantManager unavailable", "status_code": 500}
@@ -289,15 +289,22 @@ class AuthorityService:
             ("host_actions", "host_action"),
         )
         for config_key, resource_key in checks:
-            allowed_values = config.get(config_key)
-            if allowed_values is None:
+            if config_key not in config:
                 continue
-            allowed = {str(item) for item in allowed_values if str(item or "").strip()} if isinstance(allowed_values, list) else {str(allowed_values)}
-            if allowed and str(resource.get(resource_key) or "") not in allowed:
+            allowed = set(AuthorityService._string_values(config.get(config_key)))
+            if not allowed:
+                return False
+            if str(resource.get(resource_key) or "") not in allowed:
                 return False
         if "ports" in config:
-            allowed_ports = {int(item) for item in config.get("ports", []) if str(item).strip().isdigit()} if isinstance(config.get("ports"), list) else {int(config.get("ports"))}
-            if resource.get("port") not in allowed_ports:
+            allowed_ports = set(AuthorityService._port_values(config.get("ports")))
+            if not allowed_ports:
+                return False
+            try:
+                resource_port = int(resource.get("port"))
+            except (TypeError, ValueError):
+                return False
+            if resource_port not in allowed_ports:
                 return False
         if "allow_stream" in config and resource.get("stream") and not bool(config.get("allow_stream")):
             return False
@@ -308,6 +315,30 @@ class AuthorityService:
             except (TypeError, ValueError):
                 return False
         return True
+
+    @staticmethod
+    def _string_values(value: Any) -> list[str]:
+        values = value if isinstance(value, list) else [value]
+        return [str(item).strip() for item in values if str(item or "").strip()]
+
+    @staticmethod
+    def _port_values(value: Any) -> list[int]:
+        values = value if isinstance(value, list) else [value]
+        ports: list[int] = []
+        for item in values:
+            try:
+                ports.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return ports
+
+    @staticmethod
+    def _positive_int(value: Any) -> int | None:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed >= 0 else None
 
     @staticmethod
     def _resource_always_allowed(permission_id: str, resource: dict[str, Any]) -> bool:
@@ -354,7 +385,48 @@ class AuthorityService:
             config["allow_stream"] = True
         if resource.get("port") is not None:
             config["ports"] = [resource.get("port")]
+        input_tokens = AuthorityService._positive_int(resource.get("input_tokens"))
+        if input_tokens is not None:
+            config["max_input_tokens"] = input_tokens
         return config
+
+    @staticmethod
+    def _grant_config_for_persistent_approval(
+        resource: dict[str, Any],
+        client_config: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        grant_config = AuthorityService._grant_config_from_resource(resource)
+        if not isinstance(client_config, dict):
+            return grant_config
+
+        for key in ("provider_ids", "api_ids", "model_ids", "function_ids", "pack_ids", "domains", "host_actions"):
+            if key not in client_config or key not in grant_config:
+                continue
+            base_values = AuthorityService._string_values(grant_config.get(key))
+            requested_values = set(AuthorityService._string_values(client_config.get(key)))
+            grant_config[key] = [value for value in base_values if value in requested_values] if requested_values else []
+
+        if "ports" in client_config and "ports" in grant_config:
+            base_ports = AuthorityService._port_values(grant_config.get("ports"))
+            requested_ports = set(AuthorityService._port_values(client_config.get("ports")))
+            grant_config["ports"] = [port for port in base_ports if port in requested_ports] if requested_ports else []
+
+        if "allow_stream" in client_config:
+            if "allow_stream" in grant_config:
+                grant_config["allow_stream"] = bool(grant_config.get("allow_stream")) and bool(client_config.get("allow_stream"))
+            elif client_config.get("allow_stream") is False:
+                grant_config["allow_stream"] = False
+
+        requested_max_tokens = AuthorityService._positive_int(client_config.get("max_input_tokens"))
+        if requested_max_tokens is not None:
+            current_max_tokens = AuthorityService._positive_int(grant_config.get("max_input_tokens"))
+            grant_config["max_input_tokens"] = (
+                min(current_max_tokens, requested_max_tokens)
+                if current_max_tokens is not None
+                else requested_max_tokens
+            )
+
+        return grant_config
 
     @staticmethod
     def _principal_for_scope(request: AuthorityRequest, scope: str) -> str:
