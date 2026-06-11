@@ -509,7 +509,7 @@ class TestSecureTmpDir:
         expected_tmp = tmp_path / "rumi_ai_1_10" / "user_data" / "tmp"
 
         with patch.object(mod, "__file__", str(fake_file)):
-            result = _get_secure_tmp_dir()
+            result = mod._get_secure_tmp_dir()
 
         assert Path(result) == expected_tmp
         assert expected_tmp.is_dir()
