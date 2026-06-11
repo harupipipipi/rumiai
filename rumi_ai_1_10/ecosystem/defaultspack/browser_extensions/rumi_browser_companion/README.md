@@ -98,9 +98,19 @@ The extension talks to these local endpoints:
       "ok": true,
       "result": {
         "snapshot": {
+          "schema_version": "semantic_dom_v2",
           "url": "https://example.com",
           "title": "Example",
-          "nodes": []
+          "nodes": [
+            {
+              "element_id": "rumi-el-...",
+              "semantic_id": "button:button:submit",
+              "accessible_name": "Submit",
+              "labels": ["Submit"],
+              "action_hints": ["extract", "click", "press"],
+              "selector_hint": "button.primary"
+            }
+          ]
         }
       }
     }
@@ -120,6 +130,8 @@ The extension talks to these local endpoints:
 - `page.press`
 - `page.scroll`
 - `page.extract`
+- `page.highlight`
+- `page.clear_highlight`
 
 ## Safety Notes
 
