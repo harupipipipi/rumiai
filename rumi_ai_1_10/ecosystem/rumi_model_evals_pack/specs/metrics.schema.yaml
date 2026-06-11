@@ -1,0 +1,35 @@
+spec_id: rumi.model_evals.metrics.v1
+description: Metrics schema for model eval and routing evidence.
+required_fields:
+  - metric_set_id
+  - target_provider
+  - target_model
+  - capture_window
+  - sample_count
+  - pass_at_k
+  - pass_power_k
+  - flakiness
+  - cost
+  - latency
+  - caveats
+metrics:
+  pass_at_k:
+    notation: pass@k
+    required_fields: [k, attempts, successes, estimator, confidence_notes]
+    notes: "Use for success probability when multiple attempts are allowed."
+  pass_power_k:
+    notation: pass^k
+    required_fields: [k, consecutive_successes, runs, independence_assumption, confidence_notes]
+    notes: "Use for repeated independent success expectations; document assumptions."
+  flakiness:
+    required_fields: [retry_count, failure_modes, time_window, nondeterminism_notes, quarantine_threshold]
+  cost:
+    required_fields: [unit, prompt_tokens_optional, completion_tokens_optional, observed_cost_optional, budget_status]
+  latency:
+    required_fields: [unit, p50_optional, p95_optional, max_observed_optional, budget_status]
+rating_values:
+  - strong
+  - acceptable
+  - weak
+  - blocked
+  - unknown
