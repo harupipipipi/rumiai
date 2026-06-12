@@ -23,7 +23,7 @@ from domain.external.input_profile_registry import InputProfileRegistry
 from domain.external.io_templates import external_io_template_catalog
 from domain.external.output_profile_registry import OutputProfileRegistry
 from domain.external.source_store import ExternalSourceStore, external_source_key
-from domain.external.token_store import external_token_status, set_external_token
+from domain.external.token_store import external_token_status
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
 from transport.registry import component_http_route_specs, component_route_diagnostics
@@ -2597,51 +2597,18 @@ class FrontendRegistry:
                         monthly_request_limit=request_limit_value,
                         kind=str(api_key_patch.get("kind") or "").strip() or None,
                     )
-                    # If the provider matches an external-output channel
-                    # (line/discord/slack/generic), mirror the secret into the
-                    # external token store. This makes "APIs / Tokens" the
-                    # single entry point for configuring secrets.
-                    _EXTERNAL_TOKEN_PROVIDERS = {"line", "discord", "slack", "generic"}
-                    if provider_id in _EXTERNAL_TOKEN_PROVIDERS:
-                        # Use api_id as token_id so users can keep multiple
-                        # tokens per provider (e.g. "channel_access_token",
-                        # "channel_secret"). The token kind defaults to the
-                        # api_id which already encodes the role.
-                        external_kind = (
-                            str(api_key_patch.get("external_token_kind") or "").strip()
-                            or name
-                            or "token"
-                        )
-                        try:
-                            set_external_token(
-                                provider_id,
-                                value,
-                                token_id=name,
-                                name=name,
-                                kind=external_kind,
-                                pack_root=self._pack_root,
-                            )
-                        except Exception:  # noqa: BLE001 - best-effort mirroring
-                            pass
             apis["api_keys"] = []
         external_output = sanitized.get("external_output")
         legacy_external_inputs = sanitized.get("external_inputs")
         token_container = external_output if isinstance(external_output, dict) else legacy_external_inputs
         if isinstance(token_container, dict):
-            token_patch = token_container.pop("external_tokens", None)
-            if isinstance(token_patch, dict) and token_patch.get("action") == "upsert":
-                provider_id = str(token_patch.get("provider_id") or "").strip()
-                token_id = str(token_patch.get("token_id") or token_patch.get("name") or "").strip()
-                value = str(token_patch.get("value") or "")
-                if provider_id and token_id and value.strip():
-                    set_external_token(
-                        provider_id,
-                        value,
-                        pack_root=self._pack_root,
-                        token_id=token_id,
-                        name=str(token_patch.get("name") or token_id),
-                        kind=str(token_patch.get("kind") or "token"),
-                    )
+            # External tokens are secrets and must only be changed through the
+            # dedicated /api/external/tokens route, where standalone HTTP applies
+            # local-origin, bearer-token, and CSRF checks.  Keep the settings
+            # response shape stable, but treat any submitted token patch as
+            # display-only data so /api/ui/settings cannot become a secret-write
+            # bypass.
+            token_container.pop("external_tokens", None)
             token_container["external_tokens"] = []
         if isinstance(legacy_external_inputs, dict) and "external_inputs" in sanitized:
             sanitized.pop("external_inputs", None)

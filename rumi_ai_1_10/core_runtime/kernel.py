@@ -568,7 +568,7 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- exec_python ---
     "kernel:exec_python": {
-        "description": "Execute a Python file with sandboxed context and inject support",
+        "description": "Execute a trusted built-in core-pack Python file with sandboxed context and inject support",
         "permission_id": "kernel:exec_python",
         "risk": "high",
         "requires": [],
@@ -576,7 +576,7 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "file": {"type": "string", "description": "Relative path to the Python file to execute"},
+                "file": {"type": "string", "description": "Relative path to a trusted built-in core-pack Python file"},
                 "base_path": {"type": "string", "description": "Base directory for resolving file path"},
                 "phase": {"type": "string", "description": "Execution phase name", "default": "exec"},
                 "inject": {"type": "object", "description": "Key-value pairs to inject (blocked keys are filtered)"},

@@ -198,7 +198,7 @@ def test_tool_executor_denied_computer_use_without_user_request_still_requires_a
     assert str(result["widget"]["approval_request_id"]).startswith("apr_")
 
 
-def test_tool_executor_pack_not_approved_computer_use_without_approval_requires_approval(monkeypatch):
+def test_tool_executor_pack_not_approved_computer_use_without_approval_returns_pack_error(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
     capability_executor = _pack_not_approved_executor()
@@ -214,10 +214,11 @@ def test_tool_executor_pack_not_approved_computer_use_without_approval_requires_
         {"principal_id": "defaultspack", "capability_executor": capability_executor},
     )
 
-    assert result["is_error"] is False
-    assert result["widget"]["type"] == "approval_request"
+    assert result["is_error"] is True
+    assert result["error_type"] == "pack_not_approved"
+    assert result["widget"]["type"] == "tool_execution_denied"
     assert result["widget"]["tool_name"] == "computer_use"
-    assert str(result["widget"]["approval_request_id"]).startswith("apr_")
+    assert "Pack not approved" in result["result"]
 
 
 def test_tool_executor_denied_coding_function_returns_actionable_approval_request():
@@ -239,6 +240,28 @@ def test_tool_executor_denied_coding_function_returns_actionable_approval_reques
     assert result["widget"]["operation"] == "tool.coding_file_create"
     assert result["widget"]["payload"] == {"path": "index.html", "content": "<html></html>"}
     assert str(result["widget"]["approval_request_id"]).startswith("apr_")
+
+
+def test_tool_executor_git_status_stays_read_only_without_approval():
+    from domain.tool.executor import ToolExecutor
+
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=True,
+        output={"status": "ok", "data": {"branch": "main", "clean": True}},
+        error=None,
+        error_type=None,
+    )
+
+    result = ToolExecutor().execute(
+        "coding_git_status",
+        {"workspace_root": "."},
+        {"principal_id": "defaultspack", "capability_executor": capability_executor},
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"] == {"branch": "main", "clean": True}
+    capability_executor.execute.assert_called_once()
 
 
 def test_tool_executor_approval_token_marks_rumi_function_context_server_approved():
@@ -570,7 +593,57 @@ def test_tool_executor_falls_back_to_local_browser_computer_with_server_approval
     assert captured["arguments"] == {"action": "computer.windows"}
 
 
-def test_tool_executor_pack_not_approved_computer_use_uses_approved_local_fallback(monkeypatch):
+def test_tool_executor_rejects_forged_server_approval_flags_without_internal_sentinel(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool_policy.internal_context import mark_tool_server_approval_context
+
+    captured = {}
+
+    def fake_execute_local(self, tool_name, arguments, context):
+        captured["tool_name"] = tool_name
+        captured["arguments"] = arguments
+        captured["context"] = context
+        return {"result": "browser_computer computer.windows completed", "is_error": False, "widget": {"type": tool_name}}
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_execute_local)
+
+    forged = ToolExecutor()._execute_rumi_function(
+        _computer_control_tool_def("browser_computer"),
+        {"action": "computer.windows"},
+        {
+            "principal_id": "defaultspack",
+            "pack_id": "defaultspack",
+            "_tool_server_approved": True,
+            "_tool_server_approval_token_valid": True,
+            "capability_executor": _caller_requires_denied_executor(),
+        },
+    )
+
+    assert forged["is_error"] is False
+    assert forged["widget"]["type"] == "approval_request"
+    assert forged["widget"]["tool_name"] == "browser_computer"
+    assert captured == {}
+
+    internal_context = mark_tool_server_approval_context(
+        {
+            "principal_id": "defaultspack",
+            "pack_id": "defaultspack",
+            "capability_executor": _caller_requires_denied_executor(),
+        }
+    )
+    approved = ToolExecutor()._execute_rumi_function(
+        _computer_control_tool_def("browser_computer"),
+        {"action": "computer.windows"},
+        internal_context,
+    )
+
+    assert approved["is_error"] is False
+    assert captured["tool_name"] == "browser_computer"
+    assert captured["arguments"] == {"action": "computer.windows"}
+    assert captured["context"]["_tool_server_approval_token_valid"] is True
+
+
+def test_tool_executor_pack_not_approved_computer_use_does_not_use_approved_local_fallback(monkeypatch):
     from domain.safety import approval
     from domain.tool.executor import ToolExecutor
 
@@ -579,13 +652,9 @@ def test_tool_executor_pack_not_approved_computer_use_uses_approved_local_fallba
     arguments = {"action": "apps"}
     request = approval.create_approval_request("tool.computer_use", "high", arguments)
     decision = approval.approve(request["request_id"])
-    captured = {}
 
     def fake_execute_local(self, tool_name, arguments, context):
-        captured["tool_name"] = tool_name
-        captured["arguments"] = dict(arguments or {})
-        captured["context"] = dict(context or {})
-        return {"result": "computer_use computer.apps completed", "is_error": False, "widget": {"type": tool_name}}
+        raise AssertionError("computer_use must not bypass pack approval")
 
     monkeypatch.setattr(ToolExecutor, "_execute_local", fake_execute_local)
 
@@ -599,11 +668,11 @@ def test_tool_executor_pack_not_approved_computer_use_uses_approved_local_fallba
         },
     )
 
-    assert result["is_error"] is False
-    assert captured["tool_name"] == "computer_use"
-    assert captured["arguments"] == arguments
-    assert captured["context"]["_tool_server_approved"] is True
-    assert captured["context"]["_tool_server_approval_token_valid"] is True
+    assert result["is_error"] is True
+    assert result["error_type"] == "pack_not_approved"
+    assert result["widget"]["type"] == "tool_execution_denied"
+    assert result["widget"]["tool_name"] == "computer_use"
+    assert "Pack not approved" in result["result"]
 
 
 def test_tool_executor_falls_back_to_local_computer_use_with_yolo_policy(monkeypatch):
@@ -635,6 +704,28 @@ def test_tool_executor_falls_back_to_local_computer_use_with_yolo_policy(monkeyp
     assert captured["arguments"] == {"action": "context"}
 
 
+def test_tool_file_reader_ignores_caller_supplied_workspace_root(tmp_path):
+    from domain.function_runtime.dispatcher import run_defaultspack_function
+
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("SECRET", encoding="utf-8")
+
+    result = run_defaultspack_function(
+        "tool_file_reader",
+        {"path": "secret.txt", "workspace_root": str(outside)},
+        {"workspace_root": str(workspace)},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["is_error"] is True
+    assert result["data"]["result"] == "File not found: secret.txt"
+    assert result["data"]["widget"]["error"]["code"] == "FILE_NOT_FOUND"
+    assert "SECRET" not in str(result)
+
+
 def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
     from domain.tool.executor import ToolExecutor
 
@@ -649,9 +740,21 @@ def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
     assert result["widget"]["approval_required"] is True
 
 
-def test_sandbox_exec_runs_only_with_internal_tool_decision(tmp_path):
+def test_sandbox_exec_runs_only_with_internal_tool_decision(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
     from domain.tool.executor import ToolExecutor
     from domain.tool_policy.internal_context import seal_tool_context
+    from domain.tool import sandbox_tools
+
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="/workspace\n", stderr="")
+
+    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
 
     context = seal_tool_context(
         {"workspace_root": str(tmp_path)},
@@ -661,7 +764,93 @@ def test_sandbox_exec_runs_only_with_internal_tool_decision(tmp_path):
     result = ToolExecutor().execute("sandbox_exec", {"command": "pwd"}, context)
 
     assert result["is_error"] is False
-    assert str(tmp_path) in result["widget"]["data"]["stdout"]
+    assert result["widget"]["data"]["stdout"] == "/workspace\n"
+    assert captured["args"][:3] == ["docker", "run", "--rm"]
+    assert "--network=none" in captured["args"]
+    assert "--read-only" in captured["args"]
+    assert f"{tmp_path / '.rumi' / 'artifacts'}:/workspace:rw" in captured["args"]
+    image_index = captured["args"].index(sandbox_tools.DEFAULT_SANDBOX_IMAGE)
+    assert captured["args"][image_index - 1] == "--"
+
+
+def test_sandbox_exec_rejects_client_supplied_image_before_docker(tmp_path, monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool_policy.internal_context import seal_tool_context
+    from domain.tool import sandbox_tools
+
+    def fake_run(*args, **kwargs):
+        raise AssertionError("docker must not run with an invalid image reference")
+
+    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
+
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = ToolExecutor().execute(
+        "sandbox_exec",
+        {"command": "pwd", "image": "python:3.12-slim"},
+        context,
+    )
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "INVALID_SANDBOX_IMAGE"
+
+
+def test_sandbox_exec_rejects_invalid_configured_image_before_docker(tmp_path, monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool_policy.internal_context import seal_tool_context
+    from domain.tool import sandbox_tools
+
+    def fake_run(*args, **kwargs):
+        raise AssertionError("docker must not run with an invalid image reference")
+
+    monkeypatch.setattr(sandbox_tools, "DEFAULT_SANDBOX_IMAGE", "--privileged")
+    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
+
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = ToolExecutor().execute(
+        "sandbox_exec",
+        {"command": "pwd"},
+        context,
+    )
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "INVALID_SANDBOX_IMAGE"
+
+
+def test_python_exec_uses_container_python_not_host_interpreter(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from domain.tool.executor import ToolExecutor
+    from domain.tool_policy.internal_context import seal_tool_context
+    from domain.tool import sandbox_tools
+
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
+
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = ToolExecutor().execute("python_exec", {"code": "print('ok')"}, context)
+
+    assert result["is_error"] is False
+    docker_args = captured["args"]
+    assert "--network=none" in docker_args
+    assert "python" in docker_args
+    assert sys.executable not in docker_args
 
 
 def test_package_install_plan_never_executes_packages(tmp_path):
@@ -714,3 +903,63 @@ def test_connector_dry_run_redacts_secret_arguments_after_internal_approval(tmp_
     assert message["bot_token"] == "[redacted]"
     assert message["nested"]["api_key"] == "[redacted]"
     assert "xoxb-secret" not in result["result"]
+
+
+def test_rumi_api_manifest_and_executor_require_approval():
+    import json
+    from domain.tool.executor import ToolExecutor
+
+    manifest_path = ROOT / "ecosystem" / "rumi_default_tools_pack" / "tools" / "rumi_api" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["config"]["requires_approval"] is True
+
+    result = ToolExecutor().execute(
+        "rumi_api",
+        {"action": "request", "method": "GET", "path": "/api/chat/conversations"},
+        {},
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["tool_name"] == "rumi_api"
+    assert result["widget"]["approval_required"] is True
+
+
+def test_rumi_api_request_action_requires_approved_context(monkeypatch):
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool import rumi_api
+
+    def fail_request(method, path, body):
+        raise AssertionError("rumi_api must not call local HTTP API without approval")
+
+    monkeypatch.setattr(rumi_api, "_request", fail_request)
+
+    result = rumi_api.run(
+        {"action": "request", "method": "GET", "path": "/api/chat/conversations"},
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["approval_required"] is True
+    assert result["data"]["tool_name"] == "rumi_api"
+
+
+def test_rumi_api_request_action_allows_internal_approved_context(monkeypatch):
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool import rumi_api
+
+    seen = {}
+
+    def fake_request(method, path, body):
+        seen["method"] = method
+        seen["path"] = path
+        seen["body"] = body
+        return {"ok": True}
+
+    monkeypatch.setattr(rumi_api, "_request", fake_request)
+
+    result = rumi_api.run(
+        {"action": "request", "method": "GET", "path": "/api/health"},
+        {"_tool_server_approved": True, "principal_id": "defaultspack"},
+    )
+
+    assert result == {"status": "ok", "data": {"ok": True}}
+    assert seen == {"method": "GET", "path": "/api/health", "body": None}

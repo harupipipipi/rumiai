@@ -94,3 +94,68 @@ def test_chat_store_list_conversations_omits_full_messages_by_default(tmp_path, 
     assert listed[0]["message_count"] == 1
     assert listed[0]["last_message_preview"] == "hello world"
     ChatStore._instance = None
+
+
+def test_chat_store_update_replaces_client_supplied_icon_svg(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    payload = (
+        '<svg xmlns="http://www.w3.org/2000/svg" '
+        'onload="globalThis.__rumi_xss=1"></svg>'
+    )
+
+    updated = store.update_conversation(
+        conversation["id"],
+        {"metadata": {"icon_svg": payload, "workspace_label": "Local"}},
+    )
+
+    assert updated["metadata"]["workspace_label"] == "Local"
+    assert updated["metadata"]["icon_svg"] != payload
+    assert "onload" not in updated["metadata"]["icon_svg"].lower()
+    ChatStore._instance = None
+
+
+def test_chat_store_load_replaces_persisted_icon_svg(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    storage_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = (
+        '<svg xmlns="http://www.w3.org/2000/svg" '
+        'onload="globalThis.__rumi_xss=1"></svg>'
+    )
+    storage_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "updated_at": 0,
+                "conversations": {
+                    "conv-1": {
+                        "id": "conv-1",
+                        "title": "Recovered Conversation",
+                        "created_at": 0,
+                        "updated_at": 0,
+                        "model": "stub/default",
+                        "metadata": {"icon_svg": payload, "workspace_label": "Local"},
+                        "messages": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    conversation = ChatStore().get_conversation("conv-1")
+
+    assert conversation["metadata"]["workspace_label"] == "Local"
+    assert conversation["metadata"]["icon_svg"] != payload
+    assert "onload" not in conversation["metadata"]["icon_svg"].lower()
+    ChatStore._instance = None

@@ -431,25 +431,43 @@ def execute_http_request(
             # ============================================================
             # 3. Grant チェック（内部宛て判定の後）
             # ============================================================
-            if network_grant_manager:
-                grant_result = network_grant_manager.check_access(pack_id, domain, port)
-                if not grant_result.allowed:
-                    result["error"] = f"Network access denied: {grant_result.reason}"
-                    result["error_type"] = "grant_denied"
-                    result["latency_ms"] = (time.time() - start_time) * 1000
-                    result["redirect_hops"] = redirect_hops
-                    result["final_url"] = current_url
+            if network_grant_manager is None:
+                reason = "network grant manager unavailable"
+                result["error"] = f"Network access denied: {reason}"
+                result["error_type"] = "grant_denied"
+                result["latency_ms"] = (time.time() - start_time) * 1000
+                result["redirect_hops"] = redirect_hops
+                result["final_url"] = current_url
 
-                    _log_network_event(
-                        audit_logger, pack_id, domain, port, False,
-                        reason=grant_result.reason,
-                        method=method, url=original_url, final_url=current_url,
-                        latency_ms=result["latency_ms"],
-                        redirect_hops=redirect_hops,
-                        blocked_reason="grant_denied",
-                        check_type="proxy_request"
-                    )
-                    return result
+                _log_network_event(
+                    audit_logger, pack_id, domain, port, False,
+                    reason=reason,
+                    method=method, url=original_url, final_url=current_url,
+                    latency_ms=result["latency_ms"],
+                    redirect_hops=redirect_hops,
+                    blocked_reason="grant_manager_unavailable",
+                    check_type="proxy_request"
+                )
+                return result
+
+            grant_result = network_grant_manager.check_access(pack_id, domain, port)
+            if not grant_result.allowed:
+                result["error"] = f"Network access denied: {grant_result.reason}"
+                result["error_type"] = "grant_denied"
+                result["latency_ms"] = (time.time() - start_time) * 1000
+                result["redirect_hops"] = redirect_hops
+                result["final_url"] = current_url
+
+                _log_network_event(
+                    audit_logger, pack_id, domain, port, False,
+                    reason=grant_result.reason,
+                    method=method, url=original_url, final_url=current_url,
+                    latency_ms=result["latency_ms"],
+                    redirect_hops=redirect_hops,
+                    blocked_reason="grant_denied",
+                    check_type="proxy_request"
+                )
+                return result
 
             # ============================================================
             # 4. HTTP接続 & リクエスト実行

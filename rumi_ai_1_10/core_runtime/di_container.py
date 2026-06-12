@@ -298,7 +298,11 @@ def _register_defaults(container: DIContainer) -> None:
 
     def _egress_proxy_manager_factory() -> "UDSEgressProxyManager":  # noqa: F821
         from .egress_proxy import UDSEgressProxyManager
-        return UDSEgressProxyManager()
+        c = get_container()
+        return UDSEgressProxyManager(
+            network_grant_manager=c.get("network_grant_manager"),
+            audit_logger=c.get_or_none("audit_logger"),
+        )
 
     def _python_file_executor_factory() -> "PythonFileExecutor":  # noqa: F821
         from .python_file_executor import PythonFileExecutor
