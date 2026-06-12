@@ -61,6 +61,7 @@ import copy
 import re
 import time
 import uuid
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .paths import BASE_DIR
@@ -87,6 +88,11 @@ _UC_MAX_RESPONSE_SIZE = 1 * 1024 * 1024   # 1 MiB
 _UC_MAX_TIMEOUT = 120.0                    # seconds
 _UC_DEFAULT_TIMEOUT = 30.0                 # seconds
 _UC_VALID_RUNTIMES = frozenset({"python", "binary", "command"})
+_FLOW_AUTHORIZATION_SOURCE_UNSET = object()
+_FLOW_AUTHORIZATION_SOURCE_TYPE = ContextVar(
+    "rumi_flow_authorization_source_type",
+    default=_FLOW_AUTHORIZATION_SOURCE_UNSET,
+)
 
 class KernelFlowExecutionMixin:
     """
@@ -128,28 +134,18 @@ class KernelFlowExecutionMixin:
 
     def _get_flow_source_type_for_authorization(self, ctx: Dict[str, Any]) -> str:
         """Return the immutable flow source recorded when step execution started."""
-        sources = getattr(self, "_flow_authorization_source_types", None)
-        if isinstance(sources, dict) and id(ctx) in sources:
-            return str(sources[id(ctx)] or "").strip()
+        source_type = _FLOW_AUTHORIZATION_SOURCE_TYPE.get()
+        if source_type is not _FLOW_AUTHORIZATION_SOURCE_UNSET:
+            return str(source_type or "").strip()
         return str(ctx.get("_flow_source_type") or "").strip()
 
-    def _ensure_flow_authorization_context(self, ctx: Dict[str, Any]) -> bool:
+    def _ensure_flow_authorization_context(self, ctx: Dict[str, Any]) -> Any:
         """Snapshot mutable source metadata before any flow step can alter ctx."""
-        sources = getattr(self, "_flow_authorization_source_types", None)
-        if not isinstance(sources, dict):
-            sources = {}
-            setattr(self, "_flow_authorization_source_types", sources)
-        ctx_id = id(ctx)
-        if ctx_id in sources or "_flow_source_type" not in ctx:
-            return False
-        sources[ctx_id] = ctx.get("_flow_source_type")
-        return True
+        return _FLOW_AUTHORIZATION_SOURCE_TYPE.set(ctx.get("_flow_source_type"))
 
-    def _clear_flow_authorization_context(self, ctx: Dict[str, Any]) -> None:
+    def _clear_flow_authorization_context(self, token: Any) -> None:
         """Remove the immutable source snapshot for a completed flow context."""
-        sources = getattr(self, "_flow_authorization_source_types", None)
-        if isinstance(sources, dict):
-            sources.pop(id(ctx), None)
+        _FLOW_AUTHORIZATION_SOURCE_TYPE.reset(token)
 
     def _is_pack_flow_context(self, ctx: Dict[str, Any]) -> bool:
         """Return True when the current async flow originated from an approved pack."""
@@ -563,7 +559,7 @@ class KernelFlowExecutionMixin:
                 pass
 
     async def _execute_steps_async(self, steps: List[Dict[str, Any]], ctx: Dict[str, Any]) -> Dict[str, Any]:
-        authorization_scope_created = self._ensure_flow_authorization_context(ctx)
+        authorization_scope_token = self._ensure_flow_authorization_context(ctx)
         executed_ids: Set[str] = set()
         try:
             for i, step in enumerate(steps):
@@ -677,8 +673,7 @@ class KernelFlowExecutionMixin:
                                                   handler=step.get("handler", "unknown"), status="failed", error=e, meta={"action": "continue"})
             return ctx
         finally:
-            if authorization_scope_created:
-                self._clear_flow_authorization_context(ctx)
+            self._clear_flow_authorization_context(authorization_scope_token)
 
     async def _execute_handler_step_async(self, step: Dict[str, Any], ctx: Dict[str, Any]) -> Tuple[Dict[str, Any], Any]:
         handler_key = step.get("handler")
