@@ -730,10 +730,15 @@ fn persist_desktop_api_token(config: &AppConfig, api_token: &str) -> AnyResult<P
     Ok(token_path)
 }
 
-fn auto_approve_local_enabled() -> bool {
-    std::env::var("RUMI_AUTO_APPROVE_LOCAL")
-        .map(|value| value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+fn auto_approve_local_enabled(dev_workspace: bool, env_value: Option<&str>) -> bool {
+    dev_workspace && env_value.is_some_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
+fn local_dev_auto_grant_enabled(config: &AppConfig) -> bool {
+    auto_approve_local_enabled(
+        config.is_dev_workspace(),
+        std::env::var("RUMI_AUTO_APPROVE_LOCAL").ok().as_deref(),
+    )
 }
 
 fn defaultspack_desktop_grant_payload(kernel_port: u16) -> Value {
@@ -749,7 +754,7 @@ fn defaultspack_desktop_grant_payload(kernel_port: u16) -> Value {
 }
 
 fn maybe_grant_defaultspack_desktop_execute(config: &AppConfig, api_token: &str) -> AnyResult<()> {
-    if !auto_approve_local_enabled() {
+    if !local_dev_auto_grant_enabled(config) {
         return Ok(());
     }
 
@@ -945,6 +950,15 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("empty"));
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn auto_approve_local_enabled_requires_dev_workspace_and_true_env() {
+        assert!(auto_approve_local_enabled(true, Some("true")));
+        assert!(auto_approve_local_enabled(true, Some("TRUE")));
+        assert!(!auto_approve_local_enabled(false, Some("true")));
+        assert!(!auto_approve_local_enabled(true, Some("false")));
+        assert!(!auto_approve_local_enabled(true, None));
     }
 
     #[test]

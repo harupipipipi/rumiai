@@ -160,11 +160,24 @@ impl AppConfig {
         })
     }
 
+    /// Return the path where README setup installs `uv` in a repo `.venv`.
+    pub fn dev_venv_uv_path(&self) -> Option<PathBuf> {
+        self.dev_workspace_root.as_ref().map(|root| {
+            let bin_dir = if cfg!(target_os = "windows") {
+                "Scripts"
+            } else {
+                "bin"
+            };
+            root.join(".venv").join(bin_dir).join(uv_binary_name())
+        })
+    }
+
     /// Resolve a trusted `uv` binary path.
     ///
     /// Runtime downloads are intentionally not part of this trust boundary. The
     /// viewer may use a bundled `uv`, a development-checkout bundle, an explicit
-    /// `RUMI_UV_PATH`, or a user-managed `uv` on PATH.
+    /// `RUMI_UV_PATH`, the README-created repo `.venv`, or a user-managed `uv`
+    /// on PATH.
     pub fn trusted_uv_path(&self) -> Option<PathBuf> {
         let bundled = self.bundled_uv_path();
         if bundled.exists() {
@@ -180,6 +193,12 @@ impl AppConfig {
         if let Some(configured) = configured_uv_path() {
             if configured.is_file() {
                 return Some(configured);
+            }
+        }
+
+        if let Some(dev_venv) = self.dev_venv_uv_path() {
+            if dev_venv.is_file() {
+                return Some(dev_venv);
             }
         }
 
@@ -640,6 +659,64 @@ mod tests {
         );
         assert!(config.is_dev_workspace());
 
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn trusted_uv_path_uses_readme_dev_venv_uv() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_viewer_uv_dev_venv_{unique}"));
+        let resource = root
+            .join("rumi_viewer")
+            .join("src-tauri")
+            .join("target")
+            .join("debug");
+        let appdata = root.join("appdata");
+        let app_py = root.join("rumi_ai_1_10").join("app.py");
+        let bin_dir = if cfg!(target_os = "windows") {
+            "Scripts"
+        } else {
+            "bin"
+        };
+        let dev_venv_uv = root.join(".venv").join(bin_dir).join(uv_binary_name());
+
+        fs::create_dir_all(&resource).unwrap();
+        fs::create_dir_all(app_py.parent().unwrap()).unwrap();
+        fs::create_dir_all(dev_venv_uv.parent().unwrap()).unwrap();
+        fs::write(&app_py, "print('ok')\n").unwrap();
+        fs::write(&dev_venv_uv, b"uv").unwrap();
+
+        let old_path = std::env::var_os("PATH");
+        let old_uv_path = std::env::var_os(UV_PATH_ENV);
+        std::env::set_var("PATH", "");
+        std::env::remove_var(UV_PATH_ENV);
+
+        let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
+        assert_eq!(
+            config.dev_venv_uv_path().as_deref(),
+            Some(dev_venv_uv.as_path())
+        );
+        assert_eq!(
+            config.trusted_uv_path().as_deref(),
+            Some(dev_venv_uv.as_path())
+        );
+
+        if let Some(path) = old_path {
+            std::env::set_var("PATH", path);
+        } else {
+            std::env::remove_var("PATH");
+        }
+        if let Some(path) = old_uv_path {
+            std::env::set_var(UV_PATH_ENV, path);
+        } else {
+            std::env::remove_var(UV_PATH_ENV);
+        }
         fs::remove_dir_all(&root).ok();
     }
 

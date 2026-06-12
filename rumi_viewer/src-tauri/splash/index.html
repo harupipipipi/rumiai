@@ -113,6 +113,21 @@
         }
       }
 
+      function navigateToPanelWhenReady() {
+        if (!window.__TAURI__ || !window.__TAURI__.core) {
+          setTimeout(navigateToPanelWhenReady, 100);
+          return;
+        }
+
+        window.__TAURI__.core.invoke('get_panel_session_url')
+          .then(function (url) {
+            window.location.replace(url);
+          })
+          .catch(function (error) {
+            setMessage('Error: Panel navigation failed - ' + String(error), 'error');
+          });
+      }
+
       function scheduleShow() {
         if (timer) clearTimeout(timer);
         if (!finished) {
@@ -131,6 +146,7 @@
           finished = true;
           clearTimeout(timer);
           setMessage(msg, 'ready');
+          navigateToPanelWhenReady();
         } else {
           scheduleShow();
           if (shown) {

@@ -1,7 +1,7 @@
 //! Python environment bootstrap via **uv**.
 //!
 //! Flow:
-//! 1. Ensure a trusted `uv` binary is available (bundled/dev/PATH only)
+//! 1. Ensure a trusted `uv` binary is available (bundled/dev/.venv/PATH)
 //! 2. `uv python install 3.13.13`      (into a temp dir, then rename)
 //! 3. `uv venv`                         (create virtual-environment)
 //! 4. `uv pip install -r requirements.txt`
@@ -36,7 +36,7 @@ const PYTHON_MINOR: &str = "3.13";
 /// Ensure that a working Python venv with all dependencies is present.
 ///
 /// Steps (each is idempotent):
-/// 1. Ensure uv binary        → bundled/dev/PATH only
+/// 1. Ensure uv binary        → bundled/dev/.venv/PATH
 /// 2. uv python install 3.13.13 → `config.python_dir`
 /// 3. uv venv                 → `config.venv_dir`
 /// 4. uv pip install           → into the venv
@@ -55,7 +55,7 @@ pub fn ensure_python_env(config: &AppConfig) -> Result<()> {
 fn trusted_uv_path(config: &AppConfig) -> Result<PathBuf> {
     config.trusted_uv_path().with_context(|| {
         format!(
-            "no trusted uv binary found; bundle {} with the app, set RUMI_UV_PATH to a user-managed uv binary, or install uv on PATH",
+            "no trusted uv binary found; bundle {} with the app, set RUMI_UV_PATH to a user-managed uv binary, install uv into the repo .venv with `pip install uv`, or install uv on PATH",
             config.bundled_uv_path().display()
         )
     })
