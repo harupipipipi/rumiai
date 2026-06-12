@@ -33,11 +33,12 @@ import type {
   AppMode,
   ToolGroup,
 } from "./types";
-import type { ModelCommandCandidate, ModelProfile } from "../lib/api";
+import type { ModelCommandCandidate, ModelProfile, ModelSearchItem } from "../lib/api";
 import { CodingWorkspaceBadge } from "../components/coding/CodingWorkspaceBadge";
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
+import { chatComposerResources } from "../features/chat/resources/chatComposerResources";
 import { fileToAttachment } from "../lib/attachments";
 import { composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
@@ -461,6 +462,8 @@ const API_KEY_PROVIDER_IDS = new Set([
   "groq",
   "longcat",
   "mistral",
+  "opencode-go",
+  "opencode-zen",
   "openai",
   "openai_compatible",
   "openrouter",
@@ -586,6 +589,36 @@ function modelProfileSearchText(profile: ModelProfile): string {
     ...(profile.capability_tags ?? []),
     ...(profile.recommended_roles ?? []),
   ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function modelSearchItemToProfile(item: ModelSearchItem): ModelProfile {
+  const providerId = String(item.provider_id ?? "").trim();
+  const modelId = String(item.model_id ?? "").trim();
+  const profileId = String(item.profile_id ?? item.qualified_model_id ?? (providerId && modelId ? `${providerId}/${modelId}` : "")).trim();
+  const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : undefined;
+  const rawMaxContext = Number((metadata as Record<string, unknown> | undefined)?.max_context ?? NaN);
+  return {
+    profile_id: profileId,
+    qualified_model_id: String(item.qualified_model_id ?? profileId).trim() || profileId,
+    display_name: String(item.display_name ?? item.label ?? profileId).trim() || profileId,
+    provider_id: providerId,
+    provider_display_name: String(item.provider_display_name ?? providerId).trim() || providerId,
+    model_id: modelId,
+    max_context: Number.isFinite(rawMaxContext) ? rawMaxContext : undefined,
+    max_context_tokens: Number.isFinite(rawMaxContext) ? rawMaxContext : undefined,
+    supports_thinking: item.supports_thinking,
+    supports_vision: item.supports_vision,
+    supports_image_input: item.supports_image_input,
+    supports_tool_calling: item.supports_tool_calling,
+    supports_fast: item.supports_fast,
+    speed_tier: item.speed_tier,
+    quality_tier: item.quality_tier,
+    cost_tier: item.cost_tier,
+    knowledge_level: item.knowledge_level,
+    capability_tags: item.capability_tags,
+    availability: item.availability,
+    metadata,
+  };
 }
 
 export function filterModelProfilesBySearch(profiles: ModelProfile[], search: string): ModelProfile[] {
@@ -865,22 +898,60 @@ function ModelDropdown({
   selectedProfile: ModelProfile | null;
   isGenerating: boolean;
   placement?: "above" | "below";
-  onSelect: (profileId: string) => void;
+  onSelect: (profile: ModelProfile) => void;
   onClose: () => void;
 }) {
   const [search, setSearch] = useState("");
+  const [remoteProfiles, setRemoteProfiles] = useState<ModelProfile[]>([]);
+  const searchRequestSeqRef = useRef(0);
+  const trimmedSearch = search.trim();
   const filtered = useMemo(() => filterModelProfilesBySearch(profiles, search), [profiles, search]);
+
+  useEffect(() => {
+    searchRequestSeqRef.current += 1;
+    const requestSeq = searchRequestSeqRef.current;
+    if (!trimmedSearch) {
+      setRemoteProfiles([]);
+      return;
+    }
+    let disposed = false;
+    const timer = window.setTimeout(() => {
+      chatComposerResources.searchModels({ query: trimmedSearch, max_results: 30 })
+        .then((result) => {
+          if (disposed || requestSeq !== searchRequestSeqRef.current) return;
+          setRemoteProfiles((result.models ?? []).map(modelSearchItemToProfile));
+        })
+        .catch(() => {
+          if (disposed || requestSeq !== searchRequestSeqRef.current) return;
+          setRemoteProfiles([]);
+        });
+    }, 160);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+    };
+  }, [trimmedSearch]);
+
+  const visibleProfiles = useMemo(() => {
+    const byId = new Map<string, ModelProfile>();
+    for (const profile of [...filtered, ...remoteProfiles]) {
+      const key = profile.profile_id || profile.qualified_model_id || `${profile.provider_id ?? ""}/${profile.model_id ?? ""}`;
+      if (!key || byId.has(key)) continue;
+      byId.set(key, profile);
+    }
+    return [...byId.values()];
+  }, [filtered, remoteProfiles]);
 
   const groupedByProvider = useMemo(() => {
     const map = new Map<string, ModelProfile[]>();
-    for (const profile of filtered) {
+    for (const profile of visibleProfiles) {
       const provider = profile.provider_id ?? "other";
       const list = map.get(provider) ?? [];
       list.push(profile);
       map.set(provider, list);
     }
     return [...map.entries()];
-  }, [filtered]);
+  }, [visibleProfiles]);
 
   return (
     <>
@@ -924,7 +995,7 @@ function ModelDropdown({
                       event.dataTransfer.effectAllowed = "copy";
                     }}
                     onClick={() => {
-                      onSelect(profile.profile_id);
+                      onSelect(profile);
                       onClose();
                     }}
                     className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left transition-colors hover:bg-zinc-800/80 disabled:opacity-50 ${
@@ -2323,7 +2394,7 @@ export function ComposerRenderer({
                 selectedProfile={selectedProfile}
                 isGenerating={isGenerating}
                 placement={isNewConversation ? "below" : "above"}
-                onSelect={requestModelProfileSelect}
+                onSelect={(profile) => requestModelProfileSelect(profile.profile_id)}
                 onClose={() => setModelDropdownOpen(false)}
               />
             )}

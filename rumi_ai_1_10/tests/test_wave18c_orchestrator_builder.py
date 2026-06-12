@@ -185,8 +185,8 @@ class TestOrchestratorUsesDockerRunBuilder:
         """#4: --network=none が含まれる"""
         orch = _make_orchestrator()
         cmd = _capture_docker_run_cmd(orch)
-        expected_network = "--network=bridge" if sys.platform == "win32" else "--network=none"
-        assert expected_network in cmd
+        assert "--network=none" in cmd
+        assert "--network=bridge" not in cmd
 
     def test_05_cap_drop_all(self):
         """#5: --cap-drop=ALL が含まれる"""
@@ -214,10 +214,7 @@ class TestOrchestratorUsesDockerRunBuilder:
         """#8: --dns=127.0.0.1 が含まれる（旧実装では欠落）"""
         orch = _make_orchestrator()
         cmd = _capture_docker_run_cmd(orch)
-        if sys.platform == "win32":
-            assert "--dns=127.0.0.1" not in cmd
-        else:
-            assert "--dns=127.0.0.1" in cmd
+        assert "--dns=127.0.0.1" in cmd
 
     def test_09_label_pack_id(self):
         """#9: --label rumi.pack_id={pack_id} が含まれる"""
@@ -284,8 +281,8 @@ class TestOrchestratorUsesDockerRunBuilder:
         egress_env = [e for e in env_args if e.startswith("RUMI_EGRESS_SOCKET=")]
         assert len(egress_env) == 1
 
-    def test_12b_egress_tcp_fallback_on_windows(self):
-        """#12b: Windows uses TCP fallback instead of a UDS mount."""
+    def test_12b_egress_tcp_fallback_not_exposed_to_windows_pack_container(self):
+        """#12b: Windows pack containers keep no-network isolation instead of TCP bridge env."""
         orch = _make_orchestrator()
         cmd = _capture_docker_run_cmd(
             orch,
@@ -294,9 +291,11 @@ class TestOrchestratorUsesDockerRunBuilder:
             platform="win32",
         )
         env_args = _option_values(cmd, "-e")
-        assert "RUMI_EGRESS_HOST=host.docker.internal" in env_args
-        assert "RUMI_EGRESS_PORT=18081" in env_args
-        assert "RUMI_EGRESS_TOKEN=egress-token" in env_args
+        assert "--network=none" in cmd
+        assert "--network=bridge" not in cmd
+        assert not any(e.startswith("RUMI_EGRESS_HOST=") for e in env_args)
+        assert not any(e.startswith("RUMI_EGRESS_PORT=") for e in env_args)
+        assert not any(e.startswith("RUMI_EGRESS_TOKEN=") for e in env_args)
         assert not any("egress.sock" in v for v in _option_values(cmd, "-v"))
 
     def test_13_capability_socket_mounted(self):
@@ -319,8 +318,8 @@ class TestOrchestratorUsesDockerRunBuilder:
         cap_env = [e for e in env_args if e.startswith("RUMI_CAPABILITY_SOCKET=")]
         assert len(cap_env) == 1
 
-    def test_13b_capability_tcp_fallback_on_windows(self):
-        """#13b: Windows uses TCP fallback instead of a capability UDS mount."""
+    def test_13b_capability_tcp_fallback_not_exposed_to_windows_pack_container(self):
+        """#13b: Windows pack containers keep no-network isolation instead of TCP bridge env."""
         orch = _make_orchestrator()
         cmd = _capture_docker_run_cmd(
             orch,
@@ -329,9 +328,11 @@ class TestOrchestratorUsesDockerRunBuilder:
             platform="win32",
         )
         env_args = _option_values(cmd, "-e")
-        assert "RUMI_CAPABILITY_HOST=host.docker.internal" in env_args
-        assert "RUMI_CAPABILITY_PORT=18082" in env_args
-        assert "RUMI_CAPABILITY_TOKEN=cap-token" in env_args
+        assert "--network=none" in cmd
+        assert "--network=bridge" not in cmd
+        assert not any(e.startswith("RUMI_CAPABILITY_HOST=") for e in env_args)
+        assert not any(e.startswith("RUMI_CAPABILITY_PORT=") for e in env_args)
+        assert not any(e.startswith("RUMI_CAPABILITY_TOKEN=") for e in env_args)
         assert not any("capability.sock" in v for v in _option_values(cmd, "-v"))
 
     def test_14_egress_proxy_unavailable_skips_mount(self):

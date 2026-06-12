@@ -668,4 +668,48 @@
   .page-enter {
     animation: fadeInUp var(--transition-slow) ease-out;
   }
+
+  /* ----------------------------------
+     Luxe control-panel accents
+     Reusable, additive design tokens that reinforce the
+     workspace-as-runtime feel without competing with the theme system.
+     ---------------------------------- */
+  .rumi-control-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.18rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-main);
+    background: color-mix(in srgb, var(--bg-card) 80%, transparent 20%);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .rumi-control-pill-dot {
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 999px;
+    background: currentColor;
+    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 18%, transparent);
+  }
+
+  .rumi-control-divider {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--border) 80%, transparent 20%) 50%,
+      transparent 100%
+    );
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .rumi-control-pill {
+      transition: background-color 200ms ease, border-color 200ms ease;
+    }
+  }
 }

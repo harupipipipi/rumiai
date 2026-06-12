@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   CompanyAgent,
   CompanyChannel,
+  CompanyInboxItem,
   CompanyInboundRoute,
   CompanyMessage,
   CompanyRecord,
+  CompanyRunLink,
   CompanyTask,
   P2PIdentity,
   P2PPeer,
@@ -32,7 +34,40 @@ const TABS: Array<{ id: CompanyTab; label: string; icon: typeof ClipboardList }>
   { id: "p2p", label: "P2P", icon: Share2 },
 ];
 
-export function CompanyWorkspacePanel() {
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function researchSources(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).slice(0, 5);
+}
+
+function researchTaskDescription(query: string, sources: Array<Record<string, unknown>>): string {
+  const lines = [
+    "Deep research request delegated from the president chat.",
+    `Search query: ${query}`,
+  ];
+  if (sources.length > 0) {
+    lines.push("", "DuckDuckGo sources:");
+    sources.forEach((source, index) => {
+      lines.push(`${index + 1}. ${textValue(source.title) || textValue(source.url) || "Untitled source"}`);
+      if (textValue(source.url)) lines.push(`   ${textValue(source.url)}`);
+      if (textValue(source.summary)) lines.push(`   ${textValue(source.summary)}`);
+    });
+  } else {
+    lines.push("", "DuckDuckGo returned no sources. Continue with explicit uncertainty.");
+  }
+  return lines.join("\n");
+}
+
+export function CompanyWorkspacePanel({
+  activeConversationId = null,
+  activeConversationTitle = null,
+}: {
+  activeConversationId?: string | null;
+  activeConversationTitle?: string | null;
+}) {
   const [companies, setCompanies] = useState<CompanyRecord[]>([]);
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
   const [company, setCompany] = useState<CompanyRecord | null>(null);
@@ -40,6 +75,8 @@ export function CompanyWorkspacePanel() {
   const [channels, setChannels] = useState<CompanyChannel[]>([]);
   const [messages, setMessages] = useState<CompanyMessage[]>([]);
   const [tasks, setTasks] = useState<CompanyTask[]>([]);
+  const [runs, setRuns] = useState<CompanyRunLink[]>([]);
+  const [inboxItems, setInboxItems] = useState<CompanyInboxItem[]>([]);
   const [routes, setRoutes] = useState<CompanyInboundRoute[]>([]);
   const [p2pStatus, setP2PStatus] = useState<P2PStatusResponse | null>(null);
   const [p2pIdentity, setP2PIdentity] = useState<P2PIdentity | null>(null);
@@ -48,19 +85,44 @@ export function CompanyWorkspacePanel() {
   const [activeTab, setActiveTab] = useState<CompanyTab>("tasks");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasActiveConversation = Boolean(activeConversationId);
 
   const effectiveCompanies = useMemo(() => {
+    if (activeConversationId) return company ? [company] : [];
     if (!company) return companies;
     return [company, ...companies.filter((item) => item.id !== company.id)];
-  }, [companies, company]);
+  }, [activeConversationId, companies, company]);
 
   const loadCompany = useCallback(async (requestedCompanyId?: string | null) => {
     setBusy(true);
     setError(null);
     try {
+      if (!requestedCompanyId && !activeConversationId) {
+        setCompanies([]);
+        setActiveCompanyId(null);
+        setCompany(null);
+        setAgents([]);
+        setChannels([]);
+        setTasks([]);
+        setRuns([]);
+        setInboxItems([]);
+        setRoutes([]);
+        setMessages([]);
+        setP2PStatus(null);
+        setP2PIdentity(null);
+        setPeers([]);
+        setActiveChannelId(null);
+        return;
+      }
+
+      const statusTarget = requestedCompanyId
+        ? requestedCompanyId
+        : activeConversationId
+          ? { conversationId: activeConversationId, bootstrap: true }
+          : activeCompanyId ?? undefined;
       const [companyListResult, statusResult, p2pStatusResult, p2pIdentityResult, peersResult] = await Promise.allSettled([
         companyResources.listCompanies(),
-        companyResources.getCompanyStatus(requestedCompanyId ?? activeCompanyId ?? undefined),
+        companyResources.getCompanyStatus(statusTarget),
         companyResources.getP2PStatus(),
         companyResources.getP2PIdentity(),
         companyResources.listP2PPeers(),
@@ -68,8 +130,8 @@ export function CompanyWorkspacePanel() {
 
       const listedCompanies = companyListResult.status === "fulfilled" ? companyListResult.value.companies : [];
       const statusCompany = statusResult.status === "fulfilled" ? statusResult.value.company ?? null : null;
-      const selectedId = requestedCompanyId ?? statusCompany?.id ?? activeCompanyId ?? listedCompanies[0]?.id ?? null;
-      setCompanies(listedCompanies);
+      const selectedId = requestedCompanyId ?? statusCompany?.id ?? (activeConversationId ? null : activeCompanyId ?? listedCompanies[0]?.id ?? null);
+      setCompanies(activeConversationId ? (statusCompany ? [statusCompany] : []) : listedCompanies);
       setActiveCompanyId(selectedId);
       setCompany(statusCompany);
 
@@ -78,24 +140,35 @@ export function CompanyWorkspacePanel() {
       if (peersResult.status === "fulfilled") setPeers(peersResult.value.peers);
 
       if (selectedId) {
-        const [agentResult, channelResult, taskResult, routeResult, messageResult] = await Promise.allSettled([
+        const [agentResult, channelResult, taskResult, routeResult, messageResult, runResult] = await Promise.allSettled([
           companyResources.listCompanyAgents(selectedId),
           companyResources.listCompanyChannels(selectedId),
           companyResources.listCompanyTasks(selectedId),
           companyResources.listCompanyInboundRoutes(selectedId),
-          companyResources.listCompanyMessages(selectedId, { channel_id: activeChannelId ?? undefined, limit: 80 }),
+          companyResources.listCompanyMessages(selectedId, { limit: 80 }),
+          companyResources.listCompanyRuns(selectedId, { limit: 80 }),
         ]);
-        setAgents(agentResult.status === "fulfilled" ? agentResult.value.agents : arrayFromRecord(statusCompany?.agents));
+        const nextAgents = agentResult.status === "fulfilled" ? agentResult.value.agents : arrayFromRecord(statusCompany?.agents);
+        setAgents(nextAgents);
         const nextChannels = channelResult.status === "fulfilled" ? channelResult.value.channels : arrayFromRecord(statusCompany?.channels);
         setChannels(nextChannels);
         setActiveChannelId((current) => current ?? nextChannels[0]?.id ?? "ops-company");
         setTasks(taskResult.status === "fulfilled" ? taskResult.value.tasks : arrayFromRecord(statusCompany?.tasks));
         setRoutes(routeResult.status === "fulfilled" ? routeResult.value.routes : arrayFromRecord(statusCompany?.inbound_routes));
         setMessages(messageResult.status === "fulfilled" ? messageResult.value.messages : arrayFromRecord(statusCompany?.messages));
+        setRuns(runResult.status === "fulfilled" ? runResult.value.runs : []);
+        const inboxResults = await Promise.allSettled(
+          nextAgents.map((agent) => companyResources.listCompanyAgentInbox(selectedId, agent.agent_id, { limit: 20 })),
+        );
+        setInboxItems(
+          inboxResults.flatMap((result) => result.status === "fulfilled" ? result.value.inbox : []),
+        );
       } else {
         setAgents([]);
         setChannels([]);
         setTasks([]);
+        setRuns([]);
+        setInboxItems([]);
         setRoutes([]);
         setMessages([]);
       }
@@ -103,16 +176,17 @@ export function CompanyWorkspacePanel() {
       const firstError = [companyListResult, statusResult]
         .find((result) => result.status === "rejected") as PromiseRejectedResult | undefined;
       if (firstError) {
-        setError(firstError.reason instanceof Error ? firstError.reason.message : "Company APIs are unavailable.");
+        setError(firstError.reason instanceof Error ? firstError.reason.message : "Team workspace APIs are unavailable.");
       }
     } finally {
       setBusy(false);
     }
-  }, [activeChannelId, activeCompanyId]);
+  }, [activeCompanyId, activeConversationId]);
 
   useEffect(() => {
+    setActiveCompanyId(null);
     void loadCompany();
-  }, []);
+  }, [activeConversationId]);
 
   const activeCompany = company ?? effectiveCompanies.find((item) => item.id === activeCompanyId) ?? null;
 
@@ -123,7 +197,7 @@ export function CompanyWorkspacePanel() {
       await work();
       await loadCompany(activeCompanyId);
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Company action failed.");
+      setError(actionError instanceof Error ? actionError.message : "Team workspace action failed.");
     } finally {
       setBusy(false);
     }
@@ -131,7 +205,7 @@ export function CompanyWorkspacePanel() {
 
   const renderTab = () => {
     if (!activeCompanyId && activeTab !== "p2p") {
-      return <div className="p-3 text-[12px] text-zinc-500">Bootstrap or select a company workspace.</div>;
+      return <div className="p-3 text-[12px] text-zinc-500">Start or send a chat message to create its team workspace.</div>;
     }
     switch (activeTab) {
       case "channels":
@@ -149,7 +223,15 @@ export function CompanyWorkspacePanel() {
           />
         );
       case "agents":
-        return <CompanyAgentList agents={agents} />;
+        return (
+          <CompanyAgentList
+            agents={agents}
+            runs={runs}
+            inboxItems={inboxItems}
+            busy={busy}
+            onUpsertAgent={(agent) => activeCompanyId && void run(() => companyResources.upsertCompanyAgent(activeCompanyId, agent))}
+          />
+        );
       case "routes":
         return (
           <CompanyInboundRoutesPanel
@@ -184,9 +266,38 @@ export function CompanyWorkspacePanel() {
           <CompanyTaskBoard
             tasks={tasks}
             agents={agents}
+            runs={runs}
             busy={busy}
-            onCreateTask={(title, targetAgentIds) => activeCompanyId && void run(() => companyResources.createCompanyTask(activeCompanyId, { title, target_agent_ids: targetAgentIds }))}
+            onCreateTask={(title, targetAgentIds) => activeCompanyId && void run(() => companyResources.createCompanyTask(activeCompanyId, {
+              title,
+              target_agent_ids: targetAgentIds,
+              source: "president",
+              metadata: {
+                ...(activeConversationId ? { conversation_id: activeConversationId } : {}),
+                ...(activeConversationTitle ? { source_chat_title: activeConversationTitle } : {}),
+                source_message: title,
+              },
+            }))}
+            onCreateResearchTask={(query, targetAgentIds) => activeCompanyId && void run(async () => {
+              const searchResult = await companyResources.webSearch(query, true);
+              const sources = researchSources(searchResult.sources);
+              return companyResources.createCompanyTask(activeCompanyId, {
+                title: `Deep research: ${query}`,
+                description: researchTaskDescription(query, sources),
+                target_agent_ids: targetAgentIds.length > 0 ? targetAgentIds : ["research_specialist"],
+                source: "president_deep_research",
+                metadata: {
+                  ...(activeConversationId ? { conversation_id: activeConversationId } : {}),
+                  ...(activeConversationTitle ? { source_chat_title: activeConversationTitle } : {}),
+                  source_message: query,
+                  research_query: query,
+                  search_provider: textValue(searchResult.provider) || "external_web",
+                  sources,
+                },
+              });
+            })}
             onUpdateTask={(taskId, updates) => activeCompanyId && void run(() => companyResources.updateCompanyTask(activeCompanyId, taskId, updates))}
+            onDispatchTask={(taskId) => activeCompanyId && void run(() => companyResources.dispatchCompanyTask(activeCompanyId, taskId))}
           />
         );
     }
@@ -195,8 +306,10 @@ export function CompanyWorkspacePanel() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#0a0a0c] text-zinc-300">
       <div className="border-b border-zinc-800/60 px-3 py-2">
-        <p className="truncate text-[13px] font-medium text-zinc-100">Company Workspace</p>
-        <p className="truncate text-[10px] text-zinc-600">{activeCompany?.name ?? "local company operations"}</p>
+        <p className="truncate text-[13px] font-medium text-zinc-100">Team Workspace</p>
+        <p className="truncate text-[10px] text-zinc-600">
+          {activeConversationTitle || activeConversationId || activeCompany?.name || "start a chat to create a team workspace"}
+        </p>
       </div>
 
       {error && (
@@ -210,8 +323,16 @@ export function CompanyWorkspacePanel() {
         companies={effectiveCompanies}
         activeCompanyId={activeCompanyId}
         busy={busy}
+        emptyMessage={hasActiveConversation ? "No team workspace loaded." : "Start or send a chat message to create its team workspace."}
         onSelect={(companyId) => void loadCompany(companyId)}
-        onBootstrap={() => void run(() => companyResources.bootstrapCompanyWorkspace({ source: "webapp" }))}
+        onBootstrap={hasActiveConversation ? () => void run(() => companyResources.bootstrapCompanyWorkspace(
+          {
+            source: "webapp",
+            name: "Executive Team",
+            ...(activeConversationId ? { conversation_id: activeConversationId, scope: "conversation" } : {}),
+          },
+          activeConversationId ? { conversationId: activeConversationId, scope: "conversation" } : undefined,
+        )) : undefined}
         onRefresh={() => void loadCompany(activeCompanyId)}
       />
 

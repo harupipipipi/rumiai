@@ -5,7 +5,8 @@ import re
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -21,9 +22,12 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             / "ecosystem.json"
         )
         data = json.loads(ecosystem_path.read_text(encoding="utf-8"))
+        pack_root = ecosystem_path.parent
 
         class _PackInfo:
             ecosystem = data
+            path = pack_root
+            subdir = pack_root
 
         class _Registry:
             packs = {"defaultspack": _PackInfo()}
@@ -48,12 +52,54 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         )
         self.assertEqual(len(PackAPIHandler._api_route_patterns), 9)
 
+    def test_api_route_blocks_untrusted_pack_function_dispatch(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/evil/run"): {
+                "pack_id": "evil_pack",
+                "handler": "",
+                "function_id": "run",
+                "pass_body": True,
+                "response_mode": "result",
+                "args": {},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        sent = []
+        handler._send_response = lambda response, status_code=200: sent.append((status_code, response))
+
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(
+                    success=False,
+                    error="denied",
+                    error_type="permission_denied",
+                )
+            )
+        )
+        with patch("core_runtime.pack_function_runtime.invoke_pack_function") as mocked:
+            with patch(
+                "core_runtime.capability_executor.get_capability_executor",
+                return_value=executor,
+            ):
+                dispatched = handler._dispatch_api_route(
+                    "POST", "/api/evil/run", {"input": "hello"}
+                )
+
+        self.assertTrue(dispatched)
+        mocked.assert_not_called()
+        executor.execute.assert_called_once()
+        self.assertEqual(sent[0][0], 403)
+
     def test_api_route_dispatches_pack_function(self):
         from core_runtime.pack_api_server import PackAPIHandler
 
         PackAPIHandler._api_route_exact = {
-            ("POST", "/api/example/run"): {
-                "pack_id": "example",
+            ("POST", "/api/defaultspack/run"): {
+                "pack_id": "defaultspack",
                 "handler": "",
                 "function_id": "run",
                 "pass_body": True,
@@ -67,20 +113,32 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         sent = []
         handler._send_result = sent.append
 
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(success=True, output={"ok": True})
+            )
+        )
         with patch(
-            "core_runtime.pack_function_runtime.invoke_pack_function",
-            return_value={"ok": True},
-        ) as mocked:
+            "core_runtime.capability_executor.get_capability_executor",
+            return_value=executor,
+        ):
             dispatched = handler._dispatch_api_route(
-                "POST", "/api/example/run", {"input": "hello"}
+                "POST", "/api/defaultspack/run", {"input": "hello"}
             )
 
         self.assertTrue(dispatched)
-        mocked.assert_called_once_with(
-            "example",
-            "run",
-            {"mode": "fast", "input": "hello"},
-            {"pack_id": "example", "method": "POST", "path": "/api/example/run"},
+        executor.execute.assert_called_once_with(
+            "defaultspack",
+            {
+                "type": "function.call",
+                "qualified_name": "defaultspack:run",
+                "args": {"mode": "fast", "input": "hello"},
+                "context": {
+                    "pack_id": "defaultspack",
+                    "method": "POST",
+                    "path": "/api/defaultspack/run",
+                },
+            },
         )
         self.assertEqual(sent, [{"ok": True}])
 
@@ -108,10 +166,15 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         handler = PackAPIHandler.__new__(PackAPIHandler)
         handler._send_result = lambda result: None
 
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(success=True, output={"ok": True})
+            )
+        )
         with patch(
-            "core_runtime.pack_function_runtime.invoke_pack_function",
-            return_value={"ok": True},
-        ) as mocked:
+            "core_runtime.capability_executor.get_capability_executor",
+            return_value=executor,
+        ):
             dispatched = handler._dispatch_api_route(
                 "POST",
                 "/api/defaultspack/pack-requests/123/approve",
@@ -123,18 +186,21 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             )
 
         self.assertTrue(dispatched)
-        mocked.assert_called_once_with(
+        executor.execute.assert_called_once_with(
             "defaultspack",
-            "review_pack_request",
             {
-                "decision": "approve",
-                "decision_notes": "nope",
-                "request_id": "123",
-            },
-            {
-                "pack_id": "defaultspack",
-                "method": "POST",
-                "path": "/api/defaultspack/pack-requests/123/approve",
+                "type": "function.call",
+                "qualified_name": "defaultspack:review_pack_request",
+                "args": {
+                    "decision": "approve",
+                    "decision_notes": "nope",
+                    "request_id": "123",
+                },
+                "context": {
+                    "pack_id": "defaultspack",
+                    "method": "POST",
+                    "path": "/api/defaultspack/pack-requests/123/approve",
+                },
             },
         )
 

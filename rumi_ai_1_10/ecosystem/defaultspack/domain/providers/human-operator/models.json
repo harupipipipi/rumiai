@@ -1,0 +1,31 @@
+{
+  "models": [
+    {
+      "id": "human-operator/command-canvas",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "human-operator",
+      "model_id": "command-canvas",
+      "display_name": "Human Operator Canvas",
+      "type": "chat",
+      "enabled": true,
+      "priority": 1,
+      "defaults": {
+        "chat": true,
+        "local": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "tool_calls": true,
+        "vision": false,
+        "reasoning": false
+      },
+      "metadata": {
+        "local_only": true,
+        "command_only": true,
+        "human_operator": true
+      }
+    }
+  ]
+}
