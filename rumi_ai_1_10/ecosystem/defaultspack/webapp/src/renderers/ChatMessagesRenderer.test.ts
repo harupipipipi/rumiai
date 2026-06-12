@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isCompactLogLikeMessageText, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups } from "./ChatMessagesRenderer";
+import { compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
@@ -116,6 +116,80 @@ test("empty response warning only appears for finalized agent messages without a
   assert.equal(shouldShowEmptyResponseWarning(emptyCompleted, false), true);
   assert.equal(shouldShowEmptyResponseWarning(textCompleted, false), false);
   assert.equal(shouldShowEmptyResponseWarning(emptyCompleted, true), false);
+});
+
+test("authority approval followup is hidden while waiting response remains during continuation", () => {
+  const waiting = message({
+    id: "authority-waiting",
+    rawText: "モデル/API の使用許可が必要です。承認後に続行します。",
+    content: [{ type: "text", text: "モデル/API の使用許可が必要です。承認後に続行します。" }],
+    metadata: {
+      pendingAuthorityApproval: {
+        request_id: "approval-1",
+        permission_id: "model.invoke",
+      },
+    },
+  });
+  const followup = message({
+    id: "authority-followup",
+    role: "user",
+    rawText: "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。",
+    content: [{ type: "text", text: "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。" }],
+    metadata: {
+      authorityFollowup: {
+        request_id: "approval-1",
+        permission_id: "model.invoke",
+        hidden: true,
+      },
+      chatDisplay: {
+        hidden: true,
+        reason: "authority_followup",
+      },
+    },
+  });
+
+  assert.equal(isAuthorityWaitingMessage(waiting), true);
+  assert.equal(isHiddenAuthorityFollowupMessage(followup), true);
+  assert.deepEqual(visibleChatMessages([waiting, followup]).map((item) => item.id), ["authority-waiting"]);
+});
+
+test("authority waiting message is replaced by the settled assistant continuation", () => {
+  const waiting = message({
+    id: "authority-waiting",
+    rawText: "モデル/API の使用許可が必要です。承認後に続行します。",
+    content: [{ type: "text", text: "モデル/API の使用許可が必要です。承認後に続行します。" }],
+    metadata: {
+      pendingAuthorityApproval: {
+        request_id: "approval-1",
+        permission_id: "model.invoke",
+      },
+    },
+  });
+  const followup = message({
+    id: "authority-followup",
+    role: "user",
+    rawText: "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。",
+    content: [{ type: "text", text: "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。" }],
+    metadata: {
+      authorityFollowup: {
+        request_id: "approval-1",
+        permission_id: "model.invoke",
+        hidden: true,
+      },
+      chatDisplay: {
+        hidden: true,
+        reason: "authority_followup",
+      },
+    },
+  });
+  const continuation = message({
+    id: "authority-continuation",
+    rawText: "Hello! How can I assist you today?",
+    content: [{ type: "text", text: "Hello! How can I assist you today?" }],
+    metadata: { thinkingLabel: "completed" },
+  });
+
+  assert.deepEqual(visibleChatMessages([waiting, followup, continuation]).map((item) => item.id), ["authority-continuation"]);
 });
 
 test("long terminal-style output is detected for compact display", () => {

@@ -327,6 +327,56 @@ test("sendMessage preserves an empty selected tools filter", async () => {
   assert.deepEqual(requestBody?.message?.metadata, { selected_tools: [] });
 });
 
+test("sendMessage preserves authority followup display metadata", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        id: "m-authority-followup",
+        role: "assistant",
+        content: "ok",
+        created_at: 1,
+        conversation_id: "c1",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.sendMessage("c1", "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。", {
+      metadata: {
+        authority_followup: {
+          request_id: "approval-1",
+          permission_id: "model.invoke",
+          approval_token: "token-1",
+          hidden: true,
+        },
+        chat_display: {
+          hidden: true,
+          reason: "authority_followup",
+        },
+        runtime_content: "continue with approved authority",
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody?.message?.metadata?.authority_followup, {
+    request_id: "approval-1",
+    permission_id: "model.invoke",
+    approval_token: "token-1",
+    hidden: true,
+  });
+  assert.deepEqual(requestBody?.message?.metadata?.chat_display, {
+    hidden: true,
+    reason: "authority_followup",
+  });
+  assert.equal(requestBody?.message?.metadata?.runtime_content, "continue with approved authority");
+});
+
 test("searchConversations serializes spotlight search filters", async () => {
   let requestUrl = "";
   let requestBody: any = null;

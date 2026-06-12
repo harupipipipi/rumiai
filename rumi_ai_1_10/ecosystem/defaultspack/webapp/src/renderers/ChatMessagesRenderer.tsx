@@ -1,5 +1,5 @@
 import { AlertTriangle, Check, ChevronRight, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -29,6 +29,8 @@ const LOG_PREVIEW_MIN_CHARS = 1200;
 const LOG_PREVIEW_MAX_CHARS = 2200;
 const LOG_PREVIEW_HEAD_CHARS = 1300;
 const LOG_PREVIEW_TAIL_CHARS = 620;
+const AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。";
+const AUTHORITY_FOLLOWUP_TEXT = "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。";
 const markdownPlugins = [remarkGfm];
 const LOG_LIKE_TOKENS = [
   "\\n",
@@ -267,9 +269,103 @@ function messageVisibleText(message: ChatMessagesRendererProps["messages"][numbe
   return blockText || String(message.rawText ?? "").trim();
 }
 
+function messageMetadataRecord(message: ChatMessagesRendererProps["messages"][number]): Record<string, unknown> {
+  return isRecord(message.metadata) ? message.metadata as Record<string, unknown> : {};
+}
+
+function metadataChildRecord(message: ChatMessagesRendererProps["messages"][number], ...keys: string[]): Record<string, unknown> | null {
+  const metadata = messageMetadataRecord(message);
+  for (const key of keys) {
+    const value = metadata[key];
+    if (isRecord(value)) return value;
+  }
+  return null;
+}
+
+function authorityFollowupRequestId(message: ChatMessagesRendererProps["messages"][number]): string {
+  const followup = metadataChildRecord(message, "authorityFollowup", "authority_followup");
+  return String(followup?.request_id ?? followup?.approval_request_id ?? "").trim();
+}
+
+function isAuthorityPermissionId(value: unknown): boolean {
+  return value === "model.invoke" || value === "api_key.use";
+}
+
+function authorityWaitingRequestId(message: ChatMessagesRendererProps["messages"][number]): string {
+  const pending = metadataChildRecord(message, "pendingAuthorityApproval", "pending_authority_approval");
+  const metadataRequestId = String(pending?.request_id ?? pending?.approval_request_id ?? "").trim();
+  if (metadataRequestId) return metadataRequestId;
+
+  for (const event of message.events ?? []) {
+    if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
+    const requestId = String(event.request_id ?? event.approval_request_id ?? "").trim();
+    const isAuthority = Boolean(
+      event.authority
+      || event.approval_kind === "authority"
+      || isAuthorityPermissionId(event.permission_id),
+    );
+    if (isAuthority && requestId) return requestId;
+  }
+  return "";
+}
+
+export function isHiddenAuthorityFollowupMessage(message: ChatMessagesRendererProps["messages"][number]): boolean {
+  if (message.role !== "user") return false;
+  const followup = metadataChildRecord(message, "authorityFollowup", "authority_followup");
+  const chatDisplay = metadataChildRecord(message, "chatDisplay", "chat_display");
+  const requestId = String(followup?.request_id ?? followup?.approval_request_id ?? "").trim();
+  const hasAuthorityMarker = Boolean(requestId && isAuthorityPermissionId(followup?.permission_id));
+  const text = messageVisibleText(message);
+  if (chatDisplay?.hidden === true && chatDisplay.reason === "authority_followup" && hasAuthorityMarker) return true;
+  return text === AUTHORITY_FOLLOWUP_TEXT && hasAuthorityMarker;
+}
+
+export function isAuthorityWaitingMessage(message: ChatMessagesRendererProps["messages"][number]): boolean {
+  return (
+    message.role === "agent"
+    && messageVisibleText(message) === AUTHORITY_WAITING_TEXT
+    && Boolean(authorityWaitingRequestId(message) || metadataChildRecord(message, "pendingAuthorityApproval", "pending_authority_approval"))
+  );
+}
+
 export function isAwaitingStreamFinalMessage(message: ChatMessagesRendererProps["messages"][number]): boolean {
   const thinkingLabel = String(message.metadata?.thinkingLabel ?? "").trim().toLowerCase();
   return thinkingLabel === "streaming" || thinkingLabel === "running";
+}
+
+function isSettledAuthorityContinuation(message: ChatMessagesRendererProps["messages"][number]): boolean {
+  return (
+    message.role === "agent"
+    && !isAuthorityWaitingMessage(message)
+    && !isAwaitingStreamFinalMessage(message)
+    && messageVisibleText(message).length > 0
+  );
+}
+
+export function visibleChatMessages(messages: ChatMessagesRendererProps["messages"]): ChatMessagesRendererProps["messages"] {
+  const hiddenFollowupIndexes = new Set<number>();
+  const followupIndexByRequestId = new Map<string, number>();
+
+  messages.forEach((message, index) => {
+    if (!isHiddenAuthorityFollowupMessage(message)) return;
+    hiddenFollowupIndexes.add(index);
+    const requestId = authorityFollowupRequestId(message);
+    if (requestId) followupIndexByRequestId.set(requestId, index);
+  });
+
+  const hasSettledContinuationAfter = (index: number): boolean => (
+    messages.some((candidate, candidateIndex) => candidateIndex > index && isSettledAuthorityContinuation(candidate))
+  );
+
+  return messages.filter((message, index) => {
+    if (hiddenFollowupIndexes.has(index)) return false;
+    if (!isAuthorityWaitingMessage(message)) return true;
+
+    const requestId = authorityWaitingRequestId(message);
+    const matchingFollowupIndex = requestId ? followupIndexByRequestId.get(requestId) : undefined;
+    const fallbackFollowupIndex = matchingFollowupIndex ?? [...hiddenFollowupIndexes].find((hiddenIndex) => hiddenIndex > index);
+    return !(fallbackFollowupIndex !== undefined && hasSettledContinuationAfter(fallbackFollowupIndex));
+  });
 }
 
 export function shouldShowEmptyResponseWarning(
@@ -1070,6 +1166,7 @@ export function ChatMessagesRenderer({
   const [imagePreview, setImagePreview] = useState<ImagePreviewRequest | null>(null);
   const [openToolActivityByMessageId, setOpenToolActivityByMessageId] = useState<Record<string, boolean | undefined>>({});
   const hasRunningToolActivity = showActivityInMessages && messages.some((message) => message.role === "agent" && hasRunningToolActivityMessage(message));
+  const visibleMessages = useMemo(() => visibleChatMessages(messages), [messages]);
   const activityNow = useActivityNow(hasRunningToolActivity);
 
   return (
@@ -1085,7 +1182,7 @@ export function ChatMessagesRenderer({
       ) : (
         <div className="flex-1 overflow-x-hidden overflow-y-auto px-5 py-3 md:px-8 lg:px-10 xl:px-12">
           <div className="mx-auto w-full max-w-6xl min-w-0 space-y-4">
-            {messages.map((message) => {
+            {visibleMessages.map((message) => {
               const toolActivity = showActivityInMessages && message.role === "agent"
                 ? toolActivityStateForMessage(message, activityNow)
                 : null;

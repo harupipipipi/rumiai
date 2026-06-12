@@ -1337,15 +1337,29 @@ function normalizeBlocks(message: ChatMessage): ChatContentBlock[] {
   return message.content;
 }
 
+function chatMessageMetadataRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
 function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatUiMessage {
   const isUser = message.role === "user";
   const metadata = message.metadata ?? {};
   const thinking = metadata.thinking as Record<string, unknown> | undefined;
   const timing = metadata.timing as Record<string, unknown> | undefined;
   const pendingApproval = metadata.pending_approval;
+  const pendingAuthorityApproval = chatMessageMetadataRecord(metadata.pendingAuthorityApproval ?? metadata.pending_authority_approval);
+  const authorityFollowup = chatMessageMetadataRecord(metadata.authority_followup ?? metadata.authorityFollowup);
+  const chatDisplay = chatMessageMetadataRecord(metadata.chat_display ?? metadata.chatDisplay);
   const attachedToolCount = Number(metadata.attached_tool_count ?? 0);
   const thinkingDuration = String(timing?.thinking_duration_label ?? "")
     || boundedDurationLabel(timing?.thinking_started_at, timing?.completed_at);
+  const displayMetadata = {
+    ...(authorityFollowup ? { authorityFollowup } : {}),
+    ...(chatDisplay ? { chatDisplay } : {}),
+  };
+  const userMetadata = Object.keys(displayMetadata).length > 0 ? displayMetadata : undefined;
   return {
     id: message.id,
     conversationId: message.conversation_id,
@@ -1357,7 +1371,7 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
     events: message.events ?? [],
     toolLogs: message.tool_logs ?? [],
     metadata: isUser
-      ? undefined
+      ? userMetadata
       : {
           executionTime: formatRelativeTime(message.created_at),
           modelName: profile?.display_name ?? String(message.model ?? ""),
@@ -1368,6 +1382,8 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
           pendingApproval: pendingApproval && typeof pendingApproval === "object" && !Array.isArray(pendingApproval)
             ? pendingApproval as Record<string, unknown>
             : undefined,
+          pendingAuthorityApproval,
+          ...displayMetadata,
         },
   };
 }
@@ -4198,6 +4214,11 @@ export default function App() {
             approval_token: decision.token,
             request_id: authorityApproval.requestId,
             permission_id: authorityApproval.permissionId,
+            hidden: true,
+          },
+          chat_display: {
+            hidden: true,
+            reason: "authority_followup",
           },
           runtime_content: authorityApprovalRuntimeContent(authorityApproval, decision.token),
         },
@@ -5378,7 +5399,7 @@ export default function App() {
                   <AuthorityApprovalCard
                     approval={authorityApproval}
                     title={authorityApprovalTitle(authorityApproval)}
-                    onApprove={(scope) => void approveAuthorityAction(scope)}
+                    onApprove={approveAuthorityAction}
                     onDeny={() => void denyAuthorityAction()}
                   />
                 )}

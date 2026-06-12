@@ -28,6 +28,13 @@ export type ChatUiMessage = {
     thinkingTranscript?: string;
     attachedToolCount?: number;
     pendingApproval?: Record<string, unknown>;
+    pendingAuthorityApproval?: Record<string, unknown>;
+    authorityFollowup?: Record<string, unknown>;
+    chatDisplay?: {
+      hidden?: boolean;
+      reason?: string;
+      [key: string]: unknown;
+    };
   };
   events?: ChatActivityEvent[];
   toolLogs?: ToolLogEntry[];
