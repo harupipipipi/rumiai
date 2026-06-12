@@ -200,6 +200,88 @@ def test_selected_model_is_passed_to_ai_target_judge():
     assert bridge.judge_calls[0]["kwargs"]["preferred_model"] == "demo/model"
 
 
+def test_unapproved_target_resolution_does_not_capture_visual_candidates(monkeypatch):
+    from ecosystem.search_home_pack.domain.search_target_resolver import SearchTargetResolver
+
+    bridge = FakeBridge(
+        search_results=[
+            {"url": "https://example.com/a", "title": "Candidate A", "summary": "First"},
+        ],
+        judge_result={
+            "status": "ok",
+            "best_index": 0,
+            "confidence": 0.9,
+            "reason": "Selected",
+            "ordered_indexes": [0],
+            "reject_reasons": {},
+        },
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("unapproved target resolution must not capture screenshots")
+
+    monkeypatch.setattr(SearchTargetResolver, "_capture_candidate_screenshot", fail_if_called)
+    resolver = SearchTargetResolver(
+        bridge=bridge,
+        probe_fn=_probe,
+        max_visual_candidates=3,
+    )
+
+    decision = resolver.resolve(
+        "candidate a",
+        context={"approved": True, "preferred_model": "demo/vision"},
+    )
+
+    assert decision.target_url == "https://example.com/a"
+    assert bridge.judge_calls
+    assert "screenshot_data_url" not in bridge.judge_calls[0]["candidates"][0]
+    assert "screenshot_path" not in bridge.judge_calls[0]["candidates"][0]
+
+
+def test_approved_target_resolution_can_attach_visual_candidates():
+    from ecosystem.search_home_pack.domain.search_target_resolver import SearchTargetResolver
+
+    bridge = FakeBridge(
+        search_results=[
+            {"url": "https://example.com/a", "title": "Candidate A", "summary": "First"},
+        ],
+        judge_result={
+            "status": "ok",
+            "best_index": 0,
+            "confidence": 0.9,
+            "reason": "Selected",
+            "ordered_indexes": [0],
+            "reject_reasons": {},
+        },
+    )
+    capture_calls = []
+
+    def fake_capture(candidate):
+        capture_calls.append(dict(candidate))
+        return {
+            "data_url": "data:image/png;base64,ZmFrZQ==",
+            "path": "/tmp/search-home-candidate.png",
+        }
+
+    resolver = SearchTargetResolver(
+        bridge=bridge,
+        probe_fn=_probe,
+        screenshot_fn=fake_capture,
+        max_visual_candidates=1,
+    )
+
+    decision = resolver.resolve(
+        "candidate a",
+        context={"_tool_server_approval_token_valid": True, "preferred_model": "demo/vision"},
+    )
+
+    assert capture_calls
+    judged = bridge.judge_calls[0]["candidates"][0]
+    assert judged["screenshot_data_url"] == "data:image/png;base64,ZmFrZQ=="
+    assert judged["screenshot_path"] == "/tmp/search-home-candidate.png"
+    assert decision.target_candidates[0]["screenshot_path"] == "/tmp/search-home-candidate.png"
+
+
 def test_search_failure_returns_google_fallback():
     from ecosystem.search_home_pack.domain.search_target_resolver import SearchTargetResolver
 
@@ -259,9 +341,10 @@ def test_screenshot_failure_continues_with_text_only_judge():
         bridge=bridge,
         probe_fn=_probe,
         screenshot_fn=lambda candidate: (_ for _ in ()).throw(RuntimeError("capture failed")),
+        max_visual_candidates=1,
     )
 
-    decision = resolver.resolve("candidate a")
+    decision = resolver.resolve("candidate a", context={"_tool_server_approval_token_valid": True})
 
     assert decision.target_url == "https://example.com/a"
     assert bridge.judge_calls

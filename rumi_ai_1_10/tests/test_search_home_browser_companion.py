@@ -10,7 +10,14 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
 def test_browser_companion_background_supports_search_home_candidate_navigation():
-    background = (ROOT.parent / "browser_extensions" / "rumi_browser_companion" / "background.js").read_text(encoding="utf-8")
+    background = (
+        ROOT
+        / "ecosystem"
+        / "defaultspack"
+        / "browser_extensions"
+        / "rumi_browser_companion"
+        / "background.js"
+    ).read_text(encoding="utf-8")
 
     assert "rumi:search-home:set-route-state" in background
     assert "rumi:search-home:advance-candidate" in background
@@ -19,7 +26,14 @@ def test_browser_companion_background_supports_search_home_candidate_navigation(
 
 
 def test_browser_companion_content_script_captures_search_home_hotkeys():
-    content = (ROOT.parent / "browser_extensions" / "rumi_browser_companion" / "content_script.js").read_text(encoding="utf-8")
+    content = (
+        ROOT
+        / "ecosystem"
+        / "defaultspack"
+        / "browser_extensions"
+        / "rumi_browser_companion"
+        / "content_script.js"
+    ).read_text(encoding="utf-8")
 
     assert 'window.addEventListener("message"' in content
     assert 'type: "rumi:search-home:set-route-state"' in content

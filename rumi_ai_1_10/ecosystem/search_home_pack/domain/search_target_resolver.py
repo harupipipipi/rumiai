@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import html
-import json
-import os
 import re
 import threading
 import time
@@ -99,15 +97,15 @@ class SearchTargetResolver:
         screenshot_fn: ScreenshotFn | None = None,
         max_search_results: int = 8,
         max_probe_candidates: int = 5,
-        max_visual_candidates: int = 3,
+        max_visual_candidates: int = 0,
         ai_confidence_floor: float = 0.55,
     ) -> None:
         self._bridge = bridge or DefaultspackBridge()
         self._probe_fn = probe_fn or self._probe_candidate
-        self._screenshot_fn = screenshot_fn or self._capture_candidate_screenshot
+        self._screenshot_fn = screenshot_fn
         self._max_search_results = max(1, min(int(max_search_results or 8), 10))
         self._max_probe_candidates = max(1, min(int(max_probe_candidates or 5), 5))
-        self._max_visual_candidates = max(0, min(int(max_visual_candidates or 3), 3))
+        self._max_visual_candidates = max(0, min(int(max_visual_candidates), 3))
         self._ai_confidence_floor = max(0.0, min(float(ai_confidence_floor or 0.55), 1.0))
 
     def resolve(self, query: str, *, context: dict[str, Any] | None = None) -> RouteDecision:
@@ -190,7 +188,7 @@ class SearchTargetResolver:
             )
 
         probed_candidates = self._probe_candidates(candidates, user_query=cleaned)
-        self._attach_screenshots(probed_candidates)
+        self._attach_screenshots(probed_candidates, context=context)
 
         preferred_model = str((context or {}).get("preferred_model") or "").strip()
         judge = self._bridge.judge_search_targets(cleaned, probed_candidates, preferred_model=preferred_model, context=context)
@@ -544,14 +542,16 @@ class SearchTargetResolver:
                 candidate["final_url"] = str(candidate.get("url") or "")
         return results
 
-    def _attach_screenshots(self, candidates: list[dict[str, Any]]) -> None:
+    def _attach_screenshots(self, candidates: list[dict[str, Any]], *, context: dict[str, Any] | None) -> None:
         if self._max_visual_candidates <= 0:
+            return
+        if not self._context_allows_visual_capture(context):
             return
         top = candidates[: self._max_visual_candidates]
         lock = threading.Lock()
         with ThreadPoolExecutor(max_workers=min(len(top), self._max_visual_candidates)) as executor:
             future_map = {
-                executor.submit(self._capture_screenshot_safe, dict(candidate)): candidate
+                executor.submit(self._capture_screenshot_safe, dict(candidate), context): candidate
                 for candidate in top
             }
             for future in as_completed(future_map):
@@ -567,74 +567,60 @@ class SearchTargetResolver:
                     if capture.get("screenshot_error"):
                         candidate["screenshot_error"] = capture.get("screenshot_error")
 
-    def _capture_screenshot_safe(self, candidate: dict[str, Any]) -> dict[str, Any]:
+    def _capture_screenshot_safe(self, candidate: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
         try:
-            return self._screenshot_fn(dict(candidate)) or {}
+            if self._screenshot_fn is not None:
+                return self._screenshot_fn(dict(candidate)) or {}
+            return self._capture_candidate_screenshot(dict(candidate), context=context) or {}
         except Exception as exc:
             return {"screenshot_error": str(exc)}
 
-    def _capture_candidate_screenshot(self, candidate: dict[str, Any]) -> dict[str, Any]:
+    @classmethod
+    def _context_allows_visual_capture(cls, context: dict[str, Any] | None) -> bool:
+        if not isinstance(context, dict):
+            return False
+        if context.get("_tool_server_approval_token_valid") is True:
+            return True
+        policies: list[dict[str, Any]] = []
+        for key in ("profile_policy", "tool_policy"):
+            value = context.get(key)
+            if isinstance(value, dict):
+                policies.append(value)
+        runtime_profile = context.get("runtime_profile")
+        if isinstance(runtime_profile, dict) and isinstance(runtime_profile.get("policy"), dict):
+            policies.append(runtime_profile["policy"])
+        return any(cls._truthy(policy.get("yolo_mode")) for policy in policies)
+
+    @staticmethod
+    def _truthy(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on", "allow", "allowed"}
+        return False
+
+    def _capture_candidate_screenshot(self, candidate: dict[str, Any], *, context: dict[str, Any] | None) -> dict[str, Any]:
         url = str(candidate.get("final_url") or candidate.get("url") or "").strip()
         if not url:
             return {"screenshot_error": "missing_candidate_url"}
-        cdp = self._capture_with_cdp(url)
-        if isinstance(cdp, dict) and cdp.get("data_url"):
-            cdp.setdefault("provider", "browser_cdp")
-            return cdp
-        companion = self._capture_with_browser_companion(url)
+        companion = self._capture_with_browser_companion(url, context=context)
         if isinstance(companion, dict) and companion.get("data_url"):
             companion.setdefault("provider", "browser_companion")
             return companion
-        reason = ""
-        if isinstance(cdp, dict):
-            reason = str(cdp.get("screenshot_error") or "")
-        if not reason and isinstance(companion, dict):
-            reason = str(companion.get("screenshot_error") or "")
+        reason = str(companion.get("screenshot_error") or "") if isinstance(companion, dict) else ""
         return {"screenshot_error": reason or "no_screenshot_provider_available"}
 
-    def _capture_with_cdp(self, url: str) -> dict[str, Any]:
-        try:
-            from ecosystem.rumi_default_tools_pack.domain.browser.cdp_client import BrowserCDPClient, CDPTab
-        except Exception as exc:
-            return {"screenshot_error": f"browser_cdp_import_failed:{exc}"}
-
-        client = BrowserCDPClient(timeout=5.0)
-        if not client.is_available():
-            return {"screenshot_error": "browser_cdp_unavailable"}
-
-        tab = client.resolve_tab(url=url)
-        created_tab_id = ""
-        created_ws_url = ""
-        if tab is None or url not in str(tab.url or ""):
-            try:
-                created = self._open_cdp_tab(client, url)
-                if created is not None:
-                    tab = created
-                    created_tab_id = str(created.id or "")
-                    created_ws_url = str(created.web_socket_debugger_url or "")
-                    time.sleep(max(0.2, float(os.environ.get("SEARCH_HOME_CDP_CAPTURE_WAIT_SECONDS", "1.0"))))
-            except Exception as exc:
-                return {"screenshot_error": f"browser_cdp_open_tab_failed:{exc}"}
-        if tab is None:
-            return {"screenshot_error": "browser_cdp_no_matching_tab"}
-
-        try:
-            capture = client.capture_screenshot(tab)
-        except Exception as exc:
-            return {"screenshot_error": f"browser_cdp_capture_failed:{exc}"}
-        finally:
-            if created_tab_id:
-                self._close_cdp_tab(client, created_tab_id, created_ws_url)
-        return dict(capture or {})
-
-    def _capture_with_browser_companion(self, url: str) -> dict[str, Any]:
+    def _capture_with_browser_companion(self, url: str, *, context: dict[str, Any] | None) -> dict[str, Any]:
         try:
             from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion import BrowserCompanionController
         except Exception as exc:
             return {"screenshot_error": f"browser_companion_import_failed:{exc}"}
 
+        browser_context = dict(context or {})
         controller = BrowserCompanionController()
-        tabs_result = controller.run("browser.tabs", {}, context={})
+        tabs_result = controller.run("browser.tabs", {}, context=browser_context)
         tabs = tabs_result.get("tabs") if isinstance(tabs_result, dict) else None
         if not isinstance(tabs, list):
             return {"screenshot_error": str(tabs_result.get("reason") or "browser_companion_tabs_unavailable") if isinstance(tabs_result, dict) else "browser_companion_tabs_unavailable"}
@@ -653,8 +639,10 @@ class SearchTargetResolver:
         snapshot = controller.run(
             "page.snapshot",
             {"tab_id": matched_tab.get("id"), "include_capture": True},
-            context={},
+            context=browser_context,
         )
+        if isinstance(snapshot, dict) and snapshot.get("requires_approval"):
+            return {"screenshot_error": "browser_companion_capture_requires_approval"}
         if not isinstance(snapshot, dict) or snapshot.get("is_error"):
             return {"screenshot_error": str(snapshot.get("reason") or "browser_companion_capture_failed") if isinstance(snapshot, dict) else "browser_companion_capture_failed"}
         result = {
@@ -665,61 +653,6 @@ class SearchTargetResolver:
         if snapshot.get("path"):
             result["path"] = snapshot.get("path")
         return result
-
-    @staticmethod
-    def _open_cdp_tab(client: Any, url: str) -> Any | None:
-        endpoint = str(getattr(client, "endpoint", "") or "").rstrip("/")
-        if not endpoint:
-            return None
-        request = urllib.request.Request(
-            f"{endpoint}/json/new?{urllib.parse.quote(url, safe='')}",
-            method="PUT",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=float(getattr(client, "timeout", 5.0) or 5.0)) as response:
-                payload = response.read().decode("utf-8")
-        except Exception:
-            with urllib.request.urlopen(f"{endpoint}/json/new?{urllib.parse.quote(url, safe='')}", timeout=float(getattr(client, "timeout", 5.0) or 5.0)) as response:
-                payload = response.read().decode("utf-8")
-        raw = urllib.parse.unquote(payload) if payload.startswith("%7B") else payload
-        try:
-            data = urllib.parse.unquote(raw) if raw.startswith("%7B") else raw
-            parsed = json.loads(data)
-        except json.JSONDecodeError:
-            parsed = {}
-        try:
-            from ecosystem.rumi_default_tools_pack.domain.browser.cdp_client import CDPTab
-        except Exception:
-            return None
-        if not isinstance(parsed, dict):
-            return None
-        return CDPTab(
-            id=str(parsed.get("id") or ""),
-            title=str(parsed.get("title") or ""),
-            url=str(parsed.get("url") or url),
-            web_socket_debugger_url=str(parsed.get("webSocketDebuggerUrl") or ""),
-        )
-
-    @staticmethod
-    def _close_cdp_tab(client: Any, tab_id: str, ws_url: str = "") -> None:
-        endpoint = str(getattr(client, "endpoint", "") or "").rstrip("/")
-        if endpoint and tab_id:
-            try:
-                urllib.request.urlopen(f"{endpoint}/json/close/{urllib.parse.quote(str(tab_id), safe='')}", timeout=float(getattr(client, "timeout", 5.0) or 5.0))
-                return
-            except Exception:
-                pass
-        if ws_url:
-            try:
-                import websocket  # type: ignore[import]
-            except Exception:
-                return
-            try:
-                socket = websocket.create_connection(ws_url, timeout=float(getattr(client, "timeout", 5.0) or 5.0))
-                socket.send('{"id":1,"method":"Page.close"}')
-                socket.close()
-            except Exception:
-                return
 
     def _heuristic_select(
         self,

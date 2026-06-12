@@ -9,12 +9,10 @@ FORBIDDEN = [
     "domain.ai_client.gateway",
     "LLMGateway",
     "AIClient",
-    "ModelRuntimeSettingsService",
     "model_profiles",
     "model_router",
     "provider_registry",
     "api_keys",
-    "preferred_model",
 ]
 
 

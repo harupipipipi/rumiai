@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from core_runtime.interface_registry import InterfaceRegistry
@@ -23,9 +22,6 @@ class _FakeApprovalManager:
 
 def test_search_home_compile_preview_points_surface_launch_target_to_search_home_pack(tmp_path: Path):
     repo_root = Path(__file__).resolve().parent.parent
-    eco_root = tmp_path / "ecosystem"
-    shutil.copytree(repo_root / "ecosystem" / "defaultspack", eco_root / "defaultspack")
-    shutil.copytree(repo_root / "ecosystem" / "search_home_pack", eco_root / "search_home_pack")
 
     manager = StartupProfileManager(
         storage_path=tmp_path / "startup_profiles.json",
@@ -33,7 +29,7 @@ def test_search_home_compile_preview_points_surface_launch_target_to_search_home
         approval_manager=_FakeApprovalManager(
             reason_by_pack={"defaultspack": None, "search_home_pack": None}
         ),
-        ecosystem_dir=str(eco_root),
+        ecosystem_dir=str(repo_root / "ecosystem"),
     )
 
     created = manager.create_profile(

@@ -7,59 +7,119 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+for candidate in (ROOT, DEFAULTSPACK_ROOT):
+    value = str(candidate)
+    if value not in sys.path:
+        sys.path.insert(0, value)
 
-from ecosystem.search_home_pack.domain.route_decision import RouteDecision, decide_route  # noqa: E402
+from ecosystem.search_home_pack.domain.route_decision import (  # noqa: E402
+    ASK_AI_WITH_SEARCH,
+    GOOGLE_REDIRECT,
+    RouteDecision,
+)
+from ecosystem.search_home_pack.domain.search_target_resolver import SearchTargetResolver  # noqa: E402
+
+
+class FakeBridge:
+    def __init__(self, *, search_results=None):
+        self.search_results = [dict(item) for item in (search_results or [])]
+        self.search_calls = []
+
+    def web_search(self, query, *, limit=8, context=None, **kwargs):
+        self.search_calls.append({"query": query, "limit": limit, "context": context})
+        return [dict(item) for item in self.search_results]
+
+    def judge_search_targets(self, user_query, candidates, *, context=None, **kwargs):
+        return {"status": "error", "reason": "not configured"}
+
+
+def _probe(candidate):
+    url = str(candidate.get("url") or "")
+    return {
+        "final_url": url,
+        "status": 200,
+        "title": candidate.get("title") or url,
+        "content_type": "text/html",
+        "redirected": False,
+        "looks_like_login": False,
+        "looks_like_paywall": False,
+        "looks_like_404": False,
+        "looks_like_ad_heavy": False,
+        "is_search_results": False,
+    }
+
+
+def test_route_decision_selected_candidate_and_dict_round_trip():
+    decision = RouteDecision(
+        route_type=GOOGLE_REDIRECT,
+        query="openai docs",
+        target_url="https://platform.openai.com/docs/overview",
+        target_candidates=[
+            {"url": "https://openai.com/", "title": "OpenAI"},
+            {"url": "https://platform.openai.com/docs/overview", "title": "OpenAI Docs"},
+        ],
+        selected_index=1,
+        fallback_url="https://www.google.com/search?q=openai+docs",
+        resolution_reason="heuristic",
+    )
+
+    assert decision.selected_candidate()["title"] == "OpenAI Docs"
+    assert decision.to_dict()["route_type"] == GOOGLE_REDIRECT
+    assert decision.to_dict()["selected_index"] == 1
 
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("https://github.com", "URL_NAVIGATE"),
-        ("github.com/harupipipipi/rumiai", "URL_NAVIGATE"),
-        ("localhost:3000", "URL_NAVIGATE"),
-        ("!g rumiai profile", "GOOGLE_REDIRECT"),
-        ("google: rumiai", "GOOGLE_REDIRECT"),
-        ("!ai rumiai profile設計", "ASK_AI"),
-        ("Go fmtって必要？", "ASK_AI"),
-        ("日東紡 株価", "ASK_AI_WITH_SEARCH"),
-        ("openai 評価額", "ASK_AI_WITH_SEARCH"),
-        ("rumiai PR156 mergeどうする", "ASK_AI_WITH_SEARCH"),
-        ("javascript:alert(1)", "BLOCKED"),
-        ("file:///etc/passwd", "BLOCKED"),
+        ("https://github.com", "https://github.com/"),
+        ("github.com/harupipipipi/rumiai", "https://github.com/harupipipipi/rumiai"),
+        ("localhost:3000", "http://localhost:3000/"),
     ],
 )
-def test_search_home_route(raw: str, expected: str):
-    decision = decide_route(raw)
+def test_direct_url_inputs_resolve_without_search(raw: str, expected: str):
+    bridge = FakeBridge()
+    resolver = SearchTargetResolver(bridge=bridge, probe_fn=_probe)
 
-    assert decision.route == expected
+    decision = resolver.resolve(raw)
 
-
-def test_search_home_ambiguous_input_uses_ai_classifier_when_bridge_is_available():
-    class StubBridge:
-        def classify_with_ai(self, query: str) -> RouteDecision:
-            assert query == "opaque query"
-            return RouteDecision(
-                route="ASK_AI",
-                confidence=0.73,
-                normalized_query=query,
-                reason="AI classifier picked ASK_AI",
-                source="ai",
-            )
-
-    decision = decide_route("opaque query", bridge=StubBridge())
-
-    assert decision.route == "ASK_AI"
-    assert decision.source == "ai"
+    assert decision.route_type == GOOGLE_REDIRECT
+    assert decision.target_url == expected
+    assert decision.selected_index == 0
+    assert bridge.search_calls == []
 
 
-def test_search_home_ambiguous_input_falls_back_to_ai_with_search_when_bridge_fails():
-    class FailingBridge:
-        def classify_with_ai(self, _query: str) -> RouteDecision:
-            raise RuntimeError("runtime unavailable")
+def test_question_like_input_routes_to_ai_with_search():
+    resolver = SearchTargetResolver(bridge=FakeBridge(), probe_fn=_probe)
 
-    decision = decide_route("opaque query", bridge=FailingBridge())
+    decision = resolver.resolve("Go fmtって必要？")
 
-    assert decision.route == "ASK_AI_WITH_SEARCH"
-    assert decision.reason == "ambiguous input defaults to AI with search"
+    assert decision.route_type == ASK_AI_WITH_SEARCH
+    assert decision.target_url == ""
+    assert decision.metadata["selected_tools"] == ["web_search"]
+
+
+def test_unsafe_direct_input_falls_back_to_safe_google_search():
+    resolver = SearchTargetResolver(bridge=FakeBridge(), probe_fn=_probe)
+
+    decision = resolver.resolve("javascript:alert(1)")
+
+    assert decision.route_type == GOOGLE_REDIRECT
+    assert decision.target_url == "https://www.google.com/search?q=javascript%3Aalert%281%29"
+    assert decision.selected_index == -1
+
+
+def test_safe_url_filtering_falls_back_when_no_candidate_survives():
+    bridge = FakeBridge(
+        search_results=[
+            {"url": "file:///etc/passwd", "title": "bad", "summary": "bad"},
+            {"url": "http://127.0.0.1:3000/private", "title": "local", "summary": "local"},
+        ]
+    )
+    resolver = SearchTargetResolver(bridge=bridge, probe_fn=_probe)
+
+    decision = resolver.resolve("private local secret")
+
+    assert decision.target_url == "https://www.google.com/search?q=private+local+secret"
+    assert decision.target_candidates == []
+    assert decision.resolution_reason == "no_candidates_fallback"
