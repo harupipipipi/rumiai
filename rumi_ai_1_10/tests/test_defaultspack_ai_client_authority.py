@@ -91,6 +91,54 @@ def _client(monkeypatch):
     return client
 
 
+class _CompiledProvider:
+    def __init__(self):
+        self._api_key = "compiled-secret"
+        self._api_key_envs = ["OPENAI_API_KEY"]
+        self.request_json_calls = []
+
+    def _request_json(self, path, body):
+        self.request_json_calls.append({"path": path, "body": body, "api_key": self._api_key})
+        raise AssertionError("compiled provider request used API key before api_key.use authority")
+
+
+class _CompiledGateway:
+    def __init__(self, provider):
+        self.provider = provider
+
+    def resolve_provider(self, model):
+        return self.provider, model.split("/", 1)[1] if "/" in model else model
+
+
+def _compiled_prepared_run():
+    from domain.chat.run_request import PreparedChatRun
+
+    return PreparedChatRun(
+        conversation_id="c",
+        conversation={},
+        input_data={},
+        request_id="r",
+        content=[],
+        metadata={},
+        user_message={"id": "u"},
+        model="openai/gpt-5.4",
+        params={},
+        request_context={"authority": {"principal_id": "profile:work"}},
+        tool_context={},
+        standard_messages=[],
+        user_text="hi",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=[],
+        provider_tools=[],
+        tools_called=[],
+        connected_tool_names=set(),
+        call_handler=None,
+        model_routing={},
+        provider_capabilities={"provider_id": "openai", "api_family": "openai_chat"},
+    )
+
+
 def test_ai_client_does_not_read_api_key_before_authority_allow(monkeypatch):
     client = _client(monkeypatch)
     read_calls = []
@@ -129,6 +177,29 @@ def test_ai_client_requires_api_key_use_before_reading_key(monkeypatch):
     assert authority.permissions == ["model.invoke", "api_key.use"]
     assert read_calls == []
     assert client._providers["openai"].calls == []
+
+
+def test_compiled_provider_requires_api_key_use_before_request_json(monkeypatch):
+    from domain.ai_client.client import AuthorityApprovalRequired
+    from domain.chat.stream_engine import ChatRunEngine
+
+    provider = _CompiledProvider()
+    authority = _DenyApiKeyUseAuthority()
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+    monkeypatch.setattr("domain.ai_client.api_key_store.provider_has_api_key", lambda provider_id: False)
+
+    try:
+        ChatRunEngine(store=object(), gateway=_CompiledGateway(provider))._complete_turn_with_compiler(
+            _compiled_prepared_run(),
+            [{"role": "user", "content": "hi"}],
+        )
+    except AuthorityApprovalRequired as exc:
+        assert exc.decision.permission_id == "api_key.use"
+    else:
+        raise AssertionError("AuthorityApprovalRequired was not raised")
+
+    assert authority.permissions == ["model.invoke", "api_key.use"]
+    assert provider.request_json_calls == []
 
 
 def test_ai_client_strips_authority_context_before_provider(monkeypatch):
