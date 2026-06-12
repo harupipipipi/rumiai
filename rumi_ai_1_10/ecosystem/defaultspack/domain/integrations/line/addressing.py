@@ -9,7 +9,7 @@ from typing import Any
 from domain.webhook.endpoint import WebhookEndpoint
 
 
-_LINE_ADDRESSING_DEFAULT_TRIGGERS = ("#",)
+_LINE_ADDRESSING_DEFAULT_TRIGGERS: tuple[str, ...] = ()
 
 
 def decide_line_addressing(
@@ -120,7 +120,7 @@ def _line_trigger_match(text: str, triggers: list[str]) -> str:
         if not candidate:
             continue
         if candidate == "#":
-            if "#" in str(text or ""):
+            if _hash_command_prefix_match(str(text or "")):
                 return candidate
             continue
         folded = candidate.casefold()
@@ -136,6 +136,10 @@ def _line_trigger_match(text: str, triggers: list[str]) -> str:
 
 def _ascii_word(text: str) -> bool:
     return bool(re.fullmatch(r"[a-z0-9_]+", str(text or "")))
+
+
+def _hash_command_prefix_match(text: str) -> bool:
+    return bool(re.match(r"^#(?:\s|$)", str(text or "").lstrip()))
 
 
 def _frontend_settings_path() -> Path:

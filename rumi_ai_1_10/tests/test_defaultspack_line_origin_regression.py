@@ -1025,10 +1025,50 @@ def test_line_default_group_message_ignores_plain_rumi_when_trigger_not_configur
     assert event_result["event"]["metadata"]["line_mention"]["addressed"] is False
 
 
-def test_line_default_group_message_dispatches_for_hash_trigger(monkeypatch, tmp_path):
+def test_line_default_group_message_ignores_unconfigured_hashtag(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
     _install_line_endpoint(monkeypatch, tmp_path, enabled=True, input_profile_id="line.default")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    monkeypatch.setattr(
+        line_block,
+        "dispatch_external_event",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dispatch should not run for unrelated hashtag")),
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-default-group-hashtag",
+                "replyToken": "reply-default-group-hashtag",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "#topic release notes"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    assert event_result["status"] == "ignored"
+    assert event_result["line_addressing"]["addressed"] is False
+    assert event_result["line_addressing"]["signals"] == []
+    assert event_result["event"]["metadata"]["line_mention"]["mentioned"] is False
+    assert event_result["event"]["metadata"]["line_mention"]["addressed"] is False
+
+
+def test_line_default_group_message_dispatches_for_configured_hash_trigger(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.default",
+        metadata={"line_trigger_words": ["#"]},
+    )
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
     captured: dict[str, Any] = {}
 
@@ -1532,6 +1572,28 @@ def test_line_adapter_replies_to_group_origin_without_user_push(monkeypatch):
     assert result["sent"] is True
     assert calls[0]["url"].endswith("/message/reply")
     assert calls[0]["body"] == {"replyToken": "reply-group", "messages": [{"type": "text", "text": "reply"}]}
+
+
+def test_line_adapter_does_not_send_expired_reply_token(monkeypatch):
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(line_adapter_module, "read_external_token", lambda *args, **kwargs: "token")
+    monkeypatch.setattr(line_adapter_module, "post_json", lambda url, headers, body: calls.append(body) or {"ok": True})
+    event = normalize_line_event(
+        {
+            "type": "message",
+            "replyToken": "reply-expired",
+            "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+            "message": {"id": "m1", "type": "text", "text": "hello"},
+        },
+        verified=True,
+    )
+    event.received_at = int(time.time() * 1000) - 61_000
+
+    result = LineResponseAdapter().send({"messages": [{"type": "text", "text": "reply"}]}, event=event)
+
+    assert result["sent"] is False
+    assert result["reason"] == "LINE reply token expired"
+    assert calls == []
 
 
 def test_line_adapter_missing_reply_token_does_not_push_actor_user(monkeypatch):
