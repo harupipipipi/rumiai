@@ -34,6 +34,10 @@ const TABS: Array<{ id: CompanyTab; label: string; icon: typeof ClipboardList }>
   { id: "p2p", label: "P2P", icon: Share2 },
 ];
 
+const PRIMARY_TAB_IDS = new Set<CompanyTab>(["tasks", "channels", "agents"]);
+const PRIMARY_TABS = TABS.filter((tab) => PRIMARY_TAB_IDS.has(tab.id));
+const OVERFLOW_TABS = TABS.filter((tab) => !PRIMARY_TAB_IDS.has(tab.id));
+
 function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -83,9 +87,11 @@ export function CompanyWorkspacePanel({
   const [peers, setPeers] = useState<P2PPeer[]>([]);
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<CompanyTab>("tasks");
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasActiveConversation = Boolean(activeConversationId);
+  const isOverflowTabActive = OVERFLOW_TABS.some((tab) => tab.id === activeTab);
 
   const effectiveCompanies = useMemo(() => {
     if (activeConversationId) return company ? [company] : [];
@@ -203,6 +209,11 @@ export function CompanyWorkspacePanel({
     }
   };
 
+  const selectTab = (tabId: CompanyTab) => {
+    setActiveTab(tabId);
+    setIsMoreMenuOpen(false);
+  };
+
   const renderTab = () => {
     if (!activeCompanyId && activeTab !== "p2p") {
       return <div className="p-3 text-[12px] text-zinc-500">Start or send a chat message to create its employee group.</div>;
@@ -304,7 +315,7 @@ export function CompanyWorkspacePanel({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#0a0a0c] text-zinc-300">
+    <div className="relative flex h-full min-h-0 flex-col bg-[#0a0a0c] text-zinc-300">
       <div className="border-b border-zinc-800/60 px-3 py-2">
         <p className="truncate text-[13px] font-medium text-zinc-100">Employees</p>
         <p className="truncate text-[10px] text-zinc-600">
@@ -336,27 +347,75 @@ export function CompanyWorkspacePanel({
         onRefresh={() => void loadCompany(activeCompanyId)}
       />
 
-      <div className="flex gap-1 overflow-x-auto border-b border-zinc-800/60 p-2">
-        {TABS.map((tab) => {
+      <div className="grid grid-cols-3 gap-1 border-b border-zinc-800/60 p-2">
+        {PRIMARY_TABS.map((tab) => {
           const Icon = tab.icon;
           return (
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] transition-colors ${
+              onClick={() => selectTab(tab.id)}
+              className={`flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-[11px] transition-colors ${
                 activeTab === tab.id ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
               }`}
             >
-              <Icon size={12} />
-              {tab.label}
+              <Icon size={12} className="shrink-0" />
+              <span className="truncate">{tab.label}</span>
             </button>
           );
         })}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto pb-14">
         {renderTab()}
+      </div>
+
+      {isMoreMenuOpen && (
+        <button
+          type="button"
+          aria-label="Close employee workspace options"
+          className="fixed inset-0 rumi-layer-panel cursor-default bg-transparent"
+          onClick={() => setIsMoreMenuOpen(false)}
+        />
+      )}
+      <div className="absolute bottom-3 right-3 rumi-layer-local-popover flex flex-col items-end gap-2">
+        {isMoreMenuOpen && (
+          <div role="menu" className="w-44 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl">
+            {OVERFLOW_TABS.map((tab) => {
+              const Icon = tab.icon;
+              const selected = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => selectTab(tab.id)}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors ${
+                    selected ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+                  }`}
+                >
+                  <Icon size={13} className="shrink-0" />
+                  <span className="truncate">{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <button
+          type="button"
+          aria-label="Employee workspace options"
+          aria-haspopup="menu"
+          aria-expanded={isMoreMenuOpen}
+          onClick={() => setIsMoreMenuOpen((open) => !open)}
+          className={`flex h-9 w-9 items-center justify-center rounded-full border shadow-xl transition-colors ${
+            isMoreMenuOpen || isOverflowTabActive
+              ? "border-zinc-600 bg-zinc-100 text-zinc-950"
+              : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
+          }`}
+          title="Employee workspace options"
+        >
+          <Settings size={16} />
+        </button>
       </div>
     </div>
   );

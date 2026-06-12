@@ -146,6 +146,9 @@ test("company workspace renders a visible empty state before a chat exists", () 
 
   assert.match(html, /Employees/);
   assert.match(html, /Employee Group/);
+  assert.match(html, /Employee workspace options/);
+  assert.doesNotMatch(html, />Routes</);
+  assert.doesNotMatch(html, />P2P</);
   assert.match(html, /Start or send a chat message to create its employee group/);
   assert.doesNotMatch(html, /Rumi Operations Company/);
 });
