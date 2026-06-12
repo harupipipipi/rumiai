@@ -1013,7 +1013,9 @@ def _replace_current_user_content_for_model(
 
 def _conversation_system_prompt(conv: dict[str, Any], manager: Any) -> str:
     from blocks.chat._prompt_helpers import resolve_conversation_system_prompt
-    return resolve_conversation_system_prompt(conv, manager)
+    from domain.kanban.service import append_kanban_system_prompt_note
+
+    return append_kanban_system_prompt_note(resolve_conversation_system_prompt(conv, manager), conv)
 
 
 def _load_active_startup_profile() -> dict[str, Any]:

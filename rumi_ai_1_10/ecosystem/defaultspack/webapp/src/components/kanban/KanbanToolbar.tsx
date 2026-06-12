@@ -18,6 +18,7 @@ function scopeChipLabel(type: KanbanBoardScopeType): string {
   if (type === "conversation") return "chat";
   if (type === "workspace") return "workspace";
   if (type === "company") return "company";
+  if (type === "group") return "group";
   return "runs";
 }
 
@@ -77,7 +78,7 @@ export function KanbanToolbar({
             <input
               value={search}
               onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="Search cards"
+              placeholder="Search cards, chats, groups"
               className="h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 pl-8 pr-2 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
             />
           </div>

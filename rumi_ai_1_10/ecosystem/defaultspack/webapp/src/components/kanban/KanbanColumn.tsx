@@ -1,9 +1,11 @@
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { useDroppable } from "@dnd-kit/core";
 import { CircleCheck, Plus } from "lucide-react";
+import type { DragEvent } from "react";
 
 import type { KanbanCard as KanbanCardRecord, KanbanColumn as KanbanColumnRecord } from "../../lib/api";
 import { cn } from "../../lib/cn";
+import { HISTORY_CHAT_DROP_MIME } from "../../lib/historyComposer";
 import { KanbanCard } from "./KanbanCard";
 
 export function KanbanColumn({
@@ -13,6 +15,8 @@ export function KanbanColumn({
   onCreateCard,
   onEditCard,
   onMoveToColumn,
+  onHistoryChatDrop,
+  onOpenChat,
 }: {
   column: KanbanColumnRecord;
   cards: KanbanCardRecord[];
@@ -20,15 +24,32 @@ export function KanbanColumn({
   onCreateCard: (columnId: string) => void;
   onEditCard: (card: KanbanCardRecord) => void;
   onMoveToColumn: (cardId: string, columnId: string) => void;
+  onHistoryChatDrop?: (columnId: string, rawPayload: string) => void;
+  onOpenChat?: (conversationId: string) => void;
 }) {
   const droppable = useDroppable({ id: column.column_id });
   const done = column.done === true || column.done === 1;
   const wipLimit = typeof column.wip_limit === "number" ? column.wip_limit : null;
   const isOverLimit = wipLimit !== null && cards.length > wipLimit;
+  const handleNativeDragOver = (event: DragEvent<HTMLElement>) => {
+    if (!onHistoryChatDrop || !event.dataTransfer.types.includes(HISTORY_CHAT_DROP_MIME)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+  const handleNativeDrop = (event: DragEvent<HTMLElement>) => {
+    if (!onHistoryChatDrop) return;
+    const rawPayload = event.dataTransfer.getData(HISTORY_CHAT_DROP_MIME);
+    if (!rawPayload) return;
+    event.preventDefault();
+    onHistoryChatDrop(column.column_id, rawPayload);
+  };
 
   return (
     <section
       ref={droppable.setNodeRef}
+      data-kanban-column-id={column.column_id}
+      onDragOver={handleNativeDragOver}
+      onDrop={handleNativeDrop}
       className={cn(
         "flex h-full min-h-0 w-[min(312px,78vw)] shrink-0 flex-col rounded-lg border bg-[#0d0d10]",
         droppable.isOver ? "border-zinc-500 bg-zinc-900/70" : "border-zinc-800/70",
@@ -68,6 +89,7 @@ export function KanbanColumn({
               columns={columns}
               onEdit={onEditCard}
               onMoveToColumn={onMoveToColumn}
+              onOpenChat={onOpenChat}
             />
           ))}
           {cards.length === 0 && (

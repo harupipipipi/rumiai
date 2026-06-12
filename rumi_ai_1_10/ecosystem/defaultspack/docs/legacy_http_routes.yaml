@@ -1301,6 +1301,13 @@ legacy_routes:
   owner: kanban
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: POST
+  pattern: /api/kanban/boards/{board_id}/import-conversation
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
 - method: PUT
   pattern: /api/kanban/cards/{card_id}
   legacy_block_module: blocks.kanban.api

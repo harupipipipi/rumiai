@@ -52,6 +52,7 @@ from domain.chat.public_metadata import compact_provider_planning
 from domain.chat.run_request import PreparedChatRun, prepare_chat_run
 from domain.chat.tool_call_accumulator import ToolCallAccumulator
 from domain.chat.store import ChatStore
+from domain.kanban.chat_sync import sync_conversation_kanban
 from domain.context_engine.compressor import ContextCompressor
 from domain.dev.inspector import Inspector
 from domain.stream.events import run_event, to_legacy_chat_stream_event
@@ -895,6 +896,7 @@ class ChatRunEngine:
                     message="Failed to add assistant message",
                 )
                 return
+            sync_conversation_kanban(prepared.conversation_id, reason="stream_completed")
             draft_completed = True
 
             yield self._emit(

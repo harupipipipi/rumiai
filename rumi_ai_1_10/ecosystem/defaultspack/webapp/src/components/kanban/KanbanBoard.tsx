@@ -26,12 +26,16 @@ export function KanbanBoard({
   onCreateCard,
   onEditCard,
   onMoveCard,
+  onHistoryChatDrop,
+  onOpenChat,
 }: {
   columns: KanbanColumnRecord[];
   cards: KanbanCard[];
   onCreateCard: (columnId: string) => void;
   onEditCard: (card: KanbanCard) => void;
   onMoveCard: (cardId: string, columnId: string, targetIndex?: number) => void;
+  onHistoryChatDrop?: (columnId: string, rawPayload: string) => void;
+  onOpenChat?: (conversationId: string) => void;
 }) {
   const orderedColumns = sortedColumns(columns);
   const sensors = useSensors(
@@ -69,6 +73,8 @@ export function KanbanBoard({
             onCreateCard={onCreateCard}
             onEditCard={onEditCard}
             onMoveToColumn={(cardId, columnId) => onMoveCard(cardId, columnId)}
+            onHistoryChatDrop={onHistoryChatDrop}
+            onOpenChat={onOpenChat}
           />
         ))}
       </div>

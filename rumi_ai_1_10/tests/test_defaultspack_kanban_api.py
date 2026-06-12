@@ -31,6 +31,7 @@ def test_kanban_fallback_route_specs_are_registered():
         ("GET", "/api/kanban/boards/{board_id}"): ({"board_id": "board_id"}, "get_board"),
         ("PUT", "/api/kanban/boards/{board_id}"): ({"board_id": "board_id"}, "update_board"),
         ("POST", "/api/kanban/boards/{board_id}/cards"): ({"board_id": "board_id"}, "create_card"),
+        ("POST", "/api/kanban/boards/{board_id}/import-conversation"): ({"board_id": "board_id"}, "import_conversation"),
         ("PUT", "/api/kanban/cards/{card_id}"): ({"card_id": "card_id"}, "update_card"),
         ("DELETE", "/api/kanban/cards/{card_id}"): ({"card_id": "card_id"}, "delete_card"),
         ("POST", "/api/kanban/cards/{card_id}/move"): ({"card_id": "card_id"}, "move_card"),

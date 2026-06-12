@@ -647,6 +647,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/kanban/boards/{board_id}/cards", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "create_card"}),
     HttpRouteSpec("POST", "/api/kanban/boards/{board_id}/columns", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "create_column"}),
     HttpRouteSpec("POST", "/api/kanban/boards/{board_id}/sync-runs", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "sync_runs"}),
+    HttpRouteSpec("POST", "/api/kanban/boards/{board_id}/import-conversation", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "import_conversation"}),
     HttpRouteSpec("PUT", "/api/kanban/cards/{card_id}", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "update_card"}),
     HttpRouteSpec("DELETE", "/api/kanban/cards/{card_id}", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "delete_card"}),
     HttpRouteSpec("POST", "/api/kanban/cards/{card_id}/move", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "move_card"}),

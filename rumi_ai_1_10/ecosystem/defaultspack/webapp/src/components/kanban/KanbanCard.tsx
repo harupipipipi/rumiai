@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowLeft, ArrowRight, CalendarDays, CheckSquare, ExternalLink, GripVertical, Pencil } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, CheckSquare, ExternalLink, GripVertical, MessageSquareText, Pencil } from "lucide-react";
 
 import type { KanbanCard as KanbanCardRecord, KanbanColumn } from "../../lib/api";
 import { cn } from "../../lib/cn";
@@ -26,11 +26,13 @@ export function KanbanCard({
   columns,
   onEdit,
   onMoveToColumn,
+  onOpenChat,
 }: {
   card: KanbanCardRecord;
   columns: KanbanColumn[];
   onEdit: (card: KanbanCardRecord) => void;
   onMoveToColumn: (cardId: string, columnId: string) => void;
+  onOpenChat?: (conversationId: string) => void;
 }) {
   const sortable = useSortable({ id: card.card_id });
   const style = {
@@ -128,6 +130,17 @@ export function KanbanCard({
       <div className="mt-2 flex items-center justify-between gap-2 border-t border-zinc-900 pt-2">
         <span className="truncate text-[10px] text-zinc-600">{card.source_type || "manual"}</span>
         <div className="flex shrink-0 items-center gap-1">
+          {card.conversation_id && onOpenChat && (
+            <button
+              type="button"
+              onClick={() => onOpenChat(card.conversation_id || "")}
+              className="flex h-6 w-6 items-center justify-center rounded border border-zinc-800 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
+              title="Open linked chat"
+              aria-label="Open linked chat"
+            >
+              <MessageSquareText size={11} />
+            </button>
+          )}
           <button
             type="button"
             disabled={!previousColumn}

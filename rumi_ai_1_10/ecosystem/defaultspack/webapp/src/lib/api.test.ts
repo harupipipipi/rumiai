@@ -180,6 +180,21 @@ test("kanban API methods use first-class board and card routes", async () => {
         },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
+    if (String(input).endsWith("/import-conversation")) {
+      return new Response(JSON.stringify({
+        status: "ok",
+        data: {
+          board: {
+            board_id: "board-1",
+            scope_type: "conversation",
+            scope_id: "conv 1",
+            title: "Chat board",
+          },
+          columns: [],
+          cards: [{ card_id: "card-imported", board_id: "board-1", column_id: "col-1", position: 1000, title: "Imported" }],
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     return new Response(JSON.stringify({
       status: "ok",
       data: {
@@ -195,9 +210,11 @@ test("kanban API methods use first-class board and card routes", async () => {
   try {
     const board = await api.kanbanGetOrCreateBoard({ type: "conversation", id: "conv 1" });
     const card = await api.kanbanCreateCard("board-1", { title: "Fix UI", column_id: "col-1" });
+    const imported = await api.kanbanImportConversation("board-1", { conversation_id: "conv 1", column_id: "col-1" });
 
     assert.equal(board.board.board_id, "board-1");
     assert.equal(card.card_id, "card-1");
+    assert.equal(imported.cards[0]?.card_id, "card-imported");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -207,6 +224,9 @@ test("kanban API methods use first-class board and card routes", async () => {
   assert.equal(requests[1]?.input, "/api/kanban/boards/board-1/cards");
   assert.equal(requests[1]?.init?.method, "POST");
   assert.deepEqual(JSON.parse(String(requests[1]?.init?.body ?? "{}")), { title: "Fix UI", column_id: "col-1" });
+  assert.equal(requests[2]?.input, "/api/kanban/boards/board-1/import-conversation");
+  assert.equal(requests[2]?.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(requests[2]?.init?.body ?? "{}")), { conversation_id: "conv 1", column_id: "col-1" });
 });
 
 test("defaultspack API errors include status and recovery context", () => {

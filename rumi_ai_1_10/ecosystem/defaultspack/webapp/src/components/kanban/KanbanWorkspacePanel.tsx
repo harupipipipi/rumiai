@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { kanbanResources } from "../../features/kanban/resources/kanbanResources";
 import type { KanbanBoardResponse, KanbanBoardScope, KanbanCard, KanbanColumn, KanbanMovePayload, ModelProfile } from "../../lib/api";
 import { cn } from "../../lib/cn";
+import { HISTORY_CHAT_KANBAN_DROP_EVENT, parseHistoryChatDragPayload } from "../../lib/historyComposer";
 import { KanbanBoard } from "./KanbanBoard";
 import { KanbanCardDrawer, type KanbanAgentAction } from "./KanbanCardDrawer";
 import { KanbanToolbar, type KanbanScopeOption } from "./KanbanToolbar";
@@ -16,6 +17,10 @@ type DrawerState =
 export type KanbanWorkspacePanelProps = {
   activeConversationId: string | null;
   activeConversationTitle: string;
+  initialScope?: KanbanBoardScope | null;
+  initialScopeLabel?: string | null;
+  conversationOptions?: KanbanConversationOption[];
+  groupOptions?: KanbanGroupOption[];
   workspaceId?: string | null;
   workspaceLabel?: string | null;
   workspaceRoot?: string | null;
@@ -23,7 +28,20 @@ export type KanbanWorkspacePanelProps = {
   modelId: string;
   modelProfiles: ModelProfile[];
   onOpenChat?: (conversationId: string) => void;
+  onScopeChange?: (scope: KanbanBoardScope, label?: string | null) => void;
   onOpenSettings?: () => void;
+};
+
+export type KanbanConversationOption = {
+  id: string;
+  title: string;
+  groupId?: string | null;
+};
+
+export type KanbanGroupOption = {
+  id: string;
+  title: string;
+  description?: string | null;
 };
 
 const DEFAULT_COLUMN_DEFS = [
@@ -71,6 +89,7 @@ function titleForScope(scope: KanbanBoardScope, title: string, workspaceLabel?: 
   if (scope.type === "conversation") return `${title || "Current Chat"} board`;
   if (scope.type === "workspace") return `${workspaceLabel || scope.id} board`;
   if (scope.type === "company") return "Company board";
+  if (scope.type === "group") return `${title || scope.id} group board`;
   return "All Rumi Runs";
 }
 
@@ -241,9 +260,24 @@ function cardMatchesSearch(card: KanbanCard, query: string): boolean {
     card.agent_status ?? "",
     card.branch ?? "",
     card.source_type ?? "",
+    String(card.metadata?.conversation_title ?? ""),
+    String(card.metadata?.conversation_group_id ?? ""),
+    String((card.metadata?.conversation_import as Record<string, unknown> | undefined)?.conversation_title ?? ""),
+    String((card.metadata?.conversation_import as Record<string, unknown> | undefined)?.conversation_group_id ?? ""),
     ...(card.labels ?? []),
   ].join(" ").toLowerCase();
   return haystack.includes(normalized);
+}
+
+function scopeOptionMatchesSearch(option: KanbanScopeOption, query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+  return [
+    option.label,
+    option.description,
+    option.scope.type,
+    option.scope.id,
+  ].join(" ").toLowerCase().includes(normalized);
 }
 
 function runningAgentStatus(status: string | null | undefined): boolean {
@@ -306,6 +340,10 @@ export async function loadKanbanBoardWithFallback({
 export function KanbanWorkspacePanel({
   activeConversationId,
   activeConversationTitle,
+  initialScope,
+  initialScopeLabel,
+  conversationOptions = [],
+  groupOptions = [],
   workspaceId,
   workspaceLabel,
   workspaceRoot,
@@ -313,9 +351,10 @@ export function KanbanWorkspacePanel({
   modelId,
   modelProfiles,
   onOpenChat,
+  onScopeChange,
   onOpenSettings,
 }: KanbanWorkspacePanelProps) {
-  const [scope, setScope] = useState<KanbanBoardScope>(() => defaultScopeFor({ activeConversationId, workspaceId, companyId }));
+  const [scope, setScope] = useState<KanbanBoardScope>(() => initialScope ?? defaultScopeFor({ activeConversationId, workspaceId, companyId }));
   const [boardData, setBoardData] = useState<KanbanBoardResponse | null>(null);
   const [backendAvailable, setBackendAvailable] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -330,6 +369,11 @@ export function KanbanWorkspacePanel({
     () => defaultScopeFor({ activeConversationId, workspaceId, companyId }),
     [activeConversationId, companyId, workspaceId],
   );
+
+  useEffect(() => {
+    if (!initialScope) return;
+    setScope((current) => scopeKey(current) === scopeKey(initialScope) ? current : initialScope);
+  }, [initialScope]);
 
   useEffect(() => {
     setScope((current) => {
@@ -349,13 +393,34 @@ export function KanbanWorkspacePanel({
     });
   }, [activeConversationId, companyId, defaultScope, workspaceId]);
 
-  const scopeOptions = useMemo<KanbanScopeOption[]>(() => [
-    {
+  const scopeOptions = useMemo<KanbanScopeOption[]>(() => {
+    const activeScopeOption: KanbanScopeOption = {
+      scope,
+      label: initialScopeLabel || (scope.type === "group" ? "Group" : scope.type === "conversation" ? "Chat" : scope.type),
+      description: scope.id,
+    };
+    const baseOptions: KanbanScopeOption[] = [
+      {
+        scope: { type: "global", id: "default" },
+        label: "All Rumi Runs",
+        description: "registered runs",
+      },
+      {
       scope: { type: "conversation", id: activeConversationId ?? "missing" },
       label: "Current Chat",
       description: activeConversationTitle || "conversation",
       disabled: !activeConversationId,
     },
+    ...groupOptions.map((group) => ({
+      scope: { type: "group" as const, id: group.id },
+      label: group.title || group.id,
+      description: group.description || "group board",
+    })),
+    ...conversationOptions.map((conversation) => ({
+      scope: { type: "conversation" as const, id: conversation.id },
+      label: conversation.title || conversation.id,
+      description: conversation.groupId ? `chat in ${conversation.groupId}` : "chat board",
+    })),
     {
       scope: { type: "workspace", id: workspaceId ?? "missing" },
       label: "Workspace",
@@ -368,12 +433,13 @@ export function KanbanWorkspacePanel({
       description: companyId || "company",
       disabled: !companyId,
     },
-    {
-      scope: { type: "global", id: "default" },
-      label: "All Rumi Runs",
-      description: "registered runs",
-    },
-  ], [activeConversationId, activeConversationTitle, companyId, workspaceId, workspaceLabel, workspaceRoot]);
+    ];
+    const byKey = new Map<string, KanbanScopeOption>();
+    for (const option of [activeScopeOption, ...baseOptions]) {
+      byKey.set(scopeKey(option.scope), option);
+    }
+    return [...byKey.values()].filter((option) => scopeKey(option.scope) === scopeKey(scope) || scopeOptionMatchesSearch(option, search));
+  }, [activeConversationId, activeConversationTitle, companyId, conversationOptions, groupOptions, initialScopeLabel, scope, search, workspaceId, workspaceLabel, workspaceRoot]);
 
   const loadBoard = useCallback(async (options?: { retryOnFirstFailure?: boolean }) => {
     const requestId = loadRequestIdRef.current + 1;
@@ -431,6 +497,13 @@ export function KanbanWorkspacePanel({
     const targetColumnId = columnId ?? boardData?.columns[0]?.column_id ?? "";
     if (!targetColumnId) return;
     setDrawer({ mode: "create", columnId: targetColumnId });
+  };
+
+  const commitScopeChange = (nextScope: KanbanBoardScope) => {
+    const option = scopeOptions.find((candidate) => scopeKey(candidate.scope) === scopeKey(nextScope));
+    setScope(nextScope);
+    setDrawer(null);
+    onScopeChange?.(nextScope, option?.label ?? null);
   };
 
   const handleCreateCard = async (updates: Partial<KanbanCard>) => {
@@ -629,6 +702,75 @@ export function KanbanWorkspacePanel({
     }
   };
 
+  const handleHistoryChatDrop = useCallback(async (columnId: string, rawPayload: string) => {
+    if (!boardData) return;
+    const payload = parseHistoryChatDragPayload(rawPayload);
+    if (!payload?.conversationId) {
+      setNotice("Dropped history item could not be read.");
+      return;
+    }
+    setBusy(true);
+    try {
+      if (backendAvailable) {
+        const imported = await kanbanResources.importConversation(boardData.board.board_id, {
+          conversation_id: payload.conversationId,
+          column_id: columnId,
+          title: payload.title,
+          model: modelId,
+          workspace_id: workspaceId ?? null,
+          company_id: companyId ?? null,
+          use_ai: true,
+        });
+        setBoardData(normalizeBoard(imported, scope, activeConversationTitle, workspaceLabel));
+        setNotice(`Imported "${payload.title || payload.conversationId}" into Kanban.`);
+        return;
+      }
+      const created = now();
+      const localCard: KanbanCard = {
+        card_id: `local-history-${created}-${Math.random().toString(36).slice(2)}`,
+        board_id: boardData.board.board_id,
+        column_id: columnId,
+        position: boardData.cards.filter((card) => card.column_id === columnId).length * 1000 + 1000,
+        title: payload.title || "Imported conversation",
+        description: "History conversation linked to this Kanban board.",
+        priority: "normal",
+        assignee: null,
+        due_at: null,
+        labels: ["conversation"],
+        checklist: [],
+        source_type: "conversation",
+        source_id: payload.conversationId,
+        conversation_id: payload.conversationId,
+        workspace_id: workspaceId ?? null,
+        company_id: companyId ?? null,
+        metadata: {
+          conversation_title: payload.title,
+          conversation_group_id: payload.groupId,
+          model_id: modelId,
+          local_fallback: true,
+        },
+        created_at: created,
+        updated_at: created,
+      };
+      setBoardData((current) => current ? insertCard(current, localCard) : current);
+      setNotice("Kanban API is unavailable, so the dropped chat was saved as a local draft card.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to import history chat into Kanban.");
+    } finally {
+      setBusy(false);
+    }
+  }, [activeConversationTitle, backendAvailable, boardData, companyId, modelId, scope, workspaceId, workspaceLabel]);
+
+  useEffect(() => {
+    const handleGlobalHistoryChatDrop = (event: Event) => {
+      const detail = (event as CustomEvent<{ columnId?: string; rawPayload?: string }>).detail;
+      if (!detail?.columnId || !detail.rawPayload) return;
+      void handleHistoryChatDrop(detail.columnId, detail.rawPayload);
+    };
+    window.addEventListener(HISTORY_CHAT_KANBAN_DROP_EVENT, handleGlobalHistoryChatDrop);
+    return () => window.removeEventListener(HISTORY_CHAT_KANBAN_DROP_EVENT, handleGlobalHistoryChatDrop);
+  }, [handleHistoryChatDrop]);
+
   const agentPollIds = useMemo(
     () => (boardData?.cards ?? []).filter((card) => runningAgentStatus(card.agent_status)).map((card) => card.card_id).sort().join("|"),
     [boardData?.cards],
@@ -660,10 +802,7 @@ export function KanbanWorkspacePanel({
           backendAvailable={backendAvailable}
           search={search}
           onSearchChange={setSearch}
-          onScopeChange={(nextScope) => {
-            setScope(nextScope);
-            setDrawer(null);
-          }}
+          onScopeChange={commitScopeChange}
           onCreateCard={() => openCreateCard()}
           onReload={() => void loadBoard()}
           onSyncRuns={() => void handleSyncRuns()}
@@ -696,6 +835,8 @@ export function KanbanWorkspacePanel({
             onCreateCard={openCreateCard}
             onEditCard={(card) => setDrawer({ mode: "edit", cardId: card.card_id })}
             onMoveCard={(cardId, columnId, targetIndex) => void handleMoveCard(cardId, columnId, targetIndex)}
+            onHistoryChatDrop={(columnId, rawPayload) => void handleHistoryChatDrop(columnId, rawPayload)}
+            onOpenChat={onOpenChat}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center text-[12px] text-zinc-600">No board loaded.</div>

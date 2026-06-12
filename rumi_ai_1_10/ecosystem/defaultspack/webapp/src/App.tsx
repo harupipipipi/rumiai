@@ -16,10 +16,10 @@ import {
   type WorkspaceTab,
   type WorkspaceTabKind,
 } from "./components/WorkspaceTabs";
-import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
+import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { authorityApprovalRuntimeContent, pendingAuthorityApproval, type AuthorityApproval } from "./lib/authorityApproval";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
@@ -1234,6 +1234,11 @@ function externalConversationSection(conversation: Conversation): { id: string; 
 function toChatItem(conversation: Conversation): ChatItem {
   const section = externalConversationSection(conversation);
   const metadata = conversation.metadata ?? {};
+  const groupId = cleanOptionalString(conversation.group_id) ?? cleanOptionalString(metadata.group_id ?? metadata.groupId);
+  const normalizedMetadata: Record<string, unknown> = {
+    ...metadata,
+    ...(groupId ? { group_id: groupId } : {}),
+  };
   return {
     id: conversation.id,
     title: conversation.title,
@@ -1246,9 +1251,9 @@ function toChatItem(conversation: Conversation): ChatItem {
     tags: conversation.tags ?? [],
     isStarred: conversation.is_starred,
     isPinned: Boolean(conversation.is_pinned),
-    companyId: typeof metadata.company_id === "string" ? metadata.company_id : null,
-    workspaceId: typeof metadata.workspace_id === "string" ? metadata.workspace_id : null,
-    metadata,
+    companyId: typeof normalizedMetadata.company_id === "string" ? normalizedMetadata.company_id : null,
+    workspaceId: typeof normalizedMetadata.workspace_id === "string" ? normalizedMetadata.workspace_id : null,
+    metadata: normalizedMetadata,
   };
 }
 
@@ -1284,6 +1289,45 @@ function buildChatItems(conversations: Conversation[]): ChatItem[] {
   return conversations
     .filter((conversation) => !childIds.has(conversation.id))
     .map(build);
+}
+
+function visitChatItems(items: ChatItem[], visitor: (chat: ChatItem) => void) {
+  for (const item of items) {
+    visitor(item);
+    visitChatItems(item.children ?? [], visitor);
+  }
+}
+
+function kanbanConversationOptions(chatItems: ChatItem[]): Array<{ id: string; title: string; groupId?: string | null }> {
+  const options: Array<{ id: string; title: string; groupId?: string | null }> = [];
+  visitChatItems(chatItems, (chat) => {
+    options.push({
+      id: chat.id,
+      title: chat.title,
+      groupId: cleanOptionalString(chat.metadata?.group_id ?? chat.metadata?.groupId),
+    });
+  });
+  return options;
+}
+
+function kanbanGroupOptions(chatItems: ChatItem[]): Array<{ id: string; title: string; description?: string | null }> {
+  const groups = new Map<string, { id: string; title: string; count: number }>();
+  visitChatItems(chatItems, (chat) => {
+    const groupId = cleanOptionalString(chat.metadata?.group_id ?? chat.metadata?.groupId);
+    if (!groupId) return;
+    const groupTitle = cleanOptionalString(chat.metadata?.group_title ?? chat.metadata?.groupTitle) ?? groupId;
+    const existing = groups.get(groupId);
+    if (existing) {
+      existing.count += 1;
+      return;
+    }
+    groups.set(groupId, { id: groupId, title: groupTitle, count: 1 });
+  });
+  return [...groups.values()].map((group) => ({
+    id: group.id,
+    title: group.title,
+    description: `${group.count} chats`,
+  }));
 }
 
 function normalizeBlocks(message: ChatMessage): ChatContentBlock[] {
@@ -2196,6 +2240,8 @@ export default function App() {
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
+  const kanbanChatOptions = useMemo(() => kanbanConversationOptions(chatItems), [chatItems]);
+  const kanbanGroups = useMemo(() => kanbanGroupOptions(chatItems), [chatItems]);
   const recentSpotlightResults = useMemo(
     () => conversations
       .filter((conversation) => conversationMatchesSpotlightFilter(conversation, spotlightFilter))
@@ -4967,13 +5013,46 @@ export default function App() {
     }
     handleWorkspaceTabCreate("calendar");
   };
-  const handleKanbanModeToggle = () => {
+
+  const openKanbanScope = (scope: KanbanBoardScope = { type: "global", id: "default" }, label = "All Rumi Runs") => {
     const existingKanbanTab = workspaceTabs.find((tab) => tab.kind === "kanban");
     if (existingKanbanTab) {
-      activateWorkspaceTab(existingKanbanTab);
+      const updatedTab = {
+        ...existingKanbanTab,
+        title: label ? `Kanban: ${label}` : "Kanban",
+        kanbanScope: scope,
+        kanbanScopeLabel: label,
+      };
+      setWorkspaceTabs((current) => current.map((tab) => tab.id === existingKanbanTab.id ? updatedTab : tab));
+      activateWorkspaceTab(updatedTab);
       return;
     }
-    handleWorkspaceTabCreate("kanban");
+    const tab = createWorkspaceTab("kanban", {
+      title: label ? `Kanban: ${label}` : "Kanban",
+      kanbanScope: scope,
+      kanbanScopeLabel: label,
+    });
+    setWorkspaceTabs((current) => [...current, tab]);
+    activateWorkspaceTab(tab);
+  };
+
+  const handleKanbanModeToggle = () => {
+    openKanbanScope();
+  };
+
+  const handleKanbanScopeChange = (scope: KanbanBoardScope, label?: string | null) => {
+    setWorkspaceTabs((current) => current.map((tab) => tab.id === activeWorkspaceTabId && tab.kind === "kanban"
+      ? {
+          ...tab,
+          title: label ? `Kanban: ${label}` : "Kanban",
+          kanbanScope: scope,
+          kanbanScopeLabel: label ?? null,
+        }
+      : tab));
+  };
+
+  const handleHistoryGroupKanbanOpen = (group: ChatGroup) => {
+    openKanbanScope({ type: "group", id: group.id }, group.title);
   };
   const renderComposer = (isCentered = false) => (
     <Renderers.composer
@@ -5065,6 +5144,7 @@ export default function App() {
               onCalendarOpen={handleCalendarModeToggle}
               isCalendarActive={isCalendarMode}
               onKanbanOpen={handleKanbanModeToggle}
+              onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
               isKanbanActive={isKanbanMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
@@ -5092,6 +5172,7 @@ export default function App() {
               onCalendarOpen={handleCalendarModeToggle}
               isCalendarActive={isCalendarMode}
               onKanbanOpen={handleKanbanModeToggle}
+              onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
               isKanbanActive={isKanbanMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
@@ -5164,6 +5245,10 @@ export default function App() {
                 <KanbanWorkspacePanel
                   activeConversationId={activeConversationId}
                   activeConversationTitle={activeChatTitle}
+                  initialScope={activeWorkspaceTab?.kind === "kanban" ? activeWorkspaceTab.kanbanScope ?? null : null}
+                  initialScopeLabel={activeWorkspaceTab?.kind === "kanban" ? activeWorkspaceTab.kanbanScopeLabel ?? null : null}
+                  conversationOptions={kanbanChatOptions}
+                  groupOptions={kanbanGroups}
                   workspaceId={effectiveWorkspaceId}
                   workspaceLabel={activeConversationWorkspaceContext.workspaceLabel}
                   workspaceRoot={activeConversationWorkspaceContext.workspaceRoot}
@@ -5173,6 +5258,7 @@ export default function App() {
                   onOpenChat={(conversationId) => {
                     handleHistoryClick(conversationId);
                   }}
+                  onScopeChange={handleKanbanScopeChange}
                   onOpenSettings={() => setIsSettingsOpen(true)}
                 />
               </div>

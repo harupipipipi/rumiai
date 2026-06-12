@@ -54,6 +54,19 @@ def test_kanban_store_bootstraps_board_and_moves_cards(tmp_path):
     }
 
 
+def test_kanban_store_accepts_group_scope(tmp_path):
+    from domain.kanban.store import KanbanStore
+
+    store = KanbanStore(tmp_path / "kanban.db")
+    board = store.get_or_create_board("group", "group-alpha", title="Alpha board")
+    same = store.get_or_create_board("group", "group-alpha")
+
+    assert board["board_id"] == same["board_id"]
+    assert board["scope_type"] == "group"
+    assert board["scope_id"] == "group-alpha"
+    assert [column["title"] for column in store.list_columns(board["board_id"])] == ["Backlog", "Doing", "Review", "Done"]
+
+
 def test_kanban_service_agent_transitions_are_local_noops(tmp_path):
     from domain.kanban.service import KanbanService
     from domain.kanban.store import KanbanStore

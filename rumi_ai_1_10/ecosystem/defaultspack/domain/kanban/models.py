@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 DEFAULT_COLUMNS = ("Backlog", "Doing", "Review", "Done")
-SCOPE_TYPES = {"conversation", "workspace", "company", "global"}
+SCOPE_TYPES = {"conversation", "workspace", "company", "group", "global"}
 
 
 class KanbanError(RuntimeError):

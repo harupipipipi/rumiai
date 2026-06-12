@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
 
 from domain.chat.store import ChatStore
+from domain.kanban.chat_sync import sync_conversation_kanban
 
 
 def run(input_data, context):
@@ -24,4 +25,5 @@ def run(input_data, context):
     msg = store.add_message(conversation_id, message)
     if msg is None:
         return error("Failed to add message", "INTERNAL_ERROR")
+    sync_conversation_kanban(conversation_id, reason="message_added")
     return ok(msg)

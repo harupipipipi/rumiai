@@ -394,7 +394,7 @@ export type CompanyRunConversationMessage = {
   is_error?: boolean;
 };
 
-export type KanbanBoardScopeType = "conversation" | "workspace" | "company" | "global";
+export type KanbanBoardScopeType = "conversation" | "workspace" | "company" | "group" | "global";
 
 export type KanbanBoardScope = {
   type: KanbanBoardScopeType;
@@ -476,6 +476,12 @@ export type KanbanBoardResponse = {
   columns: KanbanColumn[];
   cards: KanbanCard[];
   events?: KanbanEvent[];
+  imported?: {
+    conversation_id?: string;
+    card_ids?: string[];
+    conversation?: Record<string, unknown>;
+    extraction?: Record<string, unknown>;
+  };
 };
 
 export type KanbanMovePayload = {
@@ -483,6 +489,16 @@ export type KanbanMovePayload = {
   before_card_id?: string | null;
   after_card_id?: string | null;
   position?: number;
+};
+
+export type KanbanImportConversationPayload = {
+  conversation_id: string;
+  column_id?: string | null;
+  title?: string;
+  model?: string;
+  workspace_id?: string | null;
+  company_id?: string | null;
+  use_ai?: boolean;
 };
 
 export type CompanyInboxItem = {
@@ -2373,6 +2389,13 @@ export const api = {
     return request<KanbanBoardResponse>(`/api/kanban/boards/${encodeURIComponent(boardId)}/sync-runs`, {
       method: "POST",
       body: JSON.stringify({}),
+    });
+  },
+
+  kanbanImportConversation(boardId: string, payload: KanbanImportConversationPayload) {
+    return request<KanbanBoardResponse>(`/api/kanban/boards/${encodeURIComponent(boardId)}/import-conversation`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 

@@ -139,6 +139,12 @@
       "description": "Sync agent runs into a Kanban board"
     },
     {
+      "method": "POST",
+      "path": "/api/kanban/boards/{board_id}/import-conversation",
+      "flow_id": "transport_direct",
+      "description": "Import a conversation into a Kanban board"
+    },
+    {
       "method": "PUT",
       "path": "/api/kanban/cards/{card_id}",
       "flow_id": "transport_direct",

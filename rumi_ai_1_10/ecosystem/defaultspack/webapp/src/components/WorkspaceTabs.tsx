@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import type { SidebarItem } from "../lib/api";
+import type { KanbanBoardScope, SidebarItem } from "../lib/api";
 import { cn } from "../lib/cn";
 
 export type WorkspaceTabKind = "chat" | "coding" | "calendar" | "kanban" | "canvas" | "tools" | "browser";
@@ -23,6 +23,8 @@ export type WorkspaceTab = {
   kind: WorkspaceTabKind;
   title: string;
   conversationId?: string | null;
+  kanbanScope?: KanbanBoardScope | null;
+  kanbanScopeLabel?: string | null;
   createdAt: number;
 };
 
@@ -97,13 +99,16 @@ export function createWorkspaceTab(
 ): WorkspaceTab {
   const option = workspaceTabOption(kind);
   workspaceTabCounter += 1;
-  return {
+  const tab: WorkspaceTab = {
     id: overrides.id ?? `workspace-tab-${kind}-${now}-${workspaceTabCounter}`,
     kind,
     title: overrides.title ?? option.label,
     conversationId: overrides.conversationId ?? null,
     createdAt: overrides.createdAt ?? now,
   };
+  if ("kanbanScope" in overrides) tab.kanbanScope = overrides.kanbanScope ?? null;
+  if ("kanbanScopeLabel" in overrides) tab.kanbanScopeLabel = overrides.kanbanScopeLabel ?? null;
+  return tab;
 }
 
 export function workspaceTabDisplayTitle(tab: WorkspaceTab): string {

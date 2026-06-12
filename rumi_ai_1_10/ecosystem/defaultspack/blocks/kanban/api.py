@@ -39,6 +39,8 @@ def run(input_data: Any, context: Any = None) -> dict[str, Any]:
             return ok(service.delete_column(_column_id(payload)))
         if action in {"sync_runs", "sync"}:
             return ok(service.sync_runs(_board_id(payload), payload))
+        if action in {"import_conversation", "sync_conversation"}:
+            return ok(service.import_conversation(_board_id(payload), payload))
         if action == "agent_start":
             return ok(service.agent_start(_card_id(payload), payload))
         if action == "agent_status":

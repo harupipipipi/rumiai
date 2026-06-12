@@ -3,7 +3,7 @@ import type { FormEvent, MutableRefObject, ReactNode } from "react";
 import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ConversationSteerItem, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import type { ComposerCommandItem } from "../lib/api";
-import type { ChatItem, HistoryBoardNewTaskOptions } from "../components/HistoryBoard";
+import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 import type { LocaleSetting } from "../lib/i18n";
 import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
@@ -91,6 +91,7 @@ export type HistoryBoardRendererProps = {
   onCalendarOpen?: () => void;
   isCalendarActive?: boolean;
   onKanbanOpen?: () => void;
+  onGroupKanbanOpen?: (group: ChatGroup) => void;
   isKanbanActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;

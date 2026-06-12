@@ -16,6 +16,7 @@ export const kanbanResources = {
   applyAgent: api.kanbanApplyAgent,
   dismissAgent: api.kanbanDismissAgent,
   syncRuns: api.kanbanSyncRuns,
+  importConversation: api.kanbanImportConversation,
 };
 
 export type {
@@ -26,6 +27,7 @@ export type {
   KanbanCard,
   KanbanChecklistItem,
   KanbanColumn,
+  KanbanImportConversationPayload,
   KanbanMovePayload,
   KanbanPriority,
 } from "../../../lib/api";
