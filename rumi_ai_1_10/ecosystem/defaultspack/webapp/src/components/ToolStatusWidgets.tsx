@@ -33,7 +33,7 @@ export function ToolManagerWidget({
   const blockedEntries = filterEntries.filter((entry) => entry.status === "blocked" || entry.status === "rejected");
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-5 rumi-stagger-tight">
         {countCard("ON", summary.onCount, "text-emerald-300")}
         {countCard("OFF by user", summary.offByUserCount, "text-zinc-300")}
         {countCard("Blocked", summary.blockedCount, "text-amber-300")}

@@ -1631,13 +1631,15 @@ class StartupProfileManager:
             logger.debug("failed to read pack approval for '%s'", pack_id, exc_info=True)
             return []
 
-        if approval is None:
-            return []
+        if approval is None and not hasattr(approval_manager, "is_pack_approved_and_verified"):
+            return [f"Pack '{pack_id}' needs approval before it can be launched."]
 
         try:
             approved, reason = approval_manager.is_pack_approved_and_verified(pack_id)
         except Exception:
             logger.debug("failed to verify pack approval for '%s'", pack_id, exc_info=True)
+            if approval is None:
+                return [f"Pack '{pack_id}' needs approval before it can be launched."]
             return []
 
         if approved:

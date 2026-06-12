@@ -220,7 +220,7 @@ class TestCallingConventionDispatch(unittest.TestCase):
         self.assertTrue(resp.success)
 
     def test_all_valid_conventions_handled(self):
-        """全7つの calling_convention 値がハンドリングされる（エラーでない応答を返す）"""
+        """全7つの calling_convention 値がハンドリングされる"""
         from core_runtime.capability_executor import (
             CapabilityExecutor, CapabilityResponse, _VALID_CALLING_CONVENTIONS,
         )
@@ -237,6 +237,7 @@ class TestCallingConventionDispatch(unittest.TestCase):
         mock_entry.entrypoint = "main.py:run"
         mock_entry.function_dir = "/tmp/test"
         mock_entry.is_builtin = False
+        mock_entry.host_execution = True
 
         # Mock all dispatch methods to return success
         mock_resp = CapabilityResponse(success=True, output={})
@@ -247,23 +248,76 @@ class TestCallingConventionDispatch(unittest.TestCase):
         executor._execute_binary_function = MagicMock(return_value=mock_resp)
         executor._execute_command_function = MagicMock(return_value=mock_resp)
 
-        for cc in _VALID_CALLING_CONVENTIONS:
-            resp = executor._dispatch_by_calling_convention(
-                calling_convention=cc,
-                entry=mock_entry,
-                principal_id="test",
-                effective_permission_id="test.perm",
-                grant_config={},
-                args={},
-                timeout_seconds=30.0,
-                request_id="",
-                start_time=time.time(),
-            )
-            # "kernel" returns error (by design), others should succeed
-            if cc == "kernel":
-                self.assertFalse(resp.success, f"kernel should return error")
-            else:
-                self.assertTrue(resp.success, f"{cc} should be handled successfully")
+        with patch.dict(os.environ, {"RUMI_ALLOW_HOST_EXECUTION": "1"}):
+            for cc in _VALID_CALLING_CONVENTIONS:
+                resp = executor._dispatch_by_calling_convention(
+                    calling_convention=cc,
+                    entry=mock_entry,
+                    principal_id="test",
+                    effective_permission_id="test.perm",
+                    grant_config={},
+                    args={},
+                    timeout_seconds=30.0,
+                    request_id="",
+                    start_time=time.time(),
+                )
+                # "kernel" returns error (by design), others should succeed
+                if cc == "kernel":
+                    self.assertFalse(resp.success, "kernel should return error")
+                else:
+                    self.assertTrue(resp.success, f"{cc} should be handled successfully")
+
+    def test_host_runtime_conventions_require_guard_approval(self):
+        """binary/command は dispatch 時点で host execution guard を通す"""
+        from core_runtime.capability_executor import CapabilityExecutor, CapabilityResponse
+        import time
+
+        executor = CapabilityExecutor()
+        mock_entry = MagicMock()
+        mock_entry.qualified_name = "test:func"
+        mock_entry.entrypoint = "main.py:run"
+        mock_entry.function_dir = "/tmp/test"
+        mock_entry.is_builtin = False
+        mock_resp = CapabilityResponse(success=True, output={})
+        executor._execute_binary_function = MagicMock(return_value=mock_resp)
+        executor._execute_command_function = MagicMock(return_value=mock_resp)
+
+        for cc in ("binary", "command"):
+            with self.subTest(calling_convention=cc, guard="host_execution"):
+                mock_entry.host_execution = False
+                resp = executor._dispatch_by_calling_convention(
+                    calling_convention=cc,
+                    entry=mock_entry,
+                    principal_id="test",
+                    effective_permission_id="test.perm",
+                    grant_config={},
+                    args={},
+                    timeout_seconds=30.0,
+                    request_id="",
+                    start_time=time.time(),
+                )
+                self.assertFalse(resp.success)
+                self.assertEqual(resp.error_type, "security_violation")
+
+            with self.subTest(calling_convention=cc, guard="env"):
+                mock_entry.host_execution = True
+                with patch.dict(os.environ, {"RUMI_ALLOW_HOST_EXECUTION": ""}):
+                    resp = executor._dispatch_by_calling_convention(
+                        calling_convention=cc,
+                        entry=mock_entry,
+                        principal_id="test",
+                        effective_permission_id="test.perm",
+                        grant_config={},
+                        args={},
+                        timeout_seconds=30.0,
+                        request_id="",
+                        start_time=time.time(),
+                    )
+                self.assertFalse(resp.success)
+                self.assertEqual(resp.error_type, "host_execution_disabled")
+
+        executor._execute_binary_function.assert_not_called()
+        executor._execute_command_function.assert_not_called()
 
 
 class TestManifestCallingConvention(unittest.TestCase):

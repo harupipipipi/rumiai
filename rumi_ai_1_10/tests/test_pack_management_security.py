@@ -11,11 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 class _Approval:
-    def __init__(self, approved: bool):
+    def __init__(self, approved: bool, reason: str = "not_found"):
         self.approved = approved
+        self.reason = reason
 
     def is_pack_approved_and_verified(self, pack_id: str):
-        return self.approved, None if self.approved else "not_found"
+        return self.approved, None if self.approved else self.reason
 
 
 def test_api_routes_skip_unapproved_pack():
@@ -67,6 +68,112 @@ def test_api_route_dispatch_rechecks_pack_approval():
         assert handler._dispatch_api_route("POST", "/api/evil", {"x": 1}) is True
 
     assert sent[0][1] == 403
+
+
+def test_stale_web_mount_stops_matching_after_pack_revoked():
+    from core_runtime.pack_api_server import PackAPIHandler
+
+    approval = _Approval(True)
+    old_manager = PackAPIHandler.approval_manager
+    old_mounts = list(PackAPIHandler._web_mounts)
+    PackAPIHandler.approval_manager = approval
+    PackAPIHandler._web_mounts = [
+        {
+            "path_prefix": "/stale",
+            "web_root": Path("/tmp/stale-pack/web"),
+            "spa_fallback": False,
+            "auth_required": False,
+            "pack_id": "stale_pack",
+        }
+    ]
+    try:
+        handler = object.__new__(PackAPIHandler)
+        assert handler._match_web_mount("/stale/index.html") is not None
+
+        approval.approved = False
+        approval.reason = "not_approved"
+
+        assert handler._match_web_mount("/stale/index.html") is None
+    finally:
+        PackAPIHandler.approval_manager = old_manager
+        PackAPIHandler._web_mounts = old_mounts
+
+
+def test_stale_web_mount_direct_serve_rechecks_hash_state():
+    from core_runtime.pack_api_server import PackAPIHandler
+
+    approval = _Approval(False, reason="hash_mismatch")
+    old_manager = PackAPIHandler.approval_manager
+    PackAPIHandler.approval_manager = approval
+    try:
+        handler = object.__new__(PackAPIHandler)
+        sent = []
+        handler._send_response = lambda response, status=200: sent.append((status, response))
+
+        handler._serve_static_file(
+            "/stale/index.html",
+            {
+                "path_prefix": "/stale",
+                "web_root": Path("/tmp/stale-pack/web"),
+                "spa_fallback": False,
+                "auth_required": False,
+                "pack_id": "stale_pack",
+            },
+        )
+
+        assert sent[0][0] == 403
+    finally:
+        PackAPIHandler.approval_manager = old_manager
+
+
+def test_stale_pre_auth_entry_stops_skipping_auth_after_revoke():
+    from core_runtime.pack_api_server import PackAPIHandler
+
+    approval = _Approval(True)
+    old_manager = PackAPIHandler.approval_manager
+    old_table = list(PackAPIHandler._pre_auth_table)
+    PackAPIHandler.approval_manager = approval
+    PackAPIHandler._pre_auth_table = [
+        {
+            "method": "GET",
+            "path_prefix": "/api/stale",
+            "pack_id": "stale_pack",
+        }
+    ]
+    try:
+        handler = object.__new__(PackAPIHandler)
+        assert handler._is_pre_auth_route("GET", "/api/stale/status") is True
+
+        approval.approved = False
+        approval.reason = "not_approved"
+
+        assert handler._is_pre_auth_route("GET", "/api/stale/status") is False
+    finally:
+        PackAPIHandler.approval_manager = old_manager
+        PackAPIHandler._pre_auth_table = old_table
+
+
+def test_stale_pre_auth_entry_stops_skipping_auth_after_hash_change():
+    from core_runtime.pack_api_server import PackAPIHandler
+
+    approval = _Approval(False, reason="hash_mismatch")
+    old_manager = PackAPIHandler.approval_manager
+    old_table = list(PackAPIHandler._pre_auth_table)
+    PackAPIHandler.approval_manager = approval
+    PackAPIHandler._pre_auth_table = [
+        {
+            "method": "POST",
+            "path": "/api/stale/complete",
+            "pack_id": "stale_pack",
+        }
+    ]
+    try:
+        handler = object.__new__(PackAPIHandler)
+
+        assert handler._is_pre_auth_route("POST", "/api/stale/complete") is False
+    finally:
+        PackAPIHandler.approval_manager = old_manager
+        PackAPIHandler._pre_auth_table = old_table
 
 
 def test_function_registry_trusts_manifest_entrypoint_file(tmp_path):

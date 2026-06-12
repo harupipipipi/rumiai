@@ -3,6 +3,9 @@
   "description": "Observe a desktop application – returns screenshot, AX tree, and capabilities via ComputerSeat.",
   "calling_convention": "subprocess",
   "host_execution": false,
+  "requires_approval": true,
+  "risk_level": "high",
+  "capabilities": ["screen_capture", "accessibility"],
   "input_schema": {
     "type": "object",
     "properties": {

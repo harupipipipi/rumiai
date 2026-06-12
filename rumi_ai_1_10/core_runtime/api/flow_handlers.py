@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from ..flow_context_security import reserved_flow_context_keys
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,16 @@ class FlowHandlersMixin:
         if not isinstance(inputs, dict):
             self._send_response(APIResponse(False, error="'inputs' must be an object"), 400)
             return
+        reserved_keys = reserved_flow_context_keys(inputs)
+        if reserved_keys:
+            self._send_response(
+                APIResponse(
+                    False,
+                    error=f"Reserved flow input key(s) are not allowed: {', '.join(reserved_keys)}",
+                ),
+                400,
+            )
+            return
 
         timeout = body.get("timeout", 300)
         if not isinstance(timeout, (int, float)) or timeout != timeout:
@@ -194,6 +205,13 @@ class FlowHandlersMixin:
 
         if not isinstance(inputs, dict):
             return {"success": False, "error": "'inputs' must be an object", "status_code": 400}
+        reserved_keys = reserved_flow_context_keys(inputs)
+        if reserved_keys:
+            return {
+                "success": False,
+                "error": f"Reserved flow input key(s) are not allowed: {', '.join(reserved_keys)}",
+                "status_code": 400,
+            }
 
         if not isinstance(timeout, (int, float)) or timeout != timeout:
             timeout = 300
