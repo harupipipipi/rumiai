@@ -109,6 +109,35 @@ def test_authority_approve_once_consumes_token(tmp_path, monkeypatch):
     assert second.approval_required is True
 
 
+def test_authority_approve_once_ignores_stream_transport_flag(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "opencode-go",
+        "api_id": "legacy",
+        "model_id": "qwen3.5-plus",
+        "stream": True,
+    }
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=resource,
+        conversation_id="c1",
+    )
+    approval = service.approve_request(decision.request_id, scope="once")
+
+    followup = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource={**resource, "stream": False},
+        conversation_id="c1",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+    )
+
+    assert followup.allowed is True
+
+
 def test_authority_service_resolves_from_di(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUMI_AUTHORITY_MODE", "enforce")

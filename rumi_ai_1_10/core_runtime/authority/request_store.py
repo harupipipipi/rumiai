@@ -115,6 +115,8 @@ class AuthorityRequestStore:
     def _safe_resource(resource: dict[str, Any]) -> dict[str, Any]:
         output: dict[str, Any] = {}
         for key, value in dict(resource or {}).items():
+            if key == "stream":
+                continue
             if key.lower() in {"api_key", "authorization", "token", "secret", "password", "cookie"}:
                 continue
             if isinstance(value, (str, int, float, bool)) or value is None:

@@ -2275,6 +2275,27 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
+  pattern: /api/authority/requests
+  legacy_block_module: blocks.authority.requests
+  replacement_function_id: ''
+  owner: authority
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/authority/requests/{request_id}/approve
+  legacy_block_module: blocks.authority.requests
+  replacement_function_id: ''
+  owner: authority
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/authority/requests/{request_id}/deny
+  legacy_block_module: blocks.authority.requests
+  replacement_function_id: ''
+  owner: authority
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
   pattern: /api/human-operator/conversations/{conversation_id}/sessions/{session_id}
   legacy_block_module: blocks.human_operator.page
   replacement_function_id: ''
