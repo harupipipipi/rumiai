@@ -89,8 +89,8 @@ _UC_MAX_TIMEOUT = 120.0                    # seconds
 _UC_DEFAULT_TIMEOUT = 30.0                 # seconds
 _UC_VALID_RUNTIMES = frozenset({"python", "binary", "command"})
 _FLOW_AUTHORIZATION_SOURCE_UNSET = object()
-_FLOW_AUTHORIZATION_SOURCE_TYPE = ContextVar(
-    "rumi_flow_authorization_source_type",
+_FLOW_AUTHORIZATION_SOURCE_METADATA = ContextVar(
+    "rumi_flow_authorization_source_metadata",
     default=_FLOW_AUTHORIZATION_SOURCE_UNSET,
 )
 
@@ -132,20 +132,38 @@ class KernelFlowExecutionMixin:
             return step.get("depends_on")
         return getattr(step, "depends_on", None)
 
+    @staticmethod
+    def _snapshot_flow_authorization_metadata(ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """Copy source metadata before flow steps can mutate kernel-owned ctx keys."""
+        return {
+            "source_type": ctx.get("_flow_source_type"),
+            "source_file": ctx.get("_flow_source_file"),
+            "source_pack_id": ctx.get("_flow_source_pack_id"),
+        }
+
+    def _get_flow_source_metadata_for_authorization(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """Return the immutable flow source metadata recorded for this step scope."""
+        metadata = _FLOW_AUTHORIZATION_SOURCE_METADATA.get()
+        if metadata is _FLOW_AUTHORIZATION_SOURCE_UNSET:
+            return self._snapshot_flow_authorization_metadata(ctx)
+        if isinstance(metadata, dict):
+            return dict(metadata)
+        return {"source_type": metadata, "source_file": None, "source_pack_id": None}
+
     def _get_flow_source_type_for_authorization(self, ctx: Dict[str, Any]) -> str:
-        """Return the immutable flow source recorded when step execution started."""
-        source_type = _FLOW_AUTHORIZATION_SOURCE_TYPE.get()
-        if source_type is not _FLOW_AUTHORIZATION_SOURCE_UNSET:
-            return str(source_type or "").strip()
-        return str(ctx.get("_flow_source_type") or "").strip()
+        """Return the immutable flow source type recorded when step execution started."""
+        metadata = self._get_flow_source_metadata_for_authorization(ctx)
+        return str(metadata.get("source_type") or "").strip()
 
     def _ensure_flow_authorization_context(self, ctx: Dict[str, Any]) -> Any:
         """Snapshot mutable source metadata before any flow step can alter ctx."""
-        return _FLOW_AUTHORIZATION_SOURCE_TYPE.set(ctx.get("_flow_source_type"))
+        return _FLOW_AUTHORIZATION_SOURCE_METADATA.set(
+            self._snapshot_flow_authorization_metadata(ctx)
+        )
 
     def _clear_flow_authorization_context(self, token: Any) -> None:
         """Remove the immutable source snapshot for a completed flow context."""
-        _FLOW_AUTHORIZATION_SOURCE_TYPE.reset(token)
+        _FLOW_AUTHORIZATION_SOURCE_METADATA.reset(token)
 
     def _is_pack_flow_context(self, ctx: Dict[str, Any]) -> bool:
         """Return True when the current async flow originated from an approved pack."""
@@ -173,6 +191,7 @@ class KernelFlowExecutionMixin:
         phase: str = "flow",
     ) -> None:
         """Record an authorization skip for a blocked pack-flow kernel handler."""
+        source_metadata = self._get_flow_source_metadata_for_authorization(ctx)
         self.diagnostics.record_step(
             phase=phase,
             step_id=f"{step_id or 'unknown'}.kernel_handler.blocked",
@@ -181,8 +200,9 @@ class KernelFlowExecutionMixin:
             meta={
                 "reason": "pack_flow_kernel_handler_not_allowed",
                 "flow_id": ctx.get("_flow_id"),
-                "source_type": self._get_flow_source_type_for_authorization(ctx),
-                "source_pack_id": ctx.get("_flow_source_pack_id"),
+                "source_type": str(source_metadata.get("source_type") or "").strip(),
+                "source_file": source_metadata.get("source_file"),
+                "source_pack_id": source_metadata.get("source_pack_id"),
             },
         )
 
