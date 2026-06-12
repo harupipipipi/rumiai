@@ -5,6 +5,7 @@ import {
   Code2,
   GalleryVerticalEnd,
   Globe,
+  KanbanSquare,
   LayoutGrid,
   MessageSquareText,
   Plus,
@@ -15,7 +16,7 @@ import {
 import type { SidebarItem } from "../lib/api";
 import { cn } from "../lib/cn";
 
-export type WorkspaceTabKind = "chat" | "coding" | "calendar" | "canvas" | "tools" | "browser";
+export type WorkspaceTabKind = "chat" | "coding" | "calendar" | "kanban" | "canvas" | "tools" | "browser";
 
 export type WorkspaceTab = {
   id: string;
@@ -54,6 +55,12 @@ export const WORKSPACE_TAB_CREATE_OPTIONS: WorkspaceTabCreateOption[] = [
     label: "Calendar",
     description: "Schedule board",
     icon: CalendarDays,
+  },
+  {
+    kind: "kanban",
+    label: "Kanban",
+    description: "Task and agent board",
+    icon: KanbanSquare,
   },
   {
     kind: "canvas",

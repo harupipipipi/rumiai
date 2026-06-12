@@ -90,6 +90,8 @@ export type HistoryBoardRendererProps = {
   onNewTask: (options?: HistoryBoardNewTaskOptions) => void;
   onCalendarOpen?: () => void;
   isCalendarActive?: boolean;
+  onKanbanOpen?: () => void;
+  isKanbanActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;

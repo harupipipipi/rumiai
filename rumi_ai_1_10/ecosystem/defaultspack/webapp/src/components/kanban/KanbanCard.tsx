@@ -1,0 +1,164 @@
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { ArrowLeft, ArrowRight, CalendarDays, CheckSquare, ExternalLink, GripVertical, Pencil } from "lucide-react";
+
+import type { KanbanCard as KanbanCardRecord, KanbanColumn } from "../../lib/api";
+import { cn } from "../../lib/cn";
+import { KanbanRunBadge } from "./KanbanRunBadge";
+
+function priorityClassName(priority: string | undefined): string {
+  const normalized = String(priority || "normal").toLowerCase();
+  if (normalized === "urgent") return "border-red-500/30 bg-red-500/10 text-red-200";
+  if (normalized === "high") return "border-orange-500/30 bg-orange-500/10 text-orange-200";
+  if (normalized === "low") return "border-zinc-800 bg-zinc-950/70 text-zinc-500";
+  return "border-zinc-700/70 bg-zinc-900/80 text-zinc-300";
+}
+
+function checklistLabel(card: KanbanCardRecord): string | null {
+  const checklist = card.checklist ?? [];
+  if (!checklist.length) return null;
+  const done = checklist.filter((item) => item.done).length;
+  return `${done}/${checklist.length}`;
+}
+
+export function KanbanCard({
+  card,
+  columns,
+  onEdit,
+  onMoveToColumn,
+}: {
+  card: KanbanCardRecord;
+  columns: KanbanColumn[];
+  onEdit: (card: KanbanCardRecord) => void;
+  onMoveToColumn: (cardId: string, columnId: string) => void;
+}) {
+  const sortable = useSortable({ id: card.card_id });
+  const style = {
+    transform: CSS.Transform.toString(sortable.transform),
+    transition: sortable.transition,
+  };
+  const columnIndex = columns.findIndex((column) => column.column_id === card.column_id);
+  const previousColumn = columnIndex > 0 ? columns[columnIndex - 1] : null;
+  const nextColumn = columnIndex >= 0 && columnIndex < columns.length - 1 ? columns[columnIndex + 1] : null;
+  const checklist = checklistLabel(card);
+  const isBlocked = Boolean(card.blocked_by?.length || String(card.agent_status || "").toLowerCase() === "blocked");
+
+  return (
+    <article
+      ref={sortable.setNodeRef}
+      style={style}
+      className={cn(
+        "group/card rounded-lg border bg-[#111116] p-2.5 shadow-sm transition-colors",
+        sortable.isDragging
+          ? "border-zinc-500 opacity-70"
+          : isBlocked
+            ? "border-red-500/30 hover:border-red-400/50"
+            : "border-zinc-800/80 hover:border-zinc-700",
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <button
+          type="button"
+          {...sortable.attributes}
+          {...sortable.listeners}
+          className="mt-0.5 flex h-5 w-5 shrink-0 cursor-grab items-center justify-center rounded text-zinc-700 transition hover:bg-zinc-900 hover:text-zinc-300 active:cursor-grabbing"
+          aria-label={`Drag ${card.title}`}
+          title="Drag card"
+        >
+          <GripVertical size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() => onEdit(card)}
+          className="min-w-0 flex-1 text-left"
+        >
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold leading-snug text-zinc-100">{card.title}</h4>
+            <span className={cn("shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium", priorityClassName(card.priority))}>
+              {card.priority || "normal"}
+            </span>
+          </div>
+          {card.description && (
+            <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-zinc-500">{card.description}</p>
+          )}
+        </button>
+      </div>
+
+      {card.labels && card.labels.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {card.labels.slice(0, 4).map((label) => (
+            <span key={label} className="rounded-full border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[9px] text-zinc-500">
+              {label}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500">
+        {card.assignee && <span className="truncate rounded border border-zinc-800 px-1.5 py-0.5">{card.assignee}</span>}
+        {card.due_at && (
+          <span className="inline-flex items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5">
+            <CalendarDays size={10} />
+            {card.due_at}
+          </span>
+        )}
+        {checklist && (
+          <span className="inline-flex items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5">
+            <CheckSquare size={10} />
+            {checklist}
+          </span>
+        )}
+        {card.pr_url && (
+          <a
+            href={card.pr_url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 text-sky-300 hover:bg-sky-500/10"
+          >
+            <ExternalLink size={10} />
+            PR
+          </a>
+        )}
+      </div>
+
+      <div className="mt-2">
+        <KanbanRunBadge status={card.agent_status} branch={card.branch} compact />
+      </div>
+
+      <div className="mt-2 flex items-center justify-between gap-2 border-t border-zinc-900 pt-2">
+        <span className="truncate text-[10px] text-zinc-600">{card.source_type || "manual"}</span>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            disabled={!previousColumn}
+            onClick={() => previousColumn && onMoveToColumn(card.card_id, previousColumn.column_id)}
+            className="flex h-6 w-6 items-center justify-center rounded border border-zinc-800 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-30"
+            title="Move left"
+            aria-label="Move left"
+          >
+            <ArrowLeft size={11} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onEdit(card)}
+            className="flex h-6 w-6 items-center justify-center rounded border border-zinc-800 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
+            title="Edit card"
+            aria-label="Edit card"
+          >
+            <Pencil size={11} />
+          </button>
+          <button
+            type="button"
+            disabled={!nextColumn}
+            onClick={() => nextColumn && onMoveToColumn(card.card_id, nextColumn.column_id)}
+            className="flex h-6 w-6 items-center justify-center rounded border border-zinc-800 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-30"
+            title="Move right"
+            aria-label="Move right"
+          >
+            <ArrowRight size={11} />
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}

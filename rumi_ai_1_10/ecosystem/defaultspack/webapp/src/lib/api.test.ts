@@ -160,6 +160,55 @@ test("listModelProfiles bypasses browser cache", async () => {
   assert.equal(requestCache, "no-store");
 });
 
+test("kanban API methods use first-class board and card routes", async () => {
+  const requests: Array<{ input: string; init?: RequestInit }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({ input: String(input), init });
+    if (String(input).startsWith("/api/kanban/boards?")) {
+      return new Response(JSON.stringify({
+        status: "ok",
+        data: {
+          board: {
+            board_id: "board-1",
+            scope_type: "conversation",
+            scope_id: "conv 1",
+            title: "Chat board",
+          },
+          columns: [],
+          cards: [],
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        card_id: "card-1",
+        board_id: "board-1",
+        column_id: "col-1",
+        position: 1000,
+        title: "Fix UI",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const board = await api.kanbanGetOrCreateBoard({ type: "conversation", id: "conv 1" });
+    const card = await api.kanbanCreateCard("board-1", { title: "Fix UI", column_id: "col-1" });
+
+    assert.equal(board.board.board_id, "board-1");
+    assert.equal(card.card_id, "card-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requests[0]?.input, "/api/kanban/boards?scope_type=conversation&scope_id=conv+1&bootstrap=true");
+  assert.equal(requests[0]?.init?.cache, "no-store");
+  assert.equal(requests[1]?.input, "/api/kanban/boards/board-1/cards");
+  assert.equal(requests[1]?.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(requests[1]?.init?.body ?? "{}")), { title: "Fix UI", column_id: "col-1" });
+});
+
 test("defaultspack API errors include status and recovery context", () => {
   const message = explainDefaultspackApiError(403, {
     code: "FORBIDDEN",

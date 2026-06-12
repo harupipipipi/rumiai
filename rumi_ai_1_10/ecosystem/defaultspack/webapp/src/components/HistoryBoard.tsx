@@ -26,7 +26,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Globe, Terminal, MessageSquare, Plus, ChevronRight, Settings,
-  GripVertical, FolderOpen, Folder, PanelLeftOpen, X,
+  GripVertical, FolderOpen, Folder, KanbanSquare, PanelLeftOpen, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -1083,6 +1083,8 @@ interface HistoryBoardProps {
   onNewTask: (options?: HistoryBoardNewTaskOptions) => void;
   onCalendarOpen?: () => void;
   isCalendarActive?: boolean;
+  onKanbanOpen?: () => void;
+  isKanbanActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
@@ -1285,6 +1287,8 @@ export function HistoryBoard({
   onNewTask,
   onCalendarOpen,
   isCalendarActive = false,
+  onKanbanOpen,
+  isKanbanActive = false,
   onSettingsClick,
   onChatMetadataChange,
   onMinimize,
@@ -1825,6 +1829,20 @@ export function HistoryBoard({
           >
             <WarmActionIcon kind="calendar" size="sm" iconClassName="h-3.5 w-3.5" />
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              onKanbanOpen?.();
+            }}
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+              isKanbanActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
+            )}
+            title="Kanban"
+            aria-label="Kanban"
+          >
+            <KanbanSquare size={14} />
+          </button>
         </div>
 
         <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5 py-2">
@@ -1954,6 +1972,23 @@ export function HistoryBoard({
           >
             <WarmActionIcon kind="calendar" size="sm" />
             <span className="truncate">Calendar</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onKanbanOpen?.();
+            }}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
+              isKanbanActive
+                ? "bg-zinc-800/80 text-zinc-100"
+                : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
+            )}
+            title="Kanban"
+            aria-expanded={isKanbanActive}
+          >
+            <KanbanSquare size={15} className="shrink-0 text-zinc-500" />
+            <span className="truncate">Kanban</span>
           </button>
           <ConversationSearchBar value={searchQuery} resultCount={visibleChatCount} onChange={setSearchQuery} />
           <ConversationTagFilter tags={allTags} activeTag={activeTag} onChange={setActiveTag} />

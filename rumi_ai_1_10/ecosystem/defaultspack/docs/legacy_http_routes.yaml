@@ -1253,6 +1253,125 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
+  pattern: /api/kanban/boards
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/kanban/boards/bootstrap
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/kanban/boards/{board_id}
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PUT
+  pattern: /api/kanban/boards/{board_id}
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/kanban/boards/{board_id}/cards
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/kanban/boards/{board_id}/columns
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/kanban/boards/{board_id}/sync-runs
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PUT
+  pattern: /api/kanban/cards/{card_id}
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: DELETE
+  pattern: /api/kanban/cards/{card_id}
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/kanban/cards/{card_id}/move
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/kanban/cards/{card_id}/agent/start
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/kanban/cards/{card_id}/agent/status
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/kanban/cards/{card_id}/agent/ready
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/kanban/cards/{card_id}/agent/apply
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/kanban/cards/{card_id}/agent/dismiss
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PUT
+  pattern: /api/kanban/columns/{column_id}
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: DELETE
+  pattern: /api/kanban/columns/{column_id}
+  legacy_block_module: blocks.kanban.api
+  replacement_function_id: ''
+  owner: kanban
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
   pattern: /api/capabilities
   legacy_block_module: blocks.capability.list
   replacement_function_id: ''

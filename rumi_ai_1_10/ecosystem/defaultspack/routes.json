@@ -98,6 +98,108 @@
     },
     {
       "method": "GET",
+      "path": "/api/kanban/boards",
+      "flow_id": "transport_direct",
+      "description": "List or bootstrap Kanban boards"
+    },
+    {
+      "method": "POST",
+      "path": "/api/kanban/boards/bootstrap",
+      "flow_id": "transport_direct",
+      "description": "Bootstrap a scoped Kanban board"
+    },
+    {
+      "method": "GET",
+      "path": "/api/kanban/boards/{board_id}",
+      "flow_id": "transport_direct",
+      "description": "Get a Kanban board snapshot"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/kanban/boards/{board_id}",
+      "flow_id": "transport_direct",
+      "description": "Update a Kanban board"
+    },
+    {
+      "method": "POST",
+      "path": "/api/kanban/boards/{board_id}/cards",
+      "flow_id": "transport_direct",
+      "description": "Create a Kanban card"
+    },
+    {
+      "method": "POST",
+      "path": "/api/kanban/boards/{board_id}/columns",
+      "flow_id": "transport_direct",
+      "description": "Create a Kanban column"
+    },
+    {
+      "method": "POST",
+      "path": "/api/kanban/boards/{board_id}/sync-runs",
+      "flow_id": "transport_direct",
+      "description": "Sync agent runs into a Kanban board"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/kanban/cards/{card_id}",
+      "flow_id": "transport_direct",
+      "description": "Update a Kanban card"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/kanban/cards/{card_id}",
+      "flow_id": "transport_direct",
+      "description": "Delete a Kanban card"
+    },
+    {
+      "method": "POST",
+      "path": "/api/kanban/cards/{card_id}/move",
+      "flow_id": "transport_direct",
+      "description": "Move a Kanban card"
+    },
+    {
+      "method": "POST",
+      "path": "/api/kanban/cards/{card_id}/agent/start",
+      "flow_id": "transport_direct",
+      "description": "Start a no-op Kanban agent run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/kanban/cards/{card_id}/agent/status",
+      "flow_id": "transport_direct",
+      "description": "Read Kanban card agent status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/kanban/cards/{card_id}/agent/ready",
+      "flow_id": "transport_direct",
+      "description": "Mark a Kanban agent run ready"
+    },
+    {
+      "method": "POST",
+      "path": "/api/kanban/cards/{card_id}/agent/apply",
+      "flow_id": "transport_direct",
+      "description": "Apply a Kanban agent run"
+    },
+    {
+      "method": "POST",
+      "path": "/api/kanban/cards/{card_id}/agent/dismiss",
+      "flow_id": "transport_direct",
+      "description": "Dismiss a Kanban agent run"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/kanban/columns/{column_id}",
+      "flow_id": "transport_direct",
+      "description": "Update a Kanban column"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/kanban/columns/{column_id}",
+      "flow_id": "transport_direct",
+      "description": "Delete a Kanban column"
+    },
+    {
+      "method": "GET",
       "path": "/api/capabilities",
       "flow_id": "transport_direct",
       "description": "List defaultspack local-first capability manifests"

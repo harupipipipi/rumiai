@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
 import { AuthorityApprovalCard } from "./components/AuthorityApprovalCard";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
+import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { WarmActionIcon } from "./components/WarmActionIcon";
 import {
@@ -3750,7 +3751,7 @@ export default function App() {
       return;
     }
     handleModeChange("agent");
-    if (tab.kind === "calendar") {
+    if (tab.kind === "calendar" || tab.kind === "kanban") {
       return;
     }
     if (tab.kind === "canvas") {
@@ -4948,7 +4949,16 @@ export default function App() {
     />
   ) : null;
   const isCalendarMode = activeWorkspaceKind === "calendar";
+  const isKanbanMode = activeWorkspaceKind === "kanban";
   const calendarSettings = parseCalendarSettings(settingsValues.calendar);
+  const activeConversationMetadata: Record<string, unknown> = activeConversation?.metadata && typeof activeConversation.metadata === "object"
+    ? activeConversation.metadata
+    : {};
+  const activeConversationCompanyId = typeof activeConversationMetadata.company_id === "string"
+    ? activeConversationMetadata.company_id
+    : typeof activeConversationMetadata.companyId === "string"
+      ? activeConversationMetadata.companyId
+      : null;
   const handleCalendarModeToggle = () => {
     const existingCalendarTab = workspaceTabs.find((tab) => tab.kind === "calendar");
     if (existingCalendarTab) {
@@ -4956,6 +4966,14 @@ export default function App() {
       return;
     }
     handleWorkspaceTabCreate("calendar");
+  };
+  const handleKanbanModeToggle = () => {
+    const existingKanbanTab = workspaceTabs.find((tab) => tab.kind === "kanban");
+    if (existingKanbanTab) {
+      activateWorkspaceTab(existingKanbanTab);
+      return;
+    }
+    handleWorkspaceTabCreate("kanban");
   };
   const renderComposer = (isCentered = false) => (
     <Renderers.composer
@@ -5046,6 +5064,8 @@ export default function App() {
               }}
               onCalendarOpen={handleCalendarModeToggle}
               isCalendarActive={isCalendarMode}
+              onKanbanOpen={handleKanbanModeToggle}
+              isKanbanActive={isKanbanMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onMinimize={() => setIsHistoryMinimized(true)}
@@ -5071,6 +5091,8 @@ export default function App() {
               }}
               onCalendarOpen={handleCalendarModeToggle}
               isCalendarActive={isCalendarMode}
+              onKanbanOpen={handleKanbanModeToggle}
+              isKanbanActive={isKanbanMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onRestore={() => setIsHistoryMinimized(false)}
@@ -5092,7 +5114,7 @@ export default function App() {
               onCreate={handleWorkspaceTabCreate}
             />
 
-            {showRegion("chat_header") && isChatWorkspace && !isCalendarMode && (
+            {showRegion("chat_header") && isChatWorkspace && !isCalendarMode && !isKanbanMode && (
               <Renderers.chatHeader
                 title={activeWorkspaceTab ? workspaceTabDisplayTitle(activeWorkspaceTab) : activeChatTitle}
                 showPreview={effectiveShowPreview}
@@ -5137,7 +5159,24 @@ export default function App() {
               </div>
             )}
 
-            {isCalendarMode ? (
+            {isKanbanMode ? (
+              <div className="flex min-h-0 flex-1 p-1.5">
+                <KanbanWorkspacePanel
+                  activeConversationId={activeConversationId}
+                  activeConversationTitle={activeChatTitle}
+                  workspaceId={effectiveWorkspaceId}
+                  workspaceLabel={activeConversationWorkspaceContext.workspaceLabel}
+                  workspaceRoot={activeConversationWorkspaceContext.workspaceRoot}
+                  companyId={activeConversationCompanyId}
+                  modelId={activeModelId}
+                  modelProfiles={selectableModelProfiles}
+                  onOpenChat={(conversationId) => {
+                    handleHistoryClick(conversationId);
+                  }}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
+                />
+              </div>
+            ) : isCalendarMode ? (
               <div className="flex min-h-0 flex-1 p-1.5">
                 <CalendarComposerPanel
                   conversationId={activeConversationId}
@@ -5217,7 +5256,7 @@ export default function App() {
               />
             )}
 
-            {showRegion("composer") && isChatWorkspace && !isNewConversation && !isCalendarMode && (
+            {showRegion("composer") && isChatWorkspace && !isNewConversation && !isCalendarMode && !isKanbanMode && (
               <div className="relative">
                 {showRegion("activity_preview") && !effectiveShowPreview && canShowCanvas && (
                   <CanvasPeek

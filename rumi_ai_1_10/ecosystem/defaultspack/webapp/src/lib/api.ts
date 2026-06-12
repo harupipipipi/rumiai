@@ -394,6 +394,97 @@ export type CompanyRunConversationMessage = {
   is_error?: boolean;
 };
 
+export type KanbanBoardScopeType = "conversation" | "workspace" | "company" | "global";
+
+export type KanbanBoardScope = {
+  type: KanbanBoardScopeType;
+  id: string;
+};
+
+export type KanbanPriority = "low" | "normal" | "high" | "urgent" | string;
+
+export type KanbanChecklistItem = {
+  id: string;
+  title: string;
+  done: boolean;
+};
+
+export type KanbanBoard = {
+  board_id: string;
+  scope_type: KanbanBoardScopeType;
+  scope_id: string;
+  title: string;
+  metadata?: Record<string, unknown>;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type KanbanColumn = {
+  column_id: string;
+  board_id: string;
+  title: string;
+  position: number;
+  done?: boolean | number;
+  wip_limit?: number | null;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type KanbanCard = {
+  card_id: string;
+  board_id: string;
+  column_id: string;
+  position: number;
+  title: string;
+  description?: string | null;
+  priority?: KanbanPriority;
+  assignee?: string | null;
+  due_at?: string | null;
+  labels?: string[];
+  checklist?: KanbanChecklistItem[];
+  depends_on?: string[];
+  blocked_by?: string[];
+  source_type?: string;
+  source_id?: string | null;
+  conversation_id?: string | null;
+  workspace_id?: string | null;
+  company_id?: string | null;
+  agent_run_id?: string | null;
+  agent_session_id?: string | null;
+  agent_status?: string | null;
+  branch?: string | null;
+  pr_url?: string | null;
+  metadata?: Record<string, unknown>;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type KanbanEvent = {
+  event_id?: string;
+  board_id?: string;
+  card_id?: string | null;
+  event_type?: string;
+  actor_type?: string;
+  actor_id?: string | null;
+  payload?: Record<string, unknown>;
+  created_at?: number;
+  [key: string]: unknown;
+};
+
+export type KanbanBoardResponse = {
+  board: KanbanBoard;
+  columns: KanbanColumn[];
+  cards: KanbanCard[];
+  events?: KanbanEvent[];
+};
+
+export type KanbanMovePayload = {
+  column_id: string;
+  before_card_id?: string | null;
+  after_card_id?: string | null;
+  position?: number;
+};
+
 export type CompanyInboxItem = {
   inbox_id: string;
   company_id: string;
@@ -2176,6 +2267,113 @@ export const api = {
       withQuery(`/api/company/${encodeURIComponent(companyId)}/runs`, { company_id: companyId, ...options }),
       { cache: "no-store" },
     );
+  },
+
+  kanbanGetOrCreateBoard(scope: KanbanBoardScope) {
+    return request<KanbanBoardResponse>(
+      withQuery("/api/kanban/boards", {
+        scope_type: scope.type,
+        scope_id: scope.id,
+        bootstrap: true,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  kanbanGetBoard(boardId: string) {
+    return request<KanbanBoardResponse>(
+      `/api/kanban/boards/${encodeURIComponent(boardId)}`,
+      { cache: "no-store" },
+    );
+  },
+
+  kanbanCreateCard(boardId: string, payload: Partial<KanbanCard>) {
+    return request<KanbanCard>(`/api/kanban/boards/${encodeURIComponent(boardId)}/cards`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  kanbanUpdateCard(cardId: string, updates: Partial<KanbanCard>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ updates }),
+    });
+  },
+
+  kanbanMoveCard(cardId: string, payload: KanbanMovePayload) {
+    return request<KanbanBoardResponse>(`/api/kanban/cards/${encodeURIComponent(cardId)}/move`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  kanbanDeleteCard(cardId: string) {
+    return request<{ deleted: boolean; card_id?: string }>(`/api/kanban/cards/${encodeURIComponent(cardId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  kanbanCreateColumn(boardId: string, payload: Partial<KanbanColumn>) {
+    return request<KanbanColumn>(`/api/kanban/boards/${encodeURIComponent(boardId)}/columns`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  kanbanUpdateColumn(columnId: string, updates: Partial<KanbanColumn>) {
+    return request<KanbanColumn>(`/api/kanban/columns/${encodeURIComponent(columnId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ updates }),
+    });
+  },
+
+  kanbanDeleteColumn(columnId: string) {
+    return request<{ deleted: boolean; column_id?: string }>(`/api/kanban/columns/${encodeURIComponent(columnId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  kanbanStartAgent(cardId: string, payload?: Record<string, unknown>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}/agent/start`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  kanbanGetAgentStatus(cardId: string) {
+    return request<KanbanCard>(
+      `/api/kanban/cards/${encodeURIComponent(cardId)}/agent/status`,
+      { cache: "no-store" },
+    );
+  },
+
+  kanbanMarkAgentReady(cardId: string, payload?: Record<string, unknown>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}/agent/ready`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  kanbanApplyAgent(cardId: string, payload?: Record<string, unknown>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}/agent/apply`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  kanbanDismissAgent(cardId: string, payload?: Record<string, unknown>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}/agent/dismiss`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  kanbanSyncRuns(boardId: string) {
+    return request<KanbanBoardResponse>(`/api/kanban/boards/${encodeURIComponent(boardId)}/sync-runs`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
   },
 
   listCompanyAgentInbox(companyId: string, agentId: string, options?: { status?: string; kind?: string; limit?: number }) {
