@@ -28,13 +28,17 @@ def _bool_value(value):
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _merge_run_snapshot(input_data):
+def _merge_run_snapshot(input_data, context=None):
     if not _bool_value(input_data.get("include_run_snapshot")):
         return input_data
     run_id = str(input_data.get("run_id") or "").strip()
     if not run_id:
         return input_data
-    snapshot = build_run_context_snapshot(run_id)
+    snapshot = build_run_context_snapshot(
+        run_id,
+        context=context if isinstance(context, dict) else {},
+        require_context_match=True,
+    )
     merged = dict(input_data)
     for key in (
         "progress",
@@ -50,7 +54,8 @@ def _merge_run_snapshot(input_data):
 
 
 def run(input_data, context=None):
-    input_data = _merge_run_snapshot(input_data or {})
+    context = context or {}
+    input_data = _merge_run_snapshot(input_data or {}, context)
     dispatch_hook("before_compaction", {"input": input_data, "context": context or {}})
     summary = input_data.get("summary")
     if summary is None:

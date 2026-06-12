@@ -50,7 +50,7 @@ def test_compact_packet_has_handoff_fields():
     assert packet["critical_context"] == []
 
 
-def test_context_compact_can_include_agent_run_snapshot(tmp_path, monkeypatch):
+def test_context_compact_can_include_owned_agent_run_snapshot(tmp_path, monkeypatch):
     from blocks.context.compact import run as compact_context
     from domain.agent_runtime.models import AgentRun
     from domain.agent_runtime.run_store import AgentRunStore
@@ -62,6 +62,7 @@ def test_context_compact_can_include_agent_run_snapshot(tmp_path, monkeypatch):
         AgentRun(
             run_id="run_compact",
             session_key="agent:test:main",
+            conversation_id="conv_owner",
             task="ship fix",
             status="completed",
             execution_json={"files_modified": ["fix.py"]},
@@ -75,7 +76,7 @@ def test_context_compact_can_include_agent_run_snapshot(tmp_path, monkeypatch):
             "summary": "handoff",
             "include_run_snapshot": True,
         },
-        {},
+        {"session_key": "agent:test:main"},
     )
 
     assert result["status"] == "ok"
@@ -85,6 +86,85 @@ def test_context_compact_can_include_agent_run_snapshot(tmp_path, monkeypatch):
     assert packet["next_steps"] == ["open review"]
     assert "run_id: run_compact" in packet["critical_context"]
     assert packet["validation"]["valid"] is True
+
+
+def test_context_compact_rejects_unowned_agent_run_snapshot(tmp_path, monkeypatch):
+    from blocks.context.compact import run as compact_context
+    from domain.agent_runtime.models import AgentRun
+    from domain.agent_runtime.run_store import AgentRunStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(tmp_path / "agent_runtime"))
+    AgentRunStore._instance = None
+    store = AgentRunStore()
+    store.upsert_run(
+        AgentRun(
+            run_id="run_private",
+            session_key="agent:owner:main",
+            conversation_id="conv_owner",
+            task="private task",
+            status="completed",
+            execution_json={"files_modified": ["private.py"]},
+            result_json={"next_steps": ["private next"]},
+        )
+    )
+
+    for context in ({}, {"session_key": "agent:other:main", "conversation_id": "conv_other"}):
+        result = compact_context(
+            {
+                "run_id": "run_private",
+                "conversation_id": "conv_other",
+                "summary": "handoff",
+                "include_run_snapshot": True,
+            },
+            context,
+        )
+
+        assert result["status"] == "ok"
+        packet = result["data"]
+        assert packet["progress"] == {"done": [], "in_progress": [], "blocked": []}
+        assert packet["changed_files"] == []
+        assert packet["next_steps"] == []
+        assert packet["critical_context"] == []
+        assert "private task" not in str(packet)
+        assert "private.py" not in str(packet)
+        assert "private next" not in str(packet)
+
+
+def test_context_compact_can_include_exact_active_run_snapshot(tmp_path, monkeypatch):
+    from blocks.context.compact import run as compact_context
+    from domain.agent_runtime.models import AgentRun
+    from domain.agent_runtime.run_store import AgentRunStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(tmp_path / "agent_runtime"))
+    AgentRunStore._instance = None
+    store = AgentRunStore()
+    store.upsert_run(
+        AgentRun(
+            run_id="run_active",
+            session_key="agent:owner:main",
+            conversation_id="conv_owner",
+            task="active task",
+            status="completed",
+            execution_json={"files_modified": ["active.py"]},
+            result_json={"next_steps": ["active next"]},
+        )
+    )
+
+    result = compact_context(
+        {
+            "run_id": "run_active",
+            "summary": "handoff",
+            "include_run_snapshot": True,
+        },
+        {"active_run_id": "run_active", "session_key": "agent:other:main"},
+    )
+
+    assert result["status"] == "ok"
+    packet = result["data"]
+    assert packet["progress"]["done"] == ["active task"]
+    assert packet["changed_files"] == ["active.py"]
+    assert packet["next_steps"] == ["active next"]
+    assert "run_id: run_active" in packet["critical_context"]
 
 
 def test_context_compact_rejects_invalid_packet_sections():

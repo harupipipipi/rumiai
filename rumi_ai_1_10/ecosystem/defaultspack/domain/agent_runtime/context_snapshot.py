@@ -23,12 +23,21 @@ TERMINAL_ARTIFACT_KEYS = (
     "stdout_artifact_path",
     "stderr_artifact_path",
 )
+ACTIVE_RUN_CONTEXT_KEYS = (
+    "active_run_id",
+    "agent_run_id",
+    "current_run_id",
+    "run_id",
+    "execution_id",
+)
 
 
 def build_run_context_snapshot(
     run_id: str,
     *,
     store: AgentRunStore | None = None,
+    context: dict[str, Any] | None = None,
+    require_context_match: bool = False,
     max_items: int = 8,
     max_text_chars: int = 500,
 ) -> dict[str, Any]:
@@ -40,6 +49,8 @@ def build_run_context_snapshot(
     store = store or AgentRunStore()
     run = store.get_run(clean_run_id)
     if not run:
+        return _empty_snapshot()
+    if require_context_match and not run_context_allows_snapshot(run, context, run_id=clean_run_id):
         return _empty_snapshot()
 
     execution = run.get("execution_json") if isinstance(run.get("execution_json"), dict) else {}
@@ -73,6 +84,39 @@ def build_run_context_snapshot(
         "critical_context": critical_context,
         "next_steps": next_steps,
     }
+
+
+def run_context_allows_snapshot(
+    run: dict[str, Any] | None,
+    context: dict[str, Any] | None,
+    *,
+    run_id: str | None = None,
+) -> bool:
+    """Return True when server context owns a run or names it as the active run."""
+    if not isinstance(run, dict) or not isinstance(context, dict) or not context:
+        return False
+
+    clean_run_id = _clean(run_id or run.get("run_id"))
+    if not clean_run_id:
+        return False
+
+    for key in ACTIVE_RUN_CONTEXT_KEYS:
+        if _clean(context.get(key)) == clean_run_id:
+            return True
+
+    context_session = _clean(context.get("session_key"))
+    if context_session and context_session == _clean(run.get("session_key")):
+        return True
+
+    context_conversation = _clean(context.get("conversation_id"))
+    if context_conversation and context_conversation == _clean(run.get("conversation_id")):
+        return True
+
+    return False
+
+
+def _clean(value: Any) -> str:
+    return str(value or "").strip()
 
 
 def _empty_snapshot() -> dict[str, Any]:
