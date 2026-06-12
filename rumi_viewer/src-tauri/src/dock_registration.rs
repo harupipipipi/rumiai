@@ -190,6 +190,13 @@ fn defaultspack_health_client() -> AnyResult<reqwest::blocking::Client> {
         .context("failed to build defaultspack health client")
 }
 
+fn defaultspack_grant_client() -> AnyResult<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .context("failed to build defaultspack grant client")
+}
+
 fn is_defaultspack_http_ready(port: u16) -> bool {
     defaultspack_health_client()
         .map(|client| check_defaultspack_http_ready(&client, port))
@@ -723,6 +730,60 @@ fn persist_desktop_api_token(config: &AppConfig, api_token: &str) -> AnyResult<P
     Ok(token_path)
 }
 
+fn auto_approve_local_enabled() -> bool {
+    std::env::var("RUMI_AUTO_APPROVE_LOCAL")
+        .map(|value| value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+fn defaultspack_desktop_grant_payload(kernel_port: u16) -> Value {
+    serde_json::json!({
+        "principal_id": "defaultspack",
+        "permission_id": "desktop_app.execute",
+        "config": {
+            "allowed_packs": ["defaultspack"],
+            "max_token_lifetime": 3600,
+            "port": kernel_port,
+        },
+    })
+}
+
+fn maybe_grant_defaultspack_desktop_execute(config: &AppConfig, api_token: &str) -> AnyResult<()> {
+    if !auto_approve_local_enabled() {
+        return Ok(());
+    }
+
+    let url = format!(
+        "http://127.0.0.1:{}/api/capability/grants/grant",
+        config.kernel_port
+    );
+    let payload = defaultspack_desktop_grant_payload(config.kernel_port);
+    info!("Granting local development desktop_app.execute for defaultspack");
+
+    let response = defaultspack_grant_client()?
+        .post(&url)
+        .bearer_auth(api_token)
+        .json(&payload)
+        .send()
+        .with_context(|| format!("failed to request defaultspack desktop grant at {url}"))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .context("failed to read defaultspack desktop grant response")?;
+    if !status.is_success() {
+        bail!("defaultspack desktop grant failed with {status}: {body}");
+    }
+
+    let data: Value =
+        serde_json::from_str(&body).context("invalid defaultspack desktop grant response JSON")?;
+    if data.get("success").and_then(|value| value.as_bool()) != Some(true) {
+        bail!("defaultspack desktop grant was not successful: {body}");
+    }
+
+    Ok(())
+}
+
 fn spawn_defaultspack_local_server(
     config: &AppConfig,
     metadata: &DefaultspackDesktopMetadata,
@@ -731,6 +792,7 @@ fn spawn_defaultspack_local_server(
         .ensure_pack_shell_path()
         .context("pack-shell binary is required to launch Defaultspack")?;
     let api_token = read_desktop_api_token_from_config(config)?;
+    maybe_grant_defaultspack_desktop_execute(config, &api_token)?;
     let kernel_command = kernel_command_for_python(&config.venv_python());
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
 
@@ -788,6 +850,7 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
     let metadata = read_defaultspack_desktop_metadata(config)?;
 
     let api_token = read_desktop_api_token_from_config(config)?;
+    maybe_grant_defaultspack_desktop_execute(config, &api_token)?;
     let token_path = persist_desktop_api_token(config, &api_token)?;
 
     let app_name = "Rumi Defaultspack";
@@ -882,6 +945,20 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("empty"));
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn defaultspack_desktop_grant_payload_is_scoped_to_defaultspack() {
+        let payload = defaultspack_desktop_grant_payload(8765);
+
+        assert_eq!(payload["principal_id"], "defaultspack");
+        assert_eq!(payload["permission_id"], "desktop_app.execute");
+        assert_eq!(
+            payload["config"]["allowed_packs"],
+            serde_json::json!(["defaultspack"])
+        );
+        assert_eq!(payload["config"]["max_token_lifetime"], 3600);
+        assert_eq!(payload["config"]["port"], 8765);
     }
 
     #[test]
