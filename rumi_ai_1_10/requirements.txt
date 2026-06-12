@@ -206,6 +206,10 @@ cffi==2.0.0 \
 pycparser==2.22 \
     --hash=sha256:c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc
 
+# typing-extensions 4.15.0: 1 wheel hash; source archives omitted.
+typing-extensions==4.15.0 \
+    --hash=sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548
+
 # Optional: Enhanced secret key storage (recommended for production)
 # keyring and its transitive dependencies must be pinned with hashes before
 # being added to this automatically installed requirements file.
