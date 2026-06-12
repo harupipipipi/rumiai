@@ -348,6 +348,72 @@ class TestRuleApproval:
         assert "approve_rule" in actions
 
 
+    def test_rule_approval_cleared_when_marked_modified(self, temp_dirs):
+        """変更済みになった rule Pack は再度ルール拡張承認が必要になる"""
+        eco_dir, grants_dir = temp_dirs
+        _create_pack_dir(eco_dir, "my_rule_modified", {
+            "pack_id": "my_rule_modified",
+            "pack_type": "rule",
+        })
+
+        am = self._make_am(eco_dir, grants_dir)
+        am.scan_packs()
+        am.approve("my_rule_modified")
+        am.approve_rule("my_rule_modified")
+
+        assert am.is_rule_approved("my_rule_modified") is True
+        am.mark_modified("my_rule_modified")
+
+        approval = am.get_approval("my_rule_modified")
+        assert approval.rule_approved is False
+        assert approval.rule_approved_at is None
+        assert am.is_rule_approved("my_rule_modified") is False
+
+    def test_rule_approval_cleared_on_changed_normal_reapproval(self, temp_dirs):
+        """変更された rule Pack の通常再承認だけではルール拡張承認を維持しない"""
+        eco_dir, grants_dir = temp_dirs
+        pack_dir = _create_pack_dir(eco_dir, "my_rule_changed", {
+            "pack_id": "my_rule_changed",
+            "pack_type": "rule",
+        })
+        (pack_dir / "runtime.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+        am = self._make_am(eco_dir, grants_dir)
+        am.scan_packs()
+        am.approve("my_rule_changed")
+        am.approve_rule("my_rule_changed")
+        assert am.is_rule_approved("my_rule_changed") is True
+
+        (pack_dir / "runtime.py").write_text("VALUE = 2\n", encoding="utf-8")
+        am._hash_cache.clear()
+        am.approve("my_rule_changed")
+
+        approval = am.get_approval("my_rule_changed")
+        assert approval.rule_approved is False
+        assert approval.rule_approved_at is None
+        assert am.is_rule_approved("my_rule_changed") is False
+
+    def test_rule_approval_cleared_on_reject(self, temp_dirs):
+        """拒否された rule Pack のルール拡張承認は残らない"""
+        eco_dir, grants_dir = temp_dirs
+        _create_pack_dir(eco_dir, "my_rule_rejected", {
+            "pack_id": "my_rule_rejected",
+            "pack_type": "rule",
+        })
+
+        am = self._make_am(eco_dir, grants_dir)
+        am.scan_packs()
+        am.approve("my_rule_rejected")
+        am.approve_rule("my_rule_rejected")
+
+        am.reject("my_rule_rejected", reason="unsafe")
+
+        approval = am.get_approval("my_rule_rejected")
+        assert approval.rule_approved is False
+        assert approval.rule_approved_at is None
+        assert am.is_rule_approved("my_rule_rejected") is False
+
+
 # ======================================================================
 # Wave 3: dependency_resolver.py テスト
 # ======================================================================
