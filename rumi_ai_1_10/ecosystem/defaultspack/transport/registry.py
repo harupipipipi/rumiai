@@ -260,9 +260,74 @@ def _legacy_http_routes_path() -> Path:
     return _defaultspack_root() / "docs" / "legacy_http_routes.yaml"
 
 
+def _parse_simple_yaml_scalar(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _read_legacy_http_routes_yaml_without_pyyaml(path: Path) -> dict[str, Any]:
+    """Parse the simple tracked legacy route baseline without external deps."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+
+    routes: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    in_legacy_routes = False
+    allowed_fields = {
+        "method",
+        "pattern",
+        "legacy_block_module",
+        "replacement_function_id",
+        "owner",
+        "reason",
+        "remove_after",
+    }
+
+    def assign(line: str) -> None:
+        if current is None or ":" not in line:
+            return
+        key, value = line.split(":", 1)
+        key = key.strip()
+        if key in allowed_fields:
+            current[key] = _parse_simple_yaml_scalar(value)
+
+    for raw_line in lines:
+        line = raw_line.split("#", 1)[0].rstrip()
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped == "legacy_routes:":
+            in_legacy_routes = True
+            continue
+        if not in_legacy_routes:
+            continue
+        if stripped.startswith("- "):
+            if current is not None:
+                routes.append(current)
+            current = {}
+            assign(stripped[2:].strip())
+            continue
+        assign(stripped)
+
+    if current is not None:
+        routes.append(current)
+    return {"legacy_routes": routes}
+
+
+def _read_legacy_http_routes_yaml(path: Path) -> dict[str, Any]:
+    data = _read_yaml(path)
+    if isinstance(data.get("legacy_routes"), list):
+        return data
+    return _read_legacy_http_routes_yaml_without_pyyaml(path)
+
+
 @lru_cache(maxsize=1)
 def load_legacy_http_route_allowlist() -> dict[tuple[str, str, str], dict[str, Any]]:
-    data = _read_yaml(_legacy_http_routes_path())
+    data = _read_legacy_http_routes_yaml(_legacy_http_routes_path())
     allowlist: dict[tuple[str, str, str], dict[str, Any]] = {}
     for route in data.get("legacy_routes") or []:
         if not isinstance(route, dict):
