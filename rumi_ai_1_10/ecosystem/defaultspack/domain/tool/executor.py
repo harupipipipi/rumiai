@@ -2237,6 +2237,7 @@ def _function_call_context(context, tool_def):
         "workspace_id",
         "workspace_root",
         "conversation_id",
+        "company_id",
         "conversation_workspace_dir",
         "profile_id",
         "run_id",

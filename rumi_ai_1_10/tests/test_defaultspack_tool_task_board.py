@@ -13,29 +13,182 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 from domain.tool.task_board import TaskBoardController  # noqa: E402
 from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
+from domain.kanban.service import KanbanService  # noqa: E402
+from domain.kanban.store import KanbanStore  # noqa: E402
 
 
 def test_task_board_controller_persists_workspace_board_and_moves_cards(tmp_path):
     workspace = tmp_path / "conversation" / "workspace"
     controller = TaskBoardController()
+    context = {"conversation_workspace_dir": str(workspace)}
 
     created = controller.run(
         {"action": "create", "title": "Review PR slice", "priority": "high"},
-        {"conversation_workspace_dir": str(workspace)},
+        context,
     )
     card_id = created["changed"]["id"]
     moved = controller.run(
         {"action": "move", "card_id": card_id, "column": "Doing"},
-        {"conversation_workspace_dir": str(workspace)},
+        context,
     )
 
     board_path = workspace / "task_board.json"
-    stored = json.loads(board_path.read_text(encoding="utf-8"))
+    store = KanbanStore(workspace / "task_board_kanban.db")
+    stored = store.require_card(card_id)
+    stored_column = store.require_column(stored["column_id"])
 
-    assert board_path.exists()
+    assert not board_path.exists()
+    assert created["kanban"]["board"]["board_id"] == moved["kanban_board_id"]
     assert [column["title"] for column in moved["columns"]] == ["Backlog", "Doing", "Review", "Done"]
     assert moved["cards"][0]["column_id"] == "doing"
-    assert stored["cards"][0]["priority"] == "high"
+    assert moved["cards"][0]["kanban_column_id"] == stored_column["column_id"]
+    assert stored_column["title"] == "Doing"
+    assert stored["priority"] == "high"
+
+
+def test_task_board_and_kanban_service_share_workspace_board(tmp_path, monkeypatch):
+    db_path = tmp_path / "kanban.db"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_KANBAN_DB_PATH", str(db_path))
+    KanbanStore._instance = None
+    context = {"workspace_id": "ws-shared", "conversation_id": "conv-1"}
+    controller = TaskBoardController()
+    service = KanbanService(KanbanStore(db_path))
+
+    created = controller.run({"action": "create", "title": "Visible from Kanban", "notes": "same source"}, context)
+    snapshot = service.bootstrap_board({"scope_type": "workspace", "scope_id": "ws-shared"})
+
+    assert snapshot["board"]["board_id"] == created["kanban_board_id"]
+    assert [card["title"] for card in snapshot["cards"]] == ["Visible from Kanban"]
+    assert snapshot["cards"][0]["description"] == "same source"
+    assert snapshot["cards"][0]["conversation_id"] == "conv-1"
+
+
+def test_tool_executor_task_board_shares_env_kanban_api_board(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_KANBAN_DB_PATH", str(tmp_path / "shared-kanban.db"))
+    KanbanStore._instance = None
+    context = {
+        "workspace_id": "ws-env-shared",
+        "conversation_id": "conv-env",
+        "_tool_server_approved": True,
+        "principal_id": "defaultspack",
+    }
+
+    result = ToolExecutor().execute(
+        "tool_task_board",
+        {"action": "create", "title": "ToolExecutor shared card"},
+        context,
+    )
+
+    from blocks.kanban.api import run
+
+    response = run(
+        {
+            "action": "list_boards",
+            "scope_type": "workspace",
+            "scope_id": "ws-env-shared",
+            "bootstrap": True,
+        },
+        {},
+    )
+
+    assert result["is_error"] is False
+    assert response["status"] == "ok"
+    assert response["data"]["board"]["title"] == "Kanban: ws-env-shared"
+    assert [card["title"] for card in response["data"]["cards"]] == ["ToolExecutor shared card"]
+
+
+def test_task_board_ignores_untrusted_context_db_path(tmp_path, monkeypatch):
+    primary_db = tmp_path / "primary-kanban.db"
+    redirected_db = tmp_path / "redirected-kanban.db"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_KANBAN_DB_PATH", str(primary_db))
+    KanbanStore._instance = None
+
+    result = ToolExecutor().execute(
+        "tool_task_board",
+        {"action": "create", "title": "Trusted DB only"},
+        {
+            "workspace_id": "ws-trusted-db",
+            "conversation_id": "conv-trusted-db",
+            "kanban_db_path": str(redirected_db),
+            "task_board_kanban_db_path": str(redirected_db),
+            "_task_board_test_context": True,
+            "_tool_server_approved": True,
+            "principal_id": "defaultspack",
+        },
+    )
+
+    primary = KanbanService(KanbanStore(primary_db)).bootstrap_board(
+        {"scope_type": "workspace", "scope_id": "ws-trusted-db"},
+    )
+
+    assert result["is_error"] is False
+    assert [card["title"] for card in primary["cards"]] == ["Trusted DB only"]
+    assert not redirected_db.exists()
+
+
+def test_task_board_lists_cards_created_by_kanban_service(tmp_path, monkeypatch):
+    db_path = tmp_path / "kanban.db"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_KANBAN_DB_PATH", str(db_path))
+    KanbanStore._instance = None
+    service = KanbanService(KanbanStore(db_path))
+    snapshot = service.bootstrap_board({"scope_type": "workspace", "scope_id": "ws-inverse"})
+    card = service.create_card(
+        snapshot["board"]["board_id"],
+        {
+            "title": "Created in Kanban",
+            "description": "projected into Task Board",
+            "checklist": [{"id": "c1", "title": "Check projection", "done": True}],
+        },
+    )
+
+    listed = TaskBoardController().run(
+        {"action": "list"},
+        {"workspace_id": "ws-inverse"},
+    )
+
+    assert listed["changed"] is None
+    assert listed["cards"][0]["id"] == card["card_id"]
+    assert listed["cards"][0]["notes"] == "projected into Task Board"
+    assert listed["cards"][0]["subtasks"][0]["title"] == "Check projection"
+
+
+def test_task_board_imports_legacy_json_once_into_kanban(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    legacy = {
+        "columns": ["Inbox", "Active", "Done"],
+        "cards": [
+            {
+                "id": "legacy-root",
+                "title": "Legacy root",
+                "column_id": "inbox",
+                "position": 0,
+                "notes": "old JSON",
+            },
+            {
+                "id": "legacy-child",
+                "title": "Legacy child",
+                "column_id": "active",
+                "position": 0,
+                "depends_on": ["legacy-root"],
+                "blocked_by": ["legacy-root"],
+                "subtasks": [{"id": "sub-1", "title": "Keep subtask", "done": False}],
+            },
+        ],
+    }
+    (workspace / "task_board.json").write_text(json.dumps(legacy), encoding="utf-8")
+
+    listed = TaskBoardController().run({"action": "list"}, {"conversation_workspace_dir": str(workspace)})
+    listed_again = TaskBoardController().run({"action": "list"}, {"conversation_workspace_dir": str(workspace)})
+    child = next(card for card in listed["cards"] if card["title"] == "Legacy child")
+    root = next(card for card in listed["cards"] if card["title"] == "Legacy root")
+
+    assert len(listed["cards"]) == 2
+    assert len(listed_again["cards"]) == 2
+    assert child["depends_on"] == [root["id"]]
+    assert child["blocked_by"] == [root["id"]]
+    assert child["subtasks"][0]["title"] == "Keep subtask"
+    assert listed["metadata"]["task_board_json_imported"].endswith("task_board.json")
 
 
 def test_task_board_controller_configures_columns_and_rehomes_removed_column_cards(tmp_path):

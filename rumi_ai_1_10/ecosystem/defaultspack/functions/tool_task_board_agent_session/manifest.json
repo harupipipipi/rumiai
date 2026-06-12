@@ -1,6 +1,6 @@
 {
   "function_id": "tool_task_board_agent_session",
-  "description": "Link task board cards to defaultspack coding agent sessions.",
+  "description": "Link Kanban-backed task board cards to defaultspack coding agent sessions.",
   "tags": [
     "tool",
     "planning",

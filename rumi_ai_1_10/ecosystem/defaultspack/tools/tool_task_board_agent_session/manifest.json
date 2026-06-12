@@ -1,6 +1,6 @@
 {
   "id": "tool_task_board_agent_session",
-  "description": "Start and track coding agent sessions from task board cards.",
+  "description": "Start and track coding agent sessions from Kanban-backed task board cards.",
   "config": {
     "tool_id": "tool_task_board_agent_session",
     "name": "tool_task_board_agent_session",
@@ -36,7 +36,7 @@
         "composer.toggle_chip"
       ],
       "composer_label": "Task Board Agent Run",
-      "composer_description": "Link task board cards to coding agent sessions.",
+      "composer_description": "Link Kanban task cards to coding agent sessions.",
       "composer_icon": "play-circle"
     },
     "schema": {

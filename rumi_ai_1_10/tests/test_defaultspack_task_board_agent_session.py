@@ -13,6 +13,7 @@ from domain.tool.task_board import TaskBoardController  # noqa: E402
 from domain.tool.task_board_agent_session import TaskBoardAgentSessionController  # noqa: E402
 from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
+from domain.kanban.store import KanbanStore  # noqa: E402
 
 
 def _reset_sessions():
@@ -47,6 +48,10 @@ def test_task_board_card_starts_tracks_and_applies_agent_session(tmp_path):
     assert report["session_link"]["merge_report"]["merge_strategy"] == "manual_conflict_report"
     assert applied["card"]["column_id"] == "done"
     assert applied["session_link"]["terminal_state"] == "applied"
+
+    stored = KanbanStore(Path(context["conversation_workspace_dir"]) / "task_board_kanban.db").require_card(card["id"])
+    assert stored["agent_session_id"] == session_id
+    assert stored["agent_status"] == "applied"
 
 
 def test_task_board_agent_session_tool_and_dispatcher_are_registered(tmp_path):

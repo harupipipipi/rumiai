@@ -1,6 +1,6 @@
 {
   "id": "tool_task_board",
-  "description": "Maintain a local per-workspace task board.",
+  "description": "Maintain Kanban workspace task cards from chat/tool flows.",
   "config": {
     "tool_id": "tool_task_board",
     "name": "tool_task_board",
@@ -33,7 +33,7 @@
         "composer.toggle_chip"
       ],
       "composer_label": "Task Board",
-      "composer_description": "Maintain local task-board cards and columns.",
+      "composer_description": "Create and update cards on the Kanban workspace board.",
       "composer_icon": "columns"
     },
     "schema": {

@@ -1,6 +1,6 @@
 {
   "function_id": "tool_task_board",
-  "description": "Run the default task board tool.",
+  "description": "Create and update Kanban workspace task cards from the Task Board tool.",
   "tags": [
     "tool",
     "planning",

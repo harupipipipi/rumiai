@@ -7,6 +7,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from domain.kanban.models import gen_id, now_ms
+from domain.kanban.service import KanbanService
+from domain.kanban.store import KanbanStore
+
 
 DEFAULT_COLUMNS = ("Backlog", "Doing", "Review", "Done")
 DONE_COLUMN_TITLES = {"done", "complete", "completed", "closed"}
@@ -17,7 +21,7 @@ def _now_ms() -> int:
 
 
 class TaskBoardController:
-    """Small per-workspace task board store used by the tool runtime."""
+    """Task Board tool adapter backed by the first-class Kanban workspace store."""
 
     def __init__(self, root: Path | None = None) -> None:
         self._root = root
@@ -26,66 +30,52 @@ class TaskBoardController:
         arguments = arguments or {}
         context = context or {}
         action = str(arguments.get("action") or "list").strip().lower()
-        path = self._path(context)
-        board = self._read(path)
+        service = self._service(context)
+        snapshot = self._snapshot(service, arguments, context)
+        self._import_legacy_if_needed(service, snapshot, context)
+        snapshot = service.get_board(snapshot["board"]["board_id"])
+        board = _task_board_from_snapshot(snapshot)
 
         if action in {"configure", "configure_columns", "set_columns", "columns"}:
-            board["columns"] = _normalize_columns(arguments.get("columns"))
-            first_column_id = board["columns"][0]["id"]
-            valid_column_ids = {column["id"] for column in board["columns"]}
-            for card in board["cards"]:
-                if card.get("column_id") not in valid_column_ids:
-                    card["column_id"] = first_column_id
-                    card["updated_at"] = _now_ms()
-            _compact_positions(board["cards"], board["columns"])
-            self._write(path, board)
+            columns = _normalize_columns(arguments.get("columns"))
+            self._replace_columns(service, snapshot, columns)
+            board = _task_board_from_snapshot(service.get_board(snapshot["board"]["board_id"]))
             return self._result("configure", board, changed={"columns": board["columns"]})
 
         if action in {"create", "add"}:
             title = str(arguments.get("title") or arguments.get("task") or "").strip()
             if not title:
                 raise ValueError("'title' is required for task_board.create")
-            column_id = _resolve_column_id(arguments, board["columns"]) or board["columns"][0]["id"]
-            now = _now_ms()
-            card = {
-                "id": str(uuid.uuid4()),
-                "title": title,
-                "column_id": column_id,
-                "position": 0,
-                "created_at": now,
-                "updated_at": now,
-                "notes": str(arguments.get("notes") or arguments.get("description") or ""),
-                "priority": str(arguments.get("priority") or "normal"),
-            }
-            _copy_optional_card_fields(card, arguments)
-            board["cards"].append(card)
-            _place_card(board["cards"], card["id"], column_id, arguments.get("position"), board["columns"])
-            self._write(path, board)
-            return self._result("create", board, changed=card)
+            column_id = _kanban_column_id(
+                board,
+                _resolve_column_id(arguments, board["columns"]) or board["columns"][0]["id"],
+            )
+            payload = _card_create_payload(arguments, context, column_id)
+            payload["title"] = title
+            card = service.create_card(snapshot["board"]["board_id"], payload)
+            if arguments.get("position") is not None:
+                service.move_card(card["card_id"], {"column_id": card["column_id"], "position": arguments.get("position")})
+            board = _task_board_from_snapshot(service.get_board(snapshot["board"]["board_id"]))
+            return self._result("create", board, changed=_find_card(board["cards"], card["card_id"]))
 
         if action in {"update", "edit"}:
             card = _find_card(board["cards"], _card_id(arguments))
             if card is None:
                 raise ValueError("card_id not found")
-            for key in ("title", "notes", "priority", "assignee", "due_at"):
-                if key in arguments and arguments[key] is not None:
-                    card[key] = str(arguments[key])
-            if "description" in arguments and "notes" not in arguments and arguments["description"] is not None:
-                card["notes"] = str(arguments["description"])
-            _copy_optional_card_fields(card, arguments)
+            updates = _card_update_payload(card, arguments)
+            if updates:
+                service.update_card(str(card["id"]), updates)
             next_column_id = _resolve_column_id(arguments, board["columns"])
             if next_column_id is not None or "position" in arguments:
-                _place_card(
-                    board["cards"],
+                service.move_card(
                     str(card["id"]),
-                    next_column_id or str(card.get("column_id") or board["columns"][0]["id"]),
-                    arguments.get("position"),
-                    board["columns"],
+                    {
+                        "column_id": _kanban_column_id(board, next_column_id or str(card.get("column_id") or board["columns"][0]["id"])),
+                        "position": arguments.get("position"),
+                    },
                 )
-            card["updated_at"] = _now_ms()
-            _compact_positions(board["cards"], board["columns"])
-            self._write(path, board)
-            return self._result("update", board, changed=card)
+            board = _task_board_from_snapshot(service.get_board(snapshot["board"]["board_id"]))
+            return self._result("update", board, changed=_find_card(board["cards"], str(card["id"])))
 
         if action in {"block", "unblock"}:
             card = _find_card(board["cards"], _card_id(arguments))
@@ -110,15 +100,23 @@ class TaskBoardController:
                 elif dependencies:
                     blockers = list(dependencies)
                 if dependencies:
-                    card["depends_on"] = dependencies
-                card["blocked_by"] = blockers
-                card["blocker_reason"] = str(arguments.get("blocker_reason") or arguments.get("reason") or "")
+                    updates = {"depends_on": dependencies}
+                else:
+                    updates = {}
+                updates["blocked_by"] = blockers
+                updates["metadata"] = _metadata_with_task_board_field(
+                    card,
+                    "blocker_reason",
+                    str(arguments.get("blocker_reason") or arguments.get("reason") or ""),
+                )
             else:
-                card["blocked_by"] = []
-                card["blocker_reason"] = ""
-            card["updated_at"] = _now_ms()
-            self._write(path, board)
-            return self._result(action, board, changed=card)
+                updates = {
+                    "blocked_by": [],
+                    "metadata": _metadata_with_task_board_field(card, "blocker_reason", ""),
+                }
+            service.update_card(str(card["id"]), updates)
+            board = _task_board_from_snapshot(service.get_board(snapshot["board"]["board_id"]))
+            return self._result(action, board, changed=_find_card(board["cards"], str(card["id"])))
 
         if action in {"subtask_add", "add_subtask"}:
             card = _find_card(board["cards"], _card_id(arguments))
@@ -137,10 +135,10 @@ class TaskBoardController:
             }
             if arguments.get("assignee") is not None:
                 subtask["assignee"] = str(arguments.get("assignee"))
-            card["subtasks"] = _normalize_subtasks(card.get("subtasks")) + [subtask]
-            card["updated_at"] = _now_ms()
-            self._write(path, board)
-            return self._result("subtask_add", board, changed=card)
+            subtasks = _normalize_subtasks(card.get("subtasks")) + [subtask]
+            service.update_card(str(card["id"]), {"checklist": subtasks})
+            board = _task_board_from_snapshot(service.get_board(snapshot["board"]["board_id"]))
+            return self._result("subtask_add", board, changed=_find_card(board["cards"], str(card["id"])))
 
         if action in {"subtask_update", "subtask_complete", "subtask_remove", "remove_subtask"}:
             card = _find_card(board["cards"], _card_id(arguments))
@@ -152,7 +150,7 @@ class TaskBoardController:
             if subtask is None:
                 raise ValueError("subtask_id not found")
             if action in {"subtask_remove", "remove_subtask"}:
-                card["subtasks"] = [item for item in subtasks if item.get("id") != subtask_id]
+                subtasks = [item for item in subtasks if item.get("id") != subtask_id]
             else:
                 for key in ("title", "assignee", "notes"):
                     if key in arguments and arguments[key] is not None:
@@ -168,41 +166,173 @@ class TaskBoardController:
                     subtask["status"] = str(arguments["status"])
                     subtask["done"] = subtask["status"].lower() in {"done", "complete", "completed"}
                 subtask["updated_at"] = _now_ms()
-                card["subtasks"] = subtasks
-            card["updated_at"] = _now_ms()
-            self._write(path, board)
-            return self._result(action, board, changed=card)
+            service.update_card(str(card["id"]), {"checklist": subtasks})
+            board = _task_board_from_snapshot(service.get_board(snapshot["board"]["board_id"]))
+            return self._result(action, board, changed=_find_card(board["cards"], str(card["id"])))
 
         if action == "move":
             card = _find_card(board["cards"], _card_id(arguments))
             if card is None:
                 raise ValueError("card_id not found")
             column_id = _resolve_column_id(arguments, board["columns"], required=True)
-            _place_card(board["cards"], str(card["id"]), column_id, arguments.get("position"), board["columns"])
-            card["updated_at"] = _now_ms()
-            self._write(path, board)
-            return self._result("move", board, changed=card)
+            service.move_card(
+                str(card["id"]),
+                {"column_id": _kanban_column_id(board, column_id), "position": arguments.get("position")},
+            )
+            board = _task_board_from_snapshot(service.get_board(snapshot["board"]["board_id"]))
+            return self._result("move", board, changed=_find_card(board["cards"], str(card["id"])))
 
         if action in {"delete", "remove"}:
             card_id = _card_id(arguments)
-            next_cards = [card for card in board["cards"] if card.get("id") != card_id]
-            if len(next_cards) == len(board["cards"]):
+            if _find_card(board["cards"], card_id) is None:
                 raise ValueError("card_id not found")
-            board["cards"] = next_cards
-            _compact_positions(board["cards"], board["columns"])
-            self._write(path, board)
+            service.delete_card(card_id)
+            board = _task_board_from_snapshot(service.get_board(snapshot["board"]["board_id"]))
             return self._result("delete", board, changed={"id": card_id})
 
         if action == "clear":
             removed = len(board["cards"])
-            board["cards"] = []
-            self._write(path, board)
+            for card in list(board["cards"]):
+                service.delete_card(str(card["id"]))
+            board = _task_board_from_snapshot(service.get_board(snapshot["board"]["board_id"]))
             return self._result("clear", board, changed={"cleared": removed})
 
         if action in {"list", "show"}:
             return self._result("list", board)
 
         raise ValueError(f"Unsupported task board action: {action}")
+
+    def _service(self, context: dict[str, Any]) -> KanbanService:
+        if self._root is not None:
+            self._root.mkdir(parents=True, exist_ok=True)
+            return KanbanService(KanbanStore(self._root / "kanban.db"))
+        if not any(context.get(key) for key in ("workspace_id", "conversation_id", "company_id")):
+            workspace = context.get("conversation_workspace_dir") or context.get("workspace_dir")
+            if isinstance(workspace, str) and workspace:
+                root = Path(workspace)
+                root.mkdir(parents=True, exist_ok=True)
+                return KanbanService(KanbanStore(root / "task_board_kanban.db"))
+        return KanbanService()
+
+    def _snapshot(
+        self,
+        service: KanbanService,
+        arguments: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        board_id = str(arguments.get("board_id") or arguments.get("kanban_board_id") or "").strip()
+        if board_id:
+            return service.get_board(board_id)
+        scope_type, scope_id = _scope(arguments, context)
+        title = str(arguments.get("board_title") or "").strip() or None
+        return service.bootstrap_board({"scope_type": scope_type, "scope_id": scope_id, "title": title})
+
+    def _import_legacy_if_needed(
+        self,
+        service: KanbanService,
+        snapshot: dict[str, Any],
+        context: dict[str, Any],
+    ) -> None:
+        path = self._path(context)
+        if not path.exists() or snapshot.get("cards"):
+            return
+        board = snapshot.get("board") if isinstance(snapshot.get("board"), dict) else {}
+        metadata = dict(board.get("metadata") if isinstance(board.get("metadata"), dict) else {})
+        if metadata.get("task_board_json_imported"):
+            return
+        legacy = self._read(path)
+        if not legacy["cards"] and not legacy["columns"]:
+            metadata["task_board_json_imported"] = str(path)
+            service.update_board(str(board.get("board_id") or ""), {"metadata": metadata})
+            return
+        self._replace_columns(service, snapshot, legacy["columns"])
+        imported_snapshot = _task_board_from_snapshot(service.get_board(str(board.get("board_id") or "")))
+        column_map = {
+            str(column.get("id") or ""): _kanban_column_id(imported_snapshot, str(column.get("id") or ""))
+            for column in imported_snapshot["columns"]
+        }
+        id_map: dict[str, str] = {}
+        imported_cards: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for card in _sorted_cards(legacy["cards"], legacy["columns"]):
+            column_id = column_map.get(str(card.get("column_id") or "")) or imported_snapshot["columns"][0]["kanban_column_id"]
+            payload = _card_create_payload({**card, "description": card.get("notes")}, context, column_id)
+            payload["title"] = str(card.get("title") or "Untitled card")
+            payload["depends_on"] = []
+            payload["blocked_by"] = []
+            payload_metadata = dict(payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {})
+            task_board_metadata = dict(payload_metadata.get("task_board") if isinstance(payload_metadata.get("task_board"), dict) else {})
+            task_board_metadata["legacy_task_board_id"] = str(card.get("id") or "")
+            payload_metadata["task_board"] = task_board_metadata
+            payload["metadata"] = payload_metadata
+            created = service.create_card(str(board.get("board_id") or ""), payload)
+            if card.get("id"):
+                id_map[str(card.get("id"))] = str(created["card_id"])
+            imported_cards.append((card, created))
+            if card.get("position") is not None:
+                service.move_card(created["card_id"], {"column_id": created["column_id"], "position": card.get("position")})
+        for legacy_card, created in imported_cards:
+            relation_updates: dict[str, Any] = {}
+            depends_on = [id_map.get(value, value) for value in _string_list(legacy_card.get("depends_on"))]
+            blocked_by = [id_map.get(value, value) for value in _string_list(legacy_card.get("blocked_by"))]
+            if depends_on:
+                relation_updates["depends_on"] = _without_self(depends_on, str(created["card_id"]))
+            if blocked_by:
+                relation_updates["blocked_by"] = _without_self(blocked_by, str(created["card_id"]))
+            if relation_updates:
+                service.update_card(str(created["card_id"]), relation_updates)
+        metadata["task_board_json_imported"] = str(path)
+        service.update_board(str(board.get("board_id") or ""), {"metadata": metadata})
+
+    @staticmethod
+    def _replace_columns(
+        service: KanbanService,
+        snapshot: dict[str, Any],
+        columns: list[dict[str, Any]],
+    ) -> None:
+        store = service.store
+        board_id = str(snapshot["board"]["board_id"])
+        old_columns = list(snapshot.get("columns") or [])
+        old_cards = list(snapshot.get("cards") or [])
+        old_slug_by_column = {
+            str(column.get("column_id") or ""): _slugify(str(column.get("title") or ""))
+            for column in old_columns
+        }
+        desired = _normalize_columns(columns)
+        new_column_ids = [gen_id("kcol_") for _ in desired]
+        slug_to_new_id = {
+            str(column.get("id") or ""): new_column_ids[index]
+            for index, column in enumerate(desired)
+        }
+        first_column_id = new_column_ids[0]
+        created = now_ms()
+        with store.tx() as conn:
+            conn.execute("DELETE FROM kanban_columns WHERE board_id = ?", (board_id,))
+            for index, column in enumerate(desired):
+                conn.execute(
+                    """
+                    INSERT INTO kanban_columns(column_id, board_id, title, position, done, wip_limit, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+                    """,
+                    (
+                        new_column_ids[index],
+                        board_id,
+                        str(column.get("title") or f"Column {index + 1}"),
+                        index,
+                        1 if column.get("done") else 0,
+                        created,
+                        created,
+                    ),
+                )
+            for card in old_cards:
+                old_slug = old_slug_by_column.get(str(card.get("column_id") or ""), "")
+                target_column_id = slug_to_new_id.get(old_slug, first_column_id)
+                conn.execute(
+                    "UPDATE kanban_cards SET column_id = ?, updated_at = ? WHERE card_id = ?",
+                    (target_column_id, created, str(card.get("card_id") or "")),
+                )
+            for column_id in new_column_ids:
+                store._compact_cards_tx(conn, board_id, column_id)
+            store._event_tx(conn, board_id, None, "task_board.columns_configured", {"columns": desired})
 
     def _path(self, context: dict[str, Any]) -> Path:
         if self._root is not None:
@@ -261,8 +391,14 @@ class TaskBoardController:
         return {
             "action": action,
             "summary": summary,
+            "board_id": board.get("board_id"),
+            "kanban_board_id": board.get("kanban_board_id"),
+            "scope_type": board.get("scope_type"),
+            "scope_id": board.get("scope_id"),
+            "metadata": board.get("metadata") if isinstance(board.get("metadata"), dict) else {},
             "columns": columns,
             "cards": cards,
+            "kanban": board.get("kanban"),
             "blocked_cards": relations["blocked_cards"],
             "dependency_counts": relations["dependency_counts"],
             "changed": changed,
@@ -283,6 +419,227 @@ def _default_columns() -> list[dict[str, Any]]:
         {"id": _slugify(title), "title": title, "position": index, "done": _is_done_column_title(title)}
         for index, title in enumerate(DEFAULT_COLUMNS)
     ]
+
+
+def _scope(arguments: dict[str, Any], context: dict[str, Any]) -> tuple[str, str]:
+    explicit_scope = arguments.get("scope") if isinstance(arguments.get("scope"), dict) else {}
+    scope_type = str(arguments.get("scope_type") or explicit_scope.get("type") or explicit_scope.get("scope_type") or "").strip().lower()
+    scope_id = str(arguments.get("scope_id") or explicit_scope.get("id") or explicit_scope.get("scope_id") or "").strip()
+    if scope_type and scope_id:
+        return scope_type, scope_id
+    workspace_id = str(arguments.get("workspace_id") or context.get("workspace_id") or "").strip()
+    if workspace_id:
+        return "workspace", workspace_id
+    conversation_id = str(arguments.get("conversation_id") or context.get("conversation_id") or "").strip()
+    if conversation_id:
+        return "conversation", conversation_id
+    company_id = str(arguments.get("company_id") or context.get("company_id") or "").strip()
+    if company_id:
+        return "company", company_id
+    workspace = context.get("conversation_workspace_dir") or context.get("workspace_dir")
+    if isinstance(workspace, str) and workspace.strip():
+        try:
+            return "workspace", str(Path(workspace).resolve())
+        except Exception:
+            return "workspace", workspace.strip()
+    return "global", "default"
+
+
+def _task_board_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    board_info = dict(snapshot.get("board") if isinstance(snapshot.get("board"), dict) else {})
+    raw_columns = list(snapshot.get("columns") if isinstance(snapshot.get("columns"), list) else [])
+    raw_cards = list(snapshot.get("cards") if isinstance(snapshot.get("cards"), list) else [])
+    columns: list[dict[str, Any]] = []
+    column_ids: dict[str, str] = {}
+    seen_slugs: set[str] = set()
+    for index, column in enumerate(sorted(raw_columns, key=lambda item: _int_or_default(item.get("position"), 0))):
+        title = str(column.get("title") or f"Column {index + 1}").strip()
+        compat_id = _unique_id(_slugify(title) or str(column.get("column_id") or f"column-{index + 1}"), seen_slugs)
+        kanban_column_id = str(column.get("column_id") or compat_id)
+        column_ids[kanban_column_id] = compat_id
+        columns.append(
+            {
+                "id": compat_id,
+                "title": title,
+                "position": _int_or_default(column.get("position"), index),
+                "done": bool(column.get("done")),
+                "kanban_column_id": kanban_column_id,
+                "wip_limit": column.get("wip_limit"),
+                "cards": [],
+            }
+        )
+    if not columns:
+        columns = _default_columns()
+        for column in columns:
+            column["kanban_column_id"] = column["id"]
+    fallback_column_id = columns[0]["id"]
+    cards = [
+        _task_card_from_kanban(card, column_ids.get(str(card.get("column_id") or ""), fallback_column_id))
+        for card in raw_cards
+        if isinstance(card, dict)
+    ]
+    board = {
+        "board_id": board_info.get("board_id"),
+        "kanban_board_id": board_info.get("board_id"),
+        "scope_type": board_info.get("scope_type"),
+        "scope_id": board_info.get("scope_id"),
+        "title": board_info.get("title"),
+        "metadata": board_info.get("metadata") if isinstance(board_info.get("metadata"), dict) else {},
+        "columns": columns,
+        "cards": _normalize_cards(cards),
+        "kanban": {
+            "board": board_info,
+            "columns": raw_columns,
+            "cards": raw_cards,
+        },
+    }
+    board["columns"] = _columns_with_cards(board)
+    return board
+
+
+def _task_card_from_kanban(card: dict[str, Any], column_id: str) -> dict[str, Any]:
+    metadata = dict(card.get("metadata") if isinstance(card.get("metadata"), dict) else {})
+    task_board_meta = dict(metadata.get("task_board") if isinstance(metadata.get("task_board"), dict) else {})
+    description = str(card.get("description") or "")
+    checklist = _normalize_subtasks(card.get("checklist"))
+    return {
+        "id": str(card.get("card_id") or ""),
+        "card_id": str(card.get("card_id") or ""),
+        "kanban_card_id": str(card.get("card_id") or ""),
+        "board_id": str(card.get("board_id") or ""),
+        "kanban_board_id": str(card.get("board_id") or ""),
+        "title": str(card.get("title") or ""),
+        "column_id": column_id,
+        "kanban_column_id": str(card.get("column_id") or ""),
+        "position": _int_or_default(card.get("position"), 0),
+        "created_at": _int_or_default(card.get("created_at"), _now_ms()),
+        "updated_at": _int_or_default(card.get("updated_at"), _now_ms()),
+        "notes": description,
+        "description": description,
+        "priority": str(card.get("priority") or "normal"),
+        "assignee": card.get("assignee"),
+        "due_at": card.get("due_at"),
+        "labels": _string_list(card.get("labels")),
+        "metadata": metadata,
+        "depends_on": _without_self(_string_list(card.get("depends_on")), str(card.get("card_id") or "")),
+        "blocked_by": _without_self(_string_list(card.get("blocked_by")), str(card.get("card_id") or "")),
+        "blocker_reason": str(task_board_meta.get("blocker_reason") or metadata.get("blocker_reason") or ""),
+        "subtasks": checklist,
+        "checklist": checklist,
+        "source_type": str(card.get("source_type") or "manual"),
+        "source_id": card.get("source_id"),
+        "conversation_id": card.get("conversation_id"),
+        "workspace_id": card.get("workspace_id"),
+        "company_id": card.get("company_id"),
+        "agent_run_id": card.get("agent_run_id"),
+        "agent_session_id": card.get("agent_session_id"),
+        "agent_status": card.get("agent_status"),
+        "branch": card.get("branch"),
+        "pr_url": card.get("pr_url"),
+    }
+
+
+def _kanban_column_id(board: dict[str, Any], compat_id: str) -> str:
+    candidate = str(compat_id or "").strip()
+    for column in board.get("columns", []):
+        if candidate == column.get("id") or candidate == column.get("kanban_column_id"):
+            return str(column.get("kanban_column_id") or column.get("id") or candidate)
+    raise ValueError(f"Unknown task board column: {candidate}")
+
+
+def _card_create_payload(arguments: dict[str, Any], context: dict[str, Any], column_id: str) -> dict[str, Any]:
+    metadata = dict(arguments.get("metadata") if isinstance(arguments.get("metadata"), dict) else {})
+    task_board_meta = dict(metadata.get("task_board") if isinstance(metadata.get("task_board"), dict) else {})
+    if "blocker_reason" in arguments or "reason" in arguments:
+        task_board_meta["blocker_reason"] = str(arguments.get("blocker_reason") or arguments.get("reason") or "")
+    if task_board_meta:
+        metadata["task_board"] = task_board_meta
+    return {
+        "column_id": column_id,
+        "position": arguments.get("position"),
+        "description": str(arguments.get("notes") if arguments.get("notes") is not None else arguments.get("description") or ""),
+        "priority": str(arguments.get("priority") or "normal"),
+        "assignee": str(arguments.get("assignee")) if arguments.get("assignee") is not None else None,
+        "due_at": str(arguments.get("due_at")) if arguments.get("due_at") is not None else None,
+        "labels": arguments.get("labels"),
+        "checklist": _normalize_subtasks(arguments.get("subtasks")),
+        "depends_on": _without_self(
+            _string_list(arguments.get("depends_on") if "depends_on" in arguments else arguments.get("dependencies")),
+            str(arguments.get("card_id") or arguments.get("id") or ""),
+        ),
+        "blocked_by": _without_self(
+            _string_list(arguments.get("blocked_by") if "blocked_by" in arguments else arguments.get("blockers")),
+            str(arguments.get("card_id") or arguments.get("id") or ""),
+        ),
+        "metadata": metadata,
+        "source_type": str(arguments.get("source_type") or "task_board"),
+        "source_id": str(arguments.get("source_id")) if arguments.get("source_id") is not None else None,
+        "conversation_id": _optional_context_string(arguments, context, "conversation_id"),
+        "workspace_id": _optional_context_string(arguments, context, "workspace_id"),
+        "company_id": _optional_context_string(arguments, context, "company_id"),
+    }
+
+
+def _card_update_payload(card: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+    if "title" in arguments and arguments["title"] is not None:
+        updates["title"] = str(arguments["title"])
+    if "notes" in arguments and arguments["notes"] is not None:
+        updates["description"] = str(arguments["notes"])
+    if "description" in arguments and "notes" not in arguments and arguments["description"] is not None:
+        updates["description"] = str(arguments["description"])
+    for key in ("priority", "assignee", "due_at", "agent_run_id", "agent_session_id", "agent_status", "branch", "pr_url"):
+        if key in arguments and arguments[key] is not None:
+            updates[key] = str(arguments[key])
+    if "labels" in arguments:
+        updates["labels"] = _string_list(arguments.get("labels"))
+    if "metadata" in arguments and isinstance(arguments.get("metadata"), dict):
+        updates["metadata"] = arguments["metadata"]
+        agent_session = arguments["metadata"].get("agent_session")
+        if isinstance(agent_session, dict):
+            session_id = str(agent_session.get("session_id") or "").strip()
+            status = str(agent_session.get("status") or agent_session.get("terminal_state") or "").strip()
+            if session_id and "agent_session_id" not in updates:
+                updates["agent_session_id"] = session_id
+            if status and "agent_status" not in updates:
+                updates["agent_status"] = status
+    if "depends_on" in arguments or "dependencies" in arguments:
+        updates["depends_on"] = _without_self(
+            _string_list(arguments.get("depends_on") if "depends_on" in arguments else arguments.get("dependencies")),
+            str(card.get("id") or ""),
+        )
+    if "blocked_by" in arguments or "blockers" in arguments:
+        updates["blocked_by"] = _without_self(
+            _string_list(arguments.get("blocked_by") if "blocked_by" in arguments else arguments.get("blockers")),
+            str(card.get("id") or ""),
+        )
+    if "blocker_reason" in arguments or "reason" in arguments:
+        updates["metadata"] = _metadata_with_task_board_field(
+            card,
+            "blocker_reason",
+            str(arguments.get("blocker_reason") or arguments.get("reason") or ""),
+        )
+    if "subtasks" in arguments:
+        updates["checklist"] = _normalize_subtasks(arguments.get("subtasks"))
+    return updates
+
+
+def _metadata_with_task_board_field(card: dict[str, Any], key: str, value: Any) -> dict[str, Any]:
+    metadata = dict(card.get("metadata") if isinstance(card.get("metadata"), dict) else {})
+    task_board = dict(metadata.get("task_board") if isinstance(metadata.get("task_board"), dict) else {})
+    task_board[key] = value
+    metadata["task_board"] = task_board
+    if key == "blocker_reason":
+        metadata["blocker_reason"] = value
+    return metadata
+
+
+def _optional_context_string(arguments: dict[str, Any], context: dict[str, Any], key: str) -> str | None:
+    value = arguments.get(key) if arguments.get(key) is not None else context.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _normalize_columns(value: Any) -> list[dict[str, Any]]:
@@ -353,7 +710,11 @@ def _resolve_column_id(arguments: dict[str, Any], columns: list[dict[str, Any]],
         return None
     candidate = str(raw).strip()
     for column in columns:
-        if candidate == column["id"] or candidate.lower() == str(column.get("title") or "").strip().lower():
+        if (
+            candidate == column["id"]
+            or candidate == str(column.get("kanban_column_id") or "")
+            or candidate.lower() == str(column.get("title") or "").strip().lower()
+        ):
             return str(column["id"])
     raise ValueError(f"Unknown task board column: {candidate}")
 
