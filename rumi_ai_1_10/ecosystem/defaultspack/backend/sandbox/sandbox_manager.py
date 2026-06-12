@@ -13,7 +13,7 @@ import uuid
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 REGISTRY_SCHEMA_VERSION = 1
@@ -106,8 +106,18 @@ class SandboxManager:
 
     def create(self, image: str = "ubuntu:22.04", display: bool = True) -> Dict[str, Any]:
         image = str(image or "").strip() or "ubuntu:22.04"
+        display = bool(display)
+        backend_session_id, backend_error = self._create_backend_session_id(image=image)
+        if backend_error is not None:
+            return backend_error
+
         with self._lock:
-            inst = SandboxInstance(image=image, display=bool(display), status=READY)
+            inst = SandboxInstance(
+                sandbox_id=backend_session_id or "",
+                image=image,
+                display=display,
+                status=READY,
+            )
             self._instances[inst.sandbox_id] = inst
             self._save_registry()
             return {
@@ -175,16 +185,15 @@ class SandboxManager:
             if error is not None:
                 return error
             assert inst is not None
-            inst.touch()
-            self._save_registry()
-        return {
-            "ok": True,
-            "clicked": True,
-            "recorded": True,
-            "sandbox_id": inst.sandbox_id,
-            "x": x,
-            "y": y,
-        }
+        result = self._backend_input_action(
+            inst,
+            "click",
+            "clicked",
+            {"x": x, "y": y},
+        )
+        if result.get("ok") is True:
+            self._touch_ready_instance(inst.sandbox_id)
+        return result
 
     def type_text(self, sandbox_id: str, text: str) -> Dict[str, Any]:
         with self._lock:
@@ -192,15 +201,15 @@ class SandboxManager:
             if error is not None:
                 return error
             assert inst is not None
-            inst.touch()
-            self._save_registry()
-        return {
-            "ok": True,
-            "typed": True,
-            "recorded": True,
-            "sandbox_id": inst.sandbox_id,
-            "text": text,
-        }
+        result = self._backend_input_action(
+            inst,
+            "type_text",
+            "typed",
+            {"text": text},
+        )
+        if result.get("ok") is True:
+            self._touch_ready_instance(inst.sandbox_id)
+        return result
 
     def scroll(self, sandbox_id: str, direction: str = "down", amount: int = 3) -> Dict[str, Any]:
         with self._lock:
@@ -208,16 +217,15 @@ class SandboxManager:
             if error is not None:
                 return error
             assert inst is not None
-            inst.touch()
-            self._save_registry()
-        return {
-            "ok": True,
-            "scrolled": True,
-            "recorded": True,
-            "sandbox_id": inst.sandbox_id,
-            "direction": direction,
-            "amount": amount,
-        }
+        result = self._backend_input_action(
+            inst,
+            "scroll",
+            "scrolled",
+            {"direction": direction, "amount": amount},
+        )
+        if result.get("ok") is True:
+            self._touch_ready_instance(inst.sandbox_id)
+        return result
 
     def set_model_mode(self, mode: str) -> Dict[str, Any]:
         if mode not in SUPPORTED_MODEL_MODES:
@@ -353,6 +361,53 @@ class SandboxManager:
             "sandbox_id": str(sandbox_id),
         }
 
+    def _create_backend_session_id(
+        self,
+        *,
+        image: str,
+    ) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        backend = self._gui_backend
+        method = getattr(backend, "create_session", None) if backend is not None else None
+        if not callable(method):
+            return None, None
+
+        try:
+            session = method(f"Sandbox {image}")
+        except Exception as exc:
+            return None, {
+                "ok": False,
+                "error": f"GUI backend create_session failed: {exc}",
+                "code": "SANDBOX_BACKEND_CREATE_FAILED",
+                "status_code": 502,
+                "gui_backend": True,
+            }
+
+        session_id = self._backend_session_id(session)
+        if session_id is None:
+            return None, {
+                "ok": False,
+                "error": "GUI backend create_session returned an invalid session",
+                "code": "SANDBOX_BACKEND_CREATE_FAILED",
+                "status_code": 502,
+                "gui_backend": True,
+            }
+        return session_id, None
+
+    @staticmethod
+    def _backend_session_id(session: Any) -> Optional[str]:
+        if isinstance(session, str):
+            raw_session_id: Any = session
+        elif isinstance(session, dict):
+            raw_session_id = session.get("session_id") or session.get("sandbox_id")
+        else:
+            raw_session_id = getattr(session, "session_id", None) or getattr(
+                session,
+                "sandbox_id",
+                None,
+            )
+        session_id = str(raw_session_id or "").strip()
+        return session_id or None
+
     def _backend_screenshot(self, inst: SandboxInstance) -> Optional[Dict[str, Any]]:
         if self._gui_backend is None or not hasattr(self._gui_backend, "screenshot"):
             return None
@@ -381,6 +436,143 @@ class SandboxManager:
         result.setdefault("status", inst.status)
         result.setdefault("gui_backend", True)
         return result
+
+    def _backend_input_action(
+        self,
+        inst: SandboxInstance,
+        action: str,
+        success_key: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        backend = self._gui_backend
+        method = getattr(backend, action, None) if backend is not None else None
+        if not callable(method):
+            return self._backend_unavailable(inst, action)
+
+        try:
+            result = self._call_backend_input_method(method, inst.sandbox_id, action, payload)
+        except Exception as exc:
+            return self._backend_action_failed(
+                inst,
+                action,
+                f"GUI backend {action} failed: {exc}",
+            )
+
+        if not isinstance(result, dict):
+            return self._backend_action_failed(
+                inst,
+                action,
+                f"GUI backend {action} returned an invalid payload",
+            )
+
+        normalized = dict(result)
+        if normalized.get("ok") is not True:
+            error = str(normalized.get("error") or f"GUI backend {action} did not execute")
+            normalized["ok"] = False
+            normalized.setdefault("error", error)
+            normalized.setdefault("code", "SANDBOX_BACKEND_ACTION_FAILED")
+            normalized.setdefault("status_code", 502)
+            normalized.setdefault("sandbox_id", inst.sandbox_id)
+            normalized.setdefault("status", inst.status)
+            normalized.setdefault("gui_backend", True)
+            normalized.setdefault("action", action)
+            self._strip_input_success_flags(normalized)
+            return normalized
+
+        normalized["ok"] = True
+        normalized.setdefault(success_key, True)
+        normalized.setdefault("sandbox_id", inst.sandbox_id)
+        normalized.setdefault("status", inst.status)
+        normalized.setdefault("gui_backend", True)
+        normalized.setdefault("action", action)
+        for key, value in payload.items():
+            normalized.setdefault(key, value)
+        return normalized
+
+    def _call_backend_input_method(
+        self,
+        method: Callable[..., Any],
+        sandbox_id: str,
+        action: str,
+        payload: Dict[str, Any],
+    ) -> Any:
+        if action == "click":
+            if self._accepts_keywords(method, "x", "y"):
+                return method(sandbox_id, x=payload["x"], y=payload["y"])
+            return method(sandbox_id, payload["x"], payload["y"])
+        if action == "type_text":
+            if self._accepts_keywords(method, "text"):
+                return method(sandbox_id, text=payload["text"])
+            return method(sandbox_id, payload["text"])
+        if action == "scroll":
+            if self._accepts_keywords(method, "direction", "amount"):
+                return method(
+                    sandbox_id,
+                    direction=payload["direction"],
+                    amount=payload["amount"],
+                )
+            if self._accepts_keywords(method, "amount"):
+                return method(sandbox_id, amount=payload["amount"])
+            return method(sandbox_id, payload["amount"])
+        raise ValueError(f"Unsupported sandbox input action: {action}")
+
+    @staticmethod
+    def _accepts_keywords(method: Callable[..., Any], *names: str) -> bool:
+        import inspect
+
+        try:
+            signature = inspect.signature(method)
+        except (TypeError, ValueError):
+            return False
+        parameters = signature.parameters.values()
+        accepted = set()
+        for parameter in parameters:
+            if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+                return True
+            accepted.add(parameter.name)
+        return all(name in accepted for name in names)
+
+    def _backend_unavailable(self, inst: SandboxInstance, action: str) -> Dict[str, Any]:
+        return {
+            "ok": False,
+            "error": f"Sandbox input backend unavailable for {action}",
+            "code": "SANDBOX_BACKEND_UNAVAILABLE",
+            "status_code": 503,
+            "sandbox_id": inst.sandbox_id,
+            "status": inst.status,
+            "gui_backend": False,
+            "action": action,
+        }
+
+    def _backend_action_failed(
+        self,
+        inst: SandboxInstance,
+        action: str,
+        error: str,
+    ) -> Dict[str, Any]:
+        return {
+            "ok": False,
+            "error": error,
+            "code": "SANDBOX_BACKEND_ACTION_FAILED",
+            "status_code": 502,
+            "sandbox_id": inst.sandbox_id,
+            "status": inst.status,
+            "gui_backend": True,
+            "action": action,
+        }
+
+    @staticmethod
+    def _strip_input_success_flags(result: Dict[str, Any]) -> None:
+        for key in ("clicked", "typed", "scrolled", "recorded"):
+            result.pop(key, None)
+
+    def _touch_ready_instance(self, sandbox_id: str) -> None:
+        with self._lock:
+            inst = self._instances.get(str(sandbox_id))
+            if inst is None or inst.status in TERMINAL_STATUSES:
+                return
+            inst.touch()
+            self._save_registry()
 
 
 def _float_or_zero(value: Any) -> float:
