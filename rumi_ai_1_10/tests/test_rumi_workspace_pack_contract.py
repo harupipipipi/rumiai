@@ -3,8 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from ecosystem.setup_pack.pack_selector import PackSelector
 
+
+pytestmark = pytest.mark.contract
 
 PACK_ID = "rumi_workspace_pack"
 

@@ -4,8 +4,11 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
+
+pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parent.parent
 PACK_DIR = ROOT / "ecosystem" / "rumi_agent_services_pack"

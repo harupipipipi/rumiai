@@ -1,3 +1,5 @@
+import "./bridge_url_policy.js";
+
 const DEFAULT_SETTINGS = {
   serverUrl: "http://127.0.0.1:8766",
   pairingToken: "",
@@ -126,6 +128,7 @@ function normalizePollInterval(value) {
 async function pollBridge(trigger) {
   const settings = await getSettings();
   const clientId = await ensureClientId();
+  const serverUrlResult = RumiBridgeUrlPolicy.validateServerUrl(settings.serverUrl);
   if (!settings.serverUrl || !settings.pairingToken) {
     return setStatus({
       ok: false,
@@ -134,8 +137,18 @@ async function pollBridge(trigger) {
       message: "Set server URL and pairing token in Options."
     });
   }
+  if (!serverUrlResult.ok) {
+    return setStatus({
+      ok: false,
+      state: "invalid_configuration",
+      trigger,
+      serverUrl: settings.serverUrl,
+      message: serverUrlResult.message
+    });
+  }
 
   const metadata = await buildClientMetadata(settings, clientId);
+  const serverUrl = serverUrlResult.url;
   const requestBody = {
     event: "poll",
     trigger,
@@ -144,7 +157,7 @@ async function pollBridge(trigger) {
   };
 
   try {
-    const response = await fetch(joinUrl(settings.serverUrl, BRIDGE_POLL_PATH), {
+    const response = await fetch(joinUrl(serverUrl, BRIDGE_POLL_PATH), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -165,7 +178,7 @@ async function pollBridge(trigger) {
     }
 
     if (results.length > 0) {
-      await postCommandResults(settings, metadata, results);
+      await postCommandResults({ ...settings, serverUrl }, metadata, results);
     }
 
     return setStatus({
@@ -173,14 +186,14 @@ async function pollBridge(trigger) {
       state: "connected",
       trigger,
       commandCount: commands.length,
-      serverUrl: settings.serverUrl
+      serverUrl
     });
   } catch (error) {
     return setStatus({
       ok: false,
       state: "bridge_error",
       trigger,
-      serverUrl: settings.serverUrl,
+      serverUrl,
       message: String(error && error.message ? error.message : error)
     });
   }
@@ -254,7 +267,11 @@ async function getTabsSummary() {
 }
 
 async function postCommandResults(settings, client, results) {
-  const response = await fetch(joinUrl(settings.serverUrl, BRIDGE_RESULT_PATH), {
+  const serverUrl = RumiBridgeUrlPolicy.normalizeServerUrl(settings.serverUrl);
+  if (!serverUrl) {
+    throw new Error("Bridge server URL must use a local or private host.");
+  }
+  const response = await fetch(joinUrl(serverUrl, BRIDGE_RESULT_PATH), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

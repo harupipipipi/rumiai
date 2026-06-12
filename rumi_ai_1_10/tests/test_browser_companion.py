@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -366,6 +368,82 @@ def test_browser_companion_extension_semantic_dom_and_highlight_contract():
         'case "page.clear_highlight"',
     ):
         assert needle in background or needle in tool_manifest
+
+
+def test_browser_companion_extension_restricts_bridge_server_url_to_local_private_origins():
+    extension_root = (
+        ROOT
+        / "ecosystem"
+        / "defaultspack"
+        / "browser_extensions"
+        / "rumi_browser_companion"
+    )
+    policy = (extension_root / "bridge_url_policy.js").read_text(encoding="utf-8")
+    background = (extension_root / "background.js").read_text(encoding="utf-8")
+    options = (extension_root / "options.js").read_text(encoding="utf-8")
+    options_html = (extension_root / "options.html").read_text(encoding="utf-8")
+    readme = (extension_root / "README.md").read_text(encoding="utf-8")
+
+    assert 'import "./bridge_url_policy.js";' in background
+    assert '<script src="bridge_url_policy.js"></script>' in options_html
+    assert "RumiBridgeUrlPolicy.validateServerUrl(settings.serverUrl)" in background
+    assert "RumiBridgeUrlPolicy.normalizeServerUrl(settings.serverUrl)" in background
+    assert "RumiBridgeUrlPolicy.validateServerUrl(form.serverUrl.value)" in options
+
+    for needle in (
+        'parsed.protocol !== "http:" && parsed.protocol !== "https:"',
+        "parsed.username || parsed.password",
+        'host === "localhost" || host.endsWith(".localhost")',
+        "a === 10",
+        "a === 127",
+        "a === 172 && b >= 16 && b <= 31",
+        "a === 192 && b === 168",
+        "a === 169 && b === 254",
+        'host === "::1"',
+        "value >= 0xfc00 && value <= 0xfdff",
+        "value >= 0xfe80 && value <= 0xfebf",
+        "Bridge server URL must use a local or private host.",
+    ):
+        assert needle in policy
+
+    assert "local/private `Server URL`" in readme
+
+    node = shutil.which("node")
+    if node:
+        script = """
+const policyPath = process.argv[1];
+require(policyPath);
+const policy = globalThis.RumiBridgeUrlPolicy;
+const cases = [
+  ["http://127.0.0.1:8766", true],
+  ["http://localhost:8766", true],
+  ["https://10.0.0.5:8766/path", true],
+  ["http://172.16.0.1:8766", true],
+  ["http://172.32.0.1:8766", false],
+  ["http://192.168.1.2:8766", true],
+  ["http://169.254.1.2:8766", true],
+  ["http://[::1]:8766", true],
+  ["http://[fd12::1]:8766", true],
+  ["http://[fe80::1]:8766", true],
+  ["https://example.com", false],
+  ["http://8.8.8.8:8766", false],
+  ["file:///tmp/bridge", false],
+  ["http://user:pass@127.0.0.1:8766", false],
+];
+for (const [url, expected] of cases) {
+  const result = policy.validateServerUrl(url);
+  if (result.ok !== expected) {
+    throw new Error(`${url} expected ${expected} but got ${JSON.stringify(result)}`);
+  }
+}
+"""
+        result = subprocess.run(
+            [node, "-e", script, str(extension_root / "bridge_url_policy.js")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeypatch):

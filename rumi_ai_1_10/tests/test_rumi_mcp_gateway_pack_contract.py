@@ -4,10 +4,13 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 from ecosystem.setup_pack.pack_selector import PackSelector
 
+
+pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parent.parent
 PACK_ID = "rumi_mcp_gateway_pack"
