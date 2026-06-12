@@ -144,7 +144,7 @@ class BrowserComputerController:
         if action in {"computer.move", "computer.click", "computer.drag", "computer.type", "computer.key", "computer.scroll"}:
             return self._desktop_action(action, payload, yolo_mode=yolo_mode)
         if action == "computer.observe":
-            return self._computer_seat_observe(payload)
+            return self._computer_seat_observe(payload, yolo_mode=yolo_mode)
         if action in {"computer.semantic_action", "computer.press"}:
             return self._computer_seat_semantic_action(payload, yolo_mode=yolo_mode)
         if action == "computer.pid_event":
@@ -214,6 +214,26 @@ class BrowserComputerController:
             return ComputerUseEdgeHazeManager.from_pack_root(pack_root).active(action=action, payload=payload)
         except Exception:
             return contextlib.nullcontext()
+
+    @staticmethod
+    def _edge_haze_result(edge_haze: Any) -> dict[str, Any] | None:
+        if not isinstance(edge_haze, dict):
+            return None
+        result: dict[str, Any] = {
+            "attempted": bool(edge_haze.get("attempted")),
+            "started": bool(edge_haze.get("started")),
+        }
+        for key in ("action", "sequence_id", "lease_path"):
+            value = edge_haze.get(key)
+            if isinstance(value, str) and value:
+                result[key] = value
+        return result
+
+    @classmethod
+    def _attach_edge_haze_result(cls, result: dict[str, Any], edge_haze: Any) -> None:
+        metadata = cls._edge_haze_result(edge_haze)
+        if metadata is not None:
+            result["edge_haze"] = metadata
 
     def _open_url(self, url: str, *, payload: dict[str, Any], dry_run: bool, yolo_mode: bool) -> dict[str, Any]:
         if not url.startswith(("http://", "https://", "file://")):
@@ -1353,8 +1373,15 @@ class BrowserComputerController:
             meta["recommended_next_actions"] = ["computer.screenshot", "computer.click", "computer.observe"]
         return meta
 
-    def _computer_seat_observe(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Delegate to ComputerSeatService.observe."""
+    def _computer_seat_observe(self, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
+        """Delegate to ComputerSeatService.observe with approval.
+
+        observe can aggregate screenshot-capable and foreground drivers, so it
+        must use the same explicit approval boundary as computer.screenshot.
+        """
+        approval_payload = self._safe_payload(payload)
+        if not (yolo_mode or self._consume_approval(payload, "computer.observe", approval_payload)):
+            return self._approval_required("computer.observe", approval_payload)
         try:
             svc = self._get_computer_seat()
             target = self._computer_seat_target(payload)

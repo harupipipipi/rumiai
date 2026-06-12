@@ -37,6 +37,13 @@ def _mock_service():
     return svc
 
 
+def _approval_token_for(controller: BrowserComputerController, action: str, payload: dict) -> str:
+    request = controller.run(action, payload)
+    token = str(request.get("approval_token") or "")
+    assert token
+    return token
+
+
 def test_click_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc
@@ -70,12 +77,61 @@ def test_scroll_delegates_to_seat(controller):
     svc.scroll.assert_called_once()
 
 
-def test_observe_delegates_to_seat(controller):
+def test_observe_requires_approval_without_yolo(controller):
     svc = _mock_service()
     controller._computer_seat = svc
     result = controller.run("computer.observe", {"app": "Safari"})
+    assert result.get("requires_approval") is True
+    svc.observe.assert_not_called()
+
+
+def test_observe_delegates_to_seat_with_yolo(controller):
+    svc = _mock_service()
+    controller._computer_seat = svc
+    result = controller.run("computer.observe", {"app": "Safari"}, yolo_mode=True)
     assert result["action"] == "computer.observe"
     svc.observe.assert_called_once()
+
+
+def test_observe_delegates_to_seat_with_approval(controller):
+    svc = _mock_service()
+    payload = {"app": "Safari"}
+    token = _approval_token_for(controller, "computer.observe", payload)
+    controller._computer_seat = svc
+    result = controller.run("computer.observe", {**payload, "approval_token": token})
+    assert result["action"] == "computer.observe"
+    svc.observe.assert_called_once()
+
+
+def test_attach_edge_haze_result_ignores_non_metadata(controller):
+    result: dict[str, object] = {"action": "computer.click"}
+
+    controller._attach_edge_haze_result(result, None)
+
+    assert "edge_haze" not in result
+
+
+def test_attach_edge_haze_result_adds_metadata(controller):
+    result: dict[str, object] = {"action": "computer.click"}
+
+    controller._attach_edge_haze_result(
+        result,
+        {
+            "attempted": True,
+            "started": False,
+            "action": "computer.click",
+            "sequence_id": "seq-1",
+            "lease_path": "/tmp/edge-haze.json",
+        },
+    )
+
+    assert result["edge_haze"] == {
+        "attempted": True,
+        "started": False,
+        "action": "computer.click",
+        "sequence_id": "seq-1",
+        "lease_path": "/tmp/edge-haze.json",
+    }
 
 
 def test_doctor_delegates_to_seat(controller):

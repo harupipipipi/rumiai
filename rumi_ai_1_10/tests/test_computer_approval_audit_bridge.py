@@ -24,6 +24,7 @@ def controller(tmp_path):
     svc.click.return_value = asdict(ActionResult(action="click", driver="mock", executed=True))
     svc.type_text.return_value = asdict(ActionResult(action="type_text", driver="mock", executed=True))
     svc.semantic_action.return_value = asdict(ActionResult(action="semantic_action", driver="mock", executed=True))
+    svc.observe.return_value = {"platform": "darwin", "screenshot": {"data_url": "data:image/png;base64,AAAA"}}
     svc.doctor.return_value = {"platform": "darwin", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}
     ctrl._computer_seat = svc
     return ctrl
@@ -40,6 +41,20 @@ def test_click_executes_with_yolo(controller):
     """click with yolo_mode should execute without approval."""
     result = controller.run("computer.click", {"x": 50, "y": 50}, yolo_mode=True)
     assert result["executed"] is True
+
+
+def test_observe_requires_approval_without_yolo(controller):
+    """observe can return screenshots and requires approval."""
+    result = controller.run("computer.observe", {"app": "Notes"})
+    assert result.get("requires_approval") is True
+    controller._computer_seat.observe.assert_not_called()
+
+
+def test_observe_yolo_bypasses(controller):
+    """observe with yolo_mode executes after bypassing approval."""
+    result = controller.run("computer.observe", {"app": "Notes"}, yolo_mode=True)
+    assert result["action"] == "computer.observe"
+    assert result["screenshot"]["data_url"].startswith("data:image/png;base64,")
 
 
 def test_semantic_action_requires_approval(controller):
@@ -81,9 +96,9 @@ def test_click_is_high_risk():
     assert requires_approval("click") is True
 
 
-def test_observe_is_low_risk():
-    assert risk_level("observe") == "low"
-    assert requires_approval("observe") is False
+def test_observe_is_high_risk():
+    assert risk_level("observe") == "high"
+    assert requires_approval("observe") is True
 
 
 def test_scroll_is_medium_risk():
