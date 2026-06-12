@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -303,6 +304,104 @@ class SoakTestRunner:
         comparisons.append(comparison)
         self._save_state(state)
         return comparison
+
+    def run_claimed_dogfood_tasks(
+        self,
+        *,
+        workspace_root: str | Path | None = None,
+        task_count: int = 3,
+        lease_seconds: int = 3600,
+        state_path: str | Path | None = None,
+        task_runner: Callable[..., dict[str, Any]] | None = None,
+        refill_empty_queue: bool = True,
+    ) -> dict[str, Any]:
+        """Run live dogfood tasks through the durable soak lease queue."""
+
+        if task_runner is None:
+            from domain.agent.self_improvement_live_loop import run_live_improvement
+
+            task_runner = run_live_improvement
+
+        workspace = Path(workspace_root) if workspace_root else self.runtime.workspace_root
+        live_state_path = (
+            Path(state_path)
+            if state_path
+            else workspace / "user_data" / "shared" / "self_improvement" / "live_state.json"
+        )
+
+        results: list[dict[str, Any]] = []
+        for _ in range(max(0, int(task_count))):
+            claimed = self.claim_next_task(lease_seconds=lease_seconds)
+            if claimed is None and refill_empty_queue:
+                self.save_task_queue(list(SOAK_TASK_DEFINITIONS))
+                claimed = self.claim_next_task(lease_seconds=lease_seconds)
+            if claimed is None:
+                break
+
+            task_id = str(claimed.get("task_id", ""))
+            result = self._run_claimed_task(
+                task_runner=task_runner,
+                workspace=workspace,
+                state_path=live_state_path,
+                claimed=claimed,
+            )
+            results.append(result)
+            self.record_task_result(
+                task_id,
+                status="completed" if result.get("success") else "failed",
+                model_role="main",
+                model_id=str(result.get("model", "")),
+                tools_used=list(claimed.get("tools_used") or []),
+                files_read=list(result.get("files_read") or []),
+                files_modified=list(result.get("files_modified") or []),
+                test_result="pass" if result.get("test_exit_code") == 0 else "fail",
+                failures=[str(result["error"])] if result.get("error") else [],
+            )
+
+        successful = [r for r in results if r.get("success")]
+        failed = [r for r in results if not r.get("success")]
+        return {
+            "total_tasks": len(results),
+            "successful": len(successful),
+            "failed": len(failed),
+            "results": results,
+            "generated_at": _timestamp(),
+        }
+
+    def _run_claimed_task(
+        self,
+        *,
+        task_runner: Callable[..., dict[str, Any]],
+        workspace: Path,
+        state_path: Path,
+        claimed: dict[str, Any],
+    ) -> dict[str, Any]:
+        task_id = str(claimed.get("task_id", ""))
+        task_title = str(claimed.get("title") or task_id)
+
+        try:
+            result = task_runner(
+                workspace_root=workspace,
+                task_id=task_id,
+                task_title=task_title,
+                state_path=state_path,
+            )
+        except Exception as exc:
+            result = {"success": False, "task_id": task_id, "error": str(exc)}
+
+        if not isinstance(result, dict):
+            result = {
+                "success": False,
+                "task_id": task_id,
+                "error": f"task runner returned {type(result).__name__}",
+            }
+
+        result = dict(result)
+        result["task_id"] = task_id
+        result["claimed_task_id"] = task_id
+        result["lease_attempt"] = claimed.get("attempt", 1)
+        result["lease_expires_at"] = claimed.get("lease_expires_at")
+        return result
 
     def health_status(self, *, now_epoch: float | None = None) -> dict[str, Any]:
         state = self._load_state()

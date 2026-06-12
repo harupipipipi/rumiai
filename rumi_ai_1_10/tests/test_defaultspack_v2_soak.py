@@ -4,7 +4,10 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = ROOT.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
 sys.path.insert(0, str(ROOT))
@@ -95,6 +98,99 @@ def test_soak_reclaims_expired_task_with_incremented_attempt(tmp_path):
     assert second["attempt"] == 2
     assert state["task_queue"][0]["attempt"] == 2
     assert state["active_task"]["attempt"] == 2
+    assert state["lease_events"][0]["kind"] == "lease_expired"
+
+
+def test_soak_claimed_dogfood_records_active_lease_during_task(tmp_path):
+    from domain.agent.self_improvement_runtime import create_mimo_profile
+    from domain.agent.soak_test_runner import SoakTestRunner
+
+    runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "si.json")
+    runtime.bootstrap()
+
+    state_path = tmp_path / "soak.json"
+    runner = SoakTestRunner(runtime, state_path=state_path)
+    runner.start_run()
+    tasks = runner.load_task_queue()[:2]
+    runner.save_task_queue(tasks)
+    active_seen: list[tuple[str, str, int]] = []
+
+    def fake_task_runner(**kwargs):
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        active = state["active_task"]
+        active_seen.append(
+            (
+                kwargs["task_id"],
+                active["task_id"],
+                int(active["lease_expires_epoch"] - active["started_at_epoch"]),
+            )
+        )
+        return {
+            "success": True,
+            "task_id": kwargs["task_id"],
+            "model": "fake/model",
+            "files_read": ["math_utils.py"],
+            "files_modified": ["math_utils.py"],
+            "test_exit_code": 0,
+        }
+
+    result = runner.run_claimed_dogfood_tasks(
+        workspace_root=tmp_path,
+        task_count=2,
+        lease_seconds=30,
+        task_runner=fake_task_runner,
+    )
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert result["successful"] == 2
+    assert [r["claimed_task_id"] for r in result["results"]] == [t["task_id"] for t in tasks]
+    assert active_seen == [(t["task_id"], t["task_id"], 30) for t in tasks]
+    assert state["active_task"] is None
+    assert state["task_queue"] == []
+    assert [r["task_id"] for r in state["results"]] == [t["task_id"] for t in tasks]
+    assert state["results"][0]["tools_used"] == tasks[0]["tools_used"]
+
+
+def test_soak_claimed_dogfood_leaves_active_lease_for_recovery_on_process_exit(tmp_path):
+    from domain.agent.self_improvement_runtime import create_mimo_profile
+    from domain.agent.soak_test_runner import SoakTestRunner
+
+    runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "si.json")
+    runtime.bootstrap()
+
+    state_path = tmp_path / "soak.json"
+    runner = SoakTestRunner(runtime, state_path=state_path)
+    runner.start_run()
+    runner.save_task_queue(runner.load_task_queue()[:1])
+
+    def crashing_task_runner(**kwargs):
+        raise SystemExit(f"simulated process exit during {kwargs['task_id']}")
+
+    with pytest.raises(SystemExit):
+        runner.run_claimed_dogfood_tasks(
+            workspace_root=tmp_path,
+            task_count=1,
+            lease_seconds=30,
+            task_runner=crashing_task_runner,
+        )
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    active = state["active_task"]
+    assert active["task_id"] == state["task_queue"][0]["task_id"]
+    assert state["results"] == []
+
+    health = runner.health_status(now_epoch=active["lease_expires_epoch"] + 1)
+    assert health["active_task"] == active["task_id"]
+    assert "active task lease expired" in health["reasons"]
+
+    reclaimed = runner.claim_next_task(
+        lease_seconds=30,
+        now_epoch=active["lease_expires_epoch"] + 1,
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert reclaimed is not None
+    assert reclaimed["task_id"] == active["task_id"]
+    assert reclaimed["attempt"] == 2
     assert state["lease_events"][0]["kind"] == "lease_expired"
 
 
@@ -217,3 +313,13 @@ def test_soak_task_definitions_are_complete():
         assert task["title"]
         assert task["expected_outcome"]
         assert isinstance(task["tools_used"], list)
+
+
+def test_defaultspack_soak_workflow_uses_claimed_dogfood_runner():
+    workflow = (REPO_ROOT / ".github" / "workflows" / "defaultspack-v2-soak.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "runner.run_claimed_dogfood_tasks" in workflow
+    assert "run_multi_task_dogfood" not in workflow
+    assert "runner.record_task_result(" not in workflow
