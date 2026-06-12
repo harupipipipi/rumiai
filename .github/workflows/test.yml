@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [master]
 
+env:
+  # requirements.txt intentionally forces source installs; keep Cargo's
+  # crates.io fetches resilient while building cryptography in CI.
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: "5"
+
 jobs:
   root-python-tests:
     strategy:
