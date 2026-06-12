@@ -57,11 +57,7 @@ impl AppConfig {
     /// ```
     pub fn detect_for_tauri(resource_dir: PathBuf, app_data_dir: PathBuf) -> Result<Self> {
         let mut app_dir = resource_dir.join("app");
-        let dev_workspace_root = if app_dir.exists() {
-            None
-        } else {
-            find_dev_workspace_root(&resource_dir)
-        };
+        let dev_workspace_root = find_dev_workspace_root(&resource_dir, app_dir.exists());
 
         if let Some(workspace_root) = &dev_workspace_root {
             let candidate = workspace_root.join("rumi_ai_1_10");
@@ -342,14 +338,29 @@ impl AppConfig {
     }
 }
 
-fn find_dev_workspace_root(resource_dir: &Path) -> Option<PathBuf> {
+fn find_dev_workspace_root(resource_dir: &Path, staged_app_exists: bool) -> Option<PathBuf> {
     for ancestor in resource_dir.ancestors() {
         let candidate = ancestor.join("rumi_ai_1_10");
-        if candidate.join("app.py").exists() {
+        if candidate.join("app.py").exists()
+            && (!staged_app_exists || is_tauri_dev_resource_dir(ancestor, resource_dir))
+        {
             return Some(ancestor.to_path_buf());
         }
     }
     None
+}
+
+fn is_tauri_dev_resource_dir(workspace_root: &Path, resource_dir: &Path) -> bool {
+    let tauri_manifest = workspace_root
+        .join("rumi_viewer")
+        .join("src-tauri")
+        .join("Cargo.toml");
+    let tauri_target = workspace_root
+        .join("rumi_viewer")
+        .join("src-tauri")
+        .join("target");
+
+    tauri_manifest.is_file() && resource_dir.starts_with(tauri_target)
 }
 
 fn configured_uv_path() -> Option<PathBuf> {
@@ -588,6 +599,44 @@ mod tests {
         assert_eq!(config.app_dir, resource.join("app"));
         assert_eq!(config.dev_workspace_root, None);
         assert!(!config.is_dev_workspace());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn detect_for_tauri_uses_repo_checkout_for_tauri_dev_with_staged_app() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_viewer_config_dev_staged_{unique}"));
+        let resource = root
+            .join("rumi_viewer")
+            .join("src-tauri")
+            .join("target")
+            .join("debug");
+        let tauri_manifest = root
+            .join("rumi_viewer")
+            .join("src-tauri")
+            .join("Cargo.toml");
+        let staged_app_py = resource.join("app").join("app.py");
+        let repo_app_py = root.join("rumi_ai_1_10").join("app.py");
+
+        fs::create_dir_all(staged_app_py.parent().unwrap()).unwrap();
+        fs::create_dir_all(repo_app_py.parent().unwrap()).unwrap();
+        fs::create_dir_all(tauri_manifest.parent().unwrap()).unwrap();
+        fs::write(&staged_app_py, "print('staged')\n").unwrap();
+        fs::write(&repo_app_py, "print('repo')\n").unwrap();
+        fs::write(&tauri_manifest, "[package]\nname = \"rumi-viewer\"\n").unwrap();
+
+        let config = AppConfig::detect_for_tauri(resource, root.join("appdata")).unwrap();
+
+        assert_eq!(config.app_dir, root.join("rumi_ai_1_10"));
+        assert_eq!(config.dev_workspace_root.as_deref(), Some(root.as_path()));
+        assert!(config.is_dev_workspace());
 
         fs::remove_dir_all(&root).ok();
     }
