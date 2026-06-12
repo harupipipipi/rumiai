@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ChatStreamInterruptedError, api, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { ChatStreamInterruptedError, ChatStreamStructuredError, api, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
@@ -655,6 +655,45 @@ test("streamMessage surfaces structured stream errors", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("streamMessage preserves approval stream errors after partial deltas", async () => {
+  const originalFetch = globalThis.fetch;
+  const deltas: string[] = [];
+  globalThis.fetch = (async () => {
+    const body = [
+      'data: {"type":"delta","delta":"partial"}\n\n',
+      'data: {"type":"error","error":{"code":"APPROVAL_REQUIRED","message":"tool approval denied","status":403,"category":"approval"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      api.streamMessage("c1", "hello", undefined, {
+        onDelta(delta) {
+          deltas.push(delta);
+        },
+      }),
+      (error) => {
+        assert.ok(error instanceof ChatStreamStructuredError);
+        assert.ok(!(error instanceof ChatStreamInterruptedError));
+        assert.equal(error.message, "tool approval denied");
+        assert.equal(error.code, "APPROVAL_REQUIRED");
+        assert.equal(error.status, 403);
+        assert.equal(error.category, "approval");
+        assert.equal(error.partialText, "partial");
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(deltas, ["partial"]);
 });
 
 test("streamMessage rejects streams without a final message", async () => {

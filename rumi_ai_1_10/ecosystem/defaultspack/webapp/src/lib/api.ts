@@ -38,6 +38,53 @@ export type ChatAttachment = {
   sourcePath?: string;
 };
 
+export type ChatStreamErrorDetails = {
+  code?: string;
+  message?: string;
+  status?: string | number;
+  category?: string;
+  [key: string]: unknown;
+};
+
+export type ChatStreamError = string | ChatStreamErrorDetails;
+
+function streamErrorMessage(value: ChatStreamError | undefined): string {
+  if (typeof value === "string" && value.trim()) return value;
+  if (value && typeof value === "object" && typeof value.message === "string") {
+    return value.message;
+  }
+  return "defaultspack stream failed";
+}
+
+export class ChatStreamStructuredError extends Error {
+  streamError: ChatStreamErrorDetails;
+  code?: string;
+  status?: string | number;
+  category?: string;
+  partialText: string;
+  thinkingText: string;
+  sawActivity: boolean;
+
+  constructor(
+    streamError: ChatStreamErrorDetails,
+    details: {
+      partialText?: string;
+      thinkingText?: string;
+      sawActivity?: boolean;
+    } = {},
+  ) {
+    super(streamErrorMessage(streamError));
+    this.name = "ChatStreamStructuredError";
+    this.streamError = streamError;
+    this.code = streamError.code;
+    this.status = streamError.status;
+    this.category = streamError.category;
+    this.partialText = details.partialText ?? "";
+    this.thinkingText = details.thinkingText ?? "";
+    this.sawActivity = details.sawActivity === true;
+  }
+}
+
 export class ChatStreamInterruptedError extends Error {
   partialText: string;
   thinkingText: string;
@@ -1033,8 +1080,6 @@ type SendMessageOptions = {
   metadata?: Record<string, unknown>;
 };
 
-type ChatStreamError = string | { code?: string; message?: string };
-
 export type ChatToolStreamEvent = ChatActivityEvent & {
   type:
     | "status"
@@ -1086,14 +1131,65 @@ function streamMessageValue(record: Record<string, unknown>, data: Record<string
     : undefined;
 }
 
+function streamMetadataString(record: Record<string, unknown>, key: "code" | "message" | "category"): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function streamMetadataStatus(record: Record<string, unknown>): string | number | undefined {
+  const value = record.status;
+  if (typeof value === "number") return value;
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function streamErrorMetadata(record: Record<string, unknown>, data: Record<string, unknown>): ChatStreamErrorDetails {
+  const metadata: ChatStreamErrorDetails = {};
+  for (const source of [data, record]) {
+    if (metadata.code === undefined) metadata.code = streamMetadataString(source, "code");
+    if (metadata.message === undefined) metadata.message = streamMetadataString(source, "message");
+    if (metadata.status === undefined) metadata.status = streamMetadataStatus(source);
+    if (metadata.category === undefined) metadata.category = streamMetadataString(source, "category");
+  }
+  return metadata;
+}
+
+function hasStreamErrorMetadata(details: ChatStreamErrorDetails): boolean {
+  return details.code !== undefined
+    || details.message !== undefined
+    || details.status !== undefined
+    || details.category !== undefined;
+}
+
+function isStreamErrorDetails(value: ChatStreamError | undefined): value is ChatStreamErrorDetails {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function mergeStreamErrorMetadata(
+  error: Record<string, unknown>,
+  record: Record<string, unknown>,
+  data: Record<string, unknown>,
+): ChatStreamErrorDetails {
+  const details = { ...error } as ChatStreamErrorDetails;
+  const metadata = streamErrorMetadata(record, data);
+  if (details.code === undefined) details.code = metadata.code;
+  if (details.message === undefined) details.message = metadata.message;
+  if (details.status === undefined) details.status = metadata.status;
+  if (details.category === undefined) details.category = metadata.category;
+  return details;
+}
+
 function streamErrorValue(record: Record<string, unknown>, data: Record<string, unknown>): ChatStreamError | undefined {
   const value = record.error ?? data.error;
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as ChatStreamError;
+  const metadata = streamErrorMetadata(record, data);
+  if (typeof value === "string") {
+    return hasStreamErrorMetadata(metadata)
+      ? { ...metadata, message: metadata.message ?? value }
+      : value;
   }
-  const message = record.message ?? data.message;
-  return typeof message === "string" && message.trim() ? { message } : undefined;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return mergeStreamErrorMetadata(value as Record<string, unknown>, record, data);
+  }
+  return hasStreamErrorMetadata(metadata) ? metadata : undefined;
 }
 
 export function normalizeChatStreamEvent(value: unknown): ChatStreamEvent | null {
@@ -1364,14 +1460,6 @@ async function readStreamEvents(
   let thinkingText = "";
   let sawActivity = false;
 
-  const streamErrorMessage = (value: ChatStreamError | undefined): string => {
-    if (typeof value === "string" && value.trim()) return value;
-    if (value && typeof value === "object" && typeof value.message === "string") {
-      return value.message;
-    }
-    return "defaultspack stream failed";
-  };
-
   const consumePacket = (packet: string) => {
     const dataLines = packet
       .split(/\r?\n/)
@@ -1404,6 +1492,13 @@ async function readStreamEvents(
       finalMessage = event.message;
       handlers.onMessage?.(event.message);
     } else if (event.type === "error") {
+      if (isStreamErrorDetails(event.error)) {
+        throw new ChatStreamStructuredError(event.error, {
+          partialText,
+          thinkingText,
+          sawActivity,
+        });
+      }
       throw new Error(streamErrorMessage(event.error));
     } else {
       sawActivity = true;
@@ -1437,6 +1532,7 @@ async function readStreamEvents(
     }
   } catch (errorValue) {
     if (errorValue instanceof ChatStreamInterruptedError) throw errorValue;
+    if (errorValue instanceof ChatStreamStructuredError) throw errorValue;
     throw interruptionError(errorValue instanceof Error ? errorValue.message : "defaultspack stream failed");
   }
 
