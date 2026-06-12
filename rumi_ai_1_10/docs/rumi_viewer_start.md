@@ -12,21 +12,26 @@ control panel frontend の source は `rumi_viewer/frontend` が所有し、kern
 
 ## 最短の起動手順
 
-repo ルートで次を実行します。
+README の `Clone and install` を済ませた repo ルートで次を実行します。
 
 ```bash
+source .venv/bin/activate
 cd rumi_viewer/frontend
 npm install
 cd ..
-cargo tauri dev
+RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
 
 2 回目以降、`rumi_viewer/frontend/node_modules` が残っている場合は次だけで起動できます。
 
 ```bash
+source .venv/bin/activate
 cd rumi_viewer
-cargo tauri dev
+RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
+
+`cargo tauri dev` は viewer 用 kernel の Python 環境を作るために `uv` を探します。グローバルに `uv` を入れていない場合は、README の手順で `.venv` に入れた `uv` を使えるように、必ず `.venv` を有効化したまま起動してください。
+`RUMI_AUTO_APPROVE_LOCAL=true` はローカル開発用の明示 opt-in です。repo 同梱 pack の承認と、`Open Defaultspack` に必要な `defaultspack` 限定の `desktop_app.execute` Grant を用意します。手動の承認/Grant フローを確認したい場合は、この環境変数を外してください。
 
 開発起動では viewer が次を自動で行います。
 
@@ -50,6 +55,7 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
 
 この opt-in を付けない通常の開発起動では、modified pack は再承認待ちのままです。
+また、`Open Defaultspack` に必要な `desktop_app.execute` Grant も自動では付与されません。
 
 ## 起動できたときの見え方
 
@@ -73,6 +79,14 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ### `Kernel directory not found`
 
 viewer が bundle 内の `app/` しか見ていないか、repo checkout を検出できていません。開発起動は repo ルート配下で行ってください。
+
+### `Python setup failed — uv setup failed`
+
+`uv` が見つからない状態で viewer が kernel 用 Python 環境を作ろうとしています。repo ルートで `source .venv/bin/activate` してから `cargo tauri dev` を起動してください。まだ `.venv` に `uv` を入れていない場合は `pip install uv` を実行します。
+
+### `desktop_app.execute not granted for pack: defaultspack`
+
+ローカル開発で `Open Defaultspack` まで確認する場合は、repo ルートで `.venv` を有効化し、`RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev` で viewer を起動してください。この opt-in は `defaultspack` に限定した `desktop_app.execute` Grant を用意します。
 
 ### `panel bootstrap returned 401 Unauthorized`
 

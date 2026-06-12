@@ -38,7 +38,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 - Python 3.10+
 - Node.js 18+
 - npm
-- uv (`rumi_viewer` を触る場合)
+- uv (`rumi_viewer` を触る場合。下の手順では `.venv` に入れます)
 - Rust / Cargo (`rumi_viewer` を触る場合)
 - Flutter SDK (`rumi_mobile` を触る場合)
 
@@ -51,6 +51,7 @@ cd rumiai
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
+pip install uv
 pip install -r rumi_ai_1_10/requirements.txt
 pip install -r rumi_ai_1_10/requirements-dev.txt
 pip install -e ./rumi_ai_1_10
@@ -97,20 +98,24 @@ python -m rumi_ai
 ### Viewer development
 
 ```bash
+source .venv/bin/activate
 cd rumi_viewer/frontend
 npm install
 cd ..
-cargo tauri dev
+RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
 
 2 回目以降、`rumi_viewer/frontend/node_modules` が残っている場合は次だけで起動できます。
 
 ```bash
+source .venv/bin/activate
 cd rumi_viewer
-cargo tauri dev
+RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
 
 開発用 viewer は repo 内の `rumi_ai_1_10/` を自動検出して kernel を起動します。
+`cargo tauri dev` は viewer 用 kernel の Python 環境を作るために `uv` を探します。グローバルに `uv` を入れていない場合は、`.venv` を有効化したまま起動してください。
+`RUMI_AUTO_APPROVE_LOCAL=true` はローカル開発用の明示 opt-in です。repo 同梱 pack の承認と、`Open Defaultspack` に必要な `defaultspack` 限定の `desktop_app.execute` Grant を用意します。
 `Open Defaultspack` は開発起動では repo 同梱の `defaultspack` を優先して開きます。
 起動時の詰まり方を含めたガイドは [`rumi_ai_1_10/docs/rumi_viewer_start.md`](./rumi_ai_1_10/docs/rumi_viewer_start.md) を参照してください。
 
