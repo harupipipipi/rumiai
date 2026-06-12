@@ -18,6 +18,7 @@ import {
   fetchDesktopSystemInfo,
   hasPendingPanelBootstrapCode,
   isDesktopShellAvailable,
+  launchDefaultspackDesktop,
   openExternalUrl,
   sendToBackground,
   setStartupProfileNodeOverride,
@@ -65,6 +66,7 @@ let tauriOpenExternalCount = 0;
 let tauriSendToBackgroundCount = 0;
 let tauriShowAppWindowCount = 0;
 let tauriDesktopInfoCount = 0;
+let tauriDefaultspackLaunchCount = 0;
 let sessionStorageRef: MemoryStorage;
 let fetchHandler: ((input: string | URL | Request, init?: RequestInit) => Promise<Response>) | null = null;
 
@@ -134,6 +136,10 @@ function installBrowser(href: string): MemoryStorage {
                 },
               ],
             };
+          }
+          if (command === 'launch_defaultspack_desktop') {
+            tauriDefaultspackLaunchCount += 1;
+            return 'Opening Rumi Defaultspack at http://127.0.0.1:8766/chat';
           }
           throw new Error(`Unknown command: ${command}`);
         },
@@ -223,6 +229,7 @@ beforeEach(() => {
   tauriSendToBackgroundCount = 0;
   tauriShowAppWindowCount = 0;
   tauriDesktopInfoCount = 0;
+  tauriDefaultspackLaunchCount = 0;
   installBrowser('http://127.0.0.1:8765/panel/');
   installFetchMock();
 });
@@ -444,6 +451,13 @@ test('fetchDesktopSystemInfo reads viewer version and macOS permissions from Tau
   assert.equal(info?.host_broker?.status, 'running');
   assert.equal(info?.permissions[0]?.id, 'accessibility');
   assert.equal(info?.permissions[0]?.granted, true);
+});
+
+test('launchDefaultspackDesktop invokes the viewer desktop command', async () => {
+  const message = await launchDefaultspackDesktop();
+
+  assert.equal(tauriDefaultspackLaunchCount, 1);
+  assert.match(message, /Opening Rumi Defaultspack/);
 });
 
 test('startup profile wrappers use v3 payloads and endpoints', async () => {
