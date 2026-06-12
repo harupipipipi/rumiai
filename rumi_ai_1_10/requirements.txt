@@ -1,16 +1,17 @@
 # Rumi AI OS - Core Dependencies
 #
 # The desktop viewer installs these requirements with `uv pip install
-# --require-hashes`. Keep every artifact exact-pinned and SHA-256 hashed so the
-# automatic local bootstrap cannot execute a mutable package artifact.
---no-binary :all:
+# --require-hashes --only-binary :all: --no-build`. Keep every artifact
+# exact-pinned and SHA-256 hashed so the automatic local bootstrap cannot
+# execute a mutable package artifact or source-build dependency.
+--only-binary :all:
 
-pyyaml==6.0.2 --hash=sha256:d584d9ec91ad65861cc08d42e834324ef890a082e591037abe114850ff7bbc3e
+pyyaml==6.0.2 --hash=sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5
 
 # Secret at-rest encryption (required)
 cryptography==46.0.7 --hash=sha256:e4cfd68c5f3e0bfdad0d38e023239b96a2fe84146481852dffbcca442c245aa5
-cffi==2.0.0 --hash=sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529
-pycparser==2.22 --hash=sha256:491c8be9c040f5390f5bf44a5b07752bd07f56edf992381b05c701439eec10f6
+cffi==2.0.0 --hash=sha256:c8d3b5532fc71b7a77c09192b4a5a200ea992702734a2e9279a37f2478236f26
+pycparser==2.22 --hash=sha256:c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc
 
 # Optional: Enhanced secret key storage (recommended for production)
 # keyring and its transitive dependencies must be pinned with hashes before

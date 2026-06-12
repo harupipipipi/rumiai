@@ -356,7 +356,14 @@ fn validate_hashed_requirements(req_path: &Path) -> Result<()> {
             continue;
         }
         if trimmed.starts_with("--") {
-            continue;
+            if trimmed == "--only-binary :all:" || trimmed == "--only-binary=:all:" {
+                continue;
+            }
+            bail!(
+                "{}:{} contains unsupported pip option {trimmed:?}; automatic installation only permits --only-binary :all:",
+                req_path.display(),
+                index + 1
+            );
         }
         if !trimmed.contains("==") || !trimmed.contains("--hash=sha256:") {
             bail!(
@@ -406,6 +413,9 @@ fn install_requirements(config: &AppConfig) -> Result<()> {
             "pip",
             "install",
             "--require-hashes",
+            "--only-binary",
+            ":all:",
+            "--no-build",
             "--python",
             &venv_python.to_string_lossy(),
             "-r",
@@ -503,11 +513,34 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(
             &req_path,
-            "pyyaml==6.0.2 --hash=sha256:d584d9ec91ad65861cc08d42e834324ef890a082e591037abe114850ff7bbc3e\n",
+            "--only-binary :all:\npyyaml==6.0.2 --hash=sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5\n",
         )
         .unwrap();
 
         validate_hashed_requirements(&req_path).unwrap();
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn validate_hashed_requirements_rejects_source_build_options() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_source_build_requirements_{unique}"));
+        let req_path = root.join("requirements.txt");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &req_path,
+            "--no-binary :all:\npyyaml==6.0.2 --hash=sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5\n",
+        )
+        .unwrap();
+
+        let err = validate_hashed_requirements(&req_path)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("unsupported pip option"));
         fs::remove_dir_all(root).ok();
     }
 
