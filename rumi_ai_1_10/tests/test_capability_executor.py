@@ -28,6 +28,7 @@ from core_runtime.capability_executor import (
     CapabilityExecutor,
     CapabilityResponse,
     MAX_FLOW_CALL_DEPTH,
+    get_capability_executor,
     _flow_call_stack_local,
 )
 
@@ -372,6 +373,79 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
         permission_manager.has_permission.assert_called_once_with("defaultspack", "tool.write")
 
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_function_call_repo_defaultspack_path_is_treated_as_trusted_builtin(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        entry = _make_function_entry("defaultspack", requires=["ai.route.model"])
+        entry.function_dir = str(_project_root / "ecosystem" / "defaultspack" / "functions" / "ai_route_model")
+        entry.main_py_path = str(Path(entry.function_dir) / "main.py")
+        function_registry = MagicMock()
+        function_registry.get.return_value = entry
+
+        approval_manager = MagicMock()
+        approval_manager.is_pack_approved_and_verified.return_value = (True, None)
+        approval_manager._is_trusted_builtin_pack.return_value = False
+
+        permission_manager = MagicMock()
+        permission_manager.has_permission.return_value = False
+
+        executor = _make_executor(
+            function_registry=function_registry,
+            approval_manager=approval_manager,
+            permission_manager=permission_manager,
+        )
+
+        success_response = CapabilityResponse(success=True, output={"ok": True})
+        with patch.object(executor, "_execute_user_function", return_value=success_response) as mock_exec:
+            resp = executor.execute(
+                "defaultspack",
+                {"type": "function.call", "qualified_name": "defaultspack:test_func"},
+            )
+
+        self.assertTrue(resp.success)
+        permission_manager.has_permission.assert_not_called()
+        mock_exec.assert_called_once()
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_function_call_dev_auto_reapproves_stale_pack(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        entry = _make_function_entry("defaultspack")
+        function_registry = MagicMock()
+        function_registry.get.return_value = entry
+
+        approval_manager = MagicMock()
+        approval_manager.is_pack_approved_and_verified.side_effect = [
+            (False, "hash_mismatch"),
+            (True, None),
+        ]
+        approval_manager.approve.return_value = SimpleNamespace(success=True)
+        approval_manager._is_trusted_builtin_pack.return_value = False
+
+        permission_manager = MagicMock()
+        permission_manager.has_permission.return_value = True
+
+        executor = _make_executor(
+            function_registry=function_registry,
+            approval_manager=approval_manager,
+            permission_manager=permission_manager,
+        )
+
+        success_response = CapabilityResponse(success=True, output={"ok": True})
+        with (
+            patch.dict("os.environ", {"RUMI_ENVIRONMENT": "development", "RUMI_AUTO_APPROVE_LOCAL": "true"}),
+            patch.object(executor, "_execute_user_function", return_value=success_response) as mock_exec,
+        ):
+            resp = executor.execute(
+                "principal_a",
+                {"type": "function.call", "qualified_name": "defaultspack:test_func"},
+            )
+
+        self.assertTrue(resp.success)
+        approval_manager.scan_packs.assert_called_once()
+        approval_manager.approve.assert_called_once_with("defaultspack")
+        self.assertEqual(approval_manager.is_pack_approved_and_verified.call_count, 2)
+        mock_exec.assert_called_once()
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
     def test_function_call_nonbundled_defaultspack_checks_caller_permission(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
         entry = _make_function_entry("custom_pack")
@@ -399,6 +473,115 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
         self.assertFalse(resp.success)
         self.assertEqual(resp.error_type, "permission_denied")
         permission_manager.has_permission.assert_called_once_with("defaultspack", "function.call")
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_function_call_grant_manager_fulfills_pack_requires_when_permission_manager_denies(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        entry = _make_function_entry("defaultspack", requires=["tool.write"])
+        function_registry = MagicMock()
+        function_registry.get.return_value = entry
+
+        approval_manager = MagicMock()
+        approval_manager.is_pack_approved_and_verified.return_value = (True, None)
+        approval_manager._is_trusted_builtin_pack.return_value = False
+
+        permission_manager = MagicMock()
+        permission_manager.has_permission.return_value = False
+
+        grant_manager = MagicMock()
+        grant_manager.check.side_effect = [
+            _MockGrantResult(allowed=True),
+            _MockGrantResult(allowed=True),
+        ]
+
+        executor = _make_executor(
+            function_registry=function_registry,
+            approval_manager=approval_manager,
+            permission_manager=permission_manager,
+            grant_manager=grant_manager,
+        )
+
+        success_response = CapabilityResponse(success=True, output={"ok": True})
+        with patch.object(executor, "_execute_user_function", return_value=success_response) as mock_exec:
+            resp = executor.execute(
+                "principal_a",
+                {"type": "function.call", "qualified_name": "defaultspack:test_func"},
+            )
+
+        self.assertTrue(resp.success)
+        permission_manager.has_permission.assert_any_call("defaultspack", "tool.write")
+        permission_manager.has_permission.assert_any_call("principal_a", "function.call")
+        grant_manager.check.assert_any_call("defaultspack", "tool.write")
+        grant_manager.check.assert_any_call("principal_a", "function.call")
+        mock_exec.assert_called_once()
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_function_call_grant_manager_fulfills_caller_permission_when_permission_manager_denies(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        entry = _make_function_entry("custom_pack")
+        function_registry = MagicMock()
+        function_registry.get.return_value = entry
+
+        approval_manager = MagicMock()
+        approval_manager.is_pack_approved_and_verified.return_value = (True, None)
+        approval_manager._is_trusted_builtin_pack.return_value = False
+
+        permission_manager = MagicMock()
+        permission_manager.has_permission.return_value = False
+
+        grant_manager = MagicMock()
+        grant_manager.check.return_value = _MockGrantResult(allowed=True)
+
+        executor = _make_executor(
+            function_registry=function_registry,
+            approval_manager=approval_manager,
+            permission_manager=permission_manager,
+            grant_manager=grant_manager,
+        )
+
+        success_response = CapabilityResponse(success=True, output={"ok": True})
+        with patch.object(executor, "_execute_user_function", return_value=success_response) as mock_exec:
+            resp = executor.execute(
+                "rumi_default_tools_pack",
+                {"type": "function.call", "qualified_name": "custom_pack:test_func"},
+            )
+
+        self.assertTrue(resp.success)
+        permission_manager.has_permission.assert_called_once_with("rumi_default_tools_pack", "function.call")
+        grant_manager.check.assert_called_once_with("rumi_default_tools_pack", "function.call")
+        mock_exec.assert_called_once()
+
+
+def test_get_capability_executor_initializes_cached_container_instance(monkeypatch):
+    class _FakeContainer:
+        def __init__(self, executor):
+            self._executor = executor
+
+        def get(self, name):
+            assert name == "capability_executor"
+            return self._executor
+
+    executor = CapabilityExecutor()
+    assert executor._initialized is False
+    initialize_calls = {"count": 0}
+
+    def fake_initialize():
+        initialize_calls["count"] += 1
+        executor._initialized = True
+        return True
+
+    monkeypatch.setattr(executor, "initialize", fake_initialize)
+
+    monkeypatch.setattr(
+        "core_runtime.di_container.get_container",
+        lambda: _FakeContainer(executor),
+    )
+
+    resolved = get_capability_executor()
+
+    assert resolved is executor
+    assert resolved._initialized is True
+    assert initialize_calls["count"] == 1
 
 
 if __name__ == "__main__":

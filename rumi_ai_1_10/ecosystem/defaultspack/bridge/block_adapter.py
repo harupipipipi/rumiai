@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import importlib
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict
 
 _PACK_ROOT = Path(__file__).resolve().parents[1]
-_PACK_LOCAL_PACKAGES = ("blocks", "domain", "transport")
+_REPO_ROOT = _PACK_ROOT.parent.parent
+_PACK_LOCAL_PACKAGES = ("blocks", "domain", "transport", "ecosystem")
+_IMPORT_LOCK = threading.RLock()
 
 
 def _path_is_inside_pack(path: Path) -> bool:
@@ -47,14 +50,20 @@ def _drop_foreign_top_level_package(package_name: str) -> None:
 def _prepare_pack_imports() -> None:
     pack_root = str(_PACK_ROOT)
     sys.path = [item for item in sys.path if item != pack_root]
+    repo_root = str(_REPO_ROOT)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
     sys.path.insert(0, pack_root)
     for package_name in _PACK_LOCAL_PACKAGES:
         _drop_foreign_top_level_package(package_name)
 
 
 def invoke_block(module_name: str, input_data: Dict[str, Any], context: Dict[str, Any]) -> Any:
-    _prepare_pack_imports()
-    module = importlib.import_module(module_name)
+    # The standalone HTTP server handles UI bootstrap requests concurrently.
+    # Import preparation mutates sys.path/sys.modules, so keep it serialized.
+    with _IMPORT_LOCK:
+        _prepare_pack_imports()
+        module = importlib.import_module(module_name)
     handler = getattr(module, "run", None)
     if handler is None:
         raise AttributeError(f"run not found in {module_name}")

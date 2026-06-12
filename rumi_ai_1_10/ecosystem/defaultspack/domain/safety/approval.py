@@ -179,7 +179,7 @@ def create_approval_request(
         request_id="apr_" + uuid.uuid4().hex,
         operation=str(operation),
         risk_level=str(risk_level or "high"),
-        args_hash=hash_arguments(args or details or {}),
+        args_hash=hash_arguments(args if args is not None else (details or {})),
         details=dict(details or {}),
         created_at=now,
         expires_at=now + max(1, int(expires_in or _DEFAULT_EXPIRES_IN_SECONDS)),
@@ -333,11 +333,14 @@ def verify_execution_token(
         )
     expected_pack_id = str(pack_id or "")
     token_pack_id = str(payload.get("pack_id") or "")
-    if (expected_pack_id or token_pack_id) and token_pack_id != expected_pack_id:
+    # Scope checks stay strict for real execution paths that pass an expected
+    # pack/conversation, but status probes may omit them when they only need to
+    # inspect whether a one-shot token is still valid or already consumed.
+    if expected_pack_id and token_pack_id != expected_pack_id:
         return TokenVerification(False, "APPROVAL_PACK_MISMATCH", "approval token pack mismatch")
     expected_conversation_id = str(conversation_id or "")
     token_conversation_id = str(payload.get("conversation_id") or "")
-    if (expected_conversation_id or token_conversation_id) and token_conversation_id != expected_conversation_id:
+    if expected_conversation_id and token_conversation_id != expected_conversation_id:
         return TokenVerification(
             False,
             "APPROVAL_CONVERSATION_MISMATCH",
@@ -398,6 +401,23 @@ def verify_execution_token(
             _REQUESTS[request_id] = request
             _refresh_approval_state_mirrors_from_store()
     return TokenVerification(True, request_id=request_id)
+
+
+def get_approval_request(request_id: str) -> dict[str, Any] | None:
+    """Return a stored approval request as a plain dict, or ``None`` if missing.
+
+    Used by the approval-followup replay path to recover the approved arguments
+    deterministically from the stored ``details["arguments"]`` payload.
+    """
+    if not request_id:
+        return None
+    with _LOCK:
+        request = _REQUESTS.get(str(request_id)) or _request_from_mapping(
+            get_approval_store().get_request(str(request_id))
+        )
+    if request is None:
+        return None
+    return asdict(request)
 
 
 def list_approval_requests(status: str | None = None, *, include_expired: bool = True, limit: int = 100) -> list[dict[str, Any]]:

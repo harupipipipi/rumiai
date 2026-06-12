@@ -319,7 +319,7 @@ def test_browser_computer_wraps_visible_desktop_actions_with_haze(tmp_path, monk
     def fake_haze(self, action, payload):
         events.append(f"enter:{action}")
         try:
-            yield
+            yield {"attempted": True, "started": True, "action": action, "sequence_id": "seq-test"}
         finally:
             events.append(f"exit:{action}")
 
@@ -335,6 +335,12 @@ def test_browser_computer_wraps_visible_desktop_actions_with_haze(tmp_path, monk
     )
 
     assert result["executed"] is True
+    assert result["edge_haze"] == {
+        "attempted": True,
+        "started": True,
+        "action": "computer.type",
+        "sequence_id": "seq-test",
+    }
     assert events == ["enter:computer.type", "exit:computer.type", "enter:computer.type", "exit:computer.type"]
 
 
@@ -347,7 +353,7 @@ def test_browser_computer_wraps_foreground_open_url_with_haze(tmp_path, monkeypa
     def fake_haze(self, action, payload):
         events.append(f"enter:{action}")
         try:
-            yield
+            yield {"attempted": True, "started": True, "action": action, "sequence_id": "seq-test"}
         finally:
             events.append(f"exit:{action}")
 
@@ -361,6 +367,12 @@ def test_browser_computer_wraps_foreground_open_url_with_haze(tmp_path, monkeypa
     )
 
     assert result["opened"] is True
+    assert result["edge_haze"] == {
+        "attempted": True,
+        "started": True,
+        "action": "browser.open_url",
+        "sequence_id": "seq-test",
+    }
     assert events == ["enter:browser.open_url", "exit:browser.open_url"]
 
 
@@ -379,3 +391,30 @@ def test_browser_computer_does_not_wrap_screenshot_with_haze(tmp_path, monkeypat
     )
 
     assert result["action"] == "computer.screenshot"
+
+
+def test_browser_computer_screenshot_uses_darwin_timeout(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    calls: list[dict[str, object]] = []
+
+    def fake_run(args, check=False, timeout=None, **kwargs):
+        calls.append({"args": args, "check": check, "timeout": timeout, "kwargs": kwargs})
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    screenshot_path = tmp_path / "screenshot.png"
+    result = BrowserComputerController(artifact_root=tmp_path)._capture_screenshot(screenshot_path, {})
+
+    assert result == {"platform": "Darwin", "target_window": None}
+    assert calls == [
+        {
+            "args": ["screencapture", "-x", str(screenshot_path)],
+            "check": True,
+            "timeout": browser_computer._DARWIN_SCREENSHOT_TIMEOUT_SECONDS,
+            "kwargs": {},
+        }
+    ]

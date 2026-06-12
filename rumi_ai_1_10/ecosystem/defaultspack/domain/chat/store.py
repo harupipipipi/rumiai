@@ -11,6 +11,8 @@ import errno
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+
+from domain.ai_client.inline_reasoning import split_inline_reasoning
 from domain.chat.icon_matcher import match_icon
 
 DEFAULT_CHAT_MODEL = "stub/default"
@@ -63,12 +65,18 @@ class ChatStore:
             cls._instance._lock = threading.RLock()
             cls._instance._conversations = cls._instance._load_conversations()
             if cls._instance._conversations:
-                cls._instance._save_conversation_files()
+                try:
+                    cls._instance._save_conversation_files()
+                except OSError:
+                    pass
         elif cls._instance._storage_path != storage_path:
             cls._instance._storage_path = storage_path
             cls._instance._conversations = cls._instance._load_conversations()
             if cls._instance._conversations:
-                cls._instance._save_conversation_files()
+                try:
+                    cls._instance._save_conversation_files()
+                except OSError:
+                    pass
         return cls._instance
 
     @staticmethod
@@ -183,9 +191,7 @@ class ChatStore:
             now = _now_ms()
             parent_id = str(parent_conversation_id) if parent_conversation_id else None
             metadata_dict = dict(metadata) if isinstance(metadata, dict) else {}
-            icon_info = match_icon("New Conversation", cid)
-            metadata_dict["icon_id"] = icon_info["icon_id"]
-            metadata_dict["icon_svg"] = icon_info["icon_svg"]
+            self._set_metadata_icon(metadata_dict, "New Conversation", cid)
             conv = {
                 "id": cid,
                 "title": "New Conversation",
@@ -267,32 +273,60 @@ class ChatStore:
                 continue
             if query_text and not self._conversation_matches_query(conv, query_text, include_messages=include_messages):
                 continue
-            results.append(conv)
+            if include_messages:
+                results.append(copy.deepcopy(conv))
+            else:
+                results.append(self._conversation_list_summary(conv))
         results.sort(key=self._conversation_list_sort_key, reverse=True)
         total = len(results)
         page = results[offset: offset + limit]
-        return [copy.deepcopy(c) for c in page], total
+        return page, total
+
+    @staticmethod
+    def _conversation_list_summary(conversation):
+        messages = conversation.get("messages", [])
+        if not isinstance(messages, list):
+            messages = []
+        message_count = len(messages)
+        last_message_preview = ""
+        if messages:
+            last_message = messages[-1]
+            if isinstance(last_message, dict):
+                last_message_preview = str(
+                    last_message.get("raw_text")
+                    or ChatStore._extract_raw_text(last_message.get("content", []))
+                ).strip()
+            else:
+                last_message_preview = str(last_message)
+        return {
+            **{
+                key: copy.deepcopy(value) for key, value in conversation.items()
+                if key != "messages"
+            },
+            "messages": [],
+            "message_count": message_count,
+            "last_message_preview": last_message_preview,
+        }
 
     def update_conversation(self, conversation_id, updates):
-        conv = self._conversations.get(conversation_id)
-        if conv is None:
-            return None
-        protected = {"id", "created_at", "messages"}
-        for key, value in updates.items():
-            if key not in protected:
-                conv[key] = value
+        with self._lock:
+            conv = self._conversations.get(conversation_id)
+            if conv is None:
+                return None
+            protected = {"id", "created_at", "messages"}
+            for key, value in updates.items():
+                if key not in protected:
+                    conv[key] = value
 
-        if "title" in updates or "metadata" in updates:
-            if not isinstance(conv.get("metadata"), dict):
-                conv["metadata"] = {}
-            if "title" in updates or "icon_svg" not in conv["metadata"]:
-                icon_info = match_icon(conv.get("title") or "New Conversation", conversation_id)
-                conv["metadata"]["icon_id"] = icon_info["icon_id"]
-                conv["metadata"]["icon_svg"] = icon_info["icon_svg"]
+            if "title" in updates or "metadata" in updates:
+                if not isinstance(conv.get("metadata"), dict):
+                    conv["metadata"] = {}
+                self._set_metadata_icon(conv["metadata"], conv.get("title") or "New Conversation", conversation_id)
 
-        conv["updated_at"] = _now_ms()
-        self._save_conversations()
-        return copy.deepcopy(conv)
+            conv["updated_at"] = _now_ms()
+            self._save_conversation_file(conversation_id, conv)
+            self._save_conversation_index()
+            return copy.deepcopy(conv)
 
     def delete_conversation(self, conversation_id):
         with self._lock:
@@ -764,6 +798,17 @@ class ChatStore:
             conversation["child_conversation_ids"] = []
         if not isinstance(conversation.get("metadata"), dict):
             conversation["metadata"] = {}
+        ChatStore._set_metadata_icon(
+            conversation["metadata"],
+            conversation.get("title") or "New Conversation",
+            conversation.get("id") or conversation_id,
+        )
+
+    @staticmethod
+    def _set_metadata_icon(metadata, title, conversation_id):
+        icon_info = match_icon(title or "New Conversation", conversation_id)
+        metadata["icon_id"] = icon_info["icon_id"]
+        metadata["icon_svg"] = icon_info["icon_svg"]
 
     @staticmethod
     def _normalize_filter_tags(tags):
@@ -943,6 +988,19 @@ class ChatStore:
                     if not self._is_transient_replace_error(exc):
                         raise
 
+    def _save_conversation_index(self):
+        with self._lock:
+            self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+            for conversation in self._conversations.values():
+                if isinstance(conversation, dict):
+                    self._sanitize_inline_thought_messages(conversation)
+            payload = {
+                "schema_version": 1,
+                "updated_at": _now_ms(),
+                "conversations": self._conversations,
+            }
+            self._atomic_write_json(self._storage_path, payload)
+
     def _save_conversation_file(self, conversation_id, conversation):
         with self._lock:
             conversation_dir = self.conversation_dir(conversation_id)
@@ -992,13 +1050,8 @@ class ChatStore:
                     continue
                 text = str(block.get("text") or "")
 
-                def collect(match):
-                    value = str(match.group(1) or "").strip()
-                    if value:
-                        thoughts.append(value)
-                    return ""
-
-                cleaned = re.sub(r"<thought>(.*?)</thought>", collect, text, flags=re.DOTALL).strip()
+                extracted, cleaned = split_inline_reasoning(text)
+                thoughts.extend(extracted)
                 if cleaned != text:
                     block["text"] = cleaned
             if thoughts:

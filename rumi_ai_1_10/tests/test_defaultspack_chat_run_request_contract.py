@@ -112,7 +112,6 @@ def test_prepare_chat_run_current_turn_history_only_still_works(tmp_path, monkey
     assert len(prepared.chat_ir.messages) == 1
     ChatStore._instance = None
 
-
 def test_prepare_chat_run_maps_approval_followup_tokens_for_action_operation_and_computer_aliases(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
@@ -147,4 +146,136 @@ def test_prepare_chat_run_maps_approval_followup_tokens_for_action_operation_and
         "computer.apps": "tok_followup",
         "apr_followup": "tok_followup",
     }
+
+
+def test_prepare_chat_run_propagates_conversation_workspace_to_tool_context(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+    from domain.coding.workspace_store import WorkspaceStore
+
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH",
+        str(tmp_path / "coding_workspaces.json"),
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+
+    workspace_root = tmp_path / "rumiai-root"
+    workspace_root.mkdir()
+    WorkspaceStore().create(workspace_root, workspace_id="rumiai-root")
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(
+        model="stub/default",
+        metadata={
+            "workspace_id": "rumiai-root",
+            "workspace_root": str(workspace_root),
+        },
+    )
+
+    prepared = prepare_chat_run(
+        {"conversation_id": conv["id"], "message": {"content": "git status"}},
+        {},
+    )
+
+    assert prepared.request_context.get("workspace_id") == "rumiai-root"
+    assert prepared.request_context.get("workspace_root") == str(workspace_root)
+    assert prepared.tool_context.get("workspace_id") == "rumiai-root"
+    assert prepared.tool_context.get("workspace_root") == str(workspace_root)
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_loads_profile_policy_from_conversation_profile_id(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+    from domain.tool.schema_adapter import max_tool_calls
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+    )
+
+    prepared = prepare_chat_run(
+        {"conversation_id": conv["id"], "message": {"content": "look at stop path"}},
+        {},
+    )
+
+    assert prepared.request_context.get("profile_id") == "defaultspack.mimo_coding_company"
+    assert prepared.request_context.get("profile_policy", {}).get("max_tool_calls") == 18
+    assert prepared.tool_context.get("profile_policy", {}).get("max_tool_calls") == 18
+    assert max_tool_calls(prepared.tool_context) == 18
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_merges_workspace_profile_with_catalog_profile(tmp_path, monkeypatch):
+    from domain.chat.run_request import _profile_snapshot, prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    user_data_root = tmp_path / "user_data"
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data_root))
+    profile_dir = user_data_root / "profiles" / "defaultspack.mimo_coding_company"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "profile.yaml").write_text(
+        "profile_id: defaultspack.mimo_coding_company\nversion: 1\n",
+        encoding="utf-8",
+    )
+    _profile_snapshot.cache_clear()
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {"content": "review stop path"},
+            "tools": ["artifact_export", "coding_file_read"],
+        },
+        {},
+    )
+
+    assert prepared.request_context.get("profile_policy", {}).get("max_tool_calls") == 18
+    assert "coding_file_read" in prepared.request_context.get("profile_policy", {}).get("tool_allowlist", [])
+    tool_names = {tool["function"]["name"] for tool in prepared.provider_tools if isinstance(tool, dict) and isinstance(tool.get("function"), dict)}
+    assert "coding_file_read" in tool_names
+    assert "artifact_export" not in tool_names
+    _profile_snapshot.cache_clear()
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_falls_back_to_selected_workspace_when_metadata_missing(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+    from domain.coding.workspace_store import WorkspaceStore
+
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH",
+        str(tmp_path / "coding_workspaces.json"),
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+
+    workspace_root = tmp_path / "rumiai-root"
+    workspace_root.mkdir()
+
+    workspace_store = WorkspaceStore()
+    workspace_store.create(workspace_root, workspace_id="rumiai-root")
+    workspace_store.select("rumiai-root")
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(
+        model="stub/default",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+    )
+
+    prepared = prepare_chat_run(
+        {"conversation_id": conv["id"], "message": {"content": "git status"}},
+        {},
+    )
+
+    assert prepared.request_context.get("workspace_id") == "rumiai-root"
+    assert prepared.request_context.get("workspace_root") == str(workspace_root)
+    assert prepared.tool_context.get("workspace_id") == "rumiai-root"
+    assert prepared.tool_context.get("workspace_root") == str(workspace_root)
     ChatStore._instance = None

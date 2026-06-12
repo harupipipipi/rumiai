@@ -1,0 +1,22 @@
+[
+  {
+    "id": "first_time_user",
+    "label": "First-time user",
+    "goal": "Find onboarding confusion, missing defaults, and dead-end flows."
+  },
+  {
+    "id": "power_user",
+    "label": "Power user",
+    "goal": "Stress advanced controls, model routing, and bulk actions."
+  },
+  {
+    "id": "impatient_user",
+    "label": "Impatient user",
+    "goal": "Interrupt loading and surface race conditions."
+  },
+  {
+    "id": "keyboard_heavy_user",
+    "label": "Keyboard-heavy user",
+    "goal": "Check focus order, keyboard shortcuts, and text-entry flows."
+  }
+]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from functools import lru_cache
 import os
 import re
 import sys
@@ -13,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import gen_id
 from domain.ai_client.capabilities.registry import get_model_provider_capabilities
 from blocks.chat._context_helpers import enrich_messages, extract_user_text
+from domain.capability.catalog import CapabilityCatalog
 from domain.capabilities.runtime_snapshot import build_runtime_capability_snapshot
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
@@ -24,6 +26,7 @@ from domain.chat.ir_legacy_adapter import ir_to_legacy_standard_messages, legacy
 from domain.chat.modality_detector import detect_modalities
 from domain.chat.public_metadata import compact_tool_filter_entries
 from domain.chat.store import ChatStore
+from domain.human_operator.constants import HUMAN_OPERATOR_TOOL_NAME, is_human_operator_model
 from domain.vision.image_bridge import (
     apply_vision_bridge_to_messages,
     conversation_image_context,
@@ -50,6 +53,7 @@ MAX_ATTACHMENT_TEXT_CHARS_PER_FILE = 120_000
 MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
 _DATA_IMAGE_PREFIX = "data:image/"
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_VECTOR_TOOL_ASSIST_PROFILE_IDS = {"defaultspack.mimo_coding_company"}
 _COMPUTER_USE_REQUEST_RE = re.compile(
     r"compute[\s_-]*use|compu?ter[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
     r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,80}(操作|送信|入力|クリック|開いて|開く)",
@@ -219,6 +223,26 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             request_context["skills"] = [str(item) for item in forced_skill_ids if str(item).strip()]
         elif isinstance(forced_skill_ids, str) and forced_skill_ids.strip():
             request_context["skills"] = forced_skill_ids
+    conversation_metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+    resolved_profile_id = str(
+        request_context.get("profile_id")
+        or metadata.get("profile_id")
+        or conversation_metadata.get("profile_id")
+        or ""
+    ).strip()
+    if resolved_profile_id:
+        request_context["profile_id"] = resolved_profile_id
+        _hydrate_profile_policy_from_profile_id(request_context, resolved_profile_id)
+    resolved_agent_id = str(
+        request_context.get("agent_id")
+        or metadata.get("agent_id")
+        or conversation.get("agent_id")
+        or conversation_metadata.get("agent_id")
+        or ""
+    ).strip()
+    if resolved_agent_id:
+        request_context["agent_id"] = resolved_agent_id
+    _propagate_conversation_workspace(request_context, metadata, conversation_metadata)
     request_context.update(_approval_followup_tool_context(metadata))
     tool_policy = params.get("tool_policy")
     if isinstance(tool_policy, dict):
@@ -226,6 +250,9 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             **(request_context.get("profile_policy") if isinstance(request_context.get("profile_policy"), dict) else {}),
             **tool_policy,
         }
+        policy_profile_id = str(tool_policy.get("profile_id") or "").strip()
+        if policy_profile_id and not request_context.get("profile_id"):
+            request_context["profile_id"] = policy_profile_id
         tool_choice = tool_policy.get("tool_choice")
         if "tool_choice" not in params and (
             isinstance(tool_choice, dict)
@@ -715,6 +742,122 @@ def _runtime_user_content_override(metadata: dict[str, Any] | None) -> str:
         return ""
     return value.strip()
 
+_WORKSPACE_ID_KEYS = ("workspace_id", "workspaceId")
+_WORKSPACE_ROOT_KEYS = ("workspace_root", "workspaceRoot", "rootPath")
+_MERGED_PROFILE_DICT_FIELDS = ("policy", "permissions", "metadata", "surfaces", "node_settings")
+
+
+def _merge_profile_snapshot_sources(
+    profile_id: str,
+    catalog_profile: dict[str, Any] | None,
+    workspace_profile: dict[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(catalog_profile) if isinstance(catalog_profile, dict) else {}
+    overrides = dict(workspace_profile) if isinstance(workspace_profile, dict) else {}
+    for field in _MERGED_PROFILE_DICT_FIELDS:
+        base = merged.get(field) if isinstance(merged.get(field), dict) else {}
+        override = overrides.get(field) if isinstance(overrides.get(field), dict) else {}
+        if base or override:
+            merged[field] = {**base, **override}
+    for key, value in overrides.items():
+        if key in _MERGED_PROFILE_DICT_FIELDS:
+            continue
+        merged[key] = value
+    if merged:
+        merged.setdefault("profile_id", profile_id)
+    return merged
+
+
+@lru_cache(maxsize=64)
+def _profile_snapshot(profile_id: str) -> dict[str, Any]:
+    candidate = str(profile_id or "").strip()
+    if not candidate:
+        return {}
+    workspace_profile: dict[str, Any] = {}
+    try:
+        from core_runtime.profile_workspace import ProfileWorkspaceManager
+
+        loaded = ProfileWorkspaceManager().load_profile_yaml(candidate)
+        if isinstance(loaded, dict) and loaded:
+            workspace_profile = dict(loaded)
+    except Exception:
+        workspace_profile = {}
+    catalog_profile: dict[str, Any] = {}
+    try:
+        loaded = CapabilityCatalog().profile(candidate)
+        if isinstance(loaded, dict) and loaded:
+            catalog_profile = dict(loaded)
+    except Exception:
+        catalog_profile = {}
+    merged = _merge_profile_snapshot_sources(candidate, catalog_profile, workspace_profile)
+    if merged:
+        return merged
+    return {}
+
+
+def _first_non_empty_str(*sources: dict[str, Any] | None, keys: tuple[str, ...]) -> str:
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if value not in (None, "") and not isinstance(value, str):
+                return str(value)
+    return ""
+
+
+def _hydrate_profile_policy_from_profile_id(request_context: dict[str, Any], profile_id: str) -> None:
+    if not isinstance(request_context, dict):
+        return
+    snapshot = _profile_snapshot(profile_id)
+    policy = snapshot.get("policy") if isinstance(snapshot, dict) else None
+    if not isinstance(policy, dict) or not policy:
+        return
+    existing = request_context.get("profile_policy") if isinstance(request_context.get("profile_policy"), dict) else {}
+    request_context["profile_policy"] = {
+        **policy,
+        **existing,
+    }
+
+
+def _propagate_conversation_workspace(
+    request_context: dict[str, Any],
+    message_metadata: dict[str, Any] | None,
+    conversation_metadata: dict[str, Any] | None,
+) -> None:
+    if not isinstance(request_context, dict):
+        return
+    workspace_id = _first_non_empty_str(request_context, message_metadata, conversation_metadata, keys=_WORKSPACE_ID_KEYS)
+    if workspace_id:
+        request_context["workspace_id"] = workspace_id
+    workspace_root = _first_non_empty_str(
+        request_context,
+        message_metadata,
+        conversation_metadata,
+        keys=_WORKSPACE_ROOT_KEYS,
+    )
+    if workspace_root:
+        request_context["workspace_root"] = workspace_root
+    if request_context.get("workspace_id") and request_context.get("workspace_root"):
+        return
+    try:
+        from domain.coding.workspace_store import WorkspaceStore
+
+        store = WorkspaceStore()
+        selected_workspace_id = store.selected_workspace_id()
+        if not selected_workspace_id:
+            return
+        selected = store.get(selected_workspace_id)
+        if not isinstance(selected, dict):
+            return
+        request_context.setdefault("workspace_id", selected_workspace_id)
+        root_path = selected.get("root_path")
+        if isinstance(root_path, str) and root_path.strip():
+            request_context.setdefault("workspace_root", root_path.strip())
+    except Exception:
+        return
 
 def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(metadata, dict):
@@ -781,22 +924,8 @@ def _replace_current_user_content_for_model(
 
 
 def _conversation_system_prompt(conv: dict[str, Any], manager: Any) -> str:
-    prompt_id = str((conv or {}).get("system_prompt_id") or "").strip()
-    if not prompt_id:
-        return manager.get_system_prompt()
-    prompt = manager.get_prompt(prompt_id) or manager.get_prompt_by_name(prompt_id)
-    if isinstance(prompt, dict):
-        body = prompt.get("body") or prompt.get("content")
-        if body:
-            return str(body)
-    if _PROMPT_ID_RE.match(prompt_id):
-        prompt_path = Path(__file__).resolve().parents[2] / "prompts" / (prompt_id + ".system.md")
-        try:
-            if prompt_path.is_file():
-                return prompt_path.read_text(encoding="utf-8")
-        except OSError:
-            pass
-    return manager.get_system_prompt()
+    from blocks.chat._prompt_helpers import resolve_conversation_system_prompt
+    return resolve_conversation_system_prompt(conv, manager)
 
 
 def _load_active_startup_profile() -> dict[str, Any]:
@@ -966,22 +1095,33 @@ def _resolve_selected_tools(
     registry = ToolRegistry()
     if not isinstance(raw_tools, list):
         tools = registry.list_tools()
-        mode = effective_tool_assist_mode(pack_root=Path(__file__).resolve().parents[2])
+        pack_root = Path(__file__).resolve().parents[2]
+        mode = effective_tool_assist_mode(pack_root=pack_root)
+        prefers_vector = _profile_prefers_vector_tool_assist(context)
+        if mode == "all" and prefers_vector:
+            mode = "vector"
         if mode == "off":
             return [], []
         if mode == "all":
             return tools, []
+        candidate_tools = tools
+        if prefers_vector:
+            candidate_tools = filter_tool_definitions_for_runtime_profile(
+                tools,
+                None,
+                policy_context=context or {},
+            )
         recommended_ids = recommend_tool_ids(
             user_text,
-            tools,
-            limit=tool_assist_limit(pack_root=Path(__file__).resolve().parents[2]),
+            candidate_tools,
+            limit=tool_assist_limit(pack_root=pack_root),
         )
-        resolved = [tool for tool in tools if str(tool.get("tool_id") or "") in set(recommended_ids)]
+        resolved = [tool for tool in candidate_tools if str(tool.get("tool_id") or "") in set(recommended_ids)]
         if isinstance(context, dict):
             context["tool_assist"] = {
                 "mode": "vector",
                 "recommended_tools": recommended_ids,
-                "available_tool_count": len(tools),
+                "available_tool_count": len(candidate_tools),
             }
         return resolved, []
     resolved = []
@@ -1001,6 +1141,21 @@ def _resolve_selected_tools(
             continue
         resolved.append(tool_def)
     return resolved, unknown
+
+
+def _profile_prefers_vector_tool_assist(context: dict[str, Any] | None) -> bool:
+    if not isinstance(context, dict):
+        return False
+    candidate = str(
+        context.get("profile_id")
+        or (
+            context.get("profile_policy").get("profile_id")
+            if isinstance(context.get("profile_policy"), dict)
+            else ""
+        )
+        or ""
+    ).strip()
+    return candidate in _VECTOR_TOOL_ASSIST_PROFILE_IDS
 
 
 def _infer_requested_tools_from_message(user_text: str) -> list[str]:
@@ -1062,6 +1217,31 @@ def _apply_computer_use_context_preferences(context: dict[str, Any], user_text: 
     return updated
 
 
+def _append_special_model_tools(
+    tools: list[dict[str, Any]],
+    context: dict[str, Any],
+    *,
+    agent_id: Any = None,
+) -> list[dict[str, Any]]:
+    if not is_human_operator_model(str(context.get("model") or "").strip()):
+        return tools
+    if any(tool_name_from_definition(tool) == HUMAN_OPERATOR_TOOL_NAME for tool in tools):
+        return tools
+    tool_def = ToolRegistry().get(HUMAN_OPERATOR_TOOL_NAME)
+    if not isinstance(tool_def, dict):
+        return tools
+    runtime_profile = context.get("runtime_profile")
+    helper_tools = filter_tool_definitions_for_runtime_profile(
+        [tool_def],
+        runtime_profile,
+        agent_id=agent_id,
+        policy_context=context,
+    )
+    if not helper_tools:
+        return tools
+    return [*tools, *helper_tools]
+
+
 def _available_tools(
     context: dict[str, Any],
     input_data: dict[str, Any],
@@ -1093,4 +1273,5 @@ def _available_tools(
         agent_id=agent_id,
         policy_context=resolved_context,
     )
+    filtered = _append_special_model_tools(filtered, resolved_context, agent_id=agent_id)
     return filtered, adapt_tool_definitions(filtered), resolved_context

@@ -6,13 +6,16 @@ Packs register graph binding handlers through explicit manifest metadata:
 {
   "capability_bindings": {
     "register": "my_pack.capability_bindings.register_my_pack_binding_handlers"
-  }
+  },
+  "host_execution": true
 }
 ```
 
-Registration runs before graph compile, only for discovered packs that pass
-approval/hash verification. The register path must be owned by the pack module,
-for example `my_pack.*` or `ecosystem.my_pack.*`.
+Registration runs before graph compile in the host kernel process, so community
+packs must explicitly request host execution (`host_execution: true`) and the
+local host-execution gate must allow it. Bundled runtime packs can register their
+shipped handlers without that community-pack grant. The register path must be
+owned by the pack module, for example `my_pack.*` or `ecosystem.my_pack.*`.
 
 The register function receives `InterfaceRegistry` and should register stable
 handler ids:

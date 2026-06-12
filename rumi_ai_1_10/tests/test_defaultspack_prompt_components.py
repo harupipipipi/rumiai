@@ -32,6 +32,18 @@ def test_prompt_resolver_reads_component_backed_prompts():
     assert resolver.render("coding", {}) == resolver.resolve_prompt_text("coding")
 
 
+def test_prompt_resolver_reads_pack_backed_prompt_when_source_pack_is_known():
+    resolver = PromptResolver()
+
+    content = resolver.resolve_prompt_text(
+        "mimo_coding_company",
+        source_pack_id="rumi_operations_company_pack",
+    )
+
+    assert content is not None
+    assert "MiMo Coding Company" in content
+
+
 def test_prompt_manager_lists_component_prompts_and_preserves_custom_persistence(tmp_path, monkeypatch):
     import domain.prompt.manager as manager_module  # noqa: E402
 
@@ -57,3 +69,48 @@ def test_prompt_layer_remains_provider_and_tool_independent():
 
     assert "domain.tool" not in source
     assert "ai_client" not in source
+
+
+def test_component_prompt_entrypoints_are_confined_to_component_directory(tmp_path):
+    from domain.prompt import component_prompts  # noqa: E402
+
+    component_dir = tmp_path / "component"
+    component_dir.mkdir()
+    prompt_path = component_dir / "prompt.md"
+    prompt_path.write_text("safe prompt", encoding="utf-8")
+    outside_path = tmp_path / "secret.txt"
+    outside_path.write_text("secret", encoding="utf-8")
+    manifest = {
+        "source_path": str(component_dir / "manifest.json"),
+        "entrypoints": {"prompt": "prompt.md"},
+    }
+
+    assert component_prompts._component_file(manifest, "prompt") == prompt_path.resolve()
+
+    manifest["entrypoints"]["prompt"] = str(outside_path)
+    assert component_prompts._component_file(manifest, "prompt") is None
+
+    manifest["entrypoints"]["prompt"] = "../secret.txt"
+    assert component_prompts._component_file(manifest, "prompt") is None
+
+
+def test_component_prompt_text_ignores_unsafe_or_unreadable_entrypoints(tmp_path, monkeypatch):
+    from domain.prompt import component_prompts  # noqa: E402
+
+    component_dir = tmp_path / "component"
+    component_dir.mkdir()
+    outside_path = tmp_path / "secret.txt"
+    outside_path.write_text("secret", encoding="utf-8")
+    invalid_path = component_dir / "invalid.md"
+    invalid_path.write_bytes(b"\xff\xfe")
+
+    manifest = {
+        "source_path": str(component_dir / "manifest.json"),
+        "entrypoints": {"prompt": "../secret.txt"},
+    }
+    monkeypatch.setattr(component_prompts, "component_prompt_manifests", lambda: {"leak": manifest})
+
+    assert component_prompts.component_prompt_text("leak") is None
+
+    manifest["entrypoints"]["prompt"] = "invalid.md"
+    assert component_prompts.component_prompt_text("leak") is None

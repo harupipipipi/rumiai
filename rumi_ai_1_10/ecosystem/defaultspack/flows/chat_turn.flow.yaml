@@ -31,11 +31,18 @@ result:
   value: "{{persisted_turn.assistant_message || persisted_turn}}"
 
 steps:
+  - id: load_conversation
+    type: function
+    function: defaults.chat.get_conversation
+    input:
+      conversation_id: "{{input.conversation_id}}"
+    output: conversation
+
   - id: load_active_profile
     type: function
     function: defaults.profile.load_active
     input:
-      profile_id: "{{input.profile_id}}"
+      profile_id: "{{input.profile_id || conversation.metadata.profile_id}}"
     output: active_profile
 
   - id: load_profile_workspace
@@ -58,6 +65,7 @@ steps:
     input:
       profile_id: "{{active_profile.profile_id}}"
       conversation_id: "{{input.conversation_id}}"
+      system_prompt_id: "{{conversation.system_prompt_id}}"
       workspace: "{{profile_workspace}}"
     output: system_prompt
 
@@ -84,11 +92,13 @@ steps:
     type: function
     function: defaults.ai.route_model
     input:
+      conversation_id: "{{input.conversation_id}}"
       profile_id: "{{active_profile.profile_id}}"
       message: "{{input.message}}"
       modalities: "{{modalities}}"
       tools: "{{permitted_tools.tools}}"
-      system_prompt: "{{system_prompt}}"
+      preferred_model: "{{conversation.model}}"
+      requested_thinking_level: "{{input.params.thinking_level || input.thinking_level}}"
     output: route_model
 
   - id: maybe_run_vision_bridge

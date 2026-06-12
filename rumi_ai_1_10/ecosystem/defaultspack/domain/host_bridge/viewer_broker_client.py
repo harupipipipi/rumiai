@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any
 
 
+VIEWER_BROKER_HELPER_TIMEOUT_SECONDS = 45
+VIEWER_BROKER_REQUEST_TIMEOUT_SECONDS = VIEWER_BROKER_HELPER_TIMEOUT_SECONDS + 15
+
+
 class ViewerBrokerClient:
     def __init__(self, *, url: str = "", token: str = "", connection_path: Path | None = None) -> None:
         self.url = str(url or "").rstrip("/")
@@ -109,7 +113,7 @@ class ViewerBrokerClient:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(f"{self.url}{path}", data=body, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:
+            with urllib.request.urlopen(request, timeout=VIEWER_BROKER_REQUEST_TIMEOUT_SECONDS) as response:
                 data = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             message = exc.read().decode("utf-8", errors="replace")

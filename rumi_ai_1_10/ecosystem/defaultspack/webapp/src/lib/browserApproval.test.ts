@@ -109,7 +109,33 @@ test("ignores redacted approval tokens from stored tool logs", () => {
   assert.equal(approval, null);
 });
 
-test("pendingBrowserApproval accepts approval_request_id without approval_token", () => {
+test("accepts browser computer approvals backed by approval request ids", () => {
+  const approval = pendingBrowserApproval([
+    agentMessage({
+      events: [{
+        type: "approval_requested",
+        tool_name: "computer_use",
+        action: "computer.screenshot",
+        payload: { app: "Google Chrome" },
+        requires_approval: true,
+        approval_token: "tok",
+        approval_request_id: "apr_browser",
+        approval_expires_in_seconds: 300,
+        timestamp: "2026-05-20T08:05:40Z",
+      }],
+    }),
+  ], Date.parse("2026-05-20T08:06:00Z"));
+
+  assert.deepEqual(approval, {
+    action: "computer.screenshot",
+    payload: { app: "Google Chrome" },
+    token: "tok",
+    requestId: "apr_browser",
+    toolName: "computer_use",
+  });
+});
+
+test("accepts request id browser approvals without legacy tokens", () => {
   const approval = pendingBrowserApproval([
     agentMessage({
       events: [{
@@ -119,30 +145,38 @@ test("pendingBrowserApproval accepts approval_request_id without approval_token"
         payload: { action: "apps" },
         requires_approval: true,
         approval_request_id: "apr_1",
+        risk_level: "high",
+        display_summary: "computer.apps",
       }],
     }),
   ]);
 
-  assert.equal(approval?.requestId, "apr_1");
-  assert.equal(approval?.toolName, "computer_use");
-  assert.deepEqual(approval?.payload, { action: "apps" });
+  assert.deepEqual(approval, {
+    action: "computer.apps",
+    payload: { action: "apps" },
+    requestId: "apr_1",
+    riskLevel: "high",
+    summary: "computer.apps",
+    toolName: "computer_use",
+  });
 });
 
-test("browserApprovalRuntimeContent includes approved arguments and approval token", () => {
+test("browserApprovalRuntimeContent includes request id without exposing the token", () => {
   const text = browserApprovalRuntimeContent(
     {
-      toolName: "computer_use",
       action: "computer.apps",
       payload: { action: "apps" },
       requestId: "apr_1",
+      toolName: "computer_use",
     },
     "token-1",
   );
 
   assert.match(text, /computer_use/);
   assert.match(text, /computer\.apps/);
-  assert.match(text, /approval_token/);
-  assert.match(text, /apr_1/);
+  assert.match(text, /Approval request id: apr_1/);
+  assert.doesNotMatch(text, /approval_token/);
+  assert.doesNotMatch(text, /token-1/);
 });
 
 test("returns pending runtime approval requests without browser tokens", () => {

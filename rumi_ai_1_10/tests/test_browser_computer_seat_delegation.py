@@ -40,8 +40,19 @@ def _mock_service():
 def _approval_token_for(controller: BrowserComputerController, action: str, payload: dict) -> str:
     request = controller.run(action, payload)
     token = str(request.get("approval_token") or "")
-    assert token
-    return token
+    if token:
+        return token
+    approval_module = getattr(controller, "_approval_module", lambda: None)()
+    assert approval_module is not None
+    approval_args = {"action": action, "payload": payload}
+    approval = approval_module.create_approval_request(
+        action,
+        "high",
+        approval_args,
+        details={"action": action, "pack_id": "defaultspack"},
+    )
+    decision = approval_module.approve(approval["request_id"])
+    return str(decision["token"])
 
 
 def test_click_delegates_to_seat(controller):

@@ -232,11 +232,11 @@ class TestUnifiedExecuteNonBuiltinTrustCheck(unittest.TestCase):
         trust_store.is_trusted.assert_called_once_with("user_pack:test_func", "sha256_abc")
 
 
-class TestUnifiedExecuteGrantCheckOptIn(unittest.TestCase):
+class TestUnifiedExecuteGrantCheckWithConfig(unittest.TestCase):
     """test 6: grant_config がある entry で Grant チェックが実行されること"""
 
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
-    def test_unified_execute_grant_check_opt_in(self, mock_audit_module):
+    def test_unified_execute_grant_check_with_config(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
         entry = _MockFunctionEntry(
@@ -262,11 +262,11 @@ class TestUnifiedExecuteGrantCheckOptIn(unittest.TestCase):
         grant_manager.check.assert_called_once_with("principal_a", "test.perm")
 
 
-class TestUnifiedExecuteGrantCheckSkip(unittest.TestCase):
-    """test 7: grant_config が None の entry で Grant チェックがスキップされること"""
+class TestUnifiedExecuteGrantCheckRequired(unittest.TestCase):
+    """test 7: grant_config が None の entry でも Grant チェックが必須であること"""
 
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
-    def test_unified_execute_grant_check_skip(self, mock_audit_module):
+    def test_unified_execute_grant_check_required_without_manifest_grant_config(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
         entry = _MockFunctionEntry(
@@ -279,27 +279,18 @@ class TestUnifiedExecuteGrantCheckSkip(unittest.TestCase):
         )
 
         grant_manager = MagicMock()
+        grant_manager.check.return_value = _MockGrantResult(allowed=False, reason="No grant")
         executor = _make_executor(grant_manager=grant_manager)
 
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = '{"result": "ok"}'
-        mock_proc.stderr = ""
+        resp = executor._unified_execute(
+            entry, "principal_a",
+            {"permission_id": "test.perm", "args": {}},
+            start_time=time.time(),
+        )
 
-        with patch("subprocess.run", return_value=mock_proc):
-            with patch("tempfile.NamedTemporaryFile") as mock_tmpfile:
-                mock_tmpfile.return_value.__enter__ = MagicMock(
-                    return_value=MagicMock(name="/tmp/fake_runner.py")
-                )
-                mock_tmpfile.return_value.__exit__ = MagicMock(return_value=False)
-                resp = executor._unified_execute(
-                    entry, "principal_a",
-                    {"permission_id": "test.perm", "args": {}},
-                    start_time=time.time(),
-                )
-
-        # Grant manager should NOT be called (grant_config is None)
-        grant_manager.check.assert_not_called()
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, "grant_denied")
+        grant_manager.check.assert_called_once_with("principal_a", "test.perm")
 
 
 class TestUnifiedExecuteFlowRunDispatch(unittest.TestCase):
@@ -312,10 +303,16 @@ class TestUnifiedExecuteFlowRunDispatch(unittest.TestCase):
         entry = _MockFunctionEntry(
             pack_id="core_flow",
             qualified_name="core_flow:run",
+            grant_config={},
             vocab_aliases=["flow.run"],
         )
 
-        executor = _make_executor()
+        grant_manager = MagicMock()
+        grant_manager.check.return_value = _MockGrantResult(
+            allowed=True,
+            config={"allowed_flow_ids": ["my_flow"]},
+        )
+        executor = _make_executor(grant_manager=grant_manager)
         executor._kernel = MagicMock()
         executor._kernel.execute_flow_sync.return_value = {"status": "done"}
 
@@ -344,7 +341,9 @@ class TestUnifiedExecuteSubprocessDispatch(unittest.TestCase):
             function_dir="/fake/dir",
         )
 
-        executor = _make_executor()
+        grant_manager = MagicMock()
+        grant_manager.check.return_value = _MockGrantResult(allowed=True)
+        executor = _make_executor(grant_manager=grant_manager)
 
         mock_proc = MagicMock()
         mock_proc.returncode = 0

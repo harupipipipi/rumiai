@@ -226,7 +226,7 @@ class TestExecuteFunctionStepAsync:
     async def test_function_step_success(self, kernel, di_mock):
         """11. function step が正常に実行され結果が ctx に格納される。"""
         step = {"id": "s1", "type": "function", "function": "math.add", "args": {"a": 1, "b": 2}}
-        ctx = {"_principal_id": "user1", "_flow_execution_id": "exec1"}
+        ctx = {"_flow_run_principal_id": "user1", "_flow_execution_id": "exec1"}
 
         mock_resp = _make_executor_resp(success=True, output={"sum": 3})
         mock_executor = MagicMock()
@@ -241,21 +241,21 @@ class TestExecuteFunctionStepAsync:
 
     @pytest.mark.asyncio
     async def test_function_step_no_principal_id(self, kernel, di_mock):
-        """12. _principal_id がない場合にフェイルクローズで拒否される。"""
+        """12. trusted flow principal がない場合にフェイルクローズで拒否される。"""
         step = {"id": "s1", "type": "function", "function": "math.add"}
-        ctx = {}  # no _principal_id
+        ctx = {}  # no trusted flow principal
 
         ctx, result = await kernel._execute_function_step_async(step, ctx)
 
         assert result is not None
         assert "_error" in result
-        assert "principal_id" in result["_error"]
+        assert "trusted flow principal" in result["_error"]
 
     @pytest.mark.asyncio
     async def test_function_step_executor_not_found(self, kernel, di_mock):
         """13. capability_executor が DI にない場合のエラー処理。"""
         step = {"id": "s1", "type": "function", "function": "math.add"}
-        ctx = {"_principal_id": "user1", "_flow_execution_id": "exec1"}
+        ctx = {"_flow_run_principal_id": "user1", "_flow_execution_id": "exec1"}
 
         di_mock.get_or_none = MagicMock(return_value=None)
 
@@ -269,7 +269,7 @@ class TestExecuteFunctionStepAsync:
     async def test_function_step_execution_error(self, kernel, di_mock):
         """14. executor.execute がエラーを返した場合の処理。"""
         step = {"id": "s1", "type": "function", "function": "math.add"}
-        ctx = {"_principal_id": "user1", "_flow_execution_id": "exec1"}
+        ctx = {"_flow_run_principal_id": "user1", "_flow_execution_id": "exec1"}
 
         mock_resp = _make_executor_resp(success=False, error="division by zero")
         mock_executor = MagicMock()
@@ -285,7 +285,7 @@ class TestExecuteFunctionStepAsync:
     async def test_function_step_output_storage_explicit(self, kernel, di_mock):
         """15. 明示 output キーに結果が格納される。"""
         step = {"id": "s1", "type": "function", "function": "math.add", "output": "my_result"}
-        ctx = {"_principal_id": "user1", "_flow_execution_id": "exec1"}
+        ctx = {"_flow_run_principal_id": "user1", "_flow_execution_id": "exec1"}
 
         mock_resp = _make_executor_resp(success=True, output={"sum": 10})
         mock_executor = MagicMock()
@@ -301,7 +301,7 @@ class TestExecuteFunctionStepAsync:
     async def test_function_step_output_storage_auto(self, kernel, di_mock):
         """16. 自動 _step_out.{id} に結果が格納される。"""
         step = {"id": "calc_step", "type": "function", "function": "math.add"}
-        ctx = {"_principal_id": "user1", "_flow_execution_id": "exec1"}
+        ctx = {"_flow_run_principal_id": "user1", "_flow_execution_id": "exec1"}
 
         mock_resp = _make_executor_resp(success=True, output={"sum": 7})
         mock_executor = MagicMock()
@@ -319,7 +319,7 @@ class TestExecuteFunctionStepAsync:
             "id": "s1", "type": "function", "function": "math.add",
             "vocab_normalize": True,
         }
-        ctx = {"_principal_id": "user1", "_flow_execution_id": "exec1"}
+        ctx = {"_flow_run_principal_id": "user1", "_flow_execution_id": "exec1"}
 
         mock_resp = _make_executor_resp(success=True, output={"raw_key": "value"})
         mock_executor = MagicMock()
@@ -353,7 +353,7 @@ class TestSyncFunctionStep:
             "args": {"x": 3, "y": 4},
         }
         ctx = {
-            "_principal_id": "user1",
+            "_flow_run_principal_id": "user1",
             "_flow_defaults": {"fail_soft": True, "on_missing_handler": "skip"},
         }
 
@@ -374,7 +374,7 @@ class TestSyncFunctionStep:
         assert actual_request["qualified_name"] == "math.multiply"
 
     def test_sync_function_step_no_principal_id(self, kernel, di_mock):
-        """19. 同期版でも _principal_id がない場合に拒否される。"""
+        """19. 同期版でも trusted flow principal がない場合に拒否される。"""
         step = {
             "id": "sync_s2",
             "function": "math.multiply",
@@ -382,7 +382,7 @@ class TestSyncFunctionStep:
         ctx = {
             "_flow_defaults": {"fail_soft": True, "on_missing_handler": "skip"},
         }
-        # no _principal_id in ctx
+        # no trusted flow principal in ctx
 
         aborted = kernel._execute_flow_step(step, phase="startup", ctx=ctx)
 

@@ -57,7 +57,17 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "query": {"type": "string"}
+          "query": {"type": "string"},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+          "domains": {
+            "description": "Optional preferred or required domains. Accepts a list or newline/comma separated string.",
+            "oneOf": [
+              {"type": "string"},
+              {"type": "array", "items": {"type": "string"}}
+            ]
+          },
+          "official_only": {"type": "boolean"},
+          "fetch_pages": {"type": "boolean"}
         },
         "required": ["query"]
       }

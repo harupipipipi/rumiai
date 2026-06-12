@@ -36,9 +36,9 @@ export function ConversationSpotlight({
 }) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 rumi-layer-modal flex items-start justify-center bg-black/45 px-4 pt-[9vh] backdrop-blur-sm" onMouseDown={onClose}>
+    <div className="fixed inset-0 rumi-layer-modal flex items-start justify-center bg-black/45 px-4 pt-[9vh] backdrop-blur-sm rumi-anim-fade-in" onMouseDown={onClose}>
       <div
-        className="w-full max-w-2xl overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/95 shadow-[0_32px_120px_rgba(0,0,0,0.65)] ring-1 ring-white/5"
+        className="w-full max-w-2xl overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/95 shadow-[0_32px_120px_rgba(0,0,0,0.65)] ring-1 ring-white/5 rumi-anim-pop-in"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b border-zinc-800/80 px-4 py-3">

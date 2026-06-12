@@ -43,6 +43,7 @@ class ToolOrchestrator:
             tool_def,
             context,
             tool_name=tool_name,
+            arguments=arguments or {},
             approval_granted=self._server_approval_granted(run_id, tool_call_id, approval_id),
         )
         audit_tool_policy(

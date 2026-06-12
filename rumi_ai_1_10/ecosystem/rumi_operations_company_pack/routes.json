@@ -17,6 +17,24 @@
       "path": "/api/agent/company/bootstrap",
       "flow_id": "transport_direct",
       "description": "Start or reattach the Operations Company 24/7 agent"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/mimo-company/manifest",
+      "flow_id": "transport_direct",
+      "description": "Inspect the MiMo Coding Company self-improving harness contract"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/mimo-company/status",
+      "flow_id": "transport_direct",
+      "description": "Read MiMo Coding Company org, schedule, harness, and task status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/mimo-company/bootstrap",
+      "flow_id": "transport_direct",
+      "description": "Start or reattach the MiMo Coding Company long-running coding harness"
     }
   ]
 }

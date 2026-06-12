@@ -54,6 +54,13 @@ sys.modules["core_runtime.audit_logger"].get_audit_logger = lambda: _mock_audit_
 # FunctionEntry stub
 # ---------------------------------------------------------------------------
 @dataclass
+class GrantResult:
+    allowed: bool
+    reason: str = ""
+    config: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class FunctionEntry:
     function_id: str
     pack_id: str
@@ -98,13 +105,20 @@ def _make_executor(
     approval_manager=None,
     permission_manager=None,
     docker_handler=None,
+    grant_manager=None,
 ) -> CapabilityExecutor:
     ex = CapabilityExecutor()
     ex._initialized = True
     ex._handler_registry = MagicMock()
     ex._handler_registry.is_loaded.return_value = True
     ex._trust_store = MagicMock()
-    ex._grant_manager = MagicMock()
+    if grant_manager is None:
+        ex._grant_manager = MagicMock()
+        ex._grant_manager.check.side_effect = lambda _principal, permission_id: GrantResult(
+            permission_id.startswith("docker.")
+        )
+    else:
+        ex._grant_manager = grant_manager
 
     ex._function_registry = function_registry
     ex._approval_manager = approval_manager
@@ -421,23 +435,46 @@ class TestCoreDockerExecution:
         assert resp.success is True
         assert resp.output == {"output": "hello"}
 
-    def test_grant_config_from_manifest(self):
-        gc = {"max_containers": 5}
-        entry = _core_docker_entry("run", manifest={"grant_config": gc})
+    def test_core_docker_uses_signed_grant_config_not_manifest(self):
+        manifest_gc = {"allowed_images": ["evil.registry/*"], "network_allowed": True}
+        signed_gc = {"allowed_images": ["alpine:*"], "network_allowed": False}
+        entry = _core_docker_entry("run", manifest={"grant_config": manifest_gc})
         reg = _make_function_registry({"core_docker_capability:run": entry})
         am = _make_approval_manager({"core_docker_capability"})
         pm = _make_permission_manager("permissive")
         docker = MagicMock()
         docker.handle_run.return_value = {"id": "123"}
-        ex = _make_executor(reg, am, pm, docker)
+        grant_manager = MagicMock()
+        grant_manager.check.return_value = GrantResult(True, config=signed_gc)
+        ex = _make_executor(reg, am, pm, docker, grant_manager=grant_manager)
         resp = ex.execute("p", {
             "type": "function.call",
             "qualified_name": "core_docker_capability:run",
             "args": {"image": "alpine"},
         })
         assert resp.success is True
+        grant_manager.check.assert_called_once_with("p", "docker.run")
         _, kwargs = docker.handle_run.call_args
-        assert kwargs["grant_config"] == gc
+        assert kwargs["grant_config"] == signed_gc
+
+    def test_core_docker_denies_without_signed_capability_grant(self):
+        entry = _core_docker_entry("run", manifest={"grant_config": {"allowed_images": ["*"]}})
+        reg = _make_function_registry({"core_docker_capability:run": entry})
+        am = _make_approval_manager({"core_docker_capability"})
+        pm = _make_permission_manager("permissive")
+        docker = MagicMock()
+        grant_manager = MagicMock()
+        grant_manager.check.return_value = GrantResult(False, reason="not granted")
+        ex = _make_executor(reg, am, pm, docker, grant_manager=grant_manager)
+        resp = ex.execute("p", {
+            "type": "function.call",
+            "qualified_name": "core_docker_capability:run",
+            "args": {"image": "evil.registry/pwn:latest"},
+        })
+        assert resp.success is False
+        assert resp.error_type == "grant_denied"
+        grant_manager.check.assert_called_once_with("p", "docker.run")
+        docker.handle_run.assert_not_called()
 
 
 # ===========================================================================
@@ -474,6 +511,29 @@ class TestUserFunction:
             "qualified_name": "my_pack:process",
         })
         assert resp.error_type == "not_implemented"
+
+    def test_non_core_calling_convention_does_not_bypass_user_function_policy(self):
+        entry = _user_entry()
+        entry.calling_convention = "subprocess"
+        reg = _make_function_registry({"my_pack:process": entry})
+        am = _make_approval_manager({"my_pack"})
+        pm = _make_permission_manager("permissive")
+        ex = _make_executor(reg, am, pm)
+        ex._execute_handler_subprocess = MagicMock(
+            return_value=CapabilityResponse(success=True, output={"bypassed": True})
+        )
+        ex._execute_user_function = MagicMock(
+            return_value=CapabilityResponse(success=False, error_type="docker_unavailable")
+        )
+
+        resp = ex.execute("p", {
+            "type": "function.call",
+            "qualified_name": "my_pack:process",
+        })
+
+        assert resp.error_type == "docker_unavailable"
+        ex._execute_handler_subprocess.assert_not_called()
+        ex._execute_user_function.assert_called_once()
 
 
 # ===========================================================================

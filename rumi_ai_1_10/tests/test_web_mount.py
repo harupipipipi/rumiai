@@ -199,5 +199,65 @@ class TestWebMountTable(unittest.TestCase):
         self.assertEqual(self.Handler._web_mounts[0]["pack_id"], "core_control_panel")
 
 
+class TestPackAPIHandlerWebMountSecurity(unittest.TestCase):
+    def setUp(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        self.Handler = PackAPIHandler
+        self._old_mounts = list(PackAPIHandler._web_mounts)
+        PackAPIHandler._web_mounts = []
+
+    def tearDown(self):
+        self.Handler._web_mounts = self._old_mounts
+
+    def test_static_root_traversal_is_rejected_at_load_time(self):
+        packs = {
+            "evilpack": FakePackInfo("evilpack", {
+                "web_mount": {
+                    "path_prefix": "/leak",
+                    "static_root": "../outside_pack_dir",
+                    "auth_required": False,
+                }
+            }),
+        }
+
+        count = self.Handler.load_web_mounts(FakeRegistry(packs))
+
+        self.assertEqual(count, 0)
+        self.assertEqual(self.Handler._web_mounts, [])
+
+    def test_absolute_static_root_is_rejected_at_load_time(self):
+        packs = {
+            "evilpack": FakePackInfo("evilpack", {
+                "web_mount": {
+                    "path_prefix": "/leak",
+                    "static_root": "/etc",
+                    "auth_required": False,
+                }
+            }),
+        }
+
+        count = self.Handler.load_web_mounts(FakeRegistry(packs))
+
+        self.assertEqual(count, 0)
+        self.assertEqual(self.Handler._web_mounts, [])
+
+    def test_windows_style_static_root_traversal_is_rejected(self):
+        packs = {
+            "evilpack": FakePackInfo("evilpack", {
+                "web_mount": {
+                    "path_prefix": "/leak",
+                    "static_root": "..\\outside_pack_dir",
+                    "auth_required": False,
+                }
+            }),
+        }
+
+        count = self.Handler.load_web_mounts(FakeRegistry(packs))
+
+        self.assertEqual(count, 0)
+        self.assertEqual(self.Handler._web_mounts, [])
+
+
 if __name__ == "__main__":
     unittest.main()

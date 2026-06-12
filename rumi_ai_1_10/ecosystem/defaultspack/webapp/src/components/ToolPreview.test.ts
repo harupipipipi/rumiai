@@ -7,6 +7,7 @@ import {
   buildToolPreviewTimelineItems,
   hasCanvasItems,
   isCanvasPreviewItemRenderable,
+  WEB_PREVIEW_IFRAME_SANDBOX,
   type ToolPreviewItem,
 } from "./ToolPreview";
 
@@ -68,6 +69,11 @@ test("tool preview timeline is chronological regardless of display ordering", ()
 
   assert.deepEqual(displayItems.map((item) => item.id), ["first", "second"]);
   assert.deepEqual(buildToolPreviewTimelineItems(displayItems).map((item) => item.id), ["second", "first"]);
+});
+
+test("web preview iframe sandbox keeps same-origin content isolated", () => {
+  assert.match(WEB_PREVIEW_IFRAME_SANDBOX, /allow-scripts/);
+  assert.doesNotMatch(WEB_PREVIEW_IFRAME_SANDBOX, /allow-same-origin/);
 });
 
 test("tool preview artifacts map to reusable foreground dialog items", () => {

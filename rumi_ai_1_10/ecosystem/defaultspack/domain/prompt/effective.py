@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from ..capability.catalog import CapabilityCatalog
 from .renderer import render
 from .resolver import PromptResolver
 
@@ -101,6 +102,30 @@ def _select_existing_file(candidates: list[Path]) -> Path | None:
     return None
 
 
+def _catalog_profile(profile_id: Any) -> dict[str, Any]:
+    candidate = str(profile_id or "").strip()
+    if not candidate:
+        return {}
+    try:
+        profile = CapabilityCatalog().profile(candidate)
+    except Exception:
+        return {}
+    return dict(profile) if isinstance(profile, dict) else {}
+
+
+def _source_pack_id(data: dict[str, Any], profile: dict[str, Any]) -> str:
+    metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
+    raw_pack = (
+        data.get("source_pack_id")
+        or profile.get("source_pack_id")
+        or profile.get("_source_pack_id")
+        or metadata.get("pack_id")
+        or data.get("base_pack")
+        or profile.get("base_pack")
+    )
+    return str(raw_pack or "").strip()
+
+
 def _chain_entry(
     *,
     source_type: str,
@@ -132,8 +157,12 @@ def resolve_effective_prompt(input_data: dict[str, Any] | None) -> dict[str, Any
     prompts_dir = _path_from_workspace(workspace, "prompts_dir") if workspace else None
     snapshots_dir = _path_from_workspace(workspace, "snapshots_dir") if workspace else None
     profile = _read_mapping(profile_file)
-    prompt_ids = _prompt_ids(data, profile)
-    base_pack = str(data.get("base_pack") or profile.get("base_pack") or "defaultspack").strip() or "defaultspack"
+    catalog_profile = _catalog_profile(data.get("profile_id") or profile.get("profile_id"))
+    merged_profile = dict(catalog_profile)
+    merged_profile.update(profile)
+    prompt_ids = _prompt_ids(data, merged_profile)
+    source_pack_id = _source_pack_id(data, merged_profile)
+    base_pack = str(data.get("base_pack") or merged_profile.get("base_pack") or source_pack_id or "defaultspack").strip() or "defaultspack"
     source_chain: list[dict[str, Any]] = []
 
     profile_candidates = _profile_prompt_candidates(prompts_dir, prompt_ids)
@@ -188,9 +217,9 @@ def resolve_effective_prompt(input_data: dict[str, Any] | None) -> dict[str, Any
 
     resolver = PromptResolver()
     for prompt_id in prompt_ids:
-        content = resolver.resolve_prompt_text(prompt_id)
+        content, resolved_pack_id = resolver.resolve_prompt(prompt_id, source_pack_id=source_pack_id or None)
         if content is not None:
-            source = f"{base_pack}.{prompt_id}"
+            source = f"{(resolved_pack_id or source_pack_id or base_pack)}.{prompt_id}"
             source_chain.append(
                 _chain_entry(
                     source_type="pack_default",
