@@ -359,7 +359,6 @@ export function KanbanWorkspacePanel({
   const [backendAvailable, setBackendAvailable] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [drawer, setDrawer] = useState<DrawerState>(null);
@@ -685,23 +684,6 @@ export function KanbanWorkspacePanel({
     }
   };
 
-  const handleSyncRuns = async () => {
-    if (!boardData) return;
-    setSyncing(true);
-    try {
-      if (!backendAvailable) {
-        setNotice("Run sync needs the Kanban API; local draft board remains available.");
-        return;
-      }
-      const synced = await kanbanResources.syncRuns(boardData.board.board_id);
-      setBoardData(normalizeBoard(synced, scope, activeConversationTitle, workspaceLabel));
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to sync Rumi runs.");
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   const handleHistoryChatDrop = useCallback(async (columnId: string, rawPayload: string) => {
     if (!boardData) return;
     const payload = parseHistoryChatDragPayload(rawPayload);
@@ -798,14 +780,12 @@ export function KanbanWorkspacePanel({
           scope={scope}
           scopeOptions={scopeOptions}
           loading={loading}
-          syncing={syncing}
           backendAvailable={backendAvailable}
           search={search}
           onSearchChange={setSearch}
           onScopeChange={commitScopeChange}
           onCreateCard={() => openCreateCard()}
           onReload={() => void loadBoard()}
-          onSyncRuns={() => void handleSyncRuns()}
           onOpenSettings={() => onOpenSettings?.()}
         />
 

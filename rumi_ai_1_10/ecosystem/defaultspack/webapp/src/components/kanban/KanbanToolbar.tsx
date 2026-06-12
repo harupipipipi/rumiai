@@ -1,4 +1,4 @@
-import { RefreshCw, Search, Settings, Sparkles } from "lucide-react";
+import { RefreshCw, Search, Settings } from "lucide-react";
 
 import type { KanbanBoard, KanbanBoardScope, KanbanBoardScopeType } from "../../lib/api";
 import { cn } from "../../lib/cn";
@@ -27,28 +27,24 @@ export function KanbanToolbar({
   scope,
   scopeOptions,
   loading,
-  syncing,
   backendAvailable,
   search,
   onSearchChange,
   onScopeChange,
   onCreateCard,
   onReload,
-  onSyncRuns,
   onOpenSettings,
 }: {
   board: KanbanBoard | null;
   scope: KanbanBoardScope;
   scopeOptions: KanbanScopeOption[];
   loading: boolean;
-  syncing: boolean;
   backendAvailable: boolean;
   search: string;
   onSearchChange: (value: string) => void;
   onScopeChange: (scope: KanbanBoardScope) => void;
   onCreateCard: () => void;
   onReload: () => void;
-  onSyncRuns: () => void;
   onOpenSettings: () => void;
 }) {
   const activeScopeKey = scopeKey(scope);
@@ -98,16 +94,6 @@ export function KanbanToolbar({
             aria-label="Reload"
           >
             <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-          </button>
-          <button
-            type="button"
-            onClick={onSyncRuns}
-            disabled={syncing}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-800 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-40"
-            title="Sync Rumi runs"
-            aria-label="Sync Rumi runs"
-          >
-            <Sparkles size={13} className={syncing ? "animate-pulse" : ""} />
           </button>
           <button
             type="button"
