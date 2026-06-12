@@ -51,8 +51,8 @@ export function KanbanColumn({
       onDragOver={handleNativeDragOver}
       onDrop={handleNativeDrop}
       className={cn(
-        "flex h-full min-h-0 w-[min(312px,78vw)] shrink-0 flex-col rounded-lg border bg-[#0d0d10]",
-        droppable.isOver ? "border-zinc-500 bg-zinc-900/70" : "border-zinc-800/70",
+        "relative flex h-full min-h-0 w-[min(312px,78vw)] shrink-0 flex-col rounded-lg border bg-[#0d0d10] transition-[background-color,border-color,box-shadow] duration-150",
+        droppable.isOver ? "border-sky-400/70 bg-sky-950/20 shadow-[0_0_0_1px_rgba(56,189,248,0.22)]" : "border-zinc-800/70",
       )}
     >
       <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-zinc-800/70 px-3">
@@ -81,7 +81,12 @@ export function KanbanColumn({
       </header>
 
       <SortableContext items={cards.map((card) => card.card_id)} strategy={verticalListSortingStrategy}>
-        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2 transition-colors duration-150",
+            droppable.isOver && "bg-sky-950/10",
+          )}
+        >
           {cards.map((card) => (
             <KanbanCard
               key={card.card_id}
@@ -96,7 +101,7 @@ export function KanbanColumn({
             <button
               type="button"
               onClick={() => onCreateCard(column.column_id)}
-              className="flex min-h-28 items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-950/35 px-3 text-center text-[11px] text-zinc-600 transition hover:border-zinc-700 hover:text-zinc-400"
+              className="flex min-h-32 items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-950/35 px-3 text-center text-[11px] text-zinc-600 transition hover:border-zinc-700 hover:text-zinc-400"
             >
               New card
             </button>
