@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowLeft, ArrowRight, CalendarDays, CheckSquare, ExternalLink, GripVertical, MessageSquareText, Pencil } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, CheckSquare, ExternalLink, GripVertical, MessageSquareText, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useRef, type MouseEvent, type PointerEvent } from "react";
 
 import type { KanbanCard as KanbanCardRecord, KanbanColumn } from "../../lib/api";
@@ -39,12 +39,14 @@ export function KanbanCard({
   columns,
   onEdit,
   onMoveToColumn,
+  onDelete,
   onOpenChat,
 }: {
   card: KanbanCardRecord;
   columns: KanbanColumn[];
   onEdit: (card: KanbanCardRecord) => void;
   onMoveToColumn: (cardId: string, columnId: string) => void;
+  onDelete?: (cardId: string) => void;
   onOpenChat?: (conversationId: string) => void;
 }) {
   const sortable = useSortable({ id: card.card_id });
@@ -208,6 +210,17 @@ export function KanbanCard({
           >
             <ArrowRight size={11} />
           </button>
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete(card.card_id)}
+              className="flex h-6 w-6 items-center justify-center rounded border border-red-500/20 text-red-300/80 transition hover:bg-red-500/10 hover:text-red-200"
+              title="Delete card"
+              aria-label="Delete card"
+            >
+              <Trash2 size={11} />
+            </button>
+          )}
         </div>
       </div>
     </article>

@@ -815,6 +815,7 @@ export function KanbanWorkspacePanel({
             onCreateCard={openCreateCard}
             onEditCard={(card) => setDrawer({ mode: "edit", cardId: card.card_id })}
             onMoveCard={(cardId, columnId, targetIndex) => void handleMoveCard(cardId, columnId, targetIndex)}
+            onDeleteCard={(cardId) => void handleDeleteCard(cardId)}
             onHistoryChatDrop={(columnId, rawPayload) => void handleHistoryChatDrop(columnId, rawPayload)}
             onOpenChat={onOpenChat}
           />

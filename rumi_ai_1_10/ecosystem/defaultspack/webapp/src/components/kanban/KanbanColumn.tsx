@@ -15,6 +15,7 @@ export function KanbanColumn({
   onCreateCard,
   onEditCard,
   onMoveToColumn,
+  onDeleteCard,
   onHistoryChatDrop,
   onOpenChat,
 }: {
@@ -24,6 +25,7 @@ export function KanbanColumn({
   onCreateCard: (columnId: string) => void;
   onEditCard: (card: KanbanCardRecord) => void;
   onMoveToColumn: (cardId: string, columnId: string) => void;
+  onDeleteCard?: (cardId: string) => void;
   onHistoryChatDrop?: (columnId: string, rawPayload: string) => void;
   onOpenChat?: (conversationId: string) => void;
 }) {
@@ -94,6 +96,7 @@ export function KanbanColumn({
               columns={columns}
               onEdit={onEditCard}
               onMoveToColumn={onMoveToColumn}
+              onDelete={onDeleteCard}
               onOpenChat={onOpenChat}
             />
           ))}
