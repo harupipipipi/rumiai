@@ -270,13 +270,15 @@ class TestUnifiedExecuteGrantCheckRequired(unittest.TestCase):
         mock_audit_module.return_value = MagicMock()
 
         entry = _MockFunctionEntry(
-            pack_id="core_test",
-            qualified_name="core_test:test_func",
+            pack_id="test_pack",
+            qualified_name="test_pack:test_func",
             vocab_aliases=["test.perm"],
             grant_config=None,
             entrypoint="handler.py:execute",
-            function_dir="/fake/dir",
+            function_dir=str(Path(__file__).resolve().parent),
+            main_py_path=str(Path(__file__).resolve()),
         )
+        entry.legacy_grant_required = True
 
         grant_manager = MagicMock()
         grant_manager.check.return_value = _MockGrantResult(allowed=False, reason="No grant")

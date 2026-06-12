@@ -439,6 +439,15 @@ class TestRegressionCoreFunction(unittest.TestCase):
     def test_core_function_routes_to_dispatch(self):
         """core_pack function.call routes to _dispatch_core_function."""
         entry = _make_entry(pack_id="core_docker_capability", function_id="run")
+        entry.function_dir = (
+            _project_root
+            / "core_runtime"
+            / "core_pack"
+            / "core_docker_capability"
+            / "functions"
+            / "run"
+        )
+        entry.main_py_path = entry.function_dir / "main.py"
         self.executor._function_registry.get.return_value = entry
 
         # Mock _dispatch_core_function

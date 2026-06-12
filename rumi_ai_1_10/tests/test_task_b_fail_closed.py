@@ -201,6 +201,67 @@ def test_core_prefixed_ecosystem_subprocess_does_not_bypass_trust(tmp_path):
     assert not marker.exists()
 
 
+def test_core_handler_table_pack_outside_core_pack_is_rejected(tmp_path):
+    from core_runtime.capability_executor import CapabilityExecutor
+    from core_runtime.function_registry import FunctionEntry
+
+    function_dir = tmp_path / "ecosystem" / "core_docker_capability" / "functions" / "run"
+    function_dir.mkdir(parents=True)
+    marker = tmp_path / "handler_table_executed.txt"
+    main_py = function_dir / "main.py"
+    main_py.write_text(
+        "from pathlib import Path\n"
+        "def execute(context, args):\n"
+        f"    Path({str(marker)!r}).write_text('executed', encoding='utf-8')\n"
+        "    return {'success': True}\n",
+        encoding="utf-8",
+    )
+    entry = FunctionEntry(
+        pack_id="core_docker_capability",
+        function_id="run",
+        function_dir=function_dir,
+        main_py_path=main_py,
+        manifest={},
+        calling_convention="block",
+    )
+
+    class Registry:
+        def get(self, qualified_name):
+            return entry if qualified_name == "core_docker_capability:run" else None
+
+        def resolve_by_alias(self, qualified_name):
+            return None
+
+    class ApprovalManager:
+        def is_pack_approved_and_verified(self, pack_id):
+            return True, None
+
+    class PermissionManager:
+        def has_permission(self, principal_id, permission_id):
+            return permission_id == "function.call"
+
+    executor = CapabilityExecutor()
+    executor._initialized = True
+    executor._function_registry = Registry()
+    executor._approval_manager = ApprovalManager()
+    executor._permission_manager = PermissionManager()
+    executor._core_function_handlers = {"core_docker_capability": "docker_capability_handler"}
+
+    response = executor.execute(
+        "principal-1",
+        {
+            "type": "function.call",
+            "qualified_name": "core_docker_capability:run",
+            "args": {},
+            "request_id": "req-1",
+        },
+    )
+
+    assert response.success is False
+    assert response.error_type == "unknown_core_function"
+    assert not marker.exists()
+
+
 def test_function_call_core_prefixed_block_outside_core_pack_is_rejected(tmp_path):
     from core_runtime.capability_executor import CapabilityExecutor
     from core_runtime.function_registry import FunctionEntry
@@ -260,6 +321,79 @@ def test_function_call_core_prefixed_block_outside_core_pack_is_rejected(tmp_pat
     assert response.success is False
     assert response.error_type == "unknown_core_function"
     assert not marker.exists()
+
+
+def test_unified_execute_approval_denied_returns_pack_not_approved(tmp_path):
+    from core_runtime.capability_executor import CapabilityExecutor
+    from core_runtime.function_registry import FunctionEntry
+
+    function_dir = tmp_path / "functions" / "demo"
+    function_dir.mkdir(parents=True)
+    main_py = function_dir / "main.py"
+    main_py.write_text("def run(context, args): return {'ok': True}\n", encoding="utf-8")
+    entry = FunctionEntry(
+        pack_id="custom_pack",
+        function_id="demo",
+        function_dir=function_dir,
+        main_py_path=main_py,
+        manifest={},
+        calling_convention="subprocess",
+    )
+
+    class ApprovalManager:
+        def is_pack_approved_and_verified(self, pack_id):
+            return False, "denied"
+
+    executor = CapabilityExecutor()
+    executor._initialized = True
+    executor._approval_manager = ApprovalManager()
+
+    response = executor._unified_execute(entry, "principal-1", {"args": {}}, time.time())
+
+    assert response.success is False
+    assert response.error_type == "pack_not_approved"
+
+
+def test_unified_execute_approval_allowed_continues_past_approval(tmp_path):
+    from types import SimpleNamespace
+
+    from core_runtime.capability_executor import CapabilityExecutor, CapabilityResponse
+    from core_runtime.function_registry import FunctionEntry
+
+    function_dir = tmp_path / "functions" / "demo"
+    function_dir.mkdir(parents=True)
+    main_py = function_dir / "main.py"
+    main_py.write_text("def run(context, args): return {'ok': True}\n", encoding="utf-8")
+    entry = FunctionEntry(
+        pack_id="custom_pack",
+        function_id="demo",
+        function_dir=function_dir,
+        main_py_path=main_py,
+        manifest={},
+        calling_convention="subprocess",
+    )
+
+    class ApprovalManager:
+        def is_pack_approved_and_verified(self, pack_id):
+            return True, None
+
+    class TrustStore:
+        def is_trusted(self, handler_id, sha256):
+            return SimpleNamespace(trusted=True, reason="trusted")
+
+    executor = CapabilityExecutor()
+    executor._initialized = True
+    executor._approval_manager = ApprovalManager()
+    executor._trust_store = TrustStore()
+    executor._dispatch_by_calling_convention = lambda **kwargs: CapabilityResponse(
+        success=True,
+        output={"continued": True},
+    )
+
+    response = executor._unified_execute(entry, "principal-1", {"args": {}}, time.time())
+
+    assert response.success is True
+    assert response.output == {"continued": True}
 
 
 def test_core_flow_block_dispatch_uses_in_process_flow_runner():
