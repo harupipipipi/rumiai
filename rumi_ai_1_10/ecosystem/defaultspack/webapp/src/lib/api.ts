@@ -887,6 +887,7 @@ export type ShellRegion = {
   slot?: string;
   order?: number;
   enabled?: boolean;
+  [key: string]: unknown;
 };
 
 export type ShellRenderer = {
@@ -897,6 +898,28 @@ export type ShellRenderer = {
   module?: string;
   export?: string;
   trust?: "local";
+  [key: string]: unknown;
+};
+
+export type ShellVariant = {
+  id: string;
+  label?: string;
+  extends?: string;
+  mode?: "replace_main" | string;
+  preserve_regions?: string[];
+  disable_regions?: string[];
+  add_regions?: ShellRegion[];
+  layout?: {
+    id?: string;
+    regions?: ShellRegion[];
+    [key: string]: unknown;
+  };
+  shell_layout?: {
+    id?: string;
+    regions?: ShellRegion[];
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
 };
 
 export type SkillCatalogItem = {
@@ -938,9 +961,14 @@ export type UICatalog = {
   shell?: {
     layout?: {
       id: string;
+      label?: string;
+      extends?: string;
       regions?: ShellRegion[];
+      [key: string]: unknown;
     };
     renderers?: ShellRenderer[];
+    variants?: ShellVariant[];
+    active_variant_id?: string;
   };
   parts?: Array<{
     id: string;
@@ -1537,8 +1565,9 @@ export const api = {
     return request<{ status: string; pack: string; ts: string }>("/api/health");
   },
 
-  uiCatalog() {
-    return request<UICatalog>("/api/ui/catalog");
+  uiCatalog(profileId?: string | null) {
+    const query = profileId ? `?profile_id=${encodeURIComponent(profileId)}` : "";
+    return request<UICatalog>(`/api/ui/catalog${query}`);
   },
 
   uiSettings() {

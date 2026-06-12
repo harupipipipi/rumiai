@@ -2,16 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { UICatalog } from "./api";
-import { hasShellRegion, shellRendererForRegion, shellRegions } from "./uiShell";
+import { hasShellRegion, shellRegionById, shellRendererById, shellRendererForRegion, shellRegions, shellRegionsForSlot } from "./uiShell";
 
 const catalog: UICatalog = {
   shell: {
     layout: {
       id: "custom",
       regions: [
-        { id: "composer", renderer: "composer", order: 30 },
-        { id: "history", renderer: "history_board", order: 10 },
-        { id: "right_sidebar", renderer: "right_sidebar", order: 20, enabled: false },
+        { id: "composer", renderer: "composer", slot: "bottom", order: 30 },
+        { id: "history", renderer: "history_board", slot: "left", order: 10 },
+        { id: "right_sidebar", renderer: "right_sidebar", slot: "right", order: 20, enabled: false },
       ],
     },
     renderers: [
@@ -34,7 +34,14 @@ test("hasShellRegion reads visible shell regions", () => {
   assert.equal(hasShellRegion(catalog, "right_sidebar"), false);
 });
 
+test("shellRegionsForSlot groups visible regions by slot", () => {
+  assert.deepEqual(shellRegionsForSlot(catalog, "left").map((region) => region.id), ["history"]);
+  assert.deepEqual(shellRegionsForSlot(catalog, "right").map((region) => region.id), []);
+  assert.equal(shellRegionById(catalog, "history")?.slot, "left");
+});
+
 test("shellRendererForRegion resolves renderer metadata", () => {
   assert.equal(shellRendererForRegion(catalog, "composer")?.component, "Composer");
+  assert.equal(shellRendererById(catalog, "history_board")?.component, "HistoryBoard");
   assert.equal(shellRendererForRegion(catalog, "missing"), null);
 });

@@ -10,11 +10,27 @@ export function hasShellRegion(catalog: UICatalog | null | undefined, regionId: 
   return shellRegions(catalog).some((region) => region.id === regionId);
 }
 
+export function shellRegionById(catalog: UICatalog | null | undefined, regionId: string): ShellRegion | null {
+  return shellRegions(catalog).find((region) => region.id === regionId) ?? null;
+}
+
+export function shellRegionsForSlot(catalog: UICatalog | null | undefined, slot: string): ShellRegion[] {
+  return shellRegions(catalog).filter((region) => (region.slot ?? "main") === slot);
+}
+
+export function shellRendererById(
+  catalog: UICatalog | null | undefined,
+  rendererId: string | null | undefined,
+): ShellRenderer | null {
+  if (!rendererId) return null;
+  return (catalog?.shell?.renderers ?? []).find((renderer) => renderer.id === rendererId) ?? null;
+}
+
 export function shellRendererForRegion(
   catalog: UICatalog | null | undefined,
   regionId: string,
 ): ShellRenderer | null {
-  const region = shellRegions(catalog).find((candidate) => candidate.id === regionId);
+  const region = shellRegionById(catalog, regionId);
   if (!region?.renderer) return null;
-  return (catalog?.shell?.renderers ?? []).find((renderer) => renderer.id === region.renderer) ?? null;
+  return shellRendererById(catalog, region.renderer);
 }

@@ -33,6 +33,7 @@ selection file がない開発環境では、従来どおり全 sibling pack を
 ### 0. Shell layout を差し替える
 
 `user_data/shared/frontend_shell.json` に `shell_layout` を置くと、既存 React を編集せずに表示 region を並べ替えたり無効化できる。
+profile ごとの上書きは `user_data/profiles/<profile_id>/frontend_shell.json` に同じ形式で置ける。
 
 ```json
 {
@@ -64,6 +65,37 @@ selection file がない開発環境では、従来どおり全 sibling pack を
     }
   ]
 }
+```
+
+pack は `shell_variants` を宣言できる。profile が `metadata.shell_variant` で variant id を選ぶと、`/api/ui/catalog?profile_id=<profile_id>` は適用済み layout を返す。`mode: "replace_main"` は default chat の `main` / `bottom` region を無効化し、`preserve_regions` と `add_regions` で sidebar や overlay を残しながら中央 workspace を差し替える。
+
+```json
+{
+  "shell_variants": [
+    {
+      "id": "memo.workspace",
+      "label": "Memo Workspace",
+      "extends": "default_chat_shell",
+      "mode": "replace_main",
+      "preserve_regions": ["title_bar", "right_sidebar", "settings_modal"],
+      "disable_regions": ["history", "chat_header", "chat_messages", "composer", "activity_preview"],
+      "add_regions": [
+        {"id": "memo_nav", "part_id": "memo_notes", "renderer": "memo_nav", "slot": "left", "order": 20},
+        {"id": "memo_workspace", "part_id": "memo_workspace", "renderer": "memo_workspace", "slot": "main", "order": 40}
+      ]
+    }
+  ]
+}
+```
+
+profile 側は次のように選ぶ。
+
+```yaml
+metadata:
+  shell_variant: memo.workspace
+  selected:
+    frontend:
+      - memo.workspace
 ```
 
 `/api/ui/catalog` は壊れた `parts`, `component_bindings`, `shell_layout`, `shell_renderers` を `diagnostics` として返す。frontend は診断を表示・記録できるが、manifest 全体を強制的には拒否しない。

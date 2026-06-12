@@ -236,6 +236,139 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("research_sidebar", sidebar_ids)
         self.assertNotIn("coding_sidebar", sidebar_ids)
 
+    def test_profile_shell_variant_replaces_main_and_preserves_right_sidebar(self):
+        from core_runtime.profile_workspace import ProfileWorkspaceManager
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rumi_root = Path(tmpdir) / "rumi_ai_1_10"
+            ecosystem_root = rumi_root / "ecosystem"
+            pack_root = ecosystem_root / "defaultspack"
+            pack_root.mkdir(parents=True, exist_ok=True)
+            (pack_root / "ecosystem.json").write_text(json.dumps({"pack_id": "defaultspack"}), encoding="utf-8")
+            memo_pack = ecosystem_root / "rumi_memo_pack"
+            memo_pack.mkdir(parents=True, exist_ok=True)
+            (memo_pack / "ecosystem.json").write_text(json.dumps({"pack_id": "rumi_memo_pack"}), encoding="utf-8")
+            ext_dir = memo_pack / "frontend_extensions"
+            ext_dir.mkdir(parents=True, exist_ok=True)
+            (ext_dir / "memo.ui.json").write_text(
+                json.dumps(
+                    {
+                        "parts": [
+                            {"id": "memo_notes", "kind": "navigation"},
+                            {"id": "memo_workspace", "kind": "workspace"},
+                        ],
+                        "shell_renderers": [
+                            {"id": "memo_nav", "component": "MemoNav", "regions": ["memo_nav"]},
+                            {"id": "memo_workspace", "component": "MemoWorkspace", "regions": ["memo_workspace"]},
+                        ],
+                        "shell_variants": [
+                            {
+                                "id": "memo.workspace",
+                                "mode": "replace_main",
+                                "preserve_regions": ["title_bar", "right_sidebar", "settings_modal"],
+                                "disable_regions": ["history", "chat_header", "chat_messages", "composer", "activity_preview"],
+                                "add_regions": [
+                                    {"id": "memo_nav", "part_id": "memo_notes", "renderer": "memo_nav", "slot": "left", "order": 20},
+                                    {"id": "memo_workspace", "part_id": "memo_workspace", "renderer": "memo_workspace", "slot": "main", "order": 40},
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            user_data_root = rumi_root / "user_data"
+            profile_manager = ProfileWorkspaceManager(user_data_root)
+            profile_manager.initialize_profile_workspace(
+                {
+                    "profile_id": "memo-profile",
+                    "name": "Memo Profile",
+                    "metadata": {"shell_variant": "memo.workspace", "selected": {"frontend": ["memo.workspace"]}},
+                    "policy": {},
+                }
+            )
+
+            with patch.dict(os.environ, {"RUMI_USER_DATA": str(user_data_root)}):
+                catalog = FrontendRegistry(pack_root=pack_root).build_catalog(profile_id="memo-profile")
+
+        regions = {region["id"]: region for region in catalog["shell"]["layout"]["regions"]}
+        self.assertEqual(catalog["shell"]["active_variant_id"], "memo.workspace")
+        self.assertEqual(catalog["shell"]["layout"]["id"], "memo.workspace")
+        self.assertFalse(regions["history"]["enabled"])
+        self.assertFalse(regions["chat_messages"]["enabled"])
+        self.assertFalse(regions["composer"]["enabled"])
+        self.assertTrue(regions["right_sidebar"]["enabled"])
+        self.assertEqual(regions["memo_nav"]["slot"], "left")
+        self.assertEqual(regions["memo_workspace"]["slot"], "main")
+        self.assertIn("memo.workspace", {variant["id"] for variant in catalog["shell"]["variants"]})
+        self.assertEqual(catalog["diagnostics"], [])
+
+    def test_profile_scoped_frontend_shell_overlay_is_merged_last(self):
+        from core_runtime.profile_workspace import ProfileWorkspaceManager
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir) / "defaultspack"
+            user_data_root = Path(tmpdir) / "rumi_user_data"
+            profile_manager = ProfileWorkspaceManager(user_data_root)
+            profile_manager.initialize_profile_workspace(
+                {
+                    "profile_id": "compact-profile",
+                    "name": "Compact Profile",
+                    "metadata": {},
+                    "policy": {},
+                }
+            )
+            profile_shell_path = user_data_root / "profiles" / "compact-profile" / "frontend_shell.json"
+            profile_shell_path.write_text(
+                json.dumps(
+                    {
+                        "shell_layout": {
+                            "id": "profile_compact",
+                            "regions": [
+                                {"id": "title_bar", "renderer": "title_bar", "slot": "top", "order": 5, "enabled": True},
+                                {"id": "history", "renderer": "history_board", "slot": "left", "order": 10, "enabled": False},
+                                {"id": "right_sidebar", "renderer": "right_sidebar", "slot": "right", "order": 20, "enabled": True},
+                            ],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {"RUMI_USER_DATA": str(user_data_root)}):
+                catalog = FrontendRegistry(pack_root=pack_root).build_catalog(profile_id="compact-profile")
+
+        regions = {region["id"]: region for region in catalog["shell"]["layout"]["regions"]}
+        self.assertEqual(catalog["shell"]["layout"]["id"], "profile_compact")
+        self.assertFalse(regions["history"]["enabled"])
+        self.assertTrue(regions["right_sidebar"]["enabled"])
+        self.assertEqual(catalog["diagnostics"], [])
+
+    def test_ui_catalog_block_uses_active_profile_when_profile_id_is_omitted(self):
+        from blocks.ui.catalog import run
+
+        with patch("blocks.ui.catalog.active_profile_id", return_value="active-profile"):
+            with patch("blocks.ui.catalog.FrontendRegistry") as mock_registry:
+                mock_registry.return_value.build_catalog.return_value = {"shell": {"layout": {"id": "active"}}}
+                result = run({}, None)
+
+        self.assertEqual(result["status"], "ok")
+        mock_registry.return_value.build_catalog.assert_called_once_with(profile_id="active-profile")
+
+    def test_ui_catalog_block_prefers_explicit_profile_id(self):
+        from blocks.ui.catalog import run
+
+        with patch("blocks.ui.catalog.active_profile_id", return_value="active-profile"):
+            with patch("blocks.ui.catalog.FrontendRegistry") as mock_registry:
+                mock_registry.return_value.build_catalog.return_value = {"shell": {"layout": {"id": "explicit"}}}
+                result = run({"profile_id": "explicit-profile"}, None)
+
+        self.assertEqual(result["status"], "ok")
+        mock_registry.return_value.build_catalog.assert_called_once_with(profile_id="explicit-profile")
+
     def test_frontend_extensions_filter_to_selected_setup_targets(self):
         from domain.frontend.registry import FrontendRegistry
 
@@ -1581,6 +1714,44 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         self.assertEqual(asset["content_type"], "image/png")
         self.assertEqual(asset["body"], b"\x89PNG\r\n")
+        self.assertEqual(hidden["status"], "error")
+
+    def test_static_renderer_serving_can_read_selected_pack_static_renderers(self):
+        from transport.http import DefaultsHttpServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rumi_root = Path(tmpdir) / "rumi_ai_1_10"
+            ecosystem_root = rumi_root / "ecosystem"
+            defaultspack_root = ecosystem_root / "defaultspack"
+            memo_pack_root = ecosystem_root / "rumi_memo_pack"
+            (defaultspack_root / "ui").mkdir(parents=True)
+            (memo_pack_root / "static" / "renderers").mkdir(parents=True)
+            (defaultspack_root / "ecosystem.json").write_text("{}", encoding="utf-8")
+            (memo_pack_root / "ecosystem.json").write_text("{}", encoding="utf-8")
+            (memo_pack_root / "static" / "renderers" / "memo.js").write_text(
+                "export default function Memo(){ return null; }",
+                encoding="utf-8",
+            )
+            selection_path = rumi_root / "user_data" / "settings" / "setup_pack_selection.json"
+            selection_path.parent.mkdir(parents=True, exist_ok=True)
+            selection_path.write_text(
+                json.dumps({"target_pack_ids": ["rumi_memo_pack"]}),
+                encoding="utf-8",
+            )
+
+            server = DefaultsHttpServer(facade=None)
+            original_file = __import__("transport.http", fromlist=["__file__"]).__file__
+            try:
+                import transport.http as http_module
+
+                http_module.__file__ = str(defaultspack_root / "transport" / "http.py")
+                renderer = server._handle_static_file({}, {"path": "renderers/memo.js"})
+                hidden = server._handle_static_file({}, {"path": "profiles/memo.profile.yaml"})
+            finally:
+                http_module.__file__ = original_file
+
+        self.assertEqual(renderer["content_type"], "application/javascript; charset=utf-8")
+        self.assertIn("export default", renderer["body"])
         self.assertEqual(hidden["status"], "error")
 
     def test_tool_manifest_ui_metadata_survives_tool_registry_normalization(self):
