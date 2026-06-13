@@ -1157,7 +1157,11 @@ mod tests {
         let message = launch_defaultspack_desktop_impl(&config)
             .expect("Open Defaultspack should launch the Defaultspack v2 desktop app");
 
-        assert!(message.contains("127.0.0.1:8766"));
+        println!("Defaultspack launch message: {message}");
+        assert!(
+            message.contains("8766") && message.contains("/chat"),
+            "unexpected Defaultspack launch message: {message}"
+        );
         assert!(
             is_defaultspack_http_ready(DEFAULTSPACK_DEFAULT_PORT),
             "Defaultspack v2 HTTP health check did not become ready"
