@@ -202,18 +202,7 @@ class TestContainerBuilder(unittest.TestCase):
         from core_runtime.container_orchestrator import ContainerOrchestrator
         self.assertTrue(hasattr(ContainerOrchestrator, "build_universal_call_command"))
 
-    @patch("core_runtime.docker_run_builder.DockerRunBuilder")
-    def test_returns_list(self, mock_cls):
-        mi = MagicMock()
-        mi.set_pids_limit.return_value = mi
-        mi.add_volume.return_value = mi
-        mi.set_workdir.return_value = mi
-        mi.add_label.return_value = mi
-        mi.set_image.return_value = mi
-        mi.set_command.return_value = mi
-        mi.build.return_value = ["docker", "run", "--rm", "alpine:latest"]
-        mock_cls.return_value = mi
-
+    def test_returns_list(self):
         from core_runtime.container_orchestrator import ContainerOrchestrator
         orch = ContainerOrchestrator.__new__(ContainerOrchestrator)
         result = orch.build_universal_call_command(
@@ -221,6 +210,7 @@ class TestContainerBuilder(unittest.TestCase):
             filename="run.sh", runtime="command",
         )
         self.assertIsInstance(result, list)
+        self.assertEqual(result[:2], ["docker", "run"])
 
 
 if __name__ == "__main__":
