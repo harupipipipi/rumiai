@@ -64,8 +64,9 @@ except ImportError:
     FunctionEntry = None
 
 # crypto_utils: compute_file_sha256 (Phase D: D0-3 依存解消)
-# Keep the short and package-qualified import names aliased so order-dependent
-# tests do not see two copies of the same helper module.
+# Keep the short and package-qualified import names aliased so tests and legacy
+# imports patch the same helper module instead of loading two copies.
+from .crypto_utils import compute_file_sha256
 from . import crypto_utils as _loaded_crypto_utils
 
 _crypto_utils = (

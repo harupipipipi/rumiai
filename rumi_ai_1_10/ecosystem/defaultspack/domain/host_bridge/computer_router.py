@@ -203,7 +203,7 @@ def _approval_required_response(
 ) -> dict[str, Any]:
     if str(result.get("approval_request_id") or result.get("request_id") or "").strip():
         return result
-    from domain.safety import approval
+    approval = _approval_module()
 
     safe_tool_name = str(tool_name or "computer_use").strip() or "computer_use"
     safe_action = str(action or safe_tool_name)
@@ -258,6 +258,12 @@ def _request_arguments(tool_name: str, action: str, payload: dict[str, Any]) -> 
     if tool_name == "browser_computer":
         return {"action": action, "payload": dict(payload or {})}
     return {"action": action, **dict(payload or {})}
+
+
+def _approval_module():
+    from ..safety import approval
+
+    return approval
 
 
 sys.modules.setdefault("domain.host_bridge.computer_router", sys.modules[__name__])
