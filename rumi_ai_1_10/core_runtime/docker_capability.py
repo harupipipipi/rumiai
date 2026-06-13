@@ -436,7 +436,10 @@ class DockerCapabilityHandler:
             # -------------------------------------------------------- #
             # 6. DockerRunBuilder でコマンド構築
             # -------------------------------------------------------- #
-            from .docker_run_builder import DockerRunBuilder
+            try:
+                from core_runtime.docker_run_builder import DockerRunBuilder
+            except ImportError:
+                from .docker_run_builder import DockerRunBuilder
 
             builder = DockerRunBuilder(name=container_name)
 
