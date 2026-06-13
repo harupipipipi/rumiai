@@ -55,7 +55,7 @@ export function KanbanBoard({
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const activeCard = activeCardId ? cards.find((card) => card.card_id === activeCardId) ?? null : null;
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { delay: 240, tolerance: 8 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 

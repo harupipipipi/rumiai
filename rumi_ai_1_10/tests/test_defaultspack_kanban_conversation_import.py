@@ -109,6 +109,85 @@ def test_synced_conversation_updates_existing_kanban_board(tmp_path, monkeypatch
     assert "browser QA" in titles
 
 
+def test_import_conversation_ignores_provider_error_diagnostics(tmp_path, monkeypatch):
+    ChatStore = _reset_stores(monkeypatch, tmp_path)
+
+    from domain.kanban.service import KanbanService
+
+    chat_store = ChatStore()
+    conversation = chat_store.create_conversation(model="openai/gpt-5.4")
+    conversation = chat_store.update_conversation(conversation["id"], {"title": "Provider error review"})
+    chat_store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "APIエラーでこのタスクを終了しました。\n"
+                        "- モデル: openai/gpt-5.4\n"
+                        "- 原因: AI provider HTTP 401 (invalid_request_error, invalid_api_key)\n"
+                        "- 内容: Incorrect API key provided: sk-test. You can find your API key at "
+                        "https://platform.openai.com/account/api-keys.\n"
+                        "- 次に試すこと: APIキー、OAuth、モデル利用権限、またはローカル承認が拒否されています。"
+                    ),
+                }
+            ],
+            "raw_text": (
+                "APIエラーでこのタスクを終了しました。\n"
+                "- モデル: openai/gpt-5.4\n"
+                "- 原因: AI provider HTTP 401 (invalid_request_error, invalid_api_key)\n"
+                "- 内容: Incorrect API key provided: sk-test. You can find your API key at "
+                "https://platform.openai.com/account/api-keys.\n"
+                "- 次に試すこと: APIキー、OAuth、モデル利用権限、またはローカル承認が拒否されています。"
+            ),
+        },
+    )
+
+    service = KanbanService()
+    board = service.bootstrap_board({"scope_type": "conversation", "scope_id": conversation["id"]})["board"]
+    imported = service.import_conversation(board["board_id"], {"conversation_id": conversation["id"], "use_ai": False})
+
+    assert [card["title"] for card in imported["cards"]] == ["Provider error review"]
+    assert all("openai/gpt-5.4" not in card["title"] for card in imported["cards"])
+    assert "openai/gpt-5.4" not in str(imported["cards"][0]["description"])
+    assert "モデル/API" not in str(imported["cards"][0]["description"])
+
+
+def test_reimport_removes_stale_conversation_cards(tmp_path, monkeypatch):
+    ChatStore = _reset_stores(monkeypatch, tmp_path)
+
+    from domain.kanban.service import KanbanService
+
+    chat_store = ChatStore()
+    conversation = chat_store.create_conversation(model="stub/default")
+    conversation = chat_store.update_conversation(conversation["id"], {"title": "Shrink import"})
+
+    service = KanbanService()
+    board = service.bootstrap_board({"scope_type": "conversation", "scope_id": conversation["id"]})["board"]
+    first = service.import_conversation(
+        board["board_id"],
+        {
+            "conversation_id": conversation["id"],
+            "tasks": [{"title": "First task"}, {"title": "Stale task"}],
+        },
+    )
+    assert [card["title"] for card in first["cards"]] == ["First task", "Stale task"]
+
+    second = service.import_conversation(
+        board["board_id"],
+        {
+            "conversation_id": conversation["id"],
+            "tasks": [{"title": "First task"}],
+        },
+    )
+
+    assert [card["title"] for card in second["cards"]] == ["First task"]
+    snapshot = service.get_board(board["board_id"])
+    assert [card["title"] for card in snapshot["cards"]] == ["First task"]
+
+
 def test_import_conversation_ai_timeout_falls_back(tmp_path, monkeypatch):
     ChatStore = _reset_stores(monkeypatch, tmp_path)
 

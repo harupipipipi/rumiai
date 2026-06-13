@@ -18,6 +18,14 @@ _TASK_LINE_RE = re.compile(
     r"^\s*(?:[-*•]\s*(?:\[[ xX]\]\s*)?|(?:todo|task|action|next|fix|bug)\s*[:：]|(?:\d+|[a-zA-Z])[\.)]\s+)(.+)$",
     re.IGNORECASE,
 )
+_DIAGNOSTIC_TASK_PREFIX_RE = re.compile(
+    r"^\s*(?:モデル|model|原因|reason|cause|内容|detail|details|message|error|エラー|次に試すこと|next\s*(?:step|steps|to\s+try)|try\s+next)\s*[:：]",
+    re.IGNORECASE,
+)
+_DIAGNOSTIC_TASK_CONTENT_RE = re.compile(
+    r"(?:ai provider http \d+|invalid_api_key|incorrect api key|platform\.openai\.com/account/api-keys|model invocation:|provider api key use:|モデル/api)",
+    re.IGNORECASE,
+)
 
 
 class KanbanService:
@@ -156,6 +164,8 @@ class KanbanService:
                 saved_cards.append(self.store.update_card(existing_cards[index]["card_id"], payload_card, event_type="conversation.import.updated"))
             else:
                 saved_cards.append(self.store.create_card(board["board_id"], payload_card))
+        for stale_card in existing_cards[len(saved_cards) :]:
+            self.store.delete_card(stale_card["card_id"])
 
         self.store.add_event(
             board["board_id"],
@@ -466,7 +476,7 @@ def _fallback_conversation_tasks(conversation: dict[str, Any], payload: dict[str
     return [
         {
             "title": _compact_text(title if title != "New Conversation" else "Review conversation tasks", 96),
-            "description": _compact_text(excerpt, 800),
+            "description": _conversation_card_description(conversation, limit=800) or _compact_text(excerpt, 800),
             "priority": "normal",
             "labels": ["conversation"],
             "checklist": _fallback_checklist(conversation),
@@ -650,9 +660,44 @@ def _task_like_lines(conversation: dict[str, Any]) -> list[str]:
         match = _TASK_LINE_RE.match(line)
         if match:
             task_line = match.group(1).strip()
-            if task_line:
+            if task_line and not _is_diagnostic_task_line(task_line):
                 lines.append(task_line)
     return lines
+
+
+def _is_diagnostic_task_line(line: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(line or "")).strip()
+    return bool(_DIAGNOSTIC_TASK_PREFIX_RE.search(normalized) or _DIAGNOSTIC_TASK_CONTENT_RE.search(normalized))
+
+
+def _conversation_card_description(conversation: dict[str, Any], *, limit: int) -> str:
+    lines = []
+    for raw_line in _conversation_excerpt(conversation, limit=9000).splitlines():
+        line = str(raw_line or "").strip()
+        content = re.sub(r"^\s*(?:user|assistant|system|tool)\s*:\s*", "", line, flags=re.IGNORECASE).strip()
+        content = re.sub(r"^\s*[-*•]\s*", "", content).strip()
+        if not content:
+            continue
+        if _is_conversation_import_noise_line(content):
+            continue
+        lines.append(line)
+    return _compact_text("\n".join(lines), limit)
+
+
+def _is_conversation_import_noise_line(line: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(line or "")).strip()
+    lowered = normalized.casefold()
+    if _is_diagnostic_task_line(normalized):
+        return True
+    return any(
+        token in lowered
+        for token in (
+            "モデル/api の使用許可が必要",
+            "ユーザーがモデル/api の使用を許可",
+            "承認済みのリクエストとして続行",
+            "apiエラーでこのタスクを終了しました",
+        )
+    )
 
 
 def _fallback_checklist(conversation: dict[str, Any]) -> list[dict[str, Any]]:
