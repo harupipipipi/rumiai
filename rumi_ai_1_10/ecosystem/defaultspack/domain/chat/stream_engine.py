@@ -166,6 +166,24 @@ def _provider_visible_params(params: dict[str, Any] | None) -> dict[str, Any]:
     return clean
 
 
+def _authority_context_token_for_permission(context: dict[str, Any], permission_id: str) -> tuple[str, str]:
+    permission_id = str(permission_id or "").strip()
+    tokens = context.get("approval_tokens") if isinstance(context, dict) else None
+    if isinstance(tokens, dict):
+        raw = tokens.get(permission_id)
+        if isinstance(raw, dict):
+            request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+            token = str(raw.get("approval_token") or raw.get("token") or "").strip()
+            if request_id and token:
+                return request_id, token
+    context_permission = str(context.get("permission_id") or "").strip() if isinstance(context, dict) else ""
+    if context_permission and context_permission != permission_id:
+        return "", ""
+    request_id = str(context.get("request_id") or "").strip() if isinstance(context, dict) else ""
+    token = str(context.get("approval_token") or "").strip() if isinstance(context, dict) else ""
+    return request_id, token
+
+
 def _normalize_tool_call_name_and_arguments(
     tool_name: str,
     arguments: dict[str, Any],
@@ -1637,11 +1655,14 @@ class ChatRunEngine:
         context = prepared.request_context.get("authority") if isinstance(prepared.request_context, dict) else {}
         context = dict(context) if isinstance(context, dict) else {}
         service = get_authority_service()
-        checks = (
+        checks = [
             ("model.invoke", "model", "Model invocation: {}/{}".format(provider_id, model_name)),
             ("api_key.use", "api_key", "Provider API key use: {}/legacy".format(provider_id)),
-        )
+        ]
+        if _authority_context_token_for_permission(context, "model.invoke")[1] and not _authority_context_token_for_permission(context, "api_key.use")[1]:
+            checks = [checks[1], checks[0]]
         for permission_id, resource_kind, reason in checks:
+            request_id, approval_token = _authority_context_token_for_permission(context, permission_id)
             decision = service.check(
                 principal_id=str(context.get("principal_id") or "defaultspack"),
                 permission_id=permission_id,
@@ -1658,8 +1679,8 @@ class ChatRunEngine:
                 profile_id=context.get("profile_id"),
                 node_id=context.get("node_id"),
                 graph_id=context.get("graph_id"),
-                request_id=context.get("request_id"),
-                approval_token=context.get("approval_token"),
+                request_id=request_id or context.get("request_id"),
+                approval_token=approval_token,
             )
             if not decision.allowed:
                 raise AuthorityApprovalRequired(decision)

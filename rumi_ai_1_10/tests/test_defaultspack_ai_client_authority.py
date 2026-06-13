@@ -74,6 +74,27 @@ class _DenyApiKeyUseAuthority:
         )
 
 
+class _TokenAwareAllowAuthority:
+    def __init__(self):
+        self.calls = []
+
+    def check(self, **kwargs):
+        from core_runtime.authority.models import AuthorityDecision
+
+        self.calls.append({
+            "permission_id": kwargs["permission_id"],
+            "request_id": kwargs.get("request_id"),
+            "approval_token": kwargs.get("approval_token"),
+        })
+        return AuthorityDecision(
+            allowed=True,
+            permission_id=kwargs["permission_id"],
+            principal_id=kwargs["principal_id"],
+            reason="allowed",
+            resource=kwargs["resource"],
+        )
+
+
 def _client(monkeypatch):
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers.stub_provider import StubProvider
@@ -177,6 +198,122 @@ def test_ai_client_requires_api_key_use_before_reading_key(monkeypatch):
     assert authority.permissions == ["model.invoke", "api_key.use"]
     assert read_calls == []
     assert client._providers["openai"].calls == []
+
+
+def test_ai_client_does_not_consume_model_token_before_api_key_approval(monkeypatch):
+    client = _client(monkeypatch)
+    authority = _DenyApiKeyUseAuthority()
+    read_calls = []
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+    monkeypatch.setattr("domain.ai_client.client.read_provider_api_key", lambda provider_id, api_id: read_calls.append((provider_id, api_id)) or "key")
+
+    from domain.ai_client.client import AuthorityApprovalRequired
+
+    try:
+        client.complete(
+            "gpt-5.4",
+            [{"role": "user", "content": "hi"}],
+            params={
+                "_authority_context": {
+                    "principal_id": "profile:work",
+                    "approval_tokens": {
+                        "model.invoke": {
+                            "request_id": "model_req",
+                            "approval_token": "model-token",
+                        },
+                    },
+                },
+            },
+        )
+    except AuthorityApprovalRequired as exc:
+        assert exc.decision.permission_id == "api_key.use"
+    else:
+        raise AssertionError("AuthorityApprovalRequired was not raised")
+
+    assert authority.permissions == ["api_key.use"]
+    assert read_calls == []
+    assert client._providers["openai"].calls == []
+
+
+def test_ai_client_uses_permission_specific_authority_tokens(monkeypatch):
+    client = _client(monkeypatch)
+    authority = _TokenAwareAllowAuthority()
+    read_calls = []
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+    monkeypatch.setattr("domain.ai_client.client.read_provider_api_key", lambda provider_id, api_id: read_calls.append((provider_id, api_id)) or "key")
+
+    response = client.complete(
+        "gpt-5.4",
+        [{"role": "user", "content": "hi"}],
+        params={
+            "_authority_context": {
+                "principal_id": "profile:work",
+                "approval_tokens": {
+                    "model.invoke": {
+                        "request_id": "model_req",
+                        "approval_token": "model-token",
+                    },
+                    "api_key.use": {
+                        "request_id": "api_req",
+                        "approval_token": "api-token",
+                    },
+                },
+            },
+        },
+    )
+
+    assert response["finish_reason"] == "stop"
+    assert authority.calls == [
+        {"permission_id": "model.invoke", "request_id": "model_req", "approval_token": "model-token"},
+        {"permission_id": "api_key.use", "request_id": "api_req", "approval_token": "api-token"},
+    ]
+    assert read_calls == [("openai", "work")]
+    assert client._providers["openai"].calls
+
+
+def test_authority_followup_metadata_carries_multiple_approval_tokens():
+    from domain.chat.run_request import _apply_authority_context
+
+    request_context = {}
+    _apply_authority_context(
+        request_context,
+        {
+            "authority_followup": {
+                "approval_token": "api-token",
+                "request_id": "api_req",
+                "permission_id": "api_key.use",
+                "approvals": [
+                    {
+                        "approval_token": "model-token",
+                        "request_id": "model_req",
+                        "permission_id": "model.invoke",
+                    },
+                    {
+                        "approval_token": "api-token",
+                        "request_id": "api_req",
+                        "permission_id": "api_key.use",
+                    },
+                ],
+            },
+        },
+        conversation_id="conv-1",
+        request_id="run-1",
+        active_profile=None,
+    )
+
+    authority = request_context["authority"]
+    assert authority["approval_tokens"] == {
+        "model.invoke": {
+            "approval_token": "model-token",
+            "request_id": "model_req",
+            "permission_id": "model.invoke",
+        },
+        "api_key.use": {
+            "approval_token": "api-token",
+            "request_id": "api_req",
+            "permission_id": "api_key.use",
+        },
+    }
 
 
 def test_compiled_provider_requires_api_key_use_before_request_json(monkeypatch):

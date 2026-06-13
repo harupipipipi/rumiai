@@ -947,18 +947,40 @@ def _apply_authority_context(
         request_context.setdefault("node_id", node_id)
 
     followup = {}
+    approval_tokens: dict[str, dict[str, str]] = {}
+
+    def add_authority_followup(raw: Any) -> None:
+        nonlocal followup
+        if not isinstance(raw, dict):
+            return
+        permission_id = str(raw.get("permission_id") or "").strip()
+        if permission_id not in {"model.invoke", "api_key.use"}:
+            return
+        token = str(raw.get("approval_token") or raw.get("token") or "").strip()
+        authority_request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+        if token and authority_request_id:
+            approval_tokens[permission_id] = {
+                "approval_token": token,
+                "request_id": authority_request_id,
+                "permission_id": permission_id,
+            }
+        if not followup:
+            followup = {
+                "approval_token": token,
+                "request_id": authority_request_id,
+                "permission_id": permission_id,
+            }
+
     if isinstance(metadata, dict):
         raw_followup = metadata.get("authority_followup")
         if not isinstance(raw_followup, dict):
             raw_followup = metadata.get("approval_followup")
         if isinstance(raw_followup, dict):
-            permission_id = str(raw_followup.get("permission_id") or "").strip()
-            if permission_id in {"model.invoke", "api_key.use"} or metadata.get("authority_followup") is raw_followup:
-                followup = {
-                    "approval_token": str(raw_followup.get("approval_token") or raw_followup.get("token") or "").strip(),
-                    "request_id": str(raw_followup.get("request_id") or raw_followup.get("approval_request_id") or "").strip(),
-                    "permission_id": permission_id or "model.invoke",
-                }
+            approvals = raw_followup.get("approvals")
+            if isinstance(approvals, list):
+                for item in approvals:
+                    add_authority_followup(item)
+            add_authority_followup(raw_followup)
 
     authority_context = {
         "principal_id": authority_principal_id,
@@ -973,6 +995,8 @@ def _apply_authority_context(
         authority_context["approval_token"] = followup["approval_token"]
     if followup.get("permission_id"):
         authority_context["permission_id"] = followup["permission_id"]
+    if approval_tokens:
+        authority_context["approval_tokens"] = approval_tokens
     request_context["authority_principal_id"] = authority_principal_id
     request_context["authority"] = authority_context
 

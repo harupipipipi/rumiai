@@ -455,6 +455,29 @@ class AIClient:
         return dict(value) if isinstance(value, dict) else {}
 
     @staticmethod
+    def _authority_token_for_permission(context, permission_id):
+        permission_id = str(permission_id or "").strip()
+        tokens = context.get("approval_tokens") if isinstance(context, dict) else None
+        if isinstance(tokens, dict):
+            raw = tokens.get(permission_id)
+            if isinstance(raw, dict):
+                request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+                token = str(raw.get("approval_token") or raw.get("token") or "").strip()
+                if request_id and token:
+                    return request_id, token
+        context_permission = str(context.get("permission_id") or "").strip() if isinstance(context, dict) else ""
+        if context_permission and context_permission != permission_id:
+            return "", ""
+        request_id = str(context.get("request_id") or "").strip() if isinstance(context, dict) else ""
+        token = str(context.get("approval_token") or "").strip() if isinstance(context, dict) else ""
+        return request_id, token
+
+    def _has_authority_token_for_permission(self, params, permission_id):
+        context = self._authority_context_from_params(params)
+        _, token = self._authority_token_for_permission(context, permission_id)
+        return bool(token)
+
+    @staticmethod
     def _strip_authority_params(params):
         clean = dict(params or {})
         clean.pop("_authority_context", None)
@@ -523,8 +546,8 @@ class AIClient:
             profile_id=context.get("profile_id"),
             node_id=context.get("node_id"),
             graph_id=context.get("graph_id"),
-            request_id=context.get("request_id"),
-            approval_token=context.get("approval_token"),
+            request_id=self._authority_token_for_permission(context, permission_id)[0] or context.get("request_id"),
+            approval_token=self._authority_token_for_permission(context, permission_id)[1],
         )
         if not decision.allowed:
             raise AuthorityApprovalRequired(decision)
@@ -573,6 +596,39 @@ class AIClient:
             reason="Provider API key use: {}/{}".format(provider_id, api_id or "legacy"),
         )
 
+    def _check_authority_for_model_and_api_key_use(
+        self,
+        *,
+        provider_id,
+        api_id,
+        model_id,
+        model_ref,
+        params,
+        stream=False,
+    ):
+        checks = (
+            lambda: self._check_authority_for_model_api(
+                provider_id=provider_id,
+                api_id=api_id,
+                model_id=model_id,
+                model_ref=model_ref,
+                params=params,
+                stream=stream,
+            ),
+            lambda: self._check_authority_for_api_key_use(
+                provider_id=provider_id,
+                api_id=api_id,
+                model_id=model_id,
+                model_ref=model_ref,
+                params=params,
+                stream=stream,
+            ),
+        )
+        if self._has_authority_token_for_permission(params, "model.invoke") and not self._has_authority_token_for_permission(params, "api_key.use"):
+            checks = (checks[1], checks[0])
+        for check in checks:
+            check()
+
     def _api_route_attempts(self, model, route_refs, params=None, stream=False):
         attempts = []
         for route_ref in route_refs:
@@ -592,15 +648,7 @@ class AIClient:
                 api_key = read_provider_api_key(provider_id, api_id)
                 if not api_key:
                     continue
-            self._check_authority_for_model_api(
-                provider_id=provider_id,
-                api_id=api_id,
-                model_id=model_name,
-                model_ref=model,
-                params=params,
-                stream=stream,
-            )
-            self._check_authority_for_api_key_use(
+            self._check_authority_for_model_and_api_key_use(
                 provider_id=provider_id,
                 api_id=api_id,
                 model_id=model_name,
@@ -651,15 +699,7 @@ class AIClient:
         provider, model_name = self.resolve_provider(route_model)
         if provider.__class__.__name__ == "StubProvider":
             return None, False
-        self._check_authority_for_model_api(
-            provider_id=provider_id,
-            api_id=api_id,
-            model_id=model_id,
-            model_ref=model,
-            params=params,
-            stream=(method_name == "stream"),
-        )
-        self._check_authority_for_api_key_use(
+        self._check_authority_for_model_and_api_key_use(
             provider_id=provider_id,
             api_id=api_id,
             model_id=model_id,
@@ -1241,15 +1281,7 @@ class AIClient:
             raise RuntimeError(self._provider_unconfigured_message(model))
         provider_id = self._provider_id_for_provider(provider, model)
         if self._provider_api_key_may_exist(provider_id, "legacy"):
-            self._check_authority_for_model_api(
-                provider_id=provider_id,
-                api_id="legacy",
-                model_id=model_name,
-                model_ref=model,
-                params=params,
-                stream=False,
-            )
-            self._check_authority_for_api_key_use(
+            self._check_authority_for_model_and_api_key_use(
                 provider_id=provider_id,
                 api_id="legacy",
                 model_id=model_name,
@@ -1283,15 +1315,7 @@ class AIClient:
             raise RuntimeError(self._provider_unconfigured_message(model))
         provider_id = self._provider_id_for_provider(provider, model)
         if self._provider_api_key_may_exist(provider_id, "legacy"):
-            self._check_authority_for_model_api(
-                provider_id=provider_id,
-                api_id="legacy",
-                model_id=model_name,
-                model_ref=model,
-                params=params,
-                stream=True,
-            )
-            self._check_authority_for_api_key_use(
+            self._check_authority_for_model_and_api_key_use(
                 provider_id=provider_id,
                 api_id="legacy",
                 model_id=model_name,

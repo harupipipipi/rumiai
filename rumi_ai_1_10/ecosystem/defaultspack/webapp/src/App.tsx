@@ -1551,6 +1551,12 @@ function runtimeApprovalRuntimeContent(approval: RuntimeApproval, token?: string
 }
 
 type AuthorityApprovalScope = "once" | "conversation" | "profile" | "node";
+type AuthorityApprovalTokenRecord = {
+  approval_token: string;
+  request_id: string;
+  permission_id: string;
+  resource?: Record<string, unknown>;
+};
 
 function authorityApprovalConfig(approval: AuthorityApproval): Record<string, unknown> {
   const resource = approval.resource ?? {};
@@ -1563,6 +1569,63 @@ function authorityApprovalConfig(approval: AuthorityApproval): Record<string, un
   if (modelId) config.model_ids = [modelId];
   if (resource.stream === true) config.allow_stream = true;
   return config;
+}
+
+function authorityApprovalResourceKey(resource: Record<string, unknown> | undefined): string {
+  const value = resource ?? {};
+  return [
+    typeof value.provider_id === "string" ? value.provider_id.trim() : "",
+    typeof value.api_id === "string" ? value.api_id.trim() : "",
+    typeof value.model_id === "string" ? value.model_id.trim() : "",
+  ].join("\u0000");
+}
+
+function authorityApprovalTokenFromFollowup(value: unknown): AuthorityApprovalTokenRecord | null {
+  if (!isRecord(value)) return null;
+  const approvalToken = typeof value.approval_token === "string"
+    ? value.approval_token.trim()
+    : typeof value.token === "string"
+      ? value.token.trim()
+      : "";
+  const requestId = typeof value.request_id === "string"
+    ? value.request_id.trim()
+    : typeof value.approval_request_id === "string"
+      ? value.approval_request_id.trim()
+      : "";
+  const permissionId = typeof value.permission_id === "string" ? value.permission_id.trim() : "";
+  if (!approvalToken || !requestId || !["model.invoke", "api_key.use"].includes(permissionId)) return null;
+  return {
+    approval_token: approvalToken,
+    request_id: requestId,
+    permission_id: permissionId,
+    ...(isRecord(value.resource) ? { resource: value.resource } : {}),
+  };
+}
+
+function authorityApprovalTokensForFollowup(
+  messages: ChatUiMessage[],
+  approval: AuthorityApproval,
+  current: AuthorityApprovalTokenRecord | null,
+): AuthorityApprovalTokenRecord[] {
+  const resourceKey = authorityApprovalResourceKey(approval.resource);
+  const byPermission = new Map<string, AuthorityApprovalTokenRecord>();
+  const addToken = (token: AuthorityApprovalTokenRecord | null) => {
+    if (!token) return;
+    const tokenResourceKey = authorityApprovalResourceKey(token.resource);
+    if (token.resource && tokenResourceKey !== resourceKey) return;
+    byPermission.set(token.permission_id, token);
+  };
+  for (const message of messages) {
+    const followup = message.metadata?.authorityFollowup;
+    if (!isRecord(followup)) continue;
+    const approvals = Array.isArray(followup.approvals) ? followup.approvals : [];
+    for (const item of approvals) {
+      addToken(authorityApprovalTokenFromFollowup(item));
+    }
+    addToken(authorityApprovalTokenFromFollowup(followup));
+  }
+  addToken(current);
+  return Array.from(byPermission.values());
 }
 
 function authorityApprovalTitle(approval: AuthorityApproval): string {
@@ -4204,6 +4267,13 @@ export default function App() {
       if (!decision.approved) {
         throw new Error("authority approval failed");
       }
+      const currentApprovalToken = decision.token ? {
+        approval_token: decision.token,
+        request_id: authorityApproval.requestId,
+        permission_id: authorityApproval.permissionId,
+        resource: authorityApproval.resource,
+      } : null;
+      const approvalTokens = authorityApprovalTokensForFollowup(messages, authorityApproval, currentApprovalToken);
       setSettledRuntimeApprovalIds((ids) => (
         ids.includes(authorityApproval.requestId) ? ids : [...ids, authorityApproval.requestId].slice(-50)
       ));
@@ -4214,6 +4284,8 @@ export default function App() {
             approval_token: decision.token,
             request_id: authorityApproval.requestId,
             permission_id: authorityApproval.permissionId,
+            resource: authorityApproval.resource,
+            approvals: approvalTokens,
             hidden: true,
           },
           chat_display: {
