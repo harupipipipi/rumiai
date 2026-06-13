@@ -1615,9 +1615,13 @@ function authorityApprovalTokensForFollowup(
     if (token.resource && tokenResourceKey !== resourceKey) return;
     byPermission.set(token.permission_id, token);
   };
-  for (const message of messages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
     const followup = message.metadata?.authorityFollowup;
-    if (!isRecord(followup)) continue;
+    if (!isRecord(followup)) {
+      if (message.role === "user") break;
+      continue;
+    }
     const approvals = Array.isArray(followup.approvals) ? followup.approvals : [];
     for (const item of approvals) {
       addToken(authorityApprovalTokenFromFollowup(item));
