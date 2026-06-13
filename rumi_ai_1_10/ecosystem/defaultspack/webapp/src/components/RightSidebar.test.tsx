@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { RightSidebar } from "./RightSidebar";
+import { getRailFloatingMenuPosition, RightSidebar } from "./RightSidebar";
 
 const noop = () => undefined;
 
@@ -130,4 +130,22 @@ test("right sidebar exposes workspace tabs as a vertical switcher widget", () =>
   assert.match(html, /title="Workspace tabs"/);
   assert.match(html, /aria-label="Workspace tabs"/);
   assert.match(html, />2</);
+});
+
+test("right sidebar floating menus clamp to the viewport", () => {
+  assert.deepEqual(
+    getRailFloatingMenuPosition(
+      { left: 1238, top: 627 },
+      { width: 224, height: 360, viewportWidth: 1280, viewportHeight: 720 },
+    ),
+    { top: 352, right: 50 },
+  );
+
+  assert.deepEqual(
+    getRailFloatingMenuPosition(
+      { left: 8, top: -40 },
+      { width: 224, height: 360, viewportWidth: 320, viewportHeight: 480 },
+    ),
+    { top: 8, right: 88 },
+  );
 });

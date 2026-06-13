@@ -74,6 +74,7 @@ import { compareToolUiItems, sortedToolGroups, sortedToolUiItems, supportedCompo
 import { PlacementHtmlRenderer } from "./PlacementHtmlRenderer";
 import { ToolFilterLogWidget, ToolManagerWidget } from "./ToolStatusWidgets";
 import { WorkspaceTabRailPanel, type WorkspaceTab, type WorkspaceTabKind } from "./WorkspaceTabs";
+import { LayerPortal } from "../ui/layers/LayerPortal";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -83,6 +84,31 @@ const RAIL_BUTTON_CLASS = "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-
 const PANEL_WIDTH_STORAGE_KEY = "rumi-right-sidebar-panel-width";
 const PLACEMENT_PANEL_PREFIX = "__placement__:";
 const DEFAULT_TOOL_GROUP_RAIL_LIMIT = 8;
+const RAIL_MENU_GAP = 8;
+
+export function getRailFloatingMenuPosition(
+  rect: Pick<DOMRect, "left" | "top">,
+  options: {
+    width?: number;
+    height?: number;
+    gap?: number;
+    viewportWidth?: number;
+    viewportHeight?: number;
+  } = {},
+): { top: number; right: number } {
+  const width = options.width ?? 224;
+  const height = options.height ?? 320;
+  const gap = options.gap ?? RAIL_MENU_GAP;
+  const viewportWidth = options.viewportWidth ?? (typeof window === "undefined" ? width + gap * 2 : window.innerWidth);
+  const viewportHeight = options.viewportHeight ?? (typeof window === "undefined" ? height + gap * 2 : window.innerHeight);
+  const maxTop = Math.max(gap, viewportHeight - height - gap);
+  const maxRight = Math.max(gap, viewportWidth - width - gap);
+
+  return {
+    top: Math.max(gap, Math.min(rect.top, maxTop)),
+    right: Math.max(gap, Math.min(viewportWidth - rect.left + gap, maxRight)),
+  };
+}
 
 function clampPanelWidth(value: unknown): number {
   const numeric = typeof value === "number" ? value : Number(value);
@@ -595,12 +621,7 @@ function CategorySwitcher({
   const hasActiveFilter = active !== "all";
   const buttonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const rect = buttonRef.current?.getBoundingClientRect();
-  const menuPosition = rect
-    ? {
-        top: `${Math.max(8, rect.top)}px`,
-        right: `${Math.max(8, window.innerWidth - rect.left + 8)}px`,
-      }
-    : undefined;
+  const menuPosition = rect ? getRailFloatingMenuPosition(rect, { width: 150, height: 220 }) : null;
 
   return (
     <div className="relative">
@@ -627,11 +648,11 @@ function CategorySwitcher({
       </button>
 
       {isOpen && (
-        <>
+        <LayerPortal layer="modal">
           <div className="fixed inset-0 rumi-layer-global-overlay" onClick={() => setIsOpen(false)} />
           <div
             className="fixed rumi-layer-modal bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden min-w-[150px]"
-            style={menuPosition}
+            style={menuPosition ? { top: `${menuPosition.top}px`, right: `${menuPosition.right}px` } : undefined}
           >
             <div className="px-2 py-1.5 border-b border-zinc-800/60">
               <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider">表示フィルター</p>
@@ -659,7 +680,7 @@ function CategorySwitcher({
               })}
             </div>
           </div>
-        </>
+        </LayerPortal>
       )}
     </div>
   );
@@ -684,12 +705,7 @@ function SidebarSearchControl({
   const hasQuery = query.trim().length > 0;
   const buttonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const rect = buttonRef.current?.getBoundingClientRect();
-  const menuPosition = rect
-    ? {
-        top: `${Math.max(8, rect.top)}px`,
-        right: `${Math.max(8, window.innerWidth - rect.left + 8)}px`,
-      }
-    : undefined;
+  const menuPosition = rect ? getRailFloatingMenuPosition(rect, { width: 256, height: 100 }) : null;
 
   useEffect(() => {
     if (isOpen) {
@@ -721,11 +737,11 @@ function SidebarSearchControl({
       </button>
 
       {isOpen && (
-        <>
+        <LayerPortal layer="modal">
           <div className="fixed inset-0 rumi-layer-global-overlay" onClick={() => setIsOpen(false)} />
           <div
             className="fixed rumi-layer-modal w-64 rounded-xl border border-zinc-700/70 bg-zinc-950 p-2 shadow-2xl"
-            style={menuPosition}
+            style={menuPosition ? { top: `${menuPosition.top}px`, right: `${menuPosition.right}px` } : undefined}
           >
             <label className="relative block">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
@@ -763,7 +779,7 @@ function SidebarSearchControl({
               <span>{resultCount} / {totalCount}</span>
             </div>
           </div>
-        </>
+        </LayerPortal>
       )}
     </div>
   );
@@ -830,6 +846,7 @@ export function RightSidebar({
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [panelWidth, setPanelWidth] = useState(readStoredPanelWidth);
   const [placementMenuOpen, setPlacementMenuOpen] = useState(false);
+  const [placementMenuPosition, setPlacementMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const sidebarSettings = settingsValues.sidebar ?? {};
   const toolsSettings = settingsValues.tools ?? {};
   const pinnedItemIds = useMemo(
@@ -862,6 +879,9 @@ export function RightSidebar({
   const [contextMenu, setContextMenu] = useState<{ itemId: string; x: number; y: number } | null>(null);
   const toolManagerSearchRef = useRef<HTMLDivElement | null>(null);
   const toolGroupMenuRef = useRef<HTMLDivElement | null>(null);
+  const toolGroupFloatingMenuRef = useRef<HTMLDivElement | null>(null);
+  const placementMenuRef = useRef<HTMLDivElement | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const buttonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const pinnedItemIdSet = useMemo(() => new Set(pinnedItemIds), [pinnedItemIds]);
@@ -967,6 +987,7 @@ export function RightSidebar({
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (toolGroupMenuRef.current?.contains(target)) return;
+      if (toolGroupFloatingMenuRef.current?.contains(target)) return;
       setOpenToolGroupMenu(null);
       setContextMenu(null);
     };
@@ -988,7 +1009,11 @@ export function RightSidebar({
 
   useEffect(() => {
     if (!placementMenuOpen) return;
-    const handlePointerDown = () => setPlacementMenuOpen(false);
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && placementMenuRef.current?.contains(target)) return;
+      setPlacementMenuOpen(false);
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setPlacementMenuOpen(false);
     };
@@ -1003,9 +1028,13 @@ export function RightSidebar({
   useEffect(() => {
     if (!contextMenu) return;
 
-    const close = () => setContextMenu(null);
+    const close = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && contextMenuRef.current?.contains(target)) return;
+      setContextMenu(null);
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+      if (event.key === "Escape") setContextMenu(null);
     };
     document.addEventListener("pointerdown", close);
     document.addEventListener("keydown", handleKeyDown);
@@ -1370,17 +1399,14 @@ export function RightSidebar({
     event.stopPropagation();
     setContextMenu({
       itemId: item.id,
-      x: Math.min(event.clientX, window.innerWidth - 190),
-      y: Math.min(event.clientY, window.innerHeight - 150),
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 190)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 230)),
     });
   };
 
   const openToolGroup = (groupId: string, button: HTMLButtonElement) => {
     const rect = button.getBoundingClientRect();
-    setToolGroupMenuPosition({
-      top: Math.max(8, Math.min(rect.top, window.innerHeight - 300)),
-      right: Math.max(8, window.innerWidth - rect.left + 8),
-    });
+    setToolGroupMenuPosition(getRailFloatingMenuPosition(rect, { width: 224, height: 360 }));
     setOpenToolGroupMenu(groupId);
   };
 
@@ -2023,9 +2049,14 @@ export function RightSidebar({
             <button
               type="button"
               tabIndex={buttonTabIndex}
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
-                setPlacementMenuOpen((current) => !current);
+                const nextOpen = !placementMenuOpen;
+                if (nextOpen) {
+                  setPlacementMenuPosition(getRailFloatingMenuPosition(event.currentTarget.getBoundingClientRect(), { width: 224, height: 320 }));
+                }
+                setPlacementMenuOpen(nextOpen);
               }}
               className={cn(
                 RAIL_BUTTON_CLASS,
@@ -2038,39 +2069,43 @@ export function RightSidebar({
               <Plus size={16} className="h-4 w-4 shrink-0" />
             </button>
             {placementMenuOpen && (
-              <div
-                className="absolute left-full top-0 rumi-layer-modal ml-2 w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl"
-                onPointerDown={(event) => event.stopPropagation()}
-              >
-                <div className="border-b border-zinc-800 px-3 py-2">
-                  <p className="text-[11px] font-semibold text-zinc-200">Pin to sidebar</p>
-                  <p className="text-[10px] text-zinc-500">vertical / configurable</p>
+              <LayerPortal layer="modal">
+                <div
+                  ref={placementMenuRef}
+                  className="fixed rumi-layer-modal w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl"
+                  style={placementMenuPosition ? { top: `${placementMenuPosition.top}px`, right: `${placementMenuPosition.right}px` } : undefined}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <div className="border-b border-zinc-800 px-3 py-2">
+                    <p className="text-[11px] font-semibold text-zinc-200">Pin to sidebar</p>
+                    <p className="text-[10px] text-zinc-500">vertical / configurable</p>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto py-1">
+                    {rightSidebarPlacementCandidates.map((manifest) => (
+                      <button
+                        key={manifest.id}
+                        type="button"
+                        onClick={() => {
+                          updatePinnedPlacements((current) => togglePinnedPlacement(current, { id: manifest.id, surface: "right_sidebar" }));
+                          setPlacementMenuOpen(false);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"
+                      >
+                        <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-400">
+                          {placementIcon(manifest.id)}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-[12px]">{manifest.label}</span>
+                          {manifest.description && <span className="block truncate text-[10px] text-zinc-500">{manifest.description}</span>}
+                        </span>
+                      </button>
+                    ))}
+                    {rightSidebarPlacementCandidates.length === 0 && (
+                      <p className="px-3 py-3 text-[11px] text-zinc-500">追加できる candidate はありません。</p>
+                    )}
+                  </div>
                 </div>
-                <div className="max-h-64 overflow-y-auto py-1">
-                  {rightSidebarPlacementCandidates.map((manifest) => (
-                    <button
-                      key={manifest.id}
-                      type="button"
-                      onClick={() => {
-                        updatePinnedPlacements((current) => togglePinnedPlacement(current, { id: manifest.id, surface: "right_sidebar" }));
-                        setPlacementMenuOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"
-                    >
-                      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-400">
-                        {placementIcon(manifest.id)}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-[12px]">{manifest.label}</span>
-                        {manifest.description && <span className="block truncate text-[10px] text-zinc-500">{manifest.description}</span>}
-                      </span>
-                    </button>
-                  ))}
-                  {rightSidebarPlacementCandidates.length === 0 && (
-                    <p className="px-3 py-3 text-[11px] text-zinc-500">追加できる candidate はありません。</p>
-                  )}
-                </div>
-              </div>
+              </LayerPortal>
             )}
           </div>
           {companyPanel && (
@@ -2118,17 +2153,14 @@ export function RightSidebar({
                               type="button"
                               tabIndex={buttonTabIndex}
                               onClick={(event) => {
-                                if (group.items.length === 1) {
-                                  setActivePanel((current) => (current === group.items[0].id ? null : group.items[0].id));
-                                  setOpenToolGroupMenu(null);
-                                  return;
-                                }
                                 if (openToolGroupMenu === group.id) {
                                   setOpenToolGroupMenu(null);
                                   return;
                                 }
                                 openToolGroup(group.id, event.currentTarget);
                               }}
+                              aria-label={`${group.path?.length ? group.path.join(" / ") : group.label || TOOL_GROUP_LABELS[group.id] || group.id} tool folder`}
+                              aria-expanded={isGroupOpen}
                               className={cn(
                                 RAIL_BUTTON_CLASS,
                                 "group/group",
@@ -2150,17 +2182,19 @@ export function RightSidebar({
                     )}
                   </button>
                   {openToolGroupMenu === group.id && (
-                    <div
-                      className="fixed rumi-layer-modal w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
-                      style={toolGroupMenuPosition ? { top: `${toolGroupMenuPosition.top}px`, right: `${toolGroupMenuPosition.right}px` } : undefined}
-                    >
-                      <div className="border-b border-zinc-800 px-3 py-2">
-                        <p className="truncate text-[11px] font-semibold text-zinc-200">{group.label || TOOL_GROUP_LABELS[group.id] || group.id}</p>
-                        {group.path?.length && group.path.length > 1 && (
-                          <p className="truncate text-[10px] text-zinc-500">{group.path.join(" / ")}</p>
-                        )}
-                        <p className="text-[10px] text-zinc-500">{group.count} tools</p>
-                      </div>
+                    <LayerPortal layer="modal">
+                      <div
+                        ref={toolGroupFloatingMenuRef}
+                        className="fixed rumi-layer-modal w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
+                        style={toolGroupMenuPosition ? { top: `${toolGroupMenuPosition.top}px`, right: `${toolGroupMenuPosition.right}px` } : undefined}
+                      >
+                        <div className="border-b border-zinc-800 px-3 py-2">
+                          <p className="truncate text-[11px] font-semibold text-zinc-200">{group.label || TOOL_GROUP_LABELS[group.id] || group.id}</p>
+                          {group.path?.length && group.path.length > 1 && (
+                            <p className="truncate text-[10px] text-zinc-500">{group.path.join(" / ")}</p>
+                          )}
+                          <p className="text-[10px] text-zinc-500">{group.count} tools</p>
+                        </div>
                               <div className="grid grid-cols-2 gap-1 border-b border-zinc-800 p-2">
                                 <button
                                   type="button"
@@ -2217,6 +2251,7 @@ export function RightSidebar({
                         ))}
                       </div>
                     </div>
+                    </LayerPortal>
                   )}
                 </div>
               );
@@ -2263,15 +2298,17 @@ export function RightSidebar({
             const starred = starredItemIdSet.has(item.id);
             const enabled = selectedToolIdSet.has(item.id);
             return (
-              <div
-                className="fixed rumi-layer-command-palette w-44 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
-                style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
-                onPointerDown={(event) => event.stopPropagation()}
-              >
-                <div className="border-b border-zinc-800 px-3 py-2">
-                  <p className="truncate text-[11px] font-semibold text-zinc-200">{item.label}</p>
-                  <p className="truncate text-[10px] text-zinc-500">{item.category}</p>
-                </div>
+              <LayerPortal layer="commandPalette">
+                <div
+                  ref={contextMenuRef}
+                  className="fixed rumi-layer-command-palette w-44 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
+                  style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <div className="border-b border-zinc-800 px-3 py-2">
+                    <p className="truncate text-[11px] font-semibold text-zinc-200">{item.label}</p>
+                    <p className="truncate text-[10px] text-zinc-500">{item.category}</p>
+                  </div>
                         <button
                           type="button"
                           tabIndex={buttonTabIndex}
@@ -2323,6 +2360,7 @@ export function RightSidebar({
                   <span>詳細を開く</span>
                 </button>
               </div>
+              </LayerPortal>
             );
           })()}
 
