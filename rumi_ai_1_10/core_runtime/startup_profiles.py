@@ -462,6 +462,7 @@ class StartupProfileManager:
         self._write_active_profile_marker(profile_id)
         self._apply_profile_to_active_ecosystem(profile, catalog, launched=True)
         self._record_capability_graph_result(capability_graph)
+        self._maybe_grant_local_dev_surface_launch(profile, capability_graph)
         handoff = self._request_launch_handoff(profile)
         if not handoff.get("restart_requested"):
             return {
@@ -1425,6 +1426,51 @@ class StartupProfileManager:
                 "diagnostics": list(capability_graph.get("diagnostics") or []),
             },
         )
+
+    def _maybe_grant_local_dev_surface_launch(
+        self,
+        profile: Dict[str, Any],
+        capability_graph: Dict[str, Any],
+    ) -> None:
+        """Prepare the local dev desktop grant before restart handoff."""
+        if os.environ.get("RUMI_AUTO_APPROVE_LOCAL", "").strip().lower() != "true":
+            return
+
+        try:
+            from .capability_grant_manager import get_capability_grant_manager
+            from .runtime_port import resolve_runtime_port
+            from .surface_launch_target import normalize_surface_launch_target
+
+            raw_target = capability_graph.get("surface_launch_target")
+            launch_target = normalize_surface_launch_target(
+                raw_target if isinstance(raw_target, dict) else None,
+                fallback_pack_id=str(profile.get("base_pack") or ""),
+                surfaces=profile.get("surfaces") if isinstance(profile.get("surfaces"), dict) else None,
+            )
+            if not launch_target:
+                return
+
+            principal_id = str(
+                launch_target.get("principal_id") or launch_target.get("pack_id") or ""
+            ).strip()
+            pack_id = str(launch_target.get("pack_id") or "").strip()
+            if principal_id != "defaultspack" or pack_id != "defaultspack":
+                return
+
+            get_capability_grant_manager().grant_permission(
+                principal_id,
+                "desktop_app.execute",
+                {
+                    "allowed_packs": [pack_id],
+                    "max_token_lifetime": 3600,
+                    "port": resolve_runtime_port(),
+                },
+            )
+        except Exception:
+            logger.warning(
+                "failed to grant local development desktop_app.execute for startup profile launch",
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Apply profile to active ecosystem

@@ -57,6 +57,15 @@ class _FakeApprovalManager:
         return (reason is None, reason)
 
 
+class _FakeCapabilityGrantManager:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict]] = []
+
+    def grant_permission(self, principal_id: str, permission_id: str, config: dict):
+        self.calls.append((principal_id, permission_id, config))
+        return SimpleNamespace(principal_id=principal_id, permission_id=permission_id, config=config)
+
+
 @pytest.fixture(autouse=True)
 def _stub_approval_manager(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
@@ -907,6 +916,52 @@ def test_launch_profile_updates_active_ecosystem(tmp_path: Path):
     assert active.overrides["ai_client"] == "defaultspack:ai_client:ai_client"
     assert active.overrides["tool"] == "defaultspack:tool:tool"
     assert "start" not in active.overrides
+
+
+def test_launch_profile_auto_grants_defaultspack_surface_for_local_dev(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("RUMI_AUTO_APPROVE_LOCAL", "true")
+    monkeypatch.setenv("RUMI_PORT", "8765")
+
+    eco_root = tmp_path / "ecosystem"
+    _write_pack(
+        eco_root, "defaultspack",
+        identity="rumi:ecosystem/defaultspack",
+        graphs=[_startup_graph("defaultspack")],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    locations = _discover_locations(eco_root, ["defaultspack"])
+    active = _FakeActiveEcosystem()
+    grant_manager = _FakeCapabilityGrantManager()
+    manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        with patch(
+            "backend_core.ecosystem.active_ecosystem.get_active_ecosystem_manager",
+            return_value=active,
+        ):
+            with patch("core_runtime.api.control_panel_handlers.request_kernel_restart"):
+                with patch(
+                    "core_runtime.capability_grant_manager.get_capability_grant_manager",
+                    return_value=grant_manager,
+                ):
+                    created = manager.create_profile({"base_pack": "defaultspack", "name": "Test"})
+                    response = manager.launch_profile(created["profile"]["profile_id"])
+
+    assert response["launched"] is True
+    assert grant_manager.calls == [
+        (
+            "defaultspack",
+            "desktop_app.execute",
+            {
+                "allowed_packs": ["defaultspack"],
+                "max_token_lifetime": 3600,
+                "port": 8765,
+            },
+        )
+    ]
 
 
 def test_launch_profile_with_node_override(tmp_path: Path):
