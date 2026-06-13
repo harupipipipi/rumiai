@@ -26,6 +26,10 @@ _TRANSIENT_GOOGLE_CONNECTION_TOKENS = (
 )
 
 
+def _retry_sleep(delay: float) -> None:
+    time.sleep(delay)
+
+
 class GoogleProvider(OpenAICompatibleProvider):
     """Google Gemini provider using Google's OpenAI-compatible Gemini endpoint."""
 
@@ -613,18 +617,18 @@ class GoogleProvider(OpenAICompatibleProvider):
             except urllib.error.HTTPError as exc:
                 err_body = exc.read().decode("utf-8", errors="replace")
                 if exc.code in _TRANSIENT_GOOGLE_HTTP_CODES and attempt < max_attempts - 1:
-                    time.sleep(0.5 * (attempt + 1))
+                    _retry_sleep(0.5 * (attempt + 1))
                     continue
                 transient = " (temporary Google backend error; retry shortly)" if exc.code in _TRANSIENT_GOOGLE_HTTP_CODES else ""
                 raise RuntimeError("Google API error {}{}: {}".format(exc.code, transient, err_body))
             except urllib.error.URLError as exc:
                 if self._is_transient_google_connection_error(exc) and attempt < max_attempts - 1:
-                    time.sleep(0.5 * (attempt + 1))
+                    _retry_sleep(0.5 * (attempt + 1))
                     continue
                 raise RuntimeError("Google API connection error: {}".format(exc.reason))
             except (TimeoutError, OSError) as exc:
                 if self._is_transient_google_connection_error(exc) and attempt < max_attempts - 1:
-                    time.sleep(0.5 * (attempt + 1))
+                    _retry_sleep(0.5 * (attempt + 1))
                     continue
                 raise RuntimeError("Google API connection error: {}".format(exc))
         raise RuntimeError("Google API request failed")
@@ -655,7 +659,7 @@ class GoogleProvider(OpenAICompatibleProvider):
                 last_error = exc
                 if attempt >= max_attempts - 1 or not self._is_transient_google_api_error(exc):
                     break
-                time.sleep(0.5 * (attempt + 1))
+                _retry_sleep(0.5 * (attempt + 1))
         raise last_error or RuntimeError("Google API request failed")
 
     def _request_stream(self, path, body):
@@ -668,7 +672,7 @@ class GoogleProvider(OpenAICompatibleProvider):
                 last_error = exc
                 if attempt >= max_attempts - 1 or not self._is_transient_google_api_error(exc):
                     break
-                time.sleep(0.5 * (attempt + 1))
+                _retry_sleep(0.5 * (attempt + 1))
         raise last_error or RuntimeError("Google API stream request failed")
 
     @staticmethod

@@ -27,6 +27,27 @@ def _load_json_entrypoint(component_manifest: dict[str, Any], key: str) -> Any:
         return None
 
 
+def _trusted_provider_component_root() -> Path:
+    return Path(__file__).resolve().parents[3] / "domain" / "providers"
+
+
+def _is_trusted_runtime_provider_component(component: Any) -> bool:
+    """Return whether a provider component may supply executable runtime config.
+
+    Domain component discovery intentionally catalogs sibling packs and explicit extra
+    roots for metadata, but provider manifests are executable runtime configuration:
+    an entrypoint is imported and instantiated during provider auto-detection.  Only
+    provider components bundled inside the canonical defaultspack provider directory
+    are trusted to contribute those runtime manifests.
+    """
+    try:
+        manifest_path = Path(component.manifest_path).resolve()
+        manifest_path.relative_to(_trusted_provider_component_root().resolve())
+    except (AttributeError, OSError, ValueError):
+        return False
+    return True
+
+
 def provider_component_metadata_map() -> dict[str, dict[str, Any]]:
     items: dict[str, dict[str, Any]] = {}
     registry = get_domain_component_registry()
@@ -39,7 +60,10 @@ def provider_component_metadata_map() -> dict[str, dict[str, Any]]:
         if not isinstance(metadata, dict):
             metadata = {}
         provider_manifest = manifest.get("provider_manifest")
-        if not isinstance(provider_manifest, dict):
+        if (
+            not isinstance(provider_manifest, dict)
+            or not _is_trusted_runtime_provider_component(component)
+        ):
             provider_manifest = {}
         items[provider_id] = {
             **deepcopy(metadata),

@@ -5,7 +5,6 @@ import json
 import os
 import platform
 import re
-import secrets
 import shutil
 import struct
 import subprocess
@@ -147,7 +146,7 @@ class BrowserComputerController:
         if action in {"computer.move", "computer.click", "computer.drag", "computer.type", "computer.key", "computer.scroll"}:
             return self._desktop_action(action, payload, yolo_mode=yolo_mode)
         if action == "computer.observe":
-            return self._computer_seat_observe(payload)
+            return self._computer_seat_observe(payload, yolo_mode=yolo_mode)
         if action in {"computer.semantic_action", "computer.press"}:
             return self._computer_seat_semantic_action(payload, yolo_mode=yolo_mode)
         if action == "computer.pid_event":
@@ -1382,8 +1381,15 @@ class BrowserComputerController:
             meta["recommended_next_actions"] = ["computer.screenshot", "computer.click", "computer.observe"]
         return meta
 
-    def _computer_seat_observe(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Delegate to ComputerSeatService.observe."""
+    def _computer_seat_observe(self, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
+        """Delegate to ComputerSeatService.observe with approval.
+
+        observe can aggregate screenshot-capable and foreground drivers, so it
+        must use the same explicit approval boundary as computer.screenshot.
+        """
+        approval_payload = self._safe_payload(payload)
+        if not (yolo_mode or self._consume_approval(payload, "computer.observe", approval_payload)):
+            return self._approval_required("computer.observe", approval_payload)
         try:
             svc = self._get_computer_seat()
             target = self._computer_seat_target(payload)
@@ -3818,7 +3824,8 @@ public class RumiDpi {
             self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{text}')"]))
             return
         if action == "computer.key":
-            key = self._windows_send_key(_key_combo_from_payload({**payload, "key": payload.get("key", "ENTER")}), None)
+            key_combo = _key_combo_from_payload({**payload, "key": payload.get("key", "ENTER")})
+            key = self._ps_single(self._windows_send_key(key_combo, None))
             count = _key_press_count(payload)
             self._run_powershell(
                 "\n".join(
@@ -4358,13 +4365,11 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             return False
 
     def _approval_required(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
-        token = self._issue_approval(action, payload)
         response = {
             "action": action,
             "requires_approval": True,
-            "approval_token": token,
             "approval_expires_in_seconds": 300,
-            "approval_hint": "Repeat the same action with payload.approval_token after an explicit user confirmation.",
+            "approval_hint": "Approve the pending request in a trusted Rumi UI, then retry with the signed approval token.",
             "payload": payload,
         }
         warning = self._approval_warning(action, payload)
@@ -4386,33 +4391,30 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             )
         return ""
 
-    def _issue_approval(self, action: str, payload: dict[str, Any]) -> str:
-        approvals = self._read_approvals()
-        token = secrets.token_urlsafe(24)
-        approvals[token] = {
-            "action": action,
-            "payload": payload,
-            "expires_at": time.time() + 300,
-        }
-        self._write_approvals(approvals)
-        return token
-
     def _consume_approval(self, payload: dict[str, Any], action: str, expected_payload: dict[str, Any]) -> bool:
-        token = str(payload.get("approval_token") or "")
+        token = str(payload.get("approval_token") or "").strip()
         if not token:
             return False
-        approvals = self._read_approvals()
-        record = approvals.pop(token, None)
-        self._write_approvals(approvals)
-        if not isinstance(record, dict):
+        approval = self._approval_module()
+        if approval is None:
             return False
-        if record.get("action") != action:
-            return False
-        if record.get("payload") != expected_payload:
-            return False
-        if float(record.get("expires_at") or 0) < time.time():
-            return False
-        return True
+        expected_args = {"action": action, "payload": expected_payload}
+        verification = approval.verify_execution_token(
+            token,
+            action,
+            approval.hash_arguments(expected_args),
+            pack_id="defaultspack",
+        )
+        return bool(getattr(verification, "valid", False))
+
+    @staticmethod
+    def _approval_module():
+        try:
+            from domain.safety import approval
+
+            return approval
+        except Exception:
+            return None
 
     def _read_approvals(self) -> dict[str, Any]:
         try:

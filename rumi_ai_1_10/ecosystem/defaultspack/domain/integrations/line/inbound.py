@@ -124,7 +124,7 @@ def _handle_event(
         return _line_addressing_ignored_result(external_event, addressing)
     if require_group_mention:
         policy = _require_audience_mention(policy)
-        policy = _allow_current_scope(policy, external_event)
+        policy = _allow_current_scope(policy, external_event, source_record=source_record)
     decision = AudiencePolicy(policy).evaluate(external_event, mentioned=addressed if require_group_mention else mentioned)
     if not decision.allowed:
         return _policy_denied_result(external_event, decision)
@@ -403,12 +403,12 @@ def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: 
     response_tool_policy = response.get("tool_policy") if isinstance(response.get("tool_policy"), dict) else {}
     if response_tool_policy:
         tool_policy.update(response_tool_policy)
-    if _truthy(
-        response.get("auto_approve")
-        or response.get("auto_approve_computer_use")
-        or response.get("yolo_mode")
-    ):
-        tool_policy["yolo_mode"] = True
+    # LINE webhook events are external, remote-origin input.  Endpoint response
+    # configuration must not translate "auto approve" aliases into yolo_mode
+    # for computer/browser tools, because yolo_mode bypasses the local approval
+    # token checks for screenshots and desktop input.  Operators can still set
+    # other explicit tool_policy fields above, but inbound LINE response presets
+    # cannot auto-approve computer use on behalf of a remote sender.
     if tool_policy:
         updated["profile_policy"] = tool_policy
 
@@ -597,9 +597,17 @@ def _require_audience_mention(policy: dict[str, Any]) -> dict[str, Any]:
     return updated
 
 
-def _allow_current_scope(policy: dict[str, Any], external_event) -> dict[str, Any]:
+def _allow_current_scope(
+    policy: dict[str, Any],
+    external_event,
+    *,
+    source_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     scope = getattr(external_event, "scope", None)
     if scope is None or scope.type not in {"group", "room"} or not scope.id:
+        return dict(policy or {})
+    source = source_record.get("source") if isinstance(source_record, dict) else None
+    if not (isinstance(source, dict) and bool(source.get("enabled"))):
         return dict(policy or {})
     updated = dict(policy or {})
     allow = list(updated.get("allow")) if isinstance(updated.get("allow"), list) else []

@@ -31,78 +31,26 @@ from domain.chat.history_editor import (
     _build_text_from_content,
 )
 from blocks.chat.send import _ai_direct_complete
+from blocks.chat._prompt_helpers import (
+    build_analysis_prompt,
+    build_segment_summary_prompt,
+    extract_text,
+)
 
 
 def _build_analysis_prompt(messages_with_ids, max_context_tokens=None):
     """Build the AI prompt that identifies segments to compact."""
-    system_text = (
-        "You are a conversation compaction analyst. Analyze the conversation and "
-        "identify segments of messages that can be replaced by a brief summary "
-        "without losing important information.\n\n"
-        "Good candidates for compaction:\n"
-        "- Intermediate experiment/work logs where only the conclusion matters\n"
-        "- Step-by-step debug output that led to a fix\n"
-        "- Repetitive trial-and-error sequences\n"
-        "- Verbose tool outputs superseded by later summaries\n\n"
-        "Do NOT compact:\n"
-        "- The initial user request or problem statement\n"
-        "- Final results, conclusions, or decisions\n"
-        "- Important turning points in the conversation\n"
-        "- The most recent 2 messages (they are still active context)\n\n"
+    return build_analysis_prompt(
+        messages_with_ids,
+        max_context_tokens=max_context_tokens,
+        persona="compaction_analyst",
+        truncate_at=300,
     )
-    if max_context_tokens is not None:
-        system_text += (
-            "Target: the conversation should fit within roughly "
-            + str(max_context_tokens)
-            + " tokens after compaction.\n\n"
-        )
-    system_text += (
-        "Respond with a JSON array of segments. Each segment:\n"
-        '{"start_id": "<message_id>", "end_id": "<message_id>", '
-        '"reason": "<why>", "summary_preview": "<what the summary would say>"}\n\n'
-        "If nothing should be compacted, respond with: []\n"
-        "Output ONLY the JSON array."
-    )
-
-    lines = []
-    for entry in messages_with_ids:
-        msg_id = entry["id"]
-        role = entry["role"]
-        text = entry["content"]
-        if not text:
-            text = "(empty)"
-        if isinstance(text, str) and len(text) > 300:
-            text = text[:300] + "..."
-        lines.append("[ID: " + msg_id + "] [" + role + "]: " + text)
-
-    return [
-        {"role": "system", "content": system_text},
-        {"role": "user", "content": "Analyze this conversation:\n\n" + "\n".join(lines)},
-    ]
 
 
 def _build_segment_summary_prompt(standard_messages, reason, summary_preview):
-    """Build the AI prompt that generates a summary for one segment."""
-    system_text = (
-        "You are a conversation editor. Summarize the following conversation "
-        "segment into a concise paragraph. Preserve all important results, "
-        "conclusions, decisions, and data. Discard verbose intermediate work.\n"
-        "Compaction reason: " + reason + "\n"
-        "Expected summary direction: " + summary_preview + "\n\n"
-        "Output ONLY the summary text."
-    )
-
-    parts = []
-    for msg in standard_messages:
-        role = msg.get("role", "unknown")
-        content = msg.get("content", "")
-        if content:
-            parts.append("[" + role + "]: " + content)
-
-    return [
-        {"role": "system", "content": system_text},
-        {"role": "user", "content": "Summarize:\n\n" + "\n".join(parts)},
-    ]
+    """Backwards-compatible alias around the shared prompt builder."""
+    return build_segment_summary_prompt(standard_messages, reason, summary_preview)
 
 
 def _parse_segments(response_text):
@@ -134,19 +82,8 @@ def _parse_segments(response_text):
 
 
 def _extract_text(response):
-    """Extract text from an AI response."""
-    if isinstance(response, dict) and "data" in response:
-        response = response["data"]
-    content = response.get("content", [])
-    if isinstance(content, str):
-        return content
-    parts = []
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "text":
-            parts.append(block.get("text", ""))
-        elif isinstance(block, str):
-            parts.append(block)
-    return "\n".join(parts)
+    """Backwards-compatible alias for the shared extract_text helper."""
+    return extract_text(response)
 
 
 def _call_ai(call_handler, model, messages):

@@ -150,7 +150,7 @@
     },
     "capability_bindings": {
       "type": "object",
-      "description": "Capability Graph binding registration metadata",
+      "description": "Capability Graph binding registration metadata. Community pack registration runs in the host process and requires host_execution approval.",
       "properties": {
         "register": {
           "type": "string",
@@ -352,7 +352,7 @@
         "static_root": {
           "type": "string",
           "description": "静的ファイルのルートディレクトリ (Pack subdir からの相対パス)",
-          "pattern": "^[a-zA-Z0-9_./\\\\-]+$"
+          "pattern": "^(?![\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))[a-zA-Z0-9_./\\\\-]+$"
         },
         "spa_fallback": {
           "type": "boolean",

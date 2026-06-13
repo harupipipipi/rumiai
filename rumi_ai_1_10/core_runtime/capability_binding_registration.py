@@ -4,13 +4,23 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .interface_registry import InterfaceRegistry
-from .paths import PackLocation, discover_pack_locations
+from .paths import (
+    CORE_PACK_DIR,
+    CORE_PACK_ID_PREFIX,
+    ECOSYSTEM_DIR,
+    PackLocation,
+    discover_pack_locations,
+)
+
+
+TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
 
 
 @dataclass
@@ -68,6 +78,20 @@ def register_pack_binding_handlers(
                     f"Pack '{pack_id}' cannot register binding path '{register_path}'",
                     pack_id=pack_id,
                     register=register_path,
+                )
+            )
+            continue
+        ok, reason = _host_registration_allowed(pack_id, pack_location, manifest)
+        if not ok:
+            result.skipped.append(pack_id)
+            result.diagnostics.append(
+                _diagnostic(
+                    "warning",
+                    "binding_registration_host_execution_required",
+                    f"Pack '{pack_id}' binding registration skipped: {reason}",
+                    pack_id=pack_id,
+                    register=register_path,
+                    reason=reason,
                 )
             )
             continue
@@ -185,6 +209,49 @@ def _register_path_allowed(register_path: str, pack_id: str) -> bool:
         f"ecosystem.{pack_id}.",
     )
     return register_path.startswith(allowed_prefixes)
+
+
+def _host_registration_allowed(
+    pack_id: str,
+    pack_location: PackLocation,
+    manifest: Dict[str, Any],
+) -> Tuple[bool, str]:
+    if _is_trusted_host_registration_pack(pack_id, pack_location):
+        return True, "trusted_builtin_pack"
+    if manifest.get("host_execution") is not True:
+        return False, "host_execution_not_requested"
+    if os.environ.get("RUMI_ALLOW_HOST_EXECUTION") != "true":
+        return False, "host_execution_not_allowed"
+    return True, "host_execution_allowed"
+
+
+def _is_trusted_host_registration_pack(pack_id: str, pack_location: PackLocation) -> bool:
+    normalized_pack_id = str(pack_id or "").strip()
+    try:
+        pack_dir = pack_location.pack_dir.resolve()
+    except OSError:
+        pack_dir = pack_location.pack_dir
+    if normalized_pack_id.startswith(CORE_PACK_ID_PREFIX):
+        try:
+            core_pack_root = Path(CORE_PACK_DIR).resolve()
+        except OSError:
+            core_pack_root = Path(CORE_PACK_DIR)
+        try:
+            core_relative = pack_dir.relative_to(core_pack_root)
+        except ValueError:
+            return False
+        return bool(core_relative.parts) and core_relative.parts[0] == normalized_pack_id
+    if normalized_pack_id not in TRUSTED_BUILTIN_PACK_IDS:
+        return False
+    try:
+        ecosystem_root = Path(ECOSYSTEM_DIR).resolve()
+    except OSError:
+        ecosystem_root = Path(ECOSYSTEM_DIR)
+    try:
+        relative = pack_dir.relative_to(ecosystem_root)
+    except ValueError:
+        return False
+    return bool(relative.parts) and relative.parts[0] == normalized_pack_id
 
 
 def _call_register_function(

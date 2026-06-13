@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+from ..tool_policy.internal_context import tool_server_approval_context_is_internal
 
 from .viewer_broker_client import ViewerBrokerClient
 
@@ -148,10 +149,31 @@ def _approval_token_from_context(
 def _context_has_server_approval(context: dict[str, Any] | None) -> bool:
     if not isinstance(context, dict):
         return False
-    return bool(
-        context.get("_tool_server_approved") is True
-        or context.get("_tool_server_approval_token_valid") is True
-    )
+    return tool_server_approval_context_is_internal(context) or _context_has_verified_server_approval_token(context)
+
+
+def _context_has_verified_server_approval_token(context: dict[str, Any]) -> bool:
+    token = str(context.get("_tool_server_approval_token") or "").strip()
+    operation = str(context.get("_tool_server_approval_operation") or "").strip()
+    args_hash = str(context.get("_tool_server_approval_args_hash") or "").strip()
+    if not token or not operation or not args_hash:
+        return False
+    pack_id = str(context.get("_tool_server_approval_pack_id") or "").strip()
+    conversation_id = str(context.get("_tool_server_approval_conversation_id") or "").strip()
+    try:
+        from domain.safety import approval
+
+        verification = approval.verify_execution_token(
+            token,
+            operation,
+            args_hash,
+            consume=False,
+            pack_id=pack_id,
+            conversation_id=conversation_id,
+        )
+    except Exception:
+        return False
+    return bool(getattr(verification, "valid", False))
 
 
 def _context_value(context: dict[str, Any] | None, *keys: str) -> str:
@@ -181,7 +203,7 @@ def _approval_required_response(
 ) -> dict[str, Any]:
     if str(result.get("approval_request_id") or result.get("request_id") or "").strip():
         return result
-    from domain.safety import approval
+    approval = _approval_module()
 
     safe_tool_name = str(tool_name or "computer_use").strip() or "computer_use"
     safe_action = str(action or safe_tool_name)
@@ -203,6 +225,7 @@ def _approval_required_response(
         },
     )
     wrapped = dict(result)
+    wrapped.pop("approval_token", None)
     wrapped.update(
         {
             "action": safe_action,
@@ -235,6 +258,12 @@ def _request_arguments(tool_name: str, action: str, payload: dict[str, Any]) -> 
     if tool_name == "browser_computer":
         return {"action": action, "payload": dict(payload or {})}
     return {"action": action, **dict(payload or {})}
+
+
+def _approval_module():
+    from ..safety import approval
+
+    return approval
 
 
 sys.modules.setdefault("domain.host_bridge.computer_router", sys.modules[__name__])

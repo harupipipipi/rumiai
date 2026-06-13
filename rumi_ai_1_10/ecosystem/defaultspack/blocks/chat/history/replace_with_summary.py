@@ -24,41 +24,23 @@ from domain.chat.store import ChatStore
 from domain.chat.message_converter import convert_to_standard
 from domain.chat.history_editor import replace_range_with_message
 from blocks.chat.send import _ai_direct_complete
+from blocks.chat._prompt_helpers import (
+    build_summarize_prompt,
+    extract_text,
+)
 
 
 def _build_summarize_prompt(standard_messages, instruction=None):
     """Build the AI prompt for summarizing a message range."""
-    system_text = (
-        "You are a conversation editor. "
-        "The user will provide a segment of conversation messages. "
-        "Create a concise summary that preserves all important decisions, "
-        "results, conclusions, and actionable information. "
-        "Discard intermediate work, debug output, and verbose logs. "
-        "Output ONLY the summary text, no extra formatting or preamble."
+    return build_summarize_prompt(
+        standard_messages,
+        instruction,
+        persona="editor",
+        user_prefix=(
+            "Summarize the following conversation segment. "
+            "Keep all important results and conclusions:"
+        ),
     )
-    if instruction:
-        system_text += "\n\nAdditional instruction: " + instruction
-
-    conversation_parts = []
-    for msg in standard_messages:
-        role = msg.get("role", "unknown")
-        content = msg.get("content", "")
-        if content:
-            conversation_parts.append("[" + role + "]: " + content)
-
-    conversation_text = "\n".join(conversation_parts)
-
-    return [
-        {"role": "system", "content": system_text},
-        {
-            "role": "user",
-            "content": (
-                "Summarize the following conversation segment. "
-                "Keep all important results and conclusions:\n\n"
-                + conversation_text
-            ),
-        },
-    ]
 
 
 def _unavailable_summary(standard_messages):
@@ -71,19 +53,8 @@ def _unavailable_summary(standard_messages):
 
 
 def _extract_text(response):
-    """Extract text from an AI response dict."""
-    if isinstance(response, dict) and "data" in response:
-        response = response["data"]
-    content = response.get("content", [])
-    if isinstance(content, str):
-        return content
-    parts = []
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "text":
-            parts.append(block.get("text", ""))
-        elif isinstance(block, str):
-            parts.append(block)
-    return "\n".join(parts)
+    """Backwards-compatible alias for the shared extract_text helper."""
+    return extract_text(response)
 
 
 def run(input_data, context):

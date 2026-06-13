@@ -174,7 +174,7 @@ export function apiMapNodeRoleLabel(node: ApiProfileGraphNode): string {
   if (kind === 'delivery_action') return 'Delivery';
   if (kind === 'input_profile') return 'Input profile';
   if (prefix === 'profile') return 'Profile policy';
-  if (prefix === 'prompt') return 'Prompt';
+  if (prefix === 'prompt') return 'Rule';
   if (prefix === 'frontend') return 'Frontend surface';
   return node.kind || 'Runtime entity';
 }
