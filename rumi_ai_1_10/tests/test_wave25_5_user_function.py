@@ -38,6 +38,12 @@ from core_runtime.capability_executor import (
 )
 from core_runtime.function_registry import FunctionEntry
 
+_CE_MODULE = CapabilityExecutor.__module__
+
+
+def _patch_executor_globals(**values):
+    return patch.dict(CapabilityExecutor._execute_user_function.__globals__, values)
+
 
 # =====================================================================
 # Helper: create a FunctionEntry mock
@@ -115,8 +121,8 @@ class TestUserFunctionDockerExecution(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    @patch("core_runtime.capability_executor.subprocess")
-    @patch("core_runtime.capability_executor.shutil")
+    @patch(f"{_CE_MODULE}.subprocess")
+    @patch(f"{_CE_MODULE}.shutil")
     def test_user_function_docker_success(self, mock_shutil, mock_subprocess):
         """User function normal execution via Docker (returncode=0, valid JSON stdout)."""
         mock_shutil.which.return_value = "/usr/bin/docker"
@@ -136,15 +142,16 @@ class TestUserFunctionDockerExecution(unittest.TestCase):
         )
         entry.main_py_path = Path(self.tmpdir) / "main.py"
 
-        resp = self.executor._execute_user_function(
-            principal_id="p1", entry=entry, args={"x": 1},
-            request_id="r1", start_time=time.time(),
-        )
+        with _patch_executor_globals(subprocess=mock_subprocess, shutil=mock_shutil):
+            resp = self.executor._execute_user_function(
+                principal_id="p1", entry=entry, args={"x": 1},
+                request_id="r1", start_time=time.time(),
+            )
         self.assertTrue(resp.success)
         self.assertEqual(resp.output, {"result": "hello"})
 
-    @patch("core_runtime.capability_executor.subprocess")
-    @patch("core_runtime.capability_executor.shutil")
+    @patch(f"{_CE_MODULE}.subprocess")
+    @patch(f"{_CE_MODULE}.shutil")
     def test_user_function_docker_mounts_only_runner_file_not_runtime_root(self, mock_shutil, mock_subprocess):
         """Docker user functions do not receive a bind mount for the runtime root/user_data tree."""
         mock_shutil.which.return_value = "/usr/bin/docker"
@@ -155,10 +162,11 @@ class TestUserFunctionDockerExecution(unittest.TestCase):
         (Path(self.tmpdir) / "main.py").write_text("def run(ctx, args): return {}\n", encoding="utf-8")
         entry.main_py_path = Path(self.tmpdir) / "main.py"
 
-        resp = self.executor._execute_user_function(
-            principal_id="p1", entry=entry, args={},
-            request_id="r1", start_time=time.time(),
-        )
+        with _patch_executor_globals(subprocess=mock_subprocess, shutil=mock_shutil):
+            resp = self.executor._execute_user_function(
+                principal_id="p1", entry=entry, args={},
+                request_id="r1", start_time=time.time(),
+            )
 
         self.assertTrue(resp.success)
         cmd = mock_subprocess.run.call_args.args[0]
@@ -168,8 +176,8 @@ class TestUserFunctionDockerExecution(unittest.TestCase):
         self.assertIn(f"{FUNCTION_RUNNER_PATH.resolve()}:/tmp/function_runner.py:ro", volumes)
         self.assertIn("/tmp/function_runner.py", cmd)
 
-    @patch("core_runtime.capability_executor.subprocess")
-    @patch("core_runtime.capability_executor.shutil")
+    @patch(f"{_CE_MODULE}.subprocess")
+    @patch(f"{_CE_MODULE}.shutil")
     def test_user_function_docker_returncode_nonzero(self, mock_shutil, mock_subprocess):
         """User function execution error (returncode != 0)."""
         mock_shutil.which.return_value = "/usr/bin/docker"
@@ -182,16 +190,17 @@ class TestUserFunctionDockerExecution(unittest.TestCase):
         (Path(self.tmpdir) / "main.py").write_text("def run(ctx, args): pass\n")
         entry.main_py_path = Path(self.tmpdir) / "main.py"
 
-        resp = self.executor._execute_user_function(
-            principal_id="p1", entry=entry, args={},
-            request_id="r1", start_time=time.time(),
-        )
+        with _patch_executor_globals(subprocess=mock_subprocess, shutil=mock_shutil):
+            resp = self.executor._execute_user_function(
+                principal_id="p1", entry=entry, args={},
+                request_id="r1", start_time=time.time(),
+            )
         self.assertFalse(resp.success)
         self.assertEqual(resp.error_type, "function_execution_error")
         self.assertIn("some error", resp.error)
 
-    @patch("core_runtime.capability_executor.subprocess")
-    @patch("core_runtime.capability_executor.shutil")
+    @patch(f"{_CE_MODULE}.subprocess")
+    @patch(f"{_CE_MODULE}.shutil")
     def test_user_function_docker_timeout(self, mock_shutil, mock_subprocess):
         """User function execution timeout."""
         mock_shutil.which.return_value = "/usr/bin/docker"
@@ -202,15 +211,16 @@ class TestUserFunctionDockerExecution(unittest.TestCase):
         (Path(self.tmpdir) / "main.py").write_text("def run(ctx, args): pass\n")
         entry.main_py_path = Path(self.tmpdir) / "main.py"
 
-        resp = self.executor._execute_user_function(
-            principal_id="p1", entry=entry, args={},
-            request_id="r1", start_time=time.time(),
-        )
+        with _patch_executor_globals(subprocess=mock_subprocess, shutil=mock_shutil):
+            resp = self.executor._execute_user_function(
+                principal_id="p1", entry=entry, args={},
+                request_id="r1", start_time=time.time(),
+            )
         self.assertFalse(resp.success)
         self.assertEqual(resp.error_type, "timeout")
 
-    @patch("core_runtime.capability_executor.subprocess")
-    @patch("core_runtime.capability_executor.shutil")
+    @patch(f"{_CE_MODULE}.subprocess")
+    @patch(f"{_CE_MODULE}.shutil")
     def test_user_function_docker_invalid_json_stdout(self, mock_shutil, mock_subprocess):
         """User function stdout is not valid JSON."""
         mock_shutil.which.return_value = "/usr/bin/docker"
@@ -223,15 +233,16 @@ class TestUserFunctionDockerExecution(unittest.TestCase):
         (Path(self.tmpdir) / "main.py").write_text("def run(ctx, args): pass\n")
         entry.main_py_path = Path(self.tmpdir) / "main.py"
 
-        resp = self.executor._execute_user_function(
-            principal_id="p1", entry=entry, args={},
-            request_id="r1", start_time=time.time(),
-        )
+        with _patch_executor_globals(subprocess=mock_subprocess, shutil=mock_shutil):
+            resp = self.executor._execute_user_function(
+                principal_id="p1", entry=entry, args={},
+                request_id="r1", start_time=time.time(),
+            )
         self.assertFalse(resp.success)
         self.assertEqual(resp.error_type, "invalid_json_output")
 
-    @patch("core_runtime.capability_executor.subprocess")
-    @patch("core_runtime.capability_executor.shutil")
+    @patch(f"{_CE_MODULE}.subprocess")
+    @patch(f"{_CE_MODULE}.shutil")
     def test_user_function_docker_empty_stdout(self, mock_shutil, mock_subprocess):
         """User function stdout is empty (success, output=None)."""
         mock_shutil.which.return_value = "/usr/bin/docker"
@@ -244,15 +255,16 @@ class TestUserFunctionDockerExecution(unittest.TestCase):
         (Path(self.tmpdir) / "main.py").write_text("def run(ctx, args): pass\n")
         entry.main_py_path = Path(self.tmpdir) / "main.py"
 
-        resp = self.executor._execute_user_function(
-            principal_id="p1", entry=entry, args={},
-            request_id="r1", start_time=time.time(),
-        )
+        with _patch_executor_globals(subprocess=mock_subprocess, shutil=mock_shutil):
+            resp = self.executor._execute_user_function(
+                principal_id="p1", entry=entry, args={},
+                request_id="r1", start_time=time.time(),
+            )
         self.assertTrue(resp.success)
         self.assertIsNone(resp.output)
 
-    @patch("core_runtime.capability_executor.subprocess")
-    @patch("core_runtime.capability_executor.shutil")
+    @patch(f"{_CE_MODULE}.subprocess")
+    @patch(f"{_CE_MODULE}.shutil")
     def test_user_function_docker_response_too_large(self, mock_shutil, mock_subprocess):
         """User function response exceeds MAX_RESPONSE_SIZE."""
         mock_shutil.which.return_value = "/usr/bin/docker"
@@ -266,10 +278,11 @@ class TestUserFunctionDockerExecution(unittest.TestCase):
         (Path(self.tmpdir) / "main.py").write_text("def run(ctx, args): pass\n")
         entry.main_py_path = Path(self.tmpdir) / "main.py"
 
-        resp = self.executor._execute_user_function(
-            principal_id="p1", entry=entry, args={},
-            request_id="r1", start_time=time.time(),
-        )
+        with _patch_executor_globals(subprocess=mock_subprocess, shutil=mock_shutil):
+            resp = self.executor._execute_user_function(
+                principal_id="p1", entry=entry, args={},
+                request_id="r1", start_time=time.time(),
+            )
         self.assertFalse(resp.success)
         self.assertEqual(resp.error_type, "response_too_large")
 
@@ -314,7 +327,7 @@ class TestHostExecutionFunction(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     @patch.dict(os.environ, {"RUMI_ALLOW_HOST_EXECUTION": "1"})
-    @patch("core_runtime.capability_executor.subprocess")
+    @patch(f"{_CE_MODULE}.subprocess")
     def test_host_function_success(self, mock_subprocess):
         """host_execution function normal execution."""
         output_json = json.dumps({"host_result": True})
@@ -332,10 +345,11 @@ class TestHostExecutionFunction(unittest.TestCase):
         )
         entry.main_py_path = Path(self.tmpdir) / "main.py"
 
-        resp = self.executor._execute_host_function(
-            principal_id="p1", entry=entry, args={},
-            request_id="r1", start_time=time.time(),
-        )
+        with _patch_executor_globals(subprocess=mock_subprocess):
+            resp = self.executor._execute_host_function(
+                principal_id="p1", entry=entry, args={},
+                request_id="r1", start_time=time.time(),
+            )
         self.assertTrue(resp.success)
         self.assertEqual(resp.output, {"host_result": True})
 
@@ -357,7 +371,7 @@ class TestHostExecutionFunction(unittest.TestCase):
             self.assertEqual(resp.error_type, "host_execution_disabled")
 
     @patch.dict(os.environ, {"RUMI_ALLOW_HOST_EXECUTION": "true"})
-    @patch("core_runtime.capability_executor.subprocess")
+    @patch(f"{_CE_MODULE}.subprocess")
     def test_host_function_timeout(self, mock_subprocess):
         """host_execution function timeout."""
         mock_subprocess.TimeoutExpired = type("TimeoutExpired", (Exception,), {})
@@ -367,10 +381,11 @@ class TestHostExecutionFunction(unittest.TestCase):
         (Path(self.tmpdir) / "main.py").write_text("def run(ctx, args): pass\n")
         entry.main_py_path = Path(self.tmpdir) / "main.py"
 
-        resp = self.executor._execute_host_function(
-            principal_id="p1", entry=entry, args={},
-            request_id="r1", start_time=time.time(),
-        )
+        with _patch_executor_globals(subprocess=mock_subprocess):
+            resp = self.executor._execute_host_function(
+                principal_id="p1", entry=entry, args={},
+                request_id="r1", start_time=time.time(),
+            )
         self.assertFalse(resp.success)
         self.assertEqual(resp.error_type, "timeout")
 
@@ -385,8 +400,8 @@ class TestDockerFallback(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    @patch("core_runtime.capability_executor.subprocess")
-    @patch("core_runtime.capability_executor.shutil")
+    @patch(f"{_CE_MODULE}.subprocess")
+    @patch(f"{_CE_MODULE}.shutil")
     @patch.dict(os.environ, {"RUMI_ALLOW_HOST_FALLBACK": "1"})
     def test_docker_unavailable_fallback(self, mock_shutil, mock_subprocess):
         """When Docker is not available, user function falls back to host subprocess."""
@@ -403,10 +418,11 @@ class TestDockerFallback(unittest.TestCase):
         )
         entry.main_py_path = Path(self.tmpdir) / "main.py"
 
-        resp = self.executor._execute_user_function(
-            principal_id="p1", entry=entry, args={},
-            request_id="r1", start_time=time.time(),
-        )
+        with _patch_executor_globals(subprocess=mock_subprocess, shutil=mock_shutil):
+            resp = self.executor._execute_user_function(
+                principal_id="p1", entry=entry, args={},
+                request_id="r1", start_time=time.time(),
+            )
         self.assertTrue(resp.success)
         self.assertEqual(resp.output, {"fallback": True})
         # Verify Docker was NOT called (no docker run command)

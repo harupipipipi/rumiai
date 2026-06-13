@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 import re
 import sys
 import unittest
@@ -9,6 +10,14 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+def _pack_api_sibling_module(handler_cls, module_name: str):
+    package_name = (
+        handler_cls._execute_api_route_pack_function.__globals__.get("__package__")
+        or handler_cls.__module__.rsplit(".", 1)[0]
+    )
+    return importlib.import_module(f"{package_name}.{module_name}")
 
 
 class TestDefaultspackApiRoutes(unittest.TestCase):
@@ -85,13 +94,16 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
                 )
             )
         )
-        with patch("core_runtime.pack_function_runtime.invoke_pack_function") as mocked:
+        pack_function_runtime = _pack_api_sibling_module(PackAPIHandler, "pack_function_runtime")
+        capability_executor = _pack_api_sibling_module(PackAPIHandler, "capability_executor")
+        with patch.object(pack_function_runtime, "invoke_pack_function") as mocked:
             with patch.object(
                 PackAPIHandler,
                 "_is_pack_approved_for_runtime_routes",
                 return_value=True,
-            ), patch(
-                "core_runtime.capability_executor.get_capability_executor",
+            ), patch.object(
+                capability_executor,
+                "get_capability_executor",
                 return_value=executor,
             ):
                 dispatched = handler._dispatch_api_route(
@@ -127,12 +139,14 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
                 return_value=SimpleNamespace(success=True, output={"ok": True})
             )
         )
+        capability_executor = _pack_api_sibling_module(PackAPIHandler, "capability_executor")
         with patch.object(
             PackAPIHandler,
             "_is_pack_approved_for_runtime_routes",
             return_value=True,
-        ), patch(
-            "core_runtime.capability_executor.get_capability_executor",
+        ), patch.object(
+            capability_executor,
+            "get_capability_executor",
             return_value=executor,
         ):
             dispatched = handler._dispatch_api_route(
@@ -184,12 +198,14 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
                 return_value=SimpleNamespace(success=True, output={"ok": True})
             )
         )
+        capability_executor = _pack_api_sibling_module(PackAPIHandler, "capability_executor")
         with patch.object(
             PackAPIHandler,
             "_is_pack_approved_for_runtime_routes",
             return_value=True,
-        ), patch(
-            "core_runtime.capability_executor.get_capability_executor",
+        ), patch.object(
+            capability_executor,
+            "get_capability_executor",
             return_value=executor,
         ):
             dispatched = handler._dispatch_api_route(
