@@ -47,7 +47,8 @@ impl KernelClient {
     }
 
     /// Check if the kernel is healthy.
-    /// Returns true if GET /health returns status=="ok".
+    /// Supports both the legacy `{"status":"ok"}` response and the current
+    /// API envelope `{"success":true,"data":{"status":"ok"}}`.
     pub fn is_healthy(&self) -> bool {
         let url = format!("{}/health", self.base_url());
         debug!("GET {}", url);
@@ -59,10 +60,7 @@ impl KernelClient {
                     return false;
                 }
                 match resp.json::<serde_json::Value>() {
-                    Ok(body) => {
-                        let status = body.get("status").and_then(|v| v.as_str());
-                        status == Some("ok")
-                    }
+                    Ok(body) => health_response_is_ok(&body),
                     Err(e) => {
                         debug!("Failed to parse health response: {}", e);
                         false
@@ -137,6 +135,19 @@ impl KernelClient {
     }
 }
 
+fn health_response_is_ok(body: &serde_json::Value) -> bool {
+    if body.get("status").and_then(|v| v.as_str()) == Some("ok") {
+        return true;
+    }
+
+    body.get("success").and_then(|v| v.as_bool()) == Some(true)
+        && body
+            .get("data")
+            .and_then(|data| data.get("status"))
+            .and_then(|status| status.as_str())
+            == Some("ok")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,5 +183,34 @@ mod tests {
         assert!(!resp.success);
         assert!(resp.data.is_none());
         assert_eq!(resp.error, Some("unauthorized".to_string()));
+    }
+
+    #[test]
+    fn health_response_accepts_legacy_status_shape() {
+        let body = serde_json::json!({"status": "ok"});
+        assert!(health_response_is_ok(&body));
+    }
+
+    #[test]
+    fn health_response_accepts_enveloped_status_shape() {
+        let body = serde_json::json!({
+            "success": true,
+            "data": {
+                "status": "ok",
+                "runtime_ready": true
+            }
+        });
+        assert!(health_response_is_ok(&body));
+    }
+
+    #[test]
+    fn health_response_rejects_non_ok_envelope() {
+        let body = serde_json::json!({
+            "success": true,
+            "data": {
+                "status": "starting"
+            }
+        });
+        assert!(!health_response_is_ok(&body));
     }
 }
