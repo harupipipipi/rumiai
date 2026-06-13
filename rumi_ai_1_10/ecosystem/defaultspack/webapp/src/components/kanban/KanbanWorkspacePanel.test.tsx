@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { KanbanBoardResponse, KanbanBoardScope } from "../../lib/api";
+import { filterKanbanScopeOptions, type KanbanScopeOption } from "./KanbanToolbar";
 import { KANBAN_API_UNAVAILABLE_NOTICE, loadKanbanBoardWithFallback } from "./KanbanWorkspacePanel";
 
 const scope: KanbanBoardScope = { type: "conversation", id: "conv-1" };
@@ -131,4 +132,17 @@ test("manual Kanban reload keeps immediate local fallback notice", async () => {
   assert.equal(states.boards[0]?.board.metadata?.local_fallback, true);
   assert.deepEqual(states.backendStates, [false]);
   assert.deepEqual(states.notices, [KANBAN_API_UNAVAILABLE_NOTICE]);
+});
+
+test("Kanban scope selector filters by label, description, type, and id", () => {
+  const options: KanbanScopeOption[] = [
+    { scope: { type: "global", id: "default" }, label: "All Rumi Runs", description: "registered runs" },
+    { scope: { type: "conversation", id: "conv-alpha" }, label: "Alpha Chat", description: "chat board" },
+    { scope: { type: "group", id: "design-team" }, label: "Design Team", description: "group board" },
+  ];
+
+  assert.deepEqual(filterKanbanScopeOptions(options, "alpha").map((option) => option.label), ["Alpha Chat"]);
+  assert.deepEqual(filterKanbanScopeOptions(options, "group").map((option) => option.label), ["Design Team"]);
+  assert.deepEqual(filterKanbanScopeOptions(options, "registered").map((option) => option.label), ["All Rumi Runs"]);
+  assert.equal(filterKanbanScopeOptions(options, "missing").length, 0);
 });
