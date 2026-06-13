@@ -65,7 +65,12 @@ except ImportError:
 
 # crypto_utils: compute_file_sha256 (Phase D: D0-3 依存解消)
 # def compute_file_sha256 is provided by core_runtime.crypto_utils and re-exported here.
-from .crypto_utils import compute_file_sha256
+# Prefer the canonical top-level package so tests and legacy imports patch the
+# same function object instead of loading rumi_ai_1_10.core_runtime twice.
+try:
+    from core_runtime.crypto_utils import compute_file_sha256
+except ImportError:
+    from .crypto_utils import compute_file_sha256
 from .pack_function_policy import permission_id_for_entry
 from .rate_limit_store import PersistentRateLimitStore
 

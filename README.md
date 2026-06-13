@@ -38,6 +38,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 - Python 3.10+
 - Node.js 18+
 - npm
+- uv (`rumi_viewer` を触る場合)
 - Rust / Cargo (`rumi_viewer` を触る場合)
 - Flutter SDK (`rumi_mobile` を触る場合)
 
@@ -50,7 +51,8 @@ cd rumiai
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r rumi_ai_1_10/requirements.txt -r rumi_ai_1_10/requirements-dev.txt
+pip install -r rumi_ai_1_10/requirements.txt
+pip install -r rumi_ai_1_10/requirements-dev.txt
 pip install -e ./rumi_ai_1_10
 
 cd rumi_viewer/frontend
