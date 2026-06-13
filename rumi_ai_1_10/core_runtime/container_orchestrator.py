@@ -245,7 +245,6 @@ class ContainerOrchestrator:
     ) -> list:
         """Build a Docker run command for universal_call execution."""
         import uuid
-        from core_runtime.docker_run_builder import DockerRunBuilder
 
         image = docker_image or self._UC_DEFAULT_IMAGES.get(runtime, "alpine:latest")
         name = container_name or f"rumi-uc-{pack_id}-{uuid.uuid4().hex[:8]}"
@@ -262,11 +261,11 @@ class ContainerOrchestrator:
         )
 
         if runtime == "command":
-            builder.set_command(["sh", filename])
+            builder.command(["sh", filename])
         elif runtime == "python":
-            builder.set_command(["python", filename])
+            builder.command(["python", filename])
         else:
-            builder.set_command([f"./{filename}"])
+            builder.command([f"./{filename}"])
 
         return builder.build()
 
