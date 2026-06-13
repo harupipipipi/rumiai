@@ -389,6 +389,7 @@ jobs:
         run: cargo test --locked
 
       - name: Run README viewer Defaultspack launch smoke
+        timeout-minutes: 15
         run: python .github/scripts/readme_viewer_defaultspack_smoke.py
 
   mac-computer-driver-smoke:

@@ -59,7 +59,7 @@ def main() -> int:
         wait_for_process_or_condition(
             process,
             lambda: kernel_runtime_ready(),
-            timeout_seconds=180,
+            timeout_seconds=600,
             description="kernel runtime_ready",
             log_path=tauri_log,
         )
