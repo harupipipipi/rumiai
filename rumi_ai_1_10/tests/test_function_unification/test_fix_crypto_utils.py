@@ -91,3 +91,10 @@ class TestCryptoUtilsImportFromExecutor:
         from core_runtime.crypto_utils import compute_file_sha256 as from_crypto
 
         assert capability_executor.compute_file_sha256 is from_crypto
+
+    def test_alias_executor_uses_canonical_crypto_utils_function(self):
+        """package alias 経由でも core_runtime.crypto_utils と同じ関数参照を使うこと"""
+        from core_runtime.crypto_utils import compute_file_sha256 as from_core
+        from rumi_ai_1_10.core_runtime import capability_executor as aliased_executor
+
+        assert aliased_executor.compute_file_sha256 is from_core
