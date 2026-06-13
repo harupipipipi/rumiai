@@ -62,7 +62,6 @@ def test_python_file_executor_syscall_fallback_is_fail_closed(monkeypatch, tmp_p
 
 
 def test_core_block_function_delegates_to_execute_and_preserves_failure(monkeypatch, tmp_path):
-    from core_runtime.capability_executor import CapabilityExecutor
     from core_runtime.function_registry import FunctionEntry
 
     core_pack_root = tmp_path / "core_pack"
@@ -90,7 +89,7 @@ def test_core_block_function_delegates_to_execute_and_preserves_failure(monkeypa
         manifest={},
         calling_convention="block",
     )
-    executor = CapabilityExecutor()
+    executor = capability_executor.CapabilityExecutor()
     executor._initialized = True
     executor._core_function_handlers = {}
 
