@@ -18,21 +18,24 @@ class LLMGateway:
         model = str(request.get("model", ""))
         messages = _messages_with_temporal_context(request)
         tools = list(request.get("tools", []))
-        params = dict(request.get("params", {}))
-        authority_context = request.get("authority_context")
-        if isinstance(self._client, AIClient) and isinstance(authority_context, dict):
-            params["_authority_context"] = dict(authority_context)
+        params = self._params_for_client(request)
         return self._client.complete(model, messages, tools=tools, params=params)
 
     def stream(self, request: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
         model = str(request.get("model", ""))
         messages = _messages_with_temporal_context(request)
         tools = list(request.get("tools", []))
+        params = self._params_for_client(request)
+        return self._client.stream(model, messages, tools=tools, params=params)
+
+    def _params_for_client(self, request: Dict[str, Any]) -> Dict[str, Any]:
         params = dict(request.get("params", {}))
         authority_context = request.get("authority_context")
-        if isinstance(self._client, AIClient) and isinstance(authority_context, dict):
+        if isinstance(authority_context, dict) and callable(
+            getattr(self._client, "_check_authority_for_model_api", None)
+        ):
             params["_authority_context"] = dict(authority_context)
-        return self._client.stream(model, messages, tools=tools, params=params)
+        return params
 
     def supports_stream(self, model: str) -> bool:
         return bool(self._client.supports_stream(model))

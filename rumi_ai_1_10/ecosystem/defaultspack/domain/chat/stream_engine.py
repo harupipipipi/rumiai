@@ -1590,7 +1590,12 @@ class ChatRunEngine:
             metadata=dict(prepared.provider_planning.get("metadata") or {}),
         )
         compiled = compile_complete(planned)
-        self._check_authority_for_compiled_provider(prepared, provider_id=str(caps.get("provider_id") or ""), model_name=model_name)
+        self._check_authority_for_compiled_provider(
+            prepared,
+            provider=provider,
+            provider_id=str(caps.get("provider_id") or ""),
+            model_name=model_name,
+        )
         raw = provider._request_json(compiled.path, compiled.body)
         parser = compiler_for_api_family(compiled.api_family)
         response_ir = parser.parse_response(raw, compiled)
@@ -1605,7 +1610,13 @@ class ChatRunEngine:
         return response
 
     @staticmethod
-    def _check_authority_for_compiled_provider(prepared: PreparedChatRun, *, provider_id: str, model_name: str) -> None:
+    def _check_authority_for_compiled_provider(
+        prepared: PreparedChatRun,
+        *,
+        provider: Any,
+        provider_id: str,
+        model_name: str,
+    ) -> None:
         provider_id = str(provider_id or "").strip()
         if provider_id in {"", "stub", "rumi"}:
             return
@@ -1614,33 +1625,44 @@ class ChatRunEngine:
             provider_may_have_api_key = provider_has_api_key(provider_id)
         except Exception:
             provider_may_have_api_key = True
+        if not provider_may_have_api_key and (
+            bool(getattr(provider, "_credential_required", False))
+            or bool(getattr(provider, "_api_key_envs", None))
+        ):
+            provider_may_have_api_key = True
         if not provider_may_have_api_key:
             return
         from core_runtime.authority import get_authority_service
 
         context = prepared.request_context.get("authority") if isinstance(prepared.request_context, dict) else {}
         context = dict(context) if isinstance(context, dict) else {}
-        decision = get_authority_service().check(
-            principal_id=str(context.get("principal_id") or "defaultspack"),
-            permission_id="model.invoke",
-            resource={
-                "kind": "model",
-                "provider_id": provider_id,
-                "api_id": "legacy",
-                "model_id": str(model_name or ""),
-                "model_ref": prepared.model,
-                "stream": False,
-            },
-            reason="Model invocation: {}/{}".format(provider_id, model_name),
-            conversation_id=context.get("conversation_id"),
-            profile_id=context.get("profile_id"),
-            node_id=context.get("node_id"),
-            graph_id=context.get("graph_id"),
-            request_id=context.get("request_id"),
-            approval_token=context.get("approval_token"),
+        service = get_authority_service()
+        checks = (
+            ("model.invoke", "model", "Model invocation: {}/{}".format(provider_id, model_name)),
+            ("api_key.use", "api_key", "Provider API key use: {}/legacy".format(provider_id)),
         )
-        if not decision.allowed:
-            raise AuthorityApprovalRequired(decision)
+        for permission_id, resource_kind, reason in checks:
+            decision = service.check(
+                principal_id=str(context.get("principal_id") or "defaultspack"),
+                permission_id=permission_id,
+                resource={
+                    "kind": resource_kind,
+                    "provider_id": provider_id,
+                    "api_id": "legacy",
+                    "model_id": str(model_name or ""),
+                    "model_ref": prepared.model,
+                    "stream": False,
+                },
+                reason=reason,
+                conversation_id=context.get("conversation_id"),
+                profile_id=context.get("profile_id"),
+                node_id=context.get("node_id"),
+                graph_id=context.get("graph_id"),
+                request_id=context.get("request_id"),
+                approval_token=context.get("approval_token"),
+            )
+            if not decision.allowed:
+                raise AuthorityApprovalRequired(decision)
 
     def _replay_approval_followup_if_present(
         self,

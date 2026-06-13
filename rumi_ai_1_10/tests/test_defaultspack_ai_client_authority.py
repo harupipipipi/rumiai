@@ -53,6 +53,27 @@ class _AllowAuthority:
         )
 
 
+class _DenyApiKeyUseAuthority:
+    def __init__(self):
+        self.permissions = []
+
+    def check(self, **kwargs):
+        from core_runtime.authority.models import AuthorityDecision
+
+        self.permissions.append(kwargs["permission_id"])
+        allowed = kwargs["permission_id"] == "model.invoke"
+        return AuthorityDecision(
+            allowed=allowed,
+            permission_id=kwargs["permission_id"],
+            principal_id=kwargs["principal_id"],
+            reason="allowed" if allowed else "api key denied",
+            request_id=None if allowed else "auth_api_key_test",
+            approval_required=not allowed,
+            risk_level="medium",
+            resource=kwargs["resource"],
+        )
+
+
 def _client(monkeypatch):
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers.stub_provider import StubProvider
@@ -68,6 +89,54 @@ def _client(monkeypatch):
     )
     monkeypatch.setattr("domain.ai_client.client.provider_api_metadata", lambda provider_id, api_id: {})
     return client
+
+
+class _CompiledProvider:
+    def __init__(self):
+        self._api_key = "compiled-secret"
+        self._api_key_envs = ["OPENAI_API_KEY"]
+        self.request_json_calls = []
+
+    def _request_json(self, path, body):
+        self.request_json_calls.append({"path": path, "body": body, "api_key": self._api_key})
+        raise AssertionError("compiled provider request used API key before api_key.use authority")
+
+
+class _CompiledGateway:
+    def __init__(self, provider):
+        self.provider = provider
+
+    def resolve_provider(self, model):
+        return self.provider, model.split("/", 1)[1] if "/" in model else model
+
+
+def _compiled_prepared_run():
+    from domain.chat.run_request import PreparedChatRun
+
+    return PreparedChatRun(
+        conversation_id="c",
+        conversation={},
+        input_data={},
+        request_id="r",
+        content=[],
+        metadata={},
+        user_message={"id": "u"},
+        model="openai/gpt-5.4",
+        params={},
+        request_context={"authority": {"principal_id": "profile:work"}},
+        tool_context={},
+        standard_messages=[],
+        user_text="hi",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=[],
+        provider_tools=[],
+        tools_called=[],
+        connected_tool_names=set(),
+        call_handler=None,
+        model_routing={},
+        provider_capabilities={"provider_id": "openai", "api_family": "openai_chat"},
+    )
 
 
 def test_ai_client_does_not_read_api_key_before_authority_allow(monkeypatch):
@@ -89,6 +158,50 @@ def test_ai_client_does_not_read_api_key_before_authority_allow(monkeypatch):
     assert client._providers["openai"].calls == []
 
 
+def test_ai_client_requires_api_key_use_before_reading_key(monkeypatch):
+    client = _client(monkeypatch)
+    authority = _DenyApiKeyUseAuthority()
+    read_calls = []
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+    monkeypatch.setattr("domain.ai_client.client.read_provider_api_key", lambda provider_id, api_id: read_calls.append((provider_id, api_id)) or "key")
+
+    from domain.ai_client.client import AuthorityApprovalRequired
+
+    try:
+        client.complete("gpt-5.4", [{"role": "user", "content": "hi"}], params={"_authority_context": {"principal_id": "profile:work"}})
+    except AuthorityApprovalRequired as exc:
+        assert exc.decision.permission_id == "api_key.use"
+    else:
+        raise AssertionError("AuthorityApprovalRequired was not raised")
+
+    assert authority.permissions == ["model.invoke", "api_key.use"]
+    assert read_calls == []
+    assert client._providers["openai"].calls == []
+
+
+def test_compiled_provider_requires_api_key_use_before_request_json(monkeypatch):
+    from domain.ai_client.client import AuthorityApprovalRequired
+    from domain.chat.stream_engine import ChatRunEngine
+
+    provider = _CompiledProvider()
+    authority = _DenyApiKeyUseAuthority()
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+    monkeypatch.setattr("domain.ai_client.api_key_store.provider_has_api_key", lambda provider_id: False)
+
+    try:
+        ChatRunEngine(store=object(), gateway=_CompiledGateway(provider))._complete_turn_with_compiler(
+            _compiled_prepared_run(),
+            [{"role": "user", "content": "hi"}],
+        )
+    except AuthorityApprovalRequired as exc:
+        assert exc.decision.permission_id == "api_key.use"
+    else:
+        raise AssertionError("AuthorityApprovalRequired was not raised")
+
+    assert authority.permissions == ["model.invoke", "api_key.use"]
+    assert provider.request_json_calls == []
+
+
 def test_ai_client_strips_authority_context_before_provider(monkeypatch):
     client = _client(monkeypatch)
     monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: _AllowAuthority())
@@ -103,3 +216,29 @@ def test_ai_client_strips_authority_context_before_provider(monkeypatch):
     assert response["finish_reason"] == "stop"
     assert client._providers["openai"].calls
     assert client._providers["openai"].calls[0]["params"] == {"temperature": 0}
+
+
+def test_gateway_keeps_authority_context_out_of_non_authority_clients():
+    from domain.ai_client.gateway import LLMGateway
+
+    class FakeClient:
+        def __init__(self):
+            self.params = None
+
+        def complete(self, model, messages, tools=None, params=None):
+            del model, messages, tools
+            self.params = dict(params or {})
+            return {"content": [{"type": "text", "text": "ok"}], "finish_reason": "stop"}
+
+    client = FakeClient()
+    response = LLMGateway(client=client).complete(
+        {
+            "model": "google/gemma-4-31b-it",
+            "messages": [{"role": "user", "content": "hi"}],
+            "params": {"temperature": 0.2},
+            "authority_context": {"principal_id": "profile:work"},
+        }
+    )
+
+    assert response["finish_reason"] == "stop"
+    assert client.params == {"temperature": 0.2}

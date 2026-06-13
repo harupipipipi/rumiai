@@ -76,6 +76,59 @@ def test_authority_allows_model_with_profile_grant(tmp_path, monkeypatch):
     assert denied.approval_required is True
 
 
+def test_authority_approval_cannot_widen_requested_resource(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="profile",
+        config={
+            "provider_ids": ["openai", "anthropic"],
+            "api_ids": ["work", "personal"],
+            "model_ids": ["gpt-5.4", "claude-sonnet"],
+        },
+    )
+    allowed = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+    )
+    widened = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "anthropic", "api_id": "personal", "model_id": "claude-sonnet"},
+        profile_id="work",
+    )
+
+    assert approval["success"] is True
+    assert approval["config"] == {"provider_ids": ["openai"], "api_ids": ["work"], "model_ids": ["gpt-5.4"]}
+    assert allowed.allowed is True
+    assert widened.allowed is False
+    assert widened.approval_required is True
+
+
+def test_authority_empty_config_lists_do_not_grant_everything(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": []})
+
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+    )
+
+    assert decision.allowed is False
+    assert decision.approval_required is True
+
+
 def test_authority_approve_once_consumes_token(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     resource = {"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"}
