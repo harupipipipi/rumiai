@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .paths import ECOSYSTEM_DIR, find_ecosystem_json
-from .validation import check_path_within, is_safe_staging_id
+from .validation import check_path_within, is_safe_staging_id, validate_pack_id
 
 BACKUP_ROOT = "user_data/pack_backups"
 STAGING_ROOT = "user_data/pack_staging"
@@ -189,7 +189,15 @@ class PackApplier:
         pack_id: str,
         pack_src: Path,
     ) -> Tuple[bool, Optional[str], Optional[Path]]:
+        if not isinstance(pack_id, str) or not validate_pack_id(pack_id):
+            return False, f"Invalid pack_id: {pack_id}", None
+        src_ok, src_error = check_path_within(pack_src, self._staging_root)
+        if not src_ok:
+            return False, src_error, None
         dest = self._ecosystem_dir / pack_id
+        dest_ok, dest_error = check_path_within(dest, self._ecosystem_dir)
+        if not dest_ok:
+            return False, dest_error, None
         backup_path = None
 
         if dest.exists() and dest.is_dir():

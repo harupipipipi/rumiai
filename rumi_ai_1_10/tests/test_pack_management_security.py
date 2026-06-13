@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -231,6 +232,65 @@ def test_staging_helpers_reject_path_like_ids(tmp_path):
     assert "Invalid staging_id" in (result.error or "")
 
 
+def test_pack_apply_revalidates_pack_id_from_staging_meta(tmp_path):
+    from core_runtime.pack_applier import PackApplier
+
+    staging_id = "a" * 16
+    staging_root = tmp_path / "staging"
+    staging_dir = staging_root / staging_id
+    payload_dir = staging_dir / "payload"
+    pack_dir = payload_dir / "safe_pack"
+    pack_dir.mkdir(parents=True)
+    (pack_dir / "ecosystem.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "safe_pack",
+                "version": "1.0.0",
+                "metadata": {"name": "Safe Pack"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (staging_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "staging_id": staging_id,
+                "detected_pack_ids": ["../escape"],
+                "is_multi_pack": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = PackApplier(
+        ecosystem_dir=str(tmp_path / "ecosystem"),
+        backup_root=str(tmp_path / "backups"),
+        staging_root=str(staging_root),
+    ).apply(staging_id)
+
+    assert result.success is False
+    assert "Invalid pack_id" in (result.error or "")
+    assert not (tmp_path / "escape").exists()
+
+
+def test_defaultspack_management_aliases_do_not_need_runtime_registry(monkeypatch):
+    pack_root = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack"
+    monkeypatch.syspath_prepend(str(pack_root))
+
+    from core_runtime.di_container import reset_container
+    from domain.function_runtime.dispatcher import run_defaultspack_function
+
+    reset_container()
+    result = run_defaultspack_function(
+        "pack_request_list",
+        {},
+        {"pack_id": "defaultspack"},
+    )
+
+    assert result["status"] == "ok"
+    assert "requests" in result["data"]
+
+
 def test_extension_approval_applies_staging(monkeypatch, tmp_path):
     from ecosystem.defaultspack.backend.pack_extension.extension_manager import (
         ExtensionManager,
@@ -252,8 +312,8 @@ def test_extension_approval_applies_staging(monkeypatch, tmp_path):
             }
 
     class _Applier:
-        def __init__(self, *, ecosystem_dir, backup_root):
-            calls.append(("init", ecosystem_dir, backup_root))
+        def __init__(self, *, ecosystem_dir, backup_root, staging_root):
+            calls.append(("init", ecosystem_dir, backup_root, staging_root))
 
         def apply(self, staging_id, *, mode="replace", actor="api_user"):
             calls.append(("apply", staging_id, mode, actor))
@@ -264,6 +324,7 @@ def test_extension_approval_applies_staging(monkeypatch, tmp_path):
         requests_root=tmp_path / "requests",
         ecosystem_dir=tmp_path / "ecosystem",
         backup_root=tmp_path / "backups",
+        staging_root=tmp_path / "staging",
     )
     created = manager.create_pack_request(
         mode=PatchMode.REQUEST_EXTENSION.value,
@@ -276,6 +337,12 @@ def test_extension_approval_applies_staging(monkeypatch, tmp_path):
 
     assert result["status"] == "applied"
     assert result["applied_pack_ids"] == ["new_pack"]
+    assert calls[0] == (
+        "init",
+        str(tmp_path / "ecosystem"),
+        str(tmp_path / "backups"),
+        str(tmp_path / "staging"),
+    )
     assert calls[-1] == ("apply", "a" * 16, "replace", "reviewer")
 
 

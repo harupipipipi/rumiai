@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parents[4]
 PACK_REQUESTS_ROOT = BASE_DIR / "user_data" / "packs" / "defaultspack" / "pack_requests"
 PACK_BACKUP_ROOT = BASE_DIR / "user_data" / "packs" / "defaultspack" / "pack_backups"
+PACK_STAGING_ROOT = BASE_DIR / "user_data" / "pack_staging"
 ECOSYSTEM_DIR = BASE_DIR / "ecosystem"
 
 
@@ -78,10 +79,12 @@ class ExtensionManager:
         requests_root: Path | None = None,
         ecosystem_dir: Path | None = None,
         backup_root: Path | None = None,
+        staging_root: Path | None = None,
     ) -> None:
         self.requests_root = Path(requests_root or PACK_REQUESTS_ROOT)
         self.ecosystem_dir = Path(ecosystem_dir or ECOSYSTEM_DIR)
         self.backup_root = Path(backup_root or PACK_BACKUP_ROOT)
+        self.staging_root = Path(staging_root or PACK_STAGING_ROOT)
         self._requests: Dict[str, ExtensionRequest] = {}
         self._audit: List[Dict[str, Any]] = []
 
@@ -337,6 +340,7 @@ class ExtensionManager:
             apply_result = PackApplier(
                 ecosystem_dir=str(self.ecosystem_dir),
                 backup_root=str(self.backup_root),
+                staging_root=str(self.staging_root),
             ).apply(request.staging_id, mode="replace", actor=reviewer)
         except Exception as exc:
             request.error = str(exc)
