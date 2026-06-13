@@ -67,6 +67,64 @@ def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_prepare_chat_run_appends_agent_stack_system_prompt(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "new",
+                "metadata": {
+                    "agent_profile_system_prompt": "Profile prompt",
+                },
+            },
+        },
+        {},
+    )
+
+    assert prepared.system_prompt == "System prompt\n\nProfile prompt"
+    assert prepared.standard_messages[0] == {"role": "system", "content": "System prompt\n\nProfile prompt"}
+    assert prepared.request_context["agent_profile_system_prompt"] == "Profile prompt"
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_uses_anthropic_transport_for_opencode_zen(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="opencode-zen/minimax-m3-free")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {"content": "say ok"},
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "noop",
+                        "description": "Do nothing",
+                        "parameters": {"type": "object", "properties": {}, "required": []},
+                    },
+                }
+            ],
+        },
+        {},
+    )
+
+    assert prepared.provider_capabilities["provider_id"] == "opencode-zen"
+    assert prepared.provider_capabilities["api_family"] == "anthropic_messages"
+    assert prepared.provider_capabilities["tool_choice_modes"] == ["auto", "none"]
+    assert prepared.provider_planning["provider_capabilities"]["api_family"] == "anthropic_messages"
+    ChatStore._instance = None
+
+
 def test_prepare_chat_run_persists_sanitizes_and_inlines_attachments(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore

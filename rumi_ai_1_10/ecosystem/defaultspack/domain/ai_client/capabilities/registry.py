@@ -36,7 +36,13 @@ class ProviderCapabilityRegistry:
 
     def get(self, provider_id: str, model_metadata: dict[str, Any] | None = None) -> ProviderCapabilities:
         provider_key = str(provider_id or "unknown").split("/", 1)[0] or "unknown"
-        raw = dict(self._manifests.get(provider_key) or self._manifests.get("openai_compatible") or {})
+        fallback_key = _fallback_manifest_key(model_metadata)
+        raw = dict(
+            self._manifests.get(provider_key)
+            or self._manifests.get(fallback_key)
+            or self._manifests.get("openai_compatible")
+            or {}
+        )
         if not raw:
             raw = {"provider_id": provider_key, "api_family": "unknown"}
         raw.setdefault("provider_id", provider_key)
@@ -70,3 +76,14 @@ def get_provider_capabilities(provider_id: str, model_metadata: dict[str, Any] |
 
 def get_model_provider_capabilities(model: str, model_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     return default_registry().for_model(model, model_metadata).to_dict()
+
+
+def _fallback_manifest_key(model_metadata: dict[str, Any] | None) -> str:
+    if not isinstance(model_metadata, dict):
+        return "openai_compatible"
+    metadata = model_metadata.get("metadata") if isinstance(model_metadata.get("metadata"), dict) else {}
+    transport = str(metadata.get("transport") or model_metadata.get("transport") or "").strip().lower()
+    api_family = str(metadata.get("api_family") or model_metadata.get("api_family") or "").strip().lower()
+    if transport == "anthropic_messages" or api_family == "anthropic_messages":
+        return "anthropic_messages"
+    return "openai_compatible"

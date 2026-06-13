@@ -269,6 +269,11 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     if effective_system_prompt:
         system_prompt = effective_system_prompt
         _replace_system_prompt_message(standard_messages, effective_system_prompt)
+    profile_system_prompt = _profile_system_prompt_from_metadata(metadata)
+    if profile_system_prompt:
+        system_prompt = _join_system_prompts(system_prompt, profile_system_prompt)
+        request_context["agent_profile_system_prompt"] = profile_system_prompt
+        _replace_system_prompt_message(standard_messages, system_prompt)
 
     raw_tools, provider_tools, tool_context = _available_tools(request_context, prepared_input, user_text=user_text)
     modalities = detect_modalities(content, metadata)
@@ -293,13 +298,15 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     )
     model = routing_decision.selected_model
     selected_capabilities = get_model_capabilities(model) or {}
+    selected_metadata = selected_capabilities.get("metadata") if isinstance(selected_capabilities.get("metadata"), dict) else {}
     provider_capabilities = get_model_provider_capabilities(
         model,
         {
+            **selected_capabilities,
             "id": model,
-            "provider_id": model.split("/", 1)[0] if "/" in model else "",
-            "capabilities": selected_capabilities,
-            "metadata": {"capabilities": selected_capabilities},
+            "provider_id": str(selected_capabilities.get("provider_id") or (model.split("/", 1)[0] if "/" in model else "")),
+            "capabilities": selected_metadata.get("capabilities", selected_capabilities),
+            "metadata": selected_metadata,
             "supports_thinking": bool(selected_capabilities.get("supports_thinking")),
         },
     )
@@ -534,6 +541,14 @@ def _replace_system_prompt_message(messages: list[dict[str, Any]], system_prompt
         messages[0]["content"] = system_prompt
         return
     messages.insert(0, {"role": "system", "content": system_prompt})
+
+
+def _profile_system_prompt_from_metadata(metadata: dict[str, Any]) -> str:
+    return str(metadata.get("agent_profile_system_prompt") or "").strip() if isinstance(metadata, dict) else ""
+
+
+def _join_system_prompts(*parts: str) -> str:
+    return "\n\n".join(part.strip() for part in parts if str(part or "").strip())
 
 
 def _mark_tool_calling_unavailable(entries: Any, tool_names: list[str], actual: dict[str, Any]) -> list[dict[str, Any]]:

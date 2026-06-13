@@ -447,6 +447,7 @@ _BEST_MODEL_BY_PROVIDER = {
     "openrouter": "tencent/hy3-preview:free",
     "gitlawb-opengateway": "mimo-v2.5-pro",
     "opencode-go": "kimi-k2.6",
+    "opencode-zen": "minimax-m3-free",
     "deepseek": "deepseek-chat",
     "perplexity": "sonar-pro",
     "together": "llama-3.1-70b-instruct-turbo",

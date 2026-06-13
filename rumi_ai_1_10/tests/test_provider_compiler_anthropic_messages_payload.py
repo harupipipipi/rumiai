@@ -30,3 +30,55 @@ def test_anthropic_messages_compiler_tool_use_snapshot_and_parser():
 
     assert compiled.body == json.loads((FIXTURES / "anthropic_messages_tool_use.json").read_text())
     assert parsed.content[1].tool_call.id == "tc2"
+
+
+def test_anthropic_messages_compiler_translates_thinking_and_metadata():
+    from domain.ai_client.bridge_plan import PlannedProviderRequest
+    from domain.ai_client.provider_compiler.anthropic_messages import AnthropicMessagesCompiler
+    from domain.chat.ir_legacy_adapter import legacy_standard_messages_to_ir
+
+    compiler = AnthropicMessagesCompiler()
+    planned = PlannedProviderRequest(
+        ir=legacy_standard_messages_to_ir(
+            [
+                {"role": "system", "content": "Be terse."},
+                {"role": "user", "content": "Say OK"},
+            ],
+            "c",
+        ),
+        model="opencode-zen/minimax-m3-free",
+        provider_capabilities={"provider_id": "opencode-zen", "api_family": "anthropic_messages"},
+        provider_tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "Search docs",
+                    "parameters": {"type": "object", "properties": {"q": {"type": "string"}}},
+                },
+            }
+        ],
+        params={
+            "thinking_level": "medium",
+            "temperature": 0,
+            "stop_sequences": ["END"],
+            "metadata": {"provider": "opencode-zen"},
+        },
+    )
+
+    compiled = compiler.compile_complete(planned)
+
+    assert compiled.body["model"] == "minimax-m3-free"
+    assert compiled.body["system"] == "Be terse."
+    assert compiled.body["max_tokens"] == 5120
+    assert compiled.body["temperature"] == 0
+    assert compiled.body["stop_sequences"] == ["END"]
+    assert compiled.body["metadata"] == {"provider": "opencode-zen"}
+    assert compiled.body["thinking"] == {"type": "enabled", "budget_tokens": 4096}
+    assert compiled.body["tools"] == [
+        {
+            "name": "lookup",
+            "description": "Search docs",
+            "input_schema": {"type": "object", "properties": {"q": {"type": "string"}}},
+        }
+    ]

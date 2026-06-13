@@ -98,6 +98,7 @@ def _normalize_model_metadata(raw: dict[str, Any]) -> dict[str, Any]:
     data = dict(raw)
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     capabilities = data.get("capabilities", metadata.get("capabilities", {}))
+    transport = str(metadata.get("transport") or data.get("transport") or "").strip().lower()
     if isinstance(capabilities, list):
         capability_map = {str(item): True for item in capabilities if str(item or "").strip()}
     elif isinstance(capabilities, dict):
@@ -105,6 +106,30 @@ def _normalize_model_metadata(raw: dict[str, Any]) -> dict[str, Any]:
     else:
         capability_map = {}
     normalized: dict[str, Any] = {}
+    provider_id = str(data.get("provider_id") or data.get("provider") or metadata.get("provider_id") or "").strip()
+    if provider_id:
+        normalized["provider_id"] = provider_id
+    if transport == "anthropic_messages":
+        normalized["api_family"] = "anthropic_messages"
+        normalized["supports_parallel_tool_calls"] = False
+        normalized["supported_content_blocks"] = ["text", "image", "image_url", "tool_call", "tool_result"]
+        normalized["tool_choice_modes"] = ["auto", "none"]
+        normalized["params"] = {
+            "temperature": True,
+            "max_tokens": True,
+            "top_p": True,
+            "top_k": True,
+            "stop_sequences": True,
+            "metadata": True,
+            "thinking": True,
+        }
+        normalized["quirks"] = {
+            "max_tokens_name": "max_tokens",
+            "supports_stream_usage": False,
+            "tool_schema_subset": "input_schema",
+        }
+    elif transport == "openai_chat_completions":
+        normalized["api_family"] = "openai_compatible"
     if "context_window" in data or "max_context" in data or "max_context_tokens" in data:
         normalized["max_context_tokens"] = int(
             data.get("max_context_tokens", data.get("max_context", data.get("context_window", 0))) or 0

@@ -22,9 +22,24 @@ import { isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from ".
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
+import {
+  agentStackProfileAvailability,
+  agentStackSourceLabel,
+  applyAgentStackToolOverrides,
+  batchAgentStackToolOverrides,
+  buildAgentStackConversationStateForStorage,
+  defaultAgentStackProfilesJson,
+  mergeAgentStackProfiles,
+  normalizeAgentStackSettings,
+  parseAgentStackConversationState,
+  resolveAgentStackProfiles,
+  resolveAgentStackSelection,
+  toggleAgentStackToolOverride,
+  type AgentStackConversationState,
+} from "./lib/agentStack";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
-import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
+import type { AppMode, AttachedFile, ChatHeaderAgentStackControls, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
 
 type ComposerCandidateMenuState = {
   mode: "model";
@@ -263,6 +278,28 @@ const calendarSettingsSection: SettingsSection = {
   ],
 };
 
+const agentStackSettingsSection: SettingsSection = {
+  id: "agent_stack",
+  label: "Agent Stack",
+  description: "Right-top profile fragments for tools, skills, system prompts, permissions, and model guards.",
+  fields: [
+    {
+      id: "feature_name",
+      label: "Feature name",
+      type: "text",
+      default: "Agent Stack",
+      help: "Header label for the profile stack UI.",
+    },
+    {
+      id: "profiles_json",
+      label: "Profiles JSON",
+      type: "textarea",
+      default: defaultAgentStackProfilesJson(),
+      help: "Array of profiles. Each profile may define id, label, description, tools, skills, system_prompt, tool_policy, and constraints.",
+    },
+  ],
+};
+
 function withCalendarSettingsSections(sections: SettingsSection[]): SettingsSection[] {
   if (sections.some((section) => section.id === calendarSettingsSection.id)) return sections;
   const insertAfter = sections.findIndex((section) => section.id === "preview");
@@ -295,6 +332,38 @@ function withCalendarSettingsValues(values: Record<string, Record<string, unknow
       ...(values.calendar ?? {}),
     },
   };
+}
+
+function withAgentStackSettingsSections(sections: SettingsSection[]): SettingsSection[] {
+  if (sections.some((section) => section.id === agentStackSettingsSection.id)) return sections;
+  const insertAfter = sections.findIndex((section) => section.id === "tools");
+  if (insertAfter < 0) return [...sections, agentStackSettingsSection];
+  return [
+    ...sections.slice(0, insertAfter + 1),
+    agentStackSettingsSection,
+    ...sections.slice(insertAfter + 1),
+  ];
+}
+
+function withAgentStackSettingsValues(values: Record<string, Record<string, unknown>>): Record<string, Record<string, unknown>> {
+  return {
+    ...values,
+    agent_stack: {
+      feature_name: "Agent Stack",
+      profiles_json: defaultAgentStackProfilesJson(),
+      default_profile_ids: [],
+      group_defaults: {},
+      ...(values.agent_stack ?? {}),
+    },
+  };
+}
+
+function withAugmentedSettingsSections(sections: SettingsSection[]): SettingsSection[] {
+  return withAgentStackSettingsSections(withCalendarSettingsSections(sections));
+}
+
+function withAugmentedSettingsValues(values: Record<string, Record<string, unknown>>): Record<string, Record<string, unknown>> {
+  return withAgentStackSettingsValues(withCalendarSettingsValues(values));
 }
 
 function calendarDateKey(date: Date): string {
@@ -2073,10 +2142,10 @@ export default function App() {
   const [codingWorkspaces, setCodingWorkspaces] = useState<CodingWorkspaceRecord[]>([]);
   const [selectedCodingWorkspaceId, setSelectedCodingWorkspaceId] = useState<string | null>(null);
   const [pendingNewTaskContext, setPendingNewTaskContext] = useState<PendingNewTaskContext | null>(null);
+  const [draftAgentStackState, setDraftAgentStackState] = useState<AgentStackConversationState | null>(null);
   const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
-  const [storedSelectedToolIds, setStoredSelectedToolIds] = useLocalStorage<string[]>("rumi-selected-tool-ids", []);
   const pendingStorageKey = "rumi-pending-chat-requests";
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -2134,6 +2203,10 @@ export default function App() {
   const preferredModel = activeModelId;
   const selectableModelProfiles = userFacingModelProfiles(modelProfiles, preferredModel);
   const favoriteProfiles = favoriteModelProfiles(settingsValues.models?.favorite_profiles, selectableModelProfiles, preferredModel);
+  const agentStackSettings = useMemo(
+    () => normalizeAgentStackSettings(settingsValues.agent_stack),
+    [settingsValues.agent_stack],
+  );
   const thinkingLevels = (settingsValues.models?.thinking_level_by_profile ?? {}) as Record<string, unknown>;
   const selectedThinkingLevel = String(
     thinkingLevels[profileKey(activeProfile, preferredModel)]
@@ -2157,9 +2230,37 @@ export default function App() {
       metadata: skill.metadata,
     }))
   ), [catalog?.skills]);
-  const selectedTools = useMemo(() => storedSelectedToolIds
-    .map((toolId) => composerExtensions.find((tool) => tool.id === toolId))
-    .filter((tool): tool is ComposerExtensionItem => Boolean(tool)), [composerExtensions, storedSelectedToolIds]);
+  const currentAgentStackGroupId = pendingNewTaskContext?.groupId ?? workspaceContextFromConversation(activeConversation).groupId ?? null;
+  const conversationAgentStackState = useMemo(
+    () => parseAgentStackConversationState(activeConversation?.metadata && typeof activeConversation.metadata === "object" ? (activeConversation.metadata as Record<string, unknown>).agent_stack_state : null),
+    [activeConversation?.metadata],
+  );
+  const resolvedAgentStackSelection = useMemo(
+    () => resolveAgentStackSelection({
+      settings: agentStackSettings,
+      groupId: currentAgentStackGroupId,
+      conversationState: activeConversation ? conversationAgentStackState : null,
+      draftState: activeConversation ? null : draftAgentStackState,
+    }),
+    [activeConversation, agentStackSettings, conversationAgentStackState, currentAgentStackGroupId, draftAgentStackState],
+  );
+  const resolvedAgentStackProfiles = useMemo(
+    () => resolveAgentStackProfiles(resolvedAgentStackSelection.profileIds, agentStackSettings, activeProfile),
+    [activeProfile, agentStackSettings, resolvedAgentStackSelection.profileIds],
+  );
+  const mergedAgentStackProfiles = useMemo(
+    () => mergeAgentStackProfiles(
+      resolvedAgentStackProfiles
+        .filter((profile) => profile.available)
+        .map((profile) => profile.profile),
+    ),
+    [resolvedAgentStackProfiles],
+  );
+  const selectedTools = useMemo(() => applyAgentStackToolOverrides(
+    mergedAgentStackProfiles.toolIds,
+    resolvedAgentStackSelection.toolOverrides,
+  ).map((toolId) => composerExtensions.find((tool) => tool.id === toolId))
+    .filter((tool): tool is ComposerExtensionItem => Boolean(tool)), [composerExtensions, mergedAgentStackProfiles.toolIds, resolvedAgentStackSelection.toolOverrides]);
   const selectedToolIds = useMemo(() => selectedTools.map((tool) => tool.id), [selectedTools]);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
@@ -2317,14 +2418,6 @@ export default function App() {
     media.addEventListener("change", applyMobileHistoryLayout);
     return () => media.removeEventListener("change", applyMobileHistoryLayout);
   }, [setIsHistoryMinimized]);
-
-  useEffect(() => {
-    const validIds = new Set(composerExtensions.map((tool) => tool.id));
-    setStoredSelectedToolIds((current) => {
-      const next = current.filter((toolId) => validIds.has(toolId));
-      return next.length === current.length ? current : next;
-    });
-  }, [composerExtensions, setStoredSelectedToolIds]);
 
   const updatePendingRequests = (updater: (current: Record<string, PendingChatRequest>) => Record<string, PendingChatRequest>) => {
     setPendingRequests((current) => {
@@ -2531,8 +2624,8 @@ export default function App() {
       setModelProfiles([]);
     }
     if (nextSettings) {
-      setSettingsSections(withCalendarSettingsSections(nextSettings.sections));
-      setSettingsValues(withCalendarSettingsValues(nextSettings.values));
+      setSettingsSections(withAugmentedSettingsSections(nextSettings.sections));
+      setSettingsValues(withAugmentedSettingsValues(nextSettings.values));
     } else {
       if (settingsResult.status === "rejected") console.error(settingsResult.reason);
     }
@@ -2591,6 +2684,7 @@ export default function App() {
     if (!conversationId) {
       setActiveConversationId(null);
       setActiveConversation(null);
+      setDraftAgentStackState(null);
       void refreshPreview(null);
       if (updateUrl) replaceChatIdInUrl(null, false);
       return;
@@ -2598,6 +2692,7 @@ export default function App() {
     const conversation = await api.getConversation(conversationId);
     setActiveConversationId(conversationId);
     setActiveConversation(conversation);
+    setDraftAgentStackState(null);
     if (updateUrl) replaceChatIdInUrl(conversationId);
     void refreshPreview(conversationId);
   }
@@ -2811,6 +2906,7 @@ export default function App() {
     if (nextContext?.workspaceId) {
       setMode("coding");
     }
+    setDraftAgentStackState(null);
     setActiveConversationId(null);
     setActiveConversation(null);
     setPreviews([]);
@@ -2853,6 +2949,92 @@ export default function App() {
       })
       .catch((updateError) => setError(updateError instanceof Error ? updateError.message : "会話メタデータの更新に失敗しました。"));
   };
+
+  const persistAgentStackSettings = useCallback((updater: (section: Record<string, unknown>) => Record<string, unknown>) => {
+    const currentValues = withAugmentedSettingsValues(settingsValues);
+    const nextValues = withAugmentedSettingsValues({
+      ...currentValues,
+      agent_stack: updater((currentValues.agent_stack ?? {}) as Record<string, unknown>),
+    });
+    setSettingsValues(nextValues);
+    void api.updateUiSettings(nextValues)
+      .then((result) => setSettingsValues(withAugmentedSettingsValues(result.values)))
+      .catch(console.error);
+  }, [settingsValues]);
+
+  const persistActiveConversationMetadata = useCallback((updater: (metadata: Record<string, unknown>) => Record<string, unknown>) => {
+    if (!activeConversationId) return;
+    const currentMetadata = activeConversation?.metadata && typeof activeConversation.metadata === "object"
+      ? activeConversation.metadata as Record<string, unknown>
+      : {};
+    const nextMetadata = updater(currentMetadata);
+    setActiveConversation((current) => current?.id === activeConversationId ? { ...current, metadata: nextMetadata } : current);
+    setConversations((current) => current.map((item) => item.id === activeConversationId ? { ...item, metadata: nextMetadata, updated_at: Date.now() } : item));
+    void api.updateConversation(activeConversationId, { metadata: nextMetadata })
+      .then((conversation) => {
+        setConversations((current) => current.map((item) => item.id === conversation.id ? { ...conversation, messages: [] } : item));
+        setActiveConversation((current) => current?.id === conversation.id ? conversation : current);
+      })
+      .catch((updateError) => {
+        setError(updateError instanceof Error ? updateError.message : "Agent Stack の保存に失敗しました。");
+        void loadConversation(activeConversationId, false).catch(console.error);
+      });
+  }, [activeConversation, activeConversationId]);
+
+  const persistResolvedAgentStackState = useCallback((profileIds: string[], toolOverrides: Record<string, boolean> = {}) => {
+    const nextState = buildAgentStackConversationStateForStorage(
+      profileIds,
+      resolvedAgentStackSelection.defaultProfileIds,
+      toolOverrides,
+    );
+    if (!activeConversationId) {
+      setDraftAgentStackState(nextState);
+      return;
+    }
+    persistActiveConversationMetadata((metadata) => {
+      const nextMetadata = { ...metadata };
+      if (nextState) {
+        nextMetadata.agent_stack_state = nextState;
+      } else {
+        delete nextMetadata.agent_stack_state;
+      }
+      return nextMetadata;
+    });
+  }, [activeConversationId, persistActiveConversationMetadata, resolvedAgentStackSelection.defaultProfileIds]);
+
+  const handleAgentStackAddProfile = useCallback((profileId: string) => {
+    const nextProfileIds = resolvedAgentStackSelection.profileIds.includes(profileId)
+      ? resolvedAgentStackSelection.profileIds
+      : [...resolvedAgentStackSelection.profileIds, profileId];
+    persistResolvedAgentStackState(nextProfileIds, {});
+  }, [persistResolvedAgentStackState, resolvedAgentStackSelection.profileIds]);
+
+  const handleAgentStackRemoveProfile = useCallback((profileId: string) => {
+    const nextProfileIds = resolvedAgentStackSelection.profileIds.filter((candidate) => candidate !== profileId);
+    persistResolvedAgentStackState(nextProfileIds, {});
+  }, [persistResolvedAgentStackState, resolvedAgentStackSelection.profileIds]);
+
+  const handleAgentStackReset = useCallback(() => {
+    persistResolvedAgentStackState(resolvedAgentStackSelection.defaultProfileIds, {});
+  }, [persistResolvedAgentStackState, resolvedAgentStackSelection.defaultProfileIds]);
+
+  const handleAgentStackSetDefault = useCallback(() => {
+    persistAgentStackSettings((section) => ({
+      ...section,
+      default_profile_ids: [...resolvedAgentStackSelection.profileIds],
+    }));
+  }, [persistAgentStackSettings, resolvedAgentStackSelection.profileIds]);
+
+  const handleAgentStackSetGroupDefault = useCallback(() => {
+    if (!currentAgentStackGroupId) return;
+    persistAgentStackSettings((section) => ({
+      ...section,
+      group_defaults: {
+        ...((section.group_defaults && typeof section.group_defaults === "object") ? section.group_defaults as Record<string, unknown> : {}),
+        [currentAgentStackGroupId]: [...resolvedAgentStackSelection.profileIds],
+      },
+    }));
+  }, [currentAgentStackGroupId, persistAgentStackSettings, resolvedAgentStackSelection.profileIds]);
 
   const closeSpotlight = () => {
     setIsSpotlightOpen(false);
@@ -3060,7 +3242,7 @@ export default function App() {
           .then(() => refreshCatalog())
           .catch(console.error);
       } else {
-        void api.updateUiSettings(next).then((result) => setSettingsValues(withCalendarSettingsValues(result.values))).catch(console.error);
+        void api.updateUiSettings(next).then((result) => setSettingsValues(withAugmentedSettingsValues(result.values))).catch(console.error);
       }
       return next;
     });
@@ -3074,8 +3256,8 @@ export default function App() {
         ...updates,
       },
     };
-    setSettingsValues(withCalendarSettingsValues(next));
-    void api.updateUiSettings(next).then((result) => setSettingsValues(withCalendarSettingsValues(result.values))).catch(console.error);
+    setSettingsValues(withAugmentedSettingsValues(next));
+    void api.updateUiSettings(next).then((result) => setSettingsValues(withAugmentedSettingsValues(result.values))).catch(console.error);
   };
 
   const handleModelProfileSelect = (profileId: string) => {
@@ -3184,12 +3366,14 @@ export default function App() {
       setError(`${item.label || item.id} は Settings > Tools で OFF です。`);
       return;
     }
-    setStoredSelectedToolIds((current) => {
-      if (current.includes(item.id)) {
-        return current.filter((selectedId) => selectedId !== item.id);
-      }
-      return [...current, item.id];
-    });
+    const enabled = !selectedToolIdSet.has(item.id);
+    const nextOverrides = toggleAgentStackToolOverride(
+      mergedAgentStackProfiles.toolIds,
+      resolvedAgentStackSelection.toolOverrides,
+      item.id,
+      enabled,
+    );
+    persistResolvedAgentStackState(resolvedAgentStackSelection.profileIds, nextOverrides);
   };
 
   const runFrontendCommandAction = (
@@ -3576,7 +3760,13 @@ export default function App() {
       const toolId = widget.sourceItemId || widget.id;
       const item = composerExtensions.find((candidate) => candidate.id === toolId);
       if (item) {
-        setStoredSelectedToolIds((current) => current.includes(item.id) ? current : [...current, item.id]);
+        const nextOverrides = toggleAgentStackToolOverride(
+          mergedAgentStackProfiles.toolIds,
+          resolvedAgentStackSelection.toolOverrides,
+          item.id,
+          true,
+        );
+        persistResolvedAgentStackState(resolvedAgentStackSelection.profileIds, nextOverrides);
       }
     }
   };
@@ -3598,11 +3788,13 @@ export default function App() {
     const validIds = new Set(composerExtensions.map((tool) => tool.id));
     const requestedIds = [...new Set(toolIds.filter((toolId) => validIds.has(toolId)))];
     if (requestedIds.length === 0) return;
-    setStoredSelectedToolIds((current) => {
-      if (enabled) return [...new Set([...current, ...requestedIds])];
-      const requestedIdSet = new Set(requestedIds);
-      return current.filter((toolId) => !requestedIdSet.has(toolId));
-    });
+    const nextOverrides = batchAgentStackToolOverrides(
+      mergedAgentStackProfiles.toolIds,
+      resolvedAgentStackSelection.toolOverrides,
+      requestedIds,
+      enabled,
+    );
+    persistResolvedAgentStackState(resolvedAgentStackSelection.profileIds, nextOverrides);
   };
 
   const handleComposerEndpointAction = async (widget: DroppedWidget, action: Extract<ComposerWidgetAction, { type: "call_endpoint" }>) => {
@@ -3695,6 +3887,7 @@ export default function App() {
         tool_choice: "required",
         tool_policy: {
           ...((yoloMode || ultraYoloMode) ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...mergedAgentStackProfiles.toolPolicy,
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
           ...(disabledToolIds.length ? { disabled_tools: disabledToolIds } : {}),
           ...(approvalToolIds.length ? { selected_tools: approvalToolIds } : {}),
@@ -3759,6 +3952,7 @@ export default function App() {
         tool_choice: "required",
         tool_policy: {
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...mergedAgentStackProfiles.toolPolicy,
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
           selected_tools: [runtimeApproval.toolName],
         },
@@ -4080,7 +4274,11 @@ export default function App() {
         .filter((widget) => widget.type === "skill" || widget.widgetKind === "skill_prompt")
         .map((widget) => widget.sourceItemId || widget.id),
     );
-    const submittedSkillIds = [...new Set([...Array.from(droppedWidgetSkillIds), ...mentionedSkillIdsFromText])];
+    const submittedSkillIds = [...new Set([
+      ...mergedAgentStackProfiles.skillIds,
+      ...Array.from(droppedWidgetSkillIds),
+      ...mentionedSkillIdsFromText,
+    ])];
     const mentionedToolWidgets = mentionedToolIds
       .map((toolId) => composerToolById.get(toolId))
       .filter((item): item is ComposerExtensionItem => Boolean(item))
@@ -4108,6 +4306,17 @@ export default function App() {
       ?? null;
     const rumiDataPathForSubmit = pendingNewTaskContext?.rumiDataPath ?? activeContextForSubmit.rumiDataPath ?? null;
     const isCodingWorkspaceSubmit = mode === "coding" || Boolean(workspaceIdForSubmit);
+    const conversationAgentStackState = buildAgentStackConversationStateForStorage(
+      resolvedAgentStackSelection.profileIds,
+      resolvedAgentStackSelection.defaultProfileIds,
+      resolvedAgentStackSelection.toolOverrides,
+    );
+    const activeAgentStackProfileIds = resolvedAgentStackProfiles
+      .filter((profile) => profile.available)
+      .map((profile) => profile.profile.id);
+    const inactiveAgentStackProfileIds = resolvedAgentStackProfiles
+      .filter((profile) => !profile.available)
+      .map((profile) => profile.profile.id);
 
     try {
       let conversation = activeConversation;
@@ -4120,6 +4329,7 @@ export default function App() {
           metadata: {
             ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
             ...(rumiDataPathForSubmit ? { rumi_data_path: rumiDataPathForSubmit } : {}),
+            ...(conversationAgentStackState ? { agent_stack_state: conversationAgentStackState } : {}),
             ...(isCodingWorkspaceSubmit
             ? {
                 mode: "coding",
@@ -4380,6 +4590,7 @@ export default function App() {
         tool_choice: submittedToolIds.length > 0 ? "required" : undefined,
         tool_policy: {
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...mergedAgentStackProfiles.toolPolicy,
           ...operationsPolicy,
           ...mimoCodingPolicy,
           ...(isCodingWorkspaceSubmit && workspaceIdForSubmit ? { workspace_id: workspaceIdForSubmit } : {}),
@@ -4409,6 +4620,10 @@ export default function App() {
             workspace_label: workspaceLabelForSubmit,
             workspace_root: workspaceRootForSubmit,
           } : {}),
+          ...(mergedAgentStackProfiles.systemPrompt ? { agent_profile_system_prompt: mergedAgentStackProfiles.systemPrompt } : {}),
+          ...(resolvedAgentStackSelection.profileIds.length ? { agent_stack_profile_ids: resolvedAgentStackSelection.profileIds } : {}),
+          ...(activeAgentStackProfileIds.length ? { agent_stack_active_profile_ids: activeAgentStackProfileIds } : {}),
+          ...(inactiveAgentStackProfileIds.length ? { agent_stack_inactive_profile_ids: inactiveAgentStackProfileIds } : {}),
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
           ...(submittedSkillIds.length ? { skills: submittedSkillIds, skill_mentions: submittedSkillIds.map((skillId) => ({ id: skillId, label: composerSkillById.get(skillId)?.label ?? skillId })) } : {}),
@@ -4425,14 +4640,33 @@ export default function App() {
       });
       setAttachedFiles([]);
       setDroppedWidgets([]);
-      if (!shouldKeepSelectedToolsAfterSend) {
-        setStoredSelectedToolIds([]);
+      const clearedToolOverrideState = !shouldKeepSelectedToolsAfterSend
+        ? buildAgentStackConversationStateForStorage(
+          resolvedAgentStackSelection.profileIds,
+          resolvedAgentStackSelection.defaultProfileIds,
+          {},
+        )
+        : conversationAgentStackState;
+      const metadataAfterSend = !shouldKeepSelectedToolsAfterSend
+        ? {
+          ...((conversation.metadata && typeof conversation.metadata === "object") ? conversation.metadata as Record<string, unknown> : {}),
+        }
+        : null;
+      if (metadataAfterSend) {
+        if (clearedToolOverrideState) {
+          metadataAfterSend.agent_stack_state = clearedToolOverrideState;
+        } else {
+          delete metadataAfterSend.agent_stack_state;
+        }
       }
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);
 
-      if (title !== conversation.title) {
-        await api.updateConversation(conversation.id, { title });
+      if (title !== conversation.title || metadataAfterSend) {
+        const updates: Partial<Conversation> = {};
+        if (title !== conversation.title) updates.title = title;
+        if (metadataAfterSend) updates.metadata = metadataAfterSend;
+        await api.updateConversation(conversation.id, updates);
       }
 
       await refreshConversations(conversation.id);
@@ -4482,6 +4716,52 @@ export default function App() {
   ) : null;
   const isCalendarMode = workspacePanelMode === "calendar";
   const calendarSettings = parseCalendarSettings(settingsValues.calendar);
+  const chatHeaderAgentStackControls = useMemo<ChatHeaderAgentStackControls>(() => ({
+    featureName: agentStackSettings.featureName,
+    sourceLabel: agentStackSourceLabel(resolvedAgentStackSelection.source),
+    parseError: agentStackSettings.parseError,
+    canSetGroupDefault: Boolean(currentAgentStackGroupId),
+    chips: resolvedAgentStackProfiles.map((item) => ({
+      id: item.profile.id,
+      label: item.profile.label,
+      available: item.available,
+      note: item.reason,
+    })),
+    options: agentStackSettings.profiles.map((profile) => {
+      const resolved = resolvedAgentStackProfiles.find((item) => item.profile.id === profile.id);
+      const availability = resolved ?? (() => {
+        const fallback = agentStackProfileAvailability(profile, activeProfile);
+        return { profile, available: fallback.matches, reason: fallback.reason };
+      })();
+      return {
+        id: profile.id,
+        label: profile.label,
+        description: profile.description,
+        selected: resolvedAgentStackSelection.profileIds.includes(profile.id),
+        available: availability.available,
+        note: availability.reason,
+      };
+    }),
+    onAddProfile: handleAgentStackAddProfile,
+    onRemoveProfile: handleAgentStackRemoveProfile,
+    onResetToDefault: handleAgentStackReset,
+    onSetDefault: handleAgentStackSetDefault,
+    onSetGroupDefault: handleAgentStackSetGroupDefault,
+  }), [
+    activeProfile,
+    agentStackSettings.featureName,
+    agentStackSettings.parseError,
+    agentStackSettings.profiles,
+    currentAgentStackGroupId,
+    handleAgentStackAddProfile,
+    handleAgentStackRemoveProfile,
+    handleAgentStackReset,
+    handleAgentStackSetDefault,
+    handleAgentStackSetGroupDefault,
+    resolvedAgentStackProfiles,
+    resolvedAgentStackSelection.profileIds,
+    resolvedAgentStackSelection.source,
+  ]);
   const handleCalendarModeToggle = () => setWorkspacePanelMode((current) => current === "calendar" ? "composer" : "calendar");
   const renderComposer = (isCentered = false) => (
     <Renderers.composer
@@ -4616,6 +4896,7 @@ export default function App() {
                 showPreview={effectiveShowPreview}
                 canShowPreview={showRegion("activity_preview") && canShowCanvas}
                 canOpenSettings={showRegion("settings_modal")}
+                agentStack={chatHeaderAgentStackControls}
                 onTogglePreview={() => {
                   if (canShowCanvas) setShowPreview((value) => !value);
                 }}

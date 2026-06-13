@@ -108,6 +108,37 @@ export type ChatHeaderRendererProps = {
   canOpenSettings: boolean;
   onTogglePreview: () => void;
   onOpenSettings: () => void;
+  agentStack?: ChatHeaderAgentStackControls | null;
+};
+
+export type ChatHeaderAgentStackChip = {
+  id: string;
+  label: string;
+  available: boolean;
+  note?: string | null;
+};
+
+export type ChatHeaderAgentStackOption = {
+  id: string;
+  label: string;
+  description?: string;
+  selected: boolean;
+  available: boolean;
+  note?: string | null;
+};
+
+export type ChatHeaderAgentStackControls = {
+  featureName: string;
+  sourceLabel: string;
+  parseError?: string | null;
+  canSetGroupDefault: boolean;
+  chips: ChatHeaderAgentStackChip[];
+  options: ChatHeaderAgentStackOption[];
+  onAddProfile: (profileId: string) => void;
+  onRemoveProfile: (profileId: string) => void;
+  onResetToDefault: () => void;
+  onSetDefault: () => void;
+  onSetGroupDefault: () => void;
 };
 
 export type ChatMessagesRendererProps = {

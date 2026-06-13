@@ -32,11 +32,16 @@ class AnthropicMessagesCompiler(ProviderCompiler):
                         "input_schema": function_def.get("parameters", {"type": "object", "properties": {}}),
                     }
                 )
-        body = {"model": planned.model, "messages": messages, "max_tokens": planned.params.get("max_tokens", planned.params.get("max_completion_tokens", 1024))}
+        body = {
+            "model": _provider_model_id(planned.model),
+            "messages": messages,
+            "max_tokens": planned.params.get("max_tokens", planned.params.get("max_completion_tokens", 1024)),
+        }
         if system_parts:
             body["system"] = "\n\n".join(system_parts)
         if tools:
             body["tools"] = tools
+        body.update(_anthropic_chat_params(planned.params))
         return CompiledProviderRequest(
             api_family=self.api_family,
             provider_id=str(planned.provider_capabilities.get("provider_id") or "anthropic"),
@@ -94,3 +99,32 @@ def _anthropic_content(message):
     if isinstance(content, list):
         return [{"type": "text", "text": str(part.get("text") or part)} for part in content]
     return str(content or "")
+
+
+def _anthropic_chat_params(params):
+    translated = dict(params or {})
+    thinking_level = str(translated.pop("thinking_level", "") or "").strip()
+    if thinking_level in {"low", "medium", "high", "xhigh"} and "thinking" not in translated:
+        budgets = {"low": 1024, "medium": 4096, "high": 8192, "xhigh": 16384}
+        translated["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": budgets[thinking_level],
+        }
+        translated["max_tokens"] = max(
+            int(translated.get("max_tokens", 4096) or 4096),
+            budgets[thinking_level] + 1024,
+        )
+    copied = {}
+    for key in ("temperature", "max_tokens", "top_p", "top_k", "stop_sequences", "thinking"):
+        if key in translated:
+            copied[key] = translated[key]
+    if "metadata" in translated:
+        copied["metadata"] = translated["metadata"]
+    return copied
+
+
+def _provider_model_id(model):
+    value = str(model or "").strip()
+    if "/" in value:
+        return value.split("/", 1)[1]
+    return value
