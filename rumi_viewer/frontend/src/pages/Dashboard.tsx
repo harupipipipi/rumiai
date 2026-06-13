@@ -81,6 +81,18 @@ function shouldRetryInitialProfileLoad(errorMessage: string): boolean {
   return /Unauthorized|Invalid or expired code|Too many requests|429|Failed to fetch|NetworkError/i.test(errorMessage);
 }
 
+export function shouldShowDashboardSkeleton({
+  runtimeReconnecting,
+  profilesLoading,
+  hasPayload,
+}: {
+  runtimeReconnecting: boolean;
+  profilesLoading: boolean;
+  hasPayload: boolean;
+}): boolean {
+  return !hasPayload && (runtimeReconnecting || profilesLoading);
+}
+
 export function Dashboard() {
   const addToast = useAppStore((state) => state.addToast);
   const showDialog = useAppStore((state) => state.showDialog);
@@ -204,6 +216,7 @@ export function Dashboard() {
 
   const catalog = payload?.catalog ?? null;
   const profileCount = payload?.profiles.length ?? 0;
+  const runtimeReconnecting = !runtimeReady && runtimeStatus !== 'error';
   const catalogPacks = catalog?.packs ?? [];
   const selectedBasePack = catalogPacks.find((pack) => pack.pack_id === draft?.base_pack) ?? null;
   const defaultCreatePack = defaultBasePack(catalog);
@@ -341,7 +354,7 @@ export function Dashboard() {
         await refreshProfiles(editProfileId);
         await refreshDashboard();
       }
-      setSuccessFeedback(response.restart_requested ? 'Profile launched. Kernel restart handoff was requested.' : 'Profile launched.');
+      setSuccessFeedback(response.restart_requested ? 'Profile launch requested. Keeping Viewer open while the runtime reconnects.' : 'Profile launched.');
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'launch this profile'));
     } finally { setActionState(null); }
@@ -422,7 +435,7 @@ export function Dashboard() {
 
   // --- Loading / Error states ---
 
-  if (!runtimeReady && runtimeStatus !== 'error') {
+  if (shouldShowDashboardSkeleton({ runtimeReconnecting, profilesLoading, hasPayload: Boolean(payload) })) {
     return <DashboardSkeleton />;
   }
 
@@ -444,8 +457,6 @@ export function Dashboard() {
       </div>
     );
   }
-
-  if (profilesLoading && !payload) return <DashboardSkeleton />;
 
   if (!payload) {
     return (
@@ -518,6 +529,13 @@ export function Dashboard() {
                 <RefreshCw className="h-3.5 w-3.5" /> Retry
               </Button>
             )}
+          </div>
+        )}
+
+        {runtimeReconnecting && payload && (
+          <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            <span className="flex-1">Runtime is reconnecting after launch. Keeping this page open...</span>
           </div>
         )}
 
@@ -619,7 +637,7 @@ export function Dashboard() {
                   {/* Actions - primary right */}
                   <div className="mt-auto pt-4 flex gap-2 justify-end">
                     <Button variant="outline" size="sm" onClick={() => patchSearchParams({ edit: profile.profile_id })}>Edit</Button>
-                    <Button size="sm" onClick={() => void handleLaunch(profile.profile_id)} disabled={!profileReady || busy} loading={actionState?.type === 'launch' && busy}>
+                    <Button size="sm" onClick={() => void handleLaunch(profile.profile_id)} disabled={runtimeReconnecting || !profileReady || busy} loading={actionState?.type === 'launch' && busy}>
                       <Rocket className="h-3.5 w-3.5" /> Launch
                     </Button>
                   </div>
@@ -665,6 +683,7 @@ export function Dashboard() {
           handleAddPack={handleAddPack}
           handleRemovePack={handleRemovePack}
           handleOverrideChange={handleOverrideChange}
+          runtimeReconnecting={runtimeReconnecting}
         />}
       </div>
     </div>
@@ -695,6 +714,7 @@ interface EditPanelProps {
   handleAddPack: (packId: string) => Promise<void>;
   handleRemovePack: (packId: string) => Promise<void>;
   handleOverrideChange: (portKey: string, nodeId: string) => Promise<void>;
+  runtimeReconnecting: boolean;
 }
 
 function EditPanel({
@@ -703,6 +723,7 @@ function EditPanel({
   handleSave, handleActivate, handleDuplicate, handleDelete, handleLaunch,
   handleOpenProfileGraph, handleOpenApiMap,
   handleAddPack, handleRemovePack, handleOverrideChange,
+  runtimeReconnecting,
 }: EditPanelProps) {
   const [compilePreview, setCompilePreview] = useState<StartupProfileCompilePreviewResponseData | null>(null);
   const [compilePreviewError, setCompilePreviewError] = useState<string | null>(null);
@@ -782,7 +803,7 @@ function EditPanel({
             <Trash2 className="h-3.5 w-3.5" /> Delete
           </Button>
           <div className="flex-1" />
-          <Button size="sm" onClick={() => void handleLaunch(draft.profile_id)} disabled={actionState?.profileId === draft.profile_id} loading={actionState?.type === 'launch' && actionState?.profileId === draft.profile_id}>
+          <Button size="sm" onClick={() => void handleLaunch(draft.profile_id)} disabled={runtimeReconnecting || actionState?.profileId === draft.profile_id} loading={actionState?.type === 'launch' && actionState?.profileId === draft.profile_id}>
             <Rocket className="h-3.5 w-3.5" /> Launch
           </Button>
           <Button size="sm" onClick={handleSave} disabled={!isDirty || actionState?.type === 'save'} loading={actionState?.type === 'save'}>
