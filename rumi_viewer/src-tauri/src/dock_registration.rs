@@ -1127,6 +1127,50 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires the README viewer dev runtime to be running"]
+    fn readme_defaultspack_launch_smoke() {
+        let repo_root = env_path("RUMI_VIEWER_SMOKE_REPO_ROOT");
+        let user_data_dir = env_path("RUMI_VIEWER_SMOKE_USER_DATA");
+        let venv_dir = env_path("RUMI_VIEWER_SMOKE_VENV_DIR");
+        let app_dir = repo_root.join("rumi_ai_1_10");
+        let app_data_dir = user_data_dir
+            .parent()
+            .expect("RUMI_VIEWER_SMOKE_USER_DATA must have a parent app data directory")
+            .to_path_buf();
+
+        let config = AppConfig {
+            app_dir: app_dir.clone(),
+            rumi_home: app_dir,
+            python_dir: app_data_dir.join("python"),
+            uv_path: venv_dir.join(if cfg!(target_os = "windows") {
+                "Scripts/uv.exe"
+            } else {
+                "bin/uv"
+            }),
+            venv_dir,
+            user_data_dir,
+            log_dir: app_data_dir.join("logs"),
+            kernel_port: 8765,
+            dev_workspace_root: Some(repo_root),
+        };
+
+        let message = launch_defaultspack_desktop_impl(&config)
+            .expect("Open Defaultspack should launch the Defaultspack v2 desktop app");
+
+        assert!(message.contains("127.0.0.1:8766"));
+        assert!(
+            is_defaultspack_http_ready(DEFAULTSPACK_DEFAULT_PORT),
+            "Defaultspack v2 HTTP health check did not become ready"
+        );
+    }
+
+    fn env_path(name: &str) -> PathBuf {
+        std::env::var_os(name)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| panic!("{name} is required for the README launch smoke test"))
+    }
+
+    #[test]
     fn resolve_desktop_app_working_dir_defaults_to_pack_root() {
         let pack_root = PathBuf::from("/tmp/defaultspack");
         let desktop_app: Value = serde_json::from_str(r#"{"working_dir":""}"#).unwrap();
