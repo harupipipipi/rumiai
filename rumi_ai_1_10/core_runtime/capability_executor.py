@@ -29,10 +29,15 @@ import shutil
 import uuid
 import logging
 import types
-from .flow_context_security import sanitize_user_flow_context
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from .flow_context_security import sanitize_user_flow_context
+from .crypto_utils import compute_file_sha256 as _crypto_compute_file_sha256
+from .pack_function_policy import permission_id_for_entry
+from .rate_limit_store import PersistentRateLimitStore
 
 # function.call: core_pack 判定用
 try:
@@ -66,7 +71,6 @@ except ImportError:
 # crypto_utils: compute_file_sha256 (Phase D: D0-3 依存解消)
 # Keep the short and package-qualified import names aliased so tests and legacy
 # imports patch the same helper module instead of loading two copies.
-from .crypto_utils import compute_file_sha256
 from . import crypto_utils as _loaded_crypto_utils
 
 _crypto_utils = (
@@ -77,11 +81,7 @@ _crypto_utils = (
 sys.modules["core_runtime.crypto_utils"] = _crypto_utils
 sys.modules["rumi_ai_1_10.core_runtime.crypto_utils"] = _crypto_utils
 # def compute_file_sha256 is provided by crypto_utils and re-exported here.
-compute_file_sha256 = _crypto_utils.compute_file_sha256
-from .pack_function_policy import permission_id_for_entry
-from .rate_limit_store import PersistentRateLimitStore
-
-from typing import Any, Dict, List, Optional
+compute_file_sha256 = getattr(_crypto_utils, "compute_file_sha256", _crypto_compute_file_sha256)
 
 _this_module = sys.modules.get(__name__)
 if _this_module is not None:
