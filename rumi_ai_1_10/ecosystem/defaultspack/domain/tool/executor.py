@@ -1677,6 +1677,9 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         mark_tool_server_approval_context(next_context)
         return next_context, None
     if _context_has_tool_server_approval(next_context):
+        approval_error = _attach_policy_approval_token(next_context, tool_def, arguments)
+        if approval_error is not None:
+            return next_context, approval_error
         return next_context, None
     token = _approval_token_from_context(next_context, tool_def, arguments, *extra_lookup_keys) or _approval_token_from_arguments(arguments)
     if not token:
@@ -1879,6 +1882,54 @@ def _context_has_tool_server_approval(context):
     if _truthy(policy.get("yolo_mode")) or _is_policy_allow_context(context):
         return True
     return tool_server_approval_context_is_internal(context)
+
+
+def _attach_policy_approval_token(context, tool_def, arguments):
+    if tool_server_approval_context_is_internal(context):
+        return None
+    policy = policy_from_context(context if isinstance(context, dict) else {})
+    if not (_truthy(policy.get("yolo_mode")) or _is_policy_allow_context(context)):
+        return None
+
+    approval = _approval_module()
+    operation, approval_args = _tool_approval_scope(tool_def, arguments)
+    pack_id = str(
+        context.get("owner_pack")
+        or context.get("pack_id")
+        or context.get("_source_pack_id")
+        or "defaultspack"
+    )
+    conversation_id = str(context.get("conversation_id") or context.get("conversation_turn_id") or "")
+    source = "yolo_mode" if _truthy(policy.get("yolo_mode")) else "internal_tool_policy"
+    request = approval.create_approval_request(
+        operation,
+        _tool_approval_risk_level(tool_def),
+        approval_args,
+        details={
+            "tool_name": _tool_approval_tool_name(tool_def),
+            "action": operation,
+            "function_id": operation,
+            "pack_id": pack_id,
+            "conversation_id": conversation_id,
+            "arguments": _tool_approval_display_arguments(tool_def, arguments, approval_args),
+            "auto_approved_by": source,
+        },
+    )
+    decision = approval.approve(request["request_id"])
+    if not decision.get("approved"):
+        return {
+            "result": decision.get("reason") or "policy approval failed",
+            "is_error": True,
+            "widget": None,
+        }
+
+    mark_tool_server_approval_context(context)
+    context["_tool_server_approval_token"] = str(decision.get("token") or "")
+    context["_tool_server_approval_operation"] = operation
+    context["_tool_server_approval_args_hash"] = approval.hash_arguments(approval_args)
+    context["_tool_server_approval_pack_id"] = pack_id
+    context["_tool_server_approval_conversation_id"] = conversation_id
+    return None
 
 
 def _legacy_internal_tool_server_approval_context(context, tool_def):

@@ -841,6 +841,86 @@ class CapabilityExecutor:
         config = getattr(grant_result, "config", None)
         return True, None, dict(config) if isinstance(config, dict) else {}
 
+    def _check_entry_grant(
+        self,
+        *,
+        entry,
+        principal_id,
+        effective_permission_id,
+        handler_id,
+        args,
+        request_id,
+        start_time,
+    ):
+        calling_convention = getattr(entry, "calling_convention", None)
+        entry_grant_config = self._entry_grant_config(entry)
+        host_grant_required = calling_convention in {
+            "python_host",
+            "binary",
+            "command",
+        }
+        legacy_grant_required = bool(getattr(entry, "legacy_grant_required", False))
+        grant_required = entry_grant_config is not None or host_grant_required or legacy_grant_required
+        grant_config = dict(entry_grant_config or {})
+        if not grant_required:
+            return None, grant_config
+
+        if self._grant_manager is None:
+            resp = CapabilityResponse(
+                success=False,
+                error="Capability grant manager is not available",
+                error_type="grant_manager_unavailable",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id,
+                effective_permission_id,
+                handler_id,
+                resp,
+                args,
+                request_id,
+                trusted=True,
+                grant_allowed=False,
+                grant_reason="CapabilityGrantManager not available",
+            )
+            return resp, grant_config
+
+        grant_permission_id = (
+            permission_id_for_entry(entry)
+            if isinstance(getattr(entry, "permission_id", None), str)
+            else effective_permission_id
+        )
+        if host_grant_required:
+            grant_result = self._grant_manager.check(entry.pack_id, grant_permission_id)
+            if not grant_result.allowed and principal_id != entry.pack_id:
+                caller_grant_result = self._grant_manager.check(principal_id, grant_permission_id)
+                if caller_grant_result.allowed:
+                    grant_result = caller_grant_result
+        else:
+            grant_result = self._grant_manager.check(principal_id, grant_permission_id)
+        if not grant_result.allowed:
+            resp = CapabilityResponse(
+                success=False,
+                error="Permission denied",
+                error_type="grant_denied",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id,
+                effective_permission_id,
+                handler_id,
+                resp,
+                args,
+                request_id,
+                trusted=True,
+                grant_allowed=False,
+                grant_reason=grant_result.reason,
+            )
+            return resp, grant_config
+
+        grant_config.update(grant_result.config or {})
+        return None, grant_config
+
     # ------------------------------------------------------------------
     # _unified_execute
     # ------------------------------------------------------------------
@@ -955,6 +1035,19 @@ class CapabilityExecutor:
                     )
                     return resp
 
+        calling_convention = getattr(entry, "calling_convention", None)
+        grant_resp, grant_config = self._check_entry_grant(
+            entry=entry,
+            principal_id=principal_id,
+            effective_permission_id=effective_permission_id,
+            handler_id=handler_id,
+            args=args,
+            request_id=request_id,
+            start_time=start_time,
+        )
+        if grant_resp is not None:
+            return grant_resp
+
         # 2. Trust チェック
         is_builtin = is_core_builtin or is_trusted_builtin
         builtin_sha256 = None
@@ -1015,58 +1108,6 @@ class CapabilityExecutor:
                 self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
                             trusted=True, detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {caller_requires}")
                 return resp
-
-        # 4. Grant チェック（host/binary/command は manifest grant_config がなくても必須）
-        calling_convention = getattr(entry, "calling_convention", None)
-        entry_grant_config = self._entry_grant_config(entry)
-        host_grant_required = calling_convention in {
-            "python_host",
-            "binary",
-            "command",
-        }
-        legacy_grant_required = bool(getattr(entry, "legacy_grant_required", False))
-        grant_required = entry_grant_config is not None or host_grant_required or legacy_grant_required
-        grant_config = dict(entry_grant_config or {})
-        if grant_required:
-            if self._grant_manager is None:
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Capability grant manager is not available",
-                    error_type="grant_manager_unavailable",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(
-                    principal_id,
-                    effective_permission_id,
-                    handler_id,
-                    resp,
-                    args,
-                    request_id,
-                    trusted=True,
-                    grant_allowed=False,
-                    grant_reason="CapabilityGrantManager not available",
-                )
-                return resp
-            grant_permission_id = (
-                permission_id_for_entry(entry)
-                if isinstance(getattr(entry, "permission_id", None), str)
-                else effective_permission_id
-            )
-            if host_grant_required:
-                grant_result = self._grant_manager.check(pack_id, grant_permission_id)
-                if not grant_result.allowed and principal_id != pack_id:
-                    caller_grant_result = self._grant_manager.check(principal_id, grant_permission_id)
-                    if caller_grant_result.allowed:
-                        grant_result = caller_grant_result
-            else:
-                grant_result = self._grant_manager.check(principal_id, grant_permission_id)
-            if not grant_result.allowed:
-                resp = CapabilityResponse(success=False, error="Permission denied", error_type="grant_denied",
-                                          latency_ms=(time.time() - start_time) * 1000)
-                self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
-                            trusted=True, grant_allowed=False, grant_reason=grant_result.reason)
-                return resp
-            grant_config.update(grant_result.config or {})
 
         # 4. calling_convention 分岐
         if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:

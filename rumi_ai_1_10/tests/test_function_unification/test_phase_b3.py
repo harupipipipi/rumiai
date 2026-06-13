@@ -174,6 +174,7 @@ class TestUnifiedExecuteBuiltinTrustBypass(unittest.TestCase):
             entrypoint="handler.py:execute",
             function_dir="/fake/dir",
         )
+        entry.legacy_handler_builtin = True
 
         trust_store = MagicMock()
         grant_manager = MagicMock()
@@ -310,6 +311,8 @@ class TestUnifiedExecuteFlowRunDispatch(unittest.TestCase):
             qualified_name="core_flow:run",
             grant_config={},
             vocab_aliases=["flow.run"],
+            function_dir=str(Path(__file__).resolve().parent),
+            main_py_path=str(Path(__file__).resolve()),
         )
 
         grant_manager = MagicMock()
@@ -343,7 +346,8 @@ class TestUnifiedExecuteSubprocessDispatch(unittest.TestCase):
             qualified_name="core_test:test_func",
             vocab_aliases=["test.perm"],
             entrypoint="handler.py:execute",
-            function_dir="/fake/dir",
+            function_dir=str(Path(__file__).resolve().parent),
+            main_py_path=str(Path(__file__).resolve()),
         )
 
         grant_manager = MagicMock()
