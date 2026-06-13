@@ -14,6 +14,7 @@ import {
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { KanbanCard, KanbanColumn as KanbanColumnRecord } from "../../lib/api";
 import { KanbanCardPreview } from "./KanbanCard";
@@ -83,6 +84,23 @@ export function KanbanBoard({
     onMoveCard(activeId, targetColumnId, targetIndex);
   };
 
+  const dragOverlay = (
+    <DragOverlay
+      zIndex={80}
+      dropAnimation={{
+        sideEffects: defaultDropAnimationSideEffects({
+          styles: {
+            active: {
+              opacity: "0.25",
+            },
+          },
+        }),
+      }}
+    >
+      {activeCard ? <KanbanCardPreview card={activeCard} /> : null}
+    </DragOverlay>
+  );
+
   return (
     <DndContext
       sensors={sensors}
@@ -107,20 +125,7 @@ export function KanbanBoard({
           />
         ))}
       </div>
-      <DragOverlay
-        zIndex={80}
-        dropAnimation={{
-          sideEffects: defaultDropAnimationSideEffects({
-            styles: {
-              active: {
-                opacity: "0.25",
-              },
-            },
-          }),
-        }}
-      >
-        {activeCard ? <KanbanCardPreview card={activeCard} /> : null}
-      </DragOverlay>
+      {createPortal(dragOverlay, document.body)}
     </DndContext>
   );
 }
