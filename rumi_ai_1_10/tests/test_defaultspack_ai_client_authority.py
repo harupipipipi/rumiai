@@ -31,8 +31,28 @@ class _FakeProvider:
         return {"content": [{"type": "text", "text": "ok"}], "finish_reason": "stop"}
 
     def stream(self, model_name, messages, tools, params):
-        self.calls.append({"model_name": model_name, "params": params})
+        self.calls.append({"method": "stream", "model_name": model_name, "params": params})
         yield {"type": "stream_end", "finish_reason": "stop"}
+
+    def embed(self, model_name, input_text):
+        self.calls.append({"method": "embed", "model_name": model_name, "input_text": input_text})
+        return {"embedding": [1.0]}
+
+    def image_gen(self, model_name, prompt, params):
+        self.calls.append({"method": "image_gen", "model_name": model_name, "prompt": prompt, "params": params})
+        return {"image": "ok"}
+
+    def image_analyze(self, model_name, image, prompt):
+        self.calls.append({"method": "image_analyze", "model_name": model_name, "image": image, "prompt": prompt})
+        return {"text": "ok"}
+
+    def transcribe(self, model_name, audio, params):
+        self.calls.append({"method": "transcribe", "model_name": model_name, "audio": audio, "params": params})
+        return {"text": "ok"}
+
+    def tts(self, model_name, text, voice=None):
+        self.calls.append({"method": "tts", "model_name": model_name, "text": text, "voice": voice})
+        return {"audio": "ok"}
 
 
 class _DenyAuthority:
@@ -280,6 +300,58 @@ def test_compiled_oauth_provider_requires_authority_without_api_key(monkeypatch)
     assert authority.permissions == ["model.invoke", "api_key.use"]
     assert provider.request_json_calls == []
 
+
+@pytest.mark.parametrize(
+    ("method_name", "args", "kwargs"),
+    [
+        ("embed", ("SECRET_TEXT",), {}),
+        ("image_gen", ("SECRET_PROMPT",), {"params": {"_authority_context": {"principal_id": "profile:work"}}}),
+        ("image_analyze", ("SECRET_IMAGE", "SECRET_PROMPT"), {}),
+        ("transcribe", ("SECRET_AUDIO",), {"params": {"_authority_context": {"principal_id": "profile:work"}}}),
+        ("tts", ("SECRET_TEXT",), {"voice": "alloy"}),
+    ],
+)
+def test_ai_client_non_chat_provider_calls_require_authority(monkeypatch, method_name, args, kwargs):
+    client = _client(monkeypatch)
+    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
+    monkeypatch.setattr(
+        "domain.ai_client.authority_gate.provider_has_api_key",
+        lambda provider_id: provider_id == "openai",
+    )
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: _DenyAuthority())
+
+    from domain.ai_client.client import AuthorityApprovalRequired
+
+    method = getattr(client, method_name)
+    with pytest.raises(AuthorityApprovalRequired) as exc_info:
+        method("openai/gpt-5.4", *args, **kwargs)
+
+    assert exc_info.value.decision.permission_id == "model.invoke"
+    assert client._providers["openai"].calls == []
+
+
+def test_ai_client_non_chat_strips_authority_context_before_provider(monkeypatch):
+    client = _client(monkeypatch)
+    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
+    monkeypatch.setattr(
+        "domain.ai_client.authority_gate.provider_has_api_key",
+        lambda provider_id: provider_id == "openai",
+    )
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: _AllowAuthority())
+
+    client.image_gen(
+        "openai/gpt-image-1",
+        "prompt",
+        params={"size": "1024x1024", "_authority_context": {"principal_id": "profile:work"}},
+    )
+    client.transcribe(
+        "openai/whisper-1",
+        "audio",
+        params={"language": "en", "_authority_context": {"principal_id": "profile:work"}},
+    )
+
+    assert client._providers["openai"].calls[0]["params"] == {"size": "1024x1024"}
+    assert client._providers["openai"].calls[1]["params"] == {"language": "en"}
 
 def test_ai_client_auto_register_keeps_oauth_provider_when_cloud_disabled(monkeypatch):
     from domain.ai_client.client import AIClient
