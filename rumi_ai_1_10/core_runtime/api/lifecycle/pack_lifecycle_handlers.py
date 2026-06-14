@@ -90,7 +90,7 @@ class PackLifecycleHandlersMixin:
 
             from ...pack_applier import get_pack_applier
             applier = get_pack_applier()
-            result = applier.apply_staging(staging_id, mode=mode)
+            result = applier.apply(staging_id, mode=mode)
             return result.to_dict() if hasattr(result, "to_dict") else result
         except Exception as e:
             _log_internal_error("pack_apply", e)

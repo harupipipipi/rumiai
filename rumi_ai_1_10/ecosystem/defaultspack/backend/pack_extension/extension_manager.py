@@ -2,19 +2,24 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from enum import Enum
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from core_runtime.validation import check_path_within, validate_pack_id
 
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parents[4]
 PACK_REQUESTS_ROOT = BASE_DIR / "user_data" / "packs" / "defaultspack" / "pack_requests"
 PACK_BACKUP_ROOT = BASE_DIR / "user_data" / "packs" / "defaultspack" / "pack_backups"
+PACK_STAGING_ROOT = BASE_DIR / "user_data" / "pack_staging"
 ECOSYSTEM_DIR = BASE_DIR / "ecosystem"
 
 
@@ -24,6 +29,21 @@ class PatchMode(str, Enum):
 
 
 PACK_REQUEST_MODES = frozenset(mode.value for mode in PatchMode)
+_STAGING_ID_RE = re.compile(r"^[a-fA-F0-9]{16}$")
+_REQUEST_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,80}$")
+
+
+def _is_safe_staging_id(value: str) -> bool:
+    try:
+        from core_runtime.validation import is_safe_staging_id
+
+        return is_safe_staging_id(value)
+    except Exception:
+        return bool(value and _STAGING_ID_RE.fullmatch(str(value)))
+
+
+def _is_safe_request_id(value: str) -> bool:
+    return bool(isinstance(value, str) and _REQUEST_ID_RE.fullmatch(value))
 
 
 @dataclass
@@ -41,6 +61,7 @@ class ExtensionRequest:
     exclusive: bool = False
     changed_paths: List[str] = field(default_factory=list)
     detected_pack_ids: List[str] = field(default_factory=list)
+    staging_meta_sha256: str = ""
     selection_required: bool = False
     selection_candidates: List[Dict[str, Any]] = field(default_factory=list)
     applied_pack_ids: List[str] = field(default_factory=list)
@@ -67,10 +88,12 @@ class ExtensionManager:
         requests_root: Path | None = None,
         ecosystem_dir: Path | None = None,
         backup_root: Path | None = None,
+        staging_root: Path | None = None,
     ) -> None:
         self.requests_root = Path(requests_root or PACK_REQUESTS_ROOT)
         self.ecosystem_dir = Path(ecosystem_dir or ECOSYSTEM_DIR)
         self.backup_root = Path(backup_root or PACK_BACKUP_ROOT)
+        self.staging_root = Path(staging_root or PACK_STAGING_ROOT)
         self._requests: Dict[str, ExtensionRequest] = {}
         self._audit: List[Dict[str, Any]] = []
 
@@ -79,7 +102,13 @@ class ExtensionManager:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     def _request_path(self, request_id: str) -> Path:
-        return self.requests_root / f"{request_id}.json"
+        if not _is_safe_request_id(request_id):
+            raise ValueError("invalid request_id")
+        path = self.requests_root / f"{request_id}.json"
+        path_ok, error = check_path_within(path, self.requests_root)
+        if not path_ok:
+            raise ValueError(error or "invalid request path")
+        return path
 
     def _write_request(self, request: ExtensionRequest) -> None:
         self.requests_root.mkdir(parents=True, exist_ok=True)
@@ -111,12 +140,19 @@ class ExtensionManager:
         data["summary"] = data.pop("notes", data.get("summary", ""))
         mode = data.get("mode", PatchMode.REQUEST_EXTENSION.value)
         data["mode"] = PatchMode(mode) if mode in PACK_REQUEST_MODES else mode
+        allowed = {item.name for item in fields(ExtensionRequest)}
+        data = {key: value for key, value in data.items() if key in allowed}
         return ExtensionRequest(**data)
 
     def _read_request(self, request_id: str) -> Optional[ExtensionRequest]:
+        if not _is_safe_request_id(request_id):
+            return None
         if request_id in self._requests:
             return self._requests[request_id]
-        path = self._request_path(request_id)
+        try:
+            path = self._request_path(request_id)
+        except ValueError:
+            return None
         if not path.is_file():
             return None
         try:
@@ -126,7 +162,14 @@ class ExtensionManager:
             return None
         if not isinstance(data, dict):
             return None
-        request = self._from_dict(data)
+        try:
+            request = self._from_dict(data)
+        except (TypeError, ValueError) as exc:
+            logger.warning("Invalid pack request %s: %s", path, exc)
+            return None
+        if request.request_id != request_id or not _is_safe_request_id(request.request_id):
+            logger.warning("Pack request id mismatch in %s", path)
+            return None
         self._requests[request.request_id] = request
         return request
 
@@ -202,6 +245,9 @@ class ExtensionManager:
         slot: str = "default",
         fullscreen: bool = False,
         exclusive: bool = False,
+        detected_pack_ids: Optional[List[str]] = None,
+        changed_paths: Optional[List[str]] = None,
+        staging_meta_sha256: str = "",
     ) -> ExtensionRequest:
         mode_value = mode.value if isinstance(mode, PatchMode) else str(mode)
         if mode_value not in PACK_REQUEST_MODES:
@@ -228,12 +274,94 @@ class ExtensionManager:
             slot=normalized_slot,
             fullscreen=normalized_fullscreen,
             exclusive=normalized_exclusive,
+            changed_paths=list(changed_paths or []),
+            detected_pack_ids=list(detected_pack_ids or []),
+            staging_meta_sha256=staging_meta_sha256,
             selection_required=bool(selection_candidates),
             selection_candidates=selection_candidates,
         )
         self._audit.append({"action": "create", "request_id": request.request_id, "mode": mode_value})
         self._write_request(request)
         return request
+
+    def _staging_dir_for(self, staging_id: str) -> Optional[Path]:
+        if not _is_safe_staging_id(staging_id):
+            return None
+        staging_dir = self.staging_root / str(staging_id)
+        path_ok, _ = check_path_within(staging_dir, self.staging_root)
+        if not path_ok:
+            return None
+        return staging_dir
+
+    def _load_staging_meta(self, staging_id: str) -> tuple[Dict[str, Any], str]:
+        staging_dir = self._staging_dir_for(staging_id)
+        if staging_dir is None:
+            raise ValueError("invalid staging_id")
+        meta_path = staging_dir / "meta.json"
+        path_ok, error = check_path_within(meta_path, staging_dir)
+        if not path_ok:
+            raise ValueError(error or "invalid staging metadata path")
+        if not meta_path.is_file():
+            raise FileNotFoundError("staging meta not found")
+        raw = meta_path.read_bytes()
+        try:
+            meta = json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            raise ValueError(f"invalid staging meta: {exc}") from exc
+        if not isinstance(meta, dict):
+            raise ValueError("invalid staging meta")
+        return meta, sha256(raw).hexdigest()
+
+    @staticmethod
+    def _normalize_detected_pack_ids(meta: Dict[str, Any]) -> List[str]:
+        detected = meta.get("detected_pack_ids")
+        if not isinstance(detected, list) or not detected:
+            raise ValueError("staging meta missing detected_pack_ids")
+        normalized: List[str] = []
+        for pack_id in detected:
+            if not isinstance(pack_id, str) or not validate_pack_id(pack_id):
+                raise ValueError(f"invalid detected pack_id: {pack_id}")
+            normalized.append(pack_id)
+        return normalized
+
+    @staticmethod
+    def _normalize_changed_paths(meta: Dict[str, Any]) -> List[str]:
+        changed = meta.get("changed_paths")
+        proposal_info = meta.get("proposal_info")
+        if changed is None and isinstance(proposal_info, dict):
+            changed = proposal_info.get("changed_paths")
+        if changed is None:
+            return []
+        if not isinstance(changed, list):
+            raise ValueError("invalid changed_paths in staging meta")
+        normalized: List[str] = []
+        for item in changed:
+            if not isinstance(item, str):
+                raise ValueError("invalid changed path in staging meta")
+            path = item.replace("\\", "/").strip()
+            parts = [part for part in path.split("/") if part]
+            if (
+                not path
+                or len(path) > 512
+                or path.startswith("/")
+                or "\x00" in path
+                or any(part in {".", ".."} for part in parts)
+            ):
+                raise ValueError(f"invalid changed path in staging meta: {item}")
+            normalized.append(path)
+        return normalized
+
+    def _snapshot_staging_meta(self, staging_id: str) -> Dict[str, Any]:
+        meta, digest = self._load_staging_meta(staging_id)
+        return {
+            "detected_pack_ids": self._normalize_detected_pack_ids(meta),
+            "changed_paths": self._normalize_changed_paths(meta),
+            "staging_meta_sha256": digest,
+        }
+
+    @staticmethod
+    def _metadata_mismatch_response() -> Dict[str, Any]:
+        return {"error": "staging metadata changed since request creation", "status_code": 409}
 
     def create_pack_request(
         self,
@@ -249,6 +377,22 @@ class ExtensionManager:
     ) -> Dict[str, Any]:
         if not staging_id:
             return {"error": "staging_id is required", "status_code": 400}
+        if not _is_safe_staging_id(staging_id):
+            return {"error": "invalid staging_id", "status_code": 400}
+        try:
+            staging_snapshot = self._snapshot_staging_meta(staging_id)
+        except FileNotFoundError:
+            return {"error": "staging meta not found", "status_code": 404}
+        except ValueError as exc:
+            return {"error": str(exc), "status_code": 400}
+        detected_pack_ids = staging_snapshot["detected_pack_ids"]
+        if target_pack_id:
+            if not validate_pack_id(target_pack_id):
+                return {"error": "invalid target_pack_id", "status_code": 400}
+            if target_pack_id not in detected_pack_ids:
+                return {"error": "target_pack_id does not match staging metadata", "status_code": 400}
+        else:
+            target_pack_id = detected_pack_ids[0]
         try:
             request = self.create_request(
                 mode,
@@ -259,6 +403,9 @@ class ExtensionManager:
                 slot=slot,
                 fullscreen=fullscreen,
                 exclusive=exclusive,
+                detected_pack_ids=detected_pack_ids,
+                changed_paths=staging_snapshot["changed_paths"],
+                staging_meta_sha256=staging_snapshot["staging_meta_sha256"],
             )
         except ValueError as exc:
             return {"error": str(exc), "status_code": 400}
@@ -280,6 +427,8 @@ class ExtensionManager:
         }
 
     def get_request(self, request_id: str) -> Dict[str, Any]:
+        if not _is_safe_request_id(request_id):
+            return {"error": "invalid request_id", "status_code": 400}
         request = self._read_request(request_id)
         if request is None:
             return {"error": f"Unknown request: {request_id}", "status_code": 404}
@@ -310,17 +459,66 @@ class ExtensionManager:
         reviewer: str = "user",
         decision_notes: str = "",
     ) -> Dict[str, Any]:
+        if not _is_safe_request_id(request_id):
+            return {"error": "invalid request_id", "status_code": 400}
         request = self._read_request(request_id)
         if request is None:
             return {"error": f"Unknown request: {request_id}", "status_code": 404}
         if request.status != "pending":
             return {"error": f"Request is not pending: {request.status}", "status_code": 409}
+        if not _is_safe_staging_id(request.staging_id):
+            return {"error": "invalid staging_id", "status_code": 400}
+        if not request.detected_pack_ids or not request.staging_meta_sha256:
+            return {"error": "request is missing staging metadata snapshot", "status_code": 409}
+        try:
+            staging_snapshot = self._snapshot_staging_meta(request.staging_id)
+        except FileNotFoundError:
+            return {"error": "staging meta not found", "status_code": 404}
+        except ValueError as exc:
+            return {"error": str(exc), "status_code": 400}
+        if (
+            request.detected_pack_ids != staging_snapshot["detected_pack_ids"]
+            or request.changed_paths != staging_snapshot["changed_paths"]
+            or request.staging_meta_sha256 != staging_snapshot["staging_meta_sha256"]
+        ):
+            return self._metadata_mismatch_response()
+
+        try:
+            from core_runtime.pack_applier import PackApplier
+
+            apply_result = PackApplier(
+                ecosystem_dir=str(self.ecosystem_dir),
+                backup_root=str(self.backup_root),
+                staging_root=str(self.staging_root),
+            ).apply(request.staging_id, mode="replace", actor=reviewer)
+        except Exception as exc:
+            request.error = str(exc)
+            request.reviewed_at = self._now_ts()
+            self._write_request(request)
+            return {"error": "pack apply failed", "detail": str(exc), "status_code": 500}
+
+        if not getattr(apply_result, "success", False):
+            request.error = getattr(apply_result, "error", None) or "pack apply failed"
+            request.reviewed_at = self._now_ts()
+            self._write_request(request)
+            payload = apply_result.to_dict() if hasattr(apply_result, "to_dict") else {"error": request.error}
+            payload.setdefault("status_code", 500)
+            return payload
+
         request.status = "applied"
         request.reviewed_at = self._now_ts()
         request.applied_at = request.reviewed_at
         request.decision_notes = decision_notes
+        request.applied_pack_ids = list(getattr(apply_result, "applied_pack_ids", []) or [])
+        request.backup_paths = dict(getattr(apply_result, "backup_paths", {}) or {})
+        request.error = None
         self._write_request(request)
-        self._audit.append({"action": "approve_request", "request_id": request_id, "reviewer": reviewer})
+        self._audit.append({
+            "action": "approve_request",
+            "request_id": request_id,
+            "reviewer": reviewer,
+            "applied_pack_ids": request.applied_pack_ids,
+        })
         return request.to_dict()
 
     def reject_request(
@@ -329,6 +527,8 @@ class ExtensionManager:
         reviewer: str = "user",
         reason: str = "",
     ) -> Dict[str, Any]:
+        if not _is_safe_request_id(request_id):
+            return {"error": "invalid request_id", "status_code": 400}
         request = self._read_request(request_id)
         if request is None:
             return {"error": f"Unknown request: {request_id}", "status_code": 404}
@@ -348,16 +548,24 @@ class ExtensionManager:
         reviewer: str = "user",
         notes: str = "",
     ) -> Dict[str, Any]:
+        if not _is_safe_request_id(request_id):
+            return {"error": "invalid request_id", "status_code": 400}
         request = self._read_request(request_id)
         if request is None:
             return {"error": f"Unknown request: {request_id}", "status_code": 404}
         if request.status != "applied":
             return {"error": f"Request is not applied: {request.status}", "status_code": 409}
+        if not isinstance(request.backup_paths, dict):
+            return {"error": "invalid backup_paths", "status_code": 400}
+        if not isinstance(request.applied_pack_ids, list):
+            return {"error": "invalid applied_pack_ids", "status_code": 400}
 
         backup_root_resolved = self.backup_root.resolve()
         restored = []
         removed = []
         for pack_id, backup_path in request.backup_paths.items():
+            if not isinstance(pack_id, str) or not validate_pack_id(pack_id):
+                return {"error": f"Invalid pack_id for rollback: {pack_id}", "status_code": 400}
             source = Path(backup_path).resolve()
             try:
                 source.relative_to(backup_root_resolved)
@@ -366,15 +574,23 @@ class ExtensionManager:
             if not source.is_dir():
                 return {"error": f"Backup not found for {pack_id}", "status_code": 404}
             dest = self.ecosystem_dir / pack_id
+            dest_ok, dest_error = check_path_within(dest, self.ecosystem_dir)
+            if not dest_ok:
+                return {"error": dest_error or f"Invalid destination for {pack_id}", "status_code": 400}
             if dest.exists():
                 shutil.rmtree(dest)
             shutil.copytree(str(source), str(dest), symlinks=False)
             restored.append(pack_id)
 
         for pack_id in request.applied_pack_ids:
+            if not isinstance(pack_id, str) or not validate_pack_id(pack_id):
+                return {"error": f"Invalid pack_id for rollback: {pack_id}", "status_code": 400}
             if pack_id in request.backup_paths:
                 continue
             dest = self.ecosystem_dir / pack_id
+            dest_ok, dest_error = check_path_within(dest, self.ecosystem_dir)
+            if not dest_ok:
+                return {"error": dest_error or f"Invalid destination for {pack_id}", "status_code": 400}
             if dest.exists():
                 shutil.rmtree(dest)
             removed.append(pack_id)

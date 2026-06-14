@@ -309,6 +309,7 @@ CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("coding_git_branch_create", "Create a git branch.", "high", "blocks.coding.git_branch"),
         ("coding_git_commit", "Create a git commit.", "high", "blocks.coding.git_commit"),
         ("coding_git_push", "Push git changes.", "high", "blocks.coding.git_push"),
+        ("coding_rumi_log", "List or append local .rumi coding history.", "medium", "blocks.coding.rumi_log"),
         ("coding_approval_list", "List pending coding approvals.", "low", "blocks.coding.approval_list"),
         ("coding_approval_approve", "Approve a pending coding operation.", "medium", "blocks.coding.approval_approve"),
         ("coding_approval_deny", "Deny a pending coding operation.", "medium", "blocks.coding.approval_deny"),
@@ -392,6 +393,45 @@ AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("agent_org_report", "Request an agent organization report.", "medium", "blocks.agent.org.report"),
         ("agent_org_transfer_context", "Transfer context to an agent organization.", "medium", "blocks.agent.org.transfer_context"),
     )
+)
+
+
+REMOTE_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "remote_task_create",
+        "Create and optionally dispatch a remote task.",
+        ("remote", "task"),
+        risk="medium",
+        block="blocks.remote.task_create",
+    ),
+    _spec(
+        "remote_task_get",
+        "Get a remote task snapshot.",
+        ("remote", "task"),
+        risk="low",
+        block="blocks.remote.task_get",
+    ),
+    _spec(
+        "remote_task_events",
+        "List remote task timeline events.",
+        ("remote", "task"),
+        risk="low",
+        block="blocks.remote.task_events",
+    ),
+    _spec(
+        "remote_task_cancel",
+        "Cancel a remote task and linked agent runs.",
+        ("remote", "task"),
+        risk="medium",
+        block="blocks.remote.task_cancel",
+    ),
+    _spec(
+        "remote_host_status",
+        "Get remote host readiness and runtime status.",
+        ("remote", "host"),
+        risk="low",
+        block="blocks.remote.host_status",
+    ),
 )
 
 
@@ -552,6 +592,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + CONVERSATION_FUNCTIONS
     + CODING_FUNCTIONS
     + AGENT_FUNCTIONS
+    + REMOTE_FUNCTIONS
     + BROWSER_ARTIFACT_FUNCTIONS
     + RECORDING_FUNCTIONS
     + DATA_FUNCTIONS

@@ -38,6 +38,7 @@ SENSITIVE_CODING_PATHS = {
 
 METHOD_SENSITIVE_CODING_PATHS = {
     "/api/coding/git/branch": {"POST"},
+    "/api/coding/rumi-log": {"POST"},
     "/api/coding/workspaces": {"POST"},
 }
 

@@ -509,7 +509,39 @@ class FrontendRegistry:
                             "Concrete UI entries are supplied by frontend extension packs.",
                         ],
                     },
-                }
+                },
+                {
+                    "id": "runtime-management",
+                    "label": "Runtime Management",
+                    "category": "system",
+                    "description": "Pack modules, pack requests, and migration state.",
+                    "tags": ["pack", "management", "runtime"],
+                    "origin": {"kind": "builtin", "path": "ecosystem/defaultspack/api_routes"},
+                    "panel": {
+                        "kind": "actions",
+                        "title": "Runtime Management",
+                        "actions": [
+                            {
+                                "id": "list_modules",
+                                "label": "Modules",
+                                "method": "GET",
+                                "endpoint": "/api/defaultspack/modules",
+                            },
+                            {
+                                "id": "list_pack_requests",
+                                "label": "Pack Requests",
+                                "method": "GET",
+                                "endpoint": "/api/defaultspack/pack-requests",
+                            },
+                            {
+                                "id": "migration_status",
+                                "label": "Migration Status",
+                                "method": "GET",
+                                "endpoint": "/api/defaultspack/migration/status",
+                            },
+                        ],
+                    },
+                },
             ]
         )
 
