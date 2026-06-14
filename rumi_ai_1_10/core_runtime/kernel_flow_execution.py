@@ -61,6 +61,7 @@ import copy
 import re
 import time
 import uuid
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .paths import BASE_DIR
@@ -87,6 +88,11 @@ _UC_MAX_RESPONSE_SIZE = 1 * 1024 * 1024   # 1 MiB
 _UC_MAX_TIMEOUT = 120.0                    # seconds
 _UC_DEFAULT_TIMEOUT = 30.0                 # seconds
 _UC_VALID_RUNTIMES = frozenset({"python", "binary", "command"})
+_FLOW_AUTHORIZATION_SOURCE_UNSET = object()
+_FLOW_AUTHORIZATION_SOURCE_METADATA = ContextVar(
+    "rumi_flow_authorization_source_metadata",
+    default=_FLOW_AUTHORIZATION_SOURCE_UNSET,
+)
 
 class KernelFlowExecutionMixin:
     """
@@ -126,9 +132,42 @@ class KernelFlowExecutionMixin:
             return step.get("depends_on")
         return getattr(step, "depends_on", None)
 
+    @staticmethod
+    def _snapshot_flow_authorization_metadata(ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """Copy source metadata before flow steps can mutate kernel-owned ctx keys."""
+        return {
+            "source_type": ctx.get("_flow_source_type"),
+            "source_file": ctx.get("_flow_source_file"),
+            "source_pack_id": ctx.get("_flow_source_pack_id"),
+        }
+
+    def _get_flow_source_metadata_for_authorization(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """Return the immutable flow source metadata recorded for this step scope."""
+        metadata = _FLOW_AUTHORIZATION_SOURCE_METADATA.get()
+        if metadata is _FLOW_AUTHORIZATION_SOURCE_UNSET:
+            return self._snapshot_flow_authorization_metadata(ctx)
+        if isinstance(metadata, dict):
+            return dict(metadata)
+        return {"source_type": metadata, "source_file": None, "source_pack_id": None}
+
+    def _get_flow_source_type_for_authorization(self, ctx: Dict[str, Any]) -> str:
+        """Return the immutable flow source type recorded when step execution started."""
+        metadata = self._get_flow_source_metadata_for_authorization(ctx)
+        return str(metadata.get("source_type") or "").strip()
+
+    def _ensure_flow_authorization_context(self, ctx: Dict[str, Any]) -> Any:
+        """Snapshot mutable source metadata before any flow step can alter ctx."""
+        return _FLOW_AUTHORIZATION_SOURCE_METADATA.set(
+            self._snapshot_flow_authorization_metadata(ctx)
+        )
+
+    def _clear_flow_authorization_context(self, token: Any) -> None:
+        """Remove the immutable source snapshot for a completed flow context."""
+        _FLOW_AUTHORIZATION_SOURCE_METADATA.reset(token)
+
     def _is_pack_flow_context(self, ctx: Dict[str, Any]) -> bool:
         """Return True when the current async flow originated from an approved pack."""
-        return str(ctx.get("_flow_source_type") or "").strip() in self._PACK_FLOW_SOURCE_TYPES
+        return self._get_flow_source_type_for_authorization(ctx) in self._PACK_FLOW_SOURCE_TYPES
 
     def _is_kernel_handler_allowed_for_pack_flow(self, handler_key: str) -> bool:
         """Allow only inert/sandboxed kernel handlers needed by pack flow syntax."""
@@ -152,6 +191,7 @@ class KernelFlowExecutionMixin:
         phase: str = "flow",
     ) -> None:
         """Record an authorization skip for a blocked pack-flow kernel handler."""
+        source_metadata = self._get_flow_source_metadata_for_authorization(ctx)
         self.diagnostics.record_step(
             phase=phase,
             step_id=f"{step_id or 'unknown'}.kernel_handler.blocked",
@@ -160,8 +200,9 @@ class KernelFlowExecutionMixin:
             meta={
                 "reason": "pack_flow_kernel_handler_not_allowed",
                 "flow_id": ctx.get("_flow_id"),
-                "source_type": ctx.get("_flow_source_type"),
-                "source_pack_id": ctx.get("_flow_source_pack_id"),
+                "source_type": str(source_metadata.get("source_type") or "").strip(),
+                "source_file": source_metadata.get("source_file"),
+                "source_pack_id": source_metadata.get("source_pack_id"),
             },
         )
 
@@ -538,117 +579,121 @@ class KernelFlowExecutionMixin:
                 pass
 
     async def _execute_steps_async(self, steps: List[Dict[str, Any]], ctx: Dict[str, Any]) -> Dict[str, Any]:
+        authorization_scope_token = self._ensure_flow_authorization_context(ctx)
         executed_ids: Set[str] = set()
-        for i, step in enumerate(steps):
-            if not isinstance(step, dict) or ctx.get("_flow_timeout"):
-                continue
-            ctx["_current_step_index"] = i
-            step_id = step.get("id", f"step_{i}")
-            step_type = step.get("type", "handler")
-            if step.get("when") and not self._eval_condition(step["when"], ctx):
-                continue
-            # --- Wave 10-C: depends_on check ---
-            dep_ok, dep_missing = self._check_depends_on(step, executed_ids)
-            if not dep_ok:
-                fail_soft = ctx.get("_flow_defaults", {}).get("fail_soft", True)
-                if fail_soft:
-                    _logger.warning(
-                        f"Step '{step_id}' skipped: depends_on not satisfied (missing: {dep_missing})",
-                    )
-                    self.diagnostics.record_step(
-                        phase="flow",
-                        step_id=f"{step_id}.depends_on.skipped",
-                        handler="kernel:depends_on_check",
-                        status="skipped",
-                        meta={
-                            "missing_deps": dep_missing,
-                            "flow_id": ctx.get("_flow_id"),
-                        },
-                    )
+        try:
+            for i, step in enumerate(steps):
+                if not isinstance(step, dict) or ctx.get("_flow_timeout"):
                     continue
-                else:
-                    self.diagnostics.record_step(
-                        phase="flow",
-                        step_id=f"{step_id}.depends_on.abort",
-                        handler="kernel:depends_on_check",
-                        status="failed",
-                        meta={
-                            "missing_deps": dep_missing,
-                            "flow_id": ctx.get("_flow_id"),
-                        },
-                    )
-                    return ctx
-            # --- end depends_on check ---
-            meta = {"flow_id": ctx.get("_flow_id"), "execution_id": ctx.get("_flow_execution_id"),
-                    "step_index": i, "total_steps": ctx.get("_total_steps", len(steps)),
-                    "parent_execution_id": ctx.get("_parent_flow_execution_id")}
-            should_skip, should_abort = False, False
-            for hook in self.interface_registry.get("flow.hooks.before_step", strategy="all"):
-                if callable(hook):
-                    try:
-                        result = hook(step, ctx, meta)
-                        if isinstance(result, dict):
-                            if result.get("_skip"):
-                                should_skip = True
-                                break
-                            if result.get("_abort"):
-                                should_abort = True
-                                break
-                    except Exception as e:
-                        self.diagnostics.record_step(phase="flow", step_id=f"{step_id}.before_hook",
-                                                      handler="flow.hooks.before_step", status="failed", error=e)
-            if should_abort:
-                return ctx
-            if should_skip:
-                continue
-            step_result = None
-            try:
-                if step_type == "handler":
-                    ctx, step_result = await self._execute_handler_step_async(step, ctx)
-                elif step_type == "flow":
-                    ctx, step_result = await self._execute_sub_flow_step(step, ctx)
-                elif step_type == "function":
-                    ctx, step_result = await self._execute_function_step_async(step, ctx)
-                else:
-                    construct = self.interface_registry.get(f"flow.construct.{step_type}")
-                    if construct and callable(construct):
-                        # Wave 17-A: Pack の construct に Kernel 直接参照を渡さず KernelFacade でラップ
-                        _facade = KernelFacade(self)
-                        ctx = await construct(_facade, step, ctx) if asyncio.iscoroutinefunction(construct) else construct(_facade, step, ctx)
-                # C5: check flow control abort after step execution
-                if ctx.get("_flow_control_abort"):
-                    return ctx
-                for hook in self.interface_registry.get("flow.hooks.after_step", strategy="all"):
+                ctx["_current_step_index"] = i
+                step_id = step.get("id", f"step_{i}")
+                step_type = step.get("type", "handler")
+                if step.get("when") and not self._eval_condition(step["when"], ctx):
+                    continue
+                # --- Wave 10-C: depends_on check ---
+                dep_ok, dep_missing = self._check_depends_on(step, executed_ids)
+                if not dep_ok:
+                    fail_soft = ctx.get("_flow_defaults", {}).get("fail_soft", True)
+                    if fail_soft:
+                        _logger.warning(
+                            f"Step '{step_id}' skipped: depends_on not satisfied (missing: {dep_missing})",
+                        )
+                        self.diagnostics.record_step(
+                            phase="flow",
+                            step_id=f"{step_id}.depends_on.skipped",
+                            handler="kernel:depends_on_check",
+                            status="skipped",
+                            meta={
+                                "missing_deps": dep_missing,
+                                "flow_id": ctx.get("_flow_id"),
+                            },
+                        )
+                        continue
+                    else:
+                        self.diagnostics.record_step(
+                            phase="flow",
+                            step_id=f"{step_id}.depends_on.abort",
+                            handler="kernel:depends_on_check",
+                            status="failed",
+                            meta={
+                                "missing_deps": dep_missing,
+                                "flow_id": ctx.get("_flow_id"),
+                            },
+                        )
+                        return ctx
+                # --- end depends_on check ---
+                meta = {"flow_id": ctx.get("_flow_id"), "execution_id": ctx.get("_flow_execution_id"),
+                        "step_index": i, "total_steps": ctx.get("_total_steps", len(steps)),
+                        "parent_execution_id": ctx.get("_parent_flow_execution_id")}
+                should_skip, should_abort = False, False
+                for hook in self.interface_registry.get("flow.hooks.before_step", strategy="all"):
                     if callable(hook):
                         try:
-                            hook(step, ctx, step_result, meta)
+                            result = hook(step, ctx, meta)
+                            if isinstance(result, dict):
+                                if result.get("_skip"):
+                                    should_skip = True
+                                    break
+                                if result.get("_abort"):
+                                    should_abort = True
+                                    break
                         except Exception as e:
-                            _logger.debug(f"after_step hook failed: {e}")
-                            self.diagnostics.record_step(
-                                phase="flow",
-                                step_id=f"{step_id}.after_hook",
-                                handler="flow.hooks.after_step",
-                                status="failed",
-                                error=e,
-                            )
-                # --- Wave 10-C: mark step as executed on success ---
-                executed_ids.add(step_id)
-            except Exception as e:
-                error_handler = self.interface_registry.get("flow.error_handler")
-                if error_handler and callable(error_handler):
-                    try:
-                        action = error_handler(step, ctx, e)
-                        if action == "abort":
-                            self.diagnostics.record_step(phase="flow", step_id=f"{step_id}.error",
-                                                          handler=step.get("handler", "unknown"), status="failed", error=e, meta={"action": "abort"})
-                            return ctx
-                        if action == "retry":
-                            continue
-                    except Exception:
-                        pass
-                self.diagnostics.record_step(phase="flow", step_id=f"{step_id}.error",
-                                              handler=step.get("handler", "unknown"), status="failed", error=e, meta={"action": "continue"})
-        return ctx
+                            self.diagnostics.record_step(phase="flow", step_id=f"{step_id}.before_hook",
+                                                          handler="flow.hooks.before_step", status="failed", error=e)
+                if should_abort:
+                    return ctx
+                if should_skip:
+                    continue
+                step_result = None
+                try:
+                    if step_type == "handler":
+                        ctx, step_result = await self._execute_handler_step_async(step, ctx)
+                    elif step_type == "flow":
+                        ctx, step_result = await self._execute_sub_flow_step(step, ctx)
+                    elif step_type == "function":
+                        ctx, step_result = await self._execute_function_step_async(step, ctx)
+                    else:
+                        construct = self.interface_registry.get(f"flow.construct.{step_type}")
+                        if construct and callable(construct):
+                            # Wave 17-A: Pack の construct に Kernel 直接参照を渡さず KernelFacade でラップ
+                            _facade = KernelFacade(self)
+                            ctx = await construct(_facade, step, ctx) if asyncio.iscoroutinefunction(construct) else construct(_facade, step, ctx)
+                    # C5: check flow control abort after step execution
+                    if ctx.get("_flow_control_abort"):
+                        return ctx
+                    for hook in self.interface_registry.get("flow.hooks.after_step", strategy="all"):
+                        if callable(hook):
+                            try:
+                                hook(step, ctx, step_result, meta)
+                            except Exception as e:
+                                _logger.debug(f"after_step hook failed: {e}")
+                                self.diagnostics.record_step(
+                                    phase="flow",
+                                    step_id=f"{step_id}.after_hook",
+                                    handler="flow.hooks.after_step",
+                                    status="failed",
+                                    error=e,
+                                )
+                    # --- Wave 10-C: mark step as executed on success ---
+                    executed_ids.add(step_id)
+                except Exception as e:
+                    error_handler = self.interface_registry.get("flow.error_handler")
+                    if error_handler and callable(error_handler):
+                        try:
+                            action = error_handler(step, ctx, e)
+                            if action == "abort":
+                                self.diagnostics.record_step(phase="flow", step_id=f"{step_id}.error",
+                                                              handler=step.get("handler", "unknown"), status="failed", error=e, meta={"action": "abort"})
+                                return ctx
+                            if action == "retry":
+                                continue
+                        except Exception:
+                            pass
+                    self.diagnostics.record_step(phase="flow", step_id=f"{step_id}.error",
+                                                  handler=step.get("handler", "unknown"), status="failed", error=e, meta={"action": "continue"})
+            return ctx
+        finally:
+            self._clear_flow_authorization_context(authorization_scope_token)
 
     async def _execute_handler_step_async(self, step: Dict[str, Any], ctx: Dict[str, Any]) -> Tuple[Dict[str, Any], Any]:
         handler_key = step.get("handler")

@@ -276,8 +276,14 @@ class TestWave28B_RuntimeDispatch:
             manifest={},
         )
 
-        with patch("core_runtime.capability_executor._DockerRunBuilder", mock_builder_cls), \
-             patch("subprocess.run", return_value=mock_proc), \
+        mock_subprocess = MagicMock()
+        mock_subprocess.run.return_value = mock_proc
+        mock_subprocess.TimeoutExpired = TimeoutError
+
+        with patch.dict(
+            executor._execute_user_function_docker.__globals__,
+            {"_DockerRunBuilder": mock_builder_cls, "subprocess": mock_subprocess},
+        ), \
              patch.object(executor, "_is_docker_available", return_value=True), \
              patch("os.unlink"), \
              patch("tempfile.NamedTemporaryFile") as mock_tmp:
