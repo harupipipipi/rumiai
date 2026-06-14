@@ -42,6 +42,7 @@ from .api.route_handlers import _compile_template_path, _is_safe_path_param
 from .api.api_response import APIResponse
 
 from .api import (
+    AuthorityHandlersMixin,
     PackHandlersMixin,
     ContainerHandlersMixin,
     NetworkHandlersMixin,
@@ -183,6 +184,7 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
 class PackAPIHandler(
     PackHandlersMixin,
     ContainerHandlersMixin,
+    AuthorityHandlersMixin,
     NetworkHandlersMixin,
     CapabilityGrantHandlersMixin,
     StoreShareHandlersMixin,
@@ -1613,7 +1615,37 @@ class PackAPIHandler(
             if self._dispatch_defaultspack_http_route("GET", path):
                 return
 
-            if path == "/api/packs":
+            if path == "/api/authority/requests":
+                status_filter = query.get("status", "all")
+                result = self._authority_requests(status_filter)
+                self._send_result(result)
+
+            elif path.startswith("/api/authority/requests/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4:
+                    request_id = unquote(parts[3])
+                    result = self._authority_request(request_id)
+                    if result.get("success"):
+                        self._send_result(result.get("request", {}))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Authority request not found")), result.get("status_code", 404))
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
+            elif path == "/api/authority/grants":
+                principal_id = query.get("principal_id", "")
+                result = self._authority_grants(principal_id)
+                self._send_result(result)
+
+            elif path == "/api/authority/events":
+                try:
+                    limit = int(query.get("limit", "200") or 200)
+                except ValueError:
+                    limit = 200
+                result = self._authority_events(limit)
+                self._send_result(result)
+
+            elif path == "/api/packs":
                 result = self._get_all_packs()
                 self._send_result(result)
             
@@ -1827,7 +1859,35 @@ class PackAPIHandler(
             if self._dispatch_defaultspack_http_route("POST", path, body):
                 return
 
-            if path == "/api/network/grant":
+            if path == "/api/authority/check":
+                result = self._authority_check(body)
+                self._send_result(result)
+
+            elif path.startswith("/api/authority/requests/") and path.endswith("/approve"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 5:
+                    request_id = unquote(parts[3])
+                    result = self._authority_approve(request_id, body)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Authority approve failed")), result.get("status_code", 400))
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
+            elif path.startswith("/api/authority/requests/") and path.endswith("/deny"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 5:
+                    request_id = unquote(parts[3])
+                    result = self._authority_deny(request_id, body)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Authority deny failed")), result.get("status_code", 400))
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
+            elif path == "/api/network/grant":
                 pack_id = body.get("pack_id", "")
                 allowed_domains = body.get("allowed_domains", [])
                 allowed_ports = body.get("allowed_ports", [])
@@ -2300,8 +2360,21 @@ class PackAPIHandler(
             if self._dispatch_defaultspack_http_route("DELETE", path):
                 return
 
+            if path.startswith("/api/authority/grants/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 5:
+                    principal_id = unquote(parts[3])
+                    permission_id = unquote(parts[4])
+                    if not principal_id or not permission_id:
+                        self._send_response(APIResponse(False, error="Missing principal_id or permission_id"), 400)
+                        return
+                    result = self._authority_delete_grant(principal_id, permission_id)
+                    self._send_result(result)
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
             # --- W19-B: Secret Grant DELETE endpoints ---
-            if path.startswith("/api/secrets/grants/"):
+            elif path.startswith("/api/secrets/grants/"):
                 parts = path.strip("/").split("/")
                 # DELETE /api/secrets/grants/{pack_id}/{secret_key} (5 parts)
                 if len(parts) == 5:

@@ -1,4 +1,5 @@
 import type { ToolPreviewItem } from "../components/ToolPreview";
+import type { AuthorityApprovalScope } from "./authorityApproval";
 
 const DEFAULTSPACK_CSRF_STORAGE_KEY = "rumi-defaultspack-csrf";
 
@@ -141,6 +142,66 @@ export type CodingApprovalDecision = {
   token?: string;
   expires_at?: number | null;
   reason?: string;
+};
+
+export type AuthorityApprovalDecision = {
+  request_id: string;
+  approved: boolean;
+  scope: AuthorityApprovalScope;
+  token?: string;
+  expires_at?: string | null;
+  principal_id?: string;
+  permission_id?: string;
+  config?: Record<string, unknown>;
+};
+
+export type AuthorityUiOperator = {
+  version: number;
+  kind: "ui_operator";
+  origin: string;
+  window_label: string;
+  request_id: string;
+  issued_at: number;
+  expires_at: number;
+  nonce: string;
+  signature: string;
+};
+
+export type AuthorityRequestDisplayMetadata = {
+  title?: string;
+  summary?: string;
+  permission_id?: string;
+  provider_id?: string | null;
+  api_id?: string | null;
+  model_id?: string | null;
+  function_id?: string | null;
+  pack_id?: string | null;
+  risk_level?: string;
+  audit_text?: string;
+};
+
+export type AuthorityRequest = {
+  request_id: string;
+  status: "pending" | "approved" | "denied" | "expired" | string;
+  principal_id: string;
+  permission_id: string;
+  resource: Record<string, unknown>;
+  reason: string;
+  risk_level: string;
+  created_at: string;
+  expires_at?: string | null;
+  conversation_id?: string | null;
+  profile_id?: string | null;
+  node_id?: string | null;
+  graph_id?: string | null;
+  display_metadata?: AuthorityRequestDisplayMetadata;
+  allowed_scopes?: AuthorityApprovalScope[];
+};
+
+export type AuthorityRequestsResponse = {
+  requests: AuthorityRequest[];
+  pending: AuthorityRequest[];
+  count: number;
 };
 
 export type CodingCheckpoint = {
@@ -2412,6 +2473,58 @@ export const api = {
     return request<Record<string, unknown>>("/api/coding/approvals/deny", {
       method: "POST",
       body: JSON.stringify({ approval_request_id: requestId, reason }),
+    });
+  },
+
+  listAuthorityRequests(options?: { status?: "all" | "pending" | "approved" | "denied" | "expired" | string }) {
+    return request<AuthorityRequestsResponse>(
+      withQuery("/api/authority/requests", { status: options?.status ?? "all" }),
+      { cache: "no-store" },
+    );
+  },
+
+  getAuthorityRequest(requestId: string) {
+    return request<AuthorityRequest>(
+      `/api/authority/requests/${encodeURIComponent(requestId)}`,
+      { cache: "no-store" },
+    );
+  },
+
+  approveAuthorityApproval(
+    requestId: string,
+    options?: {
+      scope?: AuthorityApprovalScope;
+      config?: Record<string, unknown>;
+      expires_in_seconds?: number;
+      ui_operator?: AuthorityUiOperator;
+    },
+  ) {
+    return request<AuthorityApprovalDecision>(`/api/authority/requests/${encodeURIComponent(requestId)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({
+        scope: options?.scope ?? "once",
+        config: options?.config,
+        expires_in_seconds: options?.expires_in_seconds,
+        ui_operator: options?.ui_operator,
+      }),
+    });
+  },
+
+  denyAuthorityApproval(
+    requestId: string,
+    reasonOrOptions?: string | { reason?: string; persist?: boolean; ui_operator?: AuthorityUiOperator },
+    persist?: boolean,
+  ) {
+    const options = typeof reasonOrOptions === "object" && reasonOrOptions !== null
+      ? reasonOrOptions
+      : { reason: reasonOrOptions, persist };
+    return request<Record<string, unknown>>(`/api/authority/requests/${encodeURIComponent(requestId)}/deny`, {
+      method: "POST",
+      body: JSON.stringify({
+        reason: options.reason,
+        persist: Boolean(options.persist),
+        ui_operator: options.ui_operator,
+      }),
     });
   },
 

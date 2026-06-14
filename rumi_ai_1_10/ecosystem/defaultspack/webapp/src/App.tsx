@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
+import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
+import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { WarmActionIcon } from "./components/WarmActionIcon";
@@ -8,6 +10,8 @@ import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryB
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type ShellRegion, type ShellRenderer, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { authorityApprovalTitle, pendingAuthorityApproval } from "./lib/authorityApproval";
+import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
@@ -15,6 +19,7 @@ import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
+import { openAuthorityApprovalWindow } from "./lib/desktopApproval";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
@@ -2089,7 +2094,7 @@ function modelCommandInputQuery(value: string): string | null {
   return String(match[1] ?? "").trim();
 }
 
-export default function App() {
+function ChatApp() {
   const [catalog, setCatalog] = useState<UICatalog | null>(null);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [settingsSections, setSettingsSections] = useState<SettingsSection[]>([]);
@@ -2153,6 +2158,7 @@ export default function App() {
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
+  const authorityApprovalWindowRequestRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (mode === "chat") {
@@ -2236,13 +2242,30 @@ export default function App() {
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
   );
   const browserApproval = pendingBrowserApproval(messages);
+  const rawAuthorityApproval = pendingAuthorityApproval(messages);
   const rawRuntimeApproval = pendingRuntimeApproval(messages);
   const settledRuntimeApprovalIdSet = useMemo(() => new Set(settledRuntimeApprovalIds), [settledRuntimeApprovalIds]);
+  const authorityApproval = !ultraYoloMode && rawAuthorityApproval && !settledRuntimeApprovalIdSet.has(rawAuthorityApproval.requestId)
+    ? rawAuthorityApproval
+    : null;
   const runtimeApproval = !ultraYoloMode && rawRuntimeApproval && !settledRuntimeApprovalIdSet.has(rawRuntimeApproval.requestId)
     ? rawRuntimeApproval
     : null;
   const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
   const visibleBrowserApproval = !ultraYoloMode ? browserApproval : null;
+
+  useEffect(() => {
+    if (!authorityApproval) {
+      authorityApprovalWindowRequestRef.current = null;
+      return;
+    }
+    if (authorityApprovalWindowRequestRef.current === authorityApproval.requestId) return;
+    authorityApprovalWindowRequestRef.current = authorityApproval.requestId;
+    void openAuthorityApprovalWindow(authorityApproval.requestId).catch(() => {
+      authorityApprovalWindowRequestRef.current = null;
+    });
+  }, [authorityApproval?.requestId]);
+
   const composerModelStatusIndicators = useMemo<ComposerModelStatusIndicator[]>(() => {
     if (ultraYoloMode) {
       return [
@@ -2719,6 +2742,15 @@ export default function App() {
 
     await loadConversation(targetId);
   }
+
+  useEffect(() => subscribeAuthorityApprovalSettlements((event) => {
+    setSettledRuntimeApprovalIds((ids) => (
+      ids.includes(event.requestId) ? ids : [...ids, event.requestId].slice(-50)
+    ));
+    if (event.conversationId && event.conversationId === activeConversationId) {
+      void refreshConversations(event.conversationId);
+    }
+  }), [activeConversationId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3916,6 +3948,19 @@ export default function App() {
     }
   };
 
+  const openAuthorityApprovalWindowAction = async () => {
+    if (!authorityApproval) return;
+    setError(null);
+    try {
+      const opened = await openAuthorityApprovalWindow(authorityApproval.requestId);
+      if (!opened) {
+        setError("authority 承認は Rumi Viewer の専用ウィンドウで実行してください。");
+      }
+    } catch (openError) {
+      setError(openError instanceof Error ? openError.message : "authority 承認ウィンドウを開けませんでした。");
+    }
+  };
+
   const pushActionPreview = (action: SidebarAction, title: string, data: unknown) => {
     const preview = previewFromAction(action, title, data);
     setPreviews((current) => [preview, ...current].slice(0, 30));
@@ -4616,7 +4661,7 @@ export default function App() {
       steerBusy={modelSteerBusy}
       steerQueuedCount={steerItems.filter((item) => item.status === "queued").length}
       steerPreviewItems={isCentered ? [] : activeComposerSteerItems(steerItems, isGenerating || isConversationPending)}
-      suppressPopovers={Boolean(visibleBrowserApproval || runtimeApproval || staleRuntimeApprovalNotice)}
+      suppressPopovers={Boolean(visibleBrowserApproval || authorityApproval || runtimeApproval || staleRuntimeApprovalNotice)}
       onOpenModelManager={() => openSettingsSection("models")}
       onOpenToolSettings={() => openSettingsSection("tools")}
       onSwitchToVisionModel={handleSwitchToVisionModel}
@@ -4836,7 +4881,14 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {!visibleBrowserApproval && runtimeApproval && (
+                {!visibleBrowserApproval && authorityApproval && (
+                  <AuthorityApprovalNotice
+                    approval={authorityApproval}
+                    title={authorityApprovalTitle(authorityApproval)}
+                    onOpen={() => void openAuthorityApprovalWindowAction()}
+                  />
+                )}
+                {!visibleBrowserApproval && !authorityApproval && runtimeApproval && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-zinc-950 p-3 shadow-2xl">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -5015,4 +5067,11 @@ export default function App() {
     </div>
     </RendererBoundary>
   );
+}
+
+export default function App() {
+  if (window.location.pathname === "/approval") {
+    return <AuthorityApprovalWindow />;
+  }
+  return <ChatApp />;
 }
