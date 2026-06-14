@@ -23,6 +23,10 @@ domains:
     - domain/temporal_context
     - domain/tool
     path: domain/ai_client
+  ambient:
+    may_import:
+    - domain/input
+    path: domain/ambient
   api_map:
     may_import:
     - domain/external

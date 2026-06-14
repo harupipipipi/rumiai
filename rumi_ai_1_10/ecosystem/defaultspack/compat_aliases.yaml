@@ -2524,6 +2524,76 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.remote.task_get
+  defaults.ambient.event_submit:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.event_submit
+  defaults.ambient.events.submit:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.event_submit
+  defaults.ambient.monitor_start:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.monitor_start
+  defaults.ambient.monitor.start:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.monitor_start
+  defaults.ambient.monitor_stop:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.monitor_stop
+  defaults.ambient.monitor.stop:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.monitor_stop
+  defaults.ambient.permission_check:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.permission_check
+  defaults.ambient.permission.check:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.permission.check
+  defaults.ambient.permissions.check:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.permissions.check
+  defaults.ambient.permission_grant:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.permission_grant
+  defaults.ambient.permissions.grant:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.permission_grant
+  defaults.ambient.permission_revoke:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.permission_revoke
+  defaults.ambient.permissions.revoke:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.permission_revoke
+  defaults.ambient.status:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.status
   defaults.tool.names:
     owner: tool
     reason: legacy caller compatibility
