@@ -7,6 +7,9 @@ required_fields:
   - accessible_name
   - rect
   - action_hints
+  - selector_hint_unique
+  - selector_hint_confidence
+  - selector_hint_error
 ranking:
   prefer:
     - "is_in_viewport == true"
@@ -17,6 +20,7 @@ ranking:
     - "is_visible == false unless include_hidden was requested"
     - "large container nodes when a child control matches"
     - "selector-only actions before semantic match is checked"
+    - "selector_hint_unique == false for mutating actions"
 actions:
   click: "Use for buttons, links, tabs, menu items, and checkboxes."
   type: "Use for textboxes, textareas, contenteditable, and editable combo boxes."

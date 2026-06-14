@@ -331,15 +331,19 @@ function actionResultSemantics(action, result) {
     return { requires_foreground: true, can_parallel_user_work: false };
   }
   if (
-    action === "browser.tabs" ||
     action === "page.navigate" ||
-    action === "page.snapshot" ||
     action === "page.click" ||
     action === "page.type" ||
     action === "page.press" ||
     action === "page.scroll" ||
+    action === "page.highlight"
+  ) {
+    return { requires_foreground: true, can_parallel_user_work: false };
+  }
+  if (
+    action === "browser.tabs" ||
+    action === "page.snapshot" ||
     action === "page.extract" ||
-    action === "page.highlight" ||
     action === "page.clear_highlight"
   ) {
     return { requires_foreground: false, can_parallel_user_work: true };
@@ -409,8 +413,8 @@ async function navigateTab(payload) {
     tab: tabSummary(tab),
     active_tab_id: tab.id,
     url: tab.url || payload.url,
-    requires_foreground: false,
-    can_parallel_user_work: true
+    requires_foreground: true,
+    can_parallel_user_work: false
   };
 }
 
@@ -440,10 +444,46 @@ async function captureVisibleTab(payload) {
 
 async function captureDomSnapshot(payload) {
   const tabId = await resolveTabId(payload.tab_id);
-  const snapshot = await sendToTab(tabId, {
+  const snapshotOptions = {};
+  if (payload.include_hidden !== undefined) {
+    snapshotOptions.includeHidden = Boolean(payload.include_hidden);
+  } else if (payload.includeHidden !== undefined) {
+    snapshotOptions.includeHidden = Boolean(payload.includeHidden);
+  }
+  if (payload.include_html !== undefined) {
+    snapshotOptions.includeHtml = Boolean(payload.include_html);
+  } else if (payload.includeHtml !== undefined) {
+    snapshotOptions.includeHtml = Boolean(payload.includeHtml);
+  }
+  if (payload.include_attributes !== undefined) {
+    snapshotOptions.includeAttributes = Boolean(payload.include_attributes);
+  } else if (payload.includeAttributes !== undefined) {
+    snapshotOptions.includeAttributes = Boolean(payload.includeAttributes);
+  }
+  if (Array.isArray(payload.attribute_names)) {
+    snapshotOptions.attributeNames = payload.attribute_names;
+  } else if (Array.isArray(payload.attributeNames)) {
+    snapshotOptions.attributeNames = payload.attributeNames;
+  }
+  if (payload.include_semantics !== undefined) {
+    snapshotOptions.includeSemantics = Boolean(payload.include_semantics);
+  } else if (payload.includeSemantics !== undefined) {
+    snapshotOptions.includeSemantics = Boolean(payload.includeSemantics);
+  }
+  if (payload.include_values === true && payload.include_values_approved === true) {
+    snapshotOptions.include_values = true;
+    snapshotOptions.include_values_approved = true;
+  }
+
+  const snapshotRequest = {
     type: "rumi:dom-snapshot",
     maxNodes: payload.limit
-  });
+  };
+  if (Object.keys(snapshotOptions).length > 0) {
+    snapshotRequest.options = snapshotOptions;
+  }
+
+  const snapshot = await sendToTab(tabId, snapshotRequest);
   const tab = await chrome.tabs.get(tabId);
   const result = {
     tab: tabSummary(tab),
@@ -475,8 +515,7 @@ async function sendElementCommand(action, payload) {
     tab: tabSummary(tab),
     active_tab_id: tab.id,
     url: tab.url || "",
-    requires_foreground: false,
-    can_parallel_user_work: true
+    ...actionResultSemantics(action, result)
   };
 }
 
