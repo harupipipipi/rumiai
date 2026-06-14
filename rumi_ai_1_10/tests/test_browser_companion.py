@@ -390,6 +390,20 @@ def test_browser_companion_snapshot_forwards_snapshot_options_to_content_script(
         assert needle in capture_body
 
 
+def test_browser_companion_extension_keeps_pairing_token_in_local_storage():
+    extension_root = _browser_companion_extension_root()
+    background = (extension_root / "background.js").read_text(encoding="utf-8")
+    options = (extension_root / "options.js").read_text(encoding="utf-8")
+
+    assert "readLocalSettingsWithSyncMigration" in background
+    assert "chrome.storage.local.set({ [STORAGE_KEY]: merged })" in background
+    assert "chrome.storage.sync.remove(STORAGE_KEY)" in background
+    assert 'areaName !== "local"' in background
+    assert "chrome.storage.local.get(STORAGE_KEY)" in options
+    assert "chrome.storage.local.set({ [STORAGE_KEY]: settings })" in options
+    assert "chrome.storage.sync.set({ [STORAGE_KEY]: settings })" not in options
+
+
 def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeypatch):
     from blocks.tool import browser_companion_bridge as route_module
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore

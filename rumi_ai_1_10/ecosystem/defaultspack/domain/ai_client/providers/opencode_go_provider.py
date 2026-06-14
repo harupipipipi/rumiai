@@ -272,11 +272,25 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
     @staticmethod
     def _translate_params(params):
         raw = dict(params or {})
-        return {
+        translated = {
             key: raw[key]
             for key in OpencodeGoProvider._OPENAI_CHAT_PARAM_KEYS
             if key in raw
         }
+        for key in ("request_timeout", "timeout"):
+            if key in raw:
+                translated[key] = raw[key]
+        return translated
+
+    @staticmethod
+    def _request_timeout(params) -> float:
+        raw = dict(params or {})
+        value = raw.get("request_timeout", raw.get("timeout", 120))
+        try:
+            timeout = float(value)
+        except (TypeError, ValueError):
+            timeout = 120.0
+        return max(2.0, min(timeout, 120.0))
 
     @staticmethod
     def _copy_chat_params(body, params):
@@ -316,13 +330,13 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         }
         return headers
 
-    def _request_messages_json(self, path, body):
+    def _request_messages_json(self, path, body, *, timeout=120.0):
         self._ensure_runtime_config()
         url = self.BASE_URL + path
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=self._messages_headers(), method="POST")
         try:
-            with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120) as resp:
+            with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout) as resp:
                 raw_bytes = resp.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="replace")
@@ -334,14 +348,14 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         except (json.JSONDecodeError, ValueError):
             raise RuntimeError("OpenCode Go API returned invalid JSON: {}".format(raw_bytes[:500]))
 
-    def _request_messages_stream(self, path, body):
+    def _request_messages_stream(self, path, body, *, timeout=120.0):
         self._ensure_runtime_config()
         body["stream"] = True
         url = self.BASE_URL + path
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=self._messages_headers(), method="POST")
         try:
-            return urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120)
+            return urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout)
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError("OpenCode Go API error {}: {}".format(exc.code, err_body))
@@ -366,12 +380,12 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
 
     def _complete_messages(self, model_id, messages, params):
         body = self._messages_body(model_id, messages, params)
-        raw = self._request_messages_json("/messages", body)
+        raw = self._request_messages_json("/messages", body, **self._request_timeout_kwargs(params))
         return AnthropicProvider.parse_response(self, raw)
 
     def _stream_messages(self, model_id, messages, params):
         body = self._messages_body(model_id, messages, params)
-        resp = self._request_messages_stream("/messages", body)
+        resp = self._request_messages_stream("/messages", body, **self._request_timeout_kwargs(params))
         usage_accum = {"input_tokens": 0, "output_tokens": 0}
         tool_call_state = {}
         try:
@@ -429,6 +443,10 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
             filtered.pop("parallel_tool_calls", None)
         if not supports_reasoning:
             filtered.pop("reasoning_effort", None)
+        if "request_timeout" in (params or {}):
+            filtered["request_timeout"] = params["request_timeout"]
+        if "timeout" in (params or {}):
+            filtered["timeout"] = params["timeout"]
         return filtered
 
     def complete(self, model, messages, tools, params):

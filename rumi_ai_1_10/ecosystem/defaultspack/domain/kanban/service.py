@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Any
 
 from .models import KanbanValidationError, gen_id
@@ -411,14 +410,11 @@ def _conversation_tasks(conversation: dict[str, Any], payload: dict[str, Any]) -
         params = {
             "temperature": 0,
             "max_tokens": 900,
+            "request_timeout": _ai_extract_timeout_seconds(payload),
+            "timeout": _ai_extract_timeout_seconds(payload),
             "_authority_context": authority_context,
         }
-        response = _complete_with_timeout(
-            model,
-            messages,
-            params=params,
-            timeout_seconds=_ai_extract_timeout_seconds(payload),
-        )
+        response = _complete_for_import(model, messages, params=params)
         text = _response_text(response)
         parsed_tasks = _parse_task_json(text)
         if parsed_tasks:
@@ -428,23 +424,15 @@ def _conversation_tasks(conversation: dict[str, Any], payload: dict[str, Any]) -
         return _fallback_conversation_tasks(conversation, payload), {"source": "fallback", "model": model, "error": str(exc)}
 
 
-def _complete_with_timeout(
+def _complete_for_import(
     model: str,
     messages: list[dict[str, Any]],
     *,
     params: dict[str, Any],
-    timeout_seconds: float,
 ) -> Any:
     from domain.ai_client.client import AIClient
 
-    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kanban-ai-extract")
-    future = executor.submit(AIClient().complete, model, messages, [], params)
-    try:
-        return future.result(timeout=timeout_seconds)
-    except FutureTimeoutError as exc:
-        raise TimeoutError(f"AI task extraction timed out after {timeout_seconds:g}s") from exc
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+    return AIClient().complete(model, messages, [], params)
 
 
 def _ai_extract_timeout_seconds(payload: dict[str, Any]) -> float:

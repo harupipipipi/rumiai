@@ -207,6 +207,40 @@ def test_task_board_imports_legacy_json_once_into_kanban(tmp_path):
     assert listed["metadata"]["task_board_json_imported"].endswith("task_board.json")
 
 
+def test_task_board_imports_legacy_json_even_when_board_has_existing_cards(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    legacy = {
+        "columns": ["Inbox", "Active", "Done"],
+        "cards": [
+            {
+                "id": "legacy-mixed",
+                "title": "Legacy mixed card",
+                "column_id": "active",
+                "position": 0,
+                "notes": "old JSON",
+            },
+        ],
+    }
+    (workspace / "task_board.json").write_text(json.dumps(legacy), encoding="utf-8")
+
+    controller = TaskBoardController()
+    created = controller.run(
+        {"action": "create", "title": "Existing canonical card"},
+        {"conversation_workspace_dir": str(workspace)},
+    )
+    listed = controller.run({"action": "list"}, {"conversation_workspace_dir": str(workspace)})
+    listed_again = controller.run({"action": "list"}, {"conversation_workspace_dir": str(workspace)})
+
+    titles = [card["title"] for card in listed["cards"]]
+    assert created["changed"]["title"] == "Existing canonical card"
+    assert titles == ["Existing canonical card", "Legacy mixed card"]
+    assert [card["title"] for card in listed_again["cards"]] == titles
+    legacy_card = next(card for card in listed["cards"] if card["title"] == "Legacy mixed card")
+    assert legacy_card["metadata"]["task_board"]["legacy_task_board_id"] == "legacy-mixed"
+    assert listed["metadata"]["task_board_json_imported"].endswith("task_board.json")
+
+
 def test_task_board_controller_configures_columns_and_rehomes_removed_column_cards(tmp_path):
     workspace = tmp_path / "workspace"
     controller = TaskBoardController()
@@ -223,6 +257,54 @@ def test_task_board_controller_configures_columns_and_rehomes_removed_column_car
     assert created["changed"]["column_id"] == "review"
     assert [column["id"] for column in configured["columns"]] == ["inbox", "active", "done"]
     assert configured["cards"][0]["column_id"] == "inbox"
+
+
+def test_task_board_controller_preserves_card_column_on_same_shape_rename(tmp_path):
+    workspace = tmp_path / "workspace"
+    controller = TaskBoardController()
+
+    created = controller.run(
+        {"action": "create", "title": "Ready for QA", "column": "Review"},
+        {"conversation_workspace_dir": str(workspace)},
+    )
+    configured = controller.run(
+        {"action": "configure", "columns": ["Backlog", "Doing", "QA", "Done"]},
+        {"conversation_workspace_dir": str(workspace)},
+    )
+
+    assert created["changed"]["column_id"] == "review"
+    assert [column["id"] for column in configured["columns"]] == ["backlog", "doing", "qa", "done"]
+    assert configured["cards"][0]["column_id"] == "qa"
+
+
+def test_task_board_metadata_update_deep_merges_by_default(tmp_path):
+    workspace = tmp_path / "workspace"
+    controller = TaskBoardController()
+
+    created = controller.run(
+        {
+            "action": "create",
+            "title": "Preserve metadata",
+            "metadata": {
+                "agent": {"session_id": "sess-1", "status": "running"},
+                "task_board": {"blocker_reason": "waiting"},
+            },
+        },
+        {"conversation_workspace_dir": str(workspace)},
+    )
+    updated = controller.run(
+        {
+            "action": "update",
+            "card_id": created["changed"]["id"],
+            "metadata": {"agent": {"status": "ready"}, "extra": {"review": True}},
+        },
+        {"conversation_workspace_dir": str(workspace)},
+    )
+
+    metadata = updated["changed"]["metadata"]
+    assert metadata["agent"] == {"session_id": "sess-1", "status": "ready"}
+    assert metadata["task_board"]["blocker_reason"] == "waiting"
+    assert metadata["extra"] == {"review": True}
 
 
 def test_task_board_controller_preserves_board_order_and_done_count_for_custom_terminal_columns(tmp_path):

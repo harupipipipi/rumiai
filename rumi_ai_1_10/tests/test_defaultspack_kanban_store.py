@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
@@ -52,6 +54,20 @@ def test_kanban_store_bootstraps_board_and_moves_cards(tmp_path):
         "card.moved",
         "card.updated",
     }
+
+
+def test_kanban_store_rejects_empty_title_updates(tmp_path):
+    from domain.kanban.models import KanbanValidationError
+    from domain.kanban.store import KanbanStore
+
+    store = KanbanStore(tmp_path / "kanban.db")
+    board = store.get_or_create_board("conversation", "conv-empty-title")
+    card = store.create_card(board["board_id"], {"title": "Keep title"})
+
+    with pytest.raises(KanbanValidationError, match="title is required"):
+        store.update_card(card["card_id"], {"title": "   "})
+
+    assert store.require_card(card["card_id"])["title"] == "Keep title"
 
 
 def test_kanban_store_accepts_group_scope(tmp_path):

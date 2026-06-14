@@ -979,6 +979,37 @@ test("unsafe API headers replace blank CSRF values", () => {
   assert.ok(headers.get("X-Rumi-CSRF")?.trim());
 });
 
+test("unsafe API headers prefer panel session CSRF when present", () => {
+  const previousDescriptor = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const values = new Map<string, string>([
+    ["rumi-panel-csrf", "panel-csrf-from-bootstrap"],
+    ["rumi-defaultspack-csrf", "local-defaultspack-csrf"],
+  ]);
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+    },
+  });
+
+  try {
+    const headers = defaultspackApiHeaders("PUT");
+    assert.equal(headers.get("X-Rumi-CSRF"), "panel-csrf-from-bootstrap");
+  } finally {
+    if (previousDescriptor) {
+      Object.defineProperty(globalThis, "sessionStorage", previousDescriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, "sessionStorage");
+    }
+  }
+});
+
 test("browserComputer calls dedicated browser-computer endpoint", async () => {
   const originalFetch = globalThis.fetch;
   let requestUrl = "";

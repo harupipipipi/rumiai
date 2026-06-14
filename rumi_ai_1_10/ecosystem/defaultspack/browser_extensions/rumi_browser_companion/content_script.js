@@ -1,8 +1,10 @@
 (function () {
   const ELEMENT_ATTR = "data-rumi-element-id";
   const HIGHLIGHT_LAYER_ID = "rumi-browser-companion-highlight-layer";
+  const SEARCH_HOME_ROUTE_STATE_MAX_AGE_MS = 1000 * 60 * 60 * 6;
   let sequence = 0;
   let highlightTimer = null;
+  let searchHomeRouteStateExpiresAt = 0;
 
   window.addEventListener("message", (event) => {
     if (event.source !== window) {
@@ -13,6 +15,7 @@
       return;
     }
     if (message.type === "rumi:search-home:set-route-state") {
+      searchHomeRouteStateExpiresAt = Date.now() + SEARCH_HOME_ROUTE_STATE_MAX_AGE_MS;
       chrome.runtime.sendMessage({
         type: "rumi:search-home:set-route-state",
         payload: message.payload || {}
@@ -26,15 +29,20 @@
       if (!isSearchHomeHotkey(event)) {
         return;
       }
+      event.preventDefault();
+      event.stopPropagation();
       chrome.runtime.sendMessage({
         type: "rumi:search-home:advance-candidate",
-        action: event.key === "ArrowLeft" ? "previous" : event.key === "ArrowRight" ? "next" : "open"
+        action: event.key === "ArrowLeft" ? "prev" : event.key === "ArrowRight" ? "next" : "open"
       });
     },
     true
   );
 
   function isSearchHomeHotkey(event) {
+    if (Date.now() > searchHomeRouteStateExpiresAt) {
+      return false;
+    }
     return event.key === "ArrowRight" || event.key === "ArrowLeft" || event.key === "Enter";
   }
 

@@ -1,6 +1,7 @@
 import type { ToolPreviewItem } from "../components/ToolPreview";
 import type { AuthorityApprovalScope } from "./authorityApproval";
 
+const PANEL_CSRF_STORAGE_KEY = "rumi-panel-csrf";
 const DEFAULTSPACK_CSRF_STORAGE_KEY = "rumi-defaultspack-csrf";
 
 export type ChatContentBlock = {
@@ -1481,6 +1482,8 @@ function generateCsrfToken(): string {
 
 function getDefaultspackCsrfToken(): string {
   const storage = sessionStorageOrNull();
+  const panelToken = storage?.getItem(PANEL_CSRF_STORAGE_KEY);
+  if (panelToken?.trim()) return panelToken;
   const stored = storage?.getItem(DEFAULTSPACK_CSRF_STORAGE_KEY);
   if (stored) return stored;
   const token = generateCsrfToken();

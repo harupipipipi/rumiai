@@ -38,6 +38,11 @@ from .validation import (
 from .api.route_handlers import _is_safe_path_param
 
 from .api.api_response import APIResponse
+from .api.route_errors import (
+    APIRouteFunctionError,
+    api_route_function_error_status,
+    api_route_function_public_error,
+)
 
 from .api import (
     APIRouteTableMixin,
@@ -576,6 +581,9 @@ class PackAPIHandler(
         except PermissionError as e:
             logger.warning("api_route denied: %s", e)
             self._send_response(APIResponse(False, error="Forbidden"), 403)
+        except APIRouteFunctionError as e:
+            logger.warning("api_route function failed: %s", e)
+            self._send_response(APIResponse(False, error=str(e)), e.status)
         except Exception as e:
             _log_internal_error(f"api_route:{handler_name}", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
@@ -619,17 +627,12 @@ class PackAPIHandler(
             return response.output
 
         error_type = getattr(response, "error_type", None) or "function_call_failed"
-        if error_type == "function_not_found":
+        status = api_route_function_error_status(error_type)
+        if status is None:
             raise LookupError(
                 getattr(response, "error", None) or "Pack function not found"
             )
-        if error_type in {
-            "pack_not_approved",
-            "approval_check_error",
-            "permission_denied",
-            "requires_denied",
-            "caller_requires_denied",
-        }:
+        if status == 403:
             logger.warning(
                 "api_route pack function denied: pack_id=%s function_id=%s error_type=%s",
                 pack_id,
@@ -639,7 +642,15 @@ class PackAPIHandler(
             raise PermissionError(
                 getattr(response, "error", None) or "Pack function denied"
             )
-        raise RuntimeError(getattr(response, "error", None) or "Pack function failed")
+        raise APIRouteFunctionError(
+            api_route_function_public_error(
+                str(error_type),
+                getattr(response, "error", None),
+                _SAFE_ERROR_MSG,
+            ),
+            status=status,
+            error_type=str(error_type),
+        )
 
     def _send_response(
         self,

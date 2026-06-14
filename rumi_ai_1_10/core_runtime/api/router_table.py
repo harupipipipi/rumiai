@@ -8,21 +8,12 @@ from urllib.parse import unquote
 
 from ._helpers import _SAFE_ERROR_MSG, _log_internal_error
 from .api_response import APIResponse
+from .route_errors import api_route_function_error_status, api_route_function_public_error
 from .route_handlers import _compile_template_path, _is_safe_path_param
 from ..validation import HANDLER_NAME_RE
 
 
 logger = logging.getLogger(__name__)
-
-_FUNCTION_ROUTE_FORBIDDEN_ERRORS = {
-    "caller_requires_denied",
-    "grant_denied",
-    "pack_not_approved",
-    "permission_denied",
-    "requires_denied",
-    "trust_denied",
-}
-
 
 class APIRouteTableMixin:
     @classmethod
@@ -283,17 +274,13 @@ class APIRouteTableMixin:
                 )
                 if not getattr(response, "success", False):
                     error_type = str(getattr(response, "error_type", "") or "")
-                    if error_type == "function_not_found":
+                    status = api_route_function_error_status(error_type)
+                    if status is None:
                         return False
-                    status = 403 if error_type in _FUNCTION_ROUTE_FORBIDDEN_ERRORS else 500
-                    if error_type == "invalid_request":
-                        status = 400
-                    elif error_type == "rate_limited":
-                        status = 429
-                    error_value = (
-                        "Forbidden"
-                        if status == 403
-                        else str(getattr(response, "error", None) or _SAFE_ERROR_MSG)
+                    error_value = api_route_function_public_error(
+                        error_type,
+                        getattr(response, "error", None),
+                        _SAFE_ERROR_MSG,
                     )
                     self._send_response(
                         APIResponse(False, error=error_value),

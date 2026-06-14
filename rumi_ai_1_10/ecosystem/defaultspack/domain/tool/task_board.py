@@ -228,7 +228,7 @@ class TaskBoardController:
         context: dict[str, Any],
     ) -> None:
         path = self._path(context)
-        if not path.exists() or snapshot.get("cards"):
+        if not path.exists():
             return
         board = snapshot.get("board") if isinstance(snapshot.get("board"), dict) else {}
         metadata = dict(board.get("metadata") if isinstance(board.get("metadata"), dict) else {})
@@ -239,15 +239,29 @@ class TaskBoardController:
             metadata["task_board_json_imported"] = str(path)
             service.update_board(str(board.get("board_id") or ""), {"metadata": metadata})
             return
-        self._replace_columns(service, snapshot, legacy["columns"])
-        imported_snapshot = _task_board_from_snapshot(service.get_board(str(board.get("board_id") or "")))
+        if not snapshot.get("cards"):
+            self._replace_columns(service, snapshot, legacy["columns"])
+            imported_snapshot = _task_board_from_snapshot(service.get_board(str(board.get("board_id") or "")))
+        else:
+            imported_snapshot = _task_board_from_snapshot(snapshot)
         column_map = {
             str(column.get("id") or ""): _kanban_column_id(imported_snapshot, str(column.get("id") or ""))
             for column in imported_snapshot["columns"]
         }
         id_map: dict[str, str] = {}
+        existing_legacy_ids = set()
+        for existing in imported_snapshot["cards"]:
+            existing_meta = existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}
+            task_board_meta = existing_meta.get("task_board") if isinstance(existing_meta.get("task_board"), dict) else {}
+            legacy_id = str(task_board_meta.get("legacy_task_board_id") or "").strip()
+            if legacy_id:
+                existing_legacy_ids.add(legacy_id)
+                id_map[legacy_id] = str(existing.get("id") or "")
         imported_cards: list[tuple[dict[str, Any], dict[str, Any]]] = []
         for card in _sorted_cards(legacy["cards"], legacy["columns"]):
+            legacy_id = str(card.get("id") or "").strip()
+            if legacy_id and legacy_id in existing_legacy_ids:
+                continue
             column_id = column_map.get(str(card.get("column_id") or "")) or imported_snapshot["columns"][0]["kanban_column_id"]
             payload = _card_create_payload({**card, "description": card.get("notes")}, context, column_id)
             payload["title"] = str(card.get("title") or "Untitled card")
@@ -287,12 +301,33 @@ class TaskBoardController:
         board_id = str(snapshot["board"]["board_id"])
         old_columns = list(snapshot.get("columns") or [])
         old_cards = list(snapshot.get("cards") or [])
-        old_slug_by_column = {
-            str(column.get("column_id") or ""): _slugify(str(column.get("title") or ""))
-            for column in old_columns
-        }
+        old_slug_by_column = {}
+        old_column_by_slug = {}
+        for column in old_columns:
+            column_id = str(column.get("column_id") or "")
+            slug = _slugify(str(column.get("title") or ""))
+            old_slug_by_column[column_id] = slug
+            old_column_by_slug.setdefault(slug, column)
         desired = _normalize_columns(columns)
-        new_column_ids = [gen_id("kcol_") for _ in desired]
+        same_shape = len(desired) == len(old_columns)
+        old_to_new: dict[str, str] = {}
+        new_column_ids = []
+        used_old_columns: set[str] = set()
+        for index, column in enumerate(desired):
+            desired_slug = str(column.get("id") or "")
+            old_column = old_column_by_slug.get(desired_slug)
+            if old_column is not None and str(old_column.get("column_id") or "") in used_old_columns:
+                old_column = None
+            if old_column is None and same_shape and index < len(old_columns):
+                positional = old_columns[index]
+                if str(positional.get("column_id") or "") not in used_old_columns:
+                    old_column = positional
+            new_id = str(old_column.get("column_id")) if old_column else gen_id("kcol_")
+            new_column_ids.append(new_id)
+            if old_column:
+                old_id = str(old_column.get("column_id") or "")
+                used_old_columns.add(old_id)
+                old_to_new[old_id] = new_id
         slug_to_new_id = {
             str(column.get("id") or ""): new_column_ids[index]
             for index, column in enumerate(desired)
@@ -318,8 +353,9 @@ class TaskBoardController:
                     ),
                 )
             for card in old_cards:
-                old_slug = old_slug_by_column.get(str(card.get("column_id") or ""), "")
-                target_column_id = slug_to_new_id.get(old_slug, first_column_id)
+                old_column_id = str(card.get("column_id") or "")
+                old_slug = old_slug_by_column.get(old_column_id, "")
+                target_column_id = old_to_new.get(old_column_id) or slug_to_new_id.get(old_slug, first_column_id)
                 conn.execute(
                     "UPDATE kanban_cards SET column_id = ?, updated_at = ? WHERE card_id = ?",
                     (target_column_id, created, str(card.get("card_id") or "")),
@@ -588,7 +624,11 @@ def _card_update_payload(card: dict[str, Any], arguments: dict[str, Any]) -> dic
     if "labels" in arguments:
         updates["labels"] = _string_list(arguments.get("labels"))
     if "metadata" in arguments and isinstance(arguments.get("metadata"), dict):
-        updates["metadata"] = arguments["metadata"]
+        current_metadata = card.get("metadata") if isinstance(card.get("metadata"), dict) else {}
+        if arguments.get("replace_metadata") is True:
+            updates["metadata"] = dict(arguments["metadata"])
+        else:
+            updates["metadata"] = _deep_merge_dicts(current_metadata, arguments["metadata"])
         agent_session = arguments["metadata"].get("agent_session")
         if isinstance(agent_session, dict):
             session_id = str(agent_session.get("session_id") or "").strip()
@@ -608,14 +648,25 @@ def _card_update_payload(card: dict[str, Any], arguments: dict[str, Any]) -> dic
             str(card.get("id") or ""),
         )
     if "blocker_reason" in arguments or "reason" in arguments:
+        base_card = {**card, "metadata": updates.get("metadata", card.get("metadata"))}
         updates["metadata"] = _metadata_with_task_board_field(
-            card,
+            base_card,
             "blocker_reason",
             str(arguments.get("blocker_reason") or arguments.get("reason") or ""),
         )
     if "subtasks" in arguments:
         updates["checklist"] = _normalize_subtasks(arguments.get("subtasks"))
     return updates
+
+
+def _deep_merge_dicts(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _metadata_with_task_board_field(card: dict[str, Any], key: str, value: Any) -> dict[str, Any]:

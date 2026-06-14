@@ -40,7 +40,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "sync" || !changes[STORAGE_KEY]) {
+  if (areaName !== "local" || !changes[STORAGE_KEY]) {
     return;
   }
   void ensureSettings().then((settings) => {
@@ -82,25 +82,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function ensureSettings() {
-  const stored = await chrome.storage.sync.get(STORAGE_KEY);
+  const stored = await readLocalSettingsWithSyncMigration();
   const merged = {
     ...DEFAULT_SETTINGS,
-    ...(stored[STORAGE_KEY] || {})
+    ...(stored || {})
   };
   merged.pollIntervalMinutes = normalizePollInterval(merged.pollIntervalMinutes);
-  await chrome.storage.sync.set({ [STORAGE_KEY]: merged });
+  await chrome.storage.local.set({ [STORAGE_KEY]: merged });
   return merged;
 }
 
 async function getSettings() {
-  const stored = await chrome.storage.sync.get(STORAGE_KEY);
+  const stored = await readLocalSettingsWithSyncMigration();
   return {
     ...DEFAULT_SETTINGS,
-    ...(stored[STORAGE_KEY] || {}),
+    ...(stored || {}),
     pollIntervalMinutes: normalizePollInterval(
-      stored[STORAGE_KEY]?.pollIntervalMinutes ?? DEFAULT_SETTINGS.pollIntervalMinutes
+      stored?.pollIntervalMinutes ?? DEFAULT_SETTINGS.pollIntervalMinutes
     )
   };
+}
+
+async function readLocalSettingsWithSyncMigration() {
+  const localStored = await chrome.storage.local.get(STORAGE_KEY);
+  if (localStored[STORAGE_KEY]) {
+    return localStored[STORAGE_KEY];
+  }
+  const syncStored = await chrome.storage.sync.get(STORAGE_KEY);
+  if (syncStored[STORAGE_KEY]) {
+    await chrome.storage.local.set({ [STORAGE_KEY]: syncStored[STORAGE_KEY] });
+    await chrome.storage.sync.remove(STORAGE_KEY);
+    return syncStored[STORAGE_KEY];
+  }
+  return null;
 }
 
 async function ensureClientId() {
@@ -615,10 +629,14 @@ async function advanceSearchHomeRouteState(tabId, action) {
   }
   let url = "";
   let nextIndex = normalizeSearchHomeIndex(current, current.selected_index);
-  if (action === "fallback") {
+  const normalizedAction = normalizeSearchHomeRouteAction(action);
+  if (normalizedAction === "fallback") {
     url = normalizeSearchHomeCandidateUrl(current.fallback_url);
+  } else if (normalizedAction === "open") {
+    const selectedCandidate = current.target_candidates[nextIndex];
+    url = normalizeSearchHomeCandidateUrl(selectedCandidate?.final_url || selectedCandidate?.url || current.target_url);
   } else {
-    const delta = action === "prev" ? -1 : 1;
+    const delta = normalizedAction === "prev" ? -1 : 1;
     nextIndex = nextSearchHomeIndex(current, delta);
     const nextCandidate = current.target_candidates[nextIndex];
     url = normalizeSearchHomeCandidateUrl(nextCandidate?.final_url || nextCandidate?.url);
@@ -635,6 +653,20 @@ async function advanceSearchHomeRouteState(tabId, action) {
   await saveSearchHomeRouteStates(states);
   await chrome.tabs.update(tabId, { url });
   return { ok: true, tab_id: tabId, url, selected_index: nextIndex };
+}
+
+function normalizeSearchHomeRouteAction(action) {
+  const value = String(action || "").trim().toLowerCase();
+  if (value === "previous" || value === "prev" || value === "left") {
+    return "prev";
+  }
+  if (value === "open" || value === "enter") {
+    return "open";
+  }
+  if (value === "fallback") {
+    return "fallback";
+  }
+  return "next";
 }
 
 function normalizeSearchHomeRouteState(value) {

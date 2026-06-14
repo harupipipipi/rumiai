@@ -362,6 +362,9 @@ class KanbanStore:
         merged = {**card, **updates}
         if "notes" in updates and "description" not in updates:
             merged["description"] = updates["notes"]
+        title = str(merged.get("title") or "").strip()
+        if not title:
+            raise KanbanValidationError("title is required")
         with self.tx() as conn:
             conn.execute(
                 """
@@ -372,7 +375,7 @@ class KanbanStore:
                   metadata_json = ?, updated_at = ?, archived_at = ? WHERE card_id = ?
                 """,
                 (
-                    str(merged.get("title") or "").strip(),
+                    title,
                     _text(merged.get("description")),
                     str(merged.get("priority") or "normal"),
                     _text(merged.get("assignee")),

@@ -37,3 +37,20 @@ def test_browser_companion_content_script_captures_search_home_hotkeys():
     assert 'event.key === "ArrowRight"' in content
     assert 'event.key === "ArrowLeft"' in content
     assert 'event.key === "Enter"' in content
+    assert 'searchHomeRouteStateExpiresAt = Date.now() + SEARCH_HOME_ROUTE_STATE_MAX_AGE_MS' in content
+    assert 'action: event.key === "ArrowLeft" ? "prev" : event.key === "ArrowRight" ? "next" : "open"' in content
+    assert "event.preventDefault()" in content
+
+
+def test_browser_companion_background_search_home_action_contract():
+    background = (
+        DEFAULTSPACK_ROOT
+        / "browser_extensions"
+        / "rumi_browser_companion"
+        / "background.js"
+    ).read_text(encoding="utf-8")
+
+    assert "function normalizeSearchHomeRouteAction" in background
+    assert 'value === "previous" || value === "prev" || value === "left"' in background
+    assert 'value === "open" || value === "enter"' in background
+    assert 'normalizedAction === "open"' in background

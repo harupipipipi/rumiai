@@ -74,6 +74,20 @@ def _provider(monkeypatch):
     return OpencodeGoProvider()
 
 
+class _FakeJsonResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        return self.payload
+
+
 def test_opencode_go_catalog_includes_all_models():
     from domain.ai_client.providers import get_all_known_models, get_provider_catalog_map
 
@@ -140,12 +154,61 @@ def test_opencode_go_catalog_includes_all_models():
     assert legacy_qwen37["supports_image_input"] is True
 
 
+def test_opencode_go_openai_transport_respects_request_timeout(monkeypatch):
+    provider = _provider(monkeypatch)
+    seen = {}
+
+    def fake_urlopen(req, context=None, timeout=None):
+        del req, context
+        seen["timeout"] = timeout
+        return _FakeJsonResponse(
+            b'{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{}}'
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = provider.complete(
+        "deepseek-v4-pro",
+        [{"role": "user", "content": "hello"}],
+        [],
+        {"request_timeout": 4},
+    )
+
+    assert result["content"][0]["text"] == "ok"
+    assert seen["timeout"] == 4.0
+
+
+def test_opencode_go_messages_transport_respects_request_timeout(monkeypatch):
+    provider = _provider(monkeypatch)
+    seen = {}
+
+    def fake_urlopen(req, context=None, timeout=None):
+        del req, context
+        seen["timeout"] = timeout
+        return _FakeJsonResponse(
+            b'{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}'
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = provider.complete(
+        "qwen3.7-plus",
+        [{"role": "user", "content": "hello"}],
+        [],
+        {"request_timeout": 5},
+    )
+
+    assert result["content"][0]["text"] == "ok"
+    assert seen["timeout"] == 5.0
+
+
 @pytest.mark.parametrize("model", OPENAI_CHAT_MODELS)
 def test_opencode_go_uses_chat_completions_for_openai_compatible_models(monkeypatch, model):
     provider = _provider(monkeypatch)
     captured = {}
 
-    def fake_request_json(path, body):
+    def fake_request_json(path, body, **kwargs):
+        del kwargs
         captured["path"] = path
         captured["body"] = body
         return {
@@ -190,7 +253,8 @@ def test_opencode_go_uses_messages_for_anthropic_compatible_models(monkeypatch, 
     provider = _provider(monkeypatch)
     captured = {}
 
-    def fake_request_messages_json(path, body):
+    def fake_request_messages_json(path, body, **kwargs):
+        del kwargs
         captured["path"] = path
         captured["body"] = body
         return {
@@ -268,7 +332,8 @@ def test_opencode_go_stream_parses_openai_sse(monkeypatch):
         ]
     )
 
-    def fake_request_stream(path, body):
+    def fake_request_stream(path, body, **kwargs):
+        del kwargs
         captured["path"] = path
         captured["body"] = body
         return response
@@ -299,7 +364,8 @@ def test_opencode_go_stream_parses_anthropic_sse(monkeypatch):
         ]
     )
 
-    def fake_request_messages_stream(path, body):
+    def fake_request_messages_stream(path, body, **kwargs):
+        del kwargs
         captured["path"] = path
         captured["body"] = body
         return response

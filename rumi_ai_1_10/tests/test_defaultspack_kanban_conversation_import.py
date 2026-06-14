@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -188,18 +187,17 @@ def test_reimport_removes_stale_conversation_cards(tmp_path, monkeypatch):
     assert [card["title"] for card in snapshot["cards"]] == ["First task"]
 
 
-def test_import_conversation_ai_timeout_falls_back(tmp_path, monkeypatch):
+def test_import_conversation_passes_provider_timeout_and_falls_back(tmp_path, monkeypatch):
     ChatStore = _reset_stores(monkeypatch, tmp_path)
 
     from domain.ai_client.client import AIClient
     from domain.kanban.service import KanbanService
 
-    def slow_complete(self, model, messages, tools=None, params=None):
+    def timeout_complete(self, model, messages, tools=None, params=None):
         del self, model, messages, tools, params
-        time.sleep(0.2)
-        return {"text": "{\"tasks\": []}"}
+        raise TimeoutError("provider timed out after requested timeout")
 
-    monkeypatch.setattr(AIClient, "complete", slow_complete)
+    monkeypatch.setattr(AIClient, "complete", timeout_complete)
 
     chat_store = ChatStore()
     conversation = chat_store.create_conversation(model="stub/default", group_id="group-alpha")
@@ -228,6 +226,42 @@ def test_import_conversation_ai_timeout_falls_back(tmp_path, monkeypatch):
     assert imported["cards"][0]["title"] == "keep UI responsive"
     assert imported["cards"][0]["metadata"]["conversation_import"]["extraction"]["source"] == "fallback"
     assert "timed out" in imported["cards"][0]["metadata"]["conversation_import"]["extraction"]["error"]
+
+
+def test_import_conversation_passes_request_timeout_to_provider(tmp_path, monkeypatch):
+    ChatStore = _reset_stores(monkeypatch, tmp_path)
+
+    from domain.ai_client.client import AIClient
+    from domain.kanban.service import KanbanService
+
+    seen_params = {}
+
+    def complete(self, model, messages, tools=None, params=None):
+        del self, model, messages, tools
+        seen_params.update(params or {})
+        return {"text": "{\"tasks\": [{\"title\": \"Imported by AI\"}]}"}
+
+    monkeypatch.setattr(AIClient, "complete", complete)
+
+    chat_store = ChatStore()
+    conversation = chat_store.create_conversation(model="stub/default")
+    conversation = chat_store.update_conversation(conversation["id"], {"title": "Provider timeout"})
+
+    service = KanbanService()
+    board = service.bootstrap_board({"scope_type": "conversation", "scope_id": conversation["id"]})["board"]
+    imported = service.import_conversation(
+        board["board_id"],
+        {
+            "conversation_id": conversation["id"],
+            "model": "stub/default",
+            "ai_timeout_seconds": 3,
+            "_authority_context": {"test": True},
+        },
+    )
+
+    assert imported["cards"][0]["title"] == "Imported by AI"
+    assert seen_params["request_timeout"] == 3.0
+    assert seen_params["timeout"] == 3.0
 
 
 def test_import_conversation_without_authority_context_skips_ai(tmp_path, monkeypatch):

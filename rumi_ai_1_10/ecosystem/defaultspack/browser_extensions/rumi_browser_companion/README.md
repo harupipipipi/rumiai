@@ -138,6 +138,7 @@ The extension talks to these local endpoints:
 - This extension can inspect and act on pages in the user's real browser profile.
 - Only pair it with a local Rumi server you control.
 - Do not share the pairing token.
+- The pairing token is stored in browser-local extension storage and is not synced between browser profiles.
 - Capture and tab selection may foreground the browser tab.
 - DOM actions are best-effort and may not work on all pages.
 
