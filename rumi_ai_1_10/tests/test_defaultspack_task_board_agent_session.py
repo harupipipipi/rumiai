@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -14,6 +16,14 @@ from domain.tool.task_board_agent_session import TaskBoardAgentSessionController
 from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
 from domain.kanban.store import KanbanStore  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolated_kanban_db(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_KANBAN_DB_PATH", str(tmp_path / "canonical-kanban.db"))
+    KanbanStore._instance = None
+    yield
+    KanbanStore._instance = None
 
 
 def _reset_sessions():
@@ -49,7 +59,7 @@ def test_task_board_card_starts_tracks_and_applies_agent_session(tmp_path):
     assert applied["card"]["column_id"] == "done"
     assert applied["session_link"]["terminal_state"] == "applied"
 
-    stored = KanbanStore(Path(context["conversation_workspace_dir"]) / "task_board_kanban.db").require_card(card["id"])
+    stored = KanbanStore().require_card(card["id"])
     assert stored["agent_session_id"] == session_id
     assert stored["agent_status"] == "applied"
 

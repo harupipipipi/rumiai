@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -15,6 +17,14 @@ from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
 from domain.kanban.service import KanbanService  # noqa: E402
 from domain.kanban.store import KanbanStore  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolated_kanban_db(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_KANBAN_DB_PATH", str(tmp_path / "canonical-kanban.db"))
+    KanbanStore._instance = None
+    yield
+    KanbanStore._instance = None
 
 
 def test_task_board_controller_persists_workspace_board_and_moves_cards(tmp_path):
@@ -33,12 +43,18 @@ def test_task_board_controller_persists_workspace_board_and_moves_cards(tmp_path
     )
 
     board_path = workspace / "task_board.json"
-    store = KanbanStore(workspace / "task_board_kanban.db")
+    store = KanbanStore()
     stored = store.require_card(card_id)
     stored_column = store.require_column(stored["column_id"])
+    api_snapshot = KanbanService().bootstrap_board(
+        {"scope_type": "workspace", "scope_id": str(workspace.resolve())},
+    )
 
     assert not board_path.exists()
+    assert not (workspace / "task_board_kanban.db").exists()
     assert created["kanban"]["board"]["board_id"] == moved["kanban_board_id"]
+    assert api_snapshot["board"]["board_id"] == moved["kanban_board_id"]
+    assert [card["title"] for card in api_snapshot["cards"]] == ["Review PR slice"]
     assert [column["title"] for column in moved["columns"]] == ["Backlog", "Doing", "Review", "Done"]
     assert moved["cards"][0]["column_id"] == "doing"
     assert moved["cards"][0]["kanban_column_id"] == stored_column["column_id"]

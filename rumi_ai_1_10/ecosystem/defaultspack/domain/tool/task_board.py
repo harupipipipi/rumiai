@@ -206,12 +206,6 @@ class TaskBoardController:
         if self._root is not None:
             self._root.mkdir(parents=True, exist_ok=True)
             return KanbanService(KanbanStore(self._root / "kanban.db"))
-        if not any(context.get(key) for key in ("workspace_id", "conversation_id", "company_id")):
-            workspace = context.get("conversation_workspace_dir") or context.get("workspace_dir")
-            if isinstance(workspace, str) and workspace:
-                root = Path(workspace)
-                root.mkdir(parents=True, exist_ok=True)
-                return KanbanService(KanbanStore(root / "task_board_kanban.db"))
         return KanbanService()
 
     def _snapshot(
