@@ -343,8 +343,10 @@ async function writeClipboardText(text: string): Promise<void> {
 
 function MessageActionBar({
   message,
+  variant = "default",
 }: {
   message: ChatMessagesRendererProps["messages"][number];
+  variant?: "default" | "header";
 }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
@@ -373,7 +375,12 @@ function MessageActionBar({
   ];
 
   return (
-    <div className="rumi-message-actions mt-1.5 flex min-h-6 items-center justify-start gap-1 opacity-80 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+    <div className={cn(
+      "rumi-message-actions flex min-h-6 items-center gap-1 opacity-80 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100",
+      variant === "header"
+        ? "ml-auto shrink-0 justify-end"
+        : "mt-1.5 justify-start",
+    )}>
       {actions.map((action) => {
         const Icon = action.icon;
         return (
@@ -1086,7 +1093,7 @@ export function ChatMessagesRenderer({
               <div key={message.id} className={cn("rumi-message-row group/message flex min-w-0 gap-3 select-text", message.role === "user" ? "flex-row-reverse lg:pr-6 xl:pr-8 2xl:pr-10" : "lg:pl-8 xl:pl-12 2xl:pl-16")}>
                 <div className={cn("flex min-w-0 flex-col pt-1", message.role === "user" ? "max-w-[82%] items-end lg:max-w-[70%] 2xl:max-w-[64%]" : "flex-1 items-start")}>
                   {message.role === "agent" && (
-                    <div className="mb-1.5 flex max-w-full min-w-0 flex-nowrap items-center gap-2 overflow-hidden">
+                    <div className="mb-1.5 flex w-full max-w-full min-w-0 flex-nowrap items-center gap-2 overflow-visible">
                       <span className="shrink-0 text-xs font-semibold tracking-wide text-zinc-300">Assistant</span>
                       {message.metadata?.executionTime && (
                         <span className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-zinc-500">
@@ -1103,6 +1110,7 @@ export function ChatMessagesRenderer({
                           summary={toolActivity.summary}
                         />
                       )}
+                      <MessageActionBar message={message} variant="header" />
                     </div>
                   )}
 
@@ -1158,7 +1166,7 @@ export function ChatMessagesRenderer({
                       );
                     })()}
 
-                    <MessageActionBar message={message} />
+                    {message.role !== "agent" && <MessageActionBar message={message} />}
                   </div>
                 </div>
               </div>
