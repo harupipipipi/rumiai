@@ -13,6 +13,19 @@ from .paths import (
     ECOSYSTEM_DIR,
     is_path_within,
 )
+from .validation import validate_entrypoint
+
+
+def _is_pack_approved_and_verified(pack_id: str) -> tuple[bool, Optional[str]]:
+    try:
+        from .approval_manager import get_approval_manager
+
+        result = get_approval_manager().is_pack_approved_and_verified(pack_id)
+    except Exception as exc:
+        return False, f"approval_check_error:{exc}"
+    if isinstance(result, tuple):
+        return bool(result[0]), result[1] if len(result) > 1 else None
+    return bool(result), None
 
 
 TRUSTED_IN_PROCESS_PACK_IDS = frozenset({"defaultspack", "rumi_default_tools_pack"})
@@ -106,16 +119,26 @@ def invoke_pack_function(
         raise PermissionError(
             f"In-process pack function execution is not allowed: {qualified_name}"
         )
+    approved, reason = _is_pack_approved_and_verified(entry.pack_id)
+    if not approved:
+        detail = f": {reason}" if reason else ""
+        raise PermissionError(f"Pack not approved: {entry.pack_id}{detail}")
 
     entrypoint = entry.entrypoint or "main.py:run"
-    module_rel, callable_name = (
-        entrypoint.rsplit(":", 1) if ":" in entrypoint else (entrypoint, "run")
-    )
-    module_path = Path(entry.function_dir) / module_rel
+    function_dir = Path(entry.function_dir)
+    valid, error, module_path = validate_entrypoint(entrypoint, function_dir)
+    if not valid or module_path is None:
+        raise PermissionError(error or f"Invalid entrypoint: {entrypoint}")
+    _, callable_name = entrypoint.rsplit(":", 1)
     if not module_path.is_file():
         raise FileNotFoundError(f"Entrypoint file not found: {module_path}")
     if not is_path_within(module_path, BASE_DIR):
         raise PermissionError(f"Entrypoint escapes project boundary: {module_path}")
+    trusted_path = getattr(entry, "main_py_path", None)
+    if trusted_path is not None and Path(trusted_path).resolve() != module_path.resolve():
+        raise PermissionError(
+            f"Entrypoint differs from trusted registry path: {module_path}"
+        )
 
     spec = importlib.util.spec_from_file_location(
         f"pack_function_{qualified_name.replace(':', '_')}",

@@ -5,14 +5,24 @@ import platform
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from core_runtime.setup_pack_metadata import (
+    as_dict,
+    has_signing_proof,
+    normalize_dependency_specs,
+    normalize_pack_ref_specs,
+    validate_setup_pack_metadata,
+    validate_setup_pack_schema,
+)
 
 
 @dataclass
 class PackCandidate:
     pack_id: str = ""
+    target_pack_id: str = ""
     pack_identity: str = ""
     display_name: str = ""
     description: str = ""
@@ -20,14 +30,19 @@ class PackCandidate:
     recommended: bool = False
     risk_level: str = "normal"
     all_ok_eligible: bool = False
-    depends_on: List[Dict[str, str]] = None
-    compatibility: Dict[str, Any] = None
-    marketplace: Dict[str, Any] = None
-    signing: Dict[str, Any] = None
+    depends_on: List[Dict[str, str]] = field(default_factory=list)
+    conflicts_with: List[Dict[str, str]] = field(default_factory=list)
+    overlap_policy: Dict[str, Any] = field(default_factory=dict)
+    defaultspack_promotion: Dict[str, Any] = field(default_factory=dict)
+    compatibility: Dict[str, Any] = field(default_factory=dict)
+    marketplace: Dict[str, Any] = field(default_factory=dict)
+    signing: Dict[str, Any] = field(default_factory=dict)
+    schema_issues: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "pack_id": self.pack_id,
+            "target_pack_id": self.target_pack_id,
             "pack_identity": self.pack_identity,
             "display_name": self.display_name,
             "description": self.description,
@@ -36,9 +51,13 @@ class PackCandidate:
             "risk_level": self.risk_level,
             "all_ok_eligible": self.all_ok_eligible,
             "depends_on": list(self.depends_on or []),
+            "conflicts_with": list(self.conflicts_with or []),
+            "overlap_policy": dict(self.overlap_policy or {}),
+            "defaultspack_promotion": dict(self.defaultspack_promotion or {}),
             "compatibility": dict(self.compatibility or {}),
             "marketplace": dict(self.marketplace or {}),
             "signing": dict(self.signing or {}),
+            "schema_issues": list(self.schema_issues or []),
         }
 
 
@@ -73,35 +92,15 @@ class PackSelector:
 
     @staticmethod
     def _as_dict(value: Any) -> Dict[str, Any]:
-        return dict(value) if isinstance(value, dict) else {}
+        return as_dict(value)
 
     @staticmethod
     def _normalize_dependency_specs(value: Any) -> List[Dict[str, str]]:
-        raw_items = value if isinstance(value, list) else []
-        if isinstance(value, dict):
-            raw_items = [
-                {"pack_id": key, **spec} if isinstance(spec, dict) else {"pack_id": key}
-                for key, spec in value.items()
-            ]
-        result: List[Dict[str, str]] = []
-        seen: set[str] = set()
-        for item in raw_items:
-            if isinstance(item, str):
-                spec = {"pack_id": item}
-            elif isinstance(item, dict):
-                pack_id = item.get("pack_id") or item.get("id") or item.get("name")
-                if not pack_id:
-                    continue
-                spec = {"pack_id": str(pack_id)}
-                version = item.get("version") or item.get("constraint") or item.get("version_constraint")
-                if version:
-                    spec["version"] = str(version)
-            else:
-                continue
-            if spec["pack_id"] not in seen:
-                seen.add(spec["pack_id"])
-                result.append(spec)
-        return result
+        return normalize_dependency_specs(value)
+
+    @staticmethod
+    def _normalize_pack_ref_specs(value: Any) -> List[Dict[str, str]]:
+        return normalize_pack_ref_specs(value)
 
     @staticmethod
     def _parse_version(value: Any) -> tuple[int, ...]:
@@ -158,11 +157,23 @@ class PackSelector:
         ecosystem_root = setup_pack_root.parent
         for pack_json in sorted(setup_pack_root.glob("*/pack.json")):
             try:
-                data = json.loads(pack_json.read_text(encoding="utf-8"))
+                loaded = json.loads(pack_json.read_text(encoding="utf-8"))
             except Exception:
                 continue
-            setup_pack_id = str(data.get("pack_id") or pack_json.parent.name)
-            target_pack_id = str(data.get("target_pack_id") or setup_pack_id)
+            if isinstance(loaded, dict):
+                data = loaded
+                fallback_pack_id = pack_json.parent.name
+                setup_pack_id = str(data.get("pack_id") or fallback_pack_id)
+                target_pack_id = str(data.get("target_pack_id") or setup_pack_id)
+            else:
+                data = {}
+                setup_pack_id = pack_json.parent.name
+                target_pack_id = setup_pack_id
+            schema_issues = validate_setup_pack_schema(
+                loaded,
+                fallback_pack_id=setup_pack_id,
+                fallback_target_pack_id=target_pack_id,
+            )
             identity = self._read_pack_identity(ecosystem_root, target_pack_id)
             compatibility = self._as_dict(data.get("compatibility"))
             for source_key, compatibility_key in (
@@ -176,6 +187,7 @@ class PackSelector:
             candidates.append(
                 PackCandidate(
                     pack_id=setup_pack_id,
+                    target_pack_id=target_pack_id,
                     pack_identity=identity,
                     display_name=str(data.get("display_name", setup_pack_id)),
                     description=str(data.get("description", "")),
@@ -191,12 +203,45 @@ class PackSelector:
                     depends_on=self._normalize_dependency_specs(
                         data.get("depends_on", data.get("dependencies", []))
                     ),
+                    conflicts_with=self._normalize_pack_ref_specs(data.get("conflicts_with", [])),
+                    overlap_policy=self._as_dict(data.get("overlap_policy")),
+                    defaultspack_promotion=self._as_dict(data.get("defaultspack_promotion")),
                     compatibility=compatibility,
                     marketplace=self._as_dict(data.get("marketplace")),
                     signing=self._as_dict(data.get("signing")),
+                    schema_issues=schema_issues,
                 )
             )
         return candidates
+
+    @staticmethod
+    def _contract_issue_type(issue: Dict[str, Any]) -> str:
+        reason = str(issue.get("reason") or "")
+        return {
+            "invalid_setup_pack_schema": "invalid_setup_pack_metadata",
+            "invalid_marketplace_metadata": "invalid_marketplace_metadata",
+            "invalid_marketplace_status": "invalid_marketplace_metadata",
+            "marketplace_blacklisted": "marketplace_blacklisted",
+            "invalid_signing_mode": "invalid_signature_algorithm",
+            "missing_required_signature": "unsigned_pack",
+        }.get(reason, reason or "invalid_setup_pack_metadata")
+
+    @classmethod
+    def _contract_issue_to_selector(
+        cls,
+        candidate: PackCandidate,
+        issue: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        result = {
+            "type": cls._contract_issue_type(issue),
+            "pack_id": candidate.pack_id,
+            "severity": issue.get("severity") or "error",
+            "reason": issue.get("reason") or "",
+            "message": issue.get("error") or "",
+        }
+        if issue.get("field"):
+            result["field"] = issue["field"]
+        return result
 
     def validate_candidates(
         self,
@@ -211,8 +256,21 @@ class PackSelector:
         platform_aliases = self._platform_aliases(platform_name or sys.platform)
         python_version = python_version or platform.python_version()
         issues: List[Dict[str, Any]] = []
+        candidates = self.scan_candidates()
+        candidate_ids = {candidate.pack_id for candidate in candidates}
+        installed_ids = set(installed_packs)
 
-        for candidate in self.scan_candidates():
+        for candidate in candidates:
+            for issue in candidate.schema_issues:
+                issues.append(self._contract_issue_to_selector(candidate, issue))
+            for issue in validate_setup_pack_metadata(
+                pack_id=candidate.pack_id,
+                target_pack_id=candidate.target_pack_id,
+                marketplace=candidate.marketplace,
+                signing=candidate.signing,
+            ):
+                issues.append(self._contract_issue_to_selector(candidate, issue))
+
             for dep in candidate.depends_on or []:
                 dep_id = dep.get("pack_id", "")
                 installed = installed_packs.get(dep_id)
@@ -260,35 +318,26 @@ class PackSelector:
                     })
 
             signing = candidate.signing or {}
-            signature = signing.get("signature")
-            algorithm = signing.get("algorithm")
-            signing_required = require_signed or bool(signing.get("required"))
-            if signing and (signature is not None or algorithm is not None):
-                if not isinstance(signature, str) or not signature.strip():
-                    issues.append({
-                        "type": "invalid_signature",
-                        "pack_id": candidate.pack_id,
-                        "severity": "error" if signing_required else "warning",
-                    })
-                if algorithm is not None and not isinstance(algorithm, str):
-                    issues.append({
-                        "type": "invalid_signature_algorithm",
-                        "pack_id": candidate.pack_id,
-                        "severity": "error",
-                    })
-            elif signing_required:
+            if require_signed and not has_signing_proof(signing):
                 issues.append({
                     "type": "unsigned_pack",
                     "pack_id": candidate.pack_id,
                     "severity": "error",
                 })
 
-            marketplace = candidate.marketplace or {}
-            if marketplace and not any(marketplace.get(key) for key in ("id", "url", "source")):
+            for conflict in candidate.conflicts_with or []:
+                conflict_id = str(conflict.get("pack_id") or "")
+                if not conflict_id:
+                    continue
+                if conflict_id not in candidate_ids and conflict_id not in installed_ids:
+                    continue
                 issues.append({
-                    "type": "invalid_marketplace_metadata",
+                    "type": "pack_conflict",
                     "pack_id": candidate.pack_id,
-                    "severity": "warning",
+                    "conflicts_with": conflict_id,
+                    "resolution": conflict.get("resolution") or "choose_one_pack",
+                    "reason": conflict.get("reason") or "",
+                    "severity": "error" if conflict_id in installed_ids else "warning",
                 })
 
         return issues

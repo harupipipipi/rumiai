@@ -21,9 +21,17 @@ from __future__ import annotations
 import fnmatch
 import re
 import subprocess
+import sys
 import threading
 import uuid
 from typing import Any, Dict, List, Optional
+
+_this_module = sys.modules.get(__name__)
+if _this_module is not None:
+    if __name__.startswith("rumi_ai_1_10."):
+        sys.modules.setdefault(__name__.removeprefix("rumi_ai_1_10."), _this_module)
+    else:
+        sys.modules.setdefault(f"rumi_ai_1_10.{__name__}", _this_module)
 
 
 class DockerCapabilityHandler:
@@ -428,7 +436,10 @@ class DockerCapabilityHandler:
             # -------------------------------------------------------- #
             # 6. DockerRunBuilder でコマンド構築
             # -------------------------------------------------------- #
-            from .docker_run_builder import DockerRunBuilder
+            try:
+                from core_runtime.docker_run_builder import DockerRunBuilder
+            except ImportError:
+                from .docker_run_builder import DockerRunBuilder
 
             builder = DockerRunBuilder(name=container_name)
 
@@ -815,4 +826,3 @@ class DockerCapabilityHandler:
         )
 
         return {"containers": containers}
-

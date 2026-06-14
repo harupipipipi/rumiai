@@ -1,0 +1,44 @@
+{
+  "function_id": "remote_task_create",
+  "description": "Create and optionally dispatch a remote task.",
+  "tags": [
+    "remote",
+    "task"
+  ],
+  "risk": "medium",
+  "requires": [
+    "remote.task.create"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.remote.task_create",
+    "defaultspack.remote.task_create",
+    "defaults.remote.task.create",
+    "defaultspack.remote.task.create"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.remote.task_create",
+      "default_args": {}
+    }
+  }
+}

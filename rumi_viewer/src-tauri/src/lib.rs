@@ -19,13 +19,15 @@ use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fs, io};
 
 use anyhow::{anyhow, bail, Context, Result as AnyResult};
+use hmac::{Hmac, Mac};
 use log::{error, info, warn};
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use tauri::{AppHandle, Emitter, Manager, Url};
 
 use config::AppConfig;
@@ -41,6 +43,11 @@ pub struct AllowedNavigationPorts(pub Arc<Mutex<Vec<u16>>>);
 
 const PRIMARY_WINDOW_LABELS: [&str; 2] = ["panel", "main"];
 const DEFAULTSPACK_RESERVED_PORT: u16 = 8766;
+const AUTHORITY_APPROVAL_WINDOW_LABEL: &str = "authority-approval";
+const AUTHORITY_APPROVAL_WINDOW_TITLE: &str = "Rumi Approval";
+const AUTHORITY_UI_OPERATOR_TTL_SECONDS: u64 = 180;
+
+type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Deserialize)]
 struct PanelBootstrapPayload {
@@ -81,6 +88,25 @@ struct BackgroundControlStatus {
     kernel_running: bool,
     shutdown_requested: bool,
     windows: Vec<WindowRuntimeSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct AuthorityUiOperator {
+    version: u8,
+    kind: String,
+    origin: String,
+    window_label: String,
+    request_id: String,
+    issued_at: u64,
+    expires_at: u64,
+    nonce: String,
+    signature: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct AuthorityApprovalContext {
+    request_id: String,
+    ui_operator: AuthorityUiOperator,
 }
 
 /// Returns the current setup progress message.
@@ -131,6 +157,277 @@ fn open_external_url(url: String) -> Result<(), String> {
     }
 
     open::that_detached(url).map_err(|error| format!("failed to open external url: {error}"))
+}
+
+fn valid_authority_request_id(request_id: &str) -> bool {
+    let trimmed = request_id.trim();
+    !trimmed.is_empty()
+        && trimmed.len() <= 160
+        && trimmed
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+}
+
+fn authority_approval_url(request_id: &str) -> Result<Url, String> {
+    if !valid_authority_request_id(request_id) {
+        return Err("invalid authority request id".into());
+    }
+    Url::parse_with_params(
+        &format!("http://127.0.0.1:{DEFAULTSPACK_RESERVED_PORT}/approval"),
+        &[("request_id", request_id.trim())],
+    )
+    .map_err(|error| format!("failed to build approval window URL: {error}"))
+}
+
+fn focus_authority_approval_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    window
+        .unminimize()
+        .map_err(|error| format!("failed to unminimize approval window: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show approval window: {error}"))?;
+    window
+        .set_always_on_top(true)
+        .map_err(|error| format!("failed to bring approval window forward: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus approval window: {error}"))
+}
+
+fn open_authority_approval_window_for_app(app: &AppHandle, request_id: &str) -> Result<(), String> {
+    let request_id = request_id.trim().to_string();
+    let approval_url = authority_approval_url(&request_id)?;
+    if let Some(window) = app.get_webview_window(AUTHORITY_APPROVAL_WINDOW_LABEL) {
+        window
+            .navigate(approval_url)
+            .map_err(|error| format!("failed to navigate approval window: {error}"))?;
+        return focus_authority_approval_window(&window);
+    }
+
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        AUTHORITY_APPROVAL_WINDOW_LABEL,
+        tauri::WebviewUrl::External(approval_url),
+    )
+    .title(AUTHORITY_APPROVAL_WINDOW_TITLE)
+    .inner_size(620.0, 720.0)
+    .min_inner_size(480.0, 560.0)
+    .resizable(true)
+    .focused(true)
+    .visible(true)
+    .always_on_top(true)
+    .build()
+    .map_err(|error| format!("failed to open approval window: {error}"))?;
+    focus_authority_approval_window(&window)
+}
+
+#[tauri::command]
+async fn open_authority_approval_window(app: AppHandle, request_id: String) -> Result<(), String> {
+    open_authority_approval_window_for_app(&app, &request_id)
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Deserialize)]
+struct AuthorityTestResponse {
+    status: String,
+    data: Option<AuthorityTestData>,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Deserialize)]
+struct AuthorityTestData {
+    request_id: Option<String>,
+}
+
+#[cfg(debug_assertions)]
+fn truthy_env_flag(name: &str) -> bool {
+    matches!(
+        std::env::var(name)
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+#[cfg(debug_assertions)]
+fn maybe_spawn_authority_approval_smoke_window(app: AppHandle) {
+    if !truthy_env_flag("RUMI_AUTHORITY_TEST_AUTORUN") {
+        return;
+    }
+
+    thread::spawn(move || {
+        let client = match reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(3))
+            .build()
+        {
+            Ok(client) => client,
+            Err(error) => {
+                warn!("authority smoke test client unavailable: {error}");
+                return;
+            }
+        };
+        let base_url = format!("http://127.0.0.1:{DEFAULTSPACK_RESERVED_PORT}");
+        let health_url = format!("{base_url}/api/health");
+        let deadline = SystemTime::now() + Duration::from_secs(60);
+        while SystemTime::now() < deadline {
+            if client
+                .get(&health_url)
+                .send()
+                .map(|response| response.status().is_success())
+                .unwrap_or(false)
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(300));
+        }
+
+        let request_url = format!("{base_url}/api/authority/test/request");
+        let response = match client
+            .post(&request_url)
+            .json(&serde_json::json!({
+                "provider_id": "openai",
+                "api_id": "authority-window-smoke",
+                "model_id": "gpt-5.4-test",
+                "reason": "Authority approval window smoke test"
+            }))
+            .send()
+        {
+            Ok(response) => response,
+            Err(error) => {
+                warn!("authority smoke test request failed: {error}");
+                return;
+            }
+        };
+
+        let payload = match response.json::<AuthorityTestResponse>() {
+            Ok(payload) => payload,
+            Err(error) => {
+                warn!("authority smoke test response was not JSON: {error}");
+                return;
+            }
+        };
+        if payload.status != "ok" {
+            warn!(
+                "authority smoke test endpoint returned status={}",
+                payload.status
+            );
+            return;
+        }
+        let request_id = payload
+            .data
+            .and_then(|data| data.request_id)
+            .unwrap_or_default();
+        if !valid_authority_request_id(&request_id) {
+            warn!("authority smoke test returned invalid request id");
+            return;
+        }
+
+        thread::sleep(Duration::from_secs(2));
+        let app_for_open = app.clone();
+        let request_id_for_open = request_id.clone();
+        if let Err(error) = app.run_on_main_thread(move || {
+            match open_authority_approval_window_for_app(&app_for_open, &request_id_for_open) {
+                Ok(()) => info!(
+                    "authority smoke approval window opened on main thread for request {request_id_for_open}"
+                ),
+                Err(error) => {
+                    warn!("authority smoke approval window failed: {error}");
+                }
+            }
+        }) {
+            warn!("authority smoke test could not schedule approval window: {error}");
+        }
+    });
+}
+
+fn unix_now_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_secs()
+}
+
+fn authority_operator_message(operator: &AuthorityUiOperator) -> String {
+    [
+        format!("v{}", operator.version),
+        operator.origin.clone(),
+        operator.window_label.clone(),
+        operator.request_id.clone(),
+        operator.issued_at.to_string(),
+        operator.expires_at.to_string(),
+        operator.nonce.clone(),
+    ]
+    .join("\n")
+}
+
+fn sign_authority_ui_operator(
+    request_id: &str,
+    bootstrap_secret: &str,
+    now: u64,
+    nonce: String,
+) -> Result<AuthorityUiOperator, String> {
+    if !valid_authority_request_id(request_id) {
+        return Err("invalid authority request id".into());
+    }
+    if bootstrap_secret.trim().is_empty() {
+        return Err("approval signing secret is unavailable".into());
+    }
+    let mut operator = AuthorityUiOperator {
+        version: 1,
+        kind: "ui_operator".into(),
+        origin: "tauri_webview_window".into(),
+        window_label: AUTHORITY_APPROVAL_WINDOW_LABEL.into(),
+        request_id: request_id.trim().into(),
+        issued_at: now,
+        expires_at: now + AUTHORITY_UI_OPERATOR_TTL_SECONDS,
+        nonce,
+        signature: String::new(),
+    };
+    let mut mac = HmacSha256::new_from_slice(bootstrap_secret.as_bytes())
+        .map_err(|error| format!("failed to prepare approval signature: {error}"))?;
+    mac.update(authority_operator_message(&operator).as_bytes());
+    operator.signature = hex::encode(mac.finalize().into_bytes());
+    Ok(operator)
+}
+
+#[tauri::command]
+fn authority_approval_context(
+    window: tauri::WebviewWindow,
+    config: tauri::State<'_, AppConfig>,
+    request_id: String,
+) -> Result<AuthorityApprovalContext, String> {
+    if window.label() != AUTHORITY_APPROVAL_WINDOW_LABEL {
+        return Err("approval context is only available in the approval window".into());
+    }
+    let current_url = window
+        .url()
+        .map_err(|error| format!("failed to inspect approval window URL: {error}"))?;
+    if current_url.path() != "/approval" {
+        return Err("approval context is only available on the approval route".into());
+    }
+    let request_id = request_id.trim().to_string();
+    let url_request_id = current_url
+        .query_pairs()
+        .find_map(|(key, value)| (key == "request_id").then(|| value.into_owned()))
+        .unwrap_or_default();
+    if request_id != url_request_id {
+        return Err("approval context request id does not match the approval window URL".into());
+    }
+    let bootstrap_secret = load_or_create_panel_bootstrap_secret(&config)
+        .map_err(|error| format!("failed to load approval signing secret: {error}"))?;
+    let nonce: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
+    let operator =
+        sign_authority_ui_operator(&request_id, &bootstrap_secret, unix_now_seconds(), nonce)?;
+    Ok(AuthorityApprovalContext {
+        request_id,
+        ui_operator: operator,
+    })
 }
 
 #[tauri::command]
@@ -599,6 +896,10 @@ pub(crate) fn primary_window_label(has_panel: bool, has_main: bool) -> Option<&'
     }
 }
 
+fn should_send_to_background_on_close(label: &str) -> bool {
+    PRIMARY_WINDOW_LABELS.contains(&label)
+}
+
 fn restore_primary_window(app: &AppHandle, refresh_panel_session: bool) -> Result<(), String> {
     let target = primary_window_label(
         app.get_webview_window("panel").is_some(),
@@ -1014,6 +1315,9 @@ pub fn run() {
             let monitor_handle = app.handle().clone();
             let port = config.kernel_port;
 
+            #[cfg(debug_assertions)]
+            maybe_spawn_authority_approval_smoke_window(app.handle().clone());
+
             spawn_kernel_exit_monitor(
                 monitor_handle,
                 config.clone(),
@@ -1096,9 +1400,11 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                if let Err(error) = send_app_to_background(&window.app_handle()) {
-                    error!("Failed to send app to background: {error}");
+                if should_send_to_background_on_close(window.label()) {
+                    api.prevent_close();
+                    if let Err(error) = send_app_to_background(&window.app_handle()) {
+                        error!("Failed to send app to background: {error}");
+                    }
                 }
             }
         })
@@ -1108,6 +1414,8 @@ pub fn run() {
             reauthorize_panel_session,
             get_panel_session_url,
             open_external_url,
+            open_authority_approval_window,
+            authority_approval_context,
             send_to_background,
             show_app_window,
             get_background_control_status,
@@ -1171,6 +1479,44 @@ mod tests {
     #[test]
     fn returns_none_when_no_window_exists() {
         assert_eq!(primary_window_label(false, false), None);
+    }
+
+    #[test]
+    fn authority_approval_url_targets_defaultspack_window_route() {
+        let url = authority_approval_url("auth_123").unwrap();
+
+        assert_eq!(
+            url.as_str(),
+            "http://127.0.0.1:8766/approval?request_id=auth_123"
+        );
+    }
+
+    #[test]
+    fn authority_ui_operator_signature_is_bound_to_request_and_window() {
+        let operator = sign_authority_ui_operator(
+            "auth_123",
+            "test-bootstrap-secret",
+            1_700_000_000,
+            "nonce-1".into(),
+        )
+        .unwrap();
+
+        assert_eq!(operator.window_label, AUTHORITY_APPROVAL_WINDOW_LABEL);
+        assert_eq!(operator.request_id, "auth_123");
+        assert_eq!(
+            authority_operator_message(&operator),
+            "v1\ntauri_webview_window\nauthority-approval\nauth_123\n1700000000\n1700000180\nnonce-1"
+        );
+        assert!(!operator.signature.is_empty());
+    }
+
+    #[test]
+    fn close_policy_keeps_primary_windows_but_allows_approval_close() {
+        assert!(should_send_to_background_on_close("main"));
+        assert!(should_send_to_background_on_close("panel"));
+        assert!(!should_send_to_background_on_close(
+            AUTHORITY_APPROVAL_WINDOW_LABEL
+        ));
     }
 
     #[test]

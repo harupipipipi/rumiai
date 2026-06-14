@@ -1,4 +1,5 @@
 import type { ToolPreviewItem } from "../components/ToolPreview";
+import type { AuthorityApprovalScope } from "./authorityApproval";
 
 const DEFAULTSPACK_CSRF_STORAGE_KEY = "rumi-defaultspack-csrf";
 
@@ -143,6 +144,66 @@ export type CodingApprovalDecision = {
   reason?: string;
 };
 
+export type AuthorityApprovalDecision = {
+  request_id: string;
+  approved: boolean;
+  scope: AuthorityApprovalScope;
+  token?: string;
+  expires_at?: string | null;
+  principal_id?: string;
+  permission_id?: string;
+  config?: Record<string, unknown>;
+};
+
+export type AuthorityUiOperator = {
+  version: number;
+  kind: "ui_operator";
+  origin: string;
+  window_label: string;
+  request_id: string;
+  issued_at: number;
+  expires_at: number;
+  nonce: string;
+  signature: string;
+};
+
+export type AuthorityRequestDisplayMetadata = {
+  title?: string;
+  summary?: string;
+  permission_id?: string;
+  provider_id?: string | null;
+  api_id?: string | null;
+  model_id?: string | null;
+  function_id?: string | null;
+  pack_id?: string | null;
+  risk_level?: string;
+  audit_text?: string;
+};
+
+export type AuthorityRequest = {
+  request_id: string;
+  status: "pending" | "approved" | "denied" | "expired" | string;
+  principal_id: string;
+  permission_id: string;
+  resource: Record<string, unknown>;
+  reason: string;
+  risk_level: string;
+  created_at: string;
+  expires_at?: string | null;
+  conversation_id?: string | null;
+  profile_id?: string | null;
+  node_id?: string | null;
+  graph_id?: string | null;
+  display_metadata?: AuthorityRequestDisplayMetadata;
+  allowed_scopes?: AuthorityApprovalScope[];
+};
+
+export type AuthorityRequestsResponse = {
+  requests: AuthorityRequest[];
+  pending: AuthorityRequest[];
+  count: number;
+};
+
 export type CodingCheckpoint = {
   snapshot_id: string;
   path?: string;
@@ -151,6 +212,48 @@ export type CodingCheckpoint = {
   created_at?: string;
   metadata?: Record<string, unknown>;
   [key: string]: unknown;
+};
+
+export type RumiLogEvent = {
+  event_id: string;
+  created_at: string;
+  kind: string;
+  actor_id?: string;
+  agent_role?: string;
+  session_id?: string;
+  status?: string;
+  message?: string;
+  branch?: string;
+  commit_hash?: string;
+  remote?: string;
+  paths?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type RumiLogSummary = {
+  total: number;
+  by_kind?: Record<string, number>;
+  by_status?: Record<string, number>;
+  agent_ids?: string[];
+  commit_count?: number;
+  push_count?: number;
+  plan_count?: number;
+  task_count?: number;
+  conversation_count?: number;
+  mention_count?: number;
+  last_event_at?: string | null;
+  last_commit_hash?: string | null;
+};
+
+export type RumiLogResponse = {
+  rumi_dir: string;
+  events_path?: string;
+  event?: RumiLogEvent;
+  events: RumiLogEvent[];
+  summary: RumiLogSummary;
+  created?: boolean;
+  workspace_id?: string | null;
+  workspace_root?: string | null;
 };
 
 export type CodingDiffResponse = {
@@ -375,6 +478,53 @@ export type CompanyStatusResponse = {
   company?: CompanyRecord | null;
   runtime?: Record<string, number>;
   storage_file?: string;
+};
+
+export type RemoteTaskCreateRequest = {
+  input: string;
+  title?: string;
+  company_id?: string;
+  target_agent_ids?: string[];
+  priority?: "low" | "normal" | "high" | string;
+  dispatch?: boolean;
+  client?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type RemoteTaskSnapshot = {
+  remote_task_id: string;
+  company_id: string;
+  task_id: string;
+  message_id?: string;
+  thread_id?: string;
+  state: string;
+  task?: Record<string, unknown>;
+  routes?: Array<Record<string, unknown>>;
+  run_links?: Array<Record<string, unknown>>;
+  agent_runs?: Array<Record<string, unknown>>;
+  inbox?: Array<Record<string, unknown>>;
+  waiting_approvals?: Array<Record<string, unknown>>;
+  updated_at?: string;
+  next_poll_ms?: number;
+};
+
+export type RemoteTaskEvent = {
+  cursor: string;
+  type: string;
+  message?: string;
+  task_id?: string;
+  run_id?: string;
+  agent_id?: string;
+  status?: string;
+  created_at?: string;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type RemoteTaskEventsResponse = {
+  events: RemoteTaskEvent[];
+  next_cursor?: string;
+  next_poll_ms?: number;
 };
 
 export type P2PSettings = {
@@ -1301,6 +1451,35 @@ function withQuery(path: string, params?: Record<string, unknown>): string {
   return suffix ? `${path}?${suffix}` : path;
 }
 
+export async function createRemoteTask(input: RemoteTaskCreateRequest): Promise<RemoteTaskSnapshot> {
+  return request<RemoteTaskSnapshot>("/api/remote/tasks", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getRemoteTask(taskId: string): Promise<RemoteTaskSnapshot> {
+  return request<RemoteTaskSnapshot>(`/api/remote/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
+}
+
+export async function listRemoteTaskEvents(taskId: string, after?: string): Promise<RemoteTaskEventsResponse> {
+  return request<RemoteTaskEventsResponse>(
+    withQuery(`/api/remote/tasks/${encodeURIComponent(taskId)}/events`, { after }),
+    { cache: "no-store" },
+  );
+}
+
+export async function cancelRemoteTask(taskId: string, reason?: string): Promise<RemoteTaskSnapshot> {
+  return request<RemoteTaskSnapshot>(`/api/remote/tasks/${encodeURIComponent(taskId)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+}
+
+export async function getRemoteHostStatus(): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>("/api/remote/host/status", { cache: "no-store" });
+}
+
 export function arrayFromRecord<T>(value: Record<string, T> | T[] | undefined | null): T[] {
   if (Array.isArray(value)) return value;
   if (value && typeof value === "object") return Object.values(value);
@@ -1948,6 +2127,16 @@ export const api = {
     );
   },
 
+  createRemoteTask,
+
+  getRemoteTask,
+
+  listRemoteTaskEvents,
+
+  cancelRemoteTask,
+
+  getRemoteHostStatus,
+
   bootstrapCompanyWorkspace(metadata?: Record<string, unknown>, options?: { conversationId?: string | null; scope?: "conversation" | "default" }) {
     return request<{ bootstrapped: boolean; company: CompanyRecord }>("/api/company/bootstrap", {
       method: "POST",
@@ -2386,6 +2575,58 @@ export const api = {
     });
   },
 
+  listAuthorityRequests(options?: { status?: "all" | "pending" | "approved" | "denied" | "expired" | string }) {
+    return request<AuthorityRequestsResponse>(
+      withQuery("/api/authority/requests", { status: options?.status ?? "all" }),
+      { cache: "no-store" },
+    );
+  },
+
+  getAuthorityRequest(requestId: string) {
+    return request<AuthorityRequest>(
+      `/api/authority/requests/${encodeURIComponent(requestId)}`,
+      { cache: "no-store" },
+    );
+  },
+
+  approveAuthorityApproval(
+    requestId: string,
+    options?: {
+      scope?: AuthorityApprovalScope;
+      config?: Record<string, unknown>;
+      expires_in_seconds?: number;
+      ui_operator?: AuthorityUiOperator;
+    },
+  ) {
+    return request<AuthorityApprovalDecision>(`/api/authority/requests/${encodeURIComponent(requestId)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({
+        scope: options?.scope ?? "once",
+        config: options?.config,
+        expires_in_seconds: options?.expires_in_seconds,
+        ui_operator: options?.ui_operator,
+      }),
+    });
+  },
+
+  denyAuthorityApproval(
+    requestId: string,
+    reasonOrOptions?: string | { reason?: string; persist?: boolean; ui_operator?: AuthorityUiOperator },
+    persist?: boolean,
+  ) {
+    const options = typeof reasonOrOptions === "object" && reasonOrOptions !== null
+      ? reasonOrOptions
+      : { reason: reasonOrOptions, persist };
+    return request<Record<string, unknown>>(`/api/authority/requests/${encodeURIComponent(requestId)}/deny`, {
+      method: "POST",
+      body: JSON.stringify({
+        reason: options.reason,
+        persist: Boolean(options.persist),
+        ui_operator: options.ui_operator,
+      }),
+    });
+  },
+
   listCodingCheckpoints(options?: { workspace_id?: string | null; limit?: number }) {
     return request<{ checkpoints: CodingCheckpoint[]; workspace_id?: string | null; workspace_root?: string | null }>(
       withQuery("/api/coding/checkpoints", { workspace_id: options?.workspace_id, limit: options?.limit }),
@@ -2406,6 +2647,48 @@ export const api = {
         body: JSON.stringify(payload ?? {}),
       },
     );
+  },
+
+  listRumiLogs(options?: { workspace_id?: string | null; limit?: number; kind?: string | string[] | null }) {
+    return request<RumiLogResponse>(
+      withQuery("/api/coding/rumi-log", {
+        workspace_id: options?.workspace_id,
+        limit: options?.limit,
+        kind: options?.kind,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  appendRumiLog(payload: {
+    workspace_id?: string | null;
+    kind?: string;
+    actor_id?: string;
+    agent_role?: string;
+    session_id?: string;
+    status?: string;
+    message?: string;
+    branch?: string;
+    commit_hash?: string;
+    remote?: string;
+    paths?: string[];
+    mentions?: string[];
+    task_id?: string;
+    task_title?: string;
+    task_status?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<RumiLogResponse>("/api/coding/rumi-log", {
+      method: "POST",
+      body: JSON.stringify({ action: "append", ...payload }),
+    });
+  },
+
+  seedRumiLogPlan(payload?: { workspace_id?: string | null }) {
+    return request<RumiLogResponse>("/api/coding/rumi-log", {
+      method: "POST",
+      body: JSON.stringify({ action: "seed_local_plan", ...(payload ?? {}) }),
+    });
   },
 
   restoreCodingSnapshot(snapshotId: string, options?: {
