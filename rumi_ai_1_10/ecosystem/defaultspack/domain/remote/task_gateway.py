@@ -274,7 +274,12 @@ class RemoteTaskGateway:
         task = self._get_task_or_raise(task_id, company_id=company_id)
         company_id = str(task["company_id"])
         run_links = self._synced_run_links(company_id, task_id)
-        agent_runs = [run for run in (self.run_store.get_run(str(link.get("run_id") or "")) for link in run_links) if isinstance(run, dict)]
+        raw_agent_runs = [
+            run
+            for run in (self.run_store.get_run(str(link.get("run_id") or "")) for link in run_links)
+            if isinstance(run, dict)
+        ]
+        agent_runs = [_remote_run_dto(run) for run in raw_agent_runs]
         run_ids = _run_ids(run_links)
         inbox = [
             item
@@ -282,7 +287,7 @@ class RemoteTaskGateway:
             if str(item.get("task_id") or "") == task_id or (item.get("run_id") and str(item.get("run_id")) in run_ids)
         ][:100]
         waiting_approvals = self._pending_approvals(run_ids)
-        state = self._normalized_state(task, run_links, agent_runs, waiting_approvals)
+        state = self._normalized_state(task, run_links, raw_agent_runs, waiting_approvals)
         if state not in REMOTE_STATES:
             state = "queued"
         task = self._persist_normalized_task_state(company_id, task_id, state, task)
@@ -398,7 +403,7 @@ class RemoteTaskGateway:
         placeholders = ",".join("?" for _ in ids)
         rows = self.run_store.conn.execute(
             f"""
-            SELECT approval_id, run_id, tool_call_id, reviewer, status, reason, requested_at, decided_at, decision_json
+            SELECT approval_id, run_id, tool_call_id, reviewer, status, reason, requested_at, decided_at
             FROM agent_approvals
             WHERE status = 'pending' AND run_id IN ({placeholders})
             ORDER BY requested_at ASC
@@ -406,7 +411,7 @@ class RemoteTaskGateway:
             """,
             ids,
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [_remote_approval_dto(dict(row)) for row in rows]
 
     def _normalized_state(
         self,
@@ -579,6 +584,39 @@ def _string_list(value: Any) -> list[str]:
 def _clean_text(value: Any, *, default: str = "", limit: int = 160) -> str:
     text = str(value or "").strip() or default
     return text[:limit]
+
+
+def _remote_run_dto(run: dict[str, Any]) -> dict[str, Any]:
+    allowed = (
+        "run_id",
+        "agent_id",
+        "status",
+        "created_at",
+        "updated_at",
+        "started_at",
+        "completed_at",
+        "heartbeat_at",
+    )
+    dto = {key: run.get(key) for key in allowed if run.get(key) not in (None, "")}
+    if run.get("error") not in (None, ""):
+        dto["error"] = _clean_text(redact_sensitive(run.get("error")), limit=500)
+    return dto
+
+
+def _remote_approval_dto(approval: dict[str, Any]) -> dict[str, Any]:
+    allowed = (
+        "approval_id",
+        "run_id",
+        "tool_call_id",
+        "reviewer",
+        "status",
+        "requested_at",
+        "decided_at",
+    )
+    dto = {key: approval.get(key) for key in allowed if approval.get(key) not in (None, "")}
+    if approval.get("reason") not in (None, ""):
+        dto["reason"] = _clean_text(redact_sensitive(approval.get("reason")), limit=500)
+    return dto
 
 
 def _title_from_input(input_text: str) -> str:

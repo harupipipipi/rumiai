@@ -133,6 +133,17 @@ def _wait_until(predicate, *, timeout=2.0):
     assert predicate()
 
 
+def _assert_forbidden_snapshot_keys_absent(value, forbidden):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            assert key not in forbidden
+            assert "transcript" not in str(key).lower()
+            _assert_forbidden_snapshot_keys_absent(child, forbidden)
+    elif isinstance(value, list):
+        for child in value:
+            _assert_forbidden_snapshot_keys_absent(child, forbidden)
+
+
 def test_create_remote_task_bootstraps_default_company(remote_gateway_env):
     gateway, _fake, runtime_store, _run_store = _gateway()
 
@@ -213,6 +224,64 @@ def test_get_remote_task_returns_task_run_links_and_waiting_approvals(remote_gat
     assert result["run_links"][0]["status"] == "waiting_approval"
     assert result["agent_runs"][0]["status"] == "waiting_approval"
     assert result["waiting_approvals"][0]["approval_id"] == "approval_1"
+
+
+def test_remote_task_snapshot_omits_run_and_approval_internals(remote_gateway_env):
+    from domain.agent_runtime.models import AgentRun
+
+    gateway, _fake, _runtime_store, run_store = _gateway(status="waiting_approval", approval=True)
+    created = gateway.create_task({"input": "Remote DTO check"}, {})
+
+    _wait_until(lambda: bool(gateway.get_task(created["task_id"], {}, {})["run_links"]))
+    run_store.upsert_run(
+        AgentRun(
+            run_id="run_remote_1",
+            session_key="remote",
+            task="do not expose task transcript poison",
+            status="waiting_approval",
+            agent_id="operations_manager",
+            current_transcript_id="transcript-poison",
+            result_json={"result_json_poison": "remote-result-secret"},
+            execution_json={
+                "execution_json_poison": "remote-execution-secret",
+                "messages": [{"role": "assistant", "content": "remote-transcript-secret"}],
+            },
+        )
+    )
+    run_store.record_approval(
+        "approval_1",
+        "run_remote_1",
+        "call_1",
+        status="pending",
+        decision={"decision_json_poison": {"secret": "remote-approval-secret"}},
+    )
+
+    result = gateway.get_task(created["task_id"], {}, {})
+    serialized = repr(result)
+
+    assert result["agent_runs"][0] == {
+        "run_id": "run_remote_1",
+        "agent_id": "operations_manager",
+        "status": "waiting_approval",
+        "created_at": result["agent_runs"][0]["created_at"],
+        "updated_at": result["agent_runs"][0]["updated_at"],
+    }
+    assert result["waiting_approvals"][0]["approval_id"] == "approval_1"
+    _assert_forbidden_snapshot_keys_absent(
+        result,
+        {
+            "execution_json",
+            "result_json",
+            "current_transcript_id",
+            "transcript_id",
+            "replacement_transcript_id",
+            "decision_json",
+        },
+    )
+    assert "remote-result-secret" not in serialized
+    assert "remote-execution-secret" not in serialized
+    assert "remote-transcript-secret" not in serialized
+    assert "remote-approval-secret" not in serialized
 
 
 def test_remote_task_state_promotes_to_completed_when_all_linked_runs_complete(remote_gateway_env):
