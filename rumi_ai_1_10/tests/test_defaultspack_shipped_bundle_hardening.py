@@ -9,6 +9,7 @@ SHELL_APP = REPO_ROOT / "ecosystem" / "defaultspack" / "ui" / "shell-app.js"
 def test_shipped_composer_bundle_rehydrates_catalog_actions():
     bundle = SHELL_APP.read_text(encoding="utf-8")
 
+    assert "trustedComposerActionForWidget" in bundle
     assert "composer_catalog_drop" in bundle
     assert "sourceItemId||" in bundle
     assert re.search(

@@ -131,7 +131,7 @@ class _CompiledGateway:
         return self.provider, model.split("/", 1)[1] if "/" in model else model
 
 
-def _compiled_prepared_run():
+def _compiled_prepared_run(provider_id: str = "openai", model: str = "openai/gpt-5.4"):
     from domain.chat.run_request import PreparedChatRun
 
     return PreparedChatRun(
@@ -142,7 +142,7 @@ def _compiled_prepared_run():
         content=[],
         metadata={},
         user_message={"id": "u"},
-        model="openai/gpt-5.4",
+        model=model,
         params={},
         request_context={"authority": {"principal_id": "profile:work"}},
         tool_context={},
@@ -156,7 +156,7 @@ def _compiled_prepared_run():
         connected_tool_names=set(),
         call_handler=None,
         model_routing={},
-        provider_capabilities={"provider_id": "openai", "api_family": "openai_chat"},
+        provider_capabilities={"provider_id": provider_id, "api_family": "openai_chat"},
     )
 
 
@@ -337,6 +337,91 @@ def test_compiled_provider_requires_api_key_use_before_request_json(monkeypatch)
 
     assert authority.permissions == ["model.invoke", "api_key.use"]
     assert provider.request_json_calls == []
+
+
+def test_ai_client_direct_oauth_provider_requires_authority_without_api_key(monkeypatch):
+    from domain.ai_client.client import AIClient, AuthorityApprovalRequired
+    from domain.ai_client.providers.stub_provider import StubProvider
+
+    AIClient._instance = None
+    client = AIClient()
+    client._providers = {"stub": StubProvider(), "google": _FakeProvider()}
+    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
+    monkeypatch.setattr("domain.ai_client.authority_gate.provider_has_api_key", lambda provider_id: False)
+    monkeypatch.setattr(
+        "domain.ai_client.authority_gate.provider_has_oauth_connection",
+        lambda provider_id: provider_id == "google",
+    )
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: _DenyAuthority())
+
+    try:
+        client.complete(
+            "google/gemini-3",
+            [{"role": "user", "content": "hi"}],
+            params={"_authority_context": {"principal_id": "profile:work"}},
+        )
+    except AuthorityApprovalRequired as exc:
+        assert exc.decision.permission_id == "model.invoke"
+    else:
+        raise AssertionError("AuthorityApprovalRequired was not raised")
+
+    assert client._providers["google"].calls == []
+
+
+def test_compiled_oauth_provider_requires_authority_without_api_key(monkeypatch):
+    from domain.ai_client.client import AuthorityApprovalRequired
+    from domain.chat.stream_engine import ChatRunEngine
+
+    class OAuthCompiledProvider:
+        def __init__(self):
+            self.request_json_calls = []
+
+        def _request_json(self, path, body):
+            self.request_json_calls.append({"path": path, "body": body})
+            raise AssertionError("compiled OAuth provider request ran before authority")
+
+    provider = OAuthCompiledProvider()
+    authority = _DenyApiKeyUseAuthority()
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+    monkeypatch.setattr("domain.ai_client.authority_gate.provider_has_api_key", lambda provider_id: False)
+    monkeypatch.setattr(
+        "domain.ai_client.authority_gate.provider_has_oauth_connection",
+        lambda provider_id: provider_id == "google",
+    )
+
+    try:
+        ChatRunEngine(store=object(), gateway=_CompiledGateway(provider))._complete_turn_with_compiler(
+            _compiled_prepared_run(provider_id="google", model="google/gemini-3"),
+            [{"role": "user", "content": "hi"}],
+        )
+    except AuthorityApprovalRequired as exc:
+        assert exc.decision.permission_id == "api_key.use"
+    else:
+        raise AssertionError("AuthorityApprovalRequired was not raised")
+
+    assert authority.permissions == ["model.invoke", "api_key.use"]
+    assert provider.request_json_calls == []
+
+
+def test_ai_client_auto_register_keeps_oauth_provider_when_cloud_disabled(monkeypatch):
+    from domain.ai_client.client import AIClient
+
+    provider = _FakeProvider()
+    AIClient._instance = None
+    monkeypatch.setattr("domain.ai_client.client.detect_available_providers", lambda: {"oauth-provider": provider})
+    monkeypatch.setattr(
+        "domain.ai_client.client.get_provider_catalog_map",
+        lambda: {"oauth-provider": {"kind": "cloud", "availability": {}}},
+    )
+    monkeypatch.setattr("domain.ai_client.client.provider_has_api_key", lambda provider_id: False)
+    monkeypatch.setattr(
+        "domain.ai_client.client.provider_has_oauth_connection",
+        lambda provider_id: provider_id == "oauth-provider",
+    )
+
+    client = AIClient()
+
+    assert client._providers["oauth-provider"] is provider
 
 
 def test_ai_client_strips_authority_context_before_provider(monkeypatch):

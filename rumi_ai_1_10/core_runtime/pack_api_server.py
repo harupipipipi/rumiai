@@ -1492,6 +1492,18 @@ class PackAPIHandler(
                 result = self._authority_requests(status_filter)
                 self._send_result(result)
 
+            elif path.startswith("/api/authority/requests/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4:
+                    request_id = unquote(parts[3])
+                    result = self._authority_request(request_id)
+                    if result.get("success"):
+                        self._send_result(result.get("request", {}))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Authority request not found")), result.get("status_code", 404))
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
             elif path == "/api/authority/grants":
                 principal_id = query.get("principal_id", "")
                 result = self._authority_grants(principal_id)

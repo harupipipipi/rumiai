@@ -1109,6 +1109,101 @@ test("browser open aliases use the browser-computer approval endpoint", async ()
   }
 });
 
+test("authority request helpers use pending list and single request routes", async () => {
+  const originalFetch = globalThis.fetch;
+  const seen: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    seen.push(String(input));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: String(input).includes("/auth_1")
+        ? {
+          request_id: "auth_1",
+          status: "pending",
+          principal_id: "profile:work",
+          permission_id: "model.invoke",
+          resource: { provider_id: "openai" },
+          reason: "model access",
+          risk_level: "medium",
+          created_at: "2026-01-01T00:00:00Z",
+          allowed_scopes: ["once", "profile"],
+        }
+        : { requests: [], pending: [], count: 0 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.listAuthorityRequests({ status: "pending" });
+    const request = await api.getAuthorityRequest("auth_1");
+    assert.equal(request.request_id, "auth_1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(seen, [
+    "/api/authority/requests?status=pending",
+    "/api/authority/requests/auth_1",
+  ]);
+});
+
+test("authority approval helpers send signed ui operator provenance", async () => {
+  const originalFetch = globalThis.fetch;
+  const seen: Array<{ input: string; body: any; csrf: string | null }> = [];
+  const uiOperator = {
+    version: 1,
+    kind: "ui_operator" as const,
+    origin: "tauri_webview_window",
+    window_label: "authority-approval",
+    request_id: "auth_1",
+    issued_at: 1700000000,
+    expires_at: 1700000180,
+    nonce: "nonce",
+    signature: "sig",
+  };
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    seen.push({
+      input: String(input),
+      body: JSON.parse(String(init?.body ?? "{}")),
+      csrf: headers.get("X-Rumi-CSRF"),
+    });
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: String(input).endsWith("/deny")
+        ? { request_id: "auth_1", denied: true }
+        : { request_id: "auth_1", approved: true, scope: "conversation" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.approveAuthorityApproval("auth_1", {
+      scope: "conversation",
+      config: { provider_ids: ["openai"] },
+      ui_operator: uiOperator,
+    });
+    await api.denyAuthorityApproval("auth_1", {
+      reason: "no",
+      persist: true,
+      ui_operator: uiOperator,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(seen[0].body, {
+    scope: "conversation",
+    config: { provider_ids: ["openai"] },
+    ui_operator: uiOperator,
+  });
+  assert.ok(seen[0].csrf);
+  assert.deepEqual(seen[1].body, {
+    reason: "no",
+    persist: true,
+    ui_operator: uiOperator,
+  });
+  assert.ok(seen[1].csrf);
+});
+
 test("coding context, branch, and workspace read helpers use existing API routes", async () => {
   const seen: Array<{ input: string; body?: unknown }> = [];
   const originalFetch = globalThis.fetch;

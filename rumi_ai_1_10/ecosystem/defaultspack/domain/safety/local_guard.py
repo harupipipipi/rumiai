@@ -43,6 +43,8 @@ METHOD_SENSITIVE_CODING_PATHS = {
 }
 
 SENSITIVE_LOCAL_PATHS = {
+    "/api/authority/requests",
+    "/api/authority/test/request",
     "/api/browser/artifacts",
     "/api/tools/browser-computer",
     "/api/tools/create",
@@ -64,6 +66,7 @@ SENSITIVE_LOCAL_PREFIXES = (
 )
 
 METHOD_SENSITIVE_LOCAL_PREFIXES = (
+    ("/api/authority/requests/", {"POST", "DELETE"}, ()),
     ("/api/tools/", {"PUT", "DELETE"}, ("/api/tools/browser-companion/bridge/",)),
     ("/api/tools/", {"POST"}, ("/api/tools/browser-companion/bridge/", "/api/tools/invoke")),
 )
