@@ -21,6 +21,17 @@ _PNG_DATA_URL = (
 )
 
 
+def _browser_companion_extension_root() -> Path:
+    candidates = [
+        DEFAULTSPACK_ROOT / "browser_extensions" / "rumi_browser_companion",
+        ROOT.parent / "browser_extensions" / "rumi_browser_companion",
+    ]
+    for candidate in candidates:
+        if (candidate / "content_script.js").is_file() and (candidate / "background.js").is_file():
+            return candidate
+    return candidates[0]
+
+
 def test_browser_companion_candidate_urls_match_defaultspack_default_port():
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import candidate_base_urls
 
@@ -333,13 +344,7 @@ def test_browser_companion_extension_focus_semantics_are_explicit():
 
 
 def test_browser_companion_extension_semantic_dom_and_highlight_contract():
-    extension_root = (
-        ROOT
-        / "ecosystem"
-        / "defaultspack"
-        / "browser_extensions"
-        / "rumi_browser_companion"
-    )
+    extension_root = _browser_companion_extension_root()
     content = (extension_root / "content_script.js").read_text(encoding="utf-8")
     background = (extension_root / "background.js").read_text(encoding="utf-8")
     tool_manifest = (
@@ -388,13 +393,7 @@ def test_browser_companion_extension_semantic_dom_and_highlight_contract():
 
 
 def test_browser_companion_extension_restricts_bridge_server_url_to_local_private_origins():
-    extension_root = (
-        ROOT
-        / "ecosystem"
-        / "defaultspack"
-        / "browser_extensions"
-        / "rumi_browser_companion"
-    )
+    extension_root = _browser_companion_extension_root()
     policy = (extension_root / "bridge_url_policy.js").read_text(encoding="utf-8")
     background = (extension_root / "background.js").read_text(encoding="utf-8")
     options = (extension_root / "options.js").read_text(encoding="utf-8")
@@ -461,6 +460,23 @@ for (const [url, expected] of cases) {
             check=False,
         )
         assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_browser_companion_snapshot_forwards_snapshot_options_to_content_script():
+    background = (_browser_companion_extension_root() / "background.js").read_text(encoding="utf-8")
+    capture_body = background[
+        background.index("async function captureDomSnapshot") : background.index("async function sendElementCommand")
+    ]
+
+    for needle in (
+        "snapshotRequest.options = snapshotOptions",
+        "snapshotOptions.includeHidden",
+        "snapshotOptions.includeHtml",
+        "snapshotOptions.includeAttributes",
+        "snapshotOptions.attributeNames",
+        "snapshotOptions.includeSemantics",
+    ):
+        assert needle in capture_body
 
 
 def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeypatch):

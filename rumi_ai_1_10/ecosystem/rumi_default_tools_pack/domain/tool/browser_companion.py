@@ -328,7 +328,14 @@ class BrowserCompanionController:
             return True
         if cls._truthy(context.get("yolo_mode")):
             return True
-        return bool(context.get("_tool_server_approval_token_valid") is True)
+        return bool(
+            context.get("_tool_server_approval_token_valid") is True
+            or context.get("_tool_server_approved") is True
+        )
+
+    @classmethod
+    def _context_allows_value_inclusion(cls, context: dict[str, Any]) -> bool:
+        return cls._context_allows_remote_action(context)
 
     @classmethod
     def _read_only_blocks(cls, remote_action: str, context: dict[str, Any]) -> bool:
@@ -536,7 +543,6 @@ class BrowserCompanionController:
         }
         return {key: value for key, value in payload.items() if key in allowed and value is not None}
 
-    @classmethod
     def _include_values_allowed(
         cls,
         remote_action: str,
@@ -548,7 +554,7 @@ class BrowserCompanionController:
             return False
         if not cls._truthy(payload.get("include_values")):
             return False
-        return approval_granted or cls._context_allows_remote_action(context)
+        return approval_granted or cls._context_allows_value_inclusion(context)
 
     @staticmethod
     def _remote_result_contains_capture(result: dict[str, Any]) -> bool:

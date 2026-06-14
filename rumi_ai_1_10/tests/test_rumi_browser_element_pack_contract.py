@@ -13,6 +13,17 @@ ROOT = Path(__file__).resolve().parent.parent
 PACK_ROOT = ROOT / "ecosystem" / "rumi_browser_element_pack"
 
 
+def _browser_companion_extension_root() -> Path:
+    candidates = [
+        ROOT / "ecosystem" / "defaultspack" / "browser_extensions" / "rumi_browser_companion",
+        ROOT.parent / "browser_extensions" / "rumi_browser_companion",
+    ]
+    for candidate in candidates:
+        if (candidate / "content_script.js").is_file():
+            return candidate
+    return candidates[0]
+
+
 def test_browser_element_pack_has_required_docs() -> None:
     for relative in (
         "README.md",
@@ -38,14 +49,7 @@ def test_browser_element_pack_json_and_yaml_parse() -> None:
 
 
 def test_browser_element_pack_tracks_extension_semantic_contract() -> None:
-    content = (
-        ROOT
-        / "ecosystem"
-        / "defaultspack"
-        / "browser_extensions"
-        / "rumi_browser_companion"
-        / "content_script.js"
-    ).read_text(encoding="utf-8")
+    content = (_browser_companion_extension_root() / "content_script.js").read_text(encoding="utf-8")
     schema = yaml.safe_load((PACK_ROOT / "catalog" / "element_schema.yaml").read_text(encoding="utf-8"))
 
     assert schema["schema_id"] == "rumi.browser.semantic_dom_v2"
