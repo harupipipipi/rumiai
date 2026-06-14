@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import errno
 import json
 import os
 import subprocess
@@ -14,6 +15,8 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 STORE_ENV_VAR = "RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH"
+_LOCK_REGISTRY_GUARD = threading.Lock()
+_LOCK_REGISTRY: dict[str, threading.RLock] = {}
 
 
 def utc_now() -> str:
@@ -25,6 +28,16 @@ def default_storage_path() -> Path:
     if override:
         return Path(override).expanduser()
     return Path(__file__).resolve().parents[2] / "user_data" / "shared" / "coding_workspaces.json"
+
+
+def _lock_for_path(path: Path) -> threading.RLock:
+    key = str(path.expanduser().resolve())
+    with _LOCK_REGISTRY_GUARD:
+        lock = _LOCK_REGISTRY.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _LOCK_REGISTRY[key] = lock
+        return lock
 
 
 def normalize_workspace_root(root_path: str | os.PathLike[str]) -> str:
@@ -91,7 +104,7 @@ def detect_workspace_metadata(root_path: str) -> dict[str, Any]:
 class WorkspaceStore:
     def __init__(self, storage_path: str | os.PathLike[str] | None = None) -> None:
         self._storage_path = Path(storage_path).expanduser() if storage_path else default_storage_path()
-        self._lock = threading.RLock()
+        self._lock = _lock_for_path(self._storage_path)
 
     @property
     def storage_path(self) -> Path:
@@ -305,10 +318,37 @@ class WorkspaceStore:
                 json.dump(data, handle, ensure_ascii=False, indent=2)
                 handle.flush()
                 os.fsync(handle.fileno())
-            Path(tmp_name).replace(self._storage_path)
+            self._replace_atomic_file(Path(tmp_name), self._storage_path)
         except BaseException:
             try:
                 os.unlink(tmp_name)
             except OSError:
                 pass
             raise
+
+    @staticmethod
+    def _is_transient_replace_error(exc: OSError) -> bool:
+        winerror = getattr(exc, "winerror", None)
+        errno_value = getattr(exc, "errno", None)
+        if isinstance(exc, PermissionError):
+            return True
+        if winerror in {5, 32}:
+            return True
+        if errno_value in {errno.EACCES, errno.EBUSY, errno.EPERM}:
+            return True
+        message = str(exc).lower()
+        return "access is denied" in message or "permission denied" in message
+
+    def _replace_atomic_file(self, tmp_path: Path, path: Path) -> None:
+        last_error: OSError | None = None
+        for attempt in range(8):
+            try:
+                tmp_path.replace(path)
+                return
+            except OSError as exc:
+                last_error = exc
+                if not self._is_transient_replace_error(exc) or attempt >= 7:
+                    break
+                time.sleep(min(0.05 * (2 ** attempt), 0.5))
+        if last_error is not None:
+            raise last_error

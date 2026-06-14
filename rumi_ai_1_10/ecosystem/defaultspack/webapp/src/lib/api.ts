@@ -214,6 +214,48 @@ export type CodingCheckpoint = {
   [key: string]: unknown;
 };
 
+export type RumiLogEvent = {
+  event_id: string;
+  created_at: string;
+  kind: string;
+  actor_id?: string;
+  agent_role?: string;
+  session_id?: string;
+  status?: string;
+  message?: string;
+  branch?: string;
+  commit_hash?: string;
+  remote?: string;
+  paths?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type RumiLogSummary = {
+  total: number;
+  by_kind?: Record<string, number>;
+  by_status?: Record<string, number>;
+  agent_ids?: string[];
+  commit_count?: number;
+  push_count?: number;
+  plan_count?: number;
+  task_count?: number;
+  conversation_count?: number;
+  mention_count?: number;
+  last_event_at?: string | null;
+  last_commit_hash?: string | null;
+};
+
+export type RumiLogResponse = {
+  rumi_dir: string;
+  events_path?: string;
+  event?: RumiLogEvent;
+  events: RumiLogEvent[];
+  summary: RumiLogSummary;
+  created?: boolean;
+  workspace_id?: string | null;
+  workspace_root?: string | null;
+};
+
 export type CodingDiffResponse = {
   diff: string;
   stat?: string;
@@ -436,6 +478,53 @@ export type CompanyStatusResponse = {
   company?: CompanyRecord | null;
   runtime?: Record<string, number>;
   storage_file?: string;
+};
+
+export type RemoteTaskCreateRequest = {
+  input: string;
+  title?: string;
+  company_id?: string;
+  target_agent_ids?: string[];
+  priority?: "low" | "normal" | "high" | string;
+  dispatch?: boolean;
+  client?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type RemoteTaskSnapshot = {
+  remote_task_id: string;
+  company_id: string;
+  task_id: string;
+  message_id?: string;
+  thread_id?: string;
+  state: string;
+  task?: Record<string, unknown>;
+  routes?: Array<Record<string, unknown>>;
+  run_links?: Array<Record<string, unknown>>;
+  agent_runs?: Array<Record<string, unknown>>;
+  inbox?: Array<Record<string, unknown>>;
+  waiting_approvals?: Array<Record<string, unknown>>;
+  updated_at?: string;
+  next_poll_ms?: number;
+};
+
+export type RemoteTaskEvent = {
+  cursor: string;
+  type: string;
+  message?: string;
+  task_id?: string;
+  run_id?: string;
+  agent_id?: string;
+  status?: string;
+  created_at?: string;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type RemoteTaskEventsResponse = {
+  events: RemoteTaskEvent[];
+  next_cursor?: string;
+  next_poll_ms?: number;
 };
 
 export type P2PSettings = {
@@ -1390,6 +1479,35 @@ function withQuery(path: string, params?: Record<string, unknown>): string {
   return suffix ? `${path}?${suffix}` : path;
 }
 
+export async function createRemoteTask(input: RemoteTaskCreateRequest): Promise<RemoteTaskSnapshot> {
+  return request<RemoteTaskSnapshot>("/api/remote/tasks", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getRemoteTask(taskId: string): Promise<RemoteTaskSnapshot> {
+  return request<RemoteTaskSnapshot>(`/api/remote/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
+}
+
+export async function listRemoteTaskEvents(taskId: string, after?: string): Promise<RemoteTaskEventsResponse> {
+  return request<RemoteTaskEventsResponse>(
+    withQuery(`/api/remote/tasks/${encodeURIComponent(taskId)}/events`, { after }),
+    { cache: "no-store" },
+  );
+}
+
+export async function cancelRemoteTask(taskId: string, reason?: string): Promise<RemoteTaskSnapshot> {
+  return request<RemoteTaskSnapshot>(`/api/remote/tasks/${encodeURIComponent(taskId)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+}
+
+export async function getRemoteHostStatus(): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>("/api/remote/host/status", { cache: "no-store" });
+}
+
 export function arrayFromRecord<T>(value: Record<string, T> | T[] | undefined | null): T[] {
   if (Array.isArray(value)) return value;
   if (value && typeof value === "object") return Object.values(value);
@@ -2038,6 +2156,16 @@ export const api = {
     );
   },
 
+  createRemoteTask,
+
+  getRemoteTask,
+
+  listRemoteTaskEvents,
+
+  cancelRemoteTask,
+
+  getRemoteHostStatus,
+
   bootstrapCompanyWorkspace(metadata?: Record<string, unknown>, options?: { conversationId?: string | null; scope?: "conversation" | "default" }) {
     return request<{ bootstrapped: boolean; company: CompanyRecord }>("/api/company/bootstrap", {
       method: "POST",
@@ -2548,6 +2676,48 @@ export const api = {
         body: JSON.stringify(payload ?? {}),
       },
     );
+  },
+
+  listRumiLogs(options?: { workspace_id?: string | null; limit?: number; kind?: string | string[] | null }) {
+    return request<RumiLogResponse>(
+      withQuery("/api/coding/rumi-log", {
+        workspace_id: options?.workspace_id,
+        limit: options?.limit,
+        kind: options?.kind,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  appendRumiLog(payload: {
+    workspace_id?: string | null;
+    kind?: string;
+    actor_id?: string;
+    agent_role?: string;
+    session_id?: string;
+    status?: string;
+    message?: string;
+    branch?: string;
+    commit_hash?: string;
+    remote?: string;
+    paths?: string[];
+    mentions?: string[];
+    task_id?: string;
+    task_title?: string;
+    task_status?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<RumiLogResponse>("/api/coding/rumi-log", {
+      method: "POST",
+      body: JSON.stringify({ action: "append", ...payload }),
+    });
+  },
+
+  seedRumiLogPlan(payload?: { workspace_id?: string | null }) {
+    return request<RumiLogResponse>("/api/coding/rumi-log", {
+      method: "POST",
+      body: JSON.stringify({ action: "seed_local_plan", ...(payload ?? {}) }),
+    });
   },
 
   restoreCodingSnapshot(snapshotId: string, options?: {

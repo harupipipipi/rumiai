@@ -36,6 +36,7 @@ from domain.vision.image_bridge import (
 from domain.chat.tool_recommender import effective_tool_assist_mode, recommend_tool_ids, tool_assist_limit
 from domain.prompt.manager import get_manager
 from domain.skill_trigger import RuntimeSkillTriggerService
+from domain.tool.loading import split_tools_by_loading
 from domain.tool.registry import ToolRegistry
 from domain.tool.eligibility import filter_tool_definitions_by_eligibility
 from domain.tool.schema_adapter import (
@@ -1368,17 +1369,24 @@ def _resolve_selected_tools(
                 None,
                 policy_context=context or {},
             )
+        always_tools, vector_tools = split_tools_by_loading(candidate_tools)
         recommended_ids = recommend_tool_ids(
             user_text,
-            candidate_tools,
+            vector_tools,
             limit=tool_assist_limit(pack_root=pack_root),
         )
-        resolved = [tool for tool in candidate_tools if str(tool.get("tool_id") or "") in set(recommended_ids)]
+        recommended = set(recommended_ids)
+        resolved = [
+            *always_tools,
+            *[tool for tool in vector_tools if str(tool.get("tool_id") or "") in recommended],
+        ]
         if isinstance(context, dict):
             context["tool_assist"] = {
-                "mode": "vector",
+                "mode": mode,
                 "recommended_tools": recommended_ids,
+                "always_tools": [str(tool.get("tool_id") or tool.get("name") or "") for tool in always_tools],
                 "available_tool_count": len(candidate_tools),
+                "vector_candidate_count": len(vector_tools),
             }
         return resolved, []
     resolved = []
