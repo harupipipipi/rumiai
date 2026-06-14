@@ -31,6 +31,7 @@ from .runtime_port import resolve_runtime_port
 from .validation import (
     validate_pack_id as _v_validate_pack_id,
     is_safe_id as _v_is_safe_id,
+    is_safe_staging_id as _v_is_safe_staging_id,
     PACK_ID_RE,
     SAFE_ID_RE,
     MAX_REQUEST_BODY_BYTES,
@@ -257,6 +258,47 @@ class PackAPIHandler(
         """汎用 ID バリデーション。staging_id, privilege_id, flow_id 等に使用する。"""
         return _v_is_safe_id(value)
 
+    @classmethod
+    def _is_pack_approved_for_runtime_routes(cls, pack_id: str) -> bool:
+        normalized_pack_id = str(pack_id or "").strip()
+        if not normalized_pack_id:
+            return False
+        manager = getattr(cls, "approval_manager", None)
+        if manager is None:
+            try:
+                from .approval_manager import get_approval_manager
+
+                manager = get_approval_manager()
+            except Exception as exc:
+                logger.warning(
+                    "Skipping runtime routes for pack '%s': approval manager unavailable: %s",
+                    normalized_pack_id,
+                    exc,
+                )
+                return False
+        try:
+            result = manager.is_pack_approved_and_verified(normalized_pack_id)
+        except Exception as exc:
+            logger.warning(
+                "Skipping runtime routes for pack '%s': approval verification failed: %s",
+                normalized_pack_id,
+                exc,
+            )
+            return False
+        if isinstance(result, tuple):
+            approved = bool(result[0])
+            reason = result[1] if len(result) > 1 else None
+        else:
+            approved = bool(result)
+            reason = None
+        if not approved:
+            logger.warning(
+                "Skipping runtime routes for unapproved pack '%s': %s",
+                normalized_pack_id,
+                reason or "not approved",
+            )
+        return approved
+
     @staticmethod
     def _pack_root_hint(pack_info: Any) -> Optional[Any]:
         for attr in ("subdir", "path", "pack_dir"):
@@ -333,6 +375,8 @@ class PackAPIHandler(
         for pack_id, pack_info in registry.packs.items():
             if pack_ids is not None and pack_id not in pack_ids:
                 continue
+            if not cls._is_pack_approved_for_runtime_routes(pack_id):
+                continue
             wm = pack_info.ecosystem.get("web_mount")
             if not wm or not isinstance(wm, dict):
                 continue
@@ -373,6 +417,8 @@ class PackAPIHandler(
                 continue
             allow_pre_auth = cls._is_trusted_pre_auth_pack(pack_id, pack_info)
             # 1. 明示的な pre_auth_routes
+            if not cls._is_pack_approved_for_runtime_routes(pack_id):
+                continue
             routes = pack_info.ecosystem.get("pre_auth_routes")
             if routes and isinstance(routes, list):
                 if not allow_pre_auth:
@@ -424,7 +470,9 @@ class PackAPIHandler(
         for wm in self._web_mounts:
             prefix = wm["path_prefix"]
             if request_path == prefix or request_path.startswith(prefix + "/"):
-                return wm
+                if self._is_pack_approved_for_runtime_routes(wm.get("pack_id", "")):
+                    return wm
+                continue
         fallback_mounts = {
             "/panel": {
                 "web_root": Path(__file__).resolve().parent / "core_pack" / "core_control_panel" / "web",
@@ -443,7 +491,9 @@ class PackAPIHandler(
         }
         for prefix, mount in fallback_mounts.items():
             if request_path == prefix or request_path.startswith(prefix + "/"):
-                return {"path_prefix": prefix, **mount}
+                candidate = {"path_prefix": prefix, **mount}
+                if self._is_pack_approved_for_runtime_routes(candidate.get("pack_id", "")):
+                    return candidate
         return None
 
 
@@ -520,6 +570,8 @@ class PackAPIHandler(
         for pack_id, pack_info in registry.packs.items():
             if pack_ids is not None and pack_id not in pack_ids:
                 continue
+            if not cls._is_pack_approved_for_runtime_routes(pack_id):
+                continue
             count += _register_routes(pack_id, pack_info.ecosystem, pack_info)
             loaded_pack_ids.add(pack_id)
 
@@ -571,10 +623,14 @@ class PackAPIHandler(
         for entry in self._pre_auth_table:
             if entry["method"] != method_upper:
                 continue
-            if "path" in entry and entry["path"] == path:
-                return True
-            if "path_prefix" in entry and path.startswith(entry["path_prefix"]):
-                return True
+            matched = "path" in entry and entry["path"] == path
+            if "path_prefix" in entry:
+                prefix = str(entry["path_prefix"]).rstrip("/")
+                if path == prefix or path.startswith(prefix + "/"):
+                    matched = True
+            if matched:
+                if self._is_pack_approved_for_runtime_routes(entry.get("pack_id", "")):
+                    return True
         return False
 
 
@@ -622,6 +678,14 @@ class PackAPIHandler(
 
         if entry is None:
             return False
+
+        pack_id = entry.get("pack_id", "")
+        if not self._is_pack_approved_for_runtime_routes(pack_id):
+            self._send_response(
+                APIResponse(False, error=f"Pack not approved: {pack_id}"),
+                403,
+            )
+            return True
 
         handler_name = entry["handler"]
         pass_body = entry.get("pass_body", False)
@@ -1390,6 +1454,9 @@ class PackAPIHandler(
         if _wm is None:
             self._send_response(APIResponse(False, error="Not found"), 404)
             return
+        if not self._is_pack_approved_for_runtime_routes(_wm.get("pack_id", "")):
+            self._send_response(APIResponse(False, error="Forbidden"), 403)
+            return
 
         path_prefix = _wm["path_prefix"]
         web_root = _wm["web_root"]
@@ -1971,9 +2038,9 @@ class PackAPIHandler(
                     self._send_response(APIResponse(False, error="Missing 'path'"), 400)
                 else:
                     # パストラバーサル防止: ecosystem/ 配下のみ許可
-                    _eco_base = Path(
-                        os.environ.get("RUMI_ECOSYSTEM_DIR", "ecosystem")
-                    ).resolve()
+                    from .paths import ECOSYSTEM_DIR as _ECOSYSTEM_DIR
+
+                    _eco_base = Path(_ECOSYSTEM_DIR).resolve()
                     try:
                         _resolved = Path(source_path).resolve()
                         _resolved.relative_to(_eco_base)
@@ -1993,7 +2060,7 @@ class PackAPIHandler(
                 mode = body.get("mode", "replace")
                 if not staging_id:
                     self._send_response(APIResponse(False, error="Missing 'staging_id'"), 400)
-                elif not self._is_safe_id(staging_id):
+                elif not _v_is_safe_staging_id(staging_id):
                     self._send_response(APIResponse(False, error="Invalid staging_id"), 400)
                 else:
                     result = self._pack_apply(staging_id, mode)

@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .validation import validate_entrypoint
+
 logger = logging.getLogger(__name__)
 
 
@@ -252,9 +254,13 @@ class FunctionRegistry:
         if function_dir is not None:
             fd = Path(function_dir)
             if runtime == "python":
-                candidate = fd / "main.py"
-                if candidate.exists():
-                    main_py = candidate
+                entrypoint = str(m.get("entrypoint") or "main.py:run")
+                valid, error, candidate = validate_entrypoint(entrypoint, fd)
+                if not valid or candidate is None:
+                    raise ValueError(
+                        f"Invalid entrypoint for {pack_id}:{function_id}: {error}"
+                    )
+                main_py = candidate
             elif runtime == "binary":
                 main_path = m.get("main", "")
                 if main_path:
@@ -287,7 +293,7 @@ class FunctionRegistry:
             command=m.get("command", []),
             docker_image=m.get("docker_image", ""),
             extensions=m.get("extensions", {}),
-            entrypoint=m.get("entrypoint"),
+            entrypoint=str(m.get("entrypoint") or "main.py:run") if runtime == "python" else m.get("entrypoint"),
             risk=m.get("risk"),
             grant_config=m.get("grant_config"),
             vocab_aliases=m.get("vocab_aliases"),
