@@ -257,7 +257,8 @@ class PackSelector:
         python_version = python_version or platform.python_version()
         issues: List[Dict[str, Any]] = []
         candidates = self.scan_candidates()
-        candidate_ids = {candidate.pack_id for candidate in candidates}
+        candidate_by_id = {candidate.pack_id: candidate for candidate in candidates}
+        candidate_ids = set(candidate_by_id)
         installed_ids = set(installed_packs)
 
         for candidate in candidates:
@@ -274,7 +275,8 @@ class PackSelector:
             for dep in candidate.depends_on or []:
                 dep_id = dep.get("pack_id", "")
                 installed = installed_packs.get(dep_id)
-                if installed is None:
+                candidate_dependency = candidate_by_id.get(dep_id)
+                if installed is None and candidate_dependency is None:
                     issues.append({
                         "type": "missing_dependency",
                         "pack_id": candidate.pack_id,
@@ -283,13 +285,14 @@ class PackSelector:
                     })
                     continue
                 constraint = dep.get("version")
-                if constraint and not self._version_satisfies(installed.get("version"), constraint):
+                actual_version = installed.get("version") if installed is not None else candidate_dependency.version
+                if constraint and not self._version_satisfies(actual_version, constraint):
                     issues.append({
                         "type": "version_mismatch",
                         "pack_id": candidate.pack_id,
                         "depends_on": dep_id,
                         "required": constraint,
-                        "actual": installed.get("version"),
+                        "actual": actual_version,
                         "severity": "error",
                     })
 
