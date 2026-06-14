@@ -17,7 +17,15 @@ build() は List[str] を返すだけであり、subprocess の呼び出し方�
 
 from __future__ import annotations
 
+import sys
 from typing import List, Optional
+
+_this_module = sys.modules.get(__name__)
+if _this_module is not None:
+    if __name__.startswith("rumi_ai_1_10."):
+        sys.modules.setdefault(__name__.removeprefix("rumi_ai_1_10."), _this_module)
+    else:
+        sys.modules.setdefault(f"rumi_ai_1_10.{__name__}", _this_module)
 
 
 class DockerRunBuilder:
@@ -48,7 +56,7 @@ class DockerRunBuilder:
     DEFAULT_NETWORK = "none"
     DEFAULT_TMPFS = "/tmp:size=64m,noexec,nosuid"
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str = "rumi-container") -> None:
         self._name: str = name
         self._pids_limit_val: int = self.DEFAULT_PIDS_LIMIT
         self._user: str = self.DEFAULT_USER
@@ -86,6 +94,9 @@ class DockerRunBuilder:
         self._pids_limit_val = limit
         return self
 
+    def set_pids_limit(self, limit: int) -> "DockerRunBuilder":
+        return self.pids_limit(limit)
+
     def user(self, user: str) -> "DockerRunBuilder":
         """--user を設定 (デフォルト: 65534:65534)"""
         self._user = user
@@ -100,6 +111,16 @@ class DockerRunBuilder:
         """-v マウントを追加 (例: "/host:/container:ro")"""
         self._volumes.append(mount_spec)
         return self
+
+    def add_volume(
+        self,
+        host_path: str,
+        container_path: str,
+        *,
+        read_only: bool = False,
+    ) -> "DockerRunBuilder":
+        mode = "ro" if read_only else "rw"
+        return self.volume(f"{host_path}:{container_path}:{mode}")
 
     def secret_file(self, host_path: str, container_path: str) -> "DockerRunBuilder":
         """Secret ファイルを読み取り専用でマウントする。
@@ -125,20 +146,32 @@ class DockerRunBuilder:
         self._workdir_val = path
         return self
 
+    def set_workdir(self, path: str) -> "DockerRunBuilder":
+        return self.workdir(path)
+
     def label(self, key: str, value: str) -> "DockerRunBuilder":
         """--label を追加"""
         self._labels.append([key, value])
         return self
+
+    def add_label(self, key: str, value: str) -> "DockerRunBuilder":
+        return self.label(key, value)
 
     def image(self, img: str) -> "DockerRunBuilder":
         """Docker イメージを設定"""
         self._image_val = img
         return self
 
+    def set_image(self, img: str) -> "DockerRunBuilder":
+        return self.image(img)
+
     def command(self, cmd: List[str]) -> "DockerRunBuilder":
         """コンテナ内で実行するコマンドを設定"""
         self._command_val = list(cmd)
         return self
+
+    def set_command(self, cmd: List[str]) -> "DockerRunBuilder":
+        return self.command(cmd)
 
     # ---- ビルド ----
 

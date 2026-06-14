@@ -577,6 +577,11 @@ def test_import_entrypoint_normalizes_legacy_module_names():
 
 def test_build_fallback_http_routes_contains_core_routes():
     class _Server:
+        def __getattr__(self, name):
+            if str(name).startswith("_handle_authority_"):
+                return lambda *_args, **_kwargs: {"status": "ok"}
+            raise AttributeError(name)
+
         def _invoke_fallback_block(self, block_module, request_data, path_params, inject=None):
             return {
                 "block_module": block_module,

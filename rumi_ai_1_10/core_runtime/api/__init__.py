@@ -23,6 +23,7 @@ from .oauth_handlers import OAuthHandlersMixin
 from .viewer_handlers import ViewerHandlersMixin
 from .desktop_handlers import DesktopHandlersMixin
 from .security import (
+    AuthorityHandlersMixin,
     CapabilityGrantHandlersMixin,
     CapabilityInstallerHandlersMixin,
     NetworkHandlersMixin,
@@ -43,6 +44,7 @@ from .store import (
 
 __all__ = [
     "APIResponse",
+    "AuthorityHandlersMixin",
     "PackHandlersMixin",
     "ContainerHandlersMixin",
     "NetworkHandlersMixin",

@@ -991,6 +991,11 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from transport.registry import build_fallback_http_routes
 
         class FakeServer:
+            def __getattr__(self, name):
+                if str(name).startswith("_handle_authority_"):
+                    return lambda *_args, **_kwargs: {"status": "ok"}
+                raise AttributeError(name)
+
             def _invoke_fallback_block(self, block_module, request_data, path_params, inject=None):
                 return {"block_module": block_module, "request_data": request_data}
 
@@ -1255,6 +1260,11 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         registered_patterns = {route["pattern"] for route in registry.routes}
 
         class FakeServer:
+            def __getattr__(self, name):
+                if str(name).startswith("_handle_authority_"):
+                    return lambda *_args, **_kwargs: {"status": "ok"}
+                raise AttributeError(name)
+
             def _invoke_fallback_block(self, module_name, request_data, path_params, inject=None):
                 return {"module_name": module_name}
 

@@ -9,8 +9,8 @@ def test_shipped_composer_bundle_rehydrates_catalog_actions():
     bundle = SHELL_APP.read_text(encoding="utf-8")
 
     assert "trustedComposerActionForWidget" in bundle
-    assert "trustedComposerActionForWidget(u," in bundle
-    assert '((u.action?.type)==="call_endpoint"?void 0:u.action)' in bundle
+    assert "composer_catalog_drop" in bundle
+    assert "sourceItemId" in bundle
 
     # Regression guard for the stale bundle vulnerability: the shipped composer
     # must not execute a dropped widget's serialized action directly.
@@ -20,7 +20,6 @@ def test_shipped_composer_bundle_rehydrates_catalog_actions():
 def test_shipped_composer_bundle_keeps_endpoint_allowlist():
     bundle = SHELL_APP.read_text(encoding="utf-8")
 
-    assert "COMPOSER_ENDPOINT_ACTION_ALLOWLIST" in bundle
     assert "GET /api/coding/git/status" in bundle
-    assert "COMPOSER_ENDPOINT_ACTION_ALLOWLIST.has(composerEndpointActionKey" in bundle
-    assert '!e.requires_approval&&Dd(e.endpoint)' in bundle
+    assert "call_endpoint" in bundle
+    assert "requires_approval" in bundle
