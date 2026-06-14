@@ -12,7 +12,7 @@ export function ToolPreviewPanelRenderer({
   onMemoChange,
 }: ToolPreviewPanelRendererProps) {
   return (
-    <div className="w-[clamp(300px,28vw,380px)] flex-shrink-0 h-full max-[1050px]:w-[300px] max-[900px]:hidden">
+    <div className="w-[clamp(300px,28vw,380px)] flex-shrink-0 h-full max-[1050px]:w-[300px] max-[900px]:hidden rumi-anim-fade-right">
       <ToolPreviewPanel
         previews={previews}
         isVisible={showPreview}

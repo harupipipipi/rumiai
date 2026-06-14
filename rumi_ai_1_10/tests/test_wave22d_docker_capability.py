@@ -124,6 +124,44 @@ class TestImageWhitelist:
         assert "error" in result
         mock_run.assert_not_called()
 
+    @patch("core_runtime.docker_capability.subprocess.run",
+           return_value=_mock_completed())
+    def test_option_like_image_rejected_before_allowlist(
+        self, mock_run: MagicMock, handler: DockerCapabilityHandler,
+    ) -> None:
+        """'*' grant でも Docker option に見える image は拒否する。"""
+        grant = {"allowed_images": ["*"]}
+        args = {
+            "image": "--user=0:0",
+            "command": [
+                "--privileged",
+                "--network=host",
+                "-v",
+                "/:/host:rw",
+                "alpine:latest",
+                "sh",
+            ],
+        }
+        result = handler.handle_run("pack-001", args, grant)
+        assert "error" in result
+        assert "Invalid image reference" in result["error"]
+        mock_run.assert_not_called()
+
+    @patch("core_runtime.docker_capability.subprocess.run",
+           return_value=_mock_completed())
+    def test_valid_registry_image_allowed_with_wildcard(
+        self, mock_run: MagicMock, handler: DockerCapabilityHandler,
+    ) -> None:
+        """registry/namespace/tag 付きの正規 image は従来通り許可する。"""
+        grant = {"allowed_images": ["registry.example.com/team/*"]}
+        args = {
+            "image": "registry.example.com/team/app:2026.06",
+            "command": ["echo", "ok"],
+        }
+        result = handler.handle_run("pack-001", args, grant)
+        assert "error" not in result
+        mock_run.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # メモリ制限

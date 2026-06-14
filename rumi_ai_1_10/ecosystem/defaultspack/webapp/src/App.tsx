@@ -12,13 +12,13 @@ import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeAp
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
-import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText } from "./lib/composerWidgets";
+import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
-import { isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
+import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
@@ -907,7 +907,14 @@ function CalendarComposerPanel({
           aria-label={`${calendarRangeLabel(activeEditor.startKey, activeEditor.endKey)}に追加`}
           className="rumi-calendar-popover absolute rumi-layer-global-overlay w-[min(320px,calc(100%-24px))] rounded-2xl border border-zinc-700 bg-zinc-950/95 p-3 text-left shadow-[0_24px_70px_rgba(0,0,0,0.65)] backdrop-blur"
           style={popoverStyle}
-          onPointerDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => {
+            const target = event.target as HTMLElement | null;
+            if (target?.closest("button, input, textarea, label, [role='listbox'], [role='option']")) {
+              event.stopPropagation();
+              return;
+            }
+            dismissActiveEditorForSelection(true);
+          }}
           onClick={(event) => event.stopPropagation()}
           onSubmit={submitDraft}
         >
@@ -1557,6 +1564,8 @@ const API_KEY_PROVIDER_IDS = new Set([
   "groq",
   "longcat",
   "mistral",
+  "opencode-go",
+  "opencode-zen",
   "openai",
   "openai_compatible",
   "openrouter",
@@ -1588,13 +1597,16 @@ function isUserFacingModelProfile(profile: ModelProfile, preferredModel: string)
   const providerId = String(profile.provider_id ?? "").trim();
   const modelId = String(profile.model_id ?? "").trim();
   const profileId = profile.profile_id || profile.qualified_model_id || `${providerId}/${modelId}`;
+  const availabilityStatus = String(profile.availability?.status ?? "").trim().toLowerCase();
 
   if (profileId === preferredModel) return true;
   if (!profileIsChatSelectable(profile)) return false;
   if (providerId === "rumi") return false;
   if (providerId === "stub") return modelId === "default";
   if (profile.local || profile.availability?.local || profile.availability?.offline || LOCAL_MODEL_PROVIDER_IDS.has(providerId)) return true;
-  return isConfiguredProfile(profile);
+  if (isConfiguredProfile(profile)) return true;
+  if (availabilityStatus === "route_required") return true;
+  return profileNeedsApiKey(profile);
 }
 
 function modelProfileSortKey(profile: ModelProfile): [number, number, string] {
@@ -2081,6 +2093,7 @@ export default function App() {
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isUnloadingRef = useRef(false);
+  const humanOperatorAutoOpenedPreviewRef = useRef<string | null>(null);
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
@@ -2253,6 +2266,19 @@ export default function App() {
   }, [messageToolPreviews, previews]);
   const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo) || liveBrowserState.state_revision >= 0;
   const effectiveShowPreview = showPreview && canShowCanvas;
+
+  useEffect(() => {
+    const preview = canvasPreviews.find(isHumanOperatorCanvasPreview);
+    if (!preview) {
+      humanOperatorAutoOpenedPreviewRef.current = null;
+      return;
+    }
+    if (humanOperatorAutoOpenedPreviewRef.current === preview.id) return;
+    humanOperatorAutoOpenedPreviewRef.current = preview.id;
+    setActivePreviewId(preview.id);
+    setShowPreview(true);
+  }, [canvasPreviews]);
+
   const composerCommands = useMemo(() => {
     const showAdvanced = settingsValues.commands?.show_advanced_commands === true;
     const fastCandidate = fastCandidateForProfile(activeProfile, selectableModelProfiles);
@@ -2416,6 +2442,18 @@ export default function App() {
       if (event.origin !== window.location.origin) return;
       const payload = event.data;
       if (!payload || typeof payload !== "object") return;
+      if ((payload as Record<string, unknown>).type === "rumi_human_operator_sync") {
+        const conversationId = String((payload as Record<string, unknown>).conversation_id ?? "").trim();
+        if (conversationId && conversationId === activeConversationId) {
+          void api.getConversation(conversationId)
+            .then((conversation) => {
+              setActiveConversation(conversation);
+              void refreshPreview(conversationId);
+            })
+            .catch(console.error);
+        }
+        return;
+      }
       if ((payload as Record<string, unknown>).type !== "rumi_provider_oauth") return;
       const providerId = String((payload as Record<string, unknown>).provider_id ?? "").trim();
       if (providerId) {
@@ -2428,7 +2466,7 @@ export default function App() {
     return () => {
       window.removeEventListener("message", handleOauthMessage);
     };
-  }, []);
+  }, [activeConversationId]);
 
   useEffect(() => {
     if (mode === "coding") {
@@ -3626,7 +3664,8 @@ export default function App() {
   };
 
   const handleWidgetAction = (widget: DroppedWidget) => {
-    const action = widget.action;
+    const trustedAction = trustedComposerActionForWidget(widget, composerExtensions);
+    const action = trustedAction ?? (widget.action?.type === "call_endpoint" ? undefined : widget.action);
 
     if (!action) {
       const target = widget.sourceItemId || widget.id;
@@ -4387,7 +4426,7 @@ export default function App() {
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
+        tools: submittedToolIds,
         metadata: {
           mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : mode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
@@ -4555,7 +4594,7 @@ export default function App() {
 
       <div className="flex flex-1 min-h-0">
         {showRegion("history") && !isHistoryMinimized && (
-          <div className="w-[286px] max-w-[30vw] min-w-[240px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-2 fade-in duration-200 ease-out max-[900px]:w-[260px]">
+          <div className="w-[286px] max-w-[30vw] min-w-[240px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-2 fade-in duration-200 ease-out max-[900px]:w-[260px] rumi-anim-fade-left">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -4580,7 +4619,7 @@ export default function App() {
         )}
 
         {showRegion("history") && isHistoryMinimized && (
-          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-visible border-r border-zinc-800/60 animate-in slide-in-from-left-1 fade-in duration-150 ease-out">
+          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-visible border-r border-zinc-800/60 animate-in slide-in-from-left-1 fade-in duration-150 ease-out rumi-anim-fade-left">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -4609,7 +4648,7 @@ export default function App() {
           className={cn("rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative", isActivityPreviewVisible && "has-activity-preview")}
           style={{ "--rumi-activity-preview-width": `${activityPreviewWidthPx}px` } as CSSProperties}
         >
-          <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
+          <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0 rumi-anim-fade-up", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
             {showRegion("chat_header") && !isCalendarMode && (
               <Renderers.chatHeader
                 title={activeChatTitle}
@@ -4786,7 +4825,7 @@ export default function App() {
           )}
 
           {isActivityPreviewVisible && (
-            <aside className="rumi-activity-preview-pane" aria-label="Activity preview">
+            <aside className="rumi-activity-preview-pane rumi-anim-fade-right" aria-label="Activity preview">
               <Renderers.toolPreviewPanel
                 previews={canvasPreviews}
                 showPreview={effectiveShowPreview}
@@ -4802,13 +4841,14 @@ export default function App() {
         </main>
 
         {showRegion("right_sidebar") && (
+          <div className="rumi-anim-fade-right">
           <Renderers.rightSidebar
             items={sidebarItems}
             activeItemId={activeSidebarItemId ? `${activeSidebarItemId}:${sidebarSelectionTick}` : null}
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
-            companyPanel={<CompanyWorkspacePanel />}
+            companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />}
             codingPanel={codingSidebarPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
             selectedProfile={activeProfile}
@@ -4830,6 +4870,7 @@ export default function App() {
             onToolBatchSet={handleToolBatchSet}
             onPanelAction={handlePanelAction}
           />
+          </div>
         )}
       </div>
 

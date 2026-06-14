@@ -2,12 +2,12 @@
   "id": "subagent",
   "category": "tool",
   "version": "1",
-  "display_name": "Subagent",
+  "display_name": "Delegation",
   "description": "Delegate a bounded task to a child conversation and link it under the parent chat.",
   "enabled": true,
   "config": {
     "name": "subagent",
-    "summary": "サブエージェント",
+    "summary": "Delegation",
     "tags": ["agent", "subagent", "delegation"],
     "schema": {
       "parameters": {
@@ -33,7 +33,7 @@
     "ui": {
       "group_id": "agent",
       "group_label": "Agent",
-      "composer_label": "Subagent",
+      "composer_label": "Delegation",
       "composer_icon": "bot",
       "drop_capabilities": ["composer.toggle_chip"],
       "widget_kind": "tool_toggle",
@@ -47,7 +47,7 @@
         },
         {
           "id": "max_concurrent_subagents",
-          "label": "Max concurrent subagents",
+          "label": "Max concurrent delegations",
           "type": "number",
           "default": 2,
           "min": 1,

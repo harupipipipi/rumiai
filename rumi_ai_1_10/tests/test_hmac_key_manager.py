@@ -451,6 +451,23 @@ class TestRotate:
             mgr._load_or_initialize()
             assert mgr.verify_token(old_key) is False
 
+    def test_old_key_rejected_after_grace_period_without_reload(self, tmp_path):
+        """再ロードなしでもグレースピリオド超過後の旧鍵が拒否されること"""
+        mgr = HMACKeyManager(
+            keys_path=str(tmp_path / "k.json"),
+            grace_period_seconds=1,
+        )
+        old_key = mgr.get_active_key()
+        new_key = mgr.rotate()
+
+        future_time = datetime.now(timezone.utc) + timedelta(seconds=10)
+        with patch(
+            "rumi_ai_1_10.core_runtime.hmac_key_manager._now_utc",
+            return_value=future_time,
+        ):
+            assert mgr.verify_token(old_key) is False
+            assert mgr.verify_token(new_key) is True
+
     def test_rotate_key_alias(self, tmp_path):
         """rotate_key が rotate のエイリアスであること"""
         mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))

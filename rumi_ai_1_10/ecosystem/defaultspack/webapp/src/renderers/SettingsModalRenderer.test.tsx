@@ -3,7 +3,17 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { SettingsModalRenderer } from "./SettingsModalRenderer";
+import { buildVisibleModelOptions, SettingsModalRenderer } from "./SettingsModalRenderer";
+
+function makeModelOption(index: number) {
+  return {
+    value: `demo/provider-model-${index}`,
+    label: `Demo Provider / Model ${index}`,
+    provider_id: "demo",
+    provider_display_name: "Demo Provider",
+    model_id: `model-${index}`,
+  };
+}
 
 test("Settings > Tools contains detailed tool settings", () => {
   const html = renderToStaticMarkup(
@@ -89,6 +99,31 @@ test("settings surface pinned placements render in the modal", () => {
   assert.match(html, /Pinned placements/);
   assert.match(html, /Models/);
   assert.match(html, /このセクションを開く/);
+});
+
+test("preferred model visibility keeps configured models beyond the old first-40 cutoff", () => {
+  const filler = Array.from({ length: 45 }, (_, index) => makeModelOption(index));
+  const zenOption = {
+    value: "opencode-zen/minimax-m3-free",
+    label: "OpenCode Zen / MiniMax M3 Free via OpenCode Zen",
+    provider_id: "opencode-zen",
+    provider_display_name: "OpenCode Zen",
+    model_id: "minimax-m3-free",
+    configured: true,
+    supports_tool_calling: true,
+    supports_thinking: true,
+    supports_vision: true,
+  };
+
+  const visible = buildVisibleModelOptions({
+    options: [...filler, zenOption],
+    selected: null,
+    remoteOptions: [],
+    query: "",
+  });
+
+  assert.equal(visible.length, 46);
+  assert(visible.some((option) => option.value === zenOption.value));
 });
 
 test("operations company model allowlist renders as an addable selection list", () => {

@@ -13,7 +13,7 @@ export function RuntimeCapabilityBanner({
 }) {
   if (!visible) return null;
   return (
-    <div className="mb-2 rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2.5">
+    <div className="mb-2 rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 rumi-anim-fade-up">
       <div className="flex items-start gap-2">
         <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-sky-400/25 bg-sky-400/10 text-sky-200">
           <Camera size={14} />

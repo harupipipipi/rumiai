@@ -14,6 +14,7 @@ mod python_env;
 mod tray;
 mod updater;
 
+use std::io::Write;
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -25,7 +26,7 @@ use anyhow::{anyhow, bail, Context, Result as AnyResult};
 use log::{error, info, warn};
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Url};
 
 use config::AppConfig;
 use host_broker::HostBrokerRuntime;
@@ -51,6 +52,17 @@ struct ApiEnvelope<T> {
     success: bool,
     data: Option<T>,
     error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TauriConfigEnv {
+    build: Option<TauriBuildConfigEnv>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TauriBuildConfigEnv {
+    #[serde(rename = "devUrl")]
+    dev_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -116,7 +128,8 @@ fn send_to_background(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn show_app_window(app: AppHandle) -> Result<(), String> {
-    show_primary_window(&app)
+    // Renderer-invoked window restore must not mint or inject fresh panel auth material.
+    restore_primary_window(&app, false)
 }
 
 #[tauri::command]
@@ -151,6 +164,7 @@ fn load_or_create_panel_bootstrap_secret(config: &AppConfig) -> AnyResult<String
         Ok(existing) => {
             let trimmed = existing.trim();
             if !trimmed.is_empty() {
+                restrict_panel_bootstrap_secret_permissions(&path)?;
                 return Ok(trimmed.to_string());
             }
         }
@@ -164,6 +178,45 @@ fn load_or_create_panel_bootstrap_secret(config: &AppConfig) -> AnyResult<String
     }
 
     let secret = generate_panel_bootstrap_secret();
+    write_panel_bootstrap_secret(&path, &secret)?;
+    Ok(secret)
+}
+
+#[cfg(unix)]
+fn restrict_panel_bootstrap_secret_permissions(path: &std::path::Path) -> AnyResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = fs::symlink_metadata(path).with_context(|| {
+        format!(
+            "failed to inspect persisted panel bootstrap secret at {}",
+            path.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() {
+        bail!(
+            "refusing to use symlinked panel bootstrap secret at {}",
+            path.display()
+        );
+    }
+
+    let mode = metadata.permissions().mode();
+    if mode & 0o077 != 0 {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).with_context(|| {
+            format!(
+                "failed to restrict panel bootstrap secret permissions at {}",
+                path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restrict_panel_bootstrap_secret_permissions(_path: &std::path::Path) -> AnyResult<()> {
+    Ok(())
+}
+
+fn write_panel_bootstrap_secret(path: &std::path::Path, secret: &str) -> AnyResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
             format!(
@@ -172,13 +225,68 @@ fn load_or_create_panel_bootstrap_secret(config: &AppConfig) -> AnyResult<String
             )
         })?;
     }
-    fs::write(&path, &secret).with_context(|| {
+
+    let mut file = secure_panel_bootstrap_secret_file(path)?;
+    file.write_all(secret.as_bytes()).with_context(|| {
         format!(
             "failed to persist panel bootstrap secret at {}",
             path.display()
         )
     })?;
-    Ok(secret)
+    restrict_panel_bootstrap_secret_permissions(path)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn secure_panel_bootstrap_secret_file(path: &std::path::Path) -> AnyResult<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            bail!(
+                "refusing to overwrite symlinked panel bootstrap secret at {}",
+                path.display()
+            );
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to inspect panel bootstrap secret before writing at {}",
+                    path.display()
+                )
+            });
+        }
+    }
+
+    fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .with_context(|| {
+            format!(
+                "failed to open panel bootstrap secret for secure write at {}",
+                path.display()
+            )
+        })
+}
+
+#[cfg(not(unix))]
+fn secure_panel_bootstrap_secret_file(path: &std::path::Path) -> AnyResult<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .with_context(|| {
+            format!(
+                "failed to open panel bootstrap secret for write at {}",
+                path.display()
+            )
+        })
 }
 
 fn request_panel_bootstrap_code(port: u16, bootstrap_secret: &str) -> AnyResult<String> {
@@ -255,7 +363,7 @@ fn is_loopback_port_available(port: u16) -> bool {
 }
 
 fn existing_kernel_accepts_bootstrap(port: u16, bootstrap_secret: &str) -> bool {
-    health_check::check_health(port).unwrap_or(false)
+    health_check::check_authenticated_health(port, bootstrap_secret).unwrap_or(false)
         && request_panel_bootstrap_code(port, bootstrap_secret).is_ok()
 }
 
@@ -316,6 +424,34 @@ fn set_allowed_navigation_ports(state: &Arc<Mutex<Vec<u16>>>, ports: Vec<u16>) {
     }
 }
 
+fn dev_server_port_from_tauri_config(raw_config: &str) -> Option<u16> {
+    serde_json::from_str::<TauriConfigEnv>(raw_config)
+        .ok()
+        .and_then(|config| config.build)
+        .and_then(|build| build.dev_url)
+        .and_then(|dev_url| Url::parse(&dev_url).ok())
+        .filter(|url| url.scheme() == "http")
+        .filter(|url| matches!(url.host_str(), Some("localhost") | Some("127.0.0.1")))
+        .and_then(|url| url.port_or_known_default())
+}
+
+#[cfg(debug_assertions)]
+fn tauri_dev_server_port() -> Option<u16> {
+    option_env!("TAURI_CONFIG").and_then(dev_server_port_from_tauri_config)
+}
+
+#[cfg(not(debug_assertions))]
+fn tauri_dev_server_port() -> Option<u16> {
+    None
+}
+
+fn navigation_ports_with_tauri_dev_server(mut ports: Vec<u16>) -> Vec<u16> {
+    if let Some(port) = tauri_dev_server_port() {
+        ports.push(port);
+    }
+    ports
+}
+
 fn navigation_is_allowed(
     scheme: &str,
     host: &str,
@@ -330,16 +466,56 @@ fn navigation_is_allowed(
         && port.is_some_and(|candidate| allowed_ports.contains(&candidate))
 }
 
+fn panel_session_url_for_current(
+    current: Option<&Url>,
+    port: u16,
+    panel_code: &str,
+) -> Result<Url, tauri::Error> {
+    if let Some(current_url) = current {
+        let is_current_panel = current_url.scheme() == "http"
+            && matches!(
+                current_url.host_str(),
+                Some("localhost") | Some("127.0.0.1")
+            )
+            && current_url.port_or_known_default() == Some(port)
+            && current_url.path().starts_with("/panel");
+
+        if is_current_panel {
+            let mut next = current_url.clone();
+            let mut query_pairs = next
+                .query_pairs()
+                .filter(|(key, _)| key != "code")
+                .map(|(key, value)| (key.into_owned(), value.into_owned()))
+                .collect::<Vec<_>>();
+            query_pairs.push(("code".to_string(), panel_code.to_string()));
+
+            next.set_query(None);
+            next.query_pairs_mut().extend_pairs(query_pairs);
+            return Ok(next);
+        }
+    }
+
+    Url::parse_with_params(
+        &format!("http://127.0.0.1:{port}/panel/"),
+        [("code", panel_code)],
+    )
+    .map_err(tauri::Error::InvalidUrl)
+}
+
 fn ensure_kernel_ready_for_panel_auth(
     config: &AppConfig,
     km: &Arc<Mutex<KernelManager>>,
 ) -> AnyResult<()> {
     let port = config.kernel_port;
-    if health_check::check_health(port)? {
+    let kernel_is_running = km
+        .lock()
+        .map_err(|error| anyhow!("kernel manager lock poisoned: {error}"))?
+        .is_running();
+    if kernel_is_running && health_check::check_health(port)? {
         return Ok(());
     }
 
-    if health_check::wait_for_healthy(port, 5).is_ok() {
+    if kernel_is_running && health_check::wait_for_healthy(port, 5).is_ok() {
         return Ok(());
     }
 
@@ -372,40 +548,9 @@ fn navigate_window_to_panel_session(
     port: u16,
     panel_code: &str,
 ) -> Result<(), tauri::Error> {
-    let panel_code = serde_json::to_string(panel_code).unwrap_or_else(|_| "\"\"".into());
-    let loopback_origin = serde_json::to_string(&format!("http://127.0.0.1:{port}"))
-        .unwrap_or_else(|_| "\"\"".into());
-    let localhost_origin = serde_json::to_string(&format!("http://localhost:{port}"))
-        .unwrap_or_else(|_| "\"\"".into());
-
-    let js = format!(
-        r#"
-(() => {{
-  const code = {panel_code};
-  const loopbackOrigin = {loopback_origin};
-  const localhostOrigin = {localhost_origin};
-  let nextUrl = `${{loopbackOrigin}}/panel/?code=${{encodeURIComponent(code)}}`;
-
-  try {{
-    const current = new URL(window.location.href);
-    const isPanelRoute =
-      (current.origin === loopbackOrigin || current.origin === localhostOrigin) &&
-      current.pathname.startsWith('/panel');
-
-    if (isPanelRoute) {{
-      current.searchParams.set('code', code);
-      nextUrl = current.pathname + current.search + current.hash;
-    }}
-  }} catch (_error) {{
-    // Fall back to the default panel entrypoint.
-  }}
-
-  window.location.replace(nextUrl);
-}})();
-"#
-    );
-
-    window.eval(&js)
+    let current_url = window.url().ok();
+    let panel_url = panel_session_url_for_current(current_url.as_ref(), port, panel_code)?;
+    window.navigate(panel_url)
 }
 
 pub(crate) fn refresh_panel_session_for_window(app: &AppHandle, window_label: &str) {
@@ -442,7 +587,7 @@ pub(crate) fn primary_window_label(has_panel: bool, has_main: bool) -> Option<&'
     }
 }
 
-pub(crate) fn show_primary_window(app: &AppHandle) -> Result<(), String> {
+fn restore_primary_window(app: &AppHandle, refresh_panel_session: bool) -> Result<(), String> {
     let target = primary_window_label(
         app.get_webview_window("panel").is_some(),
         app.get_webview_window("main").is_some(),
@@ -452,7 +597,9 @@ pub(crate) fn show_primary_window(app: &AppHandle) -> Result<(), String> {
         return Err("no Rumi window is available".into());
     };
 
-    refresh_panel_session_for_window(app, label);
+    if refresh_panel_session {
+        refresh_panel_session_for_window(app, label);
+    }
     if let Some(window) = app.get_webview_window(label) {
         window
             .unminimize()
@@ -466,6 +613,10 @@ pub(crate) fn show_primary_window(app: &AppHandle) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+pub(crate) fn show_primary_window(app: &AppHandle) -> Result<(), String> {
+    restore_primary_window(app, true)
 }
 
 pub(crate) fn send_app_to_background(app: &AppHandle) -> Result<(), String> {
@@ -766,7 +917,10 @@ fn start_kernel_and_bootstrap(
 pub fn run() {
     env_logger::init();
 
-    let allowed_navigation_ports = Arc::new(Mutex::new(vec![8765]));
+    let allowed_navigation_ports =
+        Arc::new(Mutex::new(navigation_ports_with_tauri_dev_server(vec![
+            8765,
+        ])));
     let allowed_navigation_ports_for_plugin = Arc::clone(&allowed_navigation_ports);
     let allowed_navigation_ports_for_setup = Arc::clone(&allowed_navigation_ports);
 
@@ -822,7 +976,10 @@ pub fn run() {
             config.kernel_port = resolve_available_kernel_port(&config, &panel_bootstrap_secret);
             set_allowed_navigation_ports(
                 &allowed_navigation_ports_for_setup,
-                vec![config.kernel_port, DEFAULTSPACK_RESERVED_PORT],
+                navigation_ports_with_tauri_dev_server(vec![
+                    config.kernel_port,
+                    DEFAULTSPACK_RESERVED_PORT,
+                ]),
             );
             app.manage(AllowedNavigationPorts(Arc::clone(
                 &allowed_navigation_ports_for_setup,
@@ -854,10 +1011,16 @@ pub fn run() {
             );
 
             std::thread::spawn(move || {
-                // --- Fast path: existing healthy kernel ---
-                update_setup_progress(Some(&handle), &progress_arc, "Checking for existing session...");
-                if let Ok(true) = health_check::check_health(port) {
-                    info!("Existing healthy kernel detected on port {port}, attempting fast-path bootstrap...");
+                // --- Fast path: existing authenticated kernel ---
+                update_setup_progress(
+                    Some(&handle),
+                    &progress_arc,
+                    "Checking for existing session...",
+                );
+                if let Ok(true) =
+                    health_check::check_authenticated_health(port, &panel_bootstrap_secret)
+                {
+                    info!("Existing authenticated kernel detected on port {port}, attempting fast-path bootstrap...");
                     match request_panel_bootstrap_code_with_retry(port, &panel_bootstrap_secret) {
                         Ok(panel_code) => {
                             update_setup_progress(Some(&handle), &progress_arc, "Ready");
@@ -1123,14 +1286,71 @@ mod tests {
     }
 
     #[test]
-    fn reuses_persisted_panel_bootstrap_secret() {
+    fn detects_tauri_dev_server_port_from_cli_config() {
+        assert_eq!(
+            dev_server_port_from_tauri_config(r#"{"build":{"devUrl":"http://127.0.0.1:1430"}}"#),
+            Some(1430)
+        );
+        assert_eq!(
+            dev_server_port_from_tauri_config(r#"{"build":{"devUrl":"https://127.0.0.1:1430"}}"#),
+            None
+        );
+        assert_eq!(
+            dev_server_port_from_tauri_config(r#"{"build":{"devUrl":"http://example.com:1430"}}"#),
+            None
+        );
+    }
+
+    #[test]
+    fn panel_navigation_url_starts_at_panel_entrypoint() {
+        let url = panel_session_url_for_current(None, 8765, "code with space").unwrap();
+
+        assert_eq!(url.scheme(), "http");
+        assert_eq!(url.host_str(), Some("127.0.0.1"));
+        assert_eq!(url.port_or_known_default(), Some(8765));
+        assert_eq!(url.path(), "/panel/");
+        assert_eq!(
+            url.query_pairs()
+                .find(|(key, _)| key == "code")
+                .map(|(_, value)| value.into_owned()),
+            Some("code with space".into())
+        );
+    }
+
+    #[test]
+    fn panel_navigation_url_preserves_existing_panel_route() {
+        let current =
+            Url::parse("http://localhost:8765/panel/packs?foo=bar&code=old#section").unwrap();
+        let url = panel_session_url_for_current(Some(&current), 8765, "new").unwrap();
+
+        assert_eq!(
+            url.as_str(),
+            "http://localhost:8765/panel/packs?foo=bar&code=new#section"
+        );
+    }
+
+    #[test]
+    fn panel_navigation_url_escapes_blank_or_dev_page() {
+        let current = Url::parse("http://127.0.0.1:1430/").unwrap();
+        let url = panel_session_url_for_current(Some(&current), 8765, "fresh").unwrap();
+
+        assert_eq!(url.as_str(), "http://127.0.0.1:8765/panel/?code=fresh");
+    }
+
+    fn isolated_app_config(prefix: &str) -> (PathBuf, AppConfig) {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("rumi_viewer_secret_{unique}"));
+        let root = std::env::temp_dir().join(format!("{prefix}_{unique}"));
         let config =
             AppConfig::detect_for_tauri(root.join("resource"), root.join("appdata")).unwrap();
+        (root, config)
+    }
+
+    #[test]
+    fn reuses_persisted_panel_bootstrap_secret() {
+        let (root, config) = isolated_app_config("rumi_viewer_secret");
 
         let first = load_or_create_panel_bootstrap_secret(&config).unwrap();
         let second = load_or_create_panel_bootstrap_secret(&config).unwrap();
@@ -1142,6 +1362,45 @@ mod tests {
                 .trim(),
             first
         );
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn creates_panel_bootstrap_secret_with_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (root, config) = isolated_app_config("rumi_viewer_secret_mode");
+
+        load_or_create_panel_bootstrap_secret(&config).unwrap();
+
+        let mode = fs::metadata(config.panel_bootstrap_secret_path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restricts_existing_panel_bootstrap_secret_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (root, config) = isolated_app_config("rumi_viewer_secret_restrict");
+        let path = config.panel_bootstrap_secret_path();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "existing-secret").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        let loaded = load_or_create_panel_bootstrap_secret(&config).unwrap();
+
+        assert_eq!(loaded, "existing-secret");
+        let mode = fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
 
         fs::remove_dir_all(root).ok();
     }

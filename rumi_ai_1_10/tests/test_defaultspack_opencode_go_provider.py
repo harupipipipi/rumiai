@@ -15,6 +15,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
 ALL_MODELS = [
+    "minimax-m3",
     "glm-5.1",
     "glm-5",
     "kimi-k2.6",
@@ -23,6 +24,7 @@ ALL_MODELS = [
     "deepseek-v4-flash",
     "mimo-v2.5-pro",
     "mimo-v2.5",
+    "qwen3.7-max",
     "qwen3.6-plus",
     "qwen3.5-plus",
     "minimax-m2.7",
@@ -39,8 +41,10 @@ OPENAI_CHAT_MODELS = [
     "kimi-k2.5",
     "deepseek-v4-pro",
     "deepseek-v4-flash",
+    "minimax-m3",
     "mimo-v2.5-pro",
     "mimo-v2.5",
+    "qwen3.7-max",
     "qwen3.6-plus",
     "qwen3.5-plus",
     "mimo-v2-pro",
@@ -86,6 +90,17 @@ def test_opencode_go_catalog_includes_all_models():
     assert provider["default_model_for"]["vision"] == "mimo-v2-omni"
     assert "vision" in provider["capabilities"]
     assert {f"opencode-go/{model}" for model in ALL_MODELS}.issubset(models)
+
+    minimax_m3 = models["opencode-go/minimax-m3"]
+    assert minimax_m3["defaults"]["cheap"] is True
+    assert minimax_m3["metadata"]["transport"] == "openai_chat_completions"
+    assert minimax_m3["metadata"]["endpoint_path"] == "/chat/completions"
+    assert minimax_m3["metadata"]["experimental"] is True
+
+    qwen_max = models["opencode-go/qwen3.7-max"]
+    assert qwen_max["defaults"]["general"] is True
+    assert qwen_max["metadata"]["transport"] == "openai_chat_completions"
+    assert qwen_max["metadata"]["experimental"] is True
 
     minimax = models["opencode-go/minimax-m2.7"]
     assert minimax["metadata"]["transport"] == "anthropic_messages"

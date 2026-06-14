@@ -20,4 +20,7 @@ runtime only loads these explicit locations for approved/hash-verified packs.
 
 Node bindings should reference registered handler ids such as
 `my_pack:search.compile_node`. Do not use dotted Python import paths in node
-files.
+files. If the pack declares `capability_bindings.register`, that registration
+function runs in the host kernel process; community packs must also declare
+`host_execution: true` and pass the local host-execution gate before the runtime
+imports the register module.
