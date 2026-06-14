@@ -1587,6 +1587,14 @@ function profileKey(profile: ModelProfile | null | undefined, fallback: string):
   return profile?.profile_id || profile?.qualified_model_id || fallback;
 }
 
+export function catalogProfileIdForSelection(
+  activeModelId: string | null | undefined,
+  activeProfile: ModelProfile | null | undefined,
+): string | null {
+  const profileId = profileKey(activeProfile, String(activeModelId ?? "")).trim();
+  return profileId || null;
+}
+
 function getNewConversationPlaceholder(): string {
   return "指示を入力するか、/ でツール・コマンドを選択します...";
 }
@@ -2595,9 +2603,12 @@ export default function App() {
     void refreshCatalog().catch(console.error);
   }
 
-  async function refreshCatalog() {
+  async function refreshCatalog(profileIdOverride?: string | null) {
+    const selectedCatalogProfileId = profileIdOverride === undefined
+      ? catalogProfileIdForSelection(activeModelId, activeProfile)
+      : (String(profileIdOverride ?? "").trim() || null);
     const [catalogResult, settingsResult, profilesResult, commandsResult] = await Promise.allSettled([
-      api.uiCatalog(),
+      api.uiCatalog(selectedCatalogProfileId),
       api.uiSettings(),
       api.listModelProfiles(),
       api.uiCommands(),
@@ -2685,6 +2696,7 @@ export default function App() {
     setActiveConversationId(conversationId);
     setActiveConversation(conversation);
     if (updateUrl) replaceChatIdInUrl(conversationId);
+    void refreshCatalog(conversation.model).catch(console.error);
     void refreshPreview(conversationId);
   }
 
@@ -3166,6 +3178,7 @@ export default function App() {
 
   const handleModelProfileSelect = (profileId: string) => {
     updateModelSettings({ preferred_model: profileId });
+    void refreshCatalog(profileId).catch(console.error);
     if (activeConversationId) {
       void api.updateConversation(activeConversationId, { model: profileId }).then((conversation) => {
         setActiveConversation(conversation);
@@ -3502,7 +3515,7 @@ export default function App() {
           setComposerCandidateMenu(null);
           setInput("");
           if (result.message) setError(result.message);
-          await refreshCatalog();
+          await refreshCatalog(selectedProfileId || undefined);
           if (activeConversationId && selectedProfileId) {
             const conversation = await api.updateConversation(activeConversationId, { model: selectedProfileId });
             setActiveConversation(conversation);
