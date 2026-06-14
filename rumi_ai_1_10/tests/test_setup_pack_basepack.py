@@ -12,6 +12,7 @@ def test_basepack_setup_profile_is_discoverable() -> None:
 
     assert "basepack" in candidates
     candidate = candidates["basepack"]
+    assert candidate.target_pack_id == "defaultspack"
     assert candidate.display_name == "Basepack"
     assert candidate.risk_level == "low"
     assert candidate.all_ok_eligible is True
