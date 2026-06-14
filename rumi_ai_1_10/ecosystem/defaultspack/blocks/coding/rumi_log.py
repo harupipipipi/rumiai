@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from blocks._common import error, ok
 from blocks.coding._workspace import resolve_workspace, with_workspace, workspace_error_response
+from domain.coding.workspace_policy import require_registered_trusted_workspace
 from domain.coding.rumi_log import DEFAULT_EVENT_LIMIT, RumiLogStore
 
 
@@ -34,12 +35,18 @@ def run(input_data, context=None):
         method = "POST" if raw_action in {"append", "seed", "seed_local_plan", "ensure_plan"} else "GET"
     action = raw_action or ("list" if method == "GET" else "append")
     try:
+        is_mutation = method != "GET"
         workspace = resolve_workspace(
             input_data,
             context,
-            mutation=method != "GET",
+            mutation=is_mutation,
             operation="rumi.log." + action,
         )
+        if is_mutation:
+            workspace = require_registered_trusted_workspace(
+                workspace,
+                operation="rumi.log." + action,
+            )
         store = RumiLogStore(workspace.root_path)
         if method == "GET" or action == "list":
             events = store.list_events(
