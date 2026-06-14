@@ -15,6 +15,7 @@ class _HmacKey:
 
 def _service(tmp_path, monkeypatch):
     monkeypatch.setenv("RUMI_AUTHORITY_MODE", "enforce")
+    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "panel-bootstrap-test-secret-" + ("p" * 32))
     from core_runtime.authority.request_store import AuthorityRequestStore
     from core_runtime.authority.service import AuthorityService
     from core_runtime.capability_grant_manager import CapabilityGrantManager
@@ -25,6 +26,12 @@ def _service(tmp_path, monkeypatch):
     )
     store = AuthorityRequestStore(tmp_path / "authority", hmac_key_manager=_HmacKey())
     return AuthorityService(capability_grant_manager=grants, request_store=store), grants, store
+
+
+def _ui_operator(request_id: str):
+    from core_runtime.authority.ui_operator import sign_ui_operator
+
+    return sign_ui_operator(request_id, nonce="nonce-" + request_id)
 
 
 def test_authority_denies_model_without_grant(tmp_path, monkeypatch):
@@ -93,6 +100,7 @@ def test_authority_approval_cannot_widen_requested_resource(tmp_path, monkeypatc
             "api_ids": ["work", "personal"],
             "model_ids": ["gpt-5.4", "claude-sonnet"],
         },
+        ui_operator=_ui_operator(decision.request_id),
     )
     allowed = service.check(
         principal_id="profile:work",
@@ -138,7 +146,11 @@ def test_authority_approve_once_consumes_token(tmp_path, monkeypatch):
         resource=resource,
         profile_id="work",
     )
-    approval = service.approve_request(decision.request_id, scope="once")
+    approval = service.approve_request(
+        decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(decision.request_id),
+    )
 
     first = service.check(
         principal_id="profile:work",
@@ -198,6 +210,7 @@ def test_authority_persistent_approval_keeps_resource_constraints(tmp_path, monk
         decision.request_id,
         scope="profile",
         config={"allow_stream": True},
+        ui_operator=_ui_operator(decision.request_id),
     )
 
     assert approval["success"] is True
@@ -227,6 +240,77 @@ def test_authority_persistent_approval_keeps_resource_constraints(tmp_path, monk
     assert allowed.allowed is True
     assert denied.allowed is False
     assert denied.approval_required is True
+
+
+def test_authority_approve_requires_signed_ui_operator(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+    )
+
+    approval = service.approve_request(decision.request_id, scope="once")
+
+    assert approval["success"] is False
+    assert approval["status_code"] == 403
+    assert store.get_request(decision.request_id).status == "pending"
+
+
+def test_authority_request_cannot_be_approved_twice(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+    )
+
+    first = service.approve_request(
+        decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+    second = service.approve_request(
+        decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert first["success"] is True
+    assert second["success"] is False
+    assert second["status_code"] == 409
+
+
+def test_authority_signed_deny_and_request_views(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+    decision = service.check(
+        principal_id="profile:work__graph:startup__node:agent.ai",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        reason="Need OpenAI model",
+        conversation_id="conv_1",
+        profile_id="work",
+        graph_id="startup",
+        node_id="agent.ai",
+    )
+
+    listed = service.list_requests("pending")
+    single = service.get_request(decision.request_id)
+    denied = service.deny_request(
+        decision.request_id,
+        reason="not now",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert listed["count"] == 1
+    assert listed["pending"][0]["display_metadata"]["title"] == "openai / work / gpt-5.4"
+    assert listed["pending"][0]["allowed_scopes"] == ["once", "conversation", "profile", "node"]
+    assert single["request"]["request_id"] == decision.request_id
+    assert denied["success"] is True
+    assert denied["denied"] is True
+    assert store.get_request(decision.request_id).status == "denied"
 
 
 def test_authority_resource_allowed_rejects_empty_constraints():

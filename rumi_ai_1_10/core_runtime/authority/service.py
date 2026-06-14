@@ -8,6 +8,10 @@ from typing import Any
 from .models import AUTHORITY_PERMISSION_IDS, AuthorityDecision, AuthorityRequest
 from .principal import build_principal_id, parse_principal_parts, principal_scope_candidates
 from .request_store import AuthorityRequestStore
+from .ui_operator import ui_operator_audit_record, verify_ui_operator
+
+
+AUTHORITY_APPROVAL_SCOPES = frozenset({"once", "conversation", "profile", "node"})
 
 
 class AuthorityService:
@@ -132,21 +136,43 @@ class AuthorityService:
         scope: str = "once",
         config: dict[str, Any] | None = None,
         expires_in_seconds: int | None = None,
+        ui_operator: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request = self._request_store.get_request(request_id)
         if request is None:
             return {"success": False, "error": "Authority request not found", "status_code": 404}
-        if request.status not in {"pending", "approved"}:
+        if request.status != "pending":
             return {"success": False, "error": f"Authority request is {request.status}", "status_code": 409}
         if self._request_store.request_expired(request):
             self._request_store.set_request_status(request.request_id, "expired")
             return {"success": False, "error": "Authority request expired", "status_code": 409}
 
         scope = str(scope or "once").strip().lower()
+        if scope not in AUTHORITY_APPROVAL_SCOPES:
+            return {"success": False, "error": "Authority approval scope is invalid", "status_code": 400}
+        operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
+        if not operator_ok:
+            self._request_store.audit(
+                "authority_ui_operator_rejected",
+                {"request_id": request.request_id, "reason": operator_error},
+            )
+            return {"success": False, "error": operator_error, "status_code": 403}
+        operator_audit = ui_operator_audit_record(operator_payload)
         expires = int(expires_in_seconds or 86400)
         if scope == "once":
             token = self._request_store.issue_one_shot(request, expires_in_seconds=expires)
             self._request_store.set_request_status(request.request_id, "approved")
+            self._request_store.audit(
+                "authority_request_approved",
+                {
+                    "request_id": request.request_id,
+                    "scope": "once",
+                    "principal_id": request.principal_id,
+                    "permission_id": request.permission_id,
+                    "resource_hash": self._request_store.resource_hash(request.resource),
+                    **operator_audit,
+                },
+            )
             return {
                 "success": True,
                 "request_id": request.request_id,
@@ -173,6 +199,7 @@ class AuthorityService:
                 "principal_id": grant_principal,
                 "permission_id": request.permission_id,
                 "resource_hash": self._request_store.resource_hash(request.resource),
+                **operator_audit,
             },
         )
         return {
@@ -185,10 +212,29 @@ class AuthorityService:
             "config": grant_config,
         }
 
-    def deny_request(self, request_id: str, *, reason: str = "", persist: bool = False) -> dict[str, Any]:
+    def deny_request(
+        self,
+        request_id: str,
+        *,
+        reason: str = "",
+        persist: bool = False,
+        ui_operator: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         request = self._request_store.get_request(request_id)
         if request is None:
             return {"success": False, "error": "Authority request not found", "status_code": 404}
+        if request.status != "pending":
+            return {"success": False, "error": f"Authority request is {request.status}", "status_code": 409}
+        if self._request_store.request_expired(request):
+            self._request_store.set_request_status(request.request_id, "expired")
+            return {"success": False, "error": "Authority request expired", "status_code": 409}
+        operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
+        if not operator_ok:
+            self._request_store.audit(
+                "authority_ui_operator_rejected",
+                {"request_id": request.request_id, "reason": operator_error},
+            )
+            return {"success": False, "error": operator_error, "status_code": 403}
         self._request_store.set_request_status(request.request_id, "denied")
         deny_record = None
         if persist:
@@ -200,7 +246,12 @@ class AuthorityService:
             )
         self._request_store.audit(
             "authority_request_denied",
-            {"request_id": request.request_id, "persist": bool(persist), "reason": reason},
+            {
+                "request_id": request.request_id,
+                "persist": bool(persist),
+                "reason": reason,
+                **ui_operator_audit_record(operator_payload),
+            },
         )
         return {
             "success": True,
@@ -210,8 +261,14 @@ class AuthorityService:
         }
 
     def list_requests(self, status: str = "all") -> dict[str, Any]:
-        requests = [item.to_dict() for item in self._request_store.list_requests(status)]
+        requests = [self._request_view(item) for item in self._request_store.list_requests(status)]
         return {"requests": requests, "pending": [item for item in requests if item.get("status") == "pending"], "count": len(requests)}
+
+    def get_request(self, request_id: str) -> dict[str, Any]:
+        request = self._request_store.get_request(request_id)
+        if request is None:
+            return {"success": False, "error": "Authority request not found", "status_code": 404}
+        return {"success": True, "request": self._request_view(request)}
 
     def list_grants(self, principal_id: str = "") -> dict[str, Any]:
         manager = self._capability_grant_manager
@@ -469,6 +526,48 @@ class AuthorityService:
             grant_config=dict(grant_config or {}),
             resource=dict(resource or {}),
         )
+
+    def _request_view(self, request: AuthorityRequest) -> dict[str, Any]:
+        data = request.to_dict()
+        data["display_metadata"] = self._display_metadata(request)
+        data["allowed_scopes"] = self._allowed_scopes(request)
+        return data
+
+    def _display_metadata(self, request: AuthorityRequest) -> dict[str, Any]:
+        resource = dict(request.resource or {})
+        provider_id = str(resource.get("provider_id") or "")
+        api_id = str(resource.get("api_id") or "")
+        model_id = str(resource.get("model_id") or resource.get("model_ref") or "")
+        function_id = str(resource.get("function_id") or "")
+        pack_id = str(resource.get("pack_id") or "")
+        subject = " / ".join(item for item in (provider_id, api_id, model_id, function_id, pack_id) if item)
+        title = subject or request.permission_id
+        return {
+            "title": title,
+            "summary": request.reason or f"{request.permission_id} requires approval",
+            "permission_id": request.permission_id,
+            "provider_id": provider_id or None,
+            "api_id": api_id or None,
+            "model_id": model_id or None,
+            "function_id": function_id or None,
+            "pack_id": pack_id or None,
+            "risk_level": request.risk_level,
+            "audit_text": (
+                "Approving records a signed local UI-operator action and grants only "
+                "the requested resource constraints."
+            ),
+        }
+
+    def _allowed_scopes(self, request: AuthorityRequest) -> list[str]:
+        scopes = ["once"]
+        if request.conversation_id:
+            scopes.append("conversation")
+        if request.profile_id or parse_principal_parts(request.principal_id).get("profile"):
+            scopes.append("profile")
+        parts = parse_principal_parts(request.principal_id)
+        if request.node_id or parts.get("node"):
+            scopes.append("node")
+        return scopes
 
     def _audit_check(self, action: str, principal_id: str, permission_id: str, resource: dict[str, Any]) -> None:
         self._request_store.audit(

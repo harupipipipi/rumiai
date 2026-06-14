@@ -10,6 +10,13 @@ export type AuthorityApproval = {
   reason?: string;
 };
 
+export type AuthorityApprovalScope = "once" | "conversation" | "profile" | "node";
+
+type AuthorityApprovalResource = {
+  permissionId: string;
+  resource: Record<string, unknown>;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -47,6 +54,43 @@ export function pendingAuthorityApproval(messages: ChatUiMessage[]): AuthorityAp
     }
   }
   return null;
+}
+
+export function authorityApprovalConfig(approval: AuthorityApprovalResource): Record<string, unknown> {
+  const resource = approval.resource ?? {};
+  const config: Record<string, unknown> = {};
+  const providerId = typeof resource.provider_id === "string" ? resource.provider_id.trim() : "";
+  const apiId = typeof resource.api_id === "string" ? resource.api_id.trim() : "";
+  const modelId = typeof resource.model_id === "string" ? resource.model_id.trim() : "";
+  const functionId = typeof resource.function_id === "string" ? resource.function_id.trim() : "";
+  const packId = typeof resource.pack_id === "string" ? resource.pack_id.trim() : "";
+  const domain = typeof resource.domain === "string" ? resource.domain.trim() : "";
+  const hostAction = typeof resource.host_action === "string" ? resource.host_action.trim() : "";
+  if (providerId) config.provider_ids = [providerId];
+  if (apiId) config.api_ids = [apiId];
+  if (modelId) config.model_ids = [modelId];
+  if (functionId) config.function_ids = [functionId];
+  if (packId) config.pack_ids = [packId];
+  if (domain) config.domains = [domain];
+  if (hostAction) config.host_actions = [hostAction];
+  if (resource.port !== undefined && resource.port !== null) config.ports = [resource.port];
+  if (resource.stream === true) config.allow_stream = true;
+  if (typeof resource.input_tokens === "number" && Number.isFinite(resource.input_tokens)) {
+    config.max_input_tokens = resource.input_tokens;
+  }
+  return config;
+}
+
+export function authorityApprovalTitle(approval: AuthorityApprovalResource): string {
+  const resource = approval.resource ?? {};
+  const provider = typeof resource.provider_id === "string" ? resource.provider_id : "";
+  const api = typeof resource.api_id === "string" ? resource.api_id : "";
+  const model = typeof resource.model_id === "string" ? resource.model_id : "";
+  const fn = typeof resource.function_id === "string" ? resource.function_id : "";
+  const pack = typeof resource.pack_id === "string" ? resource.pack_id : "";
+  const domain = typeof resource.domain === "string" ? resource.domain : "";
+  const hostAction = typeof resource.host_action === "string" ? resource.host_action : "";
+  return [provider, api, model, fn, pack, domain, hostAction].filter(Boolean).join(" / ") || approval.permissionId;
 }
 
 export function authorityApprovalRuntimeContent(approval: AuthorityApproval, token?: string): string {
