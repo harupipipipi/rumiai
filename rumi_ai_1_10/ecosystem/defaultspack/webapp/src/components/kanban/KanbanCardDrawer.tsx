@@ -1,5 +1,6 @@
 import { ExternalLink, MessageSquareText, PlayCircle, RefreshCw, ShieldCheck, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { KanbanCard, KanbanColumn, ModelProfile } from "../../lib/api";
 import { cn } from "../../lib/cn";
@@ -106,15 +107,15 @@ export function KanbanCardDrawer({
     });
   };
 
-  return (
+  return createPortal(
     <>
       <button
         type="button"
         aria-label="Close Kanban card drawer"
-        className="absolute inset-0 rumi-layer-modal-backdrop cursor-default bg-transparent"
+        className="fixed inset-0 rumi-layer-modal-backdrop cursor-default bg-transparent"
         onClick={onClose}
       />
-      <aside className="absolute inset-y-0 right-0 rumi-layer-modal flex w-[min(440px,100%)] flex-col border-l border-zinc-800 bg-[#0b0b0e] shadow-2xl">
+      <aside className="fixed inset-y-0 right-0 rumi-layer-modal flex w-[min(440px,calc(100vw-56px))] flex-col border-l border-zinc-800 bg-[#0b0b0e] shadow-2xl">
       <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-zinc-800 px-3">
         <div className="min-w-0">
           <h3 className="truncate text-[13px] font-semibold text-zinc-100">{isCreate ? "New card" : "Card detail"}</h3>
@@ -334,6 +335,7 @@ export function KanbanCardDrawer({
         </div>
       </footer>
       </aside>
-    </>
+    </>,
+    document.body,
   );
 }
