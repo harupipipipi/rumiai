@@ -837,7 +837,6 @@ export function RightSidebar({
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
   const [activePanel, setActivePanel] = useState<string | null>(null);
-  const didAutoOpenCompanyPanelRef = useRef(false);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("tool");
   const [searchQuery, setSearchQuery] = useState("");
   const [toolManagerSearchQuery, setToolManagerSearchQuery] = useState("");
@@ -948,13 +947,6 @@ export function RightSidebar({
       setActivePanel(requestedId);
     }
   }, [activeItemId, items]);
-
-  useEffect(() => {
-    if (didAutoOpenCompanyPanelRef.current) return;
-    if (!companyPanel || activePanel || activeItemId) return;
-    didAutoOpenCompanyPanelRef.current = true;
-    setActivePanel("__company_workspace__");
-  }, [activeItemId, activePanel, companyPanel]);
 
   useEffect(() => {
     if (!activePanel) return;
