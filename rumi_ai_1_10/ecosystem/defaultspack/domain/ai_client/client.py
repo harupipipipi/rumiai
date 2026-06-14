@@ -12,6 +12,7 @@ from domain.ai_client.model_pack_router import select_model_pack
 from domain.ai_client.model_pack import ModelPack
 from domain.ai_client.model_pack_store import ModelPackStore
 from domain.ai_client.api_key_store import provider_api_metadata, provider_has_api_key, provider_named_api_keys, read_provider_api_key
+from domain.ai_client.authority_resource import build_provider_authority_resource, provider_authority_reason
 from domain.ai_client.authority_gate import provider_requires_authority
 from domain.ai_client.capabilities.registry import get_model_provider_capabilities
 from domain.ai_client import rumi_process
@@ -521,6 +522,7 @@ class AIClient:
         model_id,
         model_ref,
         params,
+        provider=None,
         stream=False,
         reason=None,
     ):
@@ -530,14 +532,18 @@ class AIClient:
 
         context = self._authority_context_from_params(params)
         principal_id = str(context.get("principal_id") or "defaultspack")
-        resource = {
-            "kind": str(resource_kind or permission_id).strip(),
-            "provider_id": provider_id,
-            "api_id": str(api_id or "legacy").strip() or "legacy",
-            "model_id": str(model_id or "").strip(),
-            "model_ref": str(model_ref or "").strip(),
-            "stream": bool(stream),
-        }
+        api_metadata = provider_api_metadata(provider_id, api_id or "legacy")
+        resource = build_provider_authority_resource(
+            permission_id=permission_id,
+            resource_kind=resource_kind,
+            provider_id=provider_id,
+            api_id=api_id or "legacy",
+            model_id=model_id,
+            model_ref=model_ref,
+            provider=provider,
+            api_metadata=api_metadata,
+            stream=stream,
+        )
 
         from core_runtime.authority import get_authority_service
 
@@ -545,7 +551,7 @@ class AIClient:
             principal_id=principal_id,
             permission_id=permission_id,
             resource=resource,
-            reason=reason or "{}: {}/{}".format(permission_id, provider_id, model_id),
+            reason=reason or provider_authority_reason(permission_id, resource),
             conversation_id=context.get("conversation_id"),
             profile_id=context.get("profile_id"),
             node_id=context.get("node_id"),
@@ -564,6 +570,7 @@ class AIClient:
         model_id,
         model_ref,
         params,
+        provider=None,
         stream=False,
     ):
         self._check_authority_for_provider_api(
@@ -574,8 +581,9 @@ class AIClient:
             model_id=model_id,
             model_ref=model_ref,
             params=params,
+            provider=provider,
             stream=stream,
-            reason="Model invocation: {}/{}".format(provider_id, model_id),
+            reason=None,
         )
 
     def _check_authority_for_api_key_use(
@@ -586,6 +594,7 @@ class AIClient:
         model_id,
         model_ref,
         params,
+        provider=None,
         stream=False,
     ):
         self._check_authority_for_provider_api(
@@ -596,8 +605,33 @@ class AIClient:
             model_id=model_id,
             model_ref=model_ref,
             params=params,
+            provider=provider,
             stream=stream,
-            reason="Provider API key use: {}/{}".format(provider_id, api_id or "legacy"),
+            reason=None,
+        )
+
+    def _check_authority_for_network_egress(
+        self,
+        *,
+        provider_id,
+        api_id,
+        model_id,
+        model_ref,
+        params,
+        provider=None,
+        stream=False,
+    ):
+        self._check_authority_for_provider_api(
+            permission_id="network.egress",
+            resource_kind="network",
+            provider_id=provider_id,
+            api_id=api_id,
+            model_id=model_id,
+            model_ref=model_ref,
+            params=params,
+            provider=provider,
+            stream=stream,
+            reason=None,
         )
 
     def _check_authority_for_model_and_api_key_use(
@@ -608,29 +642,47 @@ class AIClient:
         model_id,
         model_ref,
         params,
+        provider=None,
         stream=False,
     ):
-        checks = (
-            lambda: self._check_authority_for_model_api(
+        checks = [
+            ("model.invoke", lambda: self._check_authority_for_model_api(
                 provider_id=provider_id,
                 api_id=api_id,
                 model_id=model_id,
                 model_ref=model_ref,
                 params=params,
+                provider=provider,
                 stream=stream,
-            ),
-            lambda: self._check_authority_for_api_key_use(
+            )),
+            ("api_key.use", lambda: self._check_authority_for_api_key_use(
                 provider_id=provider_id,
                 api_id=api_id,
                 model_id=model_id,
                 model_ref=model_ref,
                 params=params,
+                provider=provider,
                 stream=stream,
-            ),
-        )
-        if self._has_authority_token_for_permission(params, "model.invoke") and not self._has_authority_token_for_permission(params, "api_key.use"):
-            checks = (checks[1], checks[0])
-        for check in checks:
+            )),
+            ("network.egress", lambda: self._check_authority_for_network_egress(
+                provider_id=provider_id,
+                api_id=api_id,
+                model_id=model_id,
+                model_ref=model_ref,
+                params=params,
+                provider=provider,
+                stream=stream,
+            )),
+        ]
+        if self._has_authority_token_for_permission(params, "model.invoke"):
+            missing_related = [
+                item
+                for item in checks
+                if item[0] != "model.invoke" and not self._has_authority_token_for_permission(params, item[0])
+            ]
+            if missing_related:
+                checks = missing_related + [item for item in checks if item not in missing_related]
+        for _, check in checks:
             check()
 
     def _api_route_attempts(self, model, route_refs, params=None, stream=False):
@@ -651,6 +703,7 @@ class AIClient:
                 model_id=model_name,
                 model_ref=model,
                 params=params,
+                provider=provider,
                 stream=stream,
             )
             api_key = read_provider_api_key(provider_id, api_id)
@@ -701,6 +754,7 @@ class AIClient:
             model_id=model_id,
             model_ref=model,
             params=params,
+            provider=provider,
             stream=(method_name == "stream"),
         )
         api_key = read_provider_api_key(provider_id, api_id)
@@ -1283,6 +1337,7 @@ class AIClient:
                 model_id=model_name,
                 model_ref=model,
                 params=params,
+                provider=provider,
                 stream=False,
             )
         try:
@@ -1317,6 +1372,7 @@ class AIClient:
                 model_id=model_name,
                 model_ref=model,
                 params=params,
+                provider=provider,
                 stream=True,
             )
         try:

@@ -95,6 +95,26 @@ class _TokenAwareAllowAuthority:
         )
 
 
+class _CaptureDenyAuthority:
+    def __init__(self):
+        self.calls = []
+
+    def check(self, **kwargs):
+        from core_runtime.authority.models import AuthorityDecision
+
+        self.calls.append(kwargs)
+        return AuthorityDecision(
+            allowed=False,
+            permission_id=kwargs["permission_id"],
+            principal_id=kwargs["principal_id"],
+            reason="denied",
+            request_id="auth_capture",
+            approval_required=True,
+            risk_level="medium",
+            resource=kwargs["resource"],
+        )
+
+
 def _client(monkeypatch):
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers.stub_provider import StubProvider
@@ -264,11 +284,46 @@ def test_ai_client_uses_permission_specific_authority_tokens(monkeypatch):
 
     assert response["finish_reason"] == "stop"
     assert authority.calls == [
+        {"permission_id": "network.egress", "request_id": None, "approval_token": ""},
         {"permission_id": "model.invoke", "request_id": "model_req", "approval_token": "model-token"},
         {"permission_id": "api_key.use", "request_id": "api_req", "approval_token": "api-token"},
     ]
     assert read_calls == [("openai", "work")]
     assert client._providers["openai"].calls
+
+
+def test_ai_client_opencode_authority_resource_describes_endpoint_without_secret(monkeypatch):
+    from domain.ai_client.client import AIClient, AuthorityApprovalRequired
+    from domain.ai_client.providers.opencode_go_provider import OpencodeGoProvider
+    from domain.ai_client.providers.stub_provider import StubProvider
+
+    AIClient._instance = None
+    client = AIClient()
+    client._providers = {"stub": StubProvider(), "opencode-go": OpencodeGoProvider()}
+    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
+    authority = _CaptureDenyAuthority()
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+
+    try:
+        client.complete(
+            "opencode-go/deepseek-v4-pro",
+            [{"role": "user", "content": "hi"}],
+            params={"_authority_context": {"principal_id": "profile:work"}},
+        )
+    except AuthorityApprovalRequired as exc:
+        assert exc.decision.permission_id == "model.invoke"
+    else:
+        raise AssertionError("AuthorityApprovalRequired was not raised")
+
+    resource = authority.calls[0]["resource"]
+    assert resource["pack_id"] == "defaultspack"
+    assert resource["app_display_name"] == "defaultspack v2"
+    assert resource["provider_display_name"] == "OpenCode Go"
+    assert resource["model_display_name"] == "DeepSeek V4 Pro via OpenCode Go"
+    assert resource["credential_label"] == "OpenCode Go API key"
+    assert resource["endpoint_url"] == "https://opencode.ai/zen/go/v1/chat/completions"
+    assert resource["domain"] == "opencode.ai"
+    assert "api_key" not in resource
 
 
 def test_authority_followup_metadata_carries_multiple_approval_tokens():

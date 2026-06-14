@@ -235,14 +235,15 @@ class AuthorityService:
         request: AuthorityRequest,
         related_permissions: list[str] | tuple[str, ...] | None,
     ) -> list[str]:
-        if request.permission_id not in {"model.invoke", "api_key.use"}:
+        bundled_permissions = {"model.invoke", "api_key.use", "network.egress"}
+        if request.permission_id not in bundled_permissions:
             return []
         permissions: list[str] = []
         for permission_id in related_permissions or ():
             normalized = str(permission_id or "").strip()
             if normalized == request.permission_id:
                 continue
-            if normalized not in {"model.invoke", "api_key.use"}:
+            if normalized not in bundled_permissions:
                 continue
             if normalized not in AUTHORITY_PERMISSION_IDS:
                 continue
@@ -257,6 +258,8 @@ class AuthorityService:
             related["kind"] = "model"
         elif permission_id == "api_key.use":
             related["kind"] = "api_key"
+        elif permission_id == "network.egress":
+            related["kind"] = "network"
         return related
 
     def _create_related_request(self, request: AuthorityRequest, permission_id: str) -> AuthorityRequest:
@@ -548,6 +551,8 @@ class AuthorityService:
             return "high"
         if permission_id == "network.egress" and resource.get("domain") == "*":
             return "high"
+        if permission_id == "network.egress":
+            return "medium"
         if permission_id == "secret.read":
             return "high"
         if permission_id == "model.invoke":
@@ -671,17 +676,64 @@ class AuthorityService:
         model_id = str(resource.get("model_id") or resource.get("model_ref") or "")
         function_id = str(resource.get("function_id") or "")
         pack_id = str(resource.get("pack_id") or "")
+        app_name = str(resource.get("app_display_name") or "")
+        provider_display_name = str(resource.get("provider_display_name") or provider_id or "")
+        model_display_name = str(resource.get("model_display_name") or model_id or "")
+        endpoint_url = str(resource.get("endpoint_url") or "")
+        endpoint_host = str(resource.get("domain") or "")
+        endpoint_path = str(resource.get("endpoint_path") or "")
+        credential_label = str(resource.get("credential_label") or "")
+        has_rich_provider_metadata = bool(
+            app_name
+            or resource.get("provider_display_name")
+            or resource.get("model_display_name")
+            or endpoint_url
+            or credential_label
+        )
         subject = " / ".join(item for item in (provider_id, api_id, model_id, function_id, pack_id) if item)
         title = subject or request.permission_id
+        summary = request.reason or f"{request.permission_id} requires approval"
+        permission_label = {
+            "model.invoke": "Model/API",
+            "api_key.use": "API key",
+            "network.egress": "Network access",
+        }.get(request.permission_id, request.permission_id)
+        access_summary = ""
+        if has_rich_provider_metadata and request.permission_id in {"model.invoke", "api_key.use", "network.egress"}:
+            app_label = app_name or "defaultspack"
+            provider_label = provider_display_name or provider_id or "provider"
+            provider_subject = (
+                provider_label
+                if provider_label.strip().lower().endswith("provider")
+                else f"{provider_label} provider"
+            )
+            model_label = model_display_name or model_id or "model"
+            endpoint_text = f"{endpoint_url} へのアクセス" if endpoint_url else "外部 API へのアクセス"
+            credential_text = f"{credential_label} の使用" if credential_label else "API key の使用"
+            title = f"{app_label} / {provider_subject} に {credential_text}と {endpoint_text}を許可しますか？"
+            summary = (
+                f"{app_label}: {provider_subject} を {model_label} との通信に使います。"
+                f"{credential_text}と {endpoint_text}を含みます。"
+            )
+            access_summary = f"{credential_text} / {endpoint_text}"
         return {
             "title": title,
-            "summary": request.reason or f"{request.permission_id} requires approval",
+            "summary": summary,
             "permission_id": request.permission_id,
             "provider_id": provider_id or None,
             "api_id": api_id or None,
             "model_id": model_id or None,
             "function_id": function_id or None,
             "pack_id": pack_id or None,
+            "app_display_name": app_name or None,
+            "provider_display_name": provider_display_name or None,
+            "model_display_name": model_display_name or None,
+            "endpoint_url": endpoint_url or None,
+            "endpoint_host": endpoint_host or None,
+            "endpoint_path": endpoint_path or None,
+            "credential_label": credential_label or None,
+            "permission_label": permission_label,
+            "access_summary": access_summary or None,
             "risk_level": request.risk_level,
             "audit_text": (
                 "Approving records a signed local UI-operator action and grants only "

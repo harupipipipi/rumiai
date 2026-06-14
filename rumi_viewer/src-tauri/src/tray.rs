@@ -102,9 +102,13 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             "open_defaultspack" => {
                 #[cfg(target_os = "macos")]
                 {
+                    let app_handle = app.clone();
                     let config = app.state::<crate::config::AppConfig>().inner().clone();
                     std::thread::spawn(move || {
-                        match crate::dock_registration::launch_defaultspack_desktop_impl(&config) {
+                        match crate::dock_registration::launch_defaultspack_desktop_window_impl(
+                            &app_handle,
+                            &config,
+                        ) {
                             Ok(msg) => {
                                 info!("Defaultspack launch: {msg}");
                             }

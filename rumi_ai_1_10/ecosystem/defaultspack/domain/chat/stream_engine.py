@@ -40,6 +40,7 @@ from domain.ai_client.run_seal import (
 from domain.ai_client.provider_compiler.registry import compile_complete, compiler_for_api_family
 from domain.ai_client.provider_trace import redact_sensitive_value, write_provider_trace
 from domain.ai_client.client import AIClient, AuthorityApprovalRequired
+from domain.ai_client.authority_resource import build_provider_authority_resource, provider_authority_reason
 from domain.ai_client.gateway import LLMGateway
 from domain.chat.cancellation import get_chat_cancellation_registry
 from domain.chat.ir_legacy_adapter import (
@@ -1648,25 +1649,35 @@ class ChatRunEngine:
         context = dict(context) if isinstance(context, dict) else {}
         service = get_authority_service()
         checks = [
-            ("model.invoke", "model", "Model invocation: {}/{}".format(provider_id, model_name)),
-            ("api_key.use", "api_key", "Provider API key use: {}/legacy".format(provider_id)),
+            ("model.invoke", "model"),
+            ("api_key.use", "api_key"),
+            ("network.egress", "network"),
         ]
-        if _authority_context_token_for_permission(context, "model.invoke")[1] and not _authority_context_token_for_permission(context, "api_key.use")[1]:
-            checks = [checks[1], checks[0]]
-        for permission_id, resource_kind, reason in checks:
+        if _authority_context_token_for_permission(context, "model.invoke")[1]:
+            missing_related = [
+                item
+                for item in checks
+                if item[0] != "model.invoke" and not _authority_context_token_for_permission(context, item[0])[1]
+            ]
+            if missing_related:
+                checks = missing_related + [item for item in checks if item not in missing_related]
+        for permission_id, resource_kind in checks:
             request_id, approval_token = _authority_context_token_for_permission(context, permission_id)
+            resource = build_provider_authority_resource(
+                permission_id=permission_id,
+                resource_kind=resource_kind,
+                provider_id=provider_id,
+                api_id="legacy",
+                model_id=model_name,
+                model_ref=prepared.model,
+                provider=provider,
+                stream=False,
+            )
             decision = service.check(
                 principal_id=str(context.get("principal_id") or "defaultspack"),
                 permission_id=permission_id,
-                resource={
-                    "kind": resource_kind,
-                    "provider_id": provider_id,
-                    "api_id": "legacy",
-                    "model_id": str(model_name or ""),
-                    "model_ref": prepared.model,
-                    "stream": False,
-                },
-                reason=reason,
+                resource=resource,
+                reason=provider_authority_reason(permission_id, resource),
                 conversation_id=context.get("conversation_id"),
                 profile_id=context.get("profile_id"),
                 node_id=context.get("node_id"),

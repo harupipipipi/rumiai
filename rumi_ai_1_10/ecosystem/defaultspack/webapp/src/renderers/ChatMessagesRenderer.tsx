@@ -285,7 +285,7 @@ function metadataChildRecord(message: ChatMessagesRendererProps["messages"][numb
 }
 
 function isAuthorityPermissionId(value: unknown): boolean {
-  return value === "model.invoke" || value === "api_key.use";
+  return value === "model.invoke" || value === "api_key.use" || value === "network.egress";
 }
 
 function authorityWaitingRequestId(message: ChatMessagesRendererProps["messages"][number]): string {

@@ -56,6 +56,7 @@ function isAuthorityApprovalCandidate(candidate: Record<string, unknown> | undef
       || candidate.approval_kind === "authority"
       || candidate.permission_id === "model.invoke"
       || candidate.permission_id === "api_key.use"
+      || candidate.permission_id === "network.egress"
     ),
   );
 }
