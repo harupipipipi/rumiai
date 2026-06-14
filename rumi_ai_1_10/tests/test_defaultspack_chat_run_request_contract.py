@@ -303,6 +303,79 @@ def test_prepare_chat_run_merges_workspace_profile_with_catalog_profile(tmp_path
     ChatStore._instance = None
 
 
+def test_prepare_chat_run_strips_client_tool_policy_approval_bypass_keys(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {"content": "run it"},
+            "params": {
+                "tool_policy": {
+                    "selected_tools": ["coding_terminal_exec"],
+                    "yolo_mode": True,
+                    "allow_shell": True,
+                    "allow_file_write": True,
+                    "write_actions_require_approval": False,
+                    "high_risk_tools_require_approval": False,
+                    "allow_client_supplied_approved": True,
+                    "_tool_server_approved": True,
+                }
+            },
+        },
+        {},
+    )
+
+    policy = prepared.request_context.get("profile_policy", {})
+    assert policy["selected_tools"] == ["coding_terminal_exec"]
+    assert policy["allow_shell"] is True
+    assert policy["allow_file_write"] is True
+    assert "yolo_mode" not in policy
+    assert "write_actions_require_approval" not in policy
+    assert "high_risk_tools_require_approval" not in policy
+    assert "allow_client_supplied_approved" not in policy
+    assert "_tool_server_approved" not in policy
+    assert prepared.params["tool_policy"] == {
+        "selected_tools": ["coding_terminal_exec"],
+        "allow_shell": True,
+        "allow_file_write": True,
+    }
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_keeps_client_yolo_only_with_server_authorization(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {"content": "continue approved operation"},
+            "params": {
+                "tool_policy": {
+                    "selected_tools": ["coding_file_write"],
+                    "yolo_mode": True,
+                    "write_actions_require_approval": False,
+                }
+            },
+        },
+        {"_tool_server_approval_token_valid": True},
+    )
+
+    policy = prepared.request_context.get("profile_policy", {})
+    assert policy["yolo_mode"] is True
+    assert policy["write_actions_require_approval"] is False
+    assert prepared.params["tool_policy"]["yolo_mode"] is True
+    ChatStore._instance = None
+
+
 def test_prepare_chat_run_falls_back_to_selected_workspace_when_metadata_missing(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore

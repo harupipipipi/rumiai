@@ -51,6 +51,9 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
             "endpoint_path": spec["endpoint_path"],
             "source": spec["source"],
             "pricing": "free_promotion_or_account_policy",
+            "quirks": {
+                "supports_stream_tool_calls": False,
+            },
         },
     }
 

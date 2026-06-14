@@ -10,6 +10,7 @@ import {
   normalizeAgentStackSettings,
   resolveAgentStackProfiles,
   resolveAgentStackSelection,
+  sanitizeAgentStackToolPolicy,
   toggleAgentStackToolOverride,
 } from "./agentStack";
 
@@ -135,6 +136,49 @@ test("mergeAgentStackProfiles unions tools and skills and concatenates prompts",
     allow_shell: true,
     allow_file_write: true,
     model_allowlist: ["deepseek/deepseek-chat", "google/gemini-2.5-pro"],
+  });
+});
+
+test("sanitizeAgentStackToolPolicy strips approval bypass keys but keeps advisory filters", () => {
+  assert.deepEqual(
+    sanitizeAgentStackToolPolicy({
+      selected_tools: ["coding_terminal_exec"],
+      allow_shell: true,
+      allow_file_write: true,
+      model_allowlist: ["opencode-zen/minimax-m3-free"],
+      yolo_mode: true,
+      write_actions_require_approval: false,
+      high_risk_tools_require_approval: false,
+      allow_client_supplied_approved: true,
+      _tool_server_approved: true,
+      totally_custom: true,
+    }),
+    {
+      selected_tools: ["coding_terminal_exec"],
+      allow_shell: true,
+      allow_file_write: true,
+      model_allowlist: ["opencode-zen/minimax-m3-free"],
+    },
+  );
+});
+
+test("mergeAgentStackProfiles strips yolo profile approval bypass policy", () => {
+  const merged = mergeAgentStackProfiles([
+    {
+      id: "yolo",
+      label: "Yolo",
+      tool_policy: {
+        yolo_mode: true,
+        allow_shell: true,
+        allow_file_write: true,
+        write_actions_require_approval: false,
+      },
+    },
+  ]);
+
+  assert.deepEqual(merged.toolPolicy, {
+    allow_shell: true,
+    allow_file_write: true,
   });
 });
 

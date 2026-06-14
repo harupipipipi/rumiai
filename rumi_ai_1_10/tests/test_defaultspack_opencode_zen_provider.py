@@ -35,6 +35,7 @@ def test_opencode_zen_catalog_includes_minimax_m3_free():
     assert "opencode-zen/minimax-m3-free" in models
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["transport"] == "anthropic_messages"
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["endpoint_path"] == "/v1/messages"
+    assert models["opencode-zen/minimax-m3-free"]["metadata"]["quirks"]["supports_stream_tool_calls"] is False
 
 
 def test_opencode_zen_complete_uses_anthropic_messages(monkeypatch):
@@ -85,6 +86,39 @@ def test_opencode_zen_complete_uses_anthropic_messages(monkeypatch):
         }
     ]
     assert result["content"] == [{"type": "text", "text": "OK"}]
+
+
+def test_opencode_zen_complete_parses_non_stream_tool_use(monkeypatch):
+    provider = _provider(monkeypatch)
+
+    def fake_request_json(path, body):
+        return {
+            "id": "msg_tool",
+            "model": "minimax-m3-free",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "noop",
+                    "input": {"ok": True},
+                }
+            ],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 2, "output_tokens": 3},
+        }
+
+    with patch.object(provider, "_request_json", side_effect=fake_request_json):
+        result = provider.complete(
+            "opencode-zen/minimax-m3-free",
+            [{"role": "user", "content": "call noop"}],
+            [{"type": "function", "function": {"name": "noop", "parameters": {"type": "object"}}}],
+            {"max_tokens": 8},
+        )
+
+    assert result["finish_reason"] == "tool_calls"
+    assert result["content"] == [
+        {"type": "tool_use", "id": "toolu_1", "name": "noop", "input": {"ok": True}}
+    ]
 
 
 def test_opencode_zen_secret_keys_and_detection(monkeypatch):

@@ -67,6 +67,48 @@ _COMPUTER_USE_CHROME_NEGATED_RE = re.compile(
 _COMPUTER_USE_VIVALDI_TARGET_RE = re.compile(r"vivaldi|vivladi|ヴィヴァルディ|ビバルディ", re.IGNORECASE)
 _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
+_CLIENT_TOOL_POLICY_ALLOWED_KEYS = {
+    "allow_file_write",
+    "allow_network",
+    "allow_shell",
+    "allowed_tools",
+    "disabled_tools",
+    "enabled_tools",
+    "max_tool_calls",
+    "model_allowlist",
+    "model_denylist",
+    "parallel_tool_calls",
+    "profile_id",
+    "selected_tools",
+    "tool_allowlist",
+    "tool_blocklist",
+    "tool_choice",
+    "tool_denylist",
+}
+_CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS = {
+    "_tool_server_approval_token_valid",
+    "_tool_server_approved",
+    "allow_client_supplied_approved",
+    "approval_bypass",
+    "approval_granted",
+    "approval_token",
+    "approved",
+    "bypass_approval",
+    "grant_approval",
+    "is_approved",
+    "server_approved",
+    "tool_approval_tokens",
+    "yolo_mode",
+}
+_CLIENT_TOOL_POLICY_APPROVAL_REQUIRE_KEYS = {
+    "delete_actions_require_approval",
+    "destructive_actions_require_approval",
+    "git_push_requires_approval",
+    "high_risk_tools_require_approval",
+    "open_world_require_approval",
+    "terminal_actions_require_approval",
+    "write_actions_require_approval",
+}
 
 
 @dataclass
@@ -245,6 +287,9 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     request_context.update(_approval_followup_tool_context(metadata))
     tool_policy = params.get("tool_policy")
     if isinstance(tool_policy, dict):
+        tool_policy = _sanitize_client_tool_policy(tool_policy, request_context)
+        prepared_input = _with_client_tool_policy(prepared_input, tool_policy)
+        params["tool_policy"] = tool_policy
         request_context["profile_policy"] = {
             **(request_context.get("profile_policy") if isinstance(request_context.get("profile_policy"), dict) else {}),
             **tool_policy,
@@ -901,6 +946,82 @@ def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str
         for alias in ("computer_use", "browser_use", "browser_computer"):
             token_map[alias] = token
     return {"tool_approval_tokens": token_map}
+
+
+def _sanitize_client_tool_policy(policy: dict[str, Any], request_context: dict[str, Any]) -> dict[str, Any]:
+    """Keep client-selected tools advisory; never trust client approval bypass flags."""
+    if not isinstance(policy, dict):
+        return {}
+    allow_approval_bypass = _client_tool_policy_bypass_authorized(request_context)
+    sanitized: dict[str, Any] = {}
+    for key, value in policy.items():
+        key_text = str(key or "").strip()
+        if not key_text:
+            continue
+        lowered = key_text.lower()
+        if lowered in _CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS:
+            if allow_approval_bypass:
+                sanitized[key_text] = value
+            continue
+        if lowered in _CLIENT_TOOL_POLICY_APPROVAL_REQUIRE_KEYS:
+            if value is False and not allow_approval_bypass:
+                continue
+            sanitized[key_text] = value
+            continue
+        if lowered in _CLIENT_TOOL_POLICY_ALLOWED_KEYS:
+            sanitized[key_text] = value
+    return sanitized
+
+
+def _client_tool_policy_bypass_authorized(request_context: dict[str, Any]) -> bool:
+    if not isinstance(request_context, dict):
+        return False
+    if request_context.get("_tool_server_approval_token_valid") is True:
+        return True
+    if request_context.get("_tool_server_approved") is True and any(
+        str(request_context.get(key) or "").strip()
+        for key in ("principal_id", "pack_id", "_source_pack_id", "owner_pack")
+    ):
+        return True
+    policy = request_context.get("profile_policy") if isinstance(request_context.get("profile_policy"), dict) else {}
+    if _truthy(policy.get("yolo_mode")) and (
+        request_context.get("active_startup_profile_id")
+        or request_context.get("_defaultspack_http_route_adapter") is True
+        or str(request_context.get("principal_id") or request_context.get("pack_id") or "").strip()
+    ):
+        return True
+    try:
+        from domain.tool_policy.internal_context import internal_tool_decision_allows
+
+        return internal_tool_decision_allows(request_context)
+    except Exception:
+        return False
+
+
+def _with_client_tool_policy(input_data: dict[str, Any], tool_policy: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(input_data, dict):
+        return input_data
+    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
+    if not isinstance(params, dict):
+        return input_data
+    updated = dict(input_data)
+    updated_params = dict(params)
+    if tool_policy:
+        updated_params["tool_policy"] = dict(tool_policy)
+    else:
+        updated_params.pop("tool_policy", None)
+    updated["params"] = updated_params
+    return updated
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _consume_turn_model_route_override(

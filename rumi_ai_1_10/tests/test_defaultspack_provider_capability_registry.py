@@ -47,7 +47,10 @@ def test_provider_capability_registry_uses_transport_metadata_for_anthropic_mess
         {
             "provider_id": "opencode-zen",
             "capabilities": ["tool_calls", "vision", "reasoning"],
-            "metadata": {"transport": "anthropic_messages"},
+            "metadata": {
+                "transport": "anthropic_messages",
+                "quirks": {"supports_stream_tool_calls": False},
+            },
         },
     )
 
@@ -58,6 +61,7 @@ def test_provider_capability_registry_uses_transport_metadata_for_anthropic_mess
     assert "tool_call" in caps.supported_content_blocks
     assert caps.tool_choice_modes == ["auto", "none"]
     assert caps.quirks["tool_schema_subset"] == "input_schema"
+    assert caps.quirks["supports_stream_tool_calls"] is False
 
 
 def test_ai_client_runtime_model_includes_provider_capabilities():

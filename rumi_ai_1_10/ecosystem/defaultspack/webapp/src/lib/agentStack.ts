@@ -61,6 +61,48 @@ export type MergedAgentStackProfiles = {
 };
 
 const DEFAULT_FEATURE_NAME = "Agent Stack";
+const AGENT_STACK_TOOL_POLICY_ALLOWED_KEYS = new Set([
+  "allow_file_write",
+  "allow_network",
+  "allow_shell",
+  "allowed_tools",
+  "disabled_tools",
+  "enabled_tools",
+  "max_tool_calls",
+  "model_allowlist",
+  "model_denylist",
+  "parallel_tool_calls",
+  "profile_id",
+  "selected_tools",
+  "tool_allowlist",
+  "tool_blocklist",
+  "tool_choice",
+  "tool_denylist",
+]);
+const AGENT_STACK_APPROVAL_BYPASS_KEYS = new Set([
+  "_tool_server_approval_token_valid",
+  "_tool_server_approved",
+  "allow_client_supplied_approved",
+  "approval_bypass",
+  "approval_granted",
+  "approval_token",
+  "approved",
+  "bypass_approval",
+  "grant_approval",
+  "is_approved",
+  "server_approved",
+  "tool_approval_tokens",
+  "yolo_mode",
+]);
+const AGENT_STACK_APPROVAL_REQUIRE_KEYS = new Set([
+  "delete_actions_require_approval",
+  "destructive_actions_require_approval",
+  "git_push_requires_approval",
+  "high_risk_tools_require_approval",
+  "open_world_require_approval",
+  "terminal_actions_require_approval",
+  "write_actions_require_approval",
+]);
 
 const DEFAULT_PROFILES: AgentStackProfile[] = [
   {
@@ -161,6 +203,22 @@ function cloneJsonValue(value: unknown): unknown {
   );
 }
 
+export function sanitizeAgentStackToolPolicy(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) continue;
+    const lowerKey = normalizedKey.toLowerCase();
+    if (AGENT_STACK_APPROVAL_BYPASS_KEYS.has(lowerKey)) continue;
+    if (AGENT_STACK_APPROVAL_REQUIRE_KEYS.has(lowerKey) && entry === false) continue;
+    if (!AGENT_STACK_TOOL_POLICY_ALLOWED_KEYS.has(lowerKey) && !AGENT_STACK_APPROVAL_REQUIRE_KEYS.has(lowerKey)) continue;
+    const cloned = cloneJsonValue(entry);
+    if (cloned !== undefined) sanitized[normalizedKey] = cloned;
+  }
+  return sanitized;
+}
+
 function normalizeConstraints(value: unknown): AgentStackModelConstraints | undefined {
   if (!isRecord(value)) return undefined;
   const constraints: AgentStackModelConstraints = {};
@@ -189,13 +247,13 @@ function normalizeProfile(value: unknown): AgentStackProfile | null {
   const systemPrompt = cleanString(value.system_prompt || value.systemPrompt);
   const tools = cleanStringArray(value.tools || value.tool_ids);
   const skills = cleanStringArray(value.skills || value.skill_ids);
-  const toolPolicy = cloneJsonValue(value.tool_policy || value.toolPolicy);
+  const toolPolicy = sanitizeAgentStackToolPolicy(value.tool_policy || value.toolPolicy);
   const constraints = normalizeConstraints(value.constraints || value.availability);
   if (description) profile.description = description;
   if (systemPrompt) profile.system_prompt = systemPrompt;
   if (tools.length) profile.tools = tools;
   if (skills.length) profile.skills = skills;
-  if (isRecord(toolPolicy) && Object.keys(toolPolicy).length) profile.tool_policy = toolPolicy;
+  if (Object.keys(toolPolicy).length) profile.tool_policy = toolPolicy;
   if (constraints) profile.constraints = constraints;
   return profile;
 }
@@ -454,7 +512,7 @@ export function mergeAgentStackProfiles(profiles: AgentStackProfile[]): MergedAg
       systemPrompts.push(profile.system_prompt);
     }
     if (isRecord(profile.tool_policy)) {
-      toolPolicy = mergeToolPolicyValue(toolPolicy, profile.tool_policy) as Record<string, unknown>;
+      toolPolicy = mergeToolPolicyValue(toolPolicy, sanitizeAgentStackToolPolicy(profile.tool_policy)) as Record<string, unknown>;
     }
   }
   return {

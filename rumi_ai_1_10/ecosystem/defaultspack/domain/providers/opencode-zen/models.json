@@ -29,7 +29,10 @@
         "transport": "anthropic_messages",
         "endpoint_path": "/v1/messages",
         "source": "opencode_zen_minimax_m3_free",
-        "pricing": "free_promotion_or_account_policy"
+        "pricing": "free_promotion_or_account_policy",
+        "quirks": {
+          "supports_stream_tool_calls": false
+        }
       }
     }
   ]
