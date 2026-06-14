@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -18,6 +19,8 @@ def _timestamp_from_epoch(epoch_seconds: float) -> str:
 
 
 SOAK_RESULT_STATUSES = ("completed", "failed", "skipped")
+LIVE_PRIVILEGED_OPT_IN_ENV = "RUMI_SOAK_ALLOW_LIVE_PRIVILEGED"
+LIVE_ALLOWED_ROOT_ENV = "RUMI_SOAK_ALLOWED_WORKSPACE_ROOT"
 
 SOAK_TASK_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -314,15 +317,34 @@ class SoakTestRunner:
         state_path: str | Path | None = None,
         task_runner: Callable[..., dict[str, Any]] | None = None,
         refill_empty_queue: bool = True,
+        dry_run: bool | None = None,
+        allow_live_execution: bool = False,
+        allowed_workspace_root: str | Path | None = None,
+        approval_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run live dogfood tasks through the durable soak lease queue."""
 
-        if task_runner is None:
-            from domain.agent.self_improvement_live_loop import run_live_improvement
-
-            task_runner = run_live_improvement
-
         workspace = Path(workspace_root) if workspace_root else self.runtime.workspace_root
+        if task_runner is None:
+            live_policy = _live_execution_policy(
+                workspace,
+                allow_live_execution=allow_live_execution,
+                allowed_workspace_root=allowed_workspace_root,
+                approval_context=approval_context,
+            )
+            effective_dry_run = (not live_policy["allowed"]) if dry_run is None else bool(dry_run)
+            if effective_dry_run or not live_policy["allowed"]:
+                dry_run_reason = "dry_run requested" if effective_dry_run and live_policy["allowed"] else live_policy["reason"]
+
+                def task_runner(**kwargs):
+                    return _dry_run_task_result(reason=dry_run_reason, **kwargs)
+
+            else:
+                from domain.agent.self_improvement_live_loop import run_live_improvement
+
+                def task_runner(**kwargs):
+                    return run_live_improvement(**kwargs, approval_context=approval_context or {})
+
         live_state_path = (
             Path(state_path)
             if state_path
@@ -348,7 +370,7 @@ class SoakTestRunner:
             results.append(result)
             self.record_task_result(
                 task_id,
-                status="completed" if result.get("success") else "failed",
+                status="skipped" if result.get("dry_run") else "completed" if result.get("success") else "failed",
                 model_role="main",
                 model_id=str(result.get("model", "")),
                 tools_used=list(claimed.get("tools_used") or []),
@@ -364,6 +386,7 @@ class SoakTestRunner:
             "total_tasks": len(results),
             "successful": len(successful),
             "failed": len(failed),
+            "dry_run": any(r.get("dry_run") for r in results),
             "results": results,
             "generated_at": _timestamp(),
         }
@@ -484,3 +507,61 @@ class SoakTestRunner:
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"schema_version": 1, **state, "updated_at": _timestamp()}
         self._state_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _dry_run_task_result(*, reason: str, task_id: str, task_title: str, **_: Any) -> dict[str, Any]:
+    return {
+        "success": True,
+        "dry_run": True,
+        "dry_run_reason": reason,
+        "task_id": task_id,
+        "task_title": task_title,
+        "model": "dry-run",
+        "files_read": [],
+        "files_modified": [],
+        "test_exit_code": 0,
+    }
+
+
+def _live_execution_policy(
+    workspace: Path,
+    *,
+    allow_live_execution: bool,
+    allowed_workspace_root: str | Path | None,
+    approval_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not (allow_live_execution and _truthy(os.environ.get(LIVE_PRIVILEGED_OPT_IN_ENV))):
+        return {"allowed": False, "reason": "live privileged soak execution was not explicitly enabled"}
+    if not (_truthy(os.environ.get("CI")) or _truthy(os.environ.get("GITHUB_ACTIONS"))):
+        return {"allowed": False, "reason": "live privileged soak execution is CI-only"}
+
+    root_value = allowed_workspace_root or os.environ.get(LIVE_ALLOWED_ROOT_ENV) or os.environ.get("GITHUB_WORKSPACE")
+    if not root_value:
+        return {"allowed": False, "reason": "live privileged soak execution requires an allowed workspace root"}
+    if not _is_relative_to(workspace, Path(root_value)):
+        return {"allowed": False, "reason": "workspace is outside the allowed live soak root"}
+
+    if not _approval_context_allows_live_soak(approval_context):
+        return {"allowed": False, "reason": "live privileged soak execution requires a server approval context"}
+    return {"allowed": True, "reason": "live privileged soak execution enabled"}
+
+
+def _truthy(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _approval_context_allows_live_soak(context: dict[str, Any] | None) -> bool:
+    if not isinstance(context, dict):
+        return False
+    return (
+        context.get("_tool_server_approval_token_valid") is True
+        and context.get("_tool_server_approved") is True
+    )

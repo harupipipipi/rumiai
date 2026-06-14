@@ -194,6 +194,79 @@ def test_soak_claimed_dogfood_leaves_active_lease_for_recovery_on_process_exit(t
     assert state["lease_events"][0]["kind"] == "lease_expired"
 
 
+def test_soak_default_runner_forces_dry_run_without_live_opt_in(tmp_path):
+    from domain.agent.self_improvement_runtime import create_mimo_profile
+    from domain.agent.soak_test_runner import SoakTestRunner
+
+    runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "si.json")
+    runtime.bootstrap()
+
+    state_path = tmp_path / "soak.json"
+    runner = SoakTestRunner(runtime, state_path=state_path)
+    runner.start_run()
+    runner.save_task_queue(runner.load_task_queue()[:1])
+
+    result = runner.run_claimed_dogfood_tasks(workspace_root=tmp_path, task_count=1)
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert result["dry_run"] is True
+    assert result["results"][0]["dry_run"] is True
+    assert result["results"][0]["dry_run_reason"] == "live privileged soak execution was not explicitly enabled"
+    assert state["results"][0]["status"] == "skipped"
+    assert state["results"][0]["files_modified"] == []
+
+
+def test_soak_live_policy_requires_ci_allowed_root_and_approval(tmp_path, monkeypatch):
+    from domain.agent.soak_test_runner import LIVE_PRIVILEGED_OPT_IN_ENV, _live_execution_policy
+
+    workspace = tmp_path / "allowed" / "workspace"
+    workspace.mkdir(parents=True)
+    approval_context = {
+        "_tool_server_approved": True,
+        "_tool_server_approval_token_valid": True,
+    }
+
+    monkeypatch.delenv(LIVE_PRIVILEGED_OPT_IN_ENV, raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    assert _live_execution_policy(
+        workspace,
+        allow_live_execution=True,
+        allowed_workspace_root=tmp_path / "allowed",
+        approval_context=approval_context,
+    )["allowed"] is False
+
+    monkeypatch.setenv(LIVE_PRIVILEGED_OPT_IN_ENV, "true")
+    assert _live_execution_policy(
+        workspace,
+        allow_live_execution=True,
+        allowed_workspace_root=tmp_path / "allowed",
+        approval_context=approval_context,
+    )["reason"] == "live privileged soak execution is CI-only"
+
+    monkeypatch.setenv("CI", "true")
+    assert _live_execution_policy(
+        workspace,
+        allow_live_execution=True,
+        allowed_workspace_root=tmp_path / "other",
+        approval_context=approval_context,
+    )["reason"] == "workspace is outside the allowed live soak root"
+
+    assert _live_execution_policy(
+        workspace,
+        allow_live_execution=True,
+        allowed_workspace_root=tmp_path / "allowed",
+        approval_context={},
+    )["reason"] == "live privileged soak execution requires a server approval context"
+
+    assert _live_execution_policy(
+        workspace,
+        allow_live_execution=True,
+        allowed_workspace_root=tmp_path / "allowed",
+        approval_context=approval_context,
+    )["allowed"] is True
+
+
 def test_soak_health_detects_stale_heartbeat_and_failed_run(tmp_path):
     from domain.agent.self_improvement_runtime import create_mimo_profile
     from domain.agent.soak_test_runner import SoakTestRunner
@@ -323,3 +396,6 @@ def test_defaultspack_soak_workflow_uses_claimed_dogfood_runner():
     assert "runner.run_claimed_dogfood_tasks" in workflow
     assert "run_multi_task_dogfood" not in workflow
     assert "runner.record_task_result(" not in workflow
+    assert "live_execution" in workflow
+    assert "dry_run=not live_execution" in workflow
+    assert "RUMI_SOAK_ALLOW_LIVE_PRIVILEGED" in workflow
