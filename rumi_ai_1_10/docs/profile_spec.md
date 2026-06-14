@@ -85,6 +85,11 @@ policy:
 node_settings:
   defaultspack.agent:
     model_profile: default
+metadata:
+  shell_variant: memo.workspace
+  selected:
+    frontend:
+      - memo.workspace
 ```
 
 ## Required Fields
@@ -104,6 +109,8 @@ node_settings:
 - `policy`
 - `node_settings`
 - `locale`
+- `metadata.shell_variant`
+- `metadata.selected.frontend`
 
 ## Node Availability
 

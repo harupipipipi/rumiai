@@ -1,0 +1,49 @@
+profile_id: rumi.memo
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+
+display_name:
+  ja: Memo
+  en: Memo
+
+description:
+  ja: Memo workspace shell を選択する pack-owned profile。
+  en: Pack-owned profile selecting the Memo workspace shell.
+
+default_graph: defaultspack.chat
+default_flow: chat
+
+surfaces:
+  preferred: desktop
+  enabled: [desktop]
+
+enabled_nodes:
+  - rumi.start
+  - defaultspack.ai_client
+  - defaultspack.tool
+  - defaultspack.frontend
+
+disabled_nodes: []
+
+policy:
+  max_tool_calls: 6
+  allow_shell: false
+  allow_file_write: true
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  tool_allowlist:
+    - todo
+    - file_reader
+    - coding_file_read
+    - coding_file_write
+    - coding_file_patch
+  tool_denylist: []
+
+metadata:
+  pack_id: rumi_memo_pack
+  category: memo
+  shell_variant: memo.workspace
+  selected:
+    frontend:
+      - memo.workspace

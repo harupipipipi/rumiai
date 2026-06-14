@@ -1,3 +1,4 @@
+import * as ReactRuntime from "react";
 import { Component, Suspense, lazy, type ComponentType, type ReactNode } from "react";
 
 import type { ShellRenderer } from "../lib/api";
@@ -7,6 +8,14 @@ const TRUSTED_RENDERER_PREFIXES = [
   "/static/assets/renderers/",
   "/static/user_renderers/",
 ] as const;
+
+const rendererWindow = typeof window === "undefined"
+  ? null
+  : window as Window & { __RUMI_REACT__?: typeof ReactRuntime };
+
+if (rendererWindow) {
+  rendererWindow.__RUMI_REACT__ = ReactRuntime;
+}
 
 export function isTrustedLocalRendererModule(modulePath: string | undefined): modulePath is string {
   if (!modulePath) return false;

@@ -714,6 +714,9 @@ def _frontend_candidates(catalog: Dict[str, Any]) -> List[Dict[str, Any]]:
     for renderer in shell.get("renderers") if isinstance(shell.get("renderers"), list) else []:
         if isinstance(renderer, dict):
             _add(renderer, "shell_renderer")
+    for variant in shell.get("variants") if isinstance(shell.get("variants"), list) else []:
+        if isinstance(variant, dict):
+            _add(variant, "shell_variant")
     for part in catalog.get("parts") if isinstance(catalog.get("parts"), list) else []:
         if isinstance(part, dict):
             _add(part, "part")

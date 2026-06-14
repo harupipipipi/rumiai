@@ -9,7 +9,7 @@ import { WarmActionIcon } from "./components/WarmActionIcon";
 import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type ShellRegion, type ShellRenderer, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { authorityApprovalTitle, pendingAuthorityApproval } from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
@@ -25,7 +25,7 @@ import { normalizeLocale } from "./lib/i18n";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
-import { hasShellRegion } from "./lib/uiShell";
+import { hasShellRegion, shellRegionsForSlot, shellRendererForRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
 import {
   agentStackProfileAvailability,
@@ -43,7 +43,7 @@ import {
   type AgentStackConversationState,
 } from "./lib/agentStack";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
-import { RendererBoundary } from "./renderers/trustedRendererLoader";
+import { loadTrustedRenderer, RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatHeaderAgentStackControls, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
 
 type ComposerCandidateMenuState = {
@@ -1523,6 +1523,54 @@ function hasMimoCodingProfile(catalog: UICatalog | null): boolean {
   return hasAgentServiceProfile(catalog, "defaultspack.mimo_coding_company");
 }
 
+const builtinShellRegionIds = new Set([
+  "title_bar",
+  "history",
+  "chat_header",
+  "chat_messages",
+  "composer",
+  "activity_preview",
+  "right_sidebar",
+  "settings_modal",
+]);
+
+type GenericShellRegionRendererProps = {
+  region: ShellRegion;
+  renderer: ShellRenderer | null;
+  catalog: UICatalog | null;
+  settingsValues: Record<string, Record<string, unknown>>;
+  activeConversationId: string | null;
+  activeConversationTitle: string;
+  messages: ChatUiMessage[];
+  selectedProfile: ModelProfile | null;
+  selectedToolIds: string[];
+  sidebarItems: SidebarItem[];
+  onOpenSettings: () => void;
+  onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
+};
+
+function HiddenShellRegionRenderer(_: GenericShellRegionRendererProps) {
+  return null;
+}
+
+function GenericShellRegion(props: Omit<GenericShellRegionRendererProps, "renderer">) {
+  const renderer = shellRendererForRegion(props.catalog, props.region.id);
+  const Component = useMemo(
+    () => loadTrustedRenderer<GenericShellRegionRendererProps>(renderer, HiddenShellRegionRenderer),
+    [renderer],
+  );
+
+  return (
+    <RendererBoundary>
+      <Component {...props} renderer={renderer} />
+    </RendererBoundary>
+  );
+}
+
+function customShellRegionsForSlot(catalog: UICatalog | null, slot: string): ShellRegion[] {
+  return shellRegionsForSlot(catalog, slot).filter((region) => !builtinShellRegionIds.has(region.id));
+}
+
 function isOperationsConversation(conversation: Conversation | null): boolean {
   if (!conversation) return false;
   return (
@@ -1611,6 +1659,14 @@ function activeComposerSteerItems(items: ConversationSteerItem[], isRunning: boo
 
 function profileKey(profile: ModelProfile | null | undefined, fallback: string): string {
   return profile?.profile_id || profile?.qualified_model_id || fallback;
+}
+
+export function catalogProfileIdForSelection(
+  activeModelId: string | null | undefined,
+  activeProfile: ModelProfile | null | undefined,
+): string | null {
+  const profileId = profileKey(activeProfile, String(activeModelId ?? "")).trim();
+  return profileId || null;
 }
 
 function getNewConversationPlaceholder(): string {
@@ -2663,9 +2719,12 @@ function ChatApp() {
     void refreshCatalog().catch(console.error);
   }
 
-  async function refreshCatalog() {
+  async function refreshCatalog(profileIdOverride?: string | null) {
+    const selectedCatalogProfileId = profileIdOverride === undefined
+      ? catalogProfileIdForSelection(activeModelId, activeProfile)
+      : (String(profileIdOverride ?? "").trim() || null);
     const [catalogResult, settingsResult, profilesResult, commandsResult] = await Promise.allSettled([
-      api.uiCatalog(),
+      api.uiCatalog(selectedCatalogProfileId),
       api.uiSettings(),
       api.listModelProfiles(),
       api.uiCommands(),
@@ -2755,6 +2814,7 @@ function ChatApp() {
     setActiveConversation(conversation);
     setDraftAgentStackState(null);
     if (updateUrl) replaceChatIdInUrl(conversationId);
+    void refreshCatalog(conversation.model).catch(console.error);
     void refreshPreview(conversationId);
   }
 
@@ -3332,6 +3392,7 @@ function ChatApp() {
 
   const handleModelProfileSelect = (profileId: string) => {
     updateModelSettings({ preferred_model: profileId });
+    void refreshCatalog(profileId).catch(console.error);
     if (activeConversationId) {
       void api.updateConversation(activeConversationId, { model: profileId }).then((conversation) => {
         setActiveConversation(conversation);
@@ -3670,7 +3731,7 @@ function ChatApp() {
           setComposerCandidateMenu(null);
           setInput("");
           if (result.message) setError(result.message);
-          await refreshCatalog();
+          await refreshCatalog(selectedProfileId || undefined);
           if (activeConversationId && selectedProfileId) {
             const conversation = await api.updateConversation(activeConversationId, { model: selectedProfileId });
             setActiveConversation(conversation);
@@ -4911,11 +4972,47 @@ function ChatApp() {
       onCodingContextRefresh={loadCodingContext}
     />
   );
+  const customTopRegions = customShellRegionsForSlot(catalog, "top");
+  const customLeftRegions = customShellRegionsForSlot(catalog, "left");
+  const customMainRegions = customShellRegionsForSlot(catalog, "main");
+  const customRightRegions = customShellRegionsForSlot(catalog, "right");
+  const customOverlayRegions = customShellRegionsForSlot(catalog, "overlay");
+  const shouldRenderChatWorkspace = showRegion("chat_header") || showRegion("chat_messages") || showRegion("composer") || isCalendarMode;
+  const renderGenericShellRegion = (region: ShellRegion, slot: string) => (
+    <div
+      key={region.id}
+      data-shell-region={region.id}
+      data-shell-slot={slot}
+      className={cn(
+        "min-h-0 min-w-0",
+        slot === "top" && "flex-shrink-0",
+        slot === "left" && "w-[286px] max-w-[30vw] min-w-[240px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 max-[900px]:w-[260px]",
+        slot === "main" && "flex min-h-0 flex-1 flex-col",
+        slot === "right" && "flex-shrink-0 overflow-hidden border-l border-zinc-800/60",
+        slot === "overlay" && "contents",
+      )}
+    >
+      <GenericShellRegion
+        region={region}
+        catalog={catalog}
+        settingsValues={settingsValues}
+        activeConversationId={activeConversationId}
+        activeConversationTitle={activeChatTitle}
+        messages={messages}
+        selectedProfile={activeProfile}
+        selectedToolIds={selectedToolIds}
+        sidebarItems={sidebarItems}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        onSettingChange={handleSettingChange}
+      />
+    </div>
+  );
 
   return (
     <RendererBoundary>
     <div className="flex flex-col h-screen w-full bg-[#09090b] text-zinc-300 font-sans overflow-hidden selection:bg-zinc-800">
       {showRegion("title_bar") && <Renderers.titleBar appName={catalog?.app?.name} appIcon={catalog?.app?.icon} />}
+      {customTopRegions.map((region) => renderGenericShellRegion(region, "top"))}
 
       <div className="flex flex-1 min-h-0">
         {showRegion("history") && !isHistoryMinimized && (
@@ -4969,10 +5066,13 @@ function ChatApp() {
           </div>
         )}
 
+        {customLeftRegions.map((region) => renderGenericShellRegion(region, "left"))}
+
         <main
           className={cn("rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative", isActivityPreviewVisible && "has-activity-preview")}
           style={{ "--rumi-activity-preview-width": `${activityPreviewWidthPx}px` } as CSSProperties}
         >
+          {shouldRenderChatWorkspace && (
           <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0 rumi-anim-fade-up", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
             {showRegion("chat_header") && !isCalendarMode && (
               <Renderers.chatHeader
@@ -5146,6 +5246,9 @@ function ChatApp() {
               </div>
             )}
           </div>
+          )}
+
+          {customMainRegions.map((region) => renderGenericShellRegion(region, "main"))}
 
           {isActivityPreviewVisible && (
             <div
@@ -5172,6 +5275,8 @@ function ChatApp() {
             </aside>
           )}
         </main>
+
+        {customRightRegions.map((region) => renderGenericShellRegion(region, "right"))}
 
         {showRegion("right_sidebar") && (
           <div className="rumi-anim-fade-right">
@@ -5238,6 +5343,8 @@ function ChatApp() {
           onSettingChange={handleSettingChange}
         />
       )}
+
+      {customOverlayRegions.map((region) => renderGenericShellRegion(region, "overlay"))}
     </div>
     </RendererBoundary>
   );
