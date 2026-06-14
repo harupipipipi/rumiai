@@ -41,7 +41,7 @@ function sampleGraphResponse(): StartupProfileGraphResponseData {
       tools: [{id: 'web_search', label: 'Web Search', kind: 'tool'}],
       webhooks: [{id: 'research-webhook', label: 'Research Webhook', kind: 'webhook'}],
       api_routes: [{id: 'POST /api/chat/conversations/{id}/messages', label: 'POST /api/chat/conversations/{id}/messages', kind: 'api'}],
-      prompts: [{id: 'research.system', label: 'Research Prompt', kind: 'prompt'}],
+      prompts: [{id: 'research.system', label: 'Research Rule', kind: 'prompt'}],
       frontend: [{id: 'research_sidebar', label: 'Research Sidebar', kind: 'frontend'}],
       flows: [{id: 'research.flow', label: 'Research Flow', kind: 'flow'}],
       capability_nodes: [{id: 'research.node', label: 'Research Node', kind: 'node'}],
@@ -87,7 +87,7 @@ test('ProfileGraphEditorShell renders category buttons for runtime wiring', () =
   assert.match(markup, /\+ Tool/);
   assert.match(markup, /\+ Webhook/);
   assert.match(markup, /\+ API/);
-  assert.match(markup, /\+ Prompt/);
+  assert.match(markup, /\+ Rule/);
   assert.match(markup, /\+ Frontend/);
 });
 

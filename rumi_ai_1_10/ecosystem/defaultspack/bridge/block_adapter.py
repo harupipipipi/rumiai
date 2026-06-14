@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import importlib
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict
 
 _PACK_ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _PACK_ROOT.parent.parent
 _PACK_LOCAL_PACKAGES = ("blocks", "domain", "transport", "ecosystem")
+_IMPORT_LOCK = threading.RLock()
 
 
 def _path_is_inside_pack(path: Path) -> bool:
@@ -57,8 +59,11 @@ def _prepare_pack_imports() -> None:
 
 
 def invoke_block(module_name: str, input_data: Dict[str, Any], context: Dict[str, Any]) -> Any:
-    _prepare_pack_imports()
-    module = importlib.import_module(module_name)
+    # The standalone HTTP server handles UI bootstrap requests concurrently.
+    # Import preparation mutates sys.path/sys.modules, so keep it serialized.
+    with _IMPORT_LOCK:
+        _prepare_pack_imports()
+        module = importlib.import_module(module_name)
     handler = getattr(module, "run", None)
     if handler is None:
         raise AttributeError(f"run not found in {module_name}")

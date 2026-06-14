@@ -26,6 +26,7 @@ from domain.chat.ir_legacy_adapter import ir_to_legacy_standard_messages, legacy
 from domain.chat.modality_detector import detect_modalities
 from domain.chat.public_metadata import compact_tool_filter_entries
 from domain.chat.store import ChatStore
+from domain.human_operator.constants import HUMAN_OPERATOR_TOOL_NAME, is_human_operator_model
 from domain.vision.image_bridge import (
     apply_vision_bridge_to_messages,
     conversation_image_context,
@@ -1059,22 +1060,8 @@ def _replace_current_user_content_for_model(
 
 
 def _conversation_system_prompt(conv: dict[str, Any], manager: Any) -> str:
-    prompt_id = str((conv or {}).get("system_prompt_id") or "").strip()
-    if not prompt_id:
-        return manager.get_system_prompt()
-    prompt = manager.get_prompt(prompt_id) or manager.get_prompt_by_name(prompt_id)
-    if isinstance(prompt, dict):
-        body = prompt.get("body") or prompt.get("content")
-        if body:
-            return str(body)
-    if _PROMPT_ID_RE.match(prompt_id):
-        prompt_path = Path(__file__).resolve().parents[2] / "prompts" / (prompt_id + ".system.md")
-        try:
-            if prompt_path.is_file():
-                return prompt_path.read_text(encoding="utf-8")
-        except OSError:
-            pass
-    return manager.get_system_prompt()
+    from blocks.chat._prompt_helpers import resolve_conversation_system_prompt
+    return resolve_conversation_system_prompt(conv, manager)
 
 
 def _load_active_startup_profile() -> dict[str, Any]:
@@ -1366,6 +1353,31 @@ def _apply_computer_use_context_preferences(context: dict[str, Any], user_text: 
     return updated
 
 
+def _append_special_model_tools(
+    tools: list[dict[str, Any]],
+    context: dict[str, Any],
+    *,
+    agent_id: Any = None,
+) -> list[dict[str, Any]]:
+    if not is_human_operator_model(str(context.get("model") or "").strip()):
+        return tools
+    if any(tool_name_from_definition(tool) == HUMAN_OPERATOR_TOOL_NAME for tool in tools):
+        return tools
+    tool_def = ToolRegistry().get(HUMAN_OPERATOR_TOOL_NAME)
+    if not isinstance(tool_def, dict):
+        return tools
+    runtime_profile = context.get("runtime_profile")
+    helper_tools = filter_tool_definitions_for_runtime_profile(
+        [tool_def],
+        runtime_profile,
+        agent_id=agent_id,
+        policy_context=context,
+    )
+    if not helper_tools:
+        return tools
+    return [*tools, *helper_tools]
+
+
 def _available_tools(
     context: dict[str, Any],
     input_data: dict[str, Any],
@@ -1397,4 +1409,5 @@ def _available_tools(
         agent_id=agent_id,
         policy_context=resolved_context,
     )
+    filtered = _append_special_model_tools(filtered, resolved_context, agent_id=agent_id)
     return filtered, adapt_tool_definitions(filtered), resolved_context

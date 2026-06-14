@@ -21,6 +21,8 @@ from domain.ai_client.providers import (
     get_provider_catalog_map,
 )
 
+_HIDDEN_RUNTIME_LIST_PROVIDER_IDS = {"human-operator", "rumi"}
+
 
 class AIClient:
     """AI Client - provider routing with profile and catalog compatibility."""
@@ -103,7 +105,11 @@ class AIClient:
         self._profiles[name] = payload
 
     def _active_provider_ids(self):
-        return set(self._providers.keys())
+        return {
+            provider_id
+            for provider_id in self._providers.keys()
+            if provider_id not in _HIDDEN_RUNTIME_LIST_PROVIDER_IDS
+        }
 
     def _provider_model_candidates(self, provider_name):
         provider = self._providers.get(provider_name)

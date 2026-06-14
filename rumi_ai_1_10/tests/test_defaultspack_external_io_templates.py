@@ -46,6 +46,8 @@ def test_builtin_external_io_templates_split_input_and_output():
     line_computer_use = next(item for item in catalog["input"] if item["id"] == "line.input.computer_use")
     assert line_computer_use["copy_paste_setup"]["input_profile_id"] == "line.computer_use"
     assert line_computer_use["copy_paste_setup"]["fields"][0]["id"] == "line_biz_chat_url"
+    assert not line_computer_use["response"].get("auto_approve_computer_use")
+    assert not line_computer_use["response"].get("yolo_mode")
     custom_input = next(item for item in catalog["input"] if item["id"] == "custom.input")
     assert custom_input["setup_mode"] == "custom"
 

@@ -18,7 +18,7 @@
       "capabilities": {
         "chat": true,
         "streaming": true,
-        "tool_calls": true,
+        "tool_calls": false,
         "vision": true,
         "reasoning": true
       },
@@ -32,7 +32,9 @@
         "pricing": "free_promotion_or_account_policy",
         "quirks": {
           "supports_stream_tool_calls": false
-        }
+        },
+        "min_output_tokens": 96,
+        "token_floor_reason": "MiniMax M3 can emit reasoning before final text; short caps may return thinking-only output."
       }
     }
   ]

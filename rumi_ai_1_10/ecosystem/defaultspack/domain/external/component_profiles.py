@@ -5,11 +5,27 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from ..components.registry import DomainComponentRegistry, build_domain_component_roots
+from ..components.registry import DomainComponentRegistry
+
+
+def _external_component_roots(pack_root: Path) -> list[Path]:
+    """Return roots trusted for external webhook profiles and policies.
+
+    External profiles and audience policies are security-sensitive because they
+    control webhook authorization and the tools/metadata attached to external
+    LLM turns.  Do not use the general component root builder here: it also
+    discovers sibling ecosystem packs, including packs that have only been
+    applied to disk and have not passed approval/hash verification yet.
+    """
+
+    return [
+        pack_root / "domain",
+        pack_root / "user_data" / "shared" / "domain_components",
+    ]
 
 
 def _registry_for_pack(pack_root: Path) -> DomainComponentRegistry:
-    return DomainComponentRegistry(build_domain_component_roots(pack_root))
+    return DomainComponentRegistry(_external_component_roots(pack_root))
 
 
 def _load_rules(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -41,10 +57,15 @@ def _profile_specs_from_rules(rules: dict[str, Any]) -> list[dict[str, Any]]:
 
 def profile_specs_from_components(pack_root: Path, category: str) -> list[dict[str, Any]]:
     specs: list[dict[str, Any]] = []
+    seen_profile_ids: set[str] = set()
     registry = _registry_for_pack(pack_root)
     for component in registry.list(category):
         rules = _load_rules(component.as_dict())
-        specs.extend(_profile_specs_from_rules(rules))
+        for spec in _profile_specs_from_rules(rules):
+            profile_id = str(spec.get("id") or "").strip()
+            if profile_id and profile_id not in seen_profile_ids:
+                seen_profile_ids.add(profile_id)
+                specs.append(spec)
     return specs
 
 
@@ -58,5 +79,5 @@ def audience_policy_specs_from_components(pack_root: Path) -> dict[str, dict[str
             continue
         policy_id = str(policy.get("id") or component.id).strip()
         if policy_id:
-            policies[policy_id] = deepcopy(policy)
+            policies.setdefault(policy_id, deepcopy(policy))
     return policies

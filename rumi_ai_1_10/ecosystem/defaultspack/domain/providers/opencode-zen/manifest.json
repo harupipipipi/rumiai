@@ -63,7 +63,7 @@
       "reasoning": "minimax-m3-free"
     },
     "capabilities": {
-      "native_tool_calling": true,
+      "native_tool_calling": false,
       "structured_outputs": false,
       "vision": true,
       "embeddings": false,

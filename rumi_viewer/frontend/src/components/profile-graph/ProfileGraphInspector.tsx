@@ -62,7 +62,7 @@ export function ProfileGraphInspector({
 
       {category === 'prompts' && preview?.prompt_resolution ? (
         <div className="mt-4 rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/8 p-3 text-xs text-text-muted">
-          <div className="font-medium text-text-main">Prompt Resolution</div>
+          <div className="font-medium text-text-main">Rule Resolution</div>
           <div className="mt-1">selected_prompt_id: {String(preview.prompt_resolution.selected_prompt_id ?? '--')}</div>
           <div>source_type: {String(preview.prompt_resolution.source_type ?? '--')}</div>
           <div className="break-all">source: {String(preview.prompt_resolution.source ?? '--')}</div>
