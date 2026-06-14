@@ -1,0 +1,33 @@
+{
+  "function_id": "ambient_permission_revoke",
+  "description": "Revoke a Rumi ambient permission without changing OS permission state.",
+  "tags": ["ambient", "permission"],
+  "risk": "medium",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ambient.permission_revoke",
+    "defaultspack.ambient.permission_revoke",
+    "defaults.ambient.permissions.revoke"
+  ],
+  "input_schema": {
+    "type": "object",
+    "required": ["permission_id"],
+    "properties": {
+      "permission_id": {"type": "string"}
+    },
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ambient.permissions",
+      "default_args": {"action": "revoke"}
+    }
+  }
+}

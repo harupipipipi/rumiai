@@ -14,6 +14,7 @@
       "knowledge",
       "media",
       "recording",
+      "ambient",
       "vision",
       "frontend",
       "dev",
@@ -447,6 +448,28 @@
         ]
       }
     },
+    "ambient": {
+      "type": "ambient",
+      "id": "ambient",
+      "path": "blocks/ambient",
+      "connectivity": {
+        "provides": [
+          "defaults.ambient.status",
+          "defaultspack.ambient.status",
+          "defaults.ambient.monitor_start",
+          "defaultspack.ambient.monitor_start",
+          "defaults.ambient.monitor_stop",
+          "defaultspack.ambient.monitor_stop",
+          "defaults.ambient.event_submit",
+          "defaultspack.ambient.event_submit",
+          "defaults.ambient.permission_grant",
+          "defaultspack.ambient.permission_grant",
+          "defaults.ambient.permission_revoke",
+          "defaultspack.ambient.permission_revoke",
+          "defaults.console.input"
+        ]
+      }
+    },
     "vision": {
       "type": "vision",
       "id": "vision",
@@ -583,6 +606,7 @@
     "context:context",
     "media:media",
     "vision:vision",
+    "ambient:ambient",
     "ai_client:ai_client",
     "tool:tool",
     "coding:coding",
@@ -828,6 +852,41 @@
       "path": "/api/remote/host/status",
       "function_id": "remote_host_status",
       "response_mode": "result"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ambient/status",
+      "function_id": "ambient_status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/monitor/start",
+      "function_id": "ambient_monitor_start",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/monitor/stop",
+      "function_id": "ambient_monitor_stop",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/events",
+      "function_id": "ambient_event_submit",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/permissions/grant",
+      "function_id": "ambient_permission_grant",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/permissions/revoke",
+      "function_id": "ambient_permission_revoke",
+      "pass_body": true
     }
   ]
 }

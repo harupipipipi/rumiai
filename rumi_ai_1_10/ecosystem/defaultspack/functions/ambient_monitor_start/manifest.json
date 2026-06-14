@@ -1,0 +1,29 @@
+{
+  "function_id": "ambient_monitor_start",
+  "description": "Enable ambient_monitor.enabled and start voice wake and camera pinch monitoring.",
+  "tags": ["ambient", "monitor"],
+  "risk": "high",
+  "requires": ["microphone.capture", "camera.capture", "ambient.trigger.dispatch"],
+  "caller_requires": ["user.approved.high_risk"],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ambient.monitor_start",
+    "defaultspack.ambient.monitor_start",
+    "defaults.ambient.monitor.start"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ambient.monitor",
+      "default_args": {"action": "start"}
+    }
+  }
+}

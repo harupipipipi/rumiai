@@ -941,6 +941,8 @@ class ChatStore:
         for index, attachment in enumerate(attachments):
             if not isinstance(attachment, dict):
                 continue
+            if attachment.get("ephemeral") or attachment.get("do_not_persist") or attachment.get("no_persist"):
+                continue
             name = self._safe_filename(str(attachment.get("name") or f"attachment-{index + 1}"))
             path = attachment_dir / name
             suffix = 1

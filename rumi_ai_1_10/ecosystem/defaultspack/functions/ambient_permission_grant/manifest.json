@@ -1,0 +1,34 @@
+{
+  "function_id": "ambient_permission_grant",
+  "description": "Grant a Rumi ambient permission while tracking OS permission separately.",
+  "tags": ["ambient", "permission"],
+  "risk": "high",
+  "requires": ["ambient.permission.grant"],
+  "caller_requires": ["user.approved.high_risk"],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ambient.permission_grant",
+    "defaultspack.ambient.permission_grant",
+    "defaults.ambient.permissions.grant"
+  ],
+  "input_schema": {
+    "type": "object",
+    "required": ["permission_id"],
+    "properties": {
+      "permission_id": {"type": "string"},
+      "os_status": {"type": "string"}
+    },
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ambient.permissions",
+      "default_args": {"action": "grant"}
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
+import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
@@ -5519,6 +5520,14 @@ function ChatApp() {
           onSettingChange={handleSettingChange}
         />
       )}
+
+      <AmbientTriggerPanel
+        conversationId={activeConversationId}
+        onOpenInput={(text) => {
+          setWorkspacePanelMode("composer");
+          if (typeof text === "string" && text.trim()) setInput(text);
+        }}
+      />
     </div>
     </RendererBoundary>
   );

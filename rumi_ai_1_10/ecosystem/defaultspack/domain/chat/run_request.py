@@ -134,7 +134,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     conversation = _conversation_with_active_profile_prompt(conversation, active_startup_profile)
 
     message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
-    content, metadata = _prepared_user_content(store, conversation_id, message)
+    content, metadata, runtime_content = _prepared_user_content(store, conversation_id, message)
     chat_references = _chat_references(store, conversation_id, metadata)
     metadata = dict(metadata) if isinstance(metadata, dict) else {}
     metadata.setdefault("chat_references", chat_references)
@@ -149,10 +149,19 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     if user_message is None:
         raise RuntimeError("Failed to add user message")
 
+    user_message_for_ir = dict(user_message)
+    if runtime_content is not None:
+        user_message_for_ir["content"] = runtime_content
+
     if _current_turn_history_only(context):
-        message_chain = [user_message]
+        message_chain = [user_message_for_ir]
     else:
         message_chain = store.get_message_chain(conversation_id, user_message["id"])
+        if runtime_content is not None:
+            message_chain = [
+                user_message_for_ir if item.get("id") == user_message.get("id") else item
+                for item in message_chain
+            ]
     chat_ir = stored_messages_to_ir(conversation_id, message_chain)
     standard_messages = ir_to_legacy_standard_messages(chat_ir)
     runtime_content = _runtime_user_content_override(metadata)
@@ -299,6 +308,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             conversation_id=conversation_id,
             user_text=user_text,
             has_images=bool(modalities.get("has_images")),
+            has_audio=bool(modalities.get("has_audio")),
             has_files=bool(modalities.get("has_files")),
             requested_tools=[tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)],
             requires_tool_calling=bool(provider_tools),
@@ -694,7 +704,11 @@ def prefocus_computer_use_target_window(prepared: PreparedChatRun) -> Any:
     return ToolExecutor().execute(tool_name, arguments, invoke_context)
 
 
-def _prepared_user_content(store: ChatStore, conversation_id: str, message: dict[str, Any]) -> tuple[list[Any], dict[str, Any] | None]:
+def _prepared_user_content(
+    store: ChatStore,
+    conversation_id: str,
+    message: dict[str, Any],
+) -> tuple[list[Any], dict[str, Any] | None, list[Any] | None]:
     content = message.get("content", [])
     attachments = message.get("attachments")
     has_attachments = isinstance(attachments, list) and len(attachments) > 0
@@ -705,16 +719,25 @@ def _prepared_user_content(store: ChatStore, conversation_id: str, message: dict
     if isinstance(content, list):
         content = list(content)
     metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    runtime_content: list[Any] | None = None
     if isinstance(attachments, list):
         metadata = dict(metadata)
-        persisted_attachments = store.persist_attachments(conversation_id, attachments)
+        persisted_attachments = store.persist_attachments(
+            conversation_id,
+            [attachment for attachment in attachments if not _attachment_is_ephemeral(attachment)],
+        )
         metadata["attachments"] = _sanitize_attachment_metadata(attachments)
         if persisted_attachments:
             metadata["workspace_attachments"] = persisted_attachments
         if isinstance(content, list):
             content.extend(_attachment_text_blocks(attachments))
             content.extend(_attachment_image_blocks(attachments))
-    return content if isinstance(content, list) else [{"type": "text", "text": str(content)}], metadata or None
+            audio_blocks = _attachment_audio_blocks(attachments)
+            if audio_blocks:
+                runtime_content = list(content)
+                runtime_content.extend(audio_blocks)
+                content.extend(_attachment_audio_placeholders(attachments))
+    return content if isinstance(content, list) else [{"type": "text", "text": str(content)}], metadata or None, runtime_content
 
 
 def _chat_references(store: ChatStore, conversation_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1218,6 +1241,61 @@ def _attachment_image_blocks(attachments: list[dict[str, Any]]) -> list[dict[str
             continue
         blocks.append({"type": "image_url", "image_url": {"url": data_url}})
     return blocks
+
+
+def _attachment_audio_blocks(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    blocks = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
+        data_url = attachment.get("dataUrl") or attachment.get("data_url")
+        if not mime.startswith("audio/") or not isinstance(data_url, str) or not data_url.startswith("data:"):
+            continue
+        header, encoded = data_url.split(",", 1) if "," in data_url else ("", "")
+        if not encoded:
+            continue
+        audio_format = _audio_format_from_mime(header or mime)
+        blocks.append({"type": "input_audio", "input_audio": {"data": encoded, "format": audio_format}})
+    return blocks
+
+
+def _attachment_audio_placeholders(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    blocks = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
+        if not mime.startswith("audio/"):
+            continue
+        name = str(attachment.get("name") or "ambient-recording").strip()[:200] or "ambient-recording"
+        duration_ms = attachment.get("duration_ms") or attachment.get("durationMs")
+        suffix = f" ({int(duration_ms)}ms)" if isinstance(duration_ms, (int, float)) else ""
+        blocks.append({"type": "text", "text": f"\n\n音声入力: {name}{suffix}"})
+    return blocks
+
+
+def _audio_format_from_mime(value: str) -> str:
+    lowered = str(value or "").lower()
+    if "audio/webm" in lowered:
+        return "webm"
+    if "audio/wav" in lowered or "audio/x-wav" in lowered:
+        return "wav"
+    if "audio/mp4" in lowered or "audio/m4a" in lowered:
+        return "mp4"
+    if "audio/mpeg" in lowered or "audio/mp3" in lowered:
+        return "mp3"
+    if "audio/ogg" in lowered:
+        return "ogg"
+    return "webm"
+
+
+def _attachment_is_ephemeral(attachment: Any) -> bool:
+    return isinstance(attachment, dict) and (
+        bool(attachment.get("ephemeral"))
+        or bool(attachment.get("do_not_persist"))
+        or bool(attachment.get("no_persist"))
+    )
 
 
 def _sanitize_attachment_metadata(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:

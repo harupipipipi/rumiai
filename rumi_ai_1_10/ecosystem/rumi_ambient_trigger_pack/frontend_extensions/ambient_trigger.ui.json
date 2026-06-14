@@ -1,0 +1,54 @@
+{
+  "extension_id": "rumi_ambient_trigger_pack.ui",
+  "display_name": "Ambient Trigger Mini Window",
+  "surfaces": [
+    {
+      "id": "ambient_mini_window",
+      "aliases": ["small_window"],
+      "type": "floating_panel",
+      "component": "AmbientTriggerPanel",
+      "default_enabled": true
+    },
+    {
+      "id": "defaultspack_input",
+      "type": "input_dispatcher_alias",
+      "alias": "defaults.console.input",
+      "default_enabled": true
+    },
+    {
+      "id": "line_hook",
+      "type": "external_input_profile",
+      "profile_id": "line.default",
+      "default_enabled": false
+    },
+    {
+      "id": "discord_hook",
+      "type": "external_input_profile",
+      "profile_id": "discord.default",
+      "default_enabled": false
+    },
+    {
+      "id": "web_hook",
+      "type": "external_input_profile",
+      "profile_id": "generic.webhook.default",
+      "default_enabled": false
+    }
+  ],
+  "install_prompt": {
+    "title": "このpackはマイク/カメラを要求しています",
+    "body": "Rumi側の microphone.capture / camera.capture / ambient.trigger.dispatch 許可は、OSのマイク/カメラ許可とは別に管理されます。",
+    "confirm_label": "許可",
+    "deny_label": "拒否",
+    "surface_question": "小型window・defaultspack input・LINE/Discord/Web hookへ追加しますか？"
+  },
+  "privacy": {
+    "store_audio": false,
+    "store_images": false,
+    "audit_event_only": true,
+    "pinch_audio": {
+      "capture_mode": "record_while_thumb_index_touch",
+      "dispatch_on": "pinch_release",
+      "persist_recording": false
+    }
+  }
+}

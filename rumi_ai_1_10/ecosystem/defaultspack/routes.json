@@ -476,6 +476,42 @@
     },
     {
       "method": "GET",
+      "path": "/api/ambient/status",
+      "flow_id": "transport_direct",
+      "description": "Read ambient trigger monitor status, Rumi permissions, OS permissions, and recent trigger audit events"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/monitor/start",
+      "flow_id": "transport_direct",
+      "description": "Enable ambient_monitor.enabled and start voice wake and camera pinch monitors"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/monitor/stop",
+      "flow_id": "transport_direct",
+      "description": "Disable ambient_monitor.enabled and pause voice wake and camera pinch monitors"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/events",
+      "flow_id": "transport_direct",
+      "description": "Submit a voice wake, camera pinch, or external hook ambient trigger event through ambient_trigger_router"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/permissions/grant",
+      "flow_id": "transport_direct",
+      "description": "Grant a Rumi ambient permission such as microphone.capture, camera.capture, or ambient.trigger.dispatch"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/permissions/revoke",
+      "flow_id": "transport_direct",
+      "description": "Revoke a Rumi ambient permission while keeping OS permission status separate"
+    },
+    {
+      "method": "GET",
       "path": "/api/agent/companies",
       "flow_id": "company_workspace",
       "description": "List company workspaces"

@@ -1,0 +1,66 @@
+{
+  "pack_id": "rumi_ambient_trigger_pack",
+  "pack_identity": "rumi:ecosystem/rumi_ambient_trigger_pack",
+  "version": "0.1.0",
+  "metadata": {
+    "name": "Rumi Ambient Trigger Pack",
+    "description": "Voice wake and camera pinch trigger extension for defaultspack input.",
+    "author": "Rumi AI Team",
+    "license": "MIT"
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "capabilities": [
+    "microphone.capture",
+    "camera.capture",
+    "ambient.trigger.dispatch"
+  ],
+  "permissions_required": {
+    "microphone.capture": {
+      "label": "Microphone capture",
+      "risk": "high",
+      "requires_user_grant": true,
+      "os_permission_hint": "Windows/macOS/Linux microphone permission may also be required."
+    },
+    "camera.capture": {
+      "label": "Camera capture",
+      "risk": "high",
+      "requires_user_grant": true,
+      "os_permission_hint": "Windows/macOS/Linux camera permission may also be required."
+    },
+    "ambient.trigger.dispatch": {
+      "label": "Create Rumi input from ambient triggers",
+      "risk": "medium",
+      "requires_user_grant": true
+    }
+  },
+  "services": {
+    "voice_wake_monitor": {
+      "default_enabled": false,
+      "mode": "wake_phrase_enrollment_audio_embedding"
+    },
+    "gesture_wake_monitor": {
+      "default_enabled": false,
+      "mode": "thumb_index_landmark_distance"
+    },
+    "ambient_trigger_router": {
+      "dispatches_to": [
+        "chat.message",
+        "run.instruction",
+        "agent.delegate",
+        "defaults.console.input"
+      ]
+    }
+  },
+  "frontend_extensions": [
+    "frontend_extensions/ambient_trigger.ui.json"
+  ],
+  "policy": {
+    "privacy": "policies/ambient_privacy.policy.yaml",
+    "audit": "trigger_events_only"
+  }
+}

@@ -340,6 +340,57 @@ RECORDING_FUNCTIONS: tuple[FunctionSpec, ...] = (
 )
 
 
+AMBIENT_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "ambient_status",
+        "Read ambient trigger monitor, permission, OS permission, and privacy status.",
+        ("ambient", "permission"),
+        block="blocks.ambient.status",
+    ),
+    _spec(
+        "ambient_monitor_start",
+        "Enable the ambient microphone and camera trigger monitor.",
+        ("ambient", "monitor"),
+        risk="high",
+        block="blocks.ambient.monitor",
+        default_args={"action": "start"},
+        requires=("microphone.capture", "camera.capture", "ambient.trigger.dispatch"),
+    ),
+    _spec(
+        "ambient_monitor_stop",
+        "Pause the ambient trigger monitor.",
+        ("ambient", "monitor"),
+        block="blocks.ambient.monitor",
+        default_args={"action": "stop"},
+    ),
+    _spec(
+        "ambient_event_submit",
+        "Submit a sanitized ambient trigger event to the ambient trigger router.",
+        ("ambient", "input"),
+        risk="high",
+        block="blocks.ambient.event_submit",
+        aliases=("defaults.ambient.events.submit", "defaultspack.ambient.events.submit"),
+        requires=("ambient.trigger.dispatch",),
+    ),
+    _spec(
+        "ambient_permission_grant",
+        "Grant a Rumi-side ambient permission and optionally record OS permission state.",
+        ("ambient", "permission"),
+        risk="high",
+        block="blocks.ambient.permissions",
+        default_args={"action": "grant"},
+    ),
+    _spec(
+        "ambient_permission_revoke",
+        "Revoke a Rumi-side ambient permission without changing OS permission state.",
+        ("ambient", "permission"),
+        risk="medium",
+        block="blocks.ambient.permissions",
+        default_args={"action": "revoke"},
+    ),
+)
+
+
 AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
     _spec(function_id, description, ("agent",), risk=risk, block=block)
     for function_id, description, risk, block in (
@@ -595,6 +646,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + REMOTE_FUNCTIONS
     + BROWSER_ARTIFACT_FUNCTIONS
     + RECORDING_FUNCTIONS
+    + AMBIENT_FUNCTIONS
     + DATA_FUNCTIONS
     + PROFILE_WORKSPACE_FUNCTIONS
     + RESEARCH_MEDIA_UI_DEV_FUNCTIONS
