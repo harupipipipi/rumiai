@@ -257,7 +257,8 @@ class PackSelector:
         python_version = python_version or platform.python_version()
         issues: List[Dict[str, Any]] = []
         candidates = self.scan_candidates()
-        candidate_ids = {candidate.pack_id for candidate in candidates}
+        candidate_by_id = {candidate.pack_id: candidate for candidate in candidates}
+        candidate_ids = set(candidate_by_id)
         installed_ids = set(installed_packs)
 
         for candidate in candidates:
@@ -274,6 +275,8 @@ class PackSelector:
             for dep in candidate.depends_on or []:
                 dep_id = dep.get("pack_id", "")
                 installed = installed_packs.get(dep_id)
+                if installed is None and dep_id in candidate_by_id:
+                    installed = {"version": candidate_by_id[dep_id].version}
                 if installed is None:
                     issues.append({
                         "type": "missing_dependency",
