@@ -86,6 +86,8 @@ def test_cockpit_sensitive_reads_are_guarded():
 
     sensitive_reads = [
         "/api/coding/approvals",
+        "/api/authority/requests",
+        "/api/authority/test/request",
         "/api/browser/artifacts",
         "/api/coding/agent/sessions/status",
         "/api/coding/agent/sessions/merge-report",

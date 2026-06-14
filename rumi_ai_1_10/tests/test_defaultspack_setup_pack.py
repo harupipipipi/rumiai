@@ -209,6 +209,53 @@ class TestSetupPackManager(unittest.TestCase):
             principals = [call[0]["principal_id"] for call in fake_grants.batch_calls]
             self.assertEqual(principals, ["defaultspack"])
 
+    def test_install_auto_includes_declared_setup_pack_dependencies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(root, "defaultspack", "defaultspack", True, recommended=True)
+            self._write_pack(root, "tools", "tools", True)
+            self._write_pack(
+                root,
+                "codepack",
+                "codepack",
+                False,
+                depends_on=[
+                    {"pack_id": "defaultspack", "version": ">=1.0.0"},
+                    {"pack_id": "tools", "version": ">=1.0.0"},
+                ],
+            )
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+
+            ctx = self._install_context(
+                base,
+                [
+                    self._target(base, "defaultspack", "rumi:ecosystem/defaultspack"),
+                    self._target(base, "tools", "rumi:ecosystem/tools"),
+                    self._target(base, "codepack", "rumi:ecosystem/codepack"),
+                ],
+            )
+            fake_active, fake_grants, *patches = ctx
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = manager.install("codepack")
+
+            self.assertTrue(result["success"])
+            self.assertEqual(
+                result["installed_setup_pack_ids"],
+                ["defaultspack", "tools", "codepack"],
+            )
+            self.assertEqual(
+                result["installed_target_pack_ids"],
+                ["defaultspack", "tools", "codepack"],
+            )
+            self.assertEqual(result["active_setup_pack_id"], "defaultspack")
+            self.assertEqual(result["active_target_pack_id"], "defaultspack")
+            self.assertEqual(result["granted_all_ok_target_pack_ids"], ["defaultspack", "tools"])
+            self.assertEqual(result["skipped_all_ok_setup_pack_ids"], ["codepack"])
+            self.assertEqual(fake_active.active_pack_identity, "rumi:ecosystem/defaultspack")
+            principals = [call[0]["principal_id"] for call in fake_grants.batch_calls]
+            self.assertEqual(principals, ["defaultspack", "tools"])
+
     def test_recommended_selected_pack_becomes_active(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -326,6 +373,45 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(result["status_code"], 400)
             self.assertEqual(result["errors"][0]["reason"], "setup_pack_conflict")
             self.assertEqual(result["errors"][0]["resolution"], "choose_one_pack")
+            self.assertEqual(fake_grants.batch_calls, [])
+
+    def test_install_rejects_invalid_setup_pack_metadata_schema_before_grants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            pack_dir = root / "workspace"
+            pack_dir.mkdir(parents=True)
+            (pack_dir / "pack.json").write_text(
+                json.dumps(
+                    {
+                        "pack_id": "workspace",
+                        "target_pack_id": "workspace",
+                        "supports_all_ok": True,
+                        "conflicts_with": [
+                            {
+                                "reason": "Missing conflicting pack id.",
+                                "resolution": "choose_one_pack",
+                            }
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+
+            ctx = self._install_context(
+                base,
+                [self._target(base, "workspace", "rumi:ecosystem/workspace")],
+            )
+            _, fake_grants, *patches = ctx
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = manager.install("workspace")
+
+            self.assertFalse(result["success"])
+            self.assertEqual(result["status_code"], 400)
+            self.assertEqual(result["errors"][0]["reason"], "invalid_setup_pack_schema")
+            self.assertEqual(result["errors"][0]["field"], "conflicts_with[0]")
             self.assertEqual(fake_grants.batch_calls, [])
 
     def test_grant_and_revoke_all_ok_reject_unsupported_setup_pack_entries(self):

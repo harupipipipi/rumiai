@@ -29,6 +29,9 @@ PACK_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
 # 汎用 ID バリデーション: staging_id, privilege_id, flow_id, candidate_key 等
 SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_.:/-]{1,256}$')
 
+# staging_id is joined into filesystem paths, so keep it narrower than SAFE_ID_RE.
+STAGING_ID_RE = re.compile(r'^[a-fA-F0-9]{16}$')
+
 # slug バリデーション: 英数字・アンダースコア・ハイフンのみ (長さ制限なし)
 SLUG_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
 
@@ -71,6 +74,11 @@ def is_safe_id(value: str) -> bool:
         True なら有効、False なら無効。
     """
     return bool(value and SAFE_ID_RE.match(value))
+
+
+def is_safe_staging_id(value: str) -> bool:
+    """Return True when *value* is a generated pack staging id."""
+    return bool(value and STAGING_ID_RE.fullmatch(str(value)))
 
 
 def validate_slug(slug: str) -> Tuple[bool, Optional[str]]:

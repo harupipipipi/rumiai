@@ -125,6 +125,7 @@ function runtimeApprovalFromCandidate(
 ): RuntimeApproval | null {
   const requestId = requestIdFromCandidate(candidate);
   if (!candidate || !requestId) return null;
+  if (candidate.authority || candidate.approval_kind === "authority" || candidate.permission_id === "model.invoke" || candidate.permission_id === "api_key.use") return null;
   if (!candidate.requires_approval && !candidate.approval_required) return null;
   if (approvalExpired(candidate, observedAt, now)) return null;
   const toolName = String(candidate.tool_name ?? fallbackToolName).trim() || fallbackToolName;

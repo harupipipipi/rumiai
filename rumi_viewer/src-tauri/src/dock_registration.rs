@@ -315,6 +315,7 @@ fn xml_escape(value: &str) -> String {
 fn build_launch_script(
     pack_shell: &Path,
     token_file: &Path,
+    panel_bootstrap_secret_file: &Path,
     rumi_home: &Path,
     app_dir: &Path,
     user_data_dir: &Path,
@@ -348,6 +349,7 @@ RUMI_USER_DATA={user_data_dir}
 VENV_DIR={venv_dir}
 PACK_SHELL={pack_shell}
 TOKEN_FILE={token_file}
+PANEL_BOOTSTRAP_SECRET_FILE={panel_bootstrap_secret_file}
 APP_WORKING_DIR={app_working_dir}
 DESKTOP_COMMAND={command}
 KERNEL_COMMAND={kernel_command}
@@ -360,6 +362,8 @@ export RUMI_USER_DATA
 
 RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')
 export RUMI_API_TOKEN
+RUMI_PANEL_BOOTSTRAP_SECRET=$(cat "$PANEL_BOOTSTRAP_SECRET_FILE" 2>/dev/null | tr -d '\n')
+export RUMI_PANEL_BOOTSTRAP_SECRET
 
 exec "$PACK_SHELL" run "defaultspack" \
   --command "$DESKTOP_COMMAND" \
@@ -374,6 +378,7 @@ exec "$PACK_SHELL" run "defaultspack" \
         venv_dir = shell_quote_path(venv_dir),
         pack_shell = shell_quote_path(pack_shell),
         token_file = shell_quote_path(token_file),
+        panel_bootstrap_secret_file = shell_quote_path(panel_bootstrap_secret_file),
         app_working_dir = shell_quote_path(app_working_dir),
         command = shell_quote(command),
         kernel_command = shell_quote(&kernel_command),
@@ -390,6 +395,7 @@ fn create_macos_app_bundle(
     app_name: &str,
     pack_shell: &Path,
     token_file: &Path,
+    panel_bootstrap_secret_file: &Path,
     rumi_home: &Path,
     app_dir: &Path,
     user_data_dir: &Path,
@@ -443,6 +449,7 @@ fn create_macos_app_bundle(
     let launch_script = build_launch_script(
         pack_shell,
         token_file,
+        panel_bootstrap_secret_file,
         rumi_home,
         app_dir,
         user_data_dir,
@@ -723,6 +730,18 @@ fn persist_desktop_api_token(config: &AppConfig, api_token: &str) -> AnyResult<P
     Ok(token_path)
 }
 
+fn read_panel_bootstrap_secret_from_config(config: &AppConfig) -> AnyResult<String> {
+    let path = config.panel_bootstrap_secret_path();
+    let secret = fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?
+        .trim()
+        .to_string();
+    if secret.is_empty() {
+        bail!("panel bootstrap secret is empty at {}", path.display());
+    }
+    Ok(secret)
+}
+
 fn spawn_defaultspack_local_server(
     config: &AppConfig,
     metadata: &DefaultspackDesktopMetadata,
@@ -731,6 +750,7 @@ fn spawn_defaultspack_local_server(
         .ensure_pack_shell_path()
         .context("pack-shell binary is required to launch Defaultspack")?;
     let api_token = read_desktop_api_token_from_config(config)?;
+    let panel_bootstrap_secret = read_panel_bootstrap_secret_from_config(config)?;
     let kernel_command = kernel_command_for_python(&config.venv_python());
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
 
@@ -761,6 +781,7 @@ fn spawn_defaultspack_local_server(
         .env("RUMI_APP_DIR", &config.app_dir)
         .env("RUMI_USER_DATA", &config.user_data_dir)
         .env("RUMI_API_TOKEN", &api_token)
+        .env("RUMI_PANEL_BOOTSTRAP_SECRET", &panel_bootstrap_secret)
         .env("RUMI_DEFAULTSPACK_OPEN_BROWSER", "0")
         .current_dir(&metadata.app_working_dir)
         .stdin(Stdio::null())
@@ -789,12 +810,14 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
 
     let api_token = read_desktop_api_token_from_config(config)?;
     let token_path = persist_desktop_api_token(config, &api_token)?;
+    let panel_bootstrap_secret_path = config.panel_bootstrap_secret_path();
 
     let app_name = "Rumi Defaultspack";
     let app_dir = create_macos_app_bundle(
         app_name,
         &pack_shell,
         &token_path,
+        &panel_bootstrap_secret_path,
         &config.rumi_home,
         &config.app_dir,
         &config.user_data_dir,
@@ -890,6 +913,7 @@ mod tests {
         let script = build_launch_script(
             Path::new("/tmp/Rumi's bin/pack-shell"),
             Path::new("/tmp/token file"),
+            Path::new("/tmp/panel secret file"),
             Path::new("/tmp/rumi home"),
             Path::new("/tmp/app dir"),
             Path::new("/tmp/user data"),
@@ -904,6 +928,7 @@ mod tests {
         assert!(script.contains("RUMI_APP_DIR='/tmp/app dir'"));
         assert!(script.contains("RUMI_USER_DATA='/tmp/user data'"));
         assert!(script.contains("TOKEN_FILE='/tmp/token file'"));
+        assert!(script.contains("PANEL_BOOTSTRAP_SECRET_FILE='/tmp/panel secret file'"));
         assert!(script.contains("APP_WORKING_DIR='/tmp/work $(bad)'"));
         assert!(script.contains("DESKTOP_COMMAND='python -c \"print('\\''hello'\\'')\"'"));
         assert!(script.contains("KERNEL_COMMAND=''\\''/tmp/venv dir/bin/python3'\\'' -m app'"));
@@ -920,6 +945,7 @@ mod tests {
         let script = build_launch_script(
             Path::new("/tmp/pack-shell"),
             Path::new("/tmp/token"),
+            Path::new("/tmp/panel-secret"),
             Path::new("/tmp/rumi-home"),
             Path::new("/tmp/app-dir"),
             Path::new("/tmp/user-data"),
@@ -935,6 +961,7 @@ mod tests {
 
         assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
         assert!(script.contains("export DEFAULTS_HTTP_PORT='8766'"));
+        assert!(script.contains("export RUMI_PANEL_BOOTSTRAP_SECRET"));
     }
 
     #[test]
@@ -943,6 +970,7 @@ mod tests {
         let script = build_launch_script(
             Path::new("/tmp/pack-shell"),
             Path::new("/tmp/token"),
+            Path::new("/tmp/panel-secret"),
             Path::new("/tmp/rumi-home"),
             Path::new("/tmp/app-dir"),
             Path::new("/tmp/user-data"),
