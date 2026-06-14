@@ -43,6 +43,8 @@ def run(context):
         ("POST", "/api/coding/git/branch", _lazy("blocks.coding.git_branch"), {}),
         ("POST", "/api/coding/git/commit", _lazy("blocks.coding.git_commit"), {}),
         ("POST", "/api/coding/git/push", _lazy("blocks.coding.git_push"), {}),
+        ("GET", "/api/coding/rumi-log", _lazy("blocks.coding.rumi_log"), {"_method": "GET"}),
+        ("POST", "/api/coding/rumi-log", _lazy("blocks.coding.rumi_log"), {"_method": "POST"}),
         ("GET", "/api/coding/approvals", _lazy("blocks.coding.approval_list"), {}),
         ("POST", "/api/coding/approvals/approve", _lazy("blocks.coding.approval_approve"), {}),
         ("POST", "/api/coding/approvals/deny", _lazy("blocks.coding.approval_deny"), {}),
