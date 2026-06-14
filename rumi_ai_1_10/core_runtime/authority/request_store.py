@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import threading
 from datetime import datetime, timedelta, timezone
@@ -41,6 +42,65 @@ def _canonical_json(value: Any) -> str:
 def _safe_filename(value: str) -> str:
     digest = hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
     return digest
+
+
+_SECRET_KEY_EXACT = {
+    "apikey",
+    "xapikey",
+    "authorization",
+    "proxyauthorization",
+    "bearer",
+    "token",
+    "accesstoken",
+    "refreshtoken",
+    "idtoken",
+    "secret",
+    "password",
+    "passwd",
+    "cookie",
+    "setcookie",
+    "credential",
+    "credentials",
+    "clientsecret",
+    "privatekey",
+    "secretkey",
+    "accesskey",
+    "secretaccesskey",
+}
+_SECRET_KEY_SUFFIXES = ("token", "secret", "password", "passwd", "cookie", "credential", "credentials")
+
+
+def _normalized_resource_key(key: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(key or "").lower())
+
+
+def _resource_key_is_secret_like(key: str) -> bool:
+    normalized = _normalized_resource_key(key)
+    if not normalized:
+        return False
+    if normalized in _SECRET_KEY_EXACT:
+        return True
+    if "apikey" in normalized or "privatekey" in normalized or "secretkey" in normalized:
+        return True
+    return normalized.endswith(_SECRET_KEY_SUFFIXES)
+
+
+def sanitize_authority_resource(resource: dict[str, Any]) -> dict[str, Any]:
+    output: dict[str, Any] = {}
+    for key, value in dict(resource or {}).items():
+        if _resource_key_is_secret_like(key):
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            output[key] = value
+        elif isinstance(value, list):
+            output[key] = [
+                sanitize_authority_resource(item) if isinstance(item, dict) else item
+                for item in value
+                if isinstance(item, (str, int, float, bool, dict)) or item is None
+            ]
+        elif isinstance(value, dict):
+            output[key] = sanitize_authority_resource(value)
+    return output
 
 
 class AuthorityRequestStore:
@@ -113,17 +173,7 @@ class AuthorityRequestStore:
 
     @staticmethod
     def _safe_resource(resource: dict[str, Any]) -> dict[str, Any]:
-        output: dict[str, Any] = {}
-        for key, value in dict(resource or {}).items():
-            if key.lower() in {"api_key", "authorization", "token", "secret", "password", "cookie"}:
-                continue
-            if isinstance(value, (str, int, float, bool)) or value is None:
-                output[key] = value
-            elif isinstance(value, list):
-                output[key] = [item for item in value if isinstance(item, (str, int, float, bool)) or item is None]
-            elif isinstance(value, dict):
-                output[key] = AuthorityRequestStore._safe_resource(value)
-        return output
+        return sanitize_authority_resource(resource)
 
     def create_request(
         self,
@@ -365,7 +415,20 @@ class AuthorityRequestStore:
                 item = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if isinstance(item, dict):
+            if not isinstance(item, dict):
+                continue
+            if self._verify(item):
                 item.pop("_hmac_signature", None)
+                item["verified"] = True
                 events.append(item)
+                continue
+            events.append(
+                {
+                    "timestamp": _now_ts(),
+                    "action": "authority_audit_tampered",
+                    "details": {},
+                    "verified": False,
+                    "tampered": True,
+                }
+            )
         return events

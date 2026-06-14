@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -283,6 +284,25 @@ def test_authority_request_cannot_be_approved_twice(tmp_path, monkeypatch):
     assert second["status_code"] == 409
 
 
+def test_authority_rejects_global_scope(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="global",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is False
+    assert approval["status_code"] == 400
+
+
 def test_authority_signed_deny_and_request_views(tmp_path, monkeypatch):
     service, _, store = _service(tmp_path, monkeypatch)
     decision = service.check(
@@ -311,6 +331,63 @@ def test_authority_signed_deny_and_request_views(tmp_path, monkeypatch):
     assert denied["success"] is True
     assert denied["denied"] is True
     assert store.get_request(decision.request_id).status == "denied"
+
+
+def test_authority_request_resource_redacts_secret_like_keys(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={
+            "kind": "model",
+            "provider_id": "openai",
+            "api_id": "work",
+            "model_id": "gpt-5.4",
+            "apiKey": "sk-test",
+            "access_token": "access-secret",
+            "refresh-token": "refresh-secret",
+            "x-api-key": "header-secret",
+            "bearer": "bearer-secret",
+            "input_tokens": 42,
+            "metadata": {"safe": "ok", "clientSecret": "nested-secret"},
+        },
+        profile_id="work",
+    )
+
+    stored = store.get_request(decision.request_id)
+
+    assert stored is not None
+    assert stored.resource["input_tokens"] == 42
+    assert stored.resource["metadata"] == {"safe": "ok"}
+    assert "apiKey" not in stored.resource
+    assert "access_token" not in stored.resource
+    assert "refresh-token" not in stored.resource
+    assert "x-api-key" not in stored.resource
+    assert "bearer" not in stored.resource
+
+
+def test_authority_audit_events_are_verified_and_tamper_marked(tmp_path, monkeypatch):
+    _, _, store = _service(tmp_path, monkeypatch)
+    store.audit("authority_test_event", {"provider_id": "openai"})
+
+    events = store.list_events()
+
+    assert events[-1]["action"] == "authority_test_event"
+    assert events[-1]["verified"] is True
+    assert "_hmac_signature" not in events[-1]
+
+    lines = store._audit_path.read_text(encoding="utf-8").splitlines()
+    tampered = json.loads(lines[-1])
+    tampered["details"]["provider_id"] = "anthropic"
+    store._audit_path.write_text(json.dumps(tampered) + "\n", encoding="utf-8")
+
+    tampered_events = store.list_events()
+
+    assert tampered_events[-1]["action"] == "authority_audit_tampered"
+    assert tampered_events[-1]["verified"] is False
+    assert tampered_events[-1]["tampered"] is True
+    assert tampered_events[-1]["details"] == {}
 
 
 def test_authority_resource_allowed_rejects_empty_constraints():

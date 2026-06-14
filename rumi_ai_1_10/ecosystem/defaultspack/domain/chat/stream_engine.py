@@ -1612,17 +1612,9 @@ class ChatRunEngine:
         provider_id = str(provider_id or "").strip()
         if provider_id in {"", "stub", "rumi"}:
             return
-        try:
-            from domain.ai_client.api_key_store import provider_has_api_key
-            provider_may_have_api_key = provider_has_api_key(provider_id)
-        except Exception:
-            provider_may_have_api_key = True
-        if not provider_may_have_api_key and (
-            bool(getattr(provider, "_credential_required", False))
-            or bool(getattr(provider, "_api_key_envs", None))
-        ):
-            provider_may_have_api_key = True
-        if not provider_may_have_api_key:
+        from domain.ai_client.authority_gate import provider_requires_authority
+
+        if not provider_requires_authority(provider_id, provider=provider, api_id="legacy"):
             return
         from core_runtime.authority import get_authority_service
 

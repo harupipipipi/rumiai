@@ -7,7 +7,7 @@ from typing import Any
 
 from .models import AUTHORITY_PERMISSION_IDS, AuthorityDecision, AuthorityRequest
 from .principal import build_principal_id, parse_principal_parts, principal_scope_candidates
-from .request_store import AuthorityRequestStore
+from .request_store import AuthorityRequestStore, sanitize_authority_resource
 from .ui_operator import ui_operator_audit_record, verify_ui_operator
 
 
@@ -322,17 +322,7 @@ class AuthorityService:
 
     @staticmethod
     def _normalize_resource(resource: dict[str, Any]) -> dict[str, Any]:
-        normalized: dict[str, Any] = {}
-        for key, value in dict(resource or {}).items():
-            if key.lower() in {"api_key", "authorization", "token", "secret", "password", "cookie"}:
-                continue
-            if isinstance(value, (str, int, float, bool)) or value is None:
-                normalized[key] = value
-            elif isinstance(value, list):
-                normalized[key] = [item for item in value if isinstance(item, (str, int, float, bool)) or item is None]
-            elif isinstance(value, dict):
-                normalized[key] = AuthorityService._normalize_resource(value)
-        return normalized
+        return sanitize_authority_resource(resource)
 
     @staticmethod
     def _resource_allowed(config: dict[str, Any], resource: dict[str, Any]) -> bool:
@@ -487,8 +477,6 @@ class AuthorityService:
 
     @staticmethod
     def _principal_for_scope(request: AuthorityRequest, scope: str) -> str:
-        if scope == "global":
-            return "global"
         if scope == "conversation" and request.conversation_id:
             return f"conversation:{request.conversation_id}"
         if scope == "profile":

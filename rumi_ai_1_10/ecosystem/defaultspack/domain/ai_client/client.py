@@ -10,7 +10,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from domain.ai_client.model_pack_router import select_model_pack
 from domain.ai_client.model_pack_store import ModelPackStore
 from domain.ai_client.api_key_store import provider_api_metadata, provider_has_api_key, provider_named_api_keys, read_provider_api_key
+from domain.ai_client.authority_gate import provider_requires_authority
 from domain.ai_client.capabilities.registry import get_model_provider_capabilities
+from domain.ai_client.oauth_store import provider_has_oauth_connection
 from domain.ai_client.providers import (
     _cloud_runtime_enabled,
     build_profile_catalog,
@@ -72,7 +74,7 @@ class AIClient:
                 ):
                     continue
                 if not cloud_enabled and entry.get("kind") not in {"builtin", "local"}:
-                    if not provider_has_api_key(name):
+                    if not provider_has_api_key(name) and not provider_has_oauth_connection(name):
                         continue
                 self._providers[name] = instance
         except Exception:
@@ -457,7 +459,7 @@ class AIClient:
         return clean
 
     @staticmethod
-    def _provider_api_key_may_exist(provider_id, api_id):
+    def _provider_api_key_configured(provider_id, api_id):
         provider_id = str(provider_id or "").strip()
         api_id = str(api_id or "").strip() or "legacy"
         if not provider_id:
@@ -467,6 +469,10 @@ class AIClient:
                 if str(item.get("api_id") or "").strip() == api_id and item.get("configured"):
                     return True
         return provider_has_api_key(provider_id)
+
+    @staticmethod
+    def _provider_requires_authority(provider_id, provider, api_id="legacy"):
+        return provider_requires_authority(provider_id, provider=provider, api_id=api_id)
 
     def _provider_id_for_provider(self, provider, model_ref=""):
         if isinstance(model_ref, str) and "/" in model_ref:
@@ -577,7 +583,7 @@ class AIClient:
             provider, model_name = self.resolve_provider(route_model)
             if provider.__class__.__name__ == "StubProvider":
                 continue
-            if not self._provider_api_key_may_exist(provider_id, api_id):
+            if not self._provider_api_key_configured(provider_id, api_id):
                 continue
             self._check_authority_for_model_api(
                 provider_id=provider_id,
@@ -1068,7 +1074,7 @@ class AIClient:
         if provider.__class__.__name__ == "StubProvider":
             raise RuntimeError(self._provider_unconfigured_message(model))
         provider_id = self._provider_id_for_provider(provider, model)
-        if self._provider_api_key_may_exist(provider_id, "legacy"):
+        if self._provider_requires_authority(provider_id, provider, "legacy"):
             self._check_authority_for_model_api(
                 provider_id=provider_id,
                 api_id="legacy",
@@ -1109,7 +1115,7 @@ class AIClient:
         if provider.__class__.__name__ == "StubProvider":
             raise RuntimeError(self._provider_unconfigured_message(model))
         provider_id = self._provider_id_for_provider(provider, model)
-        if self._provider_api_key_may_exist(provider_id, "legacy"):
+        if self._provider_requires_authority(provider_id, provider, "legacy"):
             self._check_authority_for_model_api(
                 provider_id=provider_id,
                 api_id="legacy",
