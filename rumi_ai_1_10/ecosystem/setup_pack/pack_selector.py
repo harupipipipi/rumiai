@@ -291,6 +291,7 @@ class PackSelector:
         python_version = python_version or platform.python_version()
         issues: List[Dict[str, Any]] = []
         candidates = self.scan_candidates()
+        candidate_ids = {candidate.pack_id for candidate in candidates}
         installed_ids = set(installed_packs)
 
         for candidate in candidates:
@@ -362,7 +363,7 @@ class PackSelector:
                 conflict_id = str(conflict.get("pack_id") or "")
                 if not conflict_id:
                     continue
-                if conflict_id not in installed_ids:
+                if conflict_id not in candidate_ids and conflict_id not in installed_ids:
                     continue
                 issues.append({
                     "type": "pack_conflict",

@@ -251,9 +251,7 @@ def test_validate_candidates_accepts_bundled_marketplace_and_signing_metadata(tm
     )
 
     assert issues == []
-
-
-def test_validate_candidates_ignores_conflict_candidates_that_are_not_installed(tmp_path):
+def test_validate_candidates_warns_about_conflicting_candidates(tmp_path):
     ecosystem = tmp_path / "eco"
     setup_pack_root = ecosystem / "setup_pack"
     setup_pack_root.mkdir(parents=True)
@@ -282,4 +280,13 @@ def test_validate_candidates_ignores_conflict_candidates_that_are_not_installed(
 
     issues = PackSelector(setup_pack_root).validate_candidates(installed_packs={})
 
-    assert issues == []
+    assert issues == [
+        {
+            "type": "pack_conflict",
+            "pack_id": "workspace",
+            "conflicts_with": "legacy_workspace",
+            "resolution": "prefer_workspace",
+            "reason": "Both own generated office artifacts.",
+            "severity": "warning",
+        }
+    ]

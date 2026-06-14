@@ -41,7 +41,12 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         class _Registry:
             packs = {"defaultspack": _PackInfo()}
 
-        count = PackAPIHandler.load_api_routes(_Registry(), pack_ids={"defaultspack"})
+        with patch.object(
+            PackAPIHandler,
+            "_is_pack_approved_for_runtime_routes",
+            return_value=True,
+        ):
+            count = PackAPIHandler.load_api_routes(_Registry(), pack_ids={"defaultspack"})
         self.assertEqual(count, 16)
         self.assertIn(("GET", "/api/defaultspack/modules"), PackAPIHandler._api_route_exact)
         self.assertIn(("GET", "/api/defaultspack/pack-requests"), PackAPIHandler._api_route_exact)
@@ -49,7 +54,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         self.assertIn(("POST", "/api/tools/mcp/connect"), PackAPIHandler._api_route_exact)
         self.assertEqual(
             PackAPIHandler._api_route_exact[("GET", "/api/defaultspack/modules")]["function_id"],
-            "list_modules",
+            "management_list_modules",
         )
         self.assertEqual(
             PackAPIHandler._api_route_exact[("GET", "/api/tools/mcp")]["function_id"],
@@ -115,6 +120,10 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         capability_executor = _pack_api_sibling_module(PackAPIHandler, "capability_executor")
         with patch.object(pack_function_runtime, "invoke_pack_function") as mocked:
             with patch.object(
+                PackAPIHandler,
+                "_is_pack_approved_for_runtime_routes",
+                return_value=True,
+            ), patch.object(
                 capability_executor,
                 "get_capability_executor",
                 return_value=executor,
@@ -155,6 +164,10 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         )
         capability_executor = _pack_api_sibling_module(PackAPIHandler, "capability_executor")
         with patch.object(
+            PackAPIHandler,
+            "_is_pack_approved_for_runtime_routes",
+            return_value=True,
+        ), patch.object(
             capability_executor,
             "get_capability_executor",
             return_value=executor,
@@ -187,7 +200,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         route_entry = {
             "pack_id": "defaultspack",
             "handler": "",
-            "function_id": "review_pack_request",
+            "function_id": "pack_request_review",
             "pass_body": True,
             "response_mode": "result",
             "args": {"decision": "approve"},
@@ -213,6 +226,10 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         )
         capability_executor = _pack_api_sibling_module(PackAPIHandler, "capability_executor")
         with patch.object(
+            PackAPIHandler,
+            "_is_pack_approved_for_runtime_routes",
+            return_value=True,
+        ), patch.object(
             capability_executor,
             "get_capability_executor",
             return_value=executor,
@@ -232,7 +249,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             "defaultspack",
             {
                 "type": "function.call",
-                "qualified_name": "defaultspack:review_pack_request",
+                "qualified_name": "defaultspack:pack_request_review",
                 "args": {
                     "decision": "approve",
                     "decision_notes": "nope",

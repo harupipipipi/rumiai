@@ -66,6 +66,8 @@ class WebMountMixin:
         for pack_id, pack_info in registry.packs.items():
             if pack_ids is not None and pack_id not in pack_ids:
                 continue
+            if not cls._is_pack_approved_for_runtime_routes(pack_id):
+                continue
             wm = pack_info.ecosystem.get("web_mount")
             if not wm or not isinstance(wm, dict):
                 continue
@@ -148,7 +150,9 @@ class WebMountMixin:
         for wm in self._web_mounts:
             prefix = wm["path_prefix"]
             if request_path == prefix or request_path.startswith(prefix + "/"):
-                return wm
+                if self._is_pack_approved_for_runtime_routes(wm.get("pack_id", "")):
+                    return wm
+                continue
         fallback_mounts = {
             "/panel": {
                 "web_root": Path(__file__).resolve().parent.parent / "core_pack" / "core_control_panel" / "web",
@@ -167,7 +171,9 @@ class WebMountMixin:
         }
         for prefix, mount in fallback_mounts.items():
             if request_path == prefix or request_path.startswith(prefix + "/"):
-                return {"path_prefix": prefix, **mount}
+                candidate = {"path_prefix": prefix, **mount}
+                if self._is_pack_approved_for_runtime_routes(candidate.get("pack_id", "")):
+                    return candidate
         return None
 
     def _is_fixed_pre_auth_route(self, method: str, path: str) -> bool:
@@ -199,6 +205,9 @@ class WebMountMixin:
             _wm = self._match_web_mount(request_path)
         if _wm is None:
             self._send_response(APIResponse(False, error="Not found"), 404)
+            return
+        if not self._is_pack_approved_for_runtime_routes(_wm.get("pack_id", "")):
+            self._send_response(APIResponse(False, error="Forbidden"), 403)
             return
 
         path_prefix = _wm["path_prefix"]

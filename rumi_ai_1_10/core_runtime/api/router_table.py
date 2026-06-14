@@ -25,6 +25,47 @@ _FUNCTION_ROUTE_FORBIDDEN_ERRORS = {
 
 
 class APIRouteTableMixin:
+    @classmethod
+    def _is_pack_approved_for_runtime_routes(cls, pack_id: str) -> bool:
+        normalized_pack_id = str(pack_id or "").strip()
+        if not normalized_pack_id:
+            return False
+        manager = getattr(cls, "approval_manager", None)
+        if manager is None:
+            try:
+                from ..approval_manager import get_approval_manager
+
+                manager = get_approval_manager()
+            except Exception as exc:
+                logger.warning(
+                    "Skipping runtime routes for pack '%s': approval manager unavailable: %s",
+                    normalized_pack_id,
+                    exc,
+                )
+                return False
+        try:
+            result = manager.is_pack_approved_and_verified(normalized_pack_id)
+        except Exception as exc:
+            logger.warning(
+                "Skipping runtime routes for pack '%s': approval verification failed: %s",
+                normalized_pack_id,
+                exc,
+            )
+            return False
+        if isinstance(result, tuple):
+            approved = bool(result[0])
+            reason = result[1] if len(result) > 1 else None
+        else:
+            approved = bool(result)
+            reason = None
+        if not approved:
+            logger.warning(
+                "Skipping runtime routes for unapproved pack '%s': %s",
+                normalized_pack_id,
+                reason or "not approved",
+            )
+        return approved
+
     @staticmethod
     def _pack_root_hint(pack_info: Any) -> Optional[Any]:
         for attr in ("subdir", "path", "pack_dir"):
@@ -131,6 +172,8 @@ class APIRouteTableMixin:
             for pack_id, pack_info in registry.packs.items():
                 if pack_ids is not None and pack_id not in pack_ids:
                     continue
+                if not cls._is_pack_approved_for_runtime_routes(pack_id):
+                    continue
                 count += cls._register_api_routes_from_manifest(
                     pack_id,
                     pack_info.ecosystem,
@@ -177,6 +220,14 @@ class APIRouteTableMixin:
 
         if entry is None:
             return False
+
+        pack_id = entry.get("pack_id", "")
+        if not self._is_pack_approved_for_runtime_routes(pack_id):
+            self._send_response(
+                APIResponse(False, error=f"Pack not approved: {pack_id}"),
+                403,
+            )
+            return True
 
         handler_name = entry["handler"]
         pass_body = entry.get("pass_body", False)
