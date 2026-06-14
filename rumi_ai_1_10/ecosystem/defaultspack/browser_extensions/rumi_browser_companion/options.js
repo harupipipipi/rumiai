@@ -39,8 +39,13 @@ async function loadSettings() {
 }
 
 async function saveSettings() {
+  const serverUrlResult = RumiBridgeUrlPolicy.validateServerUrl(form.serverUrl.value);
+  if (!serverUrlResult.ok) {
+    setStatus(serverUrlResult.message, false);
+    return;
+  }
   const settings = {
-    serverUrl: String(form.serverUrl.value || "").trim(),
+    serverUrl: serverUrlResult.url,
     pairingToken: String(form.pairingToken.value || "").trim(),
     clientLabel: String(form.clientLabel.value || "").trim(),
     pollIntervalMinutes: Math.max(1, Number(form.pollIntervalMinutes.value) || 1)

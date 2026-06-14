@@ -347,7 +347,7 @@ export default function App() {
     if (session) {
       persistRouteStateRemotely(session);
     }
-    window.postMessage(buildBrowserCompanionRouteMessage(nextDecision, nextIndex), "*");
+    window.postMessage(buildBrowserCompanionRouteMessage(nextDecision, nextIndex), window.location.origin);
   }, []);
 
   const navigate = useCallback(

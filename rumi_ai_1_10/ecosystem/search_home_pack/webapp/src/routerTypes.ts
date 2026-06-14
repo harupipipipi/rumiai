@@ -51,6 +51,7 @@ export type RouteHotkeyAction = "next" | "prev" | "fallback";
 
 export const ROUTE_SESSION_STORAGE_KEY = "rumi-search-home-route-state";
 export const ROUTE_BROWSER_MESSAGE_TYPE = "rumi:search-home-route-state";
+export const ROUTE_BROWSER_MESSAGE_SOURCE = "rumi-search-home";
 
 export function selectedCandidate(decision: RouteDecision, selectedIndex = decision.selected_index): RouteCandidate | null {
   if (!decision.target_candidates.length) {
@@ -131,9 +132,10 @@ export function persistRouteSessionState(storage: Pick<Storage, "setItem"> | nul
   return state;
 }
 
-export function buildBrowserCompanionRouteMessage(decision: RouteDecision, selectedIndex = decision.selected_index): { type: string; payload: RouteSessionState } {
+export function buildBrowserCompanionRouteMessage(decision: RouteDecision, selectedIndex = decision.selected_index): { type: string; source: string; payload: RouteSessionState } {
   return {
     type: ROUTE_BROWSER_MESSAGE_TYPE,
+    source: ROUTE_BROWSER_MESSAGE_SOURCE,
     payload: buildRouteSessionState(decision, selectedIndex),
   };
 }

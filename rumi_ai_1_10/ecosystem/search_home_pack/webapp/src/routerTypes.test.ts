@@ -76,6 +76,7 @@ test("session/browser payloads preserve selected candidate", () => {
 
   const message = buildBrowserCompanionRouteMessage(decision, 2);
   assert.equal(message.type, "rumi:search-home-route-state");
+  assert.equal(message.source, "rumi-search-home");
   assert.equal(message.payload.target_url, "https://example.com/c");
 });
 

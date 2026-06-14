@@ -1,6 +1,7 @@
 (function () {
   const ELEMENT_ATTR = "data-rumi-element-id";
   const ROUTE_MESSAGE_TYPE = "rumi:search-home-route-state";
+  const SEARCH_HOME_MESSAGE_SOURCE = "rumi-search-home";
   let sequence = 0;
 
   window.addEventListener("message", (event) => {
@@ -8,11 +9,12 @@
       return;
     }
     const payload = event.data;
-    if (!payload || payload.type !== ROUTE_MESSAGE_TYPE) {
+    if (!isTrustedSearchHomeRouteMessage(event, payload)) {
       return;
     }
     void chrome.runtime.sendMessage({
       type: "rumi:search-home:set-route-state",
+      source_origin: event.origin,
       payload: payload.payload || {}
     });
   });
@@ -406,6 +408,40 @@
 
   function round2(value) {
     return Math.round(value * 100) / 100;
+  }
+
+  function isTrustedSearchHomeRouteMessage(event, message) {
+    if (!message || message.type !== ROUTE_MESSAGE_TYPE) {
+      return false;
+    }
+    if (message.source !== SEARCH_HOME_MESSAGE_SOURCE) {
+      return false;
+    }
+    if (!event.origin || event.origin !== window.location.origin) {
+      return false;
+    }
+    if (!globalThis.RumiBridgeUrlPolicy?.isTrustedSearchHomeOrigin(event.origin)) {
+      return false;
+    }
+    return isSearchHomeRouteState(message.payload);
+  }
+
+  function isSearchHomeRouteState(value) {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const hasTarget = typeof value.target_url === "string" && value.target_url.trim();
+    const hasFallback = typeof value.fallback_url === "string" && value.fallback_url.trim();
+    const hasCandidate =
+      Array.isArray(value.target_candidates) &&
+      value.target_candidates.some(
+        (candidate) =>
+          candidate &&
+          typeof candidate === "object" &&
+          (typeof candidate.url === "string" || typeof candidate.final_url === "string")
+      );
+    const updatedAt = typeof value.updated_at === "string" ? Date.parse(value.updated_at) : Number.NaN;
+    return Boolean((hasTarget || hasFallback || hasCandidate) && Number.isFinite(updatedAt));
   }
 
   function searchHomeHotkeyAction(event) {

@@ -1,3 +1,5 @@
+import "./bridge_url_policy.js";
+
 const DEFAULT_SETTINGS = {
   serverUrl: "http://127.0.0.1:8766",
   pairingToken: "",
@@ -66,7 +68,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: true, tabs: await getTabsSummary() });
         return;
       case "rumi:search-home:set-route-state":
-        sendResponse(await setSearchHomeRouteState(sender?.tab?.id, message.payload));
+        sendResponse(
+          await setSearchHomeRouteState(sender?.tab?.id, message.payload, {
+            senderUrl: sender?.url || sender?.tab?.url || "",
+            sourceOrigin: message.source_origin
+          })
+        );
         return;
       case "rumi:search-home:advance-candidate":
         sendResponse(await advanceSearchHomeRouteState(sender?.tab?.id, message.action));
@@ -138,6 +145,7 @@ function normalizePollInterval(value) {
 async function pollBridge(trigger) {
   const settings = await getSettings();
   const clientId = await ensureClientId();
+  const serverUrlResult = RumiBridgeUrlPolicy.validateServerUrl(settings.serverUrl);
   if (!settings.serverUrl || !settings.pairingToken) {
     return setStatus({
       ok: false,
@@ -146,8 +154,18 @@ async function pollBridge(trigger) {
       message: "Set server URL and pairing token in Options."
     });
   }
+  if (!serverUrlResult.ok) {
+    return setStatus({
+      ok: false,
+      state: "invalid_configuration",
+      trigger,
+      serverUrl: settings.serverUrl,
+      message: serverUrlResult.message
+    });
+  }
 
   const metadata = await buildClientMetadata(settings, clientId);
+  const serverUrl = serverUrlResult.url;
   const requestBody = {
     event: "poll",
     trigger,
@@ -156,7 +174,7 @@ async function pollBridge(trigger) {
   };
 
   try {
-    const response = await fetch(joinUrl(settings.serverUrl, BRIDGE_POLL_PATH), {
+    const response = await fetch(joinUrl(serverUrl, BRIDGE_POLL_PATH), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -177,7 +195,7 @@ async function pollBridge(trigger) {
     }
 
     if (results.length > 0) {
-      await postCommandResults(settings, metadata, results);
+      await postCommandResults({ ...settings, serverUrl }, metadata, results);
     }
 
     return setStatus({
@@ -185,14 +203,14 @@ async function pollBridge(trigger) {
       state: "connected",
       trigger,
       commandCount: commands.length,
-      serverUrl: settings.serverUrl
+      serverUrl
     });
   } catch (error) {
     return setStatus({
       ok: false,
       state: "bridge_error",
       trigger,
-      serverUrl: settings.serverUrl,
+      serverUrl,
       message: String(error && error.message ? error.message : error)
     });
   }
@@ -264,7 +282,11 @@ async function getTabsSummary() {
 }
 
 async function postCommandResults(settings, client, results) {
-  const response = await fetch(joinUrl(settings.serverUrl, BRIDGE_RESULT_PATH), {
+  const serverUrl = RumiBridgeUrlPolicy.normalizeServerUrl(settings.serverUrl);
+  if (!serverUrl) {
+    throw new Error("Bridge server URL must use a local or private host.");
+  }
+  const response = await fetch(joinUrl(serverUrl, BRIDGE_RESULT_PATH), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -552,11 +574,15 @@ async function clearSearchHomeRouteState(tabId) {
   await saveSearchHomeRouteStates(states);
 }
 
-async function setSearchHomeRouteState(tabId, payload) {
+async function setSearchHomeRouteState(tabId, payload, metadata = {}) {
   if (!Number.isInteger(tabId)) {
     return { ok: false, error: "Active tab is required for Search Home route state." };
   }
-  const normalized = normalizeSearchHomeRouteState(payload);
+  const sourceOrigin = trustedSearchHomeSourceOrigin(metadata.senderUrl, metadata.sourceOrigin);
+  if (!sourceOrigin) {
+    return { ok: false, error: "Search Home route state must come from a trusted Search Home origin." };
+  }
+  const normalized = normalizeSearchHomeRouteState(payload, { sourceOrigin });
   if (!normalized) {
     return { ok: false, error: "Invalid Search Home route payload." };
   }
@@ -572,7 +598,7 @@ async function advanceSearchHomeRouteState(tabId, action) {
   }
   const states = await loadSearchHomeRouteStates();
   const current = normalizeSearchHomeRouteState(states[String(tabId)]);
-  if (!current || !isFreshSearchHomeRouteState(current)) {
+  if (!current || !isFreshSearchHomeRouteState(current) || !isTrustedStoredSearchHomeRouteState(current)) {
     return { ok: false, error: "No fresh Search Home route state was found for this tab." };
   }
   let url = "";
@@ -599,7 +625,7 @@ async function advanceSearchHomeRouteState(tabId, action) {
   return { ok: true, tab_id: tabId, url, selected_index: nextIndex };
 }
 
-function normalizeSearchHomeRouteState(value) {
+function normalizeSearchHomeRouteState(value, options = {}) {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -610,12 +636,19 @@ function normalizeSearchHomeRouteState(value) {
     : [];
   const fallbackUrl = normalizeSearchHomeCandidateUrl(value.fallback_url);
   const selectedIndex = normalizeSearchHomeIndex({ target_candidates: candidates }, Number(value.selected_index));
+  const sourceOrigin = String(options.sourceOrigin || value.source_origin || "");
+  const targetUrl =
+    normalizeSearchHomeCandidateUrl(value.target_url) || fallbackUrl || (candidates[0]?.final_url || candidates[0]?.url || "");
+  if (!targetUrl && !fallbackUrl && candidates.length === 0) {
+    return null;
+  }
   return {
     query: String(value.query || ""),
-    target_url: normalizeSearchHomeCandidateUrl(value.target_url) || fallbackUrl || (candidates[0]?.final_url || candidates[0]?.url || ""),
+    target_url: targetUrl,
     fallback_url: fallbackUrl,
     selected_index: selectedIndex,
     target_candidates: candidates,
+    source_origin: sourceOrigin,
     updated_at: typeof value.updated_at === "string" && value.updated_at ? value.updated_at : new Date().toISOString()
   };
 }
@@ -637,15 +670,7 @@ function normalizeSearchHomeCandidate(value) {
 }
 
 function normalizeSearchHomeCandidateUrl(value) {
-  try {
-    const url = new URL(String(value || ""));
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return "";
-    }
-    return url.toString();
-  } catch {
-    return "";
-  }
+  return RumiBridgeUrlPolicy.normalizeNavigationUrl(value);
 }
 
 function normalizeSearchHomeIndex(state, value) {
@@ -674,6 +699,27 @@ function isFreshSearchHomeRouteState(state) {
     return false;
   }
   return Date.now() - updatedAt <= SEARCH_HOME_ROUTE_MAX_AGE_MS;
+}
+
+function isTrustedStoredSearchHomeRouteState(state) {
+  return RumiBridgeUrlPolicy.isTrustedSearchHomeOrigin(state.source_origin);
+}
+
+function trustedSearchHomeSourceOrigin(senderUrl, claimedOrigin) {
+  const senderOrigin = originFromUrl(senderUrl);
+  const sourceOrigin = String(claimedOrigin || "");
+  if (!senderOrigin || !sourceOrigin || senderOrigin !== sourceOrigin) {
+    return "";
+  }
+  return RumiBridgeUrlPolicy.isTrustedSearchHomeOrigin(sourceOrigin) ? sourceOrigin : "";
+}
+
+function originFromUrl(value) {
+  try {
+    return new URL(String(value || "")).origin;
+  } catch {
+    return "";
+  }
 }
 
 function tabSummary(tab) {

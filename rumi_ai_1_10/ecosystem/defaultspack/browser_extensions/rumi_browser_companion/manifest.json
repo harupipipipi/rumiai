@@ -27,6 +27,7 @@
         "<all_urls>"
       ],
       "js": [
+        "bridge_url_policy.js",
         "content_script.js"
       ],
       "run_at": "document_idle"
