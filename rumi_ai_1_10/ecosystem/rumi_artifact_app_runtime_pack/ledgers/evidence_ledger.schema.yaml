@@ -1,0 +1,19 @@
+evidence_ledger_schema:
+  ledger_id: artifact_app_runtime_ledger
+  required_fields:
+  - record_id
+  - artifact_type
+  - evidence_ids
+  - approval_state
+  - review_state
+  - handoff_owner
+  - uncertainty
+  completion_rules:
+    every_record_has_evidence_or_approval: true
+    external_actions_are_handoffs: true
+    human_review_required_for_handoff: true
+  review_states:
+  - draft
+  - ready
+  - blocked
+  - handed_off

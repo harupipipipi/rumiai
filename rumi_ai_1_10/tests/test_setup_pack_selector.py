@@ -251,3 +251,42 @@ def test_validate_candidates_accepts_bundled_marketplace_and_signing_metadata(tm
     )
 
     assert issues == []
+def test_validate_candidates_warns_about_conflicting_candidates(tmp_path):
+    ecosystem = tmp_path / "eco"
+    setup_pack_root = ecosystem / "setup_pack"
+    setup_pack_root.mkdir(parents=True)
+
+    workspace = setup_pack_root / "workspace"
+    workspace.mkdir()
+    (workspace / "pack.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "workspace",
+                "conflicts_with": [
+                    {
+                        "pack_id": "legacy_workspace",
+                        "reason": "Both own generated office artifacts.",
+                        "resolution": "prefer_workspace",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    legacy = setup_pack_root / "legacy_workspace"
+    legacy.mkdir()
+    (legacy / "pack.json").write_text(json.dumps({"pack_id": "legacy_workspace"}), encoding="utf-8")
+
+    issues = PackSelector(setup_pack_root).validate_candidates(installed_packs={})
+
+    assert issues == [
+        {
+            "type": "pack_conflict",
+            "pack_id": "workspace",
+            "conflicts_with": "legacy_workspace",
+            "resolution": "prefer_workspace",
+            "reason": "Both own generated office artifacts.",
+            "severity": "warning",
+        }
+    ]

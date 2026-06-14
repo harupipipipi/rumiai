@@ -1,0 +1,8 @@
+profile_id: rumi_knowledge_marketplace.marketplace_curator
+pack_id: rumi_knowledge_marketplace_pack
+purpose: Operate within the Rumi Knowledge Marketplace Pack declarative contract.
+policy:
+  local_first: true
+  network_default: deny
+  require_evidence: true
+  respect_owner_boundaries: true

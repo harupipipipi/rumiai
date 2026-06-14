@@ -1,0 +1,15 @@
+contract_fixture:
+  positive_cases:
+  - id: cited_research_brief
+    given: Build claim graph from provided sources
+    expected: dossier_export_handoff_packet
+  - id: contradiction_review
+    given: Review conflicting source anchors
+    expected: contradiction_review_handoff_packet
+  - id: source_quality_queue
+    given: Queue low quality source for review
+    expected: reviewer_queue_handoff_packet
+  minimum_expected:
+  - schema_valid
+  - evidence_linked
+  - handoff_scoped

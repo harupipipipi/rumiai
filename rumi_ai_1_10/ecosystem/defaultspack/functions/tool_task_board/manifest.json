@@ -1,0 +1,43 @@
+{
+  "function_id": "tool_task_board",
+  "description": "Create and update Kanban workspace task cards from the Task Board tool.",
+  "tags": [
+    "tool",
+    "planning",
+    "task_board"
+  ],
+  "risk": "medium",
+  "requires": [
+    "tool.task_board"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.tool.task_board",
+    "defaultspack.tool.task_board"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

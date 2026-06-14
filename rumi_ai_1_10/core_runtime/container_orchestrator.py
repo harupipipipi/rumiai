@@ -249,14 +249,16 @@ class ContainerOrchestrator:
         image = docker_image or self._UC_DEFAULT_IMAGES.get(runtime, "alpine:latest")
         name = container_name or f"rumi-uc-{pack_id}-{uuid.uuid4().hex[:8]}"
 
-        builder = DockerRunBuilder(name=name)
-        builder.pids_limit(100)
-        builder.volume(f"{workspace_dir}:/workspace:ro")
-        builder.workdir("/workspace")
-        builder.label("rumi.pack_id", pack_id)
-        builder.label("rumi.type", "universal_call")
-        builder.label("rumi.runtime", runtime)
-        builder.image(image)
+        builder = (
+            DockerRunBuilder(name=name)
+            .set_pids_limit(100)
+            .add_volume(workspace_dir, "/workspace", read_only=True)
+            .set_workdir("/workspace")
+            .add_label("rumi.pack_id", pack_id)
+            .add_label("rumi.type", "universal_call")
+            .add_label("rumi.runtime", runtime)
+            .set_image(image)
+        )
 
         if runtime == "command":
             builder.command(["sh", filename])

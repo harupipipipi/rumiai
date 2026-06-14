@@ -1,0 +1,21 @@
+handoff_matrix:
+  pack_boundary_rule: owner_surface_wins_then_explicit_handoff
+  items:
+  - surface: analytics_query_execution
+    resolution: handoff_to_defaultspack_tool_runtime
+    requires_human_review: true
+  - surface: runtime_telemetry
+    resolution: handoff_to_defaultspack_tool_runtime
+    requires_human_review: true
+  - surface: production_rollout
+    resolution: handoff_to_defaultspack_tool_runtime
+    requires_human_review: true
+  - surface: model_benchmarking
+    resolution: handoff_to_defaultspack_tool_runtime
+    requires_human_review: true
+  - surface: business_decision_execution
+    resolution: handoff_to_rumi_operations_company_pack
+    requires_human_review: true
+  - surface: feature_flag_mutation
+    resolution: handoff_to_defaultspack_tool_runtime
+    requires_human_review: true

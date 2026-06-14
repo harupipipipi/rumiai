@@ -1,0 +1,24 @@
+version: rumi.runtime_benchmark.warm_cold_start_policy.v1
+policy_id: rumi_runtime_benchmark_pack.warm_cold_start
+pack_id: rumi_runtime_benchmark_pack
+network_default: none
+
+start_modes:
+  - id: cold_start
+    definition: First run after process, cache, or tool session initialization.
+    evidence_required:
+      - initialization_boundary
+      - cache_state
+      - first_request_timestamp
+  - id: warm_path
+    definition: Repeated run after initialization with stable fixture and cache policy.
+    evidence_required:
+      - warmup_run_count
+      - cache_policy
+      - repeated_fixture_id
+
+rules:
+  - cold and warm samples must be reported separately
+  - warmup samples must not be mixed into measured samples unless disclosed
+  - cache policy must be stable across compared runtimes
+  - retry behavior must be recorded before latency interpretation

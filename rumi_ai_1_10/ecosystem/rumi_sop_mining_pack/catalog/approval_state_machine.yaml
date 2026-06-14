@@ -1,0 +1,20 @@
+approval_state_machine:
+  states:
+  - id: drafted
+    may_handoff: false
+  - id: redaction_reviewed
+    may_handoff: false
+  - id: human_approved
+    may_handoff: true
+  - id: rejected
+    may_handoff: false
+  transitions:
+  - from: drafted
+    to: redaction_reviewed
+    requires:
+    - redaction_complete
+  - from: redaction_reviewed
+    to: human_approved
+    requires:
+    - owner_approval
+    - evidence_links

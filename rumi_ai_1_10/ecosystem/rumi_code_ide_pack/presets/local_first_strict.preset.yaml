@@ -1,0 +1,23 @@
+id: rumi_code_ide_pack.local_first_strict
+name: Local-First Strict Coding
+profile: rumi_code_ide_pack.local_first_pair_programmer
+inspiration:
+  - local-first coding agents
+intent: offline-friendly coding with explicit approval before side effects
+enabled_capabilities:
+  - local_file
+  - terminal
+  - git
+  - project
+  - safety
+ui_panels:
+  - chat
+  - plan
+  - diff
+behavior:
+  - network_disabled_by_default
+  - destructive_commands_blocked
+  - explicit_test_summary
+  - secrets_never_collected
+overlap_notes:
+  rumi_default_tools_pack: concrete tools remain external and approval governed

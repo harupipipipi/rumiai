@@ -1,5 +1,12 @@
 import type { ChatContentBlock, ChatMessage, Conversation } from "./api";
 
+type DedupeDiagnostics = {
+  collapsedCount: number;
+  duplicateIdCount: number;
+  duplicateSequenceCount: number;
+  duplicateKeys: string[];
+};
+
 export function contentBlocksToText(content: string | ChatContentBlock[]): string {
   if (typeof content === "string") {
     return content;
@@ -43,27 +50,77 @@ function messageSortKey(message: ChatMessage, originalIndex: number): {
   };
 }
 
-export function orderConversationMessages(messages: ChatMessage[]): ChatMessage[] {
-  const byId = new Map<string, { message: ChatMessage; originalIndex: number }>();
+function mergeConversationMessage(existing: ChatMessage | undefined, message: ChatMessage): ChatMessage {
+  return {
+    ...(existing ?? {}),
+    ...message,
+    events: message.events ?? existing?.events ?? null,
+    tool_logs: message.tool_logs ?? existing?.tool_logs ?? null,
+  };
+}
+
+function dedupeKeysForMessage(message: ChatMessage, index: number): string[] {
+  const keys: string[] = [];
+  const id = String(message.id || "").trim();
+  if (id) keys.push(`id:${id}`);
+  const sequence = numericValue(message.sequence_number);
+  const role = String(message.role || "").trim();
+  const conversationId = String(message.conversation_id || "").trim();
+  if (sequence && sequence > 0 && role && conversationId) {
+    keys.push(`seq:${conversationId}:${role}:${sequence}`);
+  }
+  if (keys.length === 0) keys.push(`__message_${index}`);
+  return keys;
+}
+
+function dedupeConversationMessages(messages: ChatMessage[]): {
+  entries: Array<{ message: ChatMessage; originalIndex: number }>;
+  diagnostics: DedupeDiagnostics;
+} {
+  const canonicalByKey = new Map<string, string>();
+  const entries = new Map<string, { message: ChatMessage; originalIndex: number }>();
+  const duplicateKeys = new Set<string>();
+  let duplicateIdCount = 0;
+  let duplicateSequenceCount = 0;
+
   messages.forEach((message, index) => {
-    const id = String(message.id || "").trim();
-    if (!id) {
-      byId.set(`__message_${index}`, { message, originalIndex: index });
-      return;
+    const keys = dedupeKeysForMessage(message, index);
+    const canonical = keys
+      .map((key) => canonicalByKey.get(key))
+      .find((value): value is string => Boolean(value))
+      ?? keys[0];
+    const existing = entries.get(canonical);
+    if (existing) {
+      const matchedById = keys.some((key) => key.startsWith("id:") && canonicalByKey.get(key) === canonical);
+      const matchedBySequence = !matchedById && keys.some((key) => key.startsWith("seq:") && canonicalByKey.get(key) === canonical);
+      if (matchedById) duplicateIdCount += 1;
+      else if (matchedBySequence) duplicateSequenceCount += 1;
+      duplicateKeys.add(canonical);
     }
-    const existing = byId.get(id);
-    byId.set(id, {
-      message: {
-        ...(existing?.message ?? {}),
-        ...message,
-        events: message.events ?? existing?.message.events ?? null,
-        tool_logs: message.tool_logs ?? existing?.message.tool_logs ?? null,
-      },
+    entries.set(canonical, {
+      message: mergeConversationMessage(existing?.message, message),
       originalIndex: existing?.originalIndex ?? index,
     });
+    keys.forEach((key) => canonicalByKey.set(key, canonical));
   });
 
-  return [...byId.values()]
+  return {
+    entries: [...entries.values()],
+    diagnostics: {
+      collapsedCount: duplicateIdCount + duplicateSequenceCount,
+      duplicateIdCount,
+      duplicateSequenceCount,
+      duplicateKeys: [...duplicateKeys].sort(),
+    },
+  };
+}
+
+export function inspectConversationIntegrity(messages: ChatMessage[]): DedupeDiagnostics {
+  return dedupeConversationMessages(messages).diagnostics;
+}
+
+export function orderConversationMessages(messages: ChatMessage[]): ChatMessage[] {
+  return dedupeConversationMessages(messages).entries
     .sort((left, right) => {
       const leftKey = messageSortKey(left.message, left.originalIndex);
       const rightKey = messageSortKey(right.message, right.originalIndex);

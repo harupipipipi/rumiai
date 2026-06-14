@@ -1,0 +1,74 @@
+taxonomy_id: rumi_security_review.risk_taxonomy
+version: 1
+pack_id: rumi_security_review_pack
+severity_levels:
+  - id: low
+    meaning: Limited local impact, documented mitigation, no privilege expansion.
+  - id: medium
+    meaning: Potential data exposure, permission confusion, dependency uncertainty, or unclear owner boundary.
+  - id: high
+    meaning: Secret exposure, privilege escalation, unbounded network or filesystem access, unapproved write action, or release blocker.
+risk_categories:
+  - category_id: secrets
+    default_severity: high
+    review_focus:
+      - embedded credentials
+      - placeholder clarity
+      - local storage handling
+    escalation_cues:
+      - credential-like literal appears in tracked files
+      - examples contain real account identifiers
+  - category_id: permissions_and_grants
+    default_severity: high
+    review_focus:
+      - grant ownership
+      - approval boundaries
+      - high-risk tool policy
+    escalation_cues:
+      - pack claims approval authority
+      - client-supplied approval is trusted
+  - category_id: mcp_connectors
+    default_severity: high
+    review_focus:
+      - namespace clarity
+      - requested scopes
+      - unsupported server posture
+    escalation_cues:
+      - unknown server routes without explicit namespace
+      - server descriptor embeds credentials
+  - category_id: browser_automation
+    default_severity: high
+    review_focus:
+      - origin scope
+      - page data exposure
+      - action approval
+    escalation_cues:
+      - automation can submit forms without approval
+      - page origin is unbounded
+  - category_id: dependencies
+    default_severity: medium
+    review_focus:
+      - new packages
+      - lockfile churn
+      - installer behavior
+    escalation_cues:
+      - new dependency executes install scripts
+      - source or license is unclear
+  - category_id: privacy
+    default_severity: medium
+    review_focus:
+      - personal data handling
+      - retention
+      - outbound sharing
+    escalation_cues:
+      - data leaves local workspace without explicit approval
+      - retention behavior is undocumented
+  - category_id: release_signoff
+    default_severity: medium
+    review_focus:
+      - unresolved findings
+      - accepted risk owner
+      - signoff scope
+    escalation_cues:
+      - blocker remains unresolved
+      - release scope changed after review

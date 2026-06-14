@@ -1,0 +1,14 @@
+example:
+  id: survey_theme_map
+  user_request: Map survey responses into themes
+  input_state: local_artifacts_supplied
+  expected_result: survey_synthesis_handoff_packet
+  must_include:
+  - evidence_ids
+  - source_response_ids
+  - uncertainty_or_limitations
+  - handoff_owner
+  must_not:
+  - external_action
+  - uncited_claim
+  - credential_requirement

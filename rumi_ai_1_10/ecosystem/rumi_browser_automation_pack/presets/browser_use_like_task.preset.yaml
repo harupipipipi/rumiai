@@ -1,0 +1,8 @@
+preset_id: rumi_browser_automation.browser_use_like_task
+profile: rumi_browser_automation.operator
+playbook: browser_form_completion
+features:
+  semantic_dom: prefer
+  screenshots: required
+  highlight_before_ambiguous_action: true
+  final_state_verification: required

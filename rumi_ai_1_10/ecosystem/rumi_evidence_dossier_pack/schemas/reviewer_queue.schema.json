@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/reviewer_queue.schema.json",
+  "title": "Reviewer Queue",
+  "description": "Reviewer queue for dossier issues.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "queue_id",
+    "items",
+    "priority_rule",
+    "handoff_owner",
+    "review_state"
+  ],
+  "properties": {
+    "queue_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "item_id",
+          "kind",
+          "reason",
+          "blocking"
+        ],
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "uncited_claim",
+              "contradiction",
+              "quality_label",
+              "export_review"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blocking": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "priority_rule": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoff_owner": {
+      "type": "string",
+      "const": "rumi_evidence_dossier_pack"
+    },
+    "review_state": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "ready",
+        "blocked"
+      ]
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "pack_id": "rumi_security_review_pack",
+  "display_name": "Rumi Security Review Pack",
+  "description": "Optional declarative local-first security and privacy review pack for threat modeling, secret scanning, permission review, MCP/browser risk, dependency review, and release signoff.",
+  "target_pack_id": "rumi_security_review_pack",
+  "version": "1.0.0",
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "marketplace": {
+    "id": "rumi.security_review_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "security-review",
+    "optional": true
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": false,
+  "risk_level": "low",
+  "supports_all_ok": false,
+  "conflicts_with": [],
+  "overlap_policy": {
+    "defaultspack_grants": "review_only_do_not_override",
+    "approval_decisions": "defer_to_runtime_and_owner_pack",
+    "mcp_gateway": "complement_scope_and_namespace_review",
+    "browser_packs": "complement_origin_permission_and_action_review",
+    "dependency_tools": "record_local_evidence_only",
+    "notes": [
+      "This pack reviews grants and approvals but does not mutate or override them.",
+      "MCP and browser owner packs keep routing and execution control.",
+      "Network and executable scanning are intentionally out of scope."
+    ]
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Security review guidance should remain optional and must not become implicit grant or approval authority."
+  },
+  "conflict_notes": [
+    "This pack complements defaultspack permission and approval policy; it does not replace it.",
+    "This pack complements MCP gateway and browser packs by reviewing risk evidence; it does not route or execute those tools.",
+    "Use owner packs and runtime policy as the enforcement boundary."
+  ],
+  "security_notes": [
+    "No secrets, executable scanner code, remote endpoints, or network connector configuration are embedded.",
+    "Network is none by default and review output is local metadata only."
+  ]
+}

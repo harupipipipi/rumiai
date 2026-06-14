@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import sys
 from ctypes import wintypes
+from typing import Any
 
 from .coords import client_to_screen, make_lparam
 from .integrity import can_post_to_hwnd
@@ -19,6 +20,11 @@ if _user32 is not None:
         wintypes.LPARAM,
     ]
     _user32.PostMessageW.restype = wintypes.BOOL
+    _user32.ScreenToClient.argtypes = [
+        wintypes.HWND,
+        ctypes.POINTER(wintypes.POINT),
+    ]
+    _user32.ScreenToClient.restype = wintypes.BOOL
 
 WM_CHAR = 0x0102
 WM_KEYDOWN = 0x0100
@@ -35,6 +41,7 @@ MK_LBUTTON = 0x0001
 MK_RBUTTON = 0x0002
 MK_MBUTTON = 0x0010
 WHEEL_DELTA = 120
+_SCREEN_COORDINATE_SPACES = {"screen", "desktop", "global"}
 
 VK_CODES: dict[str, int] = {
     "backspace": 0x08,
@@ -60,6 +67,99 @@ VK_CODES: dict[str, int] = {
 }
 
 
+def _int_point(x: Any, y: Any) -> tuple[int, int]:
+    try:
+        point_x = int(x)
+    except (TypeError, ValueError):
+        point_x = 0
+    try:
+        point_y = int(y)
+    except (TypeError, ValueError):
+        point_y = 0
+    return point_x, point_y
+
+
+def _coordinate_space(value: str | None) -> str:
+    return str(value or "client").strip().lower()
+
+
+def screen_to_client(hwnd: int, x: int, y: int) -> tuple[int, int]:
+    """Convert a screen point to HWND client coordinates, returning input on failure."""
+    point_x, point_y = _int_point(x, y)
+    if not _user32 or not hwnd:
+        return point_x, point_y
+    point = wintypes.POINT(point_x, point_y)
+    try:
+        ok = _user32.ScreenToClient(
+            wintypes.HWND(int(hwnd)),
+            ctypes.byref(point),
+        )
+    except Exception:
+        return point_x, point_y
+    if not ok:
+        return point_x, point_y
+    return int(point.x), int(point.y)
+
+
+def resolve_client_point(
+    hwnd: int,
+    x: int,
+    y: int,
+    *,
+    coordinate_space: str | None = "client",
+    screen_x: int | None = None,
+    screen_y: int | None = None,
+) -> tuple[int, int, dict[str, Any]]:
+    """Return PostMessage-ready client coordinates plus coordinate metadata."""
+    input_x, input_y = _int_point(x, y)
+    input_space = _coordinate_space(coordinate_space)
+    explicit_screen = screen_x is not None or screen_y is not None
+
+    if input_space in _SCREEN_COORDINATE_SPACES or explicit_screen:
+        sx, sy = _int_point(
+            input_x if screen_x is None else screen_x,
+            input_y if screen_y is None else screen_y,
+        )
+        client_x, client_y = screen_to_client(hwnd, sx, sy)
+        return client_x, client_y, {
+            "input_space": "screen",
+            "screen": {"x": sx, "y": sy},
+            "client": {"x": client_x, "y": client_y},
+        }
+
+    return input_x, input_y, {
+        "input_space": input_space,
+        "client": {"x": input_x, "y": input_y},
+    }
+
+
+def resolve_screen_point(
+    hwnd: int,
+    x: int,
+    y: int,
+    *,
+    coordinate_space: str | None = "client",
+    screen_x: int | None = None,
+    screen_y: int | None = None,
+) -> tuple[int, int, dict[str, Any]]:
+    """Return screen coordinates for messages such as WM_MOUSEWHEEL."""
+    client_x, client_y, metadata = resolve_client_point(
+        hwnd,
+        x,
+        y,
+        coordinate_space=coordinate_space,
+        screen_x=screen_x,
+        screen_y=screen_y,
+    )
+    if metadata["input_space"] == "screen":
+        screen = metadata["screen"]
+        return int(screen["x"]), int(screen["y"]), metadata
+
+    sx, sy = client_to_screen(hwnd, client_x, client_y)
+    metadata = {**metadata, "screen": {"x": sx, "y": sy}}
+    return sx, sy, metadata
+
+
 def _post(hwnd: int, message: int, wparam: int = 0, lparam: int = 0) -> bool:
     if not _user32 or not can_post_to_hwnd(hwnd):
         return False
@@ -76,7 +176,16 @@ def _post(hwnd: int, message: int, wparam: int = 0, lparam: int = 0) -> bool:
         return False
 
 
-def post_click(hwnd: int, x: int, y: int, button: str = "left") -> bool:
+def post_click(
+    hwnd: int,
+    x: int,
+    y: int,
+    button: str = "left",
+    *,
+    coordinate_space: str | None = "client",
+    screen_x: int | None = None,
+    screen_y: int | None = None,
+) -> bool:
     """Send button down/up messages in client coordinates."""
     button = button.lower()
     down_up = {
@@ -87,7 +196,15 @@ def post_click(hwnd: int, x: int, y: int, button: str = "left") -> bool:
     if down_up is None:
         return False
     down, up, flag = down_up
-    lparam = make_lparam(x, y)
+    client_x, client_y, _metadata = resolve_client_point(
+        hwnd,
+        x,
+        y,
+        coordinate_space=coordinate_space,
+        screen_x=screen_x,
+        screen_y=screen_y,
+    )
+    lparam = make_lparam(client_x, client_y)
     return _post(hwnd, down, flag, lparam) and _post(hwnd, up, 0, lparam)
 
 
@@ -131,11 +248,28 @@ def post_key(hwnd: int, key_combo: str) -> bool:
     return ok
 
 
-def post_scroll(hwnd: int, x: int, y: int, direction: str = "down", clicks: int = 3) -> bool:
+def post_scroll(
+    hwnd: int,
+    x: int,
+    y: int,
+    direction: str = "down",
+    clicks: int = 3,
+    *,
+    coordinate_space: str | None = "client",
+    screen_x: int | None = None,
+    screen_y: int | None = None,
+) -> bool:
     """Send a ``WM_MOUSEWHEEL`` message."""
     if clicks <= 0:
         return False
     sign = 1 if direction.lower() in {"up", "left"} else -1
-    screen_x, screen_y = client_to_screen(hwnd, x, y)
+    resolved_screen_x, resolved_screen_y, _metadata = resolve_screen_point(
+        hwnd,
+        x,
+        y,
+        coordinate_space=coordinate_space,
+        screen_x=screen_x,
+        screen_y=screen_y,
+    )
     wparam = ((sign * WHEEL_DELTA * int(clicks)) & 0xFFFF) << 16
-    return _post(hwnd, WM_MOUSEWHEEL, wparam, make_lparam(screen_x, screen_y))
+    return _post(hwnd, WM_MOUSEWHEEL, wparam, make_lparam(resolved_screen_x, resolved_screen_y))

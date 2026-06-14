@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/screenshot_evidence.schema.json",
+  "title": "Screenshot Evidence",
+  "description": "Browser session replay contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "screenshot_id",
+    "trace_id",
+    "viewport",
+    "dimensions",
+    "captured_at",
+    "artifact_ref",
+    "checksum",
+    "redaction_overlays",
+    "privacy_class",
+    "binary_inline_allowed"
+  ],
+  "properties": {
+    "screenshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "viewport": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "captured_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "checksum": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "minLength": 1
+    },
+    "redaction_overlays": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "privacy_class": {
+      "type": "string",
+      "enum": [
+        "public",
+        "private_url",
+        "account_context",
+        "credential_or_payment",
+        "blocked_sensitive"
+      ]
+    },
+    "binary_inline_allowed": {
+      "const": false
+    }
+  }
+}

@@ -1,0 +1,14 @@
+preset_id: reproducible_notebook_plan
+name: Reproducible Notebook Plan
+profile: rumi_data_analysis.sql_notebook_analyst
+inspired_by: [notebook workflows, local analysis assistants]
+enabled_capabilities: [notebook_reasoning, data_cleaning, chart_design, analysis_audit]
+ui_panels: [chat, notebook_outline, cell_plan, audit_trail]
+behavior: [cell_outline, assumptions_visible, reproducibility_status]
+policy:
+  network_default: none
+  notebook_execution_requires_approval: true
+  terminal_requires_approval: true
+task_defaults:
+  output:
+    type: notebook_outline_and_recipe

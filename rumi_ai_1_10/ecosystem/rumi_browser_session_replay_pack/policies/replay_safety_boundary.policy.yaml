@@ -1,0 +1,24 @@
+policy:
+  pack_id: rumi_browser_session_replay_pack
+  never_owns:
+  - open_page
+  - click
+  - type
+  - press
+  - scroll
+  - navigate
+  - submit_form
+  - call_browser_companion
+  - transport
+  default_effect: handoff_only
+  allowed_effects:
+  - validate_schema_contract
+  - package_evidence_refs
+  - write_replay_manifest_contract
+  - write_selector_drift_report
+  - write_redaction_review_receipt
+  - emit_handoff_packet
+  runtime_handoff:
+    browser_execution: rumi_browser_automation_pack
+    semantic_dom: rumi_browser_element_pack
+    browser_transport: rumi_default_tools_pack

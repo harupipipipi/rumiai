@@ -1,0 +1,42 @@
+profile_id: rumi_computer_control_pack.terminal_session_monitor
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+
+display_name:
+  ja: Terminal Session Monitor
+  en: Terminal Session Monitor
+
+description:
+  ja: local/docker/ssh/modal/daytona などの端末バックエンド区別を優先する観察プロファイル。
+  en: Observation profile for local, Docker, SSH, Modal, Daytona, and other terminal backend distinctions.
+
+default_graph: defaultspack.coding_workspace
+default_flow: agent_chat
+
+surfaces:
+  preferred: cli
+  enabled:
+    - cli
+    - desktop
+
+prompt_layers:
+  system:
+    - prompts/sandbox_host_boundary.system.md
+    - prompts/evidence_before_action.system.md
+
+specs:
+  - specs/session_observation_spec.json
+
+policy:
+  network_default: none
+  terminal_backend_classification_required: true
+  remote_terminal_actions_require_approval: true
+  audit_level: detailed
+
+metadata:
+  pack_id: rumi_computer_control_pack
+  category: terminal_observation
+  owns:
+    - terminal backend evidence
+    - sandbox host distinction

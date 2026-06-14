@@ -1,0 +1,25 @@
+evidence_ledger_schema:
+  version: 0.1.0
+  required_records:
+  - record_id
+  - prompt_id
+  - prompt_version
+  - source_evidence_id
+  - owner_surface
+  - handoff_owner
+  - lint_dimensions_checked
+  - fixture_ids
+  - blocked_actions
+  - review_state
+  completion_rules:
+    every_record_has_evidence: true
+    adjacent_execution_requires_handoff: true
+    no_runtime_grant_created: true
+    version_ledger_entry_required: true
+    local_fixtures_only: true
+    no_model_eval_memory_api_or_code_ownership: true
+  review_states:
+  - draft
+  - blocked
+  - approved_with_handoff
+  - approved_local_only

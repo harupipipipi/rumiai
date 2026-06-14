@@ -1,0 +1,18 @@
+handoff_matrix:
+  pack_boundary_rule: owner_surface_wins_then_explicit_handoff
+  items:
+  - surface: live_recruiting
+    resolution: handoff_to_rumi_connector_gateway_pack
+    requires_human_review: true
+  - surface: email_or_crm_writes
+    resolution: handoff_to_rumi_business_ops_pack
+    requires_human_review: true
+  - surface: generic_web_research
+    resolution: handoff_to_rumi_research_pack
+    requires_human_review: true
+  - surface: analytics_query_execution
+    resolution: handoff_to_rumi_data_analysis_pack
+    requires_human_review: true
+  - surface: transcript_normalization
+    resolution: handoff_to_rumi_meeting_intelligence_pack
+    requires_human_review: true

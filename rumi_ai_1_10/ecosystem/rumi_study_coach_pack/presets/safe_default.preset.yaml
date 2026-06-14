@@ -1,0 +1,17 @@
+preset:
+  id: safe_default
+  mode: draft_only
+  network: none
+  external_actions: blocked
+  uncertainty: required_when_evidence_is_thin
+  evidence_requirements:
+  - learner_goal_present
+  - local_source_note_ids_for_claims
+  - source_span_ids_when_available
+  - uncertainty_for_missing_or_conflicting_notes
+  prohibited_actions:
+  - web_lookup_without_research_handoff
+  - document_parsing_without_document_intelligence_handoff
+  - calendar_write_without_workflow_scheduler_handoff
+  - durable_memory_write_inside_study_coach_pack
+  output_when_blocked: blocked_packet_with_safe_next_step

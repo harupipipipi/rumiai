@@ -1,0 +1,35 @@
+schema_id: rumi_memory_knowledge_pack.skill_learning_proposal
+version: 1.0.0
+proposal:
+  required:
+    - proposal_id
+    - title
+    - trigger_pattern
+    - user_value
+    - evidence
+    - safety_notes
+    - review_status
+  recommended:
+    - suggested_skill_name
+    - repeated_task_count
+    - example_tasks
+    - expected_inputs
+    - expected_outputs
+    - maintenance_owner
+    - archive_policy
+review_status_values:
+  - proposed
+  - needs_more_evidence
+  - approved_for_drafting
+  - rejected
+  - archived
+boundaries:
+  creates_skill_files: false
+  installs_skill: false
+  mutates_existing_skill: false
+  requires_user_review: true
+evidence_requirements:
+  minimum_repeated_tasks: 2
+  include_success_or_failure_trace: true
+  include_user_value: true
+  include_risk_review: true

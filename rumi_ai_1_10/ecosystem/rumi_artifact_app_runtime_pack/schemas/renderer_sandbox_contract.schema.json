@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/renderer_sandbox_contract.schema.json",
+  "title": "Renderer Sandbox Contract",
+  "description": "Renderer sandbox policy contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sandbox_id",
+    "artifact_id",
+    "csp",
+    "allowed_origins",
+    "runtime_owner",
+    "host_execution",
+    "sandbox_tokens",
+    "untrusted_forbidden_token_pairs",
+    "remote_modules_allowed",
+    "same_origin_required",
+    "trusted_renderer_prefixes"
+  ],
+  "properties": {
+    "sandbox_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "csp": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allowed_origins": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "runtime_owner": {
+      "type": "string",
+      "const": "defaultspack"
+    },
+    "host_execution": {
+      "type": "boolean",
+      "const": false
+    },
+    "sandbox_tokens": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "allow-downloads",
+          "allow-forms",
+          "allow-modals",
+          "allow-popups",
+          "allow-same-origin",
+          "allow-scripts"
+        ]
+      }
+    },
+    "untrusted_forbidden_token_pairs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "items": {
+          "type": "string",
+          "enum": [
+            "allow-same-origin",
+            "allow-scripts"
+          ]
+        }
+      }
+    },
+    "remote_modules_allowed": {
+      "type": "boolean",
+      "const": false
+    },
+    "same_origin_required": {
+      "type": "boolean",
+      "const": true
+    },
+    "trusted_renderer_prefixes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "/static/renderers/",
+          "/static/assets/renderers/",
+          "/static/user_renderers/"
+        ]
+      }
+    }
+  }
+}

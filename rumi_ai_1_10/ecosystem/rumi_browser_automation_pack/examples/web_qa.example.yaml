@@ -1,0 +1,7 @@
+example_id: rumi_browser_automation.web_qa
+request: Check that the dashboard works in the signed-in browser session.
+playbook: authenticated_ui_qa
+expected_evidence:
+  - active_account_signal
+  - route_screenshots
+  - issue_list_with_selectors

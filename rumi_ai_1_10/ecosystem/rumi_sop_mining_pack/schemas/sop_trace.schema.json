@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SOPTrace",
+  "type": "object",
+  "required": [
+    "trace_id",
+    "events",
+    "redaction_state",
+    "source_evidence"
+  ],
+  "properties": {
+    "trace_id": {
+      "type": "string"
+    },
+    "redaction_state": {
+      "enum": [
+        "redacted",
+        "needs_review",
+        "blocked"
+      ]
+    },
+    "events": {
+      "type": "array"
+    },
+    "source_evidence": {
+      "type": "array"
+    }
+  }
+}

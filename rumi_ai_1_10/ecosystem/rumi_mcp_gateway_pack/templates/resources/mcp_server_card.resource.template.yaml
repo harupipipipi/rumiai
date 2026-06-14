@@ -1,0 +1,30 @@
+resource_template_id: rumi_mcp_gateway.mcp_server_card
+version: 1
+pack_id: rumi_mcp_gateway_pack
+kind: mcp_server_card
+fields:
+  server_id: "{{server_id}}"
+  display_name: "{{display_name}}"
+  namespace: "{{namespace}}"
+  category_id: "{{category_id}}"
+  direct_support_pack: "{{direct_support_pack}}"
+  review_status: "{{review_status}}"
+  risk_level: "{{risk_level}}"
+  transport: "{{transport}}"
+  claimed_capabilities: "{{claimed_capabilities}}"
+  requested_scopes:
+    filesystem: "{{requested_filesystem_scope}}"
+    network: "{{requested_network_scope}}"
+    credentials: "{{requested_credential_types}}"
+  defaultspack_routes:
+    connect: defaultspack.tool.mcp_connect
+    list: defaultspack.tool.mcp_list
+  tool_namespace:
+    discovered_pattern: mcp__<server_id>__<tool_name>
+    gateway_alias_pattern: rumi_mcp_gateway.<server_slug>.<tool_name>
+    alias_mode: metadata_only
+  approval:
+    connection_required: true
+    execution_requires_approved_registry_entry: true
+    client_supplied_approval_trusted: false
+  notes: "{{notes}}"

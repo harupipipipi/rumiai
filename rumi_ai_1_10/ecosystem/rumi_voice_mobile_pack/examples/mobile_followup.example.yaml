@@ -1,0 +1,12 @@
+example_id: rumi_voice_mobile.mobile_followup
+request: Stage a mobile follow-up ping for connector delivery, with stop condition, quiet-hours check, and consent evidence.
+intent_class: notification_brief
+notification_channel: user_approved_channel_required
+consent_required:
+  - notification_delivery
+expected_outputs:
+  - recipient_channel
+  - quiet_hours_check
+  - stop_condition
+  - handoff_to_rumi_connector_gateway_pack
+  - handoff_receipt

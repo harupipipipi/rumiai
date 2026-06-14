@@ -1,0 +1,40 @@
+{
+  "version": "rumi.devops_release.operations.v1",
+  "pack_id": "rumi_devops_release_pack",
+  "network_default": "none",
+  "operation_categories": [
+    {
+      "id": "ci_triage",
+      "description": "Diagnose CI failures from local workflow files, exported logs, and approved connector evidence.",
+      "default_profile": "rumi_devops_release_pack.ci_triage",
+      "evidence_outputs": ["failure_summary", "suspected_owner", "next_checks", "rerun_or_fix_recommendation"]
+    },
+    {
+      "id": "release_gate",
+      "description": "Collect release evidence and decide whether a release is ready, blocked, or needs escalation.",
+      "default_profile": "rumi_devops_release_pack.release_manager",
+      "evidence_outputs": ["gate_status", "release_notes", "test_evidence", "deploy_runbook", "risk_register"]
+    },
+    {
+      "id": "deploy_runbook",
+      "description": "Draft or review deployment steps without executing them.",
+      "default_profile": "rumi_devops_release_pack.release_manager",
+      "evidence_outputs": ["preflight", "deploy_steps", "verification", "stop_conditions", "rollback_reference"]
+    },
+    {
+      "id": "rollback_plan",
+      "description": "Plan rollback decision points, actions, verification, and communication.",
+      "default_profile": "rumi_devops_release_pack.rollback_planner",
+      "evidence_outputs": ["rollback_trigger", "rollback_steps", "recovery_checks", "communication_draft"]
+    }
+  ],
+  "ownership_boundaries": {
+    "rumi_code_ide_pack": "Owns code edits, patch loops, and IDE or CLI implementation work.",
+    "rumi_agent_services_pack": "Owns service-agent composition and service runtime topology.",
+    "rumi_devops_release_pack": "Owns operational gates, release evidence, runbooks, rollback plans, and incident evidence."
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "This pack is an optional operational overlay and does not replace or promote defaultspack runtime behavior."
+  }
+}

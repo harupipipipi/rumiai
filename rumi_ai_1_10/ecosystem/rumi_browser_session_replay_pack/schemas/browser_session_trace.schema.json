@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/browser_session_trace.schema.json",
+  "title": "Browser Session Trace",
+  "description": "Browser session replay contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "trace_id",
+    "source_session_ref",
+    "captured_at",
+    "browser_context",
+    "page_timeline",
+    "evidence_bundle_refs",
+    "redaction_state",
+    "handoff_targets"
+  ],
+  "properties": {
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_session_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "captured_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "browser_context": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "page_timeline": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "evidence_bundle_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": [
+        "raw",
+        "partially_redacted",
+        "redacted",
+        "blocked_sensitive"
+      ]
+    },
+    "handoff_targets": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "defaultspack",
+          "rumi_browser_automation_pack",
+          "rumi_browser_element_pack",
+          "rumi_browser_form_operator_pack",
+          "rumi_default_tools_pack"
+        ]
+      },
+      "minItems": 1
+    }
+  }
+}

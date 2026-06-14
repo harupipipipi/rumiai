@@ -1,0 +1,24 @@
+profile_id: rumi_agent_services.browser_operator
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: ブラウザ操作役
+  en: Browser Operator
+description:
+  ja: 承認された範囲のページ観察、クリック、取得を担当し、認証済み操作は必ずユーザー承認を求める役割。
+  en: Approval-gated browser operator for page observation, collection, and scoped actions.
+surfaces:
+  preferred: desktop
+  enabled: [desktop]
+extends: defaultspack.local_agent
+enabled_capabilities: [browser_optional, computer_optional, screenshot, observation_log, safety]
+prompt_set: browser_operator
+policy:
+  network_default: deny
+  browser_actions_require_approval: true
+  authenticated_browser_actions_require_approval: true
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  audit_level: strict
+  local_first: true

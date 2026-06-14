@@ -1,0 +1,39 @@
+example:
+  id: math_notes_quiz
+  user_request: Build a short algebra quiz from my local factoring notes.
+  input_state: local_artifacts_supplied
+  local_notes:
+  - note_id: note_alg_01
+    title: Algebra notebook, factoring section
+    spans:
+    - span_id: alg_01_s1
+      summary: For x^2 + bx + c, choose two integers with sum b and product c.
+    - span_id: alg_01_s2
+      summary: Example x^2 + 5x + 6 = (x + 2)(x + 3).
+  expected_result: practice_session_handoff_packet
+  expected_packet:
+    artifact_type: practice_session
+    handoff_owner: rumi_study_coach_pack
+    source_note_ids:
+    - note_alg_01
+    uncertainty_level: low
+    quiz_items:
+    - quiz_id: quiz_factoring_01
+      question: Which pair of integers supports factoring x^2 + 5x + 6?
+      answer: 2 and 3, because the cited notes say their sum is 5 and product is 6.
+      source_note_ids:
+      - note_alg_01
+      source_span_ids:
+      - alg_01_s1
+      - alg_01_s2
+      uncertainty: low
+    uncertainty_or_limitations:
+    - Covers only the factoring pattern shown in note_alg_01; no external algebra facts are added.
+  must_include:
+  - evidence_ids
+  - uncertainty_or_limitations
+  - handoff_owner
+  must_not:
+  - external_action
+  - uncited_claim
+  - credential_requirement

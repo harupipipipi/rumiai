@@ -36,6 +36,7 @@ from domain.vision.image_bridge import (
 from domain.chat.tool_recommender import effective_tool_assist_mode, recommend_tool_ids, tool_assist_limit
 from domain.prompt.manager import get_manager
 from domain.skill_trigger import RuntimeSkillTriggerService
+from domain.temporal_context import add_temporal_context_message, current_datetime_context
 from domain.tool.loading import split_tools_by_loading
 from domain.tool.registry import ToolRegistry
 from domain.tool.eligibility import filter_tool_definitions_by_eligibility
@@ -203,6 +204,8 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             profile_id=model,
             conversation_id=conversation_id,
         )["level"]
+    if "deepthink_enabled" not in params:
+        params["deepthink_enabled"] = bool(model_settings.get("deepthink_enabled", False))
 
     request_context = _merge_active_startup_profile_context(context or {}, active_startup_profile)
     if effective_inferred_tool_ids:
@@ -269,6 +272,16 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     if effective_system_prompt:
         system_prompt = effective_system_prompt
         _replace_system_prompt_message(standard_messages, effective_system_prompt)
+    temporal_context = current_datetime_context(request_context)
+    request_context["current_datetime_context"] = temporal_context
+    request_context.setdefault("current_datetime", temporal_context["iso"])
+    request_context.setdefault("current_date", temporal_context["date"])
+    request_context.setdefault("current_time_zone", temporal_context["timezone"])
+    add_temporal_context_message(
+        standard_messages,
+        request_context,
+        temporal_context=temporal_context,
+    )
     _append_system_context_message(standard_messages, chat_reference_prompt)
 
     _apply_authority_context(
@@ -980,19 +993,41 @@ def _apply_authority_context(
     if node_id:
         request_context.setdefault("node_id", node_id)
 
-    followup = {}
+    followup: dict[str, str] = {}
+    approval_tokens: dict[str, dict[str, str]] = {}
+
+    def add_authority_followup(raw: Any) -> None:
+        nonlocal followup
+        if not isinstance(raw, dict):
+            return
+        permission_id = str(raw.get("permission_id") or "").strip()
+        if permission_id not in {"model.invoke", "api_key.use"}:
+            return
+        token = str(raw.get("approval_token") or raw.get("token") or "").strip()
+        authority_request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+        if token and authority_request_id:
+            approval_tokens[permission_id] = {
+                "approval_token": token,
+                "request_id": authority_request_id,
+                "permission_id": permission_id,
+            }
+        if not followup:
+            followup = {
+                "approval_token": token,
+                "request_id": authority_request_id,
+                "permission_id": permission_id,
+            }
+
     if isinstance(metadata, dict):
         raw_followup = metadata.get("authority_followup")
         if not isinstance(raw_followup, dict):
             raw_followup = metadata.get("approval_followup")
         if isinstance(raw_followup, dict):
-            permission_id = str(raw_followup.get("permission_id") or "").strip()
-            if permission_id in {"model.invoke", "api_key.use"} or metadata.get("authority_followup") is raw_followup:
-                followup = {
-                    "approval_token": str(raw_followup.get("approval_token") or raw_followup.get("token") or "").strip(),
-                    "request_id": str(raw_followup.get("request_id") or raw_followup.get("approval_request_id") or "").strip(),
-                    "permission_id": permission_id or "model.invoke",
-                }
+            approvals = raw_followup.get("approvals")
+            if isinstance(approvals, list):
+                for item in approvals:
+                    add_authority_followup(item)
+            add_authority_followup(raw_followup)
 
     authority_context = {
         "principal_id": authority_principal_id,
@@ -1007,6 +1042,8 @@ def _apply_authority_context(
         authority_context["approval_token"] = followup["approval_token"]
     if followup.get("permission_id"):
         authority_context["permission_id"] = followup["permission_id"]
+    if approval_tokens:
+        authority_context["approval_tokens"] = approval_tokens
     request_context["authority_principal_id"] = authority_principal_id
     request_context["authority"] = authority_context
 
@@ -1047,7 +1084,9 @@ def _replace_current_user_content_for_model(
 
 def _conversation_system_prompt(conv: dict[str, Any], manager: Any) -> str:
     from blocks.chat._prompt_helpers import resolve_conversation_system_prompt
-    return resolve_conversation_system_prompt(conv, manager)
+    from domain.kanban.service import append_kanban_system_prompt_note
+
+    return append_kanban_system_prompt_note(resolve_conversation_system_prompt(conv, manager), conv)
 
 
 def _load_active_startup_profile() -> dict[str, Any]:

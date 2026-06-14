@@ -1,0 +1,77 @@
+{
+  "pack_id": "rumi_memory_knowledge_pack",
+  "pack_identity": "rumi:ecosystem/rumi_memory_knowledge_pack",
+  "version": "1.0.0",
+  "metadata": {
+    "name": "Rumi Memory Knowledge Pack",
+    "description": "Declarative local-first contracts for session recall, user profile memory, project knowledge, skill-learning proposals, hygiene, and evidence-backed recall.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "inspired_by": [
+      "Hermes-style persistent memory and session search",
+      "Hermes-style skill creation and self-improvement loops",
+      "Cline-style project rules and persistent team state",
+      "OpenClaw-style local-first sessions and skills"
+    ],
+    "declarative_only": true,
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "runtime_memory_write_policy": "defines_contracts_only"
+  },
+  "vocabulary": {
+    "types": [
+      "memory_capability_catalog",
+      "knowledge_spec",
+      "memory_policy",
+      "memory_profile",
+      "memory_preset",
+      "memory_example"
+    ]
+  },
+  "components": {
+    "memory_catalog": {
+      "type": "memory_capability_catalog",
+      "id": "memory_catalog",
+      "path": "catalog",
+      "connectivity": {
+        "provides": [
+          "rumi.memory.capabilities",
+          "rumi.memory.recall_workflows",
+          "rumi.memory.surface_catalog"
+        ],
+        "requires": []
+      }
+    },
+    "knowledge_specs": {
+      "type": "knowledge_spec",
+      "id": "knowledge_specs",
+      "path": "specs",
+      "connectivity": {
+        "provides": [
+          "rumi.memory.object_schema",
+          "rumi.memory.evidence_schema",
+          "rumi.memory.skill_learning_proposal_schema"
+        ],
+        "requires": []
+      }
+    },
+    "memory_policies": {
+      "type": "memory_policy",
+      "id": "memory_policies",
+      "path": "policies",
+      "connectivity": {
+        "provides": [
+          "rumi.memory.hygiene_policy",
+          "rumi.memory.recall_evidence_policy",
+          "rumi.memory.skill_learning_policy"
+        ],
+        "requires": ["rumi.memory.object_schema"]
+      }
+    }
+  },
+  "load_order": [
+    "memory_capability_catalog:memory_catalog",
+    "knowledge_spec:knowledge_specs",
+    "memory_policy:memory_policies"
+  ]
+}

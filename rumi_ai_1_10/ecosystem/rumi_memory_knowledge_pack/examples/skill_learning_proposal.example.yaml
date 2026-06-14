@@ -1,0 +1,17 @@
+task:
+  title: Propose a repeatable project skill
+  preset: rumi_memory_knowledge_pack.skill_learning_proposals
+  goal: Propose a skill after repeated successful release checklist work.
+  inputs:
+    task_trace: workspace/memory/release_checklist_traces.yaml
+    repeated_pattern: release_candidate_review
+    user_value: faster and safer release readiness checks
+  output:
+    artifacts:
+      - type: skill_learning_proposal
+        path: memory_outputs/release_review_skill_proposal.yaml
+      - type: safety_notes
+        path: memory_outputs/release_review_skill_safety.md
+  workflow: skill_learning_proposal
+  review:
+    checks: [repeatability, user_value, safety_boundary, no_auto_install]

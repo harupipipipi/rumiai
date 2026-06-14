@@ -1,0 +1,10 @@
+preset:
+  id: handoff_review
+  pack_id: rumi_agentic_qa_pack
+  mode: handoff_review
+  purpose: Convert a failed replay into a regression triage report with the owning implementation pack named.
+  require_evidence: true
+  require_overlap_check: true
+  required_assets:
+    - templates/regression_triage_report.template.yaml
+    - ledgers/qa_evidence_ledger.schema.yaml

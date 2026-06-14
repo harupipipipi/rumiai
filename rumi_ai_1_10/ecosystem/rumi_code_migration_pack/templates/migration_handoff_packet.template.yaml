@@ -1,0 +1,4 @@
+template:
+  packet_id: '{{packet_id}}'
+  downstream_owner_pack: '{{owner_pack}}'
+  external_action: handoff_only
