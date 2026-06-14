@@ -887,6 +887,12 @@
       "path": "/api/ambient/permissions/revoke",
       "function_id": "ambient_permission_revoke",
       "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/permissions/check",
+      "function_id": "ambient_permission_check",
+      "pass_body": true
     }
   ]
 }

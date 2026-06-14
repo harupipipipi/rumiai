@@ -75,6 +75,13 @@ class AmbientStore:
         self._update_os_permission_in_state(state, permission_id, status)
         return self.write(state)
 
+    def update_os_permissions(self, statuses: dict[str, Any]) -> dict[str, Any]:
+        state = self.read()
+        for permission_id, status in statuses.items():
+            if str(permission_id).strip():
+                self._update_os_permission_in_state(state, str(permission_id), str(status or "unknown"))
+        return self.write(state)
+
     def save_voice_enrollment(self, embedding: list[float], *, threshold: float = 0.88) -> dict[str, Any]:
         state = self.read()
         state["voice_enrollment"] = {

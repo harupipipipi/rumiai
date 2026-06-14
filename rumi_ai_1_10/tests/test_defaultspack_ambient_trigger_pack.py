@@ -178,6 +178,87 @@ def test_pinch_and_agent_dispatch_share_ambient_router(monkeypatch, tmp_path):
     assert envelope.target["conversation_id"] == "conv-1"
 
 
+def test_gesture_choice_dispatches_numeric_reply_without_audio(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission("camera.capture", os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": ""}) as submit:
+        dispatched = router.submit_event(
+            {
+                "source": "camera",
+                "trigger": "gesture_choice",
+                "mode": "choice_response",
+                "choice": 3,
+                "confidence": 0.96,
+                "duration_ms": 3000,
+                "conversation_id": "conv-choice",
+                "metadata": {"hold_ms": 3000, "pinch_armed": True},
+            },
+            {"conversation_id": "conv-choice"},
+        )
+
+    assert dispatched["status"] == "ok"
+    envelope = submit.call_args.args[0]
+    assert envelope.input == "3"
+    assert envelope.delivery["action_id"] == "chat.message"
+    assert envelope.attachments == []
+    assert envelope.metadata["ambient"]["trigger"] == "gesture_choice"
+
+
+def test_approval_gesture_is_audited_without_dispatch(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission("camera.capture", os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+
+    with patch("domain.ambient.router.submit_input") as submit:
+        result = router.submit_event(
+            {
+                "source": "camera",
+                "trigger": "approval_gesture",
+                "mode": "swipe_reject",
+                "decision": "reject",
+                "confidence": 0.91,
+                "metadata": {"approval_kind": "runtime"},
+            }
+        )
+
+    assert result["status"] == "approval_intent"
+    assert result["decision"] == "reject"
+    submit.assert_not_called()
+
+
+def test_os_permission_check_updates_status_without_granting_rumi_permissions(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    state = router.check_os_permissions({"microphone.capture": "denied", "camera.capture": "granted"})
+
+    assert state["permissions"]["os"]["microphone.capture"]["status"] == "denied"
+    assert state["permissions"]["os"]["camera.capture"]["status"] == "granted"
+    assert state["permissions"]["rumi"]["microphone.capture"]["granted"] is False
+    audit_records = [
+        json.loads(line)
+        for line in (tmp_path / "ambient-audit.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert audit_records[-1]["trigger"] == "permission_check"
+
+
 def test_ambient_routes_and_functions_are_registered():
     from domain.function_runtime.registry import block_module_for, default_args_for, get_spec
     from transport.registry import canonical_http_route_specs
@@ -186,8 +267,10 @@ def test_ambient_routes_and_functions_are_registered():
     assert ("GET", "/api/ambient/status", "blocks.ambient.status") in routes
     assert ("POST", "/api/ambient/monitor/start", "blocks.ambient.monitor") in routes
     assert ("POST", "/api/ambient/events", "blocks.ambient.event_submit") in routes
+    assert ("POST", "/api/ambient/permissions/check", "blocks.ambient.permissions") in routes
     assert block_module_for("ambient_event_submit") == "blocks.ambient.event_submit"
     assert default_args_for("ambient_monitor_stop") == {"action": "stop"}
+    assert default_args_for("ambient_permission_check") == {"action": "check_os"}
     assert get_spec("ambient_monitor_start").requires == (
         "microphone.capture",
         "camera.capture",
@@ -213,6 +296,10 @@ def test_rumi_ambient_trigger_pack_metadata_exposes_install_prompt_permissions_a
     assert {"ambient_mini_window", "defaultspack_input", "line_hook", "discord_hook", "web_hook"} <= surface_ids
     assert extension["privacy"]["store_audio"] is False
     assert extension["privacy"]["store_images"] is False
+    assert extension["privacy"]["gesture_choice"]["choices"] == [2, 3, 4]
+    assert extension["privacy"]["gesture_choice"]["requires_audio"] is False
+    assert extension["privacy"]["gesture_choice"]["profile_mutation"] is False
+    assert extension["privacy"]["approval_gesture"]["requires_thumb_index_contact"] is False
 
 
 def _contains_any_key(value, keys: set[str]) -> bool:

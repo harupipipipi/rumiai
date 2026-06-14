@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Loader2, RefreshCw, ShieldAlert, ShieldCheck, ShieldX, X } from "lucide-react";
 
+import { AmbientTriggerPanel } from "../ambient/AmbientTriggerPanel";
+import { ambientTriggerClient } from "../ambient/ambientTriggerClient";
 import { authorityApprovalResources, type AuthorityApprovalDecision, type AuthorityRequest } from "../features/chat/resources/authorityApprovalResources";
 import {
   authorityApprovalConfig,
@@ -90,6 +92,7 @@ export function AuthorityApprovalWindow() {
   const [action, setAction] = useState<"approve" | "reject" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [decisionState, setDecisionState] = useState<DecisionState>({ kind: "idle" });
+  const [ambientEnabled, setAmbientEnabled] = useState(false);
 
   const approval = useMemo(() => request ? requestToApproval(request) : null, [request]);
   const title = request ? windowTitle(request) : "Authority approval";
@@ -117,6 +120,24 @@ export function AuthorityApprovalWindow() {
   useEffect(() => {
     document.title = title;
   }, [title]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadAmbient = async () => {
+      try {
+        const status = await ambientTriggerClient.status();
+        if (!cancelled) setAmbientEnabled(Boolean(status.ambient_monitor.enabled));
+      } catch {
+        if (!cancelled) setAmbientEnabled(false);
+      }
+    };
+    void loadAmbient();
+    const timer = window.setInterval(loadAmbient, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!allowedScopes.includes(selectedScope)) {
@@ -383,7 +404,7 @@ export function AuthorityApprovalWindow() {
                   className="flex h-10 min-w-28 items-center justify-center gap-2 rounded-lg border border-zinc-800 px-4 text-sm font-semibold text-zinc-300 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-100 disabled:opacity-50"
                 >
                   {action === "reject" ? <Loader2 className="animate-spin" size={15} /> : <X size={15} />}
-                  拒否
+                  拒否{ambientEnabled ? " (2)" : ""}
                 </button>
                 <button
                   type="button"
@@ -392,7 +413,7 @@ export function AuthorityApprovalWindow() {
                   className="flex h-10 min-w-32 items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-50"
                 >
                   {action === "approve" ? <Loader2 className="animate-spin" size={15} /> : <Check size={15} />}
-                  承認
+                  承認{ambientEnabled ? " (3)" : ""}
                 </button>
               </div>
             </>
@@ -427,6 +448,20 @@ export function AuthorityApprovalWindow() {
           </section>
         )}
       </div>
+      <AmbientTriggerPanel
+        approvalTarget={request && request.status === "pending" ? {
+          kind: "authority",
+          approveLabel: "承認",
+          rejectLabel: "拒否",
+          canApprove: true,
+          canReject: true,
+        } : null}
+        onApprovalGesture={(decision) => {
+          if (controlsDisabled) return;
+          if (decision === "approve") void approve();
+          else void reject();
+        }}
+      />
     </main>
   );
 }

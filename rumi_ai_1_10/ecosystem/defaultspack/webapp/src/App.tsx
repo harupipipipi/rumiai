@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
-import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
+import { AmbientTriggerPanel, type AmbientApprovalTarget } from "./ambient/AmbientTriggerPanel";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
@@ -2375,6 +2375,13 @@ function ChatApp() {
     : null;
   const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
   const visibleBrowserApproval = !ultraYoloMode ? browserApproval : null;
+  const latestAssistantFinalText = useMemo(() => {
+    if (isGenerating || isConversationPending) return null;
+    for (const message of [...messages].reverse()) {
+      if (message.role === "agent" && message.rawText.trim()) return message.rawText.trim();
+    }
+    return null;
+  }, [isConversationPending, isGenerating, messages]);
 
   useEffect(() => {
     if (!authorityApproval) {
@@ -4199,6 +4206,51 @@ function ChatApp() {
     }
   };
 
+  const ambientApprovalTarget = useMemo<AmbientApprovalTarget | null>(() => {
+    if (visibleBrowserApproval) {
+      return {
+        kind: "browser",
+        approveLabel: "許可",
+        canApprove: true,
+        canReject: false,
+      };
+    }
+    if (runtimeApproval) {
+      return {
+        kind: "runtime",
+        approveLabel: "許可",
+        rejectLabel: "拒否",
+        canApprove: true,
+        canReject: true,
+      };
+    }
+    if (authorityApproval) {
+      return {
+        kind: "authority",
+        approveLabel: "承認",
+        rejectLabel: "拒否",
+        canApprove: true,
+        canReject: true,
+      };
+    }
+    return null;
+  }, [authorityApproval, runtimeApproval, visibleBrowserApproval]);
+
+  const handleAmbientApprovalGesture = useCallback(async (decision: "approve" | "reject") => {
+    if (visibleBrowserApproval) {
+      if (decision === "approve") await approveBrowserAction();
+      return;
+    }
+    if (runtimeApproval) {
+      if (decision === "approve") await approveCodingAction();
+      else await denyCodingAction();
+      return;
+    }
+    if (authorityApproval) {
+      await openAuthorityApprovalWindowAction();
+    }
+  }, [authorityApproval, runtimeApproval, visibleBrowserApproval]);
+
   const pushActionPreview = (action: SidebarAction, title: string, data: unknown) => {
     const preview = previewFromAction(action, title, data);
     setPreviews((current) => [preview, ...current].slice(0, 30));
@@ -5333,7 +5385,7 @@ function ChatApp() {
                         onClick={approveBrowserAction}
                         className="h-8 flex-shrink-0 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
                       >
-                        許可
+                        許可 (2)
                       </button>
                     </div>
                   </div>
@@ -5380,7 +5432,7 @@ function ChatApp() {
                           onClick={denyCodingAction}
                           className="h-8 rounded-lg border border-zinc-800 px-3 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200"
                         >
-                          拒否
+                          拒否 (2)
                         </button>
                         <button
                           type="button"
@@ -5391,7 +5443,7 @@ function ChatApp() {
                           onClick={approveCodingAction}
                           className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
                         >
-                          許可
+                          許可 (3)
                         </button>
                       </div>
                     </div>
@@ -5523,8 +5575,12 @@ function ChatApp() {
 
       <AmbientTriggerPanel
         conversationId={activeConversationId}
+        approvalTarget={ambientApprovalTarget}
+        finalAnswerText={latestAssistantFinalText}
+        onApprovalGesture={handleAmbientApprovalGesture}
         onOpenInput={(text) => {
-          setWorkspacePanelMode("composer");
+          const chatTab = workspaceTabs.find((tab) => tab.kind === "chat") ?? workspaceTabs[0];
+          if (chatTab && activeWorkspaceTabId !== chatTab.id) activateWorkspaceTab(chatTab);
           if (typeof text === "string" && text.trim()) setInput(text);
         }}
       />

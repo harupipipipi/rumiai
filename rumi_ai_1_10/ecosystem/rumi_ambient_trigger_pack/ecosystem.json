@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "metadata": {
     "name": "Rumi Ambient Trigger Pack",
-    "description": "Voice wake and camera pinch trigger extension for defaultspack input.",
+    "description": "Voice wake, camera pinch, 2/3/4 gesture replies, and approval gesture extension for defaultspack input.",
     "author": "Rumi AI Team",
     "license": "MIT"
   },
@@ -45,7 +45,9 @@
     },
     "gesture_wake_monitor": {
       "default_enabled": false,
-      "mode": "thumb_index_landmark_distance"
+      "mode": "thumb_index_landmark_distance",
+      "choice_reply_mode": "pinch_plus_2_3_4_hold_for_3s",
+      "approval_mode": "index_swipe_or_button_number_without_pinch"
     },
     "ambient_trigger_router": {
       "dispatches_to": [

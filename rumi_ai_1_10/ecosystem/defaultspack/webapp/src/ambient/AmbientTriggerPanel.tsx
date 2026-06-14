@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronUp, Hand, Loader2, Mic, Radio, Shield, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Hand, Loader2, Mic, Radio, Settings, Shield, Video, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import { LayerPortal } from "../ui/layers/LayerPortal";
@@ -8,9 +8,20 @@ import { AmbientTriggerStatusIcon } from "./AmbientTriggerStatusIcon";
 import { startHandLandmarkerLoop } from "./mediaPipeHandLandmarker";
 import type { PinchState } from "./gesturePinchDetector";
 
+export type AmbientApprovalTarget = {
+  kind: "browser" | "runtime" | "authority";
+  approveLabel?: string;
+  rejectLabel?: string;
+  canApprove?: boolean;
+  canReject?: boolean;
+};
+
 type Props = {
   conversationId?: string | null;
   onOpenInput?: (text?: string) => void;
+  approvalTarget?: AmbientApprovalTarget | null;
+  onApprovalGesture?: (decision: "approve" | "reject") => void | Promise<void>;
+  finalAnswerText?: string | null;
 };
 
 const REQUIRED_PERMISSIONS: AmbientPermissionId[] = [
@@ -19,21 +30,36 @@ const REQUIRED_PERMISSIONS: AmbientPermissionId[] = [
   "ambient.trigger.dispatch",
 ];
 
-export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
+const MIC_DEVICE_STORAGE_KEY = "rumi.ambient.selectedMicId";
+const CAMERA_DEVICE_STORAGE_KEY = "rumi.ambient.selectedCameraId";
+const FRONT_ON_FINAL_STORAGE_KEY = "rumi.ambient.frontOnFinal";
+
+export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarget, onApprovalGesture, finalAnswerText }: Props) {
   const [status, setStatus] = useState<AmbientStatus | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedMicId, setSelectedMicId] = useState(() => safeLocalStorageGet(MIC_DEVICE_STORAGE_KEY));
+  const [selectedCameraId, setSelectedCameraId] = useState(() => safeLocalStorageGet(CAMERA_DEVICE_STORAGE_KEY));
   const [micListening, setMicListening] = useState(false);
   const [pinchRecording, setPinchRecording] = useState(false);
   const [pinchDetectorStatus, setPinchDetectorStatus] = useState("idle");
+  const [frontOnFinal, setFrontOnFinal] = useState(() => safeLocalStorageGet(FRONT_ON_FINAL_STORAGE_KEY) !== "false");
+  const [frontFlash, setFrontFlash] = useState(false);
+  const [lastFinalAnswer, setLastFinalAnswer] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioStopRef = useRef<(() => void) | null>(null);
   const gestureStopRef = useRef<(() => void) | null>(null);
   const pinchRecorderRef = useRef<ActiveAudioRecorder | null>(null);
+  const choiceHandledAtRef = useRef(0);
+  const approvalGestureBusyRef = useRef(false);
   const conversationIdRef = useRef<string | null | undefined>(conversationId);
   const onOpenInputRef = useRef<Props["onOpenInput"]>(onOpenInput);
+  const approvalTargetRef = useRef<Props["approvalTarget"]>(approvalTarget);
+  const onApprovalGestureRef = useRef<Props["onApprovalGesture"]>(onApprovalGesture);
 
   const monitorEnabled = Boolean(status?.ambient_monitor.enabled);
   const micGranted = Boolean(status?.permissions.rumi["microphone.capture"]?.granted);
@@ -46,13 +72,15 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
   useEffect(() => {
     conversationIdRef.current = conversationId;
     onOpenInputRef.current = onOpenInput;
-  }, [conversationId, onOpenInput]);
+    approvalTargetRef.current = approvalTarget;
+    onApprovalGestureRef.current = onApprovalGesture;
+  }, [approvalTarget, conversationId, onApprovalGesture, onOpenInput]);
 
   useEffect(() => {
     let cancelled = false;
-    ambientTriggerClient.status()
-      .then((next) => {
-        if (!cancelled) setStatus(next);
+    refresh({ probeOs: true })
+      .then(() => {
+        if (!cancelled) void refreshDevices();
       })
       .catch((error) => {
         if (!cancelled) setMessage(error instanceof Error ? error.message : "ambient status failed");
@@ -61,6 +89,31 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    safeLocalStorageSet(MIC_DEVICE_STORAGE_KEY, selectedMicId);
+  }, []);
+
+  useEffect(() => {
+    safeLocalStorageSet(CAMERA_DEVICE_STORAGE_KEY, selectedCameraId);
+  }, [selectedCameraId]);
+
+  useEffect(() => {
+    safeLocalStorageSet(FRONT_ON_FINAL_STORAGE_KEY, frontOnFinal ? "true" : "false");
+  }, [frontOnFinal]);
+
+  useEffect(() => {
+    const text = String(finalAnswerText ?? "").trim();
+    if (!text || text === lastFinalAnswer) return;
+    setLastFinalAnswer(text);
+    setMessage("final answer ready");
+    if (!frontOnFinal) return;
+    setExpanded(true);
+    setFrontFlash(true);
+    window.focus();
+    const timer = window.setTimeout(() => setFrontFlash(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [finalAnswerText, frontOnFinal, lastFinalAnswer]);
 
   useEffect(() => {
     if (videoRef.current && cameraStream) {
@@ -135,7 +188,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
     setPinchDetectorStatus("recording");
     setMessage("recording while pinch is held");
     try {
-      const recorder = await startPinchAudioRecorder();
+      const recorder = await startPinchAudioRecorder(selectedMicId || undefined);
       pinchRecorderRef.current = recorder;
       setPinchRecording(true);
       await ambientTriggerClient.grantPermission("microphone.capture", "granted");
@@ -160,9 +213,71 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
       setPinchDetectorStatus("tracking");
       setMessage(error instanceof Error ? error.message : "pinch recording failed");
     }
+  }, [selectedMicId]);
+
+  const submitFingerChoice = useCallback(async (state: PinchState) => {
+    const choice = state.fingerChoice;
+    if (choice !== 2 && choice !== 3 && choice !== 4) return;
+    const now = performance.now();
+    if (now - choiceHandledAtRef.current < 800) return;
+    choiceHandledAtRef.current = now;
+    if (pinchRecorderRef.current) {
+      pinchRecorderRef.current.cancel();
+      pinchRecorderRef.current = null;
+      setPinchRecording(false);
+    }
+    const approvalDecision = approvalDecisionForChoice(choice, approvalTargetRef.current);
+    if (approvalDecision) {
+      await submitApprovalGesture(approvalDecision, state, `choice_${choice}`);
+      return;
+    }
+    setPinchDetectorStatus("sending");
+    try {
+      const result = await ambientTriggerClient.submitEvent({
+        source: "camera",
+        trigger: "gesture_choice",
+        mode: "choice_response",
+        action_id: "chat.message",
+        conversation_id: conversationIdRef.current || undefined,
+        input_text: String(choice),
+        choice,
+        confidence: state.confidence,
+        duration_ms: 3000,
+        metadata: {
+          panel: "ambient_mini_window",
+          hand: state.hand,
+          normalized_distance: state.normalizedDistance,
+          hold_ms: 3000,
+          pinch_armed: true,
+        },
+      });
+      setMessage(String(result.reason ?? result.status ?? `sent ${choice}`));
+      onOpenInputRef.current?.("");
+      focusComposer();
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "choice dispatch failed");
+    } finally {
+      setPinchDetectorStatus("tracking");
+    }
+  }, []);
+
+  const handleApprovalSwipe = useCallback(async (state: PinchState) => {
+    const decision = state.approvalGesture;
+    if (decision !== "approve" && decision !== "reject") return;
+    if (!approvalTargetRef.current) return;
+    await submitApprovalGesture(decision, state, `swipe_${decision}`);
   }, []);
 
   const handlePinchState = useCallback((state: PinchState) => {
+    if (state.approvalGestureCommitted) {
+      void handleApprovalSwipe(state);
+      return;
+    }
+    if (state.choiceCommitted) {
+      void submitFingerChoice(state);
+      return;
+    }
     if (state.triggered) {
       void beginPinchRecording(state);
       return;
@@ -170,7 +285,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
     if (state.reason === "pinch_released" || state.releasedAt) {
       void finishPinchRecording(state);
     }
-  }, [beginPinchRecording, finishPinchRecording]);
+  }, [beginPinchRecording, finishPinchRecording, handleApprovalSwipe, submitFingerChoice]);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,7 +296,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
       return;
     }
     setPinchDetectorStatus("loading");
-    startHandLandmarkerLoop(videoRef.current, handlePinchState)
+    startHandLandmarkerLoop(videoRef.current, handlePinchState, {
+      choiceRequiresPinch: !approvalTargetRef.current,
+    })
       .then((stop) => {
         if (cancelled) {
           stop();
@@ -201,15 +318,47 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
       gestureStopRef.current?.();
       gestureStopRef.current = null;
     };
-  }, [cameraStream, handlePinchState, monitorEnabled]);
+  }, [Boolean(approvalTarget), cameraStream, handlePinchState, monitorEnabled]);
 
   const permissionSummary = useMemo(() => {
     const granted = REQUIRED_PERMISSIONS.filter((permissionId) => status?.permissions.rumi[permissionId]?.granted).length;
     return `${granted}/${REQUIRED_PERMISSIONS.length}`;
   }, [status]);
 
-  async function refresh() {
-    setStatus(await ambientTriggerClient.status());
+  async function refresh(options?: { probeOs?: boolean }) {
+    const next = await ambientTriggerClient.status();
+    setStatus(next);
+    if (options?.probeOs) {
+      const statuses = await probeOsPermissions();
+      if (Object.keys(statuses).length > 0) {
+        setStatus(await ambientTriggerClient.checkOsPermissions(statuses));
+      }
+    }
+  }
+
+  async function refreshDevices() {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    try {
+      const nextDevices = await navigator.mediaDevices.enumerateDevices();
+      setDevices(nextDevices.filter((device) => device.kind === "audioinput" || device.kind === "videoinput"));
+    } catch (error) {
+      console.info("[ambient] media device listing unavailable", error);
+    }
+  }
+
+  async function probeOsPermissions(): Promise<Record<AmbientPermissionId, string>> {
+    const statuses: Record<AmbientPermissionId, string> = {};
+    const mic = await queryBrowserPermission("microphone");
+    const camera = await queryBrowserPermission("camera");
+    if (mic) statuses["microphone.capture"] = mic;
+    if (camera) statuses["camera.capture"] = camera;
+    const platform = navigator.platform || "";
+    const isMac = /Mac/i.test(platform);
+    console.info(
+      isMac ? "[ambient] macOS camera/microphone permission check" : "[ambient] camera/microphone permission check",
+      statuses,
+    );
+    return statuses;
   }
 
   async function runAction(action: () => Promise<AmbientStatus | Record<string, unknown>>, success?: string) {
@@ -250,8 +399,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("camera capture is not available in this browser");
       }
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : true });
       setCameraStream(stream);
+      await refreshDevices();
       return ambientTriggerClient.grantPermission("camera.capture", "granted");
     }, "camera ready");
   }
@@ -260,7 +410,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
     setBusy(true);
     setMessage("recording wake sample");
     try {
-      const embedding = await captureAudioEmbedding(900);
+      const embedding = await captureAudioEmbedding(900, selectedMicId || undefined);
       const result = await ambientTriggerClient.submitEvent({
         source: "microphone",
         trigger: "voice_wake",
@@ -297,7 +447,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
           onOpenInput?.("");
           focusComposer();
         }
-      });
+      }, selectedMicId || undefined);
       audioStopRef.current = stop;
       setMicListening(true);
       await ambientTriggerClient.grantPermission("microphone.capture", "granted");
@@ -328,10 +478,49 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
     }, 900);
   }
 
+  async function submitApprovalGesture(decision: "approve" | "reject", state: PinchState, mode: string) {
+    const target = approvalTargetRef.current;
+    if (!target || approvalGestureBusyRef.current) return;
+    if (decision === "approve" && target.canApprove === false) return;
+    if (decision === "reject" && target.canReject === false) {
+      setMessage("reject gesture ignored for this approval");
+      return;
+    }
+    approvalGestureBusyRef.current = true;
+    setMessage(decision === "approve" ? "approval gesture accepted" : "rejection gesture accepted");
+    try {
+      await ambientTriggerClient.submitEvent({
+        source: "camera",
+        trigger: "approval_gesture",
+        mode,
+        action_id: "chat.message",
+        confidence: state.confidence,
+        decision,
+        metadata: {
+          panel: "ambient_mini_window",
+          approval_kind: target.kind,
+          hand: state.hand,
+          normalized_distance: state.normalizedDistance,
+          finger_choice: state.fingerChoice,
+        },
+      }).catch(() => undefined);
+      await onApprovalGestureRef.current?.(decision);
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "approval gesture failed");
+    } finally {
+      approvalGestureBusyRef.current = false;
+      setPinchDetectorStatus("tracking");
+    }
+  }
+
   return (
     <LayerPortal layer="globalOverlay">
       <section
-        className="fixed bottom-4 right-4 w-[min(360px,calc(100vw-24px))] rounded-xl border border-zinc-800/90 bg-zinc-950/95 text-zinc-200 shadow-2xl shadow-black/40 backdrop-blur"
+        className={cn(
+          "fixed bottom-4 right-4 w-[min(360px,calc(100vw-24px))] rounded-xl border border-zinc-800/90 bg-zinc-950/95 text-zinc-200 shadow-2xl shadow-black/40 backdrop-blur",
+          frontFlash && "border-emerald-300/60 shadow-emerald-500/20",
+        )}
         aria-label="Ambient trigger mini window"
       >
         <div className="flex items-center gap-2 border-b border-zinc-800/80 px-3 py-2">
@@ -387,6 +576,10 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
                 <Shield size={14} />
                 Grant
               </button>
+              <button type="button" onClick={() => setSettingsOpen((value) => !value)} className="ambient-mini-button">
+                <Settings size={14} />
+                Settings
+              </button>
               <button type="button" onClick={() => void requestCamera()} className="ambient-mini-button">
                 <Video size={14} />
                 Camera
@@ -405,6 +598,59 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
               </button>
             </div>
 
+            {settingsOpen && (
+              <div className="space-y-2 rounded-lg border border-zinc-800 bg-black/25 p-2">
+                <label className="block text-[11px] text-zinc-500">
+                  Mic
+                  <select
+                    value={selectedMicId}
+                    onChange={(event) => setSelectedMicId(event.target.value)}
+                    className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+                  >
+                    <option value="">Default</option>
+                    {devices.filter((device) => device.kind === "audioinput").map((device, index) => (
+                      <option key={device.deviceId || `mic-${index}`} value={device.deviceId}>
+                        {deviceLabel(device, index, "Mic")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-[11px] text-zinc-500">
+                  Camera
+                  <select
+                    value={selectedCameraId}
+                    onChange={(event) => setSelectedCameraId(event.target.value)}
+                    className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+                  >
+                    <option value="">Default</option>
+                    {devices.filter((device) => device.kind === "videoinput").map((device, index) => (
+                      <option key={device.deviceId || `camera-${index}`} value={device.deviceId}>
+                        {deviceLabel(device, index, "Camera")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => void refreshDevices()} className="ambient-mini-button">
+                    <Settings size={14} />
+                    Devices
+                  </button>
+                  <button type="button" onClick={() => void refresh({ probeOs: true })} className="ambient-mini-button">
+                    <Shield size={14} />
+                    OS check
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFrontOnFinal((value) => !value)}
+                  className={cn("ambient-mini-button w-full", frontOnFinal && "border-emerald-400/30 text-emerald-200")}
+                >
+                  <Radio size={14} />
+                  Front on final {frontOnFinal ? "ON" : "OFF"}
+                </button>
+              </div>
+            )}
+
             {cameraStream && (
               <video
                 ref={videoRef}
@@ -420,6 +666,23 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput }: Props) {
               <StatusPill label="camera" value={pinchDetectorStatus} active={pinchDetectorStatus === "tracking"} />
               <StatusPill label="wake" value={voice?.enrolled ? "enrolled" : "empty"} active={Boolean(voice?.enrolled)} />
             </div>
+
+            {approvalTarget && monitorEnabled && (
+              <div className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-2 py-1.5 text-[11px] text-amber-100">
+                {approvalTarget.canReject !== false && <span className="mr-2"><X size={11} className="mr-1 inline" />{approvalTarget.rejectLabel ?? "Reject"} (2)</span>}
+                {approvalTarget.canApprove !== false && <span><Check size={11} className="mr-1 inline" />{approvalTarget.approveLabel ?? "Approve"} ({approvalTarget.canReject === false ? "2" : "3"})</span>}
+              </div>
+            )}
+
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 text-[11px] text-zinc-400">
+              2 / 3 / 4 replies {approvalTarget ? "or approval buttons" : "after pinch hold"}
+            </div>
+
+            {lastFinalAnswer && (
+              <div className="max-h-28 overflow-auto rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-2 py-1.5 text-[11px] leading-5 text-emerald-50">
+                {lastFinalAnswer}
+              </div>
+            )}
 
             {message && (
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-[11px] text-zinc-400">
@@ -470,11 +733,11 @@ function focusComposer() {
   }, 0);
 }
 
-async function captureAudioEmbedding(durationMs: number): Promise<number[]> {
+async function captureAudioEmbedding(durationMs: number, deviceId?: string): Promise<number[]> {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("microphone capture is not available in this browser");
   }
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: audioCaptureConstraints(deviceId) });
   try {
     const AudioContextClass = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) {
@@ -515,20 +778,14 @@ type AmbientAudioRecording = {
   durationMs: number;
 };
 
-async function startPinchAudioRecorder(): Promise<ActiveAudioRecorder> {
+async function startPinchAudioRecorder(deviceId?: string): Promise<ActiveAudioRecorder> {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("microphone capture is not available in this browser");
   }
   if (typeof MediaRecorder === "undefined") {
     throw new Error("audio recording is not available in this browser");
   }
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    },
-  });
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: audioCaptureConstraints(deviceId) });
   const mimeType = preferredAudioMimeType();
   const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
   const chunks: Blob[] = [];
@@ -608,11 +865,11 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-async function startWakeListening(onEmbedding: (embedding: number[]) => Promise<void>): Promise<() => void> {
+async function startWakeListening(onEmbedding: (embedding: number[]) => Promise<void>, deviceId?: string): Promise<() => void> {
   let stopped = false;
   async function loop() {
     while (!stopped) {
-      const embedding = await captureAudioEmbedding(700);
+      const embedding = await captureAudioEmbedding(700, deviceId);
       if (stopped) return;
       await onEmbedding(embedding).catch(() => undefined);
       await new Promise((resolve) => window.setTimeout(resolve, 900));
@@ -621,6 +878,15 @@ async function startWakeListening(onEmbedding: (embedding: number[]) => Promise<
   void loop();
   return () => {
     stopped = true;
+  };
+}
+
+function audioCaptureConstraints(deviceId?: string): MediaTrackConstraints {
+  return {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
   };
 }
 
@@ -635,4 +901,43 @@ function audioEmbedding(samples: number[]): number[] {
   }
   const norm = Math.sqrt(features.reduce((sum, item) => sum + item * item, 0)) || 1;
   return features.map((item) => item / norm);
+}
+
+async function queryBrowserPermission(name: "microphone" | "camera"): Promise<string> {
+  if (!navigator.permissions?.query) return "unknown";
+  try {
+    const result = await navigator.permissions.query({ name } as PermissionDescriptor);
+    return result.state || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function deviceLabel(device: MediaDeviceInfo, index: number, fallback: string): string {
+  return device.label || `${fallback} ${index + 1}`;
+}
+
+function approvalDecisionForChoice(choice: 2 | 3 | 4, target: AmbientApprovalTarget | null | undefined): "approve" | "reject" | null {
+  if (!target) return null;
+  if (choice === 2 && target.canReject !== false) return "reject";
+  if (choice === 2 && target.canReject === false && target.canApprove !== false) return "approve";
+  if (choice === 3 && target.canApprove !== false) return "approve";
+  return null;
+}
+
+function safeLocalStorageGet(key: string): string {
+  try {
+    return window.localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function safeLocalStorageSet(key: string, value: string) {
+  try {
+    if (value) window.localStorage.setItem(key, value);
+    else window.localStorage.removeItem(key);
+  } catch {
+    // localStorage can be unavailable in restricted webviews.
+  }
 }

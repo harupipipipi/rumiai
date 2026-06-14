@@ -388,6 +388,15 @@ AMBIENT_FUNCTIONS: tuple[FunctionSpec, ...] = (
         block="blocks.ambient.permissions",
         default_args={"action": "revoke"},
     ),
+    _spec(
+        "ambient_permission_check",
+        "Record observed OS microphone and camera permission state without granting Rumi permissions.",
+        ("ambient", "permission"),
+        block="blocks.ambient.permissions",
+        default_args={"action": "check_os"},
+        aliases=("defaults.ambient.permissions.check", "defaultspack.ambient.permissions.check"),
+        requires=(),
+    ),
 )
 
 

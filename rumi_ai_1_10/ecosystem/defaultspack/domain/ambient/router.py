@@ -22,6 +22,7 @@ ACTION_ALIASES = {
 
 PINCH_RECORD_START_MODES = {"record_audio_start", "hold_to_record_start", "start_voice_capture"}
 PINCH_RECORD_RELEASE_MODES = {"record_audio_release", "dispatch_audio", "submit_recording", "stop_voice_capture"}
+APPROVAL_GESTURE_MODES = {"approval_approve", "approval_reject", "swipe_approve", "swipe_reject"}
 
 ALLOWED_ACTIONS = {
     "chat.message",
@@ -61,6 +62,25 @@ class AmbientTriggerRouter:
     def revoke_permission(self, permission_id: str) -> dict[str, Any]:
         return self.store.revoke_permission(permission_id)
 
+    def check_os_permissions(self, statuses: dict[str, Any]) -> dict[str, Any]:
+        clean_statuses = {
+            str(permission_id): str(status or "unknown")
+            for permission_id, status in (statuses or {}).items()
+            if str(permission_id or "").strip()
+        }
+        state = self.store.update_os_permissions(clean_statuses)
+        self.audit.record(
+            {
+                "event_id": f"ambient_permission_check_{int(time.time() * 1000)}",
+                "source": "os",
+                "trigger": "permission_check",
+                "status": "checked",
+                "permissions": clean_statuses,
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+        )
+        return state
+
     def submit_event(self, payload: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
         event = AmbientTriggerEvent.from_payload(payload)
         state = self.store.read()
@@ -83,6 +103,16 @@ class AmbientTriggerRouter:
             voice_result = self._handle_voice_wake(event, state)
             if voice_result is not None:
                 return voice_result
+        elif event.source == "camera" and event.trigger == "approval_gesture":
+            if event.confidence < 0.5:
+                return self._record(event, "ignored", "approval_gesture.low_confidence")
+            return self._record(
+                event,
+                "approval_intent",
+                f"approval_gesture.{event.mode or 'unknown'}",
+                action_id=self._action_id(event),
+                decision=str(event.payload.get("decision") or event.metadata.get("decision") or ""),
+            )
         elif event.source == "camera" and event.trigger == "pinch":
             if event.confidence < 0.5:
                 return self._record(event, "ignored", "pinch.low_confidence")
@@ -210,7 +240,7 @@ class AmbientTriggerRouter:
         services = state.get("services") if isinstance(state.get("services"), dict) else {}
         if event.trigger == "voice_wake":
             return services.get("voice_wake_monitor") if isinstance(services.get("voice_wake_monitor"), dict) else None
-        if event.trigger == "pinch":
+        if event.trigger in {"pinch", "gesture_choice", "approval_gesture"}:
             return services.get("gesture_wake_monitor") if isinstance(services.get("gesture_wake_monitor"), dict) else None
         return None
 
@@ -273,6 +303,10 @@ class AmbientTriggerRouter:
             if event.source == "camera" and event.trigger == "pinch":
                 return "このpinch中に録音した音声を入力として処理してください。"
             return "この録音音声を入力として処理してください。"
+        if event.trigger == "gesture_choice":
+            choice = str(event.payload.get("choice") or event.payload.get("finger_choice") or "").strip()
+            if choice in {"2", "3", "4"}:
+                return choice
         return ""
 
 

@@ -12,9 +12,19 @@ export type PinchDetectorOptions = {
   pinchStartMs?: number;
   pinchReleaseMs?: number;
   cooldownMs?: number;
+  choiceHoldMs?: number;
+  choiceCooldownMs?: number;
+  choiceRequiresPinch?: boolean;
+  swipeWindowMs?: number;
+  swipeCooldownMs?: number;
+  swipeMinDistance?: number;
+  swipeDominanceRatio?: number;
   minHandConfidence?: number;
   minTrackingConfidence?: number;
 };
+
+export type FingerChoice = 2 | 3 | 4;
+export type ApprovalGesture = "approve" | "reject";
 
 export type PinchState = {
   active: boolean;
@@ -25,6 +35,11 @@ export type PinchState = {
   startedAt?: number;
   releasedAt?: number;
   reason?: string;
+  fingerChoice?: FingerChoice;
+  choiceStartedAt?: number;
+  choiceCommitted?: boolean;
+  approvalGesture?: ApprovalGesture;
+  approvalGestureCommitted?: boolean;
 };
 
 export type PinchFrame = {
@@ -41,6 +56,13 @@ const DEFAULTS = {
   pinchStartMs: 300,
   pinchReleaseMs: 200,
   cooldownMs: 1500,
+  choiceHoldMs: 3000,
+  choiceCooldownMs: 1200,
+  choiceRequiresPinch: true,
+  swipeWindowMs: 700,
+  swipeCooldownMs: 1000,
+  swipeMinDistance: 0.16,
+  swipeDominanceRatio: 1.6,
   minHandConfidence: 0.6,
   minTrackingConfidence: 0.6,
 };
@@ -50,6 +72,11 @@ export class GesturePinchDetector {
   private candidateStartedAt: number | null = null;
   private releaseStartedAt: number | null = null;
   private lastTriggeredAt = -Infinity;
+  private choiceCandidate: FingerChoice | null = null;
+  private choiceStartedAt: number | null = null;
+  private lastChoiceCommittedAt = -Infinity;
+  private swipeSamples: Array<{ x: number; y: number; now: number }> = [];
+  private lastSwipeCommittedAt = -Infinity;
 
   constructor(private readonly options: PinchDetectorOptions = {}) {}
 
@@ -62,13 +89,36 @@ export class GesturePinchDetector {
     );
     if (confidence < options.minHandConfidence || confidence < options.minTrackingConfidence) {
       this.candidateStartedAt = null;
+      this.resetChoice();
+      this.swipeSamples = [];
       return this.state(frame, 1, confidence, "low_confidence");
     }
 
     const normalizedDistance = normalizedThumbIndexDistance(frame.landmarks);
     if (!Number.isFinite(normalizedDistance)) {
       this.candidateStartedAt = null;
+      this.resetChoice();
+      this.swipeSamples = [];
       return this.state(frame, 1, confidence, "missing_landmarks");
+    }
+
+    const approvalGesture = this.detectApprovalSwipe(frame, now, options);
+    if (approvalGesture) {
+      return {
+        ...this.state(frame, normalizedDistance, confidence, `swipe_${approvalGesture}`),
+        approvalGesture,
+        approvalGestureCommitted: true,
+      };
+    }
+
+    const choiceState = this.updateFingerChoice(frame.landmarks, normalizedDistance, now, options);
+    if (choiceState?.committed) {
+      return {
+        ...this.state(frame, normalizedDistance, confidence, "choice_committed"),
+        fingerChoice: choiceState.choice,
+        choiceStartedAt: choiceState.startedAt,
+        choiceCommitted: true,
+      };
     }
 
     if (!this.active) {
@@ -87,10 +137,10 @@ export class GesturePinchDetector {
             startedAt: this.candidateStartedAt,
           };
         }
-        return this.state(frame, normalizedDistance, confidence, cooldownReady ? "pinch_candidate" : "cooldown");
+        return this.state(frame, normalizedDistance, confidence, choiceState ? "choice_candidate" : cooldownReady ? "pinch_candidate" : "cooldown");
       }
       this.candidateStartedAt = null;
-      return this.state(frame, normalizedDistance, confidence);
+      return this.state(frame, normalizedDistance, confidence, choiceState ? "choice_candidate" : undefined);
     }
 
     if (normalizedDistance > options.pinchReleaseThreshold) {
@@ -107,7 +157,7 @@ export class GesturePinchDetector {
     } else {
       this.releaseStartedAt = null;
     }
-    return { ...this.state(frame, normalizedDistance, confidence), active: true };
+    return { ...this.state(frame, normalizedDistance, confidence, choiceState ? "choice_candidate" : undefined), active: true };
   }
 
   reset() {
@@ -115,6 +165,9 @@ export class GesturePinchDetector {
     this.candidateStartedAt = null;
     this.releaseStartedAt = null;
     this.lastTriggeredAt = -Infinity;
+    this.resetChoice();
+    this.swipeSamples = [];
+    this.lastSwipeCommittedAt = -Infinity;
   }
 
   private state(frame: PinchFrame, normalizedDistance: number, confidence: number, reason?: string): PinchState {
@@ -125,8 +178,73 @@ export class GesturePinchDetector {
       normalizedDistance,
       hand: frame.handedness ?? "Unknown",
       ...(this.candidateStartedAt !== null ? { startedAt: this.candidateStartedAt } : {}),
+      ...(this.choiceCandidate !== null ? { fingerChoice: this.choiceCandidate, choiceStartedAt: this.choiceStartedAt ?? undefined } : {}),
       ...(reason ? { reason } : {}),
     };
+  }
+
+  private updateFingerChoice(
+    landmarks: HandLandmark[],
+    normalizedDistance: number,
+    now: number,
+    options: Required<PinchDetectorOptions>,
+  ): { choice: FingerChoice; startedAt: number; committed: boolean } | null {
+    const choice = fingerChoiceFromLandmarks(landmarks);
+    const pinchHeld = !options.choiceRequiresPinch || normalizedDistance < options.pinchReleaseThreshold;
+    if (!choice || !pinchHeld) {
+      this.resetChoice();
+      return null;
+    }
+    if (this.choiceCandidate !== choice) {
+      this.choiceCandidate = choice;
+      this.choiceStartedAt = now;
+      return { choice, startedAt: now, committed: false };
+    }
+    const startedAt = this.choiceStartedAt ?? now;
+    const heldMs = now - startedAt;
+    const cooldownReady = now - this.lastChoiceCommittedAt >= options.choiceCooldownMs;
+    if (heldMs >= options.choiceHoldMs && cooldownReady) {
+      this.lastChoiceCommittedAt = now;
+      this.resetChoice();
+      return { choice, startedAt, committed: true };
+    }
+    return { choice, startedAt, committed: false };
+  }
+
+  private detectApprovalSwipe(
+    frame: PinchFrame,
+    now: number,
+    options: Required<PinchDetectorOptions>,
+  ): ApprovalGesture | null {
+    if (!isIndexOnlyPose(frame.landmarks)) {
+      this.swipeSamples = [];
+      return null;
+    }
+    const indexTip = frame.landmarks[8];
+    if (!indexTip) return null;
+    this.swipeSamples = [
+      ...this.swipeSamples.filter((sample) => now - sample.now <= options.swipeWindowMs),
+      { x: indexTip.x, y: indexTip.y, now },
+    ];
+    if (now - this.lastSwipeCommittedAt < options.swipeCooldownMs || this.swipeSamples.length < 2) {
+      return null;
+    }
+    const first = this.swipeSamples[0];
+    const dx = indexTip.x - first.x;
+    const dy = indexTip.y - first.y;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+    const dominantX = absX >= options.swipeMinDistance && absX >= absY * options.swipeDominanceRatio;
+    const dominantY = absY >= options.swipeMinDistance && absY >= absX * options.swipeDominanceRatio;
+    if (!dominantX && !dominantY) return null;
+    this.lastSwipeCommittedAt = now;
+    this.swipeSamples = [];
+    return dominantX ? "reject" : "approve";
+  }
+
+  private resetChoice() {
+    this.choiceCandidate = null;
+    this.choiceStartedAt = null;
   }
 }
 
@@ -149,6 +267,38 @@ export function normalizedThumbIndexDistance(landmarks: HandLandmark[]): number 
   const handScale = distance(wrist, middleMcp);
   if (handScale <= 0) return Number.POSITIVE_INFINITY;
   return pinchDistance / handScale;
+}
+
+export function fingerChoiceFromLandmarks(landmarks: HandLandmark[]): FingerChoice | null {
+  const count = extendedFingerCount(landmarks);
+  if (count === 2 || count === 3 || count === 4) return count;
+  return null;
+}
+
+export function isIndexOnlyPose(landmarks: HandLandmark[]): boolean {
+  return isFingerExtended(landmarks, "index")
+    && !isFingerExtended(landmarks, "middle")
+    && !isFingerExtended(landmarks, "ring")
+    && !isFingerExtended(landmarks, "pinky");
+}
+
+export function extendedFingerCount(landmarks: HandLandmark[]): number {
+  return (["index", "middle", "ring", "pinky"] as const)
+    .filter((finger) => isFingerExtended(landmarks, finger))
+    .length;
+}
+
+function isFingerExtended(landmarks: HandLandmark[], finger: "index" | "middle" | "ring" | "pinky"): boolean {
+  const indices = {
+    index: [8, 6],
+    middle: [12, 10],
+    ring: [16, 14],
+    pinky: [20, 18],
+  }[finger];
+  const tip = landmarks[indices[0]];
+  const pip = landmarks[indices[1]];
+  if (!tip || !pip) return false;
+  return tip.y < pip.y - 0.035;
 }
 
 function distance(left: HandLandmark, right: HandLandmark): number {

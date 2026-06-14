@@ -24,6 +24,11 @@ TRIGGER_ALIASES = {
     "voice_wake": "voice_wake",
     "pinch": "pinch",
     "gesture_pinch": "pinch",
+    "finger_choice": "gesture_choice",
+    "gesture_choice": "gesture_choice",
+    "choice": "gesture_choice",
+    "approval_gesture": "approval_gesture",
+    "gesture_approval": "approval_gesture",
     "external_hook": "external_hook",
 }
 

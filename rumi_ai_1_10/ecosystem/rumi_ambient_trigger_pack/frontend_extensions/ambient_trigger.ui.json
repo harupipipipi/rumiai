@@ -49,6 +49,17 @@
       "capture_mode": "record_while_thumb_index_touch",
       "dispatch_on": "pinch_release",
       "persist_recording": false
+    },
+    "gesture_choice": {
+      "choices": [2, 3, 4],
+      "hold_ms": 3000,
+      "requires_audio": false,
+      "profile_mutation": false
+    },
+    "approval_gesture": {
+      "reject": "index_only_horizontal_swipe_or_choice_2",
+      "approve": "index_only_vertical_swipe_or_choice_3",
+      "requires_thumb_index_contact": false
     }
   }
 }

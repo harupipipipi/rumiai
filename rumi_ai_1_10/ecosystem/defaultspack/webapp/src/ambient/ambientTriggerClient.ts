@@ -47,15 +47,17 @@ export type AmbientStatus = {
 
 export type AmbientEventPayload = {
   source: "microphone" | "camera" | "hook" | string;
-  trigger: "voice_wake" | "pinch" | "external_hook" | string;
+  trigger: "voice_wake" | "pinch" | "gesture_choice" | "approval_gesture" | "external_hook" | string;
   event_id?: string;
   confidence?: number;
   duration_ms?: number;
-  mode?: "open_input" | "focus_composer" | "enroll_wake_voice" | "dispatch" | string;
+  mode?: "open_input" | "focus_composer" | "enroll_wake_voice" | "dispatch" | "choice_response" | "swipe_approve" | "swipe_reject" | string;
   action_id?: "chat.message" | "run.instruction" | "agent.delegate" | "defaults.console.input" | string;
   conversation_id?: string;
   input_text?: string;
   next_action?: string;
+  choice?: 2 | 3 | 4;
+  decision?: "approve" | "reject" | string;
   metadata?: Record<string, unknown>;
   audio_embedding?: number[];
   samples?: number[];
@@ -108,6 +110,13 @@ export const ambientTriggerClient = {
     return requestJson<AmbientStatus>("/api/ambient/permissions/revoke", {
       method: "POST",
       body: JSON.stringify({ permission_id: permissionId }),
+    });
+  },
+
+  checkOsPermissions(statuses: Record<AmbientPermissionId, string>) {
+    return requestJson<AmbientStatus>("/api/ambient/permissions/check", {
+      method: "POST",
+      body: JSON.stringify({ statuses }),
     });
   },
 

@@ -511,6 +511,12 @@
       "description": "Revoke a Rumi ambient permission while keeping OS permission status separate"
     },
     {
+      "method": "POST",
+      "path": "/api/ambient/permissions/check",
+      "flow_id": "transport_direct",
+      "description": "Record observed OS microphone and camera permission state without changing Rumi permissions"
+    },
+    {
       "method": "GET",
       "path": "/api/agent/companies",
       "flow_id": "company_workspace",
