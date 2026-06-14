@@ -162,6 +162,71 @@ def test_authority_approve_once_consumes_token(tmp_path, monkeypatch):
     assert second.approval_required is True
 
 
+def test_authority_approve_once_can_bundle_model_and_api_key_tokens(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    model_resource = {"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"}
+    api_resource = {"kind": "api_key", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"}
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=model_resource,
+        conversation_id="c1",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="once",
+        related_permissions=["api_key.use"],
+    )
+    related = approval["related_approvals"][0]
+
+    model_allowed = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=model_resource,
+        conversation_id="c1",
+        request_id=approval["request_id"],
+        approval_token=approval["token"],
+    )
+    api_allowed = service.check(
+        principal_id="conversation:c1",
+        permission_id="api_key.use",
+        resource=api_resource,
+        conversation_id="c1",
+        request_id=related["request_id"],
+        approval_token=related["token"],
+    )
+
+    assert approval["permission_id"] == "model.invoke"
+    assert related["permission_id"] == "api_key.use"
+    assert related["resource"]["kind"] == "api_key"
+    assert model_allowed.allowed is True
+    assert api_allowed.allowed is True
+
+
+def test_authority_persistent_approval_can_bundle_model_and_api_key_grants(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    resource = {"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"}
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=resource,
+        conversation_id="c1",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="conversation",
+        related_permissions=["api_key.use"],
+    )
+    grant = grants.get_grant("conversation:c1")
+
+    assert approval["success"] is True
+    assert grant is not None
+    assert "model.invoke" in grant.permissions
+    assert "api_key.use" in grant.permissions
+
+
 def test_authority_approve_once_ignores_stream_transport_flag(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     resource = {

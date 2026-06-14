@@ -132,6 +132,7 @@ class AuthorityService:
         scope: str = "once",
         config: dict[str, Any] | None = None,
         expires_in_seconds: int | None = None,
+        related_permissions: list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         request = self._request_store.get_request(request_id)
         if request is None:
@@ -147,6 +148,11 @@ class AuthorityService:
         if scope == "once":
             token = self._request_store.issue_one_shot(request, expires_in_seconds=expires)
             self._request_store.set_request_status(request.request_id, "approved")
+            related = self._approve_related_once(
+                request,
+                related_permissions=related_permissions,
+                expires_in_seconds=expires,
+            )
             return {
                 "success": True,
                 "request_id": request.request_id,
@@ -154,6 +160,8 @@ class AuthorityService:
                 "scope": "once",
                 "token": token["token"],
                 "expires_at": token["expires_at"],
+                "permission_id": request.permission_id,
+                "related_approvals": related,
             }
 
         grant_principal = self._principal_for_scope(request, scope)
@@ -164,6 +172,13 @@ class AuthorityService:
         if manager is None or not callable(getattr(manager, "grant_permission", None)):
             return {"success": False, "error": "CapabilityGrantManager unavailable", "status_code": 500}
         manager.grant_permission(grant_principal, request.permission_id, grant_config)
+        related = self._approve_related_persistent(
+            request,
+            grant_principal=grant_principal,
+            scope=scope,
+            config=config,
+            related_permissions=related_permissions,
+        )
         self._request_store.set_request_status(request.request_id, "approved")
         self._request_store.audit(
             "authority_request_approved",
@@ -183,7 +198,118 @@ class AuthorityService:
             "principal_id": grant_principal,
             "permission_id": request.permission_id,
             "config": grant_config,
+            "related_approvals": related,
         }
+
+    def _normalized_related_permissions(
+        self,
+        request: AuthorityRequest,
+        related_permissions: list[str] | tuple[str, ...] | None,
+    ) -> list[str]:
+        if request.permission_id not in {"model.invoke", "api_key.use"}:
+            return []
+        permissions: list[str] = []
+        for permission_id in related_permissions or ():
+            normalized = str(permission_id or "").strip()
+            if normalized == request.permission_id:
+                continue
+            if normalized not in {"model.invoke", "api_key.use"}:
+                continue
+            if normalized not in AUTHORITY_PERMISSION_IDS:
+                continue
+            if normalized not in permissions:
+                permissions.append(normalized)
+        return permissions
+
+    @staticmethod
+    def _resource_for_related_permission(resource: dict[str, Any], permission_id: str) -> dict[str, Any]:
+        related = dict(resource or {})
+        if permission_id == "model.invoke":
+            related["kind"] = "model"
+        elif permission_id == "api_key.use":
+            related["kind"] = "api_key"
+        return related
+
+    def _create_related_request(self, request: AuthorityRequest, permission_id: str) -> AuthorityRequest:
+        resource = self._resource_for_related_permission(request.resource, permission_id)
+        return self._request_store.create_request(
+            principal_id=request.principal_id,
+            permission_id=permission_id,
+            resource=resource,
+            reason=f"Bundled with {request.permission_id} approval",
+            risk_level=self._risk_level(permission_id, resource),
+            conversation_id=request.conversation_id,
+            profile_id=request.profile_id,
+            node_id=request.node_id,
+            graph_id=request.graph_id,
+        )
+
+    def _approve_related_once(
+        self,
+        request: AuthorityRequest,
+        *,
+        related_permissions: list[str] | tuple[str, ...] | None,
+        expires_in_seconds: int,
+    ) -> list[dict[str, Any]]:
+        approvals: list[dict[str, Any]] = []
+        for permission_id in self._normalized_related_permissions(request, related_permissions):
+            related_request = self._create_related_request(request, permission_id)
+            token = self._request_store.issue_one_shot(related_request, expires_in_seconds=expires_in_seconds)
+            self._request_store.set_request_status(related_request.request_id, "approved")
+            approvals.append(
+                {
+                    "request_id": related_request.request_id,
+                    "approved": True,
+                    "scope": "once",
+                    "token": token["token"],
+                    "expires_at": token["expires_at"],
+                    "permission_id": permission_id,
+                    "resource": related_request.resource,
+                }
+            )
+        return approvals
+
+    def _approve_related_persistent(
+        self,
+        request: AuthorityRequest,
+        *,
+        grant_principal: str,
+        scope: str,
+        config: dict[str, Any] | None,
+        related_permissions: list[str] | tuple[str, ...] | None,
+    ) -> list[dict[str, Any]]:
+        manager = self._capability_grant_manager
+        if manager is None or not callable(getattr(manager, "grant_permission", None)):
+            return []
+        approvals: list[dict[str, Any]] = []
+        for permission_id in self._normalized_related_permissions(request, related_permissions):
+            related_request = self._create_related_request(request, permission_id)
+            grant_config = self._grant_config_for_persistent_approval(related_request.resource, config)
+            manager.grant_permission(grant_principal, permission_id, grant_config)
+            self._request_store.set_request_status(related_request.request_id, "approved")
+            self._request_store.audit(
+                "authority_request_approved",
+                {
+                    "request_id": related_request.request_id,
+                    "scope": scope,
+                    "principal_id": grant_principal,
+                    "permission_id": permission_id,
+                    "resource_hash": self._request_store.resource_hash(related_request.resource),
+                    "bundled_with_request_id": request.request_id,
+                },
+            )
+            approvals.append(
+                {
+                    "request_id": related_request.request_id,
+                    "approved": True,
+                    "scope": scope,
+                    "principal_id": grant_principal,
+                    "permission_id": permission_id,
+                    "config": grant_config,
+                    "resource": related_request.resource,
+                }
+            )
+        return approvals
 
     def deny_request(self, request_id: str, *, reason: str = "", persist: bool = False) -> dict[str, Any]:
         request = self._request_store.get_request(request_id)

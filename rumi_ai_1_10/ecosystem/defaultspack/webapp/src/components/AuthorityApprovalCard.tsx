@@ -1,5 +1,5 @@
 import { CheckCircle2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { AuthorityApproval } from "../lib/authorityApproval";
 import { cn } from "../lib/cn";
@@ -19,10 +19,15 @@ const AUTHORITY_SCOPE_OPTIONS: Array<[AuthorityApprovalScope, string]> = [
   ["profile", "Profile"],
   ["node", "Node"],
 ];
+const APPROVAL_CONFIRMATION_MIN_MS = 1200;
 
 export function AuthorityApprovalCard({ approval, title, onApprove, onDeny }: AuthorityApprovalCardProps) {
   const approvingRef = useRef(false);
+  const mountedRef = useRef(true);
   const [approvingScope, setApprovingScope] = useState<AuthorityApprovalScope | null>(null);
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
   const scopeOptions = AUTHORITY_SCOPE_OPTIONS.filter(([scope]) => {
     if (scope === "node") return approval.principalId.includes("__node:");
     if (scope === "profile") return approval.principalId.startsWith("profile:");
@@ -32,10 +37,14 @@ export function AuthorityApprovalCard({ approval, title, onApprove, onDeny }: Au
   const approve = (scope: AuthorityApprovalScope) => {
     if (approvingRef.current) return;
     approvingRef.current = true;
+    const startedAt = Date.now();
     setApprovingScope(scope);
     void Promise.resolve().then(() => onApprove(scope)).finally(() => {
-      approvingRef.current = false;
-      setApprovingScope(null);
+      const remainingMs = Math.max(0, APPROVAL_CONFIRMATION_MIN_MS - (Date.now() - startedAt));
+      window.setTimeout(() => {
+        approvingRef.current = false;
+        if (mountedRef.current) setApprovingScope(null);
+      }, remainingMs);
     });
   };
 

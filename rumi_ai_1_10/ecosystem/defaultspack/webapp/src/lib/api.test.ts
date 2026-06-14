@@ -377,6 +377,36 @@ test("sendMessage preserves authority followup display metadata", async () => {
   assert.equal(requestBody?.message?.metadata?.runtime_content, "continue with approved authority");
 });
 
+test("approveAuthorityApproval serializes bundled related permissions", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        request_id: "approval-1",
+        approved: true,
+        scope: "once",
+        token: "token-1",
+        permission_id: "model.invoke",
+        related_approvals: [],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.approveAuthorityApproval("approval-1", {
+      scope: "once",
+      related_permissions: ["api_key.use"],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody?.related_permissions, ["api_key.use"]);
+});
+
 test("searchConversations serializes spotlight search filters", async () => {
   let requestUrl = "";
   let requestBody: any = null;

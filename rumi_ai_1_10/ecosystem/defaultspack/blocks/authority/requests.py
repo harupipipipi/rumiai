@@ -45,11 +45,15 @@ def run(input_data, context=None):
 
     if action == "approve":
         config = payload.get("config") if isinstance(payload.get("config"), dict) else None
+        related_permissions = payload.get("related_permissions")
+        if not isinstance(related_permissions, list):
+            related_permissions = []
         result = service.approve_request(
             request_id,
             scope=str(payload.get("scope") or "once").strip() or "once",
             config=config,
             expires_in_seconds=_optional_int(payload.get("expires_in_seconds")),
+            related_permissions=[str(item) for item in related_permissions],
         )
         if not result.get("success"):
             return _failed(result, "AUTHORITY_APPROVAL_FAILED")

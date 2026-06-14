@@ -173,6 +173,8 @@ export type AuthorityApprovalDecision = {
   principal_id?: string;
   permission_id?: string;
   config?: Record<string, unknown>;
+  resource?: Record<string, unknown>;
+  related_approvals?: AuthorityApprovalDecision[];
 };
 
 export type CodingCheckpoint = {
@@ -2728,6 +2730,7 @@ export const api = {
       scope?: "once" | "conversation" | "profile" | "node" | "global";
       config?: Record<string, unknown>;
       expires_in_seconds?: number;
+      related_permissions?: string[];
     },
   ) {
     return request<AuthorityApprovalDecision>(`/api/authority/requests/${encodeURIComponent(requestId)}/approve`, {
@@ -2736,6 +2739,7 @@ export const api = {
         scope: options?.scope ?? "once",
         config: options?.config,
         expires_in_seconds: options?.expires_in_seconds,
+        related_permissions: options?.related_permissions,
       }),
     });
   },

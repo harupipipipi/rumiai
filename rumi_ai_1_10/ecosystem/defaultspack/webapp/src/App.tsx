@@ -19,7 +19,7 @@ import {
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, defaultspackApiFetch, type AuthorityApprovalDecision, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { authorityApprovalRuntimeContent, pendingAuthorityApproval, type AuthorityApproval } from "./lib/authorityApproval";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
@@ -1602,10 +1602,27 @@ function authorityApprovalTokenFromFollowup(value: unknown): AuthorityApprovalTo
   };
 }
 
+function authorityApprovalTokenFromDecision(
+  value: AuthorityApprovalDecision | undefined,
+  fallbackResource?: Record<string, unknown>,
+): AuthorityApprovalTokenRecord | null {
+  if (!value) return null;
+  const approvalToken = typeof value.token === "string" ? value.token.trim() : "";
+  const requestId = typeof value.request_id === "string" ? value.request_id.trim() : "";
+  const permissionId = typeof value.permission_id === "string" ? value.permission_id.trim() : "";
+  if (!approvalToken || !requestId || !["model.invoke", "api_key.use"].includes(permissionId)) return null;
+  return {
+    approval_token: approvalToken,
+    request_id: requestId,
+    permission_id: permissionId,
+    ...(isRecord(value.resource) ? { resource: value.resource } : fallbackResource ? { resource: fallbackResource } : {}),
+  };
+}
+
 function authorityApprovalTokensForFollowup(
   messages: ChatUiMessage[],
   approval: AuthorityApproval,
-  current: AuthorityApprovalTokenRecord | null,
+  current: AuthorityApprovalTokenRecord | AuthorityApprovalTokenRecord[] | null,
 ): AuthorityApprovalTokenRecord[] {
   const resourceKey = authorityApprovalResourceKey(approval.resource);
   const byPermission = new Map<string, AuthorityApprovalTokenRecord>();
@@ -1628,8 +1645,18 @@ function authorityApprovalTokensForFollowup(
     }
     addToken(authorityApprovalTokenFromFollowup(followup));
   }
-  addToken(current);
+  if (Array.isArray(current)) {
+    current.forEach(addToken);
+  } else {
+    addToken(current);
+  }
   return Array.from(byPermission.values());
+}
+
+function authorityApprovalRelatedPermissions(approval: AuthorityApproval): string[] {
+  if (approval.permissionId === "model.invoke") return ["api_key.use"];
+  if (approval.permissionId === "api_key.use") return ["model.invoke"];
+  return [];
 }
 
 function authorityApprovalTitle(approval: AuthorityApproval): string {
@@ -4260,27 +4287,23 @@ export default function App() {
     rememberPendingRequest({
       conversationId: activeConversationId,
       startedAt: Date.now(),
-      status: "モデル/API 承認をAIへ伝えています",
+      status: "モデル/API を許可しました。応答を再開しています",
       toolNames: [],
     });
     try {
       const decision = await api.approveAuthorityApproval(authorityApproval.requestId, {
         scope,
         config: authorityApprovalConfig(authorityApproval),
+        related_permissions: authorityApprovalRelatedPermissions(authorityApproval),
       });
       if (!decision.approved) {
         throw new Error("authority approval failed");
       }
-      const currentApprovalToken = decision.token ? {
-        approval_token: decision.token,
-        request_id: authorityApproval.requestId,
-        permission_id: authorityApproval.permissionId,
-        resource: authorityApproval.resource,
-      } : null;
-      const approvalTokens = authorityApprovalTokensForFollowup(messages, authorityApproval, currentApprovalToken);
-      setSettledRuntimeApprovalIds((ids) => (
-        ids.includes(authorityApproval.requestId) ? ids : [...ids, authorityApproval.requestId].slice(-50)
-      ));
+      const currentApprovalTokens = [
+        authorityApprovalTokenFromDecision(decision, authorityApproval.resource),
+        ...(decision.related_approvals ?? []).map((item) => authorityApprovalTokenFromDecision(item)),
+      ].filter((item): item is AuthorityApprovalTokenRecord => Boolean(item));
+      const approvalTokens = authorityApprovalTokensForFollowup(messages, authorityApproval, currentApprovalTokens);
       await api.sendMessage(activeConversationId, "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。", {
         metadata: {
           mode,
@@ -4299,6 +4322,13 @@ export default function App() {
           runtime_content: authorityApprovalRuntimeContent(authorityApproval, decision.token),
         },
       });
+      const approvedRequestIds = [
+        authorityApproval.requestId,
+        ...(decision.related_approvals ?? []).map((item) => item.request_id).filter(Boolean),
+      ];
+      setSettledRuntimeApprovalIds((ids) => (
+        [...ids, ...approvedRequestIds.filter((id) => !ids.includes(id))].slice(-50)
+      ));
       forgetPendingRequest(activeConversationId);
       replaceChatIdInUrl(activeConversationId, false);
       await loadConversation(activeConversationId, false);
