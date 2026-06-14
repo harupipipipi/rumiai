@@ -116,7 +116,7 @@ def test_browser_companion_controller_round_trip_uses_active_tab_and_saves_captu
     assert Path(result["path"]).exists()
 
 
-def test_browser_companion_controller_marks_dom_actions_parallel_safe(tmp_path):
+def test_browser_companion_controller_marks_dom_actions_foreground_not_parallel_safe(tmp_path):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion import BrowserCompanionController
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
 
@@ -155,8 +155,8 @@ def test_browser_companion_controller_marks_dom_actions_parallel_safe(tmp_path):
     worker.join(timeout=1.0)
 
     assert result["is_error"] is False
-    assert result["requires_foreground"] is False
-    assert result["can_parallel_user_work"] is True
+    assert result["requires_foreground"] is True
+    assert result["can_parallel_user_work"] is False
 
 
 def test_browser_companion_extension_focus_semantics_are_explicit():
@@ -170,12 +170,18 @@ def test_browser_companion_extension_focus_semantics_are_explicit():
     capture_body = background[
         background.index("async function captureVisibleTab") : background.index("async function captureDomSnapshot")
     ]
+    navigate_body = background[
+        background.index("async function navigateTab") : background.index("async function captureVisibleTab")
+    ]
 
     assert "chrome.tabs.update(tabId, { url: payload.url })" in background
     assert "return sendElementCommand(action, payload);" in background
     assert "chrome.tabs.sendMessage(resolvedTabId, message)" in send_to_tab_body
     assert "chrome.tabs.update" not in send_element_body
     assert "chrome.windows.update" not in send_element_body
+    assert "requires_foreground: true" in navigate_body
+    assert "can_parallel_user_work: false" in navigate_body
+    assert "actionResultSemantics(action, result)" in send_element_body
     assert "requires_foreground: true" in capture_body
     assert "can_parallel_user_work: false" in capture_body
 
@@ -201,7 +207,18 @@ def test_browser_companion_extension_semantic_dom_and_highlight_contract():
         "nearby_text:",
         "action_hints:",
         "recognition_confidence:",
+        "value_redacted:",
+        "selector_hint_unique:",
+        "selector_hint_confidence:",
+        "selector_hint_error:",
         "xpath_hint:",
+        "REDACTED_VALUE",
+        "function validateActionTarget",
+        "function includeValuesAllowed",
+        "querySelectorAll(command.selector)",
+        "hasActionApprovalEvidence(command)",
+        "isSubmitLikeClickTarget",
+        "cssEscape(element.id)",
         "function highlightElement",
         "function clearHighlights",
     ):

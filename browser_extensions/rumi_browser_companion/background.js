@@ -314,15 +314,19 @@ function actionResultSemantics(action, result) {
     return { requires_foreground: true, can_parallel_user_work: false };
   }
   if (
-    action === "browser.tabs" ||
     action === "page.navigate" ||
-    action === "page.snapshot" ||
     action === "page.click" ||
     action === "page.type" ||
     action === "page.press" ||
     action === "page.scroll" ||
+    action === "page.highlight"
+  ) {
+    return { requires_foreground: true, can_parallel_user_work: false };
+  }
+  if (
+    action === "browser.tabs" ||
+    action === "page.snapshot" ||
     action === "page.extract" ||
-    action === "page.highlight" ||
     action === "page.clear_highlight"
   ) {
     return { requires_foreground: false, can_parallel_user_work: true };
@@ -392,8 +396,8 @@ async function navigateTab(payload) {
     tab: tabSummary(tab),
     active_tab_id: tab.id,
     url: tab.url || payload.url,
-    requires_foreground: false,
-    can_parallel_user_work: true
+    requires_foreground: true,
+    can_parallel_user_work: false
   };
 }
 
@@ -449,6 +453,10 @@ async function captureDomSnapshot(payload) {
   } else if (payload.includeSemantics !== undefined) {
     snapshotOptions.includeSemantics = Boolean(payload.includeSemantics);
   }
+  if (payload.include_values === true && payload.include_values_approved === true) {
+    snapshotOptions.include_values = true;
+    snapshotOptions.include_values_approved = true;
+  }
 
   const snapshotRequest = {
     type: "rumi:dom-snapshot",
@@ -490,8 +498,7 @@ async function sendElementCommand(action, payload) {
     tab: tabSummary(tab),
     active_tab_id: tab.id,
     url: tab.url || "",
-    requires_foreground: false,
-    can_parallel_user_work: true
+    ...actionResultSemantics(action, result)
   };
 }
 

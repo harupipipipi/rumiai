@@ -190,6 +190,11 @@ class BrowserCompanionController:
             }
         self._bridge.set_active_client(str(client.get("client_id") or ""))
         remote_payload = self._remote_payload(payload)
+        if self._include_values_allowed(remote_action, payload, context):
+            remote_payload["include_values"] = True
+            remote_payload["include_values_approved"] = True
+        if remote_action in {"page.click", "page.press"} and self._context_allows_value_inclusion(context):
+            remote_payload["approval_evidence"] = "tool_server_approval"
         if remote_action.startswith("page.") and remote_payload.get("tab_id") is None:
             active_tab_id = client.get("active_tab_id")
             if active_tab_id is not None:
@@ -269,15 +274,21 @@ class BrowserCompanionController:
                 "can_parallel_user_work": False,
             }
         if remote_action in {
-            "browser.tabs",
             "page.navigate",
-            "page.snapshot",
             "page.click",
             "page.type",
             "page.press",
             "page.scroll",
-            "page.extract",
             "page.highlight",
+        }:
+            return {
+                "requires_foreground": True,
+                "can_parallel_user_work": False,
+            }
+        if remote_action in {
+            "browser.tabs",
+            "page.snapshot",
+            "page.extract",
             "page.clear_highlight",
         }:
             return {
@@ -332,6 +343,35 @@ class BrowserCompanionController:
             "include_semantics",
         }
         return {key: value for key, value in payload.items() if key in allowed and value is not None}
+
+    @classmethod
+    def _include_values_allowed(cls, remote_action: str, payload: dict[str, Any], context: dict[str, Any]) -> bool:
+        if remote_action not in {"page.snapshot", "page.extract"}:
+            return False
+        if not cls._truthy(payload.get("include_values")):
+            return False
+        return cls._context_allows_value_inclusion(context)
+
+    @staticmethod
+    def _truthy(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on", "allow", "allowed"}
+        return False
+
+    @classmethod
+    def _context_allows_value_inclusion(cls, context: dict[str, Any]) -> bool:
+        if not isinstance(context, dict):
+            return False
+        if context.get("_tool_server_approval_token_valid") is True or context.get("_tool_server_approved") is True:
+            return True
+        policy = context.get("profile_policy")
+        if isinstance(policy, dict) and cls._truthy(policy.get("yolo_mode")):
+            return True
+        return cls._truthy(context.get("yolo_mode"))
 
     @staticmethod
     def _remote_result_contains_capture(result: dict[str, Any]) -> bool:
