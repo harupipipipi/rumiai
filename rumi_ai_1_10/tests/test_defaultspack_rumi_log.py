@@ -86,10 +86,13 @@ def test_rumi_log_seed_plan_is_idempotent(tmp_path):
     assert ".rumi" not in _porcelain(tmp_path)
 
 
-def test_rumi_log_block_lists_and_appends(tmp_path):
+def test_rumi_log_block_lists_and_appends(tmp_path, monkeypatch):
     from blocks.coding.rumi_log import run as rumi_log_run
+    from domain.coding.workspace_store import WorkspaceStore
 
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
     _init_git_repo(tmp_path)
+    WorkspaceStore().create(tmp_path, workspace_id="rumi-log-test", trusted=True)
     seeded = rumi_log_run(
         {"workspace_root": str(tmp_path), "action": "seed_local_plan"},
         {},
@@ -116,3 +119,30 @@ def test_rumi_log_block_lists_and_appends(tmp_path):
     assert listed["status"] == "ok", listed
     assert listed["data"]["summary"]["total"] == 15
     assert listed["data"]["events"][0]["message"] == "watch commit pair"
+
+
+def test_rumi_log_mutation_rejects_unregistered_raw_workspace_root(tmp_path, monkeypatch):
+    from blocks.coding.rumi_log import run as rumi_log_run
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
+    _init_git_repo(tmp_path)
+
+    seeded = rumi_log_run(
+        {"workspace_root": str(tmp_path), "action": "seed_local_plan"},
+        {},
+    )
+    appended = rumi_log_run(
+        {
+            "workspace_root": str(tmp_path),
+            "action": "append",
+            "kind": "agent.note",
+            "message": "should not write",
+        },
+        {},
+    )
+
+    assert seeded["status"] == "error"
+    assert seeded["error"]["code"] == "WORKSPACE_UNTRUSTED"
+    assert appended["status"] == "error"
+    assert appended["error"]["code"] == "WORKSPACE_UNTRUSTED"
+    assert not (tmp_path / ".rumi").exists()
