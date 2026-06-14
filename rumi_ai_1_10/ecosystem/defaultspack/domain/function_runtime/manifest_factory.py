@@ -395,6 +395,45 @@ AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
 )
 
 
+REMOTE_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "remote_task_create",
+        "Create and optionally dispatch a remote task.",
+        ("remote", "task"),
+        risk="medium",
+        block="blocks.remote.task_create",
+    ),
+    _spec(
+        "remote_task_get",
+        "Get a remote task snapshot.",
+        ("remote", "task"),
+        risk="low",
+        block="blocks.remote.task_get",
+    ),
+    _spec(
+        "remote_task_events",
+        "List remote task timeline events.",
+        ("remote", "task"),
+        risk="low",
+        block="blocks.remote.task_events",
+    ),
+    _spec(
+        "remote_task_cancel",
+        "Cancel a remote task and linked agent runs.",
+        ("remote", "task"),
+        risk="medium",
+        block="blocks.remote.task_cancel",
+    ),
+    _spec(
+        "remote_host_status",
+        "Get remote host readiness and runtime status.",
+        ("remote", "host"),
+        risk="low",
+        block="blocks.remote.host_status",
+    ),
+)
+
+
 DATA_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
     _spec(function_id, description, tags, risk=risk, block=block)
     for function_id, description, tags, risk, block in (
@@ -552,6 +591,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + CONVERSATION_FUNCTIONS
     + CODING_FUNCTIONS
     + AGENT_FUNCTIONS
+    + REMOTE_FUNCTIONS
     + BROWSER_ARTIFACT_FUNCTIONS
     + RECORDING_FUNCTIONS
     + DATA_FUNCTIONS

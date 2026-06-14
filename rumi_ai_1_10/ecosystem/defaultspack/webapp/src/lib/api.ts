@@ -619,6 +619,53 @@ export type CompanyStatusResponse = {
   storage_file?: string;
 };
 
+export type RemoteTaskCreateRequest = {
+  input: string;
+  title?: string;
+  company_id?: string;
+  target_agent_ids?: string[];
+  priority?: "low" | "normal" | "high" | string;
+  dispatch?: boolean;
+  client?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type RemoteTaskSnapshot = {
+  remote_task_id: string;
+  company_id: string;
+  task_id: string;
+  message_id?: string;
+  thread_id?: string;
+  state: string;
+  task?: Record<string, unknown>;
+  routes?: Array<Record<string, unknown>>;
+  run_links?: Array<Record<string, unknown>>;
+  agent_runs?: Array<Record<string, unknown>>;
+  inbox?: Array<Record<string, unknown>>;
+  waiting_approvals?: Array<Record<string, unknown>>;
+  updated_at?: string;
+  next_poll_ms?: number;
+};
+
+export type RemoteTaskEvent = {
+  cursor: string;
+  type: string;
+  message?: string;
+  task_id?: string;
+  run_id?: string;
+  agent_id?: string;
+  status?: string;
+  created_at?: string;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type RemoteTaskEventsResponse = {
+  events: RemoteTaskEvent[];
+  next_cursor?: string;
+  next_poll_ms?: number;
+};
+
 export type P2PSettings = {
   enabled?: boolean;
   bind_host?: string;
@@ -1544,6 +1591,35 @@ function withQuery(path: string, params?: Record<string, unknown>): string {
   return suffix ? `${path}?${suffix}` : path;
 }
 
+export async function createRemoteTask(input: RemoteTaskCreateRequest): Promise<RemoteTaskSnapshot> {
+  return request<RemoteTaskSnapshot>("/api/remote/tasks", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getRemoteTask(taskId: string): Promise<RemoteTaskSnapshot> {
+  return request<RemoteTaskSnapshot>(`/api/remote/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
+}
+
+export async function listRemoteTaskEvents(taskId: string, after?: string): Promise<RemoteTaskEventsResponse> {
+  return request<RemoteTaskEventsResponse>(
+    withQuery(`/api/remote/tasks/${encodeURIComponent(taskId)}/events`, { after }),
+    { cache: "no-store" },
+  );
+}
+
+export async function cancelRemoteTask(taskId: string, reason?: string): Promise<RemoteTaskSnapshot> {
+  return request<RemoteTaskSnapshot>(`/api/remote/tasks/${encodeURIComponent(taskId)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+}
+
+export async function getRemoteHostStatus(): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>("/api/remote/host/status", { cache: "no-store" });
+}
+
 export function arrayFromRecord<T>(value: Record<string, T> | T[] | undefined | null): T[] {
   if (Array.isArray(value)) return value;
   if (value && typeof value === "object") return Object.values(value);
@@ -2230,6 +2306,16 @@ export const api = {
       { cache: "no-store" },
     );
   },
+
+  createRemoteTask,
+
+  getRemoteTask,
+
+  listRemoteTaskEvents,
+
+  cancelRemoteTask,
+
+  getRemoteHostStatus,
 
   bootstrapCompanyWorkspace(metadata?: Record<string, unknown>, options?: { conversationId?: string | null; scope?: "conversation" | "default" }) {
     return request<{ bootstrapped: boolean; company: CompanyRecord }>("/api/company/bootstrap", {

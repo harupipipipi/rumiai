@@ -1,0 +1,42 @@
+{
+  "function_id": "remote_task_get",
+  "description": "Get a remote task snapshot.",
+  "tags": [
+    "remote",
+    "task"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.remote.task_get",
+    "defaultspack.remote.task_get",
+    "defaults.remote.task.get",
+    "defaultspack.remote.task.get"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.remote.task_get",
+      "default_args": {}
+    }
+  }
+}

@@ -256,6 +256,8 @@ class APIRouteTableMixin:
                     return True
 
                 call_args = dict(body if pass_body and body is not None else {})
+                if pass_query:
+                    call_args.update(dict(query or {}))
                 call_args.update(entry.get("args") or {})
                 param_map = entry.get("path_param_map") or {}
                 if param_map:
@@ -288,8 +290,13 @@ class APIRouteTableMixin:
                         status = 400
                     elif error_type == "rate_limited":
                         status = 429
+                    error_value = (
+                        "Forbidden"
+                        if status == 403
+                        else str(getattr(response, "error", None) or _SAFE_ERROR_MSG)
+                    )
                     self._send_response(
-                        APIResponse(False, error=str(getattr(response, "error", None) or _SAFE_ERROR_MSG)),
+                        APIResponse(False, error=error_value),
                         status,
                     )
                     return True
@@ -310,6 +317,8 @@ class APIRouteTableMixin:
                     args.append(dict(query or {}))
                 result = handler(*args)
 
+            if entry.get("function_id") and str(entry.get("function_id") or "").startswith("remote_"):
+                result = self._unwrap_defaultspack_function_envelope(result)
             sse_events = self._sse_events_from_result(result)
             if sse_events is not None:
                 self._send_sse(sse_events)

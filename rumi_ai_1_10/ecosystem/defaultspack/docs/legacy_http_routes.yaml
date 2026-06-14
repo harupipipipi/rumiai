@@ -272,6 +272,41 @@ legacy_routes:
   owner: integrations
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: POST
+  pattern: /api/remote/tasks
+  legacy_block_module: blocks.remote.task_create
+  replacement_function_id: remote_task_create
+  owner: remote
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/remote/tasks/{task_id}
+  legacy_block_module: blocks.remote.task_get
+  replacement_function_id: remote_task_get
+  owner: remote
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/remote/tasks/{task_id}/events
+  legacy_block_module: blocks.remote.task_events
+  replacement_function_id: remote_task_events
+  owner: remote
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/remote/tasks/{task_id}/cancel
+  legacy_block_module: blocks.remote.task_cancel
+  replacement_function_id: remote_task_cancel
+  owner: remote
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/remote/host/status
+  legacy_block_module: blocks.remote.host_status
+  replacement_function_id: remote_host_status
+  owner: remote
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
 - method: GET
   pattern: /api/external/tokens
   legacy_block_module: blocks.external.tokens
