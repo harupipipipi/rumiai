@@ -704,6 +704,8 @@ class PackAPIHandler(
         try:
             if entry.get("function_id"):
                 call_args = dict(body if pass_body and body is not None else {})
+                if pass_query:
+                    call_args.update(dict(query or {}))
                 # Route-level args define the contract for fixed endpoints such as
                 # /approve and /reject, so body values must not override them.
                 call_args.update(entry.get("args") or {})
@@ -738,6 +740,8 @@ class PackAPIHandler(
 
                 result = handler(*args)
 
+            if entry.get("function_id") and str(entry.get("function_id") or "").startswith("remote_"):
+                result = self._unwrap_defaultspack_function_envelope(result)
             sse_events = self._sse_events_from_result(result)
             if sse_events is not None:
                 self._send_sse(sse_events)
@@ -1061,6 +1065,28 @@ class PackAPIHandler(
             )
         else:
             self._send_response(APIResponse(True, data=result))
+
+    @staticmethod
+    def _unwrap_defaultspack_function_envelope(result: Any) -> Any:
+        if not isinstance(result, dict) or "status" not in result:
+            return result
+        status = str(result.get("status") or "").lower()
+        if status == "ok":
+            return result.get("data")
+        if status != "error":
+            return result
+        error_payload = result.get("error")
+        if isinstance(error_payload, dict):
+            code = str(error_payload.get("code") or "ERROR")
+            message = str(error_payload.get("message") or code)
+            error_value: Any = {"code": code, "message": message}
+        else:
+            error_value = str(error_payload or "error")
+        try:
+            status_int = int(result.get("status_code"))
+        except (TypeError, ValueError):
+            status_int = 500
+        return {"error": error_value, "status_code": status_int}
     
     @staticmethod
     def _is_loopback_ip(ip: str) -> bool:
