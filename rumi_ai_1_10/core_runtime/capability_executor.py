@@ -67,6 +67,7 @@ except ImportError:
 # Keep the short and package-qualified import names aliased so order-dependent
 # tests do not see two copies of the same helper module.
 from . import crypto_utils as _loaded_crypto_utils
+from .crypto_utils import compute_file_sha256 as _imported_compute_file_sha256
 
 _crypto_utils = (
     sys.modules.get("rumi_ai_1_10.core_runtime.crypto_utils")
@@ -76,7 +77,7 @@ _crypto_utils = (
 sys.modules["core_runtime.crypto_utils"] = _crypto_utils
 sys.modules["rumi_ai_1_10.core_runtime.crypto_utils"] = _crypto_utils
 # def compute_file_sha256 is provided by crypto_utils and re-exported here.
-compute_file_sha256 = _crypto_utils.compute_file_sha256
+compute_file_sha256 = getattr(_crypto_utils, "compute_file_sha256", _imported_compute_file_sha256)
 from .pack_function_policy import permission_id_for_entry
 from .rate_limit_store import PersistentRateLimitStore
 
