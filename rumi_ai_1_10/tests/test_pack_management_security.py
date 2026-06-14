@@ -20,6 +20,19 @@ class _Approval:
         return self.approved, None if self.approved else self.reason
 
 
+def _write_staging_meta(tmp_path, staging_id, detected_pack_ids, changed_paths=None):
+    staging_dir = tmp_path / "staging" / staging_id
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "staging_id": staging_id,
+        "detected_pack_ids": detected_pack_ids,
+        "changed_paths": list(changed_paths or []),
+        "is_multi_pack": False,
+    }
+    (staging_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    return meta
+
+
 def test_api_routes_skip_unapproved_pack():
     from core_runtime.pack_api_server import PackAPIHandler
 
@@ -291,6 +304,183 @@ def test_defaultspack_management_aliases_do_not_need_runtime_registry(monkeypatc
     assert "requests" in result["data"]
 
 
+def test_extension_manager_rejects_unsafe_request_ids(tmp_path):
+    from ecosystem.defaultspack.backend.pack_extension.extension_manager import ExtensionManager
+
+    manager = ExtensionManager(
+        requests_root=tmp_path / "requests",
+        ecosystem_dir=tmp_path / "ecosystem",
+        backup_root=tmp_path / "backups",
+        staging_root=tmp_path / "staging",
+    )
+
+    with pytest.raises(ValueError):
+        manager._request_path("../outside")
+
+    safe_path = manager._request_path("req_" + "a" * 16)
+    safe_path.resolve().relative_to((tmp_path / "requests").resolve())
+    assert manager.get_request("../outside")["status_code"] == 400
+    assert manager.approve_request("../outside")["status_code"] == 400
+    assert manager.rollback_request("../outside")["status_code"] == 400
+
+
+def test_extension_manager_rejects_mismatched_request_file_id(tmp_path):
+    from ecosystem.defaultspack.backend.pack_extension.extension_manager import ExtensionManager
+
+    requests_root = tmp_path / "requests"
+    requests_root.mkdir()
+    (requests_root / ("req_" + "a" * 16 + ".json")).write_text(
+        json.dumps(
+            {
+                "request_id": "../outside",
+                "mode": "request_extension",
+                "actor": "tester",
+                "target_pack_id": "safe_pack",
+                "notes": "bad",
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager = ExtensionManager(
+        requests_root=requests_root,
+        ecosystem_dir=tmp_path / "ecosystem",
+        backup_root=tmp_path / "backups",
+        staging_root=tmp_path / "staging",
+    )
+
+    result = manager.get_request("req_" + "a" * 16)
+
+    assert result["status_code"] == 404
+
+
+def test_rollback_revalidates_applied_pack_ids(tmp_path):
+    from ecosystem.defaultspack.backend.pack_extension.extension_manager import (
+        ExtensionManager,
+        ExtensionRequest,
+        PatchMode,
+    )
+
+    outside = tmp_path / "escape"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep", encoding="utf-8")
+    manager = ExtensionManager(
+        requests_root=tmp_path / "requests",
+        ecosystem_dir=tmp_path / "ecosystem",
+        backup_root=tmp_path / "backups",
+        staging_root=tmp_path / "staging",
+    )
+    request = ExtensionRequest(
+        request_id="req_" + "a" * 16,
+        mode=PatchMode.REQUEST_EXTENSION,
+        pack_id="tester",
+        target_pack_id="safe_pack",
+        summary="bad rollback",
+        status="applied",
+        applied_pack_ids=["../escape"],
+    )
+    manager._write_request(request)
+
+    result = manager.rollback_request(request.request_id)
+
+    assert result["status_code"] == 400
+    assert "Invalid pack_id" in result["error"]
+    assert (outside / "keep.txt").exists()
+
+
+def test_create_pack_request_snapshots_staging_meta(tmp_path):
+    from ecosystem.defaultspack.backend.pack_extension.extension_manager import (
+        ExtensionManager,
+        PatchMode,
+    )
+
+    staging_id = "a" * 16
+    _write_staging_meta(tmp_path, staging_id, ["nice_pack"], ["ecosystem.json"])
+    manager = ExtensionManager(
+        requests_root=tmp_path / "requests",
+        ecosystem_dir=tmp_path / "ecosystem",
+        backup_root=tmp_path / "backups",
+        staging_root=tmp_path / "staging",
+    )
+
+    created = manager.create_pack_request(
+        mode=PatchMode.REQUEST_EXTENSION.value,
+        staging_id=staging_id,
+        actor="tester",
+        target_pack_id="nice_pack",
+    )
+
+    assert created["request_id"] == "req_" + staging_id
+    assert created["detected_pack_ids"] == ["nice_pack"]
+    assert created["changed_paths"] == ["ecosystem.json"]
+    assert len(created["staging_meta_sha256"]) == 64
+
+
+def test_create_pack_request_rejects_target_pack_mismatch(tmp_path):
+    from ecosystem.defaultspack.backend.pack_extension.extension_manager import (
+        ExtensionManager,
+        PatchMode,
+    )
+
+    staging_id = "a" * 16
+    _write_staging_meta(tmp_path, staging_id, ["nice_pack"])
+    manager = ExtensionManager(
+        requests_root=tmp_path / "requests",
+        ecosystem_dir=tmp_path / "ecosystem",
+        backup_root=tmp_path / "backups",
+        staging_root=tmp_path / "staging",
+    )
+
+    result = manager.create_pack_request(
+        mode=PatchMode.REQUEST_EXTENSION.value,
+        staging_id=staging_id,
+        actor="tester",
+        target_pack_id="evil_pack",
+    )
+
+    assert result["status_code"] == 400
+    assert "target_pack_id" in result["error"]
+
+
+def test_approve_request_rechecks_staging_meta_before_apply(monkeypatch, tmp_path):
+    from ecosystem.defaultspack.backend.pack_extension.extension_manager import (
+        ExtensionManager,
+        PatchMode,
+    )
+
+    staging_id = "a" * 16
+    _write_staging_meta(tmp_path, staging_id, ["nice_pack"])
+    calls = []
+
+    class _Applier:
+        def __init__(self, **kwargs):
+            calls.append(("init", kwargs))
+
+        def apply(self, staging_id, *, mode="replace", actor="api_user"):
+            calls.append(("apply", staging_id, mode, actor))
+            raise AssertionError("apply should not run after staging metadata changes")
+
+    monkeypatch.setattr("core_runtime.pack_applier.PackApplier", _Applier)
+    manager = ExtensionManager(
+        requests_root=tmp_path / "requests",
+        ecosystem_dir=tmp_path / "ecosystem",
+        backup_root=tmp_path / "backups",
+        staging_root=tmp_path / "staging",
+    )
+    created = manager.create_pack_request(
+        mode=PatchMode.REQUEST_EXTENSION.value,
+        staging_id=staging_id,
+        actor="tester",
+        target_pack_id="nice_pack",
+    )
+    _write_staging_meta(tmp_path, staging_id, ["evil_pack"])
+
+    result = manager.approve_request(created["request_id"], reviewer="reviewer")
+
+    assert result["status_code"] == 409
+    assert "staging metadata changed" in result["error"]
+    assert calls == []
+
+
 def test_extension_approval_applies_staging(monkeypatch, tmp_path):
     from ecosystem.defaultspack.backend.pack_extension.extension_manager import (
         ExtensionManager,
@@ -320,6 +510,7 @@ def test_extension_approval_applies_staging(monkeypatch, tmp_path):
             return _ApplyResult()
 
     monkeypatch.setattr("core_runtime.pack_applier.PackApplier", _Applier)
+    _write_staging_meta(tmp_path, "a" * 16, ["new_pack"])
     manager = ExtensionManager(
         requests_root=tmp_path / "requests",
         ecosystem_dir=tmp_path / "ecosystem",
@@ -330,7 +521,7 @@ def test_extension_approval_applies_staging(monkeypatch, tmp_path):
         mode=PatchMode.REQUEST_EXTENSION.value,
         staging_id="a" * 16,
         actor="tester",
-        target_pack_id="defaultspack",
+        target_pack_id="new_pack",
     )
 
     result = manager.approve_request(created["request_id"], reviewer="reviewer")
