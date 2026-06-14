@@ -99,6 +99,37 @@ def test_sandbox_not_found_and_destroyed_errors_are_clear(tmp_path):
     assert click["code"] == "SANDBOX_NOT_RUNNING"
 
 
+def test_sandbox_destroy_marks_error_when_backend_teardown_fails(tmp_path):
+    class Backend:
+        def __init__(self):
+            self.destroyed = []
+
+        def create_session(self, title):
+            return {"session_id": "backend-session-1"}
+
+        def destroy_session(self, sandbox_id):
+            self.destroyed.append(sandbox_id)
+            return {"ok": False, "error": "teardown refused"}
+
+    backend = Backend()
+    manager = SandboxManager(state_dir=tmp_path, gui_backend=backend)
+    sandbox_id = manager.create()["sandbox_id"]
+
+    result = manager.destroy(sandbox_id)
+
+    assert result["ok"] is False
+    assert result["destroyed"] is False
+    assert result["code"] == "SANDBOX_BACKEND_DESTROY_FAILED"
+    assert result["status"] == "error"
+    assert result["error"] == "teardown refused"
+    assert backend.destroyed == [sandbox_id]
+
+    persisted = SandboxManager(state_dir=tmp_path).status(sandbox_id)
+    assert persisted["status"] == "error"
+    assert persisted["destroyed_at"] is None
+    assert persisted["last_error"] == "teardown refused"
+
+
 def test_sandbox_input_actions_fail_closed_without_backend(tmp_path):
     manager = SandboxManager(state_dir=tmp_path)
     sandbox_id = manager.create()["sandbox_id"]

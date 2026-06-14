@@ -133,6 +133,40 @@ class SandboxManager:
             inst = self._instances.get(str(sandbox_id))
             if inst is None:
                 return self._not_found(sandbox_id)
+            if inst.status == DESTROYED:
+                return {
+                    "ok": True,
+                    "destroyed": True,
+                    "sandbox_id": inst.sandbox_id,
+                    "status": inst.status,
+                }
+
+        teardown_error = self._backend_teardown(inst)
+        if teardown_error is not None:
+            with self._lock:
+                current = self._instances.get(inst.sandbox_id)
+                if current is not None and current.status != DESTROYED:
+                    now = time.time()
+                    current.status = ERROR
+                    current.updated_at = now
+                    current.last_activity_at = now
+                    current.last_error = teardown_error
+                    self._save_registry()
+            return {
+                "ok": False,
+                "destroyed": False,
+                "sandbox_id": inst.sandbox_id,
+                "status": ERROR,
+                "error": teardown_error,
+                "code": "SANDBOX_BACKEND_DESTROY_FAILED",
+                "status_code": 502,
+                "gui_backend": True,
+            }
+
+        with self._lock:
+            inst = self._instances.get(str(sandbox_id))
+            if inst is None:
+                return self._not_found(sandbox_id)
             if inst.status != DESTROYED:
                 now = time.time()
                 inst.status = DESTROYED
@@ -436,6 +470,29 @@ class SandboxManager:
         result.setdefault("status", inst.status)
         result.setdefault("gui_backend", True)
         return result
+
+    def _backend_teardown(self, inst: SandboxInstance) -> Optional[str]:
+        backend = self._gui_backend
+        if backend is None:
+            return None
+        for method_name in ("destroy_session", "teardown_session", "delete_session", "destroy", "teardown"):
+            method = getattr(backend, method_name, None)
+            if callable(method):
+                break
+        else:
+            return None
+
+        try:
+            result = method(inst.sandbox_id)
+        except Exception as exc:
+            return f"GUI backend teardown failed: {exc}"
+        if isinstance(result, dict):
+            if result.get("ok", True) is not True:
+                return str(result.get("error") or "GUI backend teardown did not complete")
+            return None
+        if result is False:
+            return "GUI backend teardown did not complete"
+        return None
 
     def _backend_input_action(
         self,
