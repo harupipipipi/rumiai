@@ -80,6 +80,7 @@ class TaskBoardAgentSessionController:
         updated_card = self._update_card_session(
             card,
             context,
+            arguments,
             session_link,
             column=_default_column(card, arguments, "Doing"),
             explicit_column=_has_explicit_column(arguments),
@@ -104,7 +105,7 @@ class TaskBoardAgentSessionController:
             "updated_at": _now_ms(),
             "last_status": data,
         }
-        updated_card = self._update_card_session(card, context, session_link)
+        updated_card = self._update_card_session(card, context, arguments, session_link)
         return self._result("status", updated_card, session_link, data)
 
     def _merge_report(self, arguments: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -129,6 +130,7 @@ class TaskBoardAgentSessionController:
         updated_card = self._update_card_session(
             card,
             context,
+            arguments,
             session_link,
             column=_default_column(card, arguments, "Review"),
             explicit_column=_has_explicit_column(arguments),
@@ -146,6 +148,7 @@ class TaskBoardAgentSessionController:
         updated_card = self._update_card_session(
             card,
             context,
+            arguments,
             session_link,
             column=_default_column(card, arguments, "Review"),
             explicit_column=_has_explicit_column(arguments),
@@ -172,6 +175,7 @@ class TaskBoardAgentSessionController:
         updated_card = self._update_card_session(
             card,
             context,
+            arguments,
             session_link,
             column=_default_column(card, arguments, default_column) if default_column else None,
             explicit_column=_has_explicit_column(arguments),
@@ -183,7 +187,11 @@ class TaskBoardAgentSessionController:
         metadata = _metadata(card)
         previous = metadata.pop("agent_session", {})
         card = self._task_board.run(
-            {"action": "update", "card_id": card["id"], "metadata": metadata},
+            _with_board_selector(
+                arguments,
+                {"action": "update", "card_id": card["id"], "metadata": metadata},
+                fallback_card=card,
+            ),
             context,
         )["changed"]
         return self._result("unlink", card, {}, {"previous": previous})
@@ -192,7 +200,7 @@ class TaskBoardAgentSessionController:
         card_id = str(arguments.get("card_id") or arguments.get("id") or "").strip()
         if not card_id:
             raise ValueError("card_id is required")
-        board = self._task_board.run({"action": "list"}, context)
+        board = self._task_board.run(_with_board_selector(arguments, {"action": "list"}), context)
         for card in board.get("cards", []):
             if card.get("id") == card_id:
                 return dict(card)
@@ -209,6 +217,7 @@ class TaskBoardAgentSessionController:
         self,
         card: dict[str, Any],
         context: dict[str, Any],
+        arguments: dict[str, Any],
         session_link: dict[str, Any],
         *,
         column: str | None = None,
@@ -227,7 +236,14 @@ class TaskBoardAgentSessionController:
             "card_id": card["id"],
             "metadata": metadata,
         }
-        target_column = self._resolve_target_column(card, context, column, explicit_column=explicit_column)
+        update_args = _with_board_selector(arguments, update_args, fallback_card=card)
+        target_column = self._resolve_target_column(
+            card,
+            context,
+            column,
+            explicit_column=explicit_column,
+            arguments=arguments,
+        )
         if target_column:
             update_args["column"] = target_column
         updated = self._task_board.run(update_args, context)
@@ -240,10 +256,14 @@ class TaskBoardAgentSessionController:
         column: str | None,
         *,
         explicit_column: bool,
+        arguments: dict[str, Any] | None = None,
     ) -> str | None:
         if not column:
             return None
-        board = self._task_board.run({"action": "list"}, context)
+        board = self._task_board.run(
+            _with_board_selector(arguments or {}, {"action": "list"}, fallback_card=card),
+            context,
+        )
         columns = list(board.get("columns") if isinstance(board.get("columns"), list) else [])
         exact = _find_column(columns, str(column))
         if exact is not None:
@@ -312,6 +332,23 @@ def _default_column(card: dict[str, Any], arguments: dict[str, Any], fallback_ti
 
 def _has_explicit_column(arguments: dict[str, Any]) -> bool:
     return any(arguments.get(key) for key in ("column", "column_id", "move_to"))
+
+
+def _with_board_selector(
+    source: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    fallback_card: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    selected = dict(payload)
+    for key in ("board_id", "kanban_board_id", "scope_type", "scope_id", "scope", "board_title"):
+        if source.get(key) is not None:
+            selected[key] = source[key]
+    if not (selected.get("board_id") or selected.get("kanban_board_id")) and fallback_card:
+        board_id = fallback_card.get("board_id") or fallback_card.get("kanban_board_id")
+        if board_id:
+            selected["board_id"] = board_id
+    return selected
 
 
 def _error_message(output: dict[str, Any], fallback: str) -> str:

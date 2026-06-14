@@ -82,6 +82,9 @@ def test_task_board_agent_session_tool_and_dispatcher_are_registered(tmp_path):
 
     assert tool is not None
     assert tool["execution"]["handler"] == "domain.tool.task_board_agent_session:tool_task_board_agent_session"
+    properties = tool["schema"]["parameters"]["properties"]
+    for key in ("board_id", "kanban_board_id", "scope", "scope_type", "scope_id"):
+        assert key in properties
     assert executed["is_error"] is False
     assert executed["widget"]["type"] == "task_board_agent_session"
     assert dispatched["status"] == "ok"
@@ -105,6 +108,43 @@ def test_task_board_agent_session_maps_custom_board_columns_and_done_state(tmp_p
     assert report["card"]["column_id"] == "qa-review"
     assert applied["card"]["column_id"] == "completed"
     assert board["summary"].endswith("(0 open)")
+
+
+def test_task_board_agent_session_forwards_board_id_and_scope_selectors(tmp_path):
+    _reset_sessions()
+    context = {"conversation_workspace_dir": str(tmp_path / "workspace")}
+    task_board = TaskBoardController()
+    scoped = {"type": "workspace", "id": "ws-scoped-board"}
+    scoped_card = task_board.run({"action": "create", "title": "Scoped board task", "scope": scoped}, context)["changed"]
+    task_board.run({"action": "create", "title": "Ambient board task"}, context)
+    controller = TaskBoardAgentSessionController()
+
+    started = controller.run(
+        {"action": "start", "card_id": scoped_card["id"], "scope": scoped, "max_turns": 1},
+        context,
+    )
+    status = controller.run(
+        {"action": "status", "card_id": scoped_card["id"], "board_id": scoped_card["board_id"]},
+        context,
+    )
+    ready = controller.run(
+        {
+            "action": "mark_ready",
+            "card_id": scoped_card["id"],
+            "scope_type": "workspace",
+            "scope_id": "ws-scoped-board",
+        },
+        context,
+    )
+
+    scoped_board = task_board.run({"action": "list", "scope": scoped}, context)
+    ambient_board = task_board.run({"action": "list"}, context)
+
+    assert started["card"]["board_id"] == scoped_card["board_id"]
+    assert status["card"]["board_id"] == scoped_card["board_id"]
+    assert ready["card"]["column_id"] == "review"
+    assert scoped_board["cards"][0]["metadata"]["agent_session"]["ready_for_review"] is True
+    assert "agent_session" not in ambient_board["cards"][0]["metadata"]
 
 
 def test_task_board_agent_session_rejects_unknown_explicit_column(tmp_path):

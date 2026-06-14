@@ -66,6 +66,36 @@
           "session_id": {
             "type": "string"
           },
+          "board_id": {
+            "type": "string"
+          },
+          "kanban_board_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "scope_type": {
+                "type": "string"
+              },
+              "scope_id": {
+                "type": "string"
+              }
+            }
+          },
+          "scope_type": {
+            "type": "string"
+          },
+          "scope_id": {
+            "type": "string"
+          },
           "task": {
             "type": "string"
           },
