@@ -68,6 +68,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "rumi:search-home:set-route-state":
         sendResponse(await setSearchHomeRouteState(sender?.tab?.id, message.payload));
         return;
+      case "rumi:search-home:get-route-state":
+        sendResponse(await getSearchHomeRouteState(sender?.tab?.id));
+        return;
       case "rumi:search-home:advance-candidate":
         sendResponse(await advanceSearchHomeRouteState(sender?.tab?.id, message.action));
         return;
@@ -615,7 +618,35 @@ async function setSearchHomeRouteState(tabId, payload) {
   const states = await loadSearchHomeRouteStates();
   states[String(tabId)] = normalized;
   await saveSearchHomeRouteStates(states);
-  return { ok: true, tab_id: tabId, selected_index: normalized.selected_index };
+  return {
+    ok: true,
+    active: true,
+    tab_id: tabId,
+    selected_index: normalized.selected_index,
+    expires_at: searchHomeRouteStateExpiresAt(normalized)
+  };
+}
+
+async function getSearchHomeRouteState(tabId) {
+  if (!Number.isInteger(tabId)) {
+    return { ok: true, active: false };
+  }
+  const states = await loadSearchHomeRouteStates();
+  const current = normalizeSearchHomeRouteState(states[String(tabId)]);
+  if (!current || !isFreshSearchHomeRouteState(current)) {
+    if (current) {
+      delete states[String(tabId)];
+      await saveSearchHomeRouteStates(states);
+    }
+    return { ok: true, active: false, tab_id: tabId };
+  }
+  return {
+    ok: true,
+    active: true,
+    tab_id: tabId,
+    selected_index: current.selected_index,
+    expires_at: searchHomeRouteStateExpiresAt(current)
+  };
 }
 
 async function advanceSearchHomeRouteState(tabId, action) {
@@ -744,6 +775,14 @@ function isFreshSearchHomeRouteState(state) {
     return false;
   }
   return Date.now() - updatedAt <= SEARCH_HOME_ROUTE_MAX_AGE_MS;
+}
+
+function searchHomeRouteStateExpiresAt(state) {
+  const updatedAt = Date.parse(state?.updated_at || "");
+  if (!Number.isFinite(updatedAt)) {
+    return 0;
+  }
+  return updatedAt + SEARCH_HOME_ROUTE_MAX_AGE_MS;
 }
 
 function tabSummary(tab) {

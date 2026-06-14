@@ -36,6 +36,7 @@ def test_pack_api_handler_uses_request_body_mixin():
 
 def test_router_table_function_route_error_status_contract():
     from core_runtime.api.api_response import APIResponse
+    from core_runtime.api._helpers import _SAFE_ERROR_MSG
     from core_runtime.api.router_table import APIRouteTableMixin
 
     class Handler(APIRouteTableMixin):
@@ -69,21 +70,28 @@ def test_router_table_function_route_error_status_contract():
             self.sent = (status, response.error)
 
     class Executor:
-        def __init__(self, error_type):
+        def __init__(self, error_type, error):
             self.error_type = error_type
+            self.error = error
 
         def execute(self, pack_id, request):
             assert pack_id == "defaultspack"
             assert request["context"]["_api_route"] is True
-            return SimpleNamespace(success=False, error_type=self.error_type, error="boom")
+            return SimpleNamespace(success=False, error_type=self.error_type, error=self.error)
 
-    for error_type, expected in {
-        "grant_denied": (403, "Forbidden"),
-        "trust_denied": (403, "Forbidden"),
-        "rate_limited": (429, "boom"),
-        "invalid_request": (400, "boom"),
+    secret_error = "provider body leaked /private/defaultspack/secrets.json"
+    for error_type, (raw_error, expected) in {
+        "grant_denied": ("boom", (403, "Forbidden")),
+        "trust_denied": ("boom", (403, "Forbidden")),
+        "rate_limited": ("boom", (429, "boom")),
+        "invalid_request": ("boom", (400, "boom")),
+        "internal_failure": (secret_error, (500, _SAFE_ERROR_MSG)),
+        "provider_crashed": (secret_error, (500, _SAFE_ERROR_MSG)),
     }.items():
         handler = Handler()
-        with patch("core_runtime.capability_executor.get_capability_executor", return_value=Executor(error_type)):
+        with patch(
+            "core_runtime.capability_executor.get_capability_executor",
+            return_value=Executor(error_type, raw_error),
+        ):
             assert handler._dispatch_api_route("POST", "/demo", body={"ok": True}) is True
         assert handler.sent == expected

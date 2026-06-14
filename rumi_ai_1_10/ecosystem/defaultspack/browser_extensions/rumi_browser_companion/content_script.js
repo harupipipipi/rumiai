@@ -6,6 +6,11 @@
   let highlightTimer = null;
   let searchHomeRouteStateExpiresAt = 0;
 
+  refreshSearchHomeRouteState();
+  window.addEventListener("focus", () => {
+    refreshSearchHomeRouteState();
+  });
+
   window.addEventListener("message", (event) => {
     if (event.source !== window) {
       return;
@@ -44,6 +49,31 @@
       return false;
     }
     return event.key === "ArrowRight" || event.key === "ArrowLeft" || event.key === "Enter";
+  }
+
+  function refreshSearchHomeRouteState() {
+    try {
+      const maybePromise = chrome.runtime.sendMessage(
+        { type: "rumi:search-home:get-route-state" },
+        (response) => {
+          updateSearchHomeRouteStateExpiry(response);
+        }
+      );
+      if (maybePromise && typeof maybePromise.then === "function") {
+        maybePromise.then(updateSearchHomeRouteStateExpiry).catch(() => {});
+      }
+    } catch (_error) {
+      searchHomeRouteStateExpiresAt = 0;
+    }
+  }
+
+  function updateSearchHomeRouteStateExpiry(response) {
+    if (!response || response.ok !== true || response.active !== true) {
+      searchHomeRouteStateExpiresAt = 0;
+      return;
+    }
+    const expiresAt = Number(response.expires_at);
+    searchHomeRouteStateExpiresAt = Number.isFinite(expiresAt) ? expiresAt : 0;
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

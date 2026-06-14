@@ -36,4 +36,8 @@ def api_route_function_public_error(error_type: str, raw_error: str | None, safe
     status = api_route_function_error_status(error_type)
     if status == 403:
         return "Forbidden"
+    if status in {400, 429}:
+        return str(raw_error or safe_error)
+    if status is not None and status >= 500:
+        return safe_error
     return str(raw_error or safe_error)
