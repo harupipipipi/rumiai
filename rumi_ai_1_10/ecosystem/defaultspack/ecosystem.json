@@ -194,6 +194,8 @@
           "defaultspack.tool.invoke",
           "defaults.tool.list",
           "defaultspack.tool.list",
+          "defaults.tool.names",
+          "defaultspack.tool.names",
           "defaults.tool.schema",
           "defaultspack.tool.schema",
           "defaults.tool.mcp_connect",

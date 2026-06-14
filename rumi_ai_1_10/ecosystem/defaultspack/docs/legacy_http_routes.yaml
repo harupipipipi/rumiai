@@ -2338,6 +2338,13 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
+  pattern: /api/tools/names
+  legacy_block_module: blocks.tool.names
+  replacement_function_id: tool_names
+  owner: tool
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
   pattern: /api/human-operator/conversations/{conversation_id}/sessions/{session_id}
   legacy_block_module: blocks.human_operator.page
   replacement_function_id: ''

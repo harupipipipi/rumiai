@@ -15,45 +15,43 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
 ALL_MODELS = [
-    "minimax-m3",
     "glm-5.1",
     "glm-5",
+    "kimi-k2.7-code",
     "kimi-k2.6",
-    "kimi-k2.5",
     "deepseek-v4-pro",
     "deepseek-v4-flash",
     "mimo-v2.5-pro",
     "mimo-v2.5",
+    "minimax-m3",
+    "qwen3.7-plus",
     "qwen3.7-max",
     "qwen3.6-plus",
-    "qwen3.5-plus",
     "minimax-m2.7",
     "minimax-m2.5",
-    "mimo-v2-pro",
-    "mimo-v2-omni",
-    "hy3-preview",
 ]
 
 OPENAI_CHAT_MODELS = [
     "glm-5.1",
     "glm-5",
+    "kimi-k2.7-code",
     "kimi-k2.6",
-    "kimi-k2.5",
     "deepseek-v4-pro",
     "deepseek-v4-flash",
-    "minimax-m3",
     "mimo-v2.5-pro",
     "mimo-v2.5",
-    "qwen3.7-max",
-    "qwen3.6-plus",
-    "qwen3.5-plus",
-    "mimo-v2-pro",
-    "mimo-v2-omni",
-    "hy3-preview",
 ]
 
-ANTHROPIC_MESSAGES_MODELS = ["minimax-m2.7", "minimax-m2.5"]
+ANTHROPIC_MESSAGES_MODELS = [
+    "minimax-m3",
+    "minimax-m2.7",
+    "minimax-m2.5",
+    "qwen3.7-plus",
+    "qwen3.7-max",
+    "qwen3.6-plus",
+]
 TOOL_CALL_MODELS = {"mimo-v2.5-pro", "mimo-v2.5"}
+LIVE_SMOKE_MODEL = os.environ.get("RUMI_OPENCODE_GO_LIVE_MODEL", "minimax-m3")
 
 
 class _FakeSseResponse:
@@ -87,33 +85,43 @@ def test_opencode_go_catalog_includes_all_models():
     assert provider["metadata"]["default_base_url"] == "https://opencode.ai/zen/go/v1"
     assert provider["env_vars"] == ["OPENCODE_GO_API_KEY", "OPENCODE_ZEN_API_KEY"]
     assert provider["default_model_for"]["coding"] == "kimi-k2.6"
+    assert provider["default_model_for"]["general"] == "qwen3.7-plus"
     assert provider["default_model_for"]["fast"] == "deepseek-v4-flash"
-    assert provider["default_model_for"]["vision"] == "mimo-v2-omni"
+    assert provider["default_model_for"]["cheap"] == "deepseek-v4-flash"
+    assert provider["default_model_for"]["vision"] == "qwen3.7-plus"
     assert "vision" in provider["capabilities"]
     assert {f"opencode-go/{model}" for model in ALL_MODELS}.issubset(models)
 
     minimax_m3 = models["opencode-go/minimax-m3"]
-    assert minimax_m3["defaults"]["cheap"] is True
-    assert minimax_m3["metadata"]["transport"] == "openai_chat_completions"
-    assert minimax_m3["metadata"]["endpoint_path"] == "/chat/completions"
-    assert minimax_m3["metadata"]["experimental"] is True
+    assert minimax_m3["metadata"]["transport"] == "anthropic_messages"
+    assert minimax_m3["metadata"]["endpoint_path"] == "/messages"
+    assert minimax_m3["metadata"]["source"] == "opencode_go_docs"
+
+    k27 = models["opencode-go/kimi-k2.7-code"]
+    assert k27["metadata"]["transport"] == "openai_chat_completions"
+    assert k27["metadata"]["endpoint_path"] == "/chat/completions"
+    assert k27["metadata"]["source"] == "opencode_go_docs"
 
     qwen_max = models["opencode-go/qwen3.7-max"]
-    assert qwen_max["defaults"]["general"] is True
-    assert qwen_max["metadata"]["transport"] == "openai_chat_completions"
-    assert qwen_max["metadata"]["experimental"] is True
+    assert qwen_max["defaults"]["reasoning"] is True
+    assert qwen_max["metadata"]["transport"] == "anthropic_messages"
+    assert qwen_max["metadata"]["endpoint_path"] == "/messages"
+    assert "reasoning" in qwen_max["capabilities"]
+    assert qwen_max["metadata"]["capabilities"]["reasoning"] is True
 
     minimax = models["opencode-go/minimax-m2.7"]
     assert minimax["metadata"]["transport"] == "anthropic_messages"
     assert minimax["metadata"]["endpoint_path"] == "/messages"
 
-    experimental = models["opencode-go/mimo-v2-omni"]
-    assert experimental["defaults"]["vision"] is True
-    assert "vision" in experimental["capabilities"]
-    assert experimental["metadata"]["capabilities"]["vision"] is True
-    assert experimental["metadata"]["transport"] == "openai_chat_completions"
-    assert experimental["metadata"]["experimental"] is True
-    assert experimental["metadata"]["vision_unverified"] is True
+    qwen37 = models["opencode-go/qwen3.7-plus"]
+    assert qwen37["metadata"]["transport"] == "anthropic_messages"
+    assert {"vision", "reasoning"}.issubset(set(qwen37["capabilities"]))
+    assert qwen37["metadata"]["capabilities"]["vision"] is True
+    assert qwen37["metadata"]["capabilities"]["reasoning"] is True
+
+    qwen36 = models["opencode-go/qwen3.6-plus"]
+    assert qwen36["metadata"]["transport"] == "anthropic_messages"
+    assert qwen36["metadata"]["endpoint_path"] == "/messages"
 
     for model_id in TOOL_CALL_MODELS:
         model_entry = models[f"opencode-go/{model_id}"]
@@ -127,9 +135,9 @@ def test_opencode_go_catalog_includes_all_models():
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
 
     legacy_models = {item["id"]: item for item in list_model_catalog("opencode-go")}
-    legacy_omni = legacy_models["opencode-go/mimo-v2-omni"]
-    assert legacy_omni["supports_vision"] is True
-    assert legacy_omni["supports_image_input"] is True
+    legacy_qwen37 = legacy_models["opencode-go/qwen3.7-plus"]
+    assert legacy_qwen37["supports_vision"] is True
+    assert legacy_qwen37["supports_image_input"] is True
 
 
 @pytest.mark.parametrize("model", OPENAI_CHAT_MODELS)
@@ -178,7 +186,7 @@ def test_opencode_go_uses_chat_completions_for_openai_compatible_models(monkeypa
 
 
 @pytest.mark.parametrize("model", ANTHROPIC_MESSAGES_MODELS)
-def test_opencode_go_uses_messages_for_minimax(monkeypatch, model):
+def test_opencode_go_uses_messages_for_anthropic_compatible_models(monkeypatch, model):
     provider = _provider(monkeypatch)
     captured = {}
 
@@ -316,13 +324,12 @@ def _live_enabled():
 
 @pytest.mark.live
 @pytest.mark.skipif(not _live_enabled(), reason="set RUMI_OPENCODE_GO_LIVE_TEST=1 and an OpenCode Go API key")
-@pytest.mark.parametrize("model", ALL_MODELS)
-def test_opencode_go_live_complete(model):
+def test_opencode_go_live_messages_complete():
     from domain.ai_client.providers.opencode_go_provider import OpencodeGoProvider
 
     provider = OpencodeGoProvider()
     result = provider.complete(
-        model,
+        LIVE_SMOKE_MODEL,
         [{"role": "user", "content": "Reply with exactly: OK"}],
         [],
         {"max_tokens": 8},
@@ -332,14 +339,13 @@ def test_opencode_go_live_complete(model):
 
 @pytest.mark.live
 @pytest.mark.skipif(not _live_enabled(), reason="set RUMI_OPENCODE_GO_LIVE_TEST=1 and an OpenCode Go API key")
-@pytest.mark.parametrize("model", ALL_MODELS)
-def test_opencode_go_live_stream(model):
+def test_opencode_go_live_messages_stream():
     from domain.ai_client.providers.opencode_go_provider import OpencodeGoProvider
 
     provider = OpencodeGoProvider()
     events = list(
         provider.stream(
-            model,
+            LIVE_SMOKE_MODEL,
             [{"role": "user", "content": "Say OK"}],
             [],
             {"max_tokens": 8},

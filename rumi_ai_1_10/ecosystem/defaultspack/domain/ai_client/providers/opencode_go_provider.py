@@ -11,14 +11,13 @@ from .openai_compatible_provider import OpenAICompatibleProvider
 
 _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
     {
-        "model_id": "minimax-m3",
-        "display_name": "MiniMax M3 via OpenCode Go",
+        "model_id": "kimi-k2.7-code",
+        "display_name": "Kimi K2.7 Code via OpenCode Go",
         "priority": 0,
-        "defaults": {"chat": True, "cheap": True},
+        "defaults": {"chat": True},
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
-        "source": "opencode_go_models_endpoint",
-        "experimental": True,
+        "source": "opencode_go_docs",
     },
     {
         "model_id": "kimi-k2.6",
@@ -30,18 +29,9 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
         "source": "opencode_go_docs",
     },
     {
-        "model_id": "kimi-k2.5",
-        "display_name": "Kimi K2.5 via OpenCode Go",
-        "priority": 2,
-        "defaults": {"chat": True},
-        "transport": "openai_chat_completions",
-        "endpoint_path": "/chat/completions",
-        "source": "opencode_go_docs",
-    },
-    {
         "model_id": "glm-5.1",
         "display_name": "GLM-5.1 via OpenCode Go",
-        "priority": 3,
+        "priority": 2,
         "defaults": {"chat": True},
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
@@ -50,7 +40,7 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
     {
         "model_id": "glm-5",
         "display_name": "GLM-5 via OpenCode Go",
-        "priority": 4,
+        "priority": 3,
         "defaults": {"chat": True},
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
@@ -59,7 +49,7 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
     {
         "model_id": "deepseek-v4-pro",
         "display_name": "DeepSeek V4 Pro via OpenCode Go",
-        "priority": 5,
+        "priority": 4,
         "defaults": {"chat": True},
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
@@ -68,8 +58,8 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
     {
         "model_id": "deepseek-v4-flash",
         "display_name": "DeepSeek V4 Flash via OpenCode Go",
-        "priority": 6,
-        "defaults": {"chat": True, "fast": True},
+        "priority": 5,
+        "defaults": {"chat": True, "fast": True, "cheap": True},
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
         "source": "opencode_go_docs",
@@ -77,7 +67,7 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
     {
         "model_id": "mimo-v2.5-pro",
         "display_name": "MiMo V2.5 Pro via OpenCode Go",
-        "priority": 7,
+        "priority": 6,
         "defaults": {"chat": True, "reasoning": True},
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
@@ -86,38 +76,49 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
     {
         "model_id": "mimo-v2.5",
         "display_name": "MiMo V2.5 via OpenCode Go",
-        "priority": 8,
+        "priority": 7,
         "defaults": {"chat": True},
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
         "source": "opencode_go_docs",
     },
     {
-        "model_id": "qwen3.6-plus",
-        "display_name": "Qwen3.6 Plus via OpenCode Go",
+        "model_id": "minimax-m3",
+        "display_name": "MiniMax M3 via OpenCode Go",
+        "priority": 8,
+        "defaults": {"chat": True},
+        "transport": "anthropic_messages",
+        "endpoint_path": "/messages",
+        "source": "opencode_go_docs",
+    },
+    {
+        "model_id": "qwen3.7-plus",
+        "display_name": "Qwen3.7 Plus via OpenCode Go",
         "priority": 9,
         "defaults": {"chat": True, "general": True},
-        "transport": "openai_chat_completions",
-        "endpoint_path": "/chat/completions",
+        "transport": "anthropic_messages",
+        "endpoint_path": "/messages",
         "source": "opencode_go_docs",
+        "reasoning": True,
+        "vision": True,
     },
     {
         "model_id": "qwen3.7-max",
         "display_name": "Qwen3.7 Max via OpenCode Go",
         "priority": 10,
-        "defaults": {"chat": True, "general": True},
-        "transport": "openai_chat_completions",
-        "endpoint_path": "/chat/completions",
-        "source": "opencode_go_models_endpoint",
-        "experimental": True,
+        "defaults": {"chat": True, "reasoning": True},
+        "transport": "anthropic_messages",
+        "endpoint_path": "/messages",
+        "source": "opencode_go_docs",
+        "reasoning": True,
     },
     {
-        "model_id": "qwen3.5-plus",
-        "display_name": "Qwen3.5 Plus via OpenCode Go",
+        "model_id": "qwen3.6-plus",
+        "display_name": "Qwen3.6 Plus via OpenCode Go",
         "priority": 11,
-        "defaults": {"chat": True, "cheap": True},
-        "transport": "openai_chat_completions",
-        "endpoint_path": "/chat/completions",
+        "defaults": {"chat": True},
+        "transport": "anthropic_messages",
+        "endpoint_path": "/messages",
         "source": "opencode_go_docs",
     },
     {
@@ -138,37 +139,6 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
         "endpoint_path": "/messages",
         "source": "opencode_go_docs",
     },
-    {
-        "model_id": "mimo-v2-pro",
-        "display_name": "MiMo V2 Pro via OpenCode Go",
-        "priority": 14,
-        "defaults": {"chat": True},
-        "transport": "openai_chat_completions",
-        "endpoint_path": "/chat/completions",
-        "source": "opencode_go_models_endpoint",
-        "experimental": True,
-    },
-    {
-        "model_id": "mimo-v2-omni",
-        "display_name": "MiMo V2 Omni via OpenCode Go",
-        "priority": 15,
-        "defaults": {"chat": True, "vision": True},
-        "transport": "openai_chat_completions",
-        "endpoint_path": "/chat/completions",
-        "source": "opencode_go_models_endpoint",
-        "experimental": True,
-        "vision_unverified": True,
-    },
-    {
-        "model_id": "hy3-preview",
-        "display_name": "HY3 Preview via OpenCode Go",
-        "priority": 16,
-        "defaults": {"chat": True},
-        "transport": "openai_chat_completions",
-        "endpoint_path": "/chat/completions",
-        "source": "opencode_go_models_endpoint",
-        "experimental": True,
-    },
 ]
 _OPENCODE_GO_TOOL_CALL_MODELS = {"mimo-v2.5", "mimo-v2.5-pro"}
 _OPENCODE_GO_REASONING_MODELS = {"mimo-v2.5", "mimo-v2.5-pro"}
@@ -177,7 +147,8 @@ _OPENCODE_GO_REASONING_MODELS = {"mimo-v2.5", "mimo-v2.5-pro"}
 def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
     defaults = dict(spec.get("defaults", {}))
     tool_calls = spec["model_id"] in _OPENCODE_GO_TOOL_CALL_MODELS
-    reasoning = spec["model_id"] in _OPENCODE_GO_REASONING_MODELS
+    reasoning = bool(spec.get("reasoning", spec["model_id"] in _OPENCODE_GO_REASONING_MODELS))
+    verified_reasoning_effort = spec["model_id"] in _OPENCODE_GO_REASONING_MODELS
     metadata = {
         "transport": spec["transport"],
         "endpoint_path": spec["endpoint_path"],
@@ -185,7 +156,7 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
     }
     if tool_calls:
         metadata["tool_calls_verified"] = True
-    if reasoning:
+    if verified_reasoning_effort:
         metadata["reasoning_effort_verified"] = True
     for key in ("experimental", "vision_unverified"):
         if spec.get(key):
@@ -207,7 +178,7 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
             "chat": True,
             "streaming": True,
             "tool_calls": tool_calls,
-            "vision": bool(defaults.get("vision")),
+            "vision": bool(spec.get("vision", defaults.get("vision", False))),
             "reasoning": reasoning,
         },
         "supports_thinking": reasoning,
@@ -228,21 +199,21 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
     OPENAI_CHAT_MODELS = {
         "glm-5.1",
         "glm-5",
+        "kimi-k2.7-code",
         "kimi-k2.6",
-        "kimi-k2.5",
         "deepseek-v4-pro",
         "deepseek-v4-flash",
-        "minimax-m3",
         "mimo-v2.5-pro",
         "mimo-v2.5",
+    }
+    ANTHROPIC_MESSAGES_MODELS = {
+        "minimax-m3",
+        "minimax-m2.7",
+        "minimax-m2.5",
+        "qwen3.7-plus",
         "qwen3.7-max",
         "qwen3.6-plus",
-        "qwen3.5-plus",
-        "mimo-v2-pro",
-        "mimo-v2-omni",
-        "hy3-preview",
     }
-    ANTHROPIC_MESSAGES_MODELS = {"minimax-m2.7", "minimax-m2.5"}
     MODEL_IDS = OPENAI_CHAT_MODELS | ANTHROPIC_MESSAGES_MODELS
     TOOL_CALL_MODELS = set(_OPENCODE_GO_TOOL_CALL_MODELS)
     KNOWN_MODELS = [_known_model_entry(spec) for spec in _OPENCODE_GO_MODEL_SPECS]

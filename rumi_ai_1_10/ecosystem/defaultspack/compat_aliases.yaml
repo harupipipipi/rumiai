@@ -2474,6 +2474,61 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.tool.task_board_agent_session
+  defaults.remote.host.status:
+    owner: remote
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.remote.host.status
+  defaults.remote.host_status:
+    owner: remote
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.remote.host_status
+  defaults.remote.task.cancel:
+    owner: remote
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.remote.task.cancel
+  defaults.remote.task.create:
+    owner: remote
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.remote.task.create
+  defaults.remote.task.events:
+    owner: remote
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.remote.task.events
+  defaults.remote.task.get:
+    owner: remote
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.remote.task.get
+  defaults.remote.task_cancel:
+    owner: remote
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.remote.task_cancel
+  defaults.remote.task_create:
+    owner: remote
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.remote.task_create
+  defaults.remote.task_events:
+    owner: remote
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.remote.task_events
+  defaults.remote.task_get:
+    owner: remote
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.remote.task_get
+  defaults.tool.names:
+    owner: tool
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.tool.names
 canonical_prefix: defaultspack.
 compat_prefixes:
 - defaults.

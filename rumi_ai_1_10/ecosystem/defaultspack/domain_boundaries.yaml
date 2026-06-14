@@ -212,6 +212,11 @@ domains:
   recording:
     may_import: []
     path: domain/recording
+  remote:
+    may_import:
+    - domain/agent_runtime
+    - domain/company
+    path: domain/remote
   research:
     may_import: []
     path: domain/research

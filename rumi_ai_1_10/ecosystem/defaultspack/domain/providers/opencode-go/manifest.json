@@ -38,11 +38,11 @@
     "default_model_for": {
       "chat": "kimi-k2.6",
       "coding": "kimi-k2.6",
-      "general": "qwen3.6-plus",
+      "general": "qwen3.7-plus",
       "fast": "deepseek-v4-flash",
-      "cheap": "qwen3.5-plus",
+      "cheap": "deepseek-v4-flash",
       "reasoning": "mimo-v2.5-pro",
-      "vision": "mimo-v2-omni"
+      "vision": "qwen3.7-plus"
     },
     "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "vision", "openai_compatible", "anthropic_compatible"]
   },
@@ -66,11 +66,11 @@
     "default_model_for": {
       "chat": "kimi-k2.6",
       "coding": "kimi-k2.6",
-      "general": "qwen3.6-plus",
+      "general": "qwen3.7-plus",
       "fast": "deepseek-v4-flash",
-      "cheap": "qwen3.5-plus",
+      "cheap": "deepseek-v4-flash",
       "reasoning": "mimo-v2.5-pro",
-      "vision": "mimo-v2-omni"
+      "vision": "qwen3.7-plus"
     },
     "capabilities": {
       "native_tool_calling": true,
@@ -94,21 +94,18 @@
       "opencode-go",
       "opencode-go/glm-5.1",
       "opencode-go/glm-5",
-      "opencode-go/minimax-m3",
+      "opencode-go/kimi-k2.7-code",
       "opencode-go/kimi-k2.6",
-      "opencode-go/kimi-k2.5",
       "opencode-go/deepseek-v4-pro",
       "opencode-go/deepseek-v4-flash",
       "opencode-go/mimo-v2.5-pro",
       "opencode-go/mimo-v2.5",
+      "opencode-go/minimax-m3",
+      "opencode-go/qwen3.7-plus",
       "opencode-go/qwen3.7-max",
       "opencode-go/qwen3.6-plus",
-      "opencode-go/qwen3.5-plus",
       "opencode-go/minimax-m2.7",
-      "opencode-go/minimax-m2.5",
-      "opencode-go/mimo-v2-pro",
-      "opencode-go/mimo-v2-omni",
-      "opencode-go/hy3-preview"
+      "opencode-go/minimax-m2.5"
     ]
   },
   "source_pack_id": "defaultspack"

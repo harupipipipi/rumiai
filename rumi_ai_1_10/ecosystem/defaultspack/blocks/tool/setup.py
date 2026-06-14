@@ -65,6 +65,7 @@ def run(context):
     routes = [
         # ---- Tool read/invoke routes ----
         ("GET", "/api/tools", _lazy("blocks.tool.list"), {}),
+        ("GET", "/api/tools/names", _lazy("blocks.tool.names"), {}),
         ("POST", "/api/tools/invoke", _lazy("blocks.tool.invoke"), {}),
         ("POST", "/api/tools/browser-computer", _lazy("blocks.tool.browser_computer"), {}),
         ("POST", "/api/tools/browser-companion/bridge/poll", _lazy("blocks.tool.browser_companion_bridge", "run_poll"), {}),

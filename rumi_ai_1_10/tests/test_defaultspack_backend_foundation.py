@@ -115,6 +115,7 @@ def test_ai_and_tool_setup_register_new_foundation_routes():
     assert ("GET", "/api/ai/profiles") in ai_routes
 
     assert ("GET", "/api/tools") in tool_routes
+    assert ("GET", "/api/tools/names") in tool_routes
     assert ("POST", "/api/tools/invoke") in tool_routes
     assert ("POST", "/api/tools/mcp/connect") in tool_routes
     assert ("GET", "/api/tools/mcp") in tool_routes
