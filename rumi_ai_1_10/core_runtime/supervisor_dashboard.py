@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
+from .runtime_audit_helpers import redact_sensitive
 
 _BASE_DIR = Path(__file__).resolve().parents[1]
 _DEFAULTSPACK_IMPORT_ROOT = _BASE_DIR / "ecosystem" / "defaultspack"
@@ -184,6 +185,23 @@ STORAGE_TARGETS = {
     "traces": "opentelemetry",
     "llm_trace": "langfuse_optional",
 }
+
+EVENT_PAYLOAD_ALLOWED_KEYS = {
+    "action",
+    "agent_id",
+    "artifact_id",
+    "code",
+    "exit_code",
+    "path",
+    "reason",
+    "risk",
+    "risk_level",
+    "status",
+    "tool",
+    "tool_name",
+}
+MAX_EVENT_PAYLOAD_FIELDS = 8
+MAX_EVENT_PAYLOAD_VALUE_CHARS = 160
 
 
 def build_supervisor_dashboard_snapshot(
@@ -428,7 +446,7 @@ def _recent_events(store: Any, sessions: list[dict[str, Any]], *, limit: int) ->
                     "run_id": run_id,
                     "event_type": row.get("event_type"),
                     "created_at": row.get("created_at"),
-                    "payload": row.get("payload_json") if isinstance(row.get("payload_json"), dict) else {},
+                    "payload": _dashboard_event_payload(row.get("payload_json")),
                 }
             )
     events.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
@@ -469,4 +487,41 @@ def _computer_driver_order() -> dict[str, list[str]]:
 def _truncate(value: str, max_length: int) -> str:
     if len(value) <= max_length:
         return value
-    return value[: max(0, max_length - 1)].rstrip() + "..."
+    if max_length <= 3:
+        return value[: max(0, max_length)]
+    return value[: max(0, max_length - 3)].rstrip() + "..."
+
+
+def _dashboard_event_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    redacted = redact_sensitive(payload)
+    allowed_items: list[tuple[str, Any]] = []
+    for key, value in redacted.items():
+        key_text = str(key)
+        if key_text not in EVENT_PAYLOAD_ALLOWED_KEYS:
+            continue
+        allowed_items.append((key_text, _dashboard_payload_value(value)))
+        if len(allowed_items) >= MAX_EVENT_PAYLOAD_FIELDS:
+            break
+    result = {key: value for key, value in allowed_items}
+    omitted = max(0, len(redacted) - len(result))
+    if omitted:
+        result["_omitted_fields"] = omitted
+    return result
+
+
+def _dashboard_payload_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _truncate(value, MAX_EVENT_PAYLOAD_VALUE_CHARS)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, dict):
+        return {
+            "type": "object",
+            "field_count": len(value),
+            "keys": sorted(str(key) for key in value.keys())[:MAX_EVENT_PAYLOAD_FIELDS],
+        }
+    if isinstance(value, (list, tuple, set)):
+        return {"type": "list", "count": len(value)}
+    return _truncate(str(value), MAX_EVENT_PAYLOAD_VALUE_CHARS)

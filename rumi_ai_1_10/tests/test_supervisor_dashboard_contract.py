@@ -108,6 +108,50 @@ def test_supervisor_snapshot_summarizes_agent_runtime_store(tmp_path) -> None:
     assert snapshot["recent_events"][0]["event_type"] == "approval_requested"
 
 
+def test_supervisor_snapshot_redacts_poisoned_event_payload(tmp_path) -> None:
+    from core_runtime.supervisor_dashboard import build_supervisor_dashboard_snapshot
+    from domain.agent_runtime.models import AgentRun
+    from domain.agent_runtime.run_store import AgentRunStore
+
+    store = AgentRunStore(tmp_path / "agent_runtime.db")
+    store.upsert_run(
+        AgentRun(
+            run_id="run_poison",
+            session_key="agent:reviewer:main",
+            task="Review poisoned dashboard event",
+            status="waiting_approval",
+            agent_id="reviewer",
+        )
+    )
+    store.add_event(
+        "run_poison",
+        "approval_requested",
+        {
+            "tool": "browser_upload_file",
+            "status": "pending",
+            "secret": "dashboard-secret-poison",
+            "token": "dashboard-token-poison",
+            "payload_json": {"raw": "dashboard-raw-payload-poison"},
+            "nested": {"api_key": "dashboard-api-key-poison"},
+            "reason": "x" * 500,
+        },
+    )
+
+    snapshot = build_supervisor_dashboard_snapshot(run_store=store, event_limit=1)
+    event = snapshot["recent_events"][0]
+    serialized = repr(snapshot)
+
+    assert event["payload"]["tool"] == "browser_upload_file"
+    assert event["payload"]["status"] == "pending"
+    assert len(event["payload"]["reason"]) <= 160
+    assert event["payload"]["_omitted_fields"] >= 4
+    assert "payload_json" not in event["payload"]
+    assert "dashboard-secret-poison" not in serialized
+    assert "dashboard-token-poison" not in serialized
+    assert "dashboard-raw-payload-poison" not in serialized
+    assert "dashboard-api-key-poison" not in serialized
+
+
 def test_supervisor_snapshot_does_not_advertise_live_controls() -> None:
     from core_runtime.supervisor_dashboard import build_supervisor_dashboard_snapshot
 
