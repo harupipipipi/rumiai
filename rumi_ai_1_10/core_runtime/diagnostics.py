@@ -6,10 +6,18 @@ diagnostics.py - 起動/実行の結果集約(fail-softの"見える化")
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Literal
 from threading import RLock
+
+_this_module = sys.modules.get(__name__)
+if _this_module is not None:
+    if __name__.startswith("rumi_ai_1_10."):
+        sys.modules.setdefault(__name__.removeprefix("rumi_ai_1_10."), _this_module)
+    else:
+        sys.modules.setdefault(f"rumi_ai_1_10.{__name__}", _this_module)
 
 
 Status = Literal["success", "failed", "skipped", "disabled", "unknown"]

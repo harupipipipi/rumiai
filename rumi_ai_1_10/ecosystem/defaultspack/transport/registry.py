@@ -539,6 +539,11 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/coding/approvals", block_module="blocks.coding.approval_list"),
     HttpRouteSpec("POST", "/api/coding/approvals/approve", block_module="blocks.coding.approval_approve"),
     HttpRouteSpec("POST", "/api/coding/approvals/deny", block_module="blocks.coding.approval_deny"),
+    HttpRouteSpec("GET", "/api/authority/requests", handler_name="_handle_authority_requests"),
+    HttpRouteSpec("GET", "/api/authority/requests/{request_id}", handler_name="_handle_authority_request"),
+    HttpRouteSpec("POST", "/api/authority/test/request", handler_name="_handle_authority_test_request"),
+    HttpRouteSpec("POST", "/api/authority/requests/{request_id}/approve", handler_name="_handle_authority_approve"),
+    HttpRouteSpec("POST", "/api/authority/requests/{request_id}/deny", handler_name="_handle_authority_deny"),
     HttpRouteSpec("POST", "/api/coding/github/pr", block_module="blocks.coding.github_pr_read"),
     HttpRouteSpec("POST", "/api/coding/github/issue", block_module="blocks.coding.github_issue_read"),
     HttpRouteSpec("POST", "/api/coding/github/ci", block_module="blocks.coding.github_ci_status"),
@@ -653,6 +658,7 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/", handler_name="_handle_chat_redirect"),
     HttpRouteSpec("GET", "/chat", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/coding", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/approval", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/static/{path}", handler_name="_handle_static_file"),
 ]
 
