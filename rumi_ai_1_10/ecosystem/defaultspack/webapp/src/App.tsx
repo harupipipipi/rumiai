@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
-import { AuthorityApprovalCard } from "./components/AuthorityApprovalCard";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
@@ -19,8 +18,8 @@ import {
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, defaultspackApiFetch, type AuthorityApprovalDecision, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
-import { authorityApprovalRuntimeContent, pendingAuthorityApproval, type AuthorityApproval } from "./lib/authorityApproval";
+import { ChatStreamInterruptedError, api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { pendingAuthorityApproval } from "./lib/authorityApproval";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
@@ -1550,123 +1549,6 @@ function runtimeApprovalRuntimeContent(approval: RuntimeApproval, token?: string
   ].join("\n");
 }
 
-type AuthorityApprovalScope = "once" | "conversation" | "profile" | "node";
-type AuthorityApprovalTokenRecord = {
-  approval_token: string;
-  request_id: string;
-  permission_id: string;
-  resource?: Record<string, unknown>;
-};
-
-function authorityApprovalConfig(approval: AuthorityApproval): Record<string, unknown> {
-  const resource = approval.resource ?? {};
-  const config: Record<string, unknown> = {};
-  const providerId = typeof resource.provider_id === "string" ? resource.provider_id.trim() : "";
-  const apiId = typeof resource.api_id === "string" ? resource.api_id.trim() : "";
-  const modelId = typeof resource.model_id === "string" ? resource.model_id.trim() : "";
-  if (providerId) config.provider_ids = [providerId];
-  if (apiId) config.api_ids = [apiId];
-  if (modelId) config.model_ids = [modelId];
-  if (resource.stream === true) config.allow_stream = true;
-  return config;
-}
-
-function authorityApprovalResourceKey(resource: Record<string, unknown> | undefined): string {
-  const value = resource ?? {};
-  return [
-    typeof value.provider_id === "string" ? value.provider_id.trim() : "",
-    typeof value.api_id === "string" ? value.api_id.trim() : "",
-    typeof value.model_id === "string" ? value.model_id.trim() : "",
-  ].join("\u0000");
-}
-
-function authorityApprovalTokenFromFollowup(value: unknown): AuthorityApprovalTokenRecord | null {
-  if (!isRecord(value)) return null;
-  const approvalToken = typeof value.approval_token === "string"
-    ? value.approval_token.trim()
-    : typeof value.token === "string"
-      ? value.token.trim()
-      : "";
-  const requestId = typeof value.request_id === "string"
-    ? value.request_id.trim()
-    : typeof value.approval_request_id === "string"
-      ? value.approval_request_id.trim()
-      : "";
-  const permissionId = typeof value.permission_id === "string" ? value.permission_id.trim() : "";
-  if (!approvalToken || !requestId || !["model.invoke", "api_key.use"].includes(permissionId)) return null;
-  return {
-    approval_token: approvalToken,
-    request_id: requestId,
-    permission_id: permissionId,
-    ...(isRecord(value.resource) ? { resource: value.resource } : {}),
-  };
-}
-
-function authorityApprovalTokenFromDecision(
-  value: AuthorityApprovalDecision | undefined,
-  fallbackResource?: Record<string, unknown>,
-): AuthorityApprovalTokenRecord | null {
-  if (!value) return null;
-  const approvalToken = typeof value.token === "string" ? value.token.trim() : "";
-  const requestId = typeof value.request_id === "string" ? value.request_id.trim() : "";
-  const permissionId = typeof value.permission_id === "string" ? value.permission_id.trim() : "";
-  if (!approvalToken || !requestId || !["model.invoke", "api_key.use"].includes(permissionId)) return null;
-  return {
-    approval_token: approvalToken,
-    request_id: requestId,
-    permission_id: permissionId,
-    ...(isRecord(value.resource) ? { resource: value.resource } : fallbackResource ? { resource: fallbackResource } : {}),
-  };
-}
-
-function authorityApprovalTokensForFollowup(
-  messages: ChatUiMessage[],
-  approval: AuthorityApproval,
-  current: AuthorityApprovalTokenRecord | AuthorityApprovalTokenRecord[] | null,
-): AuthorityApprovalTokenRecord[] {
-  const resourceKey = authorityApprovalResourceKey(approval.resource);
-  const byPermission = new Map<string, AuthorityApprovalTokenRecord>();
-  const addToken = (token: AuthorityApprovalTokenRecord | null) => {
-    if (!token) return;
-    const tokenResourceKey = authorityApprovalResourceKey(token.resource);
-    if (token.resource && tokenResourceKey !== resourceKey) return;
-    byPermission.set(token.permission_id, token);
-  };
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    const followup = message.metadata?.authorityFollowup;
-    if (!isRecord(followup)) {
-      if (message.role === "user") break;
-      continue;
-    }
-    const approvals = Array.isArray(followup.approvals) ? followup.approvals : [];
-    for (const item of approvals) {
-      addToken(authorityApprovalTokenFromFollowup(item));
-    }
-    addToken(authorityApprovalTokenFromFollowup(followup));
-  }
-  if (Array.isArray(current)) {
-    current.forEach(addToken);
-  } else {
-    addToken(current);
-  }
-  return Array.from(byPermission.values());
-}
-
-function authorityApprovalRelatedPermissions(approval: AuthorityApproval): string[] {
-  if (approval.permissionId === "model.invoke") return ["api_key.use"];
-  if (approval.permissionId === "api_key.use") return ["model.invoke"];
-  return [];
-}
-
-function authorityApprovalTitle(approval: AuthorityApproval): string {
-  const resource = approval.resource ?? {};
-  const provider = typeof resource.provider_id === "string" ? resource.provider_id : "";
-  const api = typeof resource.api_id === "string" ? resource.api_id : "";
-  const model = typeof resource.model_id === "string" ? resource.model_id : "";
-  return [provider, api, model].filter(Boolean).join(" / ") || approval.permissionId;
-}
-
 function staleRuntimeApprovalTitle(approval: StaleRuntimeApproval): string {
   const label = approval.operation || approval.toolName || "tool";
   return `${label} は再実行が必要です`;
@@ -2340,7 +2222,6 @@ export default function App() {
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
-  const activeAuthorityApprovalActionRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (mode === "chat") {
@@ -4277,91 +4158,6 @@ export default function App() {
     }
   };
 
-  const approveAuthorityAction = async (scope: AuthorityApprovalScope) => {
-    if (!authorityApproval) return;
-    if (!activeConversationId) return;
-    if (activeAuthorityApprovalActionRef.current === authorityApproval.requestId) return;
-    activeAuthorityApprovalActionRef.current = authorityApproval.requestId;
-    setError(null);
-    setIsGenerating(true);
-    rememberPendingRequest({
-      conversationId: activeConversationId,
-      startedAt: Date.now(),
-      status: "モデル/API を許可しました。応答を再開しています",
-      toolNames: [],
-    });
-    try {
-      const decision = await api.approveAuthorityApproval(authorityApproval.requestId, {
-        scope,
-        config: authorityApprovalConfig(authorityApproval),
-        related_permissions: authorityApprovalRelatedPermissions(authorityApproval),
-      });
-      if (!decision.approved) {
-        throw new Error("authority approval failed");
-      }
-      const currentApprovalTokens = [
-        authorityApprovalTokenFromDecision(decision, authorityApproval.resource),
-        ...(decision.related_approvals ?? []).map((item) => authorityApprovalTokenFromDecision(item)),
-      ].filter((item): item is AuthorityApprovalTokenRecord => Boolean(item));
-      const approvalTokens = authorityApprovalTokensForFollowup(messages, authorityApproval, currentApprovalTokens);
-      await api.sendMessage(activeConversationId, "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。", {
-        metadata: {
-          mode,
-          authority_followup: {
-            approval_token: decision.token,
-            request_id: authorityApproval.requestId,
-            permission_id: authorityApproval.permissionId,
-            resource: authorityApproval.resource,
-            approvals: approvalTokens,
-            hidden: true,
-          },
-          chat_display: {
-            hidden: true,
-            reason: "authority_followup",
-          },
-          runtime_content: authorityApprovalRuntimeContent(authorityApproval, decision.token),
-        },
-      });
-      const approvedRequestIds = [
-        authorityApproval.requestId,
-        ...(decision.related_approvals ?? []).map((item) => item.request_id).filter(Boolean),
-      ];
-      setSettledRuntimeApprovalIds((ids) => (
-        [...ids, ...approvedRequestIds.filter((id) => !ids.includes(id))].slice(-50)
-      ));
-      forgetPendingRequest(activeConversationId);
-      replaceChatIdInUrl(activeConversationId, false);
-      await loadConversation(activeConversationId, false);
-      await refreshConversations(activeConversationId);
-    } catch (approvalError) {
-      forgetPendingRequest(activeConversationId);
-      setError(approvalError instanceof Error ? approvalError.message : "authority 承認に失敗しました。");
-    } finally {
-      activeAuthorityApprovalActionRef.current = null;
-      setIsGenerating(false);
-    }
-  };
-
-  const denyAuthorityAction = async () => {
-    if (!authorityApproval) return;
-    if (!activeConversationId) return;
-    if (activeAuthorityApprovalActionRef.current === authorityApproval.requestId) return;
-    activeAuthorityApprovalActionRef.current = authorityApproval.requestId;
-    setError(null);
-    try {
-      await api.denyAuthorityApproval(authorityApproval.requestId, "Denied from chat authority card");
-      setSettledRuntimeApprovalIds((ids) => (
-        ids.includes(authorityApproval.requestId) ? ids : [...ids, authorityApproval.requestId].slice(-50)
-      ));
-      await loadConversation(activeConversationId, false);
-      await refreshConversations(activeConversationId);
-    } catch (approvalError) {
-      setError(approvalError instanceof Error ? approvalError.message : "authority 承認の拒否に失敗しました。");
-    } finally {
-      activeAuthorityApprovalActionRef.current = null;
-    }
-  };
-
   const pushActionPreview = (action: SidebarAction, title: string, data: unknown) => {
     const preview = previewFromAction(action, title, data);
     setPreviews((current) => [preview, ...current].slice(0, 30));
@@ -5500,14 +5296,6 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                )}
-                {!visibleBrowserApproval && authorityApproval && (
-                  <AuthorityApprovalCard
-                    approval={authorityApproval}
-                    title={authorityApprovalTitle(authorityApproval)}
-                    onApprove={approveAuthorityAction}
-                    onDeny={() => void denyAuthorityAction()}
-                  />
                 )}
                 {!visibleBrowserApproval && !authorityApproval && runtimeApproval && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-zinc-950 p-3 shadow-2xl">

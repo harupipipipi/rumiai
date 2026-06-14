@@ -48,21 +48,3 @@ export function pendingAuthorityApproval(messages: ChatUiMessage[]): AuthorityAp
   }
   return null;
 }
-
-export function authorityApprovalRuntimeContent(approval: AuthorityApproval, token?: string): string {
-  const payload = {
-    request_id: approval.requestId,
-    permission_id: approval.permissionId,
-    resource: approval.resource,
-    ...(token ? { approval_token: token } : {}),
-  };
-  return [
-    "The user approved the pending model/API authority request.",
-    "Continue the conversation by retrying the same model/API request once.",
-    "Do not ask the user for the same authority approval again unless a new request id is produced.",
-    `Authority request id: ${approval.requestId}`,
-    `Permission: ${approval.permissionId}`,
-    "Authority approval JSON:",
-    JSON.stringify(payload, null, 2),
-  ].join("\n");
-}

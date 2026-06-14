@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { authorityContinuationWaitingMessageIds, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
+import { compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
@@ -118,7 +118,7 @@ test("empty response warning only appears for finalized agent messages without a
   assert.equal(shouldShowEmptyResponseWarning(emptyCompleted, true), false);
 });
 
-test("authority approval followup is hidden while waiting response renders as continuation loading", () => {
+test("authority approval followup is hidden while waiting response remains passive", () => {
   const waiting = message({
     id: "authority-waiting",
     rawText: "モデル/API の使用許可が必要です。承認後に続行します。",
@@ -151,10 +151,9 @@ test("authority approval followup is hidden while waiting response renders as co
   assert.equal(isAuthorityWaitingMessage(waiting), true);
   assert.equal(isHiddenAuthorityFollowupMessage(followup), true);
   assert.deepEqual(visibleChatMessages([waiting, followup]).map((item) => item.id), ["authority-waiting"]);
-  assert.deepEqual([...authorityContinuationWaitingMessageIds([waiting, followup])], ["authority-waiting"]);
 });
 
-test("authority waiting message is replaced by the settled assistant continuation", () => {
+test("authority waiting message is not replaced by the settled assistant continuation", () => {
   const waiting = message({
     id: "authority-waiting",
     rawText: "モデル/API の使用許可が必要です。承認後に続行します。",
@@ -190,8 +189,7 @@ test("authority waiting message is replaced by the settled assistant continuatio
     metadata: { thinkingLabel: "completed" },
   });
 
-  assert.deepEqual(visibleChatMessages([waiting, followup, continuation]).map((item) => item.id), ["authority-continuation"]);
-  assert.deepEqual([...authorityContinuationWaitingMessageIds([waiting, followup, continuation])], []);
+  assert.deepEqual(visibleChatMessages([waiting, followup, continuation]).map((item) => item.id), ["authority-waiting", "authority-continuation"]);
 });
 
 test("long terminal-style output is detected for compact display", () => {

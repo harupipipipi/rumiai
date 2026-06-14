@@ -31,6 +31,8 @@ const LOG_PREVIEW_HEAD_CHARS = 1300;
 const LOG_PREVIEW_TAIL_CHARS = 620;
 const AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。";
 const AUTHORITY_FOLLOWUP_TEXT = "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。";
+const AUTHORITY_PENDING_TITLE = "承認待ち";
+const AUTHORITY_PENDING_DETAIL = "別ウィンドウで承認してください";
 const markdownPlugins = [remarkGfm];
 const LOG_LIKE_TOKENS = [
   "\\n",
@@ -282,11 +284,6 @@ function metadataChildRecord(message: ChatMessagesRendererProps["messages"][numb
   return null;
 }
 
-function authorityFollowupRequestId(message: ChatMessagesRendererProps["messages"][number]): string {
-  const followup = metadataChildRecord(message, "authorityFollowup", "authority_followup");
-  return String(followup?.request_id ?? followup?.approval_request_id ?? "").trim();
-}
-
 function isAuthorityPermissionId(value: unknown): boolean {
   return value === "model.invoke" || value === "api_key.use";
 }
@@ -333,68 +330,8 @@ export function isAwaitingStreamFinalMessage(message: ChatMessagesRendererProps[
   return thinkingLabel === "streaming" || thinkingLabel === "running";
 }
 
-function isSettledAuthorityContinuation(message: ChatMessagesRendererProps["messages"][number]): boolean {
-  return (
-    message.role === "agent"
-    && !isAuthorityWaitingMessage(message)
-    && !isAwaitingStreamFinalMessage(message)
-    && messageVisibleText(message).length > 0
-  );
-}
-
 export function visibleChatMessages(messages: ChatMessagesRendererProps["messages"]): ChatMessagesRendererProps["messages"] {
-  const hiddenFollowupIndexes = new Set<number>();
-  const followupIndexByRequestId = new Map<string, number>();
-
-  messages.forEach((message, index) => {
-    if (!isHiddenAuthorityFollowupMessage(message)) return;
-    hiddenFollowupIndexes.add(index);
-    const requestId = authorityFollowupRequestId(message);
-    if (requestId) followupIndexByRequestId.set(requestId, index);
-  });
-
-  const hasSettledContinuationAfter = (index: number): boolean => (
-    messages.some((candidate, candidateIndex) => candidateIndex > index && isSettledAuthorityContinuation(candidate))
-  );
-
-  return messages.filter((message, index) => {
-    if (hiddenFollowupIndexes.has(index)) return false;
-    if (!isAuthorityWaitingMessage(message)) return true;
-
-    const requestId = authorityWaitingRequestId(message);
-    const matchingFollowupIndex = requestId ? followupIndexByRequestId.get(requestId) : undefined;
-    const fallbackFollowupIndex = matchingFollowupIndex ?? [...hiddenFollowupIndexes].find((hiddenIndex) => hiddenIndex > index);
-    return !(fallbackFollowupIndex !== undefined && hasSettledContinuationAfter(fallbackFollowupIndex));
-  });
-}
-
-export function authorityContinuationWaitingMessageIds(messages: ChatMessagesRendererProps["messages"]): Set<string> {
-  const hiddenFollowupIndexes = new Set<number>();
-  const followupIndexByRequestId = new Map<string, number>();
-
-  messages.forEach((message, index) => {
-    if (!isHiddenAuthorityFollowupMessage(message)) return;
-    hiddenFollowupIndexes.add(index);
-    const requestId = authorityFollowupRequestId(message);
-    if (requestId) followupIndexByRequestId.set(requestId, index);
-  });
-
-  const hasSettledContinuationAfter = (index: number): boolean => (
-    messages.some((candidate, candidateIndex) => candidateIndex > index && isSettledAuthorityContinuation(candidate))
-  );
-
-  const ids = new Set<string>();
-  messages.forEach((message, index) => {
-    if (!isAuthorityWaitingMessage(message)) return;
-
-    const requestId = authorityWaitingRequestId(message);
-    const matchingFollowupIndex = requestId ? followupIndexByRequestId.get(requestId) : undefined;
-    const fallbackFollowupIndex = matchingFollowupIndex ?? [...hiddenFollowupIndexes].find((hiddenIndex) => hiddenIndex > index);
-    if (fallbackFollowupIndex !== undefined && !hasSettledContinuationAfter(fallbackFollowupIndex)) {
-      ids.add(message.id);
-    }
-  });
-  return ids;
+  return messages.filter((message) => !isHiddenAuthorityFollowupMessage(message));
 }
 
 export function shouldShowEmptyResponseWarning(
@@ -1036,6 +973,16 @@ function BrowserScreenshotStrip({
   );
 }
 
+function AuthorityPendingNotice() {
+  return (
+    <div className="inline-flex max-w-full items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100">
+      <Clock size={14} className="shrink-0 text-amber-300" />
+      <span className="shrink-0 font-semibold">{AUTHORITY_PENDING_TITLE}</span>
+      <span className="min-w-0 text-amber-100/80">{AUTHORITY_PENDING_DETAIL}</span>
+    </div>
+  );
+}
+
 function ToolActivityToggle({
   isOpen,
   onToggle,
@@ -1199,8 +1146,7 @@ export function ChatMessagesRenderer({
   const [openToolActivityByMessageId, setOpenToolActivityByMessageId] = useState<Record<string, boolean | undefined>>({});
   const hasRunningToolActivity = showActivityInMessages && messages.some((message) => message.role === "agent" && hasRunningToolActivityMessage(message));
   const visibleMessages = useMemo(() => visibleChatMessages(messages), [messages]);
-  const authorityContinuationWaitingIds = useMemo(() => authorityContinuationWaitingMessageIds(messages), [messages]);
-  const hasAuthorityContinuationWaiting = authorityContinuationWaitingIds.size > 0;
+  const hasAuthorityPendingMessage = useMemo(() => visibleMessages.some(isAuthorityWaitingMessage), [visibleMessages]);
   const activityNow = useActivityNow(hasRunningToolActivity);
 
   return (
@@ -1223,7 +1169,7 @@ export function ChatMessagesRenderer({
               const isToolActivityOpen = toolActivity
                 ? openToolActivityByMessageId[message.id] ?? toolActivity.hasRunningItems
                 : false;
-              const isAuthorityContinuationWaiting = authorityContinuationWaitingIds.has(message.id);
+              const isAuthorityPending = isAuthorityWaitingMessage(message);
               const toggleToolActivity = () => {
                 if (!toolActivity) return;
                 setOpenToolActivityByMessageId((current) => {
@@ -1289,13 +1235,9 @@ export function ChatMessagesRenderer({
                       )}
 
                       <div className="rumi-message-content markdown-body min-w-0 max-w-full select-text space-y-4 overflow-x-hidden break-words leading-relaxed">
-                        {isAuthorityContinuationWaiting
+                        {isAuthorityPending
                           ? (
-                              <RumiActivityLoading
-                                status={pendingStatus ?? "モデル/API を許可しました。応答を再開しています"}
-                                toolNames={[]}
-                                startedAt={pendingStartedAt}
-                              />
+                              <AuthorityPendingNotice />
                             )
                           : message.content.length > 0 && (messageVisibleText(message) || message.content.some((block) => String(block.type ?? "text") !== "text"))
                           ? message.content.map((block, index) => (
@@ -1323,7 +1265,7 @@ export function ChatMessagesRenderer({
               );
             })}
 
-            {isGenerating && !hasAuthorityContinuationWaiting && (
+            {isGenerating && !hasAuthorityPendingMessage && (
               <div className="flex gap-3">
                 <div className="text-zinc-400 text-[13px] flex flex-col gap-1 mt-1.5">
                   <RumiActivityLoading status={pendingStatus} toolNames={pendingToolNames} startedAt={pendingStartedAt} compact />
