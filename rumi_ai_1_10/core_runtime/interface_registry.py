@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Literal, Callable, Iterable, Tuple
@@ -15,6 +16,13 @@ from threading import RLock
 from contextlib import contextmanager
 import fnmatch
 import uuid
+
+_this_module = sys.modules.get(__name__)
+if _this_module is not None:
+    if __name__.startswith("rumi_ai_1_10."):
+        sys.modules.setdefault(__name__.removeprefix("rumi_ai_1_10."), _this_module)
+    else:
+        sys.modules.setdefault(f"rumi_ai_1_10.{__name__}", _this_module)
 
 
 GetStrategy = Literal["first", "last", "all"]

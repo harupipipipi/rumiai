@@ -12,6 +12,7 @@ from .security import (
     source_pack_id_from_manifest,
     unsupported_execution_reason,
 )
+from .loading import normalize_tool_loading_mode
 
 _TOOL_SEARCH_METADATA_KEYS = {
     "aliases",
@@ -354,6 +355,12 @@ class ToolRegistry:
         supports_attachments = config.get("supports_attachments") if isinstance(config.get("supports_attachments"), bool) else None
         tags = list(config.get("tags", manifest.get("tags", [])) or [])
         extra_metadata = _search_metadata_from_manifest(manifest, config)
+        loading = normalize_tool_loading_mode(
+            config.get("loading")
+            or config.get("load_mode")
+            or manifest.get("loading")
+            or manifest.get("load_mode")
+        )
         if not execution:
             execution = {"type": "local"}
         if handler and "handler" not in execution:
@@ -412,9 +419,11 @@ class ToolRegistry:
                 "supports_attachments": supports_attachments,
                 "write_action": write_action,
                 "requires_approval": requires_approval,
+                "loading": loading,
             },
             "source_pack_id": pack_id,
             "trusted": trusted,
+            "loading": loading,
         }
         risk, risk_was_unknown = normalize_risk(raw_risk, provisional, trusted)
         inferred_unsafe = appears_write_or_execute_capable(provisional)
@@ -485,6 +494,7 @@ class ToolRegistry:
             "supports_attachments": supports_attachments,
             "write_action": write_action,
             "requires_approval": requires_approval,
+            "loading": loading,
             "ui": dict(ui),
             "trusted": trusted,
             "source_pack_id": pack_id,
@@ -505,6 +515,7 @@ class ToolRegistry:
                 "supports_attachments": supports_attachments,
                 "write_action": write_action,
                 "requires_approval": requires_approval,
+                "loading": loading,
                 "risk": risk,
                 **({"risk_defaulted": True} if risk_was_unknown else {}),
                 **legacy_compat_metadata,
@@ -542,9 +553,12 @@ class ToolRegistry:
             metadata["source"] = "user"
             metadata["source_pack_id"] = "user_dynamic"
             metadata["trusted"] = False
+            loading = normalize_tool_loading_mode(tool_def.get("loading") or metadata.get("loading"))
+            metadata["loading"] = loading
             tool_def["metadata"] = metadata
             tool_def["source_pack_id"] = "user_dynamic"
             tool_def["trusted"] = False
+            tool_def["loading"] = loading
             if unsupported_execution_reason(tool_def) is not None:
                 continue
             with self._lock:
@@ -629,9 +643,12 @@ class ToolRegistry:
         metadata["source"] = "user"
         metadata["source_pack_id"] = "user_dynamic"
         metadata["trusted"] = False
+        loading = normalize_tool_loading_mode(tool_def.get("loading") or metadata.get("loading"))
+        metadata["loading"] = loading
         tool_def["metadata"] = metadata
         tool_def["source_pack_id"] = "user_dynamic"
         tool_def["trusted"] = False
+        tool_def["loading"] = loading
         rejection_reason = unsupported_execution_reason(tool_def)
         if rejection_reason is not None:
             raise ValueError(rejection_reason)
@@ -673,6 +690,12 @@ class ToolRegistry:
                     tool_def["tags"] = value
                 else:
                     tool_def[key] = value
+            raw_metadata = tool_def.get("metadata") if isinstance(tool_def.get("metadata"), dict) else {}
+            loading = normalize_tool_loading_mode(tool_def.get("loading") or raw_metadata.get("loading"))
+            metadata = dict(raw_metadata)
+            metadata["loading"] = loading
+            tool_def["metadata"] = metadata
+            tool_def["loading"] = loading
             if handler_code is not None:
                 tool_def["handler_code"] = handler_code
             self._tools[tool_name] = tool_def

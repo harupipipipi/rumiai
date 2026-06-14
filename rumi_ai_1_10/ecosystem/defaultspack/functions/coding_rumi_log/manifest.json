@@ -1,0 +1,43 @@
+{
+  "function_id": "coding_rumi_log",
+  "description": "List or append local .rumi coding history.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "medium",
+  "requires": [
+    "coding.rumi.log"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.rumi_log",
+    "defaultspack.coding.rumi_log",
+    "defaults.coding.rumi.log",
+    "defaultspack.coding.rumi.log"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.rumi_log",
+      "default_args": {}
+    }
+  }
+}
