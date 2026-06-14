@@ -142,7 +142,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("tool_assist_mode", tools_field_ids)
         tool_assist_field = next(field for field in tools_section["fields"] if field["id"] == "tool_assist_mode")
         self.assertEqual(catalog["settings"]["values"]["tools"]["tool_assist_mode"], "all")
-        self.assertIn("vector", {option["value"] for option in tool_assist_field["options"]})
+        tool_assist_options = {option["value"] for option in tool_assist_field["options"]}
+        self.assertIn("auto", tool_assist_options)
+        self.assertIn("vector", tool_assist_options)
         general_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "general")
         general_field_ids = {field["id"] for field in general_section["fields"]}
         self.assertIn("language", general_field_ids)

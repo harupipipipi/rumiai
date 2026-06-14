@@ -187,6 +187,7 @@ TOOL_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
     for function_id, description, risk, block in (
         ("tool_invoke", "Invoke a registered tool.", "medium", "blocks.tool.invoke"),
         ("tool_list", "List registered tools.", "low", "blocks.tool.list"),
+        ("tool_names", "List registered tool names only.", "low", "blocks.tool.names"),
         ("tool_schema", "Get a registered tool schema.", "low", "blocks.tool.schema"),
         ("tool_mcp_connect", "Connect an MCP server.", "high", "blocks.tool.mcp_connect"),
         ("tool_mcp_list", "List MCP servers.", "low", "blocks.tool.mcp_list"),

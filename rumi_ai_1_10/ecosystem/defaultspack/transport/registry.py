@@ -598,6 +598,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/prompts/lint", block_module="blocks.prompt.lint_prompt"),
     HttpRouteSpec("POST", "/api/prompts/compact", block_module="blocks.prompt.compact_prompt"),
     HttpRouteSpec("GET", "/api/tools", block_module="blocks.tool.list"),
+    HttpRouteSpec("GET", "/api/tools/names", block_module="blocks.tool.names"),
     HttpRouteSpec("GET", "/api/defaultspack/modules", function_name="defaultspack:management_list_modules"),
     HttpRouteSpec("GET", "/api/defaultspack/modules/{id}", function_name="defaultspack:management_get_module", path_inject={"id": "module_id"}),
     HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/enable", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "enabled"}),
