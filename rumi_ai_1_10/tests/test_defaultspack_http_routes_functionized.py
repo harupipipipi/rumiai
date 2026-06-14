@@ -315,6 +315,15 @@ def test_external_webhook_admin_routes_require_sensitive_http_auth():
     assert not http._requires_sensitive_http_auth("POST", "/api/webhooks/inbound/test-webhook")
 
 
+def test_recording_routes_require_sensitive_http_auth_and_cors():
+    from transport import http
+
+    assert http._requires_sensitive_http_auth("GET", "/api/recording/devices")
+    assert http._requires_sensitive_http_auth("POST", "/api/recording/capture")
+    assert http._is_sensitive_http_path("/api/recording/devices")
+    assert http._is_sensitive_http_path("/api/recording/capture")
+
+
 def test_external_webhook_admin_routes_are_sensitive_for_cors():
     from transport import http
 
@@ -346,6 +355,18 @@ def test_high_risk_defaultspack_local_routes_use_sensitive_cors():
         assert http._is_sensitive_http_path(path)
 
     assert not http._is_sensitive_http_path("/api/tools/browser-companion/bridge/poll")
+
+
+def test_human_operator_canvas_routes_are_sensitive_for_cors_without_bearer_auth():
+    from transport import http
+
+    page_path = "/api/human-operator/conversations/c1/sessions/s1"
+    message_path = "/api/human-operator/conversations/c1/sessions/s1/messages"
+
+    assert http._is_sensitive_http_path(page_path)
+    assert http._is_sensitive_http_path(message_path)
+    assert not http._requires_sensitive_http_auth("GET", page_path)
+    assert not http._requires_sensitive_http_auth("POST", message_path)
 
 
 def test_high_risk_defaultspack_local_routes_require_loopback_origin_and_csrf():

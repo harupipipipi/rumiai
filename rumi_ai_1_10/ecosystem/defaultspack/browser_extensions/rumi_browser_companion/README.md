@@ -20,7 +20,7 @@ This gives Rumi a "computer use + browser use" path where the model can inspect 
 2. Open the browser's extensions page and enable developer mode.
 3. Choose "Load unpacked" and select this folder:
 
-   `<repo>/browser_extensions/rumi_browser_companion`
+   `<repo>/rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/rumi_browser_companion`
 
 4. In Rumi, call `browser_companion` with `action: "bridge.pairing"` to get the pairing token and candidate server URLs.
 5. Open the extension options page and paste:

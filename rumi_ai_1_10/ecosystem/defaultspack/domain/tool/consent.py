@@ -27,6 +27,11 @@ import time
 import uuid
 
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
+from blocks.chat._prompt_helpers import build_content_classifier_prompt
+
+
 # ======================================================================
 # カテゴリ定義
 # ======================================================================
@@ -100,14 +105,10 @@ CATEGORIES = {
 # AI 判定用プロンプト
 # ======================================================================
 
-_AI_JUDGE_SYSTEM = (
-    "You are a content classifier. Analyze the given text and determine "
-    "if it contains sensitive advice in any of these categories: "
-    "investment, tax, medical, legal.\n"
-    "Respond with ONLY a JSON object: "
-    '{"categories": ["category1", ...], "confidence": 0.0-1.0}\n'
-    "If no sensitive content is found, respond: "
-    '{"categories": [], "confidence": 1.0}'
+_AI_JUDGE_SYSTEM = build_content_classifier_prompt(
+    list(CATEGORIES.keys()),
+    field_name="categories",
+    scope="consent",
 )
 
 

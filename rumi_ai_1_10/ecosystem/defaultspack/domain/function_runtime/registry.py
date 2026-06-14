@@ -25,6 +25,8 @@ TOOL_FUNCTION_ACTIONS = {
     "tool_calculator": ("calculator", {}),
     "tool_file_reader": ("file_reader", {}),
     "tool_todo": ("todo", {}),
+    "tool_kanban": ("tool_kanban", {}),
+    "tool_kanban_agent_session": ("tool_kanban_agent_session", {}),
     "tool_subagent": ("subagent", {}),
     "browser_session": ("browser_computer", {"action": "browser.session"}),
     "browser_open_url": ("browser_computer", {"action": "browser.open_url"}),

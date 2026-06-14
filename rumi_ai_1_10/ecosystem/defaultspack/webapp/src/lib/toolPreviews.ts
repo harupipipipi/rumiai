@@ -119,6 +119,11 @@ function normalizePreviewUrl(value: string): string {
   }
 }
 
+export function isHumanOperatorCanvasPreview(preview: ToolPreviewItem): boolean {
+  if (preview.data.type !== "web") return false;
+  return normalizePreviewUrl(preview.data.url).includes("/api/human-operator/conversations/");
+}
+
 export function collectPreviewUrls(value: unknown, urls: string[] = [], seen = new Set<string>()): string[] {
   if (Array.isArray(value)) {
     value.forEach((item) => collectPreviewUrls(item, urls, seen));

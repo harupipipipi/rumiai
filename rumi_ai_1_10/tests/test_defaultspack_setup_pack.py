@@ -375,6 +375,45 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(result["errors"][0]["resolution"], "choose_one_pack")
             self.assertEqual(fake_grants.batch_calls, [])
 
+    def test_install_rejects_invalid_setup_pack_metadata_schema_before_grants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            pack_dir = root / "workspace"
+            pack_dir.mkdir(parents=True)
+            (pack_dir / "pack.json").write_text(
+                json.dumps(
+                    {
+                        "pack_id": "workspace",
+                        "target_pack_id": "workspace",
+                        "supports_all_ok": True,
+                        "conflicts_with": [
+                            {
+                                "reason": "Missing conflicting pack id.",
+                                "resolution": "choose_one_pack",
+                            }
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+
+            ctx = self._install_context(
+                base,
+                [self._target(base, "workspace", "rumi:ecosystem/workspace")],
+            )
+            _, fake_grants, *patches = ctx
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = manager.install("workspace")
+
+            self.assertFalse(result["success"])
+            self.assertEqual(result["status_code"], 400)
+            self.assertEqual(result["errors"][0]["reason"], "invalid_setup_pack_schema")
+            self.assertEqual(result["errors"][0]["field"], "conflicts_with[0]")
+            self.assertEqual(fake_grants.batch_calls, [])
+
     def test_grant_and_revoke_all_ok_reject_unsupported_setup_pack_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

@@ -8,7 +8,9 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use log::info;
+use rand::{distributions::Alphanumeric, Rng};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 /// Reusable blocking HTTP client for health checks.
 static HEALTH_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
@@ -22,6 +24,52 @@ struct ApiEnvelope<T> {
 #[derive(Debug, Deserialize)]
 struct HealthPayload {
     panel_ready: Option<bool>,
+    desktop_challenge_response: Option<String>,
+}
+
+const DESKTOP_HEALTH_CHALLENGE_HEADER: &str = "X-Rumi-Desktop-Health-Challenge";
+
+fn generate_health_challenge() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect()
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output
+}
+
+fn hmac_sha256_hex(secret: &str, message: &str) -> String {
+    const BLOCK_SIZE: usize = 64;
+
+    let mut key = secret.as_bytes().to_vec();
+    if key.len() > BLOCK_SIZE {
+        key = Sha256::digest(&key).to_vec();
+    }
+    key.resize(BLOCK_SIZE, 0);
+
+    let mut outer_key_pad = [0x5c; BLOCK_SIZE];
+    let mut inner_key_pad = [0x36; BLOCK_SIZE];
+    for (idx, byte) in key.iter().enumerate() {
+        outer_key_pad[idx] ^= byte;
+        inner_key_pad[idx] ^= byte;
+    }
+
+    let mut inner = Sha256::new();
+    inner.update(inner_key_pad);
+    inner.update(message.as_bytes());
+    let inner_hash = inner.finalize();
+
+    let mut outer = Sha256::new();
+    outer.update(outer_key_pad);
+    outer.update(inner_hash);
+    hex_lower(&outer.finalize())
 }
 
 fn health_client() -> &'static reqwest::blocking::Client {
@@ -31,6 +79,50 @@ fn health_client() -> &'static reqwest::blocking::Client {
             .build()
             .expect("failed to build health-check HTTP client")
     })
+}
+
+/// Send a health-check request that proves the listener knows the desktop
+/// bootstrap secret without disclosing that secret to an untrusted local port.
+pub fn check_authenticated_health(port: u16, bootstrap_secret: &str) -> Result<bool> {
+    if bootstrap_secret.is_empty() {
+        return Ok(false);
+    }
+
+    let challenge = generate_health_challenge();
+    let url = format!("http://127.0.0.1:{port}/health");
+    let resp = match health_client()
+        .get(&url)
+        .header(DESKTOP_HEALTH_CHALLENGE_HEADER, &challenge)
+        .send()
+    {
+        Ok(resp) => resp,
+        Err(_) => return Ok(false),
+    };
+
+    if !resp.status().is_success() {
+        return Ok(false);
+    }
+
+    let envelope: ApiEnvelope<HealthPayload> = match resp.json() {
+        Ok(payload) => payload,
+        Err(_) => return Ok(false),
+    };
+    if !envelope.success {
+        return Ok(false);
+    }
+
+    let Some(payload) = envelope.data else {
+        return Ok(false);
+    };
+    if payload.panel_ready == Some(false) {
+        return Ok(false);
+    }
+
+    let expected = hmac_sha256_hex(bootstrap_secret, &challenge);
+    Ok(payload
+        .desktop_challenge_response
+        .as_deref()
+        .is_some_and(|actual| actual.eq_ignore_ascii_case(&expected)))
 }
 
 /// Send a single health-check request.
@@ -94,5 +186,13 @@ mod tests {
         let result = check_health(1);
         assert!(result.is_ok());
         assert!(!result.unwrap());
+    }
+
+    #[test]
+    fn hmac_sha256_hex_matches_known_vector() {
+        assert_eq!(
+            hmac_sha256_hex("key", "The quick brown fox jumps over the lazy dog"),
+            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+        );
     }
 }

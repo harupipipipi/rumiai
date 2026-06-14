@@ -292,3 +292,72 @@ def test_tool_executor_yolo_string_false_does_not_bypass_approval(tmp_path, monk
     assert result["is_error"] is False
     assert result["widget"]["approval_required"] is True
     assert not (tmp_path / "blocked.txt").exists()
+
+
+def test_tool_invoke_ignores_untrusted_payload_profile_policy_yolo(tmp_path, monkeypatch):
+    import backend.tool.permission_policy as permission_policy
+    import blocks.tool.invoke as invoke
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_TOOL_PERMISSION_POLICY_PATH", str(tmp_path / "permission_policy.json"))
+    permission_policy._POLICY_STORE = None
+
+    class Registry:
+        def get(self, name):
+            return {"tool_id": name, "name": name, "write_action": True}
+
+        def list_tools(self):
+            return []
+
+    class Executor:
+        def execute(self, tool_name, arguments, context):
+            raise AssertionError("untrusted yolo_mode must not reach execution")
+
+    monkeypatch.setattr(invoke, "ToolRegistry", Registry)
+    monkeypatch.setattr(invoke, "ToolExecutor", Executor)
+
+    result = invoke.run(
+        {
+            "tool_name": "danger",
+            "arguments": {},
+            "context": {
+                "workspace_root": str(tmp_path),
+                "profile_policy": {"yolo_mode": True, "allow_shell": True},
+            },
+        },
+        {},
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "PERMISSION_DENIED"
+    assert result["error"]["details"]["action"] == "ask"
+
+
+def test_tool_invoke_preserves_trusted_context_profile_policy_yolo(tmp_path, monkeypatch):
+    import backend.tool.permission_policy as permission_policy
+    import blocks.tool.invoke as invoke
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_TOOL_PERMISSION_POLICY_PATH", str(tmp_path / "permission_policy.json"))
+    permission_policy._POLICY_STORE = None
+
+    class Registry:
+        def get(self, name):
+            return {"tool_id": name, "name": name, "write_action": True}
+
+        def list_tools(self):
+            return []
+
+    class Executor:
+        def execute(self, tool_name, arguments, context):
+            return {"result": "ran", "is_error": False, "widget": None}
+
+    monkeypatch.setattr(invoke, "ToolRegistry", Registry)
+    monkeypatch.setattr(invoke, "ToolExecutor", Executor)
+
+    result = invoke.run(
+        {"tool_name": "danger", "arguments": {}, "context": {"workspace_root": str(tmp_path)}},
+        {"profile_policy": {"yolo_mode": True}},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["result"] == "ran"
+    assert result["data"]["permission"]["matched_by"] == "yolo_mode"

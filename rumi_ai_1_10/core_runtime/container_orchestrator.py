@@ -100,27 +100,18 @@ class ContainerOrchestrator:
                 builder.label("rumi.pack_id", pack_id)
                 builder.label("rumi.managed", "true")
 
-                # BUG-5-1: Windows needs bridge network for TCP
-                if sys.platform == "win32":
-                    builder.network("bridge")
-
                 # Egress UDS ソケットマウント
                 try:
                     from .egress_proxy import get_uds_egress_proxy_manager
                     _egress_mgr = get_uds_egress_proxy_manager()
                     _ok, _err, _egress_sock = _egress_mgr.ensure_pack_socket(pack_id)
-                    if _ok:
-                        if sys.platform == "win32":
-                            # BUG-5-1: Windows TCP egress fallback
-                            _egress_port = _egress_mgr.get_tcp_port(pack_id)
-                            _egress_token = _egress_mgr.get_auth_token(pack_id)
-                            if _egress_port and _egress_token:
-                                builder.env("RUMI_EGRESS_HOST", "host.docker.internal")
-                                builder.env("RUMI_EGRESS_PORT", str(_egress_port))
-                                builder.env("RUMI_EGRESS_TOKEN", _egress_token)
-                        elif _egress_sock:
-                            builder.volume(f"{_egress_sock}:/run/rumi/egress.sock:rw")
-                            builder.env("RUMI_EGRESS_SOCKET", "/run/rumi/egress.sock")
+                    # Keep pack containers on DockerRunBuilder's default --network=none.
+                    # Windows Docker cannot mount UDS sockets, but enabling bridge
+                    # networking for TCP proxy fallback would let pack code bypass
+                    # the egress proxy with direct sockets/curl/requests.
+                    if _ok and sys.platform != "win32" and _egress_sock:
+                        builder.volume(f"{_egress_sock}:/run/rumi/egress.sock:rw")
+                        builder.env("RUMI_EGRESS_SOCKET", "/run/rumi/egress.sock")
                 except Exception as e:
                     logger.warning("Failed to mount egress socket for %s: %s", pack_id, e)
 
@@ -129,18 +120,11 @@ class ContainerOrchestrator:
                     from .capability_proxy import get_capability_proxy
                     _cap_proxy = get_capability_proxy()
                     _cap_ok, _cap_err, _cap_sock = _cap_proxy.ensure_principal_socket(pack_id)
-                    if _cap_ok:
-                        if sys.platform == "win32":
-                            # BUG-5-1: Windows TCP capability fallback
-                            _cap_port = _cap_proxy.get_tcp_port(pack_id)
-                            _cap_token = _cap_proxy.get_auth_token(pack_id)
-                            if _cap_port and _cap_token:
-                                builder.env("RUMI_CAPABILITY_HOST", "host.docker.internal")
-                                builder.env("RUMI_CAPABILITY_PORT", str(_cap_port))
-                                builder.env("RUMI_CAPABILITY_TOKEN", _cap_token)
-                        elif _cap_sock:
-                            builder.volume(f"{_cap_sock}:/run/rumi/capability.sock:rw")
-                            builder.env("RUMI_CAPABILITY_SOCKET", "/run/rumi/capability.sock")
+                    # Same isolation rule for capability IPC: do not expose a TCP
+                    # host path that would require broad container networking.
+                    if _cap_ok and sys.platform != "win32" and _cap_sock:
+                        builder.volume(f"{_cap_sock}:/run/rumi/capability.sock:rw")
+                        builder.env("RUMI_CAPABILITY_SOCKET", "/run/rumi/capability.sock")
                 except Exception as e:
                     logger.warning("Failed to mount capability socket for %s: %s", pack_id, e)
 
@@ -261,28 +245,25 @@ class ContainerOrchestrator:
     ) -> list:
         """Build a Docker run command for universal_call execution."""
         import uuid
-        from core_runtime.docker_run_builder import DockerRunBuilder
 
         image = docker_image or self._UC_DEFAULT_IMAGES.get(runtime, "alpine:latest")
         name = container_name or f"rumi-uc-{pack_id}-{uuid.uuid4().hex[:8]}"
 
-        builder = (
-            DockerRunBuilder()
-            .set_pids_limit(100)
-            .add_volume(workspace_dir, "/workspace", read_only=True)
-            .set_workdir("/workspace")
-            .add_label("rumi.pack_id", pack_id)
-            .add_label("rumi.type", "universal_call")
-            .add_label("rumi.runtime", runtime)
-            .set_image(image)
-        )
+        builder = DockerRunBuilder(name=name)
+        builder.pids_limit(100)
+        builder.volume(f"{workspace_dir}:/workspace:ro")
+        builder.workdir("/workspace")
+        builder.label("rumi.pack_id", pack_id)
+        builder.label("rumi.type", "universal_call")
+        builder.label("rumi.runtime", runtime)
+        builder.image(image)
 
         if runtime == "command":
-            builder.set_command(["sh", filename])
+            builder.command(["sh", filename])
         elif runtime == "python":
-            builder.set_command(["python", filename])
+            builder.command(["python", filename])
         else:
-            builder.set_command([f"./{filename}"])
+            builder.command([f"./{filename}"])
 
         return builder.build()
 
