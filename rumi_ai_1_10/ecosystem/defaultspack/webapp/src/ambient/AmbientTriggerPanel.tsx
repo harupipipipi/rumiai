@@ -174,9 +174,20 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
 
   useEffect(() => subscribeAuthorityApprovalSettlements((event) => {
     if (event.requestId !== AMBIENT_AUTHORITY_REQUEST_ID) return;
-    setMessage(event.status === "approved" ? "Rumi内の許可を保存しました。次に端末のマイク・カメラを許可してください。" : null);
+    setMessage(event.status === "approved" ? "Rumiの承認が届きました。次に端末のマイク・カメラを許可してください。" : null);
     void refresh({ probeOs: true });
   }), []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("authority_approved") !== "1") return;
+    setMessage("Rumiの承認が戻ってきました。次に端末のマイク・カメラを許可してください。");
+    params.delete("authority_approved");
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", nextUrl);
+    void refresh({ probeOs: true });
+  }, []);
 
   useEffect(() => {
     if (!status || allRumiPermissionsGranted || rumiApprovalAutoOpenRef.current) return;
@@ -188,6 +199,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   useEffect(() => {
     if (videoRef.current && cameraStream) {
       videoRef.current.srcObject = cameraStream;
+      void videoRef.current.play().catch((error) => {
+        console.info("[ambient] camera video play was blocked", error);
+      });
     }
   }, [cameraStream, monitorEnabled]);
 
