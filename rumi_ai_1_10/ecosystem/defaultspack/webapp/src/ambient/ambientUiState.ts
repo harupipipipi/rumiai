@@ -121,7 +121,7 @@ export const ambientCopyJa = {
       badge: "許可が拒否されています",
       headline: "マイクまたはカメラが拒否されています",
       body: "設定から許可を変更して、再確認してください",
-      primary: "設定方法を見る",
+      primary: "許可を開く",
       tone: "red",
     },
     blocked: {

@@ -181,7 +181,7 @@ def test_pinch_and_agent_dispatch_share_ambient_router(monkeypatch, tmp_path):
     assert envelope.target["conversation_id"] == "conv-1"
 
 
-def test_gesture_choice_dispatches_numeric_reply_without_audio(monkeypatch, tmp_path):
+def test_gesture_choice_does_not_dispatch_numeric_reply_without_audio(monkeypatch, tmp_path):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
 
@@ -193,7 +193,7 @@ def test_gesture_choice_dispatches_numeric_reply_without_audio(monkeypatch, tmp_
     router.grant_permission("ambient.trigger.dispatch")
 
     with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": ""}) as submit:
-        dispatched = router.submit_event(
+        ignored = router.submit_event(
             {
                 "source": "camera",
                 "trigger": "gesture_choice",
@@ -207,12 +207,9 @@ def test_gesture_choice_dispatches_numeric_reply_without_audio(monkeypatch, tmp_
             {"conversation_id": "conv-choice"},
         )
 
-    assert dispatched["status"] == "ok"
-    envelope = submit.call_args.args[0]
-    assert envelope.input == "3"
-    assert envelope.delivery["action_id"] == "chat.message"
-    assert envelope.attachments == []
-    assert envelope.metadata["ambient"]["trigger"] == "gesture_choice"
+    assert ignored["status"] == "ignored"
+    assert ignored["reason"] == "gesture_choice.chat_dispatch_disabled"
+    submit.assert_not_called()
 
 
 def test_ambient_routing_can_create_session_or_per_trigger_chats(monkeypatch, tmp_path):

@@ -360,6 +360,8 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     if (choice !== 2 && choice !== 3 && choice !== 4) return;
     const now = performance.now();
     if (now - choiceHandledAtRef.current < 800) return;
+    const approvalDecision = approvalDecisionForChoice(choice, approvalTargetRef.current);
+    if (!approvalDecision) return;
     choiceHandledAtRef.current = now;
     if (pinchRecorderRef.current) {
       pinchRecorderRef.current.cancel();
@@ -367,40 +369,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       setPinchRecording(false);
       setRecordingStartedAt(null);
     }
-    const approvalDecision = approvalDecisionForChoice(choice, approvalTargetRef.current);
-    if (approvalDecision) {
-      await submitApprovalGesture(approvalDecision, state, `choice_${choice}`);
-      return;
-    }
-    setPinchDetectorStatus("sending");
-    try {
-      const result = await ambientTriggerClient.submitEvent({
-        source: "camera",
-        trigger: "gesture_choice",
-        mode: "choice_response",
-        action_id: "chat.message",
-        conversation_id: conversationIdRef.current || undefined,
-        input_text: String(choice),
-        choice,
-        confidence: state.confidence,
-        duration_ms: 3000,
-        metadata: {
-          panel: "ambient_mini_window",
-          hand: state.hand,
-          normalized_distance: state.normalizedDistance,
-          hold_ms: 3000,
-          pinch_armed: true,
-        },
-      });
-      setMessage(String(result.reason ?? result.status ?? `sent ${choice}`));
-      onOpenInputRef.current?.("");
-      focusComposer();
-      await refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "数字ジェスチャーを送信できませんでした。");
-    } finally {
-      setPinchDetectorStatus("tracking");
-    }
+    await submitApprovalGesture(approvalDecision, state, `choice_${choice}`);
   }, []);
 
   const handleApprovalSwipe = useCallback(async (state: PinchState) => {

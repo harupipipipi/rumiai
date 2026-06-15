@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   AMBIENT_CAMERA_PERMISSION,
   AMBIENT_MIC_PERMISSION,
+  ambientCopyJa,
   deriveAmbientUiState,
   osPermissionBucket,
   rumiPermissionBucket,
@@ -84,6 +85,7 @@ test("permission buckets keep denied and blocked distinct from missing setup", (
   });
   assert.equal(osPermissionBucket(denied, AMBIENT_MIC_PERMISSION), "denied");
   assert.equal(deriveAmbientUiState(denied, "off"), "denied");
+  assert.equal(ambientCopyJa.states.denied.primary, "許可を開く");
 
   const blocked = status({
     rumi: { ...allRumi, [AMBIENT_CAMERA_PERMISSION]: false },

@@ -129,6 +129,14 @@ class AmbientTriggerRouter:
                 action_id=self._action_id(event),
                 decision=str(event.payload.get("decision") or event.metadata.get("decision") or ""),
             )
+        elif event.source == "camera" and event.trigger == "gesture_choice":
+            return self._record(
+                event,
+                "ignored",
+                "gesture_choice.chat_dispatch_disabled",
+                action_id=self._action_id(event),
+                choice=event.payload.get("choice"),
+            )
         elif event.source == "camera" and event.trigger == "pinch":
             if event.confidence < 0.5:
                 return self._record(event, "ignored", "pinch.low_confidence")
