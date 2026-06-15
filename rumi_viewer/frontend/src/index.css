@@ -331,7 +331,26 @@
     border-color: var(--border);
   }
 
+  html {
+    min-height: 100%;
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body,
+  #root {
+    min-height: 100vh;
+    background-color: var(--bg-main);
+  }
+
   body {
+    margin: 0;
+    min-width: 320px;
     background-color: var(--bg-main);
     color: var(--text-main);
     font-family: var(--font-sans);
