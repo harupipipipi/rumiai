@@ -390,7 +390,7 @@ def test_ambient_monitor_start_function_returns_host_stream_intent(monkeypatch):
     }
 
 
-def test_rumi_ambient_trigger_pack_metadata_exposes_install_prompt_permissions_and_hooks():
+def test_rumi_ambient_trigger_pack_metadata_exposes_install_prompt_permissions_and_surfaces():
     pack_json = ROOT / "ecosystem" / "setup_pack" / "rumi_ambient_trigger_pack" / "pack.json"
     pack = json.loads(pack_json.read_text(encoding="utf-8"))
     assert pack["supports_all_ok"] is False
@@ -402,6 +402,7 @@ def test_rumi_ambient_trigger_pack_metadata_exposes_install_prompt_permissions_a
     assert "マイク/カメラ" in pack["install_prompt"]["title"]
     assert pack["install_surfaces"] == ["small_window", "defaultspack_input"]
     assert "LINE" not in pack["install_prompt"]["surface_question"]
+    assert "external_input" not in pack["overlap_policy"]
 
     extension_json = ROOT / "ecosystem" / "rumi_ambient_trigger_pack" / "frontend_extensions" / "ambient_trigger.ui.json"
     extension = json.loads(extension_json.read_text(encoding="utf-8"))
@@ -414,6 +415,40 @@ def test_rumi_ambient_trigger_pack_metadata_exposes_install_prompt_permissions_a
     assert extension["privacy"]["gesture_choice"]["requires_audio"] is False
     assert extension["privacy"]["gesture_choice"]["profile_mutation"] is False
     assert extension["privacy"]["approval_gesture"]["requires_thumb_index_contact"] is False
+
+
+def test_ambient_status_hides_legacy_external_hooks(monkeypatch, tmp_path):
+    store_path = tmp_path / "ambient-state.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(store_path))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+    store_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "defaultspack_input": {"enabled": True, "profile": "defaults.console.input"},
+                    "line": {"enabled": True, "profile": "legacy.line"},
+                    "discord": {"enabled": True, "profile": "legacy.discord"},
+                    "web": {"enabled": True, "profile": "legacy.web"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    status = router.status()
+
+    assert status["hooks"] == {
+        "defaultspack_input": {"enabled": True, "profile": "defaults.console.input"},
+    }
+
+    router.start_monitor()
+    persisted = json.loads(store_path.read_text(encoding="utf-8"))
+    assert persisted["hooks"] == {
+        "defaultspack_input": {"enabled": True, "profile": "defaults.console.input"},
+    }
 
 
 def _contains_any_key(value, keys: set[str]) -> bool:

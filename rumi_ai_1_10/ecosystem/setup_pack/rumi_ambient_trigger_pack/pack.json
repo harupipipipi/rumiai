@@ -45,7 +45,6 @@
   },
   "overlap_policy": {
     "frontend": "add_small_control_window_and_settings_section",
-    "external_input": "reuse_existing_external_input_profiles",
     "defaultspack_core": "do_not_override"
   },
   "defaultspack_promotion": {

@@ -34,6 +34,7 @@ class AmbientStore:
         _deep_update(base, data)
         _migrate_legacy_permissions(base)
         _migrate_legacy_gesture_thresholds(base)
+        _migrate_legacy_hooks(base)
         return base
 
     def write(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -184,9 +185,6 @@ def _default_state() -> dict[str, Any]:
         },
         "hooks": {
             "defaultspack_input": {"enabled": True, "profile": "defaults.console.input"},
-            "line": {"enabled": True, "profile": "external_input.line"},
-            "discord": {"enabled": True, "profile": "external_input.discord"},
-            "web": {"enabled": True, "profile": "external_input.web"},
         },
         "privacy": {
             "store_audio": False,
@@ -228,6 +226,7 @@ def _rumi_permission(state: dict[str, Any], permission_id: str) -> dict[str, Any
 def _privacy_safe_state(state: dict[str, Any]) -> dict[str, Any]:
     clean = deepcopy(state)
     clean["routing"] = _normalized_routing(clean.get("routing") if isinstance(clean.get("routing"), dict) else {})
+    _migrate_legacy_hooks(clean)
     enrollment = clean.get("voice_enrollment")
     if isinstance(enrollment, dict):
         enrollment.pop("raw_audio", None)
@@ -321,6 +320,19 @@ def _migrate_legacy_gesture_thresholds(state: dict[str, Any]) -> None:
         release_threshold = 0.0
     if release_threshold <= 0.38:
         service["release_threshold"] = 0.46
+
+
+def _migrate_legacy_hooks(state: dict[str, Any]) -> None:
+    hooks = state.get("hooks") if isinstance(state.get("hooks"), dict) else {}
+    default_input = hooks.get("defaultspack_input") if isinstance(hooks, dict) else {}
+    if not isinstance(default_input, dict):
+        default_input = {}
+    state["hooks"] = {
+        "defaultspack_input": {
+            "enabled": _coerce_bool(default_input.get("enabled"), True),
+            "profile": "defaults.console.input",
+        }
+    }
 
 
 def _now() -> str:
