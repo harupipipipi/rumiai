@@ -56,7 +56,7 @@ export const ambientCopyJa = {
   subtitle: "Ambient Trigger",
   gestureShort: "指をくっつけている間だけ録音。離すとAIに送信。",
   privacyShort: "音声・映像は保存しません",
-  auditShort: "記録はトリガーイベントのみです",
+  auditShort: "履歴には使った時刻と結果だけ残します",
   states: {
     setupNeeded: {
       badge: "準備が必要",
@@ -81,16 +81,16 @@ export const ambientCopyJa = {
     },
     readyOff: {
       badge: "停止中",
-      headline: "開始すると指で録音できます",
-      body: "まだ監視していません",
-      primary: "開始する",
+      headline: "手の認識を始めると録音できます",
+      body: "Rumiと端末の許可は済んでいます。まだ手の認識は始めていません",
+      primary: "手の認識を開始",
       tone: "zinc",
     },
     monitoring: {
       badge: "待機中",
       headline: "指をくっつけると録音します",
       body: "離すとAIに送信します",
-      primary: "停止する",
+      primary: "手の認識を停止",
       tone: "emerald",
     },
     recording: {
@@ -111,7 +111,7 @@ export const ambientCopyJa = {
       badge: "一時停止中",
       headline: "一時停止しています",
       body: "再開すると指の検出に戻ります",
-      primary: "再開する",
+      primary: "手の認識を再開",
       tone: "zinc",
     },
     denied: {
@@ -150,15 +150,19 @@ export function deriveAmbientUiState(
   const rumiStatuses = AMBIENT_REQUIRED_PERMISSIONS.map((permissionId) => rumiPermissionBucket(status, permissionId));
   const osStatuses = AMBIENT_OS_PERMISSIONS.map((permissionId) => osPermissionBucket(status, permissionId));
 
-  if (rumiStatuses.includes("blocked") || osStatuses.includes("blocked")) return "blocked";
-  if (rumiStatuses.includes("denied") || osStatuses.includes("denied")) return "denied";
-
   const hasMissingRumi = rumiStatuses.some((permission) => permission !== "granted");
   const hasMissingOs = osStatuses.some((permission) => permission !== "granted");
 
-  if (hasMissingRumi && hasMissingOs) return "setupNeeded";
-  if (hasMissingRumi) return "rumiPermissionNeeded";
-  if (hasMissingOs) return "osPermissionNeeded";
+  if (hasMissingRumi) {
+    if (rumiStatuses.includes("blocked")) return "blocked";
+    if (rumiStatuses.includes("denied")) return "denied";
+    return hasMissingOs ? "setupNeeded" : "rumiPermissionNeeded";
+  }
+  if (hasMissingOs) {
+    if (osStatuses.includes("blocked")) return "blocked";
+    if (osStatuses.includes("denied")) return "denied";
+    return "osPermissionNeeded";
+  }
 
   if (runtimeStatus === "sending") return "sending";
   if (runtimeStatus === "recording") return "recording";

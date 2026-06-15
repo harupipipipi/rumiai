@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Loader2, RefreshCw, ShieldAlert, ShieldCheck, ShieldX, X } from "lucide-react";
+import { Check, ExternalLink, Loader2, RefreshCw, ShieldAlert, ShieldCheck, ShieldX, X } from "lucide-react";
 
 import { AmbientTriggerPanel } from "../ambient/AmbientTriggerPanel";
 import { ambientTriggerClient, type AmbientStatus } from "../ambient/ambientTriggerClient";
@@ -20,7 +20,7 @@ import {
   type AuthorityApprovalScope,
 } from "../lib/authorityApproval";
 import { broadcastAuthorityApprovalSettlement } from "../lib/authorityApprovalEvents";
-import { getAuthorityApprovalContext } from "../lib/desktopApproval";
+import { getAuthorityApprovalContext, openAmbientTriggerWindow } from "../lib/desktopApproval";
 import { cn } from "../lib/cn";
 
 type DecisionState =
@@ -489,7 +489,7 @@ export function AuthorityApprovalWindow() {
 function AmbientPackAuthorityApprovalWindow() {
   const [status, setStatus] = useState<AmbientStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [action, setAction] = useState<"approve" | "close" | null>(null);
+  const [action, setAction] = useState<"approve" | "open" | "close" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const rumiPermissionCount = grantedPermissionCount(status, AMBIENT_REQUIRED_PERMISSIONS, "rumi");
@@ -539,6 +539,22 @@ function AmbientPackAuthorityApprovalWindow() {
     setAction("close");
     window.close();
     window.setTimeout(() => setAction(null), 300);
+  };
+
+  const openAmbientWindow = async () => {
+    setAction("open");
+    setError(null);
+    try {
+      const opened = await openAmbientTriggerWindow();
+      if (!opened) {
+        window.location.assign("/ambient");
+      }
+    } catch (openError) {
+      console.info("[ambient] ambient trigger window unavailable", openError);
+      window.location.assign("/ambient");
+    } finally {
+      window.setTimeout(() => setAction(null), 300);
+    }
   };
 
   return (
@@ -602,6 +618,13 @@ function AmbientPackAuthorityApprovalWindow() {
               </div>
             ) : (
               <div className="mt-5 grid gap-4">
+                {rumiReady && (
+                  <section className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-3 text-xs leading-5 text-emerald-50">
+                    <p className="font-medium">Rumiの承認は終わっています</p>
+                    <p className="mt-1 text-emerald-50/80">この画面は承認用です。手の認識と録音は、指で録音ウィンドウで開始します。</p>
+                  </section>
+                )}
+
                 <section className="space-y-2">
                   <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-600">Rumiで許可すること</p>
                   <div className="grid gap-2">
@@ -616,7 +639,7 @@ function AmbientPackAuthorityApprovalWindow() {
 
                 <section className="rounded-lg border border-zinc-800 bg-black/25 p-3 text-xs leading-5 text-zinc-400">
                   <p className="font-medium text-zinc-200">追加される入口</p>
-                  <p className="mt-1">小型window、defaultspack input、LINE / Discord / Web hook の外部入力profileへ接続します。</p>
+                  <p className="mt-1">指録音の別ウィンドウ、defaultspack input、LINE / Discord / Web hook の外部入力profileへ接続します。</p>
                 </section>
 
                 <section className="rounded-lg border border-zinc-800 bg-black/25 p-3 text-xs leading-5 text-zinc-400">
@@ -626,7 +649,7 @@ function AmbientPackAuthorityApprovalWindow() {
 
                 <section className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs leading-5 text-emerald-50">
                   <p className="font-medium">プライバシー</p>
-                  <p className="mt-1 text-emerald-50/80">音声・画像・カメラ映像は保存しません。auditに残るのはトリガーイベントだけです。</p>
+                  <p className="mt-1 text-emerald-50/80">録音データやカメラ映像は残しません。履歴には、指録音を使った時刻と結果だけを残します。</p>
                 </section>
               </div>
             )}
@@ -642,6 +665,17 @@ function AmbientPackAuthorityApprovalWindow() {
               {action === "close" ? <Loader2 className="animate-spin" size={15} /> : <X size={15} />}
               {rumiReady ? "閉じる" : "あとで"}
             </button>
+            {rumiReady && (
+              <button
+                type="button"
+                onClick={() => void openAmbientWindow()}
+                disabled={loading || action !== null}
+                className="flex h-10 min-w-40 items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-50"
+              >
+                {action === "open" ? <Loader2 className="animate-spin" size={15} /> : <ExternalLink size={15} />}
+                指で録音を開く
+              </button>
+            )}
             {!rumiReady && (
               <button
                 type="button"

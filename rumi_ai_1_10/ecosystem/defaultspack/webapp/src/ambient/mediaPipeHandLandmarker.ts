@@ -9,14 +9,18 @@ import {
   GesturePinchDetector,
   type HandLandmark,
   type Handedness,
+  type PinchFrame,
   type PinchDetectorOptions,
   type PinchState,
 } from "./gesturePinchDetector";
+
+export type HandTrackingFrame = PinchFrame;
 
 type TrackerOptions = PinchDetectorOptions & {
   wasmRoot?: string;
   modelAssetPath?: string;
   frameIntervalMs?: number;
+  onFrame?: (frame: HandTrackingFrame | null) => void;
 };
 
 const DEFAULT_FRAME_INTERVAL_MS = 80;
@@ -57,6 +61,7 @@ export async function startHandLandmarkerLoop(
       lastFrameAt = now;
       const result = handLandmarker.detectForVideo(video, now);
       const frame = frameFromResult(result, now);
+      options.onFrame?.(frame);
       if (frame) {
         onState(detector.updateFromLandmarks(frame));
       }

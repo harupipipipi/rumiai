@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Check, ChevronDown, ChevronUp, Hand, Loader2, Mic, Play, Radio, RefreshCcw, Settings, Shield, Square, Video, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, Mic, Play, Radio, RefreshCcw, Settings, Shield, Square, Video, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import { subscribeAuthorityApprovalSettlements } from "../lib/authorityApprovalEvents";
-import { openAuthorityApprovalWindow } from "../lib/desktopApproval";
+import { openAmbientTriggerWindow, openAuthorityApprovalWindow } from "../lib/desktopApproval";
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { ambientTriggerClient, type AmbientPermissionId, type AmbientStatus } from "./ambientTriggerClient";
 import {
@@ -23,7 +23,7 @@ import {
   type AmbientRuntimeStatus,
   type AmbientUiState,
 } from "./ambientUiState";
-import { startHandLandmarkerLoop } from "./mediaPipeHandLandmarker";
+import { startHandLandmarkerLoop, type HandTrackingFrame } from "./mediaPipeHandLandmarker";
 import type { PinchState } from "./gesturePinchDetector";
 
 export type AmbientApprovalTarget = {
@@ -40,15 +40,27 @@ type Props = {
   approvalTarget?: AmbientApprovalTarget | null;
   onApprovalGesture?: (decision: "approve" | "reject") => void | Promise<void>;
   finalAnswerText?: string | null;
+  variant?: "floating" | "window";
 };
 
 const MIC_DEVICE_STORAGE_KEY = "rumi.ambient.selectedMicId";
 const CAMERA_DEVICE_STORAGE_KEY = "rumi.ambient.selectedCameraId";
 const FRONT_ON_FINAL_STORAGE_KEY = "rumi.ambient.frontOnFinal";
+const THUMB_TIP_INDEX = 4;
+const INDEX_TIP_INDEX = 8;
+const HAND_LANDMARK_CONNECTIONS = [
+  [0, 1], [1, 2], [2, 3], [3, 4],
+  [0, 5], [5, 6], [6, 7], [7, 8],
+  [5, 9], [9, 10], [10, 11], [11, 12],
+  [9, 13], [13, 14], [14, 15], [15, 16],
+  [13, 17], [17, 18], [18, 19], [19, 20],
+  [0, 17],
+] as const;
 
-export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarget, onApprovalGesture, finalAnswerText }: Props) {
+export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarget, onApprovalGesture, finalAnswerText, variant = "floating" }: Props) {
   const [status, setStatus] = useState<AmbientStatus | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const standalone = variant === "window";
+  const [expanded, setExpanded] = useState(() => standalone);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [manualRumiFallbackOpen, setManualRumiFallbackOpen] = useState(false);
   const [rumiApprovalOpen, setRumiApprovalOpen] = useState(false);
@@ -63,6 +75,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [pinchDetectorStatus, setPinchDetectorStatus] = useState("idle");
+  const [trackingFrame, setTrackingFrame] = useState<HandTrackingFrame | null>(null);
   const [frontOnFinal, setFrontOnFinal] = useState(() => safeLocalStorageGet(FRONT_ON_FINAL_STORAGE_KEY) !== "false");
   const [frontFlash, setFrontFlash] = useState(false);
   const [lastFinalAnswer, setLastFinalAnswer] = useState("");
@@ -176,7 +189,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     if (videoRef.current && cameraStream) {
       videoRef.current.srcObject = cameraStream;
     }
-  }, [cameraStream]);
+  }, [cameraStream, monitorEnabled]);
 
   useEffect(() => () => {
     gestureStopRef.current?.();
@@ -354,11 +367,13 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     gestureStopRef.current = null;
     if (!monitorEnabled || !cameraStream || !videoRef.current) {
       setPinchDetectorStatus(cameraStream ? "paused" : "idle");
+      setTrackingFrame(null);
       return;
     }
     setPinchDetectorStatus("loading");
     startHandLandmarkerLoop(videoRef.current, handlePinchState, {
       choiceRequiresPinch: !approvalTargetRef.current,
+      onFrame: (frame) => setTrackingFrame(frame),
     })
       .then((stop) => {
         if (cancelled) {
@@ -378,6 +393,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       cancelled = true;
       gestureStopRef.current?.();
       gestureStopRef.current = null;
+      setTrackingFrame(null);
     };
   }, [Boolean(approvalTarget), cameraStream, handlePinchState, monitorEnabled]);
 
@@ -448,6 +464,21 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     setRumiApprovalOpen(true);
   }
 
+  async function openAmbientWindow() {
+    setMessage(null);
+    try {
+      const opened = await openAmbientTriggerWindow();
+      if (opened) return;
+    } catch (error) {
+      console.info("[ambient] ambient trigger window unavailable", error);
+    }
+    const url = new URL("/ambient", window.location.href);
+    const popup = window.open(url.toString(), "rumi-ambient-trigger", "popup,width=440,height=700");
+    if (!popup) {
+      setMessage("別ウィンドウを開けませんでした。ブラウザで /ambient を開いてください。");
+    }
+  }
+
   async function grantAllPermissions() {
     setManualRumiFallbackOpen(false);
     await runAction(async () => {
@@ -488,7 +519,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         "microphone.capture": "granted",
         "camera.capture": "granted",
       });
-    }, "マイクとカメラを使用できます。開始すると指の検出を待機します。");
+    }, "マイクとカメラを使用できます。次は手の認識を開始してください。");
   }
 
   async function startMonitoring() {
@@ -514,6 +545,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       pinchRecorderRef.current = null;
       setPinchRecording(false);
       setRecordingStartedAt(null);
+      setTrackingFrame(null);
       setCameraStream((current) => {
         current?.getTracks().forEach((track) => track.stop());
         return null;
@@ -571,27 +603,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "マイクを開始できませんでした。");
     }
-  }
-
-  async function submitPinch() {
-    const startState: PinchState = {
-      active: true,
-      triggered: true,
-      confidence: 0.91,
-      normalizedDistance: 0.21,
-      hand: "Right",
-      startedAt: performance.now(),
-    };
-    await beginPinchRecording(startState);
-    window.setTimeout(() => {
-      void finishPinchRecording({
-        ...startState,
-        active: false,
-        triggered: false,
-        releasedAt: performance.now(),
-        reason: "pinch_released",
-      });
-    }, 900);
   }
 
   async function submitApprovalGesture(decision: "approve" | "reject", state: PinchState, mode: string) {
@@ -672,12 +683,13 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     }
   }
 
-  return (
-    <LayerPortal layer="globalOverlay">
-      <>
+  const content = (
+    <>
       <section
         className={cn(
-          "fixed bottom-4 right-4 flex max-h-[calc(100vh-2rem)] w-[min(400px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-950/96 text-zinc-200 shadow-2xl shadow-black/40 backdrop-blur",
+          standalone
+            ? "flex h-screen w-full flex-col overflow-hidden bg-zinc-950 text-zinc-200"
+            : "fixed bottom-4 right-4 flex max-h-[calc(100vh-2rem)] w-[min(400px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-950/96 text-zinc-200 shadow-2xl shadow-black/40 backdrop-blur",
           frontFlash && "border-emerald-300/60 shadow-emerald-500/20",
           stateCopy.tone === "red" && "border-red-400/35",
           stateCopy.tone === "amber" && "border-amber-400/30",
@@ -694,16 +706,39 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             </div>
             <p className="mt-1 text-[12px] leading-5 text-zinc-300">{stateCopy.headline}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
-            title={expanded ? "閉じる" : "詳しく見る"}
-            aria-label={expanded ? "指で録音の詳細を閉じる" : "指で録音の詳細を見る"}
-          >
-            {expanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-          </button>
+          {!standalone && (
+            <button
+              type="button"
+              onClick={() => void openAmbientWindow()}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
+              title="別ウィンドウで開く"
+              aria-label="指で録音を別ウィンドウで開く"
+            >
+              <ExternalLink size={15} />
+            </button>
+          )}
+          {!standalone && (
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
+              title={expanded ? "閉じる" : "詳しく見る"}
+              aria-label={expanded ? "指で録音の詳細を閉じる" : "指で録音の詳細を見る"}
+            >
+              {expanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+            </button>
+          )}
         </div>
+
+        {monitorEnabled && (
+          <RecognitionMonitor
+            videoRef={videoRef}
+            frame={trackingFrame}
+            status={pinchDetectorStatus}
+            recording={pinchRecording}
+            recordingSeconds={recordingSeconds}
+          />
+        )}
 
         <div className="min-h-0 overflow-y-auto overscroll-contain">
         <div className="space-y-2.5 px-3.5 py-3">
@@ -809,22 +844,21 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
 
               <SetupStep
                 index={3}
-                title="指の動きをテスト"
+                title="手を映して録音"
                 statusText={gestureStatusLabel(pinchDetectorStatus, monitorEnabled)}
                 complete={monitorEnabled && pinchDetectorStatus === "tracking"}
                 active={allRumiPermissionsGranted && allOsPermissionsGranted}
               >
                 <p className="text-[12px] leading-5 text-zinc-400">カメラの前で、親指と人差し指をくっつけてください。くっついている間だけ録音します。</p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => void startMonitoring()} disabled={busy || !allRumiPermissionsGranted || !allOsPermissionsGranted || monitorEnabled} className="ambient-mini-button">
-                    <Play size={14} />
-                    開始する
-                  </button>
-                  <button type="button" onClick={() => void submitPinch()} disabled={busy || !monitorEnabled} className="ambient-mini-button">
-                    <Hand size={14} />
-                    送信テスト
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => void (monitorEnabled ? stopMonitoring() : startMonitoring())}
+                  disabled={busy || !allRumiPermissionsGranted || !allOsPermissionsGranted}
+                  className="ambient-mini-button mt-2 w-full"
+                >
+                  {monitorEnabled ? <Square size={14} /> : <Play size={14} />}
+                  {monitorEnabled ? "手の認識を停止" : "手の認識を開始"}
+                </button>
               </SetupStep>
             </section>
 
@@ -892,16 +926,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
               </section>
             )}
 
-            {cameraStream && (
-              <video
-                ref={videoRef}
-                className="h-24 w-full rounded-lg border border-zinc-800 object-cover"
-                autoPlay
-                muted
-                playsInline
-              />
-            )}
-
             <section className="space-y-2 border-t border-zinc-800/80 pt-3">
               <p className="text-[11px] font-semibold uppercase text-zinc-500">状態</p>
               <div className="grid grid-cols-3 gap-2 text-[11px] text-zinc-500">
@@ -921,7 +945,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             <section className="space-y-1 border-t border-zinc-800/80 pt-3 text-[12px] leading-5 text-zinc-400">
               <p className="font-medium text-zinc-300">プライバシー</p>
               <p>音声・画像・カメラ映像は保存しません。</p>
-              <p>記録されるのは「トリガーが使われた」イベントだけです。</p>
+              <p>あとから安全確認できるよう、使った時刻と結果だけを履歴に残します。</p>
             </section>
 
             {manualRumiFallbackOpen && (
@@ -974,8 +998,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         />
       )}
       </>
-    </LayerPortal>
   );
+  if (standalone) return content;
+  return <LayerPortal layer="globalOverlay">{content}</LayerPortal>;
 }
 
 function RumiPermissionApprovalDialog({
@@ -1027,7 +1052,7 @@ function RumiPermissionApprovalDialog({
           <section className="space-y-2">
             <p className="text-[11px] font-semibold uppercase text-zinc-500">追加される入口</p>
             <div className="grid gap-1.5 text-zinc-300">
-              <InstructionStep index={1} text="小型windowに指で録音パネルを表示" />
+              <InstructionStep index={1} text="別ウィンドウで指録音を開く" />
               <InstructionStep index={2} text="defaultspack inputへ音声入力を投入" />
               <InstructionStep index={3} text="LINE / Discord / Web hookの外部入力profileへ接続" />
             </div>
@@ -1040,7 +1065,7 @@ function RumiPermissionApprovalDialog({
 
           <section className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-emerald-50">
             <p className="font-medium">プライバシー</p>
-            <p className="mt-1 text-emerald-50/80">音声・画像・カメラ映像は保存しません。auditに残るのはトリガーイベントだけです。</p>
+            <p className="mt-1 text-emerald-50/80">録音データやカメラ映像は残しません。履歴には、指録音を使った時刻と結果だけを残します。</p>
           </section>
         </div>
 
@@ -1061,6 +1086,123 @@ function RumiPermissionApprovalDialog({
       </section>
     </div>
   );
+}
+
+function RecognitionMonitor({
+  videoRef,
+  frame,
+  status,
+  recording,
+  recordingSeconds,
+}: {
+  videoRef: RefObject<HTMLVideoElement | null>;
+  frame: HandTrackingFrame | null;
+  status: string;
+  recording: boolean;
+  recordingSeconds: number;
+}) {
+  const landmarks = frame?.landmarks ?? [];
+  const hasHand = landmarks.length > 0;
+  const label = recognitionMonitorLabel(status, hasHand, recording, recordingSeconds);
+  const toneClass = recognitionMonitorToneClass(status, hasHand, recording);
+  const thumbTip = landmarks[THUMB_TIP_INDEX];
+  const indexTip = landmarks[INDEX_TIP_INDEX];
+
+  return (
+    <section className="border-b border-zinc-800/80 bg-black/35 px-3.5 py-3">
+      <div className="relative overflow-hidden rounded-lg border border-zinc-800 bg-black">
+        <div className="relative aspect-[4/3]">
+          <video
+            ref={videoRef}
+            className="absolute inset-0 h-full w-full object-cover"
+            autoPlay
+            muted
+            playsInline
+          />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/20" />
+          <svg
+            className="pointer-events-none absolute inset-0 h-full w-full"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            {hasHand && HAND_LANDMARK_CONNECTIONS.map(([from, to]) => {
+              const a = landmarks[from];
+              const b = landmarks[to];
+              if (!a || !b) return null;
+              return (
+                <line
+                  key={`${from}-${to}`}
+                  x1={landmarkPercent(a.x)}
+                  y1={landmarkPercent(a.y)}
+                  x2={landmarkPercent(b.x)}
+                  y2={landmarkPercent(b.y)}
+                  vectorEffect="non-scaling-stroke"
+                  className="stroke-emerald-200/70"
+                  strokeWidth={1.4}
+                />
+              );
+            })}
+            {thumbTip && indexTip && (
+              <line
+                x1={landmarkPercent(thumbTip.x)}
+                y1={landmarkPercent(thumbTip.y)}
+                x2={landmarkPercent(indexTip.x)}
+                y2={landmarkPercent(indexTip.y)}
+                vectorEffect="non-scaling-stroke"
+                className={recording ? "stroke-red-200" : "stroke-amber-100"}
+                strokeWidth={2.5}
+              />
+            )}
+            {hasHand && landmarks.map((landmark, index) => (
+              <circle
+                key={index}
+                cx={landmarkPercent(landmark.x)}
+                cy={landmarkPercent(landmark.y)}
+                r={index === THUMB_TIP_INDEX || index === INDEX_TIP_INDEX ? 2.2 : 1.35}
+                vectorEffect="non-scaling-stroke"
+                className={index === THUMB_TIP_INDEX || index === INDEX_TIP_INDEX ? "fill-amber-100 stroke-black/70" : "fill-emerald-200 stroke-black/60"}
+                strokeWidth={0.7}
+              />
+            ))}
+          </svg>
+          <div className="absolute left-2 right-2 top-2 flex items-center justify-between gap-2">
+            <span className={cn("inline-flex min-h-7 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium shadow-lg shadow-black/20", toneClass)}>
+              {recording ? <Mic size={12} /> : hasHand ? <Hand size={12} /> : <Video size={12} />}
+              {label}
+            </span>
+            {frame?.handedness && frame.handedness !== "Unknown" && (
+              <span className="rounded-md border border-zinc-700/80 bg-black/55 px-2 py-1 text-[10px] text-zinc-300">
+                {frame.handedness}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function landmarkPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value * 100));
+}
+
+function recognitionMonitorLabel(status: string, hasHand: boolean, recording: boolean, recordingSeconds: number): string {
+  if (recording) return `録音中 ${formatRecordingTime(recordingSeconds)}・指を離すと送信`;
+  if (status === "sending") return "AIに送信中";
+  if (status === "loading") return "手の認識モデルを読み込み中";
+  if (status === "unavailable") return "手の認識を開始できません";
+  if (hasHand) return "手を認識中・指をくっつけると録音";
+  return "手をカメラに入れてください";
+}
+
+function recognitionMonitorToneClass(status: string, hasHand: boolean, recording: boolean): string {
+  if (recording) return "border-red-300/45 bg-red-500/25 text-red-50";
+  if (status === "sending") return "border-violet-300/45 bg-violet-500/25 text-violet-50";
+  if (status === "unavailable") return "border-red-300/45 bg-red-500/25 text-red-50";
+  if (hasHand) return "border-emerald-300/45 bg-emerald-500/20 text-emerald-50";
+  return "border-zinc-700/80 bg-black/55 text-zinc-200";
 }
 
 function StatusGlyph({ uiState }: { uiState: AmbientUiState }) {
@@ -1122,7 +1264,7 @@ function primaryButtonClass(uiState: AmbientUiState): string {
 function nextActionText(uiState: AmbientUiState, rumiReady: boolean, osReady: boolean): string {
   if (!rumiReady) return "まずRumiでこの機能を許可してください。";
   if (!osReady) return "次に、端末のマイクとカメラを許可してください。";
-  if (uiState === "readyOff") return "開始すると、カメラで指の動きを待機します。録音はまだ始まりません。";
+  if (uiState === "readyOff") return "Rumiと端末の許可は済んでいます。まだ手の認識を開始していない状態です。";
   if (uiState === "monitoring") return "親指と人差し指をくっつけると録音します。離すとAIに送信します。";
   if (uiState === "recording") return "録音中です。指を離すとAIに送信します。保存はされません。";
   if (uiState === "sending") return "音声をAIに送っています。送信後に待機へ戻ります。";

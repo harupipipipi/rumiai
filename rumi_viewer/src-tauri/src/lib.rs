@@ -45,6 +45,8 @@ const PRIMARY_WINDOW_LABELS: [&str; 2] = ["panel", "main"];
 const DEFAULTSPACK_RESERVED_PORT: u16 = 8766;
 const AUTHORITY_APPROVAL_WINDOW_LABEL: &str = "authority-approval";
 const AUTHORITY_APPROVAL_WINDOW_TITLE: &str = "Rumi Approval";
+const AMBIENT_TRIGGER_WINDOW_LABEL: &str = "ambient-trigger";
+const AMBIENT_TRIGGER_WINDOW_TITLE: &str = "Rumi Finger Recording";
 const AUTHORITY_UI_OPERATOR_TTL_SECONDS: u64 = 180;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -167,6 +169,13 @@ fn authority_approval_url(request_id: &str) -> Result<Url, String> {
     .map_err(|error| format!("failed to build approval window URL: {error}"))
 }
 
+fn ambient_trigger_url() -> Result<Url, String> {
+    Url::parse(&format!(
+        "http://127.0.0.1:{DEFAULTSPACK_RESERVED_PORT}/ambient"
+    ))
+    .map_err(|error| format!("failed to build ambient trigger window URL: {error}"))
+}
+
 fn focus_authority_approval_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     window
         .unminimize()
@@ -212,6 +221,52 @@ fn open_authority_approval_window_for_app(app: &AppHandle, request_id: &str) -> 
 #[tauri::command]
 async fn open_authority_approval_window(app: AppHandle, request_id: String) -> Result<(), String> {
     open_authority_approval_window_for_app(&app, &request_id)
+}
+
+fn focus_ambient_trigger_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    window
+        .unminimize()
+        .map_err(|error| format!("failed to unminimize ambient trigger window: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show ambient trigger window: {error}"))?;
+    window
+        .set_always_on_top(true)
+        .map_err(|error| format!("failed to float ambient trigger window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus ambient trigger window: {error}"))
+}
+
+fn open_ambient_trigger_window_for_app(app: &AppHandle) -> Result<(), String> {
+    let ambient_url = ambient_trigger_url()?;
+    if let Some(window) = app.get_webview_window(AMBIENT_TRIGGER_WINDOW_LABEL) {
+        window
+            .navigate(ambient_url)
+            .map_err(|error| format!("failed to navigate ambient trigger window: {error}"))?;
+        return focus_ambient_trigger_window(&window);
+    }
+
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        AMBIENT_TRIGGER_WINDOW_LABEL,
+        tauri::WebviewUrl::External(ambient_url),
+    )
+    .title(AMBIENT_TRIGGER_WINDOW_TITLE)
+    .inner_size(440.0, 700.0)
+    .min_inner_size(360.0, 560.0)
+    .resizable(true)
+    .focused(true)
+    .visible(true)
+    .always_on_top(true)
+    .build()
+    .map_err(|error| format!("failed to open ambient trigger window: {error}"))?;
+    focus_ambient_trigger_window(&window)
+}
+
+#[tauri::command]
+async fn open_ambient_trigger_window(app: AppHandle) -> Result<(), String> {
+    open_ambient_trigger_window_for_app(&app)
 }
 
 #[cfg(debug_assertions)]
@@ -1430,6 +1485,7 @@ pub fn run() {
             reauthorize_panel_session,
             open_external_url,
             open_authority_approval_window,
+            open_ambient_trigger_window,
             authority_approval_context,
             send_to_background,
             show_app_window,
@@ -1504,6 +1560,13 @@ mod tests {
             url.as_str(),
             "http://127.0.0.1:8766/approval?request_id=auth_123"
         );
+    }
+
+    #[test]
+    fn ambient_trigger_url_targets_defaultspack_window_route() {
+        let url = ambient_trigger_url().unwrap();
+
+        assert_eq!(url.as_str(), "http://127.0.0.1:8766/ambient");
     }
 
     #[test]

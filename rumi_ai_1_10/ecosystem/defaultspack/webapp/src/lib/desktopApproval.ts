@@ -45,6 +45,13 @@ export async function openAuthorityApprovalWindow(requestId: string): Promise<bo
   return true;
 }
 
+export async function openAmbientTriggerWindow(): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_ambient_trigger_window");
+  return true;
+}
+
 export async function getAuthorityApprovalContext(requestId: string): Promise<AuthorityApprovalContext> {
   const invoke = await loadTauriInvoke();
   if (!invoke) {

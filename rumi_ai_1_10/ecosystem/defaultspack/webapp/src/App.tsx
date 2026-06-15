@@ -5593,5 +5593,8 @@ export default function App() {
   if (window.location.pathname === "/approval") {
     return <AuthorityApprovalWindow />;
   }
+  if (window.location.pathname === "/ambient") {
+    return <AmbientTriggerPanel variant="window" />;
+  }
   return <ChatApp />;
 }

@@ -83,6 +83,20 @@ def test_flow_yaml_routes_are_the_canonical_chat_ingress():
     assert canonical[("POST", "/api/chat/conversations/{id}/stream")].flow_id == "defaultspack.chat_stream_turn"
 
 
+def test_always_available_routes_include_ambient_shell():
+    from ecosystem.defaultspack.transport.registry import _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS
+
+    routes = {
+        (spec.method, spec.pattern, spec.handler_name)
+        for spec in _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS
+    }
+
+    assert ("GET", "/chat", "_handle_static") in routes
+    assert ("GET", "/coding", "_handle_static") in routes
+    assert ("GET", "/approval", "_handle_static") in routes
+    assert ("GET", "/ambient", "_handle_static") in routes
+
+
 def test_pack_api_dispatches_defaultspack_interface_routes(monkeypatch):
     from core_runtime.pack_api_server import PackAPIHandler
 

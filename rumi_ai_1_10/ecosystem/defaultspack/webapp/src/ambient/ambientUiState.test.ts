@@ -54,6 +54,14 @@ test("deriveAmbientUiState separates Rumi permission setup from OS permission se
   assert.equal(deriveAmbientUiState(status({ os: allOs }), "off"), "rumiPermissionNeeded");
 });
 
+test("deriveAmbientUiState keeps first-run setup visible even when browser OS permission is denied", () => {
+  const firstRunWithDeniedBrowserPermission = status({
+    os: { "microphone.capture": "denied", "camera.capture": "denied" },
+  });
+
+  assert.equal(deriveAmbientUiState(firstRunWithDeniedBrowserPermission, "off"), "setupNeeded");
+});
+
 test("deriveAmbientUiState distinguishes off, monitoring, recording, and sending", () => {
   const ready = status({ rumi: allRumi, os: allOs });
   const cases: Array<[AmbientRuntimeStatus, string]> = [
