@@ -1,0 +1,16 @@
+{
+  "function_id": "host_file_open_dialog",
+  "description": "Open a user-mediated file dialog through the approved Rumi Viewer host broker.",
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "host_execution": false,
+  "risk": "medium",
+  "risk_level": "medium",
+  "requires_approval": true,
+  "requires": ["host.file.open_dialog"],
+  "caller_requires": ["user.approved.high_risk"],
+  "tags": ["host", "file", "broker"],
+  "host_operation": {"operation": "host.file.open_dialog", "stream_allowed": false},
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

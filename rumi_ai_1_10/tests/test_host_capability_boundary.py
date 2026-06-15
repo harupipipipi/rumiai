@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import sys
 import time
 import json
@@ -9,6 +10,32 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+EXPECTED_HOST_MEDIATOR_FUNCTIONS = {
+    "host_permission_status": "host.permission.status",
+    "host_permission_open_settings": "host.permission.open_settings",
+    "host_intent_execute": "host.intent.execute",
+    "host_stream_start": "host.stream.start",
+    "host_stream_stop": "host.stream.stop",
+    "host_screen_capture": "host.screen.capture",
+    "host_accessibility_snapshot": "host.accessibility.read",
+    "host_accessibility_action": "host.accessibility.mutate",
+    "host_input_pointer": "host.input.pointer",
+    "host_input_keyboard": "host.input.keyboard",
+    "host_clipboard_read": "host.clipboard.read",
+    "host_clipboard_write": "host.clipboard.write",
+    "host_microphone_capture": "host.microphone.capture",
+    "host_audio_output": "host.audio.output",
+    "host_speech_transcribe": "host.speech.transcribe",
+    "host_speech_synthesize": "host.speech.synthesize",
+    "host_camera_capture": "host.camera.capture",
+    "host_file_open_dialog": "host.file.open_dialog",
+    "host_file_read_selected": "host.file.read_user_selected",
+    "host_file_write_selected": "host.file.write_user_selected",
+    "host_process_open_url": "host.process.open_url",
+    "host_process_launch_app": "host.process.launch_app",
+    "host_process_exec_guarded": "host.process.exec_guarded",
+}
 
 
 def test_host_permission_registry_normalizes_ambient_aliases():
@@ -87,6 +114,79 @@ def test_host_capabilities_pack_contract_names_boundary_and_privacy():
     assert ecosystem["privacy"]["store_microphone_audio"] is False
     assert ecosystem["privacy"]["store_camera_frames"] is False
     assert setup["overlap_policy"]["defaultspack_host_execution"] == "forbidden"
+
+
+def test_host_capabilities_pack_defines_standard_mediator_functions():
+    pack_root = ROOT / "ecosystem" / "rumi_host_capabilities_pack"
+    ecosystem = json.loads((pack_root / "ecosystem.json").read_text())
+    assert ecosystem["host_functions"] == {
+        function_id: {
+            "operation": operation,
+            "stream": operation in {"host.stream.start", "host.microphone.capture", "host.speech.transcribe", "host.camera.capture", "host.process.exec_guarded"},
+            "executor_owner": "rumi_viewer_host_broker",
+        }
+        for function_id, operation in sorted(EXPECTED_HOST_MEDIATOR_FUNCTIONS.items())
+    }
+    for function_id, operation in EXPECTED_HOST_MEDIATOR_FUNCTIONS.items():
+        function_dir = pack_root / "functions" / function_id
+        manifest = json.loads((function_dir / "manifest.json").read_text())
+        assert (function_dir / "main.py").is_file()
+        assert manifest["function_id"] == function_id
+        assert manifest["host_execution"] is False
+        assert manifest["calling_convention"] == "subprocess"
+        assert manifest["requires_approval"] is True
+        assert manifest["caller_requires"] == ["user.approved.high_risk"]
+        assert operation in manifest["requires"]
+        assert manifest["host_operation"]["operation"] == operation
+        if operation == "host.process.exec_guarded":
+            assert manifest["risk_level"] == "critical"
+            assert manifest["host_operation"]["typed_confirmation_required"] is True
+
+
+def test_host_mediator_function_returns_valid_host_intent(monkeypatch):
+    from core_runtime.host_intent import validate_host_intent
+
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    main_path = (
+        ROOT
+        / "ecosystem"
+        / "rumi_host_capabilities_pack"
+        / "functions"
+        / "host_microphone_capture"
+        / "main.py"
+    )
+    spec = importlib.util.spec_from_file_location("host_microphone_capture_main", main_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    result = module.run(
+        {
+            "owner_pack": "rumi_ambient_trigger_pack",
+            "function_id": "ambient_monitor_start",
+            "conversation_id": "conversation-1",
+        },
+        {
+            "duration_ms": 1000,
+            "stream": {"enabled": True, "max_duration_ms": 1000},
+            "approval_token": "not-forwarded",
+            "reason": "wake audio",
+        },
+    )
+    validation = validate_host_intent(
+        result,
+        caller_pack_id="fallback_pack",
+        caller_function_id="fallback_function",
+    )
+
+    assert result["type"] == "host_stream_intent"
+    assert result["operation"] == "host.microphone.capture"
+    assert result["host_function_id"] == "host_microphone_capture"
+    assert result["caller"]["pack_id"] == "rumi_ambient_trigger_pack"
+    assert result["caller"]["function_id"] == "ambient_monitor_start"
+    assert result["conversation_id"] == "conversation-1"
+    assert "approval_token" not in result["args"]
+    assert validation.ok is True
 
 
 def test_direct_host_function_from_non_host_pack_becomes_critical_authority_request(monkeypatch):

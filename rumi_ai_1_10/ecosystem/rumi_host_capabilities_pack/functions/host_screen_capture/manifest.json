@@ -1,0 +1,16 @@
+{
+  "function_id": "host_screen_capture",
+  "description": "Capture screen content through the approved Rumi Viewer host broker.",
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "host_execution": false,
+  "risk": "high",
+  "risk_level": "high",
+  "requires_approval": true,
+  "requires": ["host.screen.capture"],
+  "caller_requires": ["user.approved.high_risk"],
+  "tags": ["host", "screen", "broker"],
+  "host_operation": {"operation": "host.screen.capture", "stream_allowed": false},
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

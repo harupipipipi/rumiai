@@ -1,0 +1,16 @@
+{
+  "function_id": "host_speech_synthesize",
+  "description": "Synthesize speech through the approved Rumi Viewer host broker.",
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "host_execution": false,
+  "risk": "medium",
+  "risk_level": "medium",
+  "requires_approval": true,
+  "requires": ["host.speech.synthesize"],
+  "caller_requires": ["user.approved.high_risk"],
+  "tags": ["host", "speech", "audio", "broker"],
+  "host_operation": {"operation": "host.speech.synthesize", "stream_allowed": false},
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

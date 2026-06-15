@@ -1,0 +1,16 @@
+{
+  "function_id": "host_microphone_capture",
+  "description": "Capture microphone audio through the approved Rumi Viewer host broker.",
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "host_execution": false,
+  "risk": "high",
+  "risk_level": "high",
+  "requires_approval": true,
+  "requires": ["host.microphone.capture"],
+  "caller_requires": ["user.approved.high_risk"],
+  "tags": ["host", "microphone", "audio", "broker"],
+  "host_operation": {"operation": "host.microphone.capture", "stream_allowed": true},
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

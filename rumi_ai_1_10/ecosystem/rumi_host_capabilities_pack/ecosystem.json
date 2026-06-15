@@ -62,9 +62,69 @@
     ]
   },
   "host_functions": {
-    "host_permission_status": {
-      "operation": "host.permission.status",
+    "host_accessibility_action": {
+      "operation": "host.accessibility.mutate",
       "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_accessibility_snapshot": {
+      "operation": "host.accessibility.read",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_audio_output": {
+      "operation": "host.audio.output",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_camera_capture": {
+      "operation": "host.camera.capture",
+      "stream": true,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_clipboard_read": {
+      "operation": "host.clipboard.read",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_clipboard_write": {
+      "operation": "host.clipboard.write",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_file_open_dialog": {
+      "operation": "host.file.open_dialog",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_file_read_selected": {
+      "operation": "host.file.read_user_selected",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_file_write_selected": {
+      "operation": "host.file.write_user_selected",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_input_keyboard": {
+      "operation": "host.input.keyboard",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_input_pointer": {
+      "operation": "host.input.pointer",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_intent_execute": {
+      "operation": "host.intent.execute",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_microphone_capture": {
+      "operation": "host.microphone.capture",
+      "stream": true,
       "executor_owner": "rumi_viewer_host_broker"
     },
     "host_permission_open_settings": {
@@ -72,9 +132,39 @@
       "stream": false,
       "executor_owner": "rumi_viewer_host_broker"
     },
-    "host_intent_execute": {
-      "operation": "host.intent.execute",
+    "host_permission_status": {
+      "operation": "host.permission.status",
       "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_process_exec_guarded": {
+      "operation": "host.process.exec_guarded",
+      "stream": true,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_process_launch_app": {
+      "operation": "host.process.launch_app",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_process_open_url": {
+      "operation": "host.process.open_url",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_screen_capture": {
+      "operation": "host.screen.capture",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_speech_synthesize": {
+      "operation": "host.speech.synthesize",
+      "stream": false,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
+    "host_speech_transcribe": {
+      "operation": "host.speech.transcribe",
+      "stream": true,
       "executor_owner": "rumi_viewer_host_broker"
     },
     "host_stream_start": {
@@ -84,7 +174,7 @@
     },
     "host_stream_stop": {
       "operation": "host.stream.stop",
-      "stream": true,
+      "stream": false,
       "executor_owner": "rumi_viewer_host_broker"
     }
   },

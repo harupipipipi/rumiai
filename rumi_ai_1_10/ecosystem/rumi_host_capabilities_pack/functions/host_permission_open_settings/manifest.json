@@ -1,0 +1,16 @@
+{
+  "function_id": "host_permission_open_settings",
+  "description": "Open OS settings for a host permission through the approved Rumi Viewer host broker.",
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "host_execution": false,
+  "risk": "medium",
+  "risk_level": "medium",
+  "requires_approval": true,
+  "requires": ["host.permission.open_settings"],
+  "caller_requires": ["user.approved.high_risk"],
+  "tags": ["host", "permission", "settings", "broker"],
+  "host_operation": {"operation": "host.permission.open_settings", "stream_allowed": false},
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

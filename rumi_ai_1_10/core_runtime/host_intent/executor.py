@@ -12,7 +12,7 @@ from typing import Any
 from core_runtime.authority import get_authority_service
 
 from .approval import check_host_intent_authority
-from .models import HostIntent, is_host_intent_payload
+from .models import is_host_intent_payload
 from .validator import validate_host_intent
 
 

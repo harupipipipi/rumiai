@@ -1,0 +1,16 @@
+{
+  "function_id": "host_permission_status",
+  "description": "Read host permission status through the approved Rumi Viewer host broker.",
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "host_execution": false,
+  "risk": "low",
+  "risk_level": "low",
+  "requires_approval": true,
+  "requires": ["host.permission.status"],
+  "caller_requires": ["user.approved.high_risk"],
+  "tags": ["host", "permission", "broker"],
+  "host_operation": {"operation": "host.permission.status", "stream_allowed": false},
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

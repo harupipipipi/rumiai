@@ -504,8 +504,13 @@ def _validate_functions(
 
     try:
         func_dirs = sorted(
-            (d for d in functions_dir.iterdir()
-             if d.is_dir() and not d.name.startswith(".")),
+            (
+                d
+                for d in functions_dir.iterdir()
+                if d.is_dir()
+                and not d.name.startswith(".")
+                and not d.name.startswith("__")
+            ),
             key=lambda d: d.name,
         )
     except OSError:
@@ -678,4 +683,3 @@ def validate_host_execution_single(pack_config: dict) -> Tuple[bool, str]:
         return (True, "WARNING: host_execution enabled")
 
     return (False, "host_execution requires RUMI_ALLOW_HOST_EXECUTION=true")
-
