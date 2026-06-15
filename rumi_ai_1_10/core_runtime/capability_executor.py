@@ -1055,25 +1055,6 @@ class CapabilityExecutor:
                             trusted=True, detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {caller_requires}")
                 return resp
 
-        host_boundary_resp = self._host_boundary_response_if_needed(
-            entry=entry,
-            principal_id=principal_id,
-            request_id=request_id,
-            start_time=start_time,
-        )
-        if host_boundary_resp is not None:
-            self._audit(
-                principal_id,
-                effective_permission_id,
-                handler_id,
-                host_boundary_resp,
-                args,
-                request_id,
-                trusted=True,
-                detail_reason="Direct host access requires critical typed confirmation",
-            )
-            return host_boundary_resp
-
         # 4. Grant チェック（host/binary/command は manifest grant_config がなくても必須）
         calling_convention = getattr(entry, "calling_convention", None)
         entry_grant_config = self._entry_grant_config(entry)
@@ -1128,6 +1109,25 @@ class CapabilityExecutor:
             result_config = getattr(grant_result, "config", None)
             if isinstance(result_config, dict):
                 grant_config.update(result_config)
+
+        host_boundary_resp = self._host_boundary_response_if_needed(
+            entry=entry,
+            principal_id=principal_id,
+            request_id=request_id,
+            start_time=start_time,
+        )
+        if host_boundary_resp is not None:
+            self._audit(
+                principal_id,
+                effective_permission_id,
+                handler_id,
+                host_boundary_resp,
+                args,
+                request_id,
+                trusted=True,
+                detail_reason="Direct host access requires critical typed confirmation",
+            )
+            return host_boundary_resp
 
         # 5. calling_convention 分岐
         if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
@@ -1638,7 +1638,7 @@ class CapabilityExecutor:
             manifest.get("host_operation")
             or manifest.get("host_execution") is True
             or getattr(entry, "host_execution", False)
-            or calling_convention in {"python_host", "binary", "command"}
+            or calling_convention == "python_host"
         )
 
     def _critical_host_confirmation_required_response(
@@ -1909,9 +1909,6 @@ class CapabilityExecutor:
             allow_fallback = os.environ.get("RUMI_ALLOW_HOST_FALLBACK", "").lower()
             if allow_fallback not in ("1", "true"):
                 return CapabilityResponse(success=False, error="Docker is not available and host fallback is disabled. Set RUMI_ALLOW_HOST_FALLBACK=1 to enable.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
-            rumi_environment = os.environ.get("RUMI_ENVIRONMENT", "").strip().lower()
-            if rumi_environment not in {"development", "dev"}:
-                return CapabilityResponse(success=False, error="Docker is not available and host fallback is limited to development mode.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
             return self._execute_user_function_host(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout, grant_config=grant_config, request_context=request_context)
 
     def _execute_user_function_docker(self, principal_id, entry, args, request_id, start_time, timeout, grant_config=None, request_context=None):
