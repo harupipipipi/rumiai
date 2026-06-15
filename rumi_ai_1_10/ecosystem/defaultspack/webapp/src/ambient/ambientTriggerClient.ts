@@ -1,6 +1,6 @@
 import { defaultspackApiFetch } from "../lib/api";
 
-export type AmbientPermissionId = "microphone.capture" | "camera.capture" | "ambient.trigger.dispatch" | string;
+export type AmbientPermissionId = "host.microphone.capture" | "host.camera.capture" | "ambient.trigger.dispatch" | string;
 
 export type AmbientPermissionStatus = {
   granted?: boolean;

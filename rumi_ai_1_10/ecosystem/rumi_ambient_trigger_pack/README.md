@@ -9,7 +9,7 @@ profile, and tool policy remain the same unless the user explicitly changes
 them elsewhere.
 
 The pack is opt-in and high-risk. It requests Rumi-side permissions for
-`microphone.capture`, `camera.capture`, and `ambient.trigger.dispatch`, and it
+`host.microphone.capture`, `host.camera.capture`, and `ambient.trigger.dispatch`, and it
 keeps those grants separate from OS microphone/camera permission status.
 
 Gesture inputs:

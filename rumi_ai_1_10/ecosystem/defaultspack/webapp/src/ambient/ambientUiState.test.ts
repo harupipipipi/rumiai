@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  AMBIENT_CAMERA_PERMISSION,
+  AMBIENT_MIC_PERMISSION,
   deriveAmbientUiState,
   osPermissionBucket,
   rumiPermissionBucket,
@@ -22,27 +24,27 @@ function status(options?: {
     },
     permissions: {
       rumi: {
-        "microphone.capture": { granted: Boolean(options?.rumi?.["microphone.capture"]) },
-        "camera.capture": { granted: Boolean(options?.rumi?.["camera.capture"]) },
+        [AMBIENT_MIC_PERMISSION]: { granted: Boolean(options?.rumi?.[AMBIENT_MIC_PERMISSION]) },
+        [AMBIENT_CAMERA_PERMISSION]: { granted: Boolean(options?.rumi?.[AMBIENT_CAMERA_PERMISSION]) },
         "ambient.trigger.dispatch": { granted: Boolean(options?.rumi?.["ambient.trigger.dispatch"]) },
       },
       os: {
-        "microphone.capture": { status: options?.os?.["microphone.capture"] ?? "unknown" },
-        "camera.capture": { status: options?.os?.["camera.capture"] ?? "unknown" },
+        [AMBIENT_MIC_PERMISSION]: { status: options?.os?.[AMBIENT_MIC_PERMISSION] ?? "unknown" },
+        [AMBIENT_CAMERA_PERMISSION]: { status: options?.os?.[AMBIENT_CAMERA_PERMISSION] ?? "unknown" },
       },
     },
   };
 }
 
 const allRumi = {
-  "microphone.capture": true,
-  "camera.capture": true,
+  [AMBIENT_MIC_PERMISSION]: true,
+  [AMBIENT_CAMERA_PERMISSION]: true,
   "ambient.trigger.dispatch": true,
 };
 
 const allOs = {
-  "microphone.capture": "granted",
-  "camera.capture": "granted",
+  [AMBIENT_MIC_PERMISSION]: "granted",
+  [AMBIENT_CAMERA_PERMISSION]: "granted",
 };
 
 test("deriveAmbientUiState guides first-run users to setup before showing off", () => {
@@ -56,7 +58,7 @@ test("deriveAmbientUiState separates Rumi permission setup from OS permission se
 
 test("deriveAmbientUiState keeps first-run setup visible even when browser OS permission is denied", () => {
   const firstRunWithDeniedBrowserPermission = status({
-    os: { "microphone.capture": "denied", "camera.capture": "denied" },
+    os: { [AMBIENT_MIC_PERMISSION]: "denied", [AMBIENT_CAMERA_PERMISSION]: "denied" },
   });
 
   assert.equal(deriveAmbientUiState(firstRunWithDeniedBrowserPermission, "off"), "setupNeeded");
@@ -78,16 +80,16 @@ test("deriveAmbientUiState distinguishes off, monitoring, recording, and sending
 test("permission buckets keep denied and blocked distinct from missing setup", () => {
   const denied = status({
     rumi: allRumi,
-    os: { "microphone.capture": "denied", "camera.capture": "granted" },
+    os: { [AMBIENT_MIC_PERMISSION]: "denied", [AMBIENT_CAMERA_PERMISSION]: "granted" },
   });
-  assert.equal(osPermissionBucket(denied, "microphone.capture"), "denied");
+  assert.equal(osPermissionBucket(denied, AMBIENT_MIC_PERMISSION), "denied");
   assert.equal(deriveAmbientUiState(denied, "off"), "denied");
 
   const blocked = status({
-    rumi: { ...allRumi, "camera.capture": false },
+    rumi: { ...allRumi, [AMBIENT_CAMERA_PERMISSION]: false },
     os: allOs,
   });
-  blocked.permissions.rumi["camera.capture"].status = "blocked";
-  assert.equal(rumiPermissionBucket(blocked, "camera.capture"), "blocked");
+  blocked.permissions.rumi[AMBIENT_CAMERA_PERMISSION].status = "blocked";
+  assert.equal(rumiPermissionBucket(blocked, AMBIENT_CAMERA_PERMISSION), "blocked");
   assert.equal(deriveAmbientUiState(blocked, "off"), "blocked");
 });

@@ -3,7 +3,7 @@
   "description": "Enable ambient_monitor.enabled and start voice wake and camera pinch monitoring.",
   "tags": ["ambient", "monitor"],
   "risk": "high",
-  "requires": ["microphone.capture", "camera.capture", "ambient.trigger.dispatch"],
+  "requires": ["host.microphone.capture", "host.camera.capture", "ambient.trigger.dispatch"],
   "caller_requires": ["user.approved.high_risk"],
   "host_execution": false,
   "calling_convention": "subprocess",

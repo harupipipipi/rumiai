@@ -28,8 +28,8 @@
   "risk_level": "high",
   "supports_all_ok": false,
   "required_permissions": [
-    "microphone.capture",
-    "camera.capture",
+    "host.microphone.capture",
+    "host.camera.capture",
     "ambient.trigger.dispatch"
   ],
   "install_surfaces": [
@@ -41,7 +41,7 @@
   ],
   "install_prompt": {
     "title": "このpackはマイク/カメラを要求しています",
-    "body": "Rumi側の microphone.capture / camera.capture / ambient.trigger.dispatch 許可は、OSのマイク/カメラ許可とは別に管理されます。",
+    "body": "Rumi側の host.microphone.capture / host.camera.capture / ambient.trigger.dispatch 許可は、OSのマイク/カメラ許可とは別に管理されます。",
     "confirm_label": "許可",
     "deny_label": "拒否",
     "surface_question": "小型window・defaultspack input・LINE/Discord/Web hookへ追加しますか？"

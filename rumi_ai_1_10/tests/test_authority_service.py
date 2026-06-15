@@ -341,6 +341,53 @@ def test_authority_approve_once_ignores_stream_transport_flag(tmp_path, monkeypa
     assert followup.allowed is True
 
 
+def test_authority_critical_host_approval_requires_typed_confirmation(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "critical_host_function",
+        "operation": "shell.exec",
+        "confirmation_phrase": "RUMI-HOST-TEST",
+        "typed_confirmation_required": True,
+    }
+    decision = service.check(
+        principal_id="pack:untrusted",
+        permission_id="host.process.exec_guarded",
+        resource=resource,
+        reason="Direct host execution requires typed confirmation",
+    )
+
+    view = service.get_request(decision.request_id)["request"]
+    display = view["display_metadata"]
+    wrong = service.approve_request(
+        decision.request_id,
+        scope="once",
+        config={"confirmation_text": "RUMI-HOST-WRONG"},
+        ui_operator=_ui_operator(decision.request_id),
+    )
+    persistent = service.approve_request(
+        decision.request_id,
+        scope="conversation",
+        config={"confirmation_text": "RUMI-HOST-TEST"},
+        ui_operator=_ui_operator(decision.request_id),
+    )
+    approved = service.approve_request(
+        decision.request_id,
+        scope="once",
+        config={"confirmation_text": "RUMI-HOST-TEST"},
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert view["allowed_scopes"] == ["once"]
+    assert display["typed_confirmation_required"] is True
+    assert display["confirmation_phrase"] == "RUMI-HOST-TEST"
+    assert wrong["success"] is False
+    assert wrong["status_code"] == 400
+    assert persistent["success"] is False
+    assert persistent["status_code"] == 400
+    assert approved["success"] is True
+    assert store.get_request(decision.request_id).status == "approved"
+
+
 def test_authority_service_resolves_from_di(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUMI_AUTHORITY_MODE", "enforce")

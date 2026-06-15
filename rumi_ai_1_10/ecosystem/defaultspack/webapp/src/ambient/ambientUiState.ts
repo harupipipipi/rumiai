@@ -1,16 +1,19 @@
 import type { AmbientPermissionId, AmbientStatus } from "./ambientTriggerClient";
 
+export const AMBIENT_MIC_PERMISSION = "host.microphone.capture" satisfies AmbientPermissionId;
+export const AMBIENT_CAMERA_PERMISSION = "host.camera.capture" satisfies AmbientPermissionId;
+
 export const AMBIENT_REQUIRED_PERMISSIONS: AmbientPermissionId[] = [
-  "microphone.capture",
-  "camera.capture",
+  AMBIENT_MIC_PERMISSION,
+  AMBIENT_CAMERA_PERMISSION,
   "ambient.trigger.dispatch",
 ];
 
 export const AMBIENT_AUTHORITY_REQUEST_ID = "rumi_ambient_trigger_pack";
 
 export const AMBIENT_OS_PERMISSIONS: AmbientPermissionId[] = [
-  "microphone.capture",
-  "camera.capture",
+  AMBIENT_MIC_PERMISSION,
+  AMBIENT_CAMERA_PERMISSION,
 ];
 
 export type AmbientPermissionBucket = "unknown" | "prompt" | "granted" | "denied" | "blocked";
@@ -46,8 +49,8 @@ type AmbientStateCopy = {
 };
 
 export const ambientPermissionLabels: Record<string, string> = {
-  "microphone.capture": "マイク入力を使う",
-  "camera.capture": "カメラで指の動きを見る",
+  [AMBIENT_MIC_PERMISSION]: "マイク入力を使う",
+  [AMBIENT_CAMERA_PERMISSION]: "カメラで指の動きを見る",
   "ambient.trigger.dispatch": "音声をAIに送る",
 };
 

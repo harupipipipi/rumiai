@@ -5,6 +5,8 @@ import { AmbientTriggerPanel } from "../ambient/AmbientTriggerPanel";
 import { ambientTriggerClient, type AmbientStatus } from "../ambient/ambientTriggerClient";
 import {
   AMBIENT_AUTHORITY_REQUEST_ID,
+  AMBIENT_CAMERA_PERMISSION,
+  AMBIENT_MIC_PERMISSION,
   AMBIENT_OS_PERMISSIONS,
   AMBIENT_REQUIRED_PERMISSIONS,
   ambientPermissionLabels,
@@ -110,6 +112,7 @@ export function AuthorityApprovalWindow() {
   const [error, setError] = useState<string | null>(null);
   const [decisionState, setDecisionState] = useState<DecisionState>({ kind: "idle" });
   const [ambientEnabled, setAmbientEnabled] = useState(false);
+  const [confirmationText, setConfirmationText] = useState("");
 
   const approval = useMemo(() => request ? requestToApproval(request) : null, [request]);
   const title = request ? windowTitle(request) : "Authority approval";
@@ -133,6 +136,13 @@ export function AuthorityApprovalWindow() {
     return scopes.length ? scopes : ["once"];
   }, [request?.allowed_scopes]);
   const controlsDisabled = !request || request.status !== "pending" || action !== null || decisionState.kind !== "idle";
+  const confirmationPhrase = stringValue(request?.display_metadata?.confirmation_phrase) || stringValue(request?.resource?.confirmation_phrase);
+  const typedConfirmationRequired = Boolean(
+    request?.display_metadata?.typed_confirmation_required
+    || request?.resource?.typed_confirmation_required
+    || confirmationPhrase,
+  );
+  const typedConfirmationSatisfied = !typedConfirmationRequired || Boolean(confirmationPhrase && confirmationText.trim() === confirmationPhrase);
 
   useEffect(() => {
     if (isAmbientPackApproval) return;
@@ -162,6 +172,10 @@ export function AuthorityApprovalWindow() {
       setSelectedScope(allowedScopes[0] ?? "once");
     }
   }, [allowedScopes, selectedScope]);
+
+  useEffect(() => {
+    setConfirmationText("");
+  }, [request?.request_id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -217,9 +231,11 @@ export function AuthorityApprovalWindow() {
     setError(null);
     try {
       const context = await getAuthorityApprovalContext(request.request_id);
+      const config = authorityApprovalConfig(approval);
+      if (typedConfirmationRequired) config.confirmation_text = confirmationText.trim();
       const decision = await authorityApprovalResources.approveAuthorityApproval(request.request_id, {
         scope: selectedScope,
-        config: authorityApprovalConfig(approval),
+        config,
         related_permissions: relatedPermissionsForApproval(approval),
         ui_operator: context.ui_operator,
       });
@@ -387,6 +403,27 @@ export function AuthorityApprovalWindow() {
                   ))}
                 </dl>
 
+                {typedConfirmationRequired && (
+                  <div className="mt-4 rounded-lg border border-red-500/35 bg-red-500/10 p-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-red-200">critical host confirmation</p>
+                    <p className="mt-2 text-xs leading-5 text-red-100/85">
+                      この操作はRumiの外側に触れる可能性があります。続けるには次の文字をそのまま入力してください。
+                    </p>
+                    <code className="mt-2 block rounded-md border border-red-400/25 bg-black/35 px-2 py-1.5 font-mono text-xs text-red-100">
+                      {confirmationPhrase || "confirmation phrase missing"}
+                    </code>
+                    <input
+                      value={confirmationText}
+                      onChange={(event) => setConfirmationText(event.currentTarget.value)}
+                      disabled={controlsDisabled}
+                      spellCheck={false}
+                      autoComplete="off"
+                      className="mt-2 h-9 w-full rounded-md border border-red-400/30 bg-black/35 px-2 font-mono text-xs text-red-50 outline-none placeholder:text-red-100/30 focus:border-red-200"
+                      placeholder="上の文字を入力"
+                    />
+                  </div>
+                )}
+
                 <div className="mt-4 rounded-lg border border-zinc-800 bg-black/30 p-3">
                   <p className="text-[11px] font-medium text-zinc-400">scope</p>
                   <div className="mt-2 grid grid-cols-2 gap-2">
@@ -437,7 +474,7 @@ export function AuthorityApprovalWindow() {
                 <button
                   type="button"
                   onClick={() => void approve()}
-                  disabled={controlsDisabled}
+                  disabled={controlsDisabled || !typedConfirmationSatisfied}
                   className="flex h-10 min-w-32 items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-50"
                 >
                   {action === "approve" ? <Loader2 className="animate-spin" size={15} /> : <Check size={15} />}
@@ -481,7 +518,7 @@ export function AuthorityApprovalWindow() {
           kind: "authority",
           approveLabel: "承認",
           rejectLabel: "拒否",
-          canApprove: true,
+          canApprove: !typedConfirmationRequired || typedConfirmationSatisfied,
           canReject: true,
         } : null}
         onApprovalGesture={(decision) => {
@@ -729,7 +766,7 @@ function AmbientPackAuthorityApprovalWindow() {
 
 const ambientApprovalPermissionRows = [
   {
-    permissionId: "microphone.capture",
+    permissionId: AMBIENT_MIC_PERMISSION,
     label: "マイク入力",
     detail: "指をくっつけている間の録音に使う実入力",
     badge: "実入力",
@@ -738,7 +775,7 @@ const ambientApprovalPermissionRows = [
     badgeClassName: "text-rose-200/80",
   },
   {
-    permissionId: "camera.capture",
+    permissionId: AMBIENT_CAMERA_PERMISSION,
     label: "カメラで手を見る",
     detail: "映像を保存せず、手の点だけをその場で判定",
     badge: "実入力",

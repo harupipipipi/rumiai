@@ -1,0 +1,69 @@
+{
+  "source": "core_runtime/host_permissions/default_registry.json",
+  "permissions": [
+    {
+      "id": "host.permission.status",
+      "label": "Read host permission status",
+      "risk": "low",
+      "approval_required": false
+    },
+    {
+      "id": "host.permission.open_settings",
+      "label": "Open OS permission settings",
+      "risk": "medium",
+      "approval_required": false
+    },
+    {
+      "id": "host.microphone.capture",
+      "label": "Microphone capture",
+      "risk": "high",
+      "approval_required": true,
+      "stream_allowed": true,
+      "os_permissions": ["microphone"]
+    },
+    {
+      "id": "host.camera.capture",
+      "label": "Camera capture",
+      "risk": "high",
+      "approval_required": true,
+      "stream_allowed": true,
+      "os_permissions": ["camera"]
+    },
+    {
+      "id": "host.screen.capture",
+      "label": "Screen capture",
+      "risk": "high",
+      "approval_required": true,
+      "stream_allowed": true,
+      "os_permissions": ["screen_recording"]
+    },
+    {
+      "id": "host.accessibility.read",
+      "label": "Read accessibility tree",
+      "risk": "high",
+      "approval_required": true,
+      "os_permissions": ["accessibility"]
+    },
+    {
+      "id": "host.input.pointer",
+      "label": "Pointer input",
+      "risk": "high",
+      "approval_required": true,
+      "os_permissions": ["accessibility", "input_monitoring"]
+    },
+    {
+      "id": "host.clipboard.read",
+      "label": "Clipboard read",
+      "risk": "high",
+      "approval_required": true
+    },
+    {
+      "id": "host.process.exec_guarded",
+      "label": "Guarded process execution",
+      "risk": "critical",
+      "approval_required": true,
+      "typed_confirmation_required": true,
+      "default_grant": false
+    }
+  ]
+}

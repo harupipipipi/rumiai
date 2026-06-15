@@ -1024,7 +1024,9 @@ def _apply_authority_context(
         if not isinstance(raw, dict):
             return
         permission_id = str(raw.get("permission_id") or "").strip()
-        if permission_id not in {"model.invoke", "api_key.use"}:
+        if permission_id not in {"model.invoke", "api_key.use", "network.egress"} and not (
+            permission_id.startswith("host.") or permission_id.startswith("authority.")
+        ):
             return
         token = str(raw.get("approval_token") or raw.get("token") or "").strip()
         authority_request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()

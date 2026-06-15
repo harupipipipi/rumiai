@@ -9,6 +9,7 @@ from .models import AUTHORITY_PERMISSION_IDS, AuthorityDecision, AuthorityReques
 from .principal import build_principal_id, parse_principal_parts, principal_scope_candidates
 from .request_store import AuthorityRequestStore, sanitize_authority_resource
 from .ui_operator import ui_operator_audit_record, verify_ui_operator
+from ..host_permissions import get_host_permission_definition
 
 
 AUTHORITY_APPROVAL_SCOPES = frozenset({"once", "conversation", "profile", "node"})
@@ -148,9 +149,33 @@ class AuthorityService:
             self._request_store.set_request_status(request.request_id, "expired")
             return {"success": False, "error": "Authority request expired", "status_code": 409}
 
+        config = dict(config or {})
         scope = str(scope or "once").strip().lower()
         if scope not in AUTHORITY_APPROVAL_SCOPES:
             return {"success": False, "error": "Authority approval scope is invalid", "status_code": 400}
+        confirmation_text = str(config.pop("confirmation_text", "") or "").strip()
+        if self._typed_confirmation_required(request):
+            if scope != "once":
+                return {
+                    "success": False,
+                    "error": "Critical host approval must use once scope",
+                    "status_code": 400,
+                }
+            confirmation_phrase = self._confirmation_phrase(request)
+            if not confirmation_phrase or confirmation_text != confirmation_phrase:
+                self._request_store.audit(
+                    "authority_typed_confirmation_rejected",
+                    {
+                        "request_id": request.request_id,
+                        "permission_id": request.permission_id,
+                        "resource_hash": self._request_store.resource_hash(request.resource),
+                    },
+                )
+                return {
+                    "success": False,
+                    "error": "Typed confirmation is required for this host operation",
+                    "status_code": 400,
+                }
         operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
         if not operator_ok:
             self._request_store.audit(
@@ -478,6 +503,8 @@ class AuthorityService:
             ("model_ids", "model_id"),
             ("function_ids", "function_id"),
             ("pack_ids", "pack_id"),
+            ("caller_pack_ids", "caller_pack_id"),
+            ("caller_function_ids", "caller_function_id"),
             ("domains", "domain"),
             ("host_actions", "host_action"),
         )
@@ -547,7 +574,10 @@ class AuthorityService:
 
     @staticmethod
     def _risk_level(permission_id: str, resource: dict[str, Any]) -> str:
-        if permission_id == "host.execute":
+        if permission_id.startswith("host."):
+            definition = get_host_permission_definition(permission_id)
+            if definition is not None:
+                return definition.risk_level
             return "high"
         if permission_id == "network.egress" and resource.get("domain") == "*":
             return "high"
@@ -569,8 +599,11 @@ class AuthorityService:
             "model_id": "model_ids",
             "function_id": "function_ids",
             "pack_id": "pack_ids",
+            "caller_pack_id": "caller_pack_ids",
+            "caller_function_id": "caller_function_ids",
             "domain": "domains",
             "host_action": "host_actions",
+            "operation": "host_actions",
         }
         for resource_key, config_key in mapping.items():
             value = str(resource.get(resource_key) or "").strip()
@@ -594,7 +627,17 @@ class AuthorityService:
         if not isinstance(client_config, dict):
             return grant_config
 
-        for key in ("provider_ids", "api_ids", "model_ids", "function_ids", "pack_ids", "domains", "host_actions"):
+        for key in (
+            "provider_ids",
+            "api_ids",
+            "model_ids",
+            "function_ids",
+            "pack_ids",
+            "caller_pack_ids",
+            "caller_function_ids",
+            "domains",
+            "host_actions",
+        ):
             if key not in client_config or key not in grant_config:
                 continue
             base_values = AuthorityService._string_values(grant_config.get(key))
@@ -693,12 +736,29 @@ class AuthorityService:
         subject = " / ".join(item for item in (provider_id, api_id, model_id, function_id, pack_id) if item)
         title = subject or request.permission_id
         summary = request.reason or f"{request.permission_id} requires approval"
+        host_definition = get_host_permission_definition(request.permission_id)
         permission_label = {
             "model.invoke": "Model/API",
             "api_key.use": "API key",
             "network.egress": "Network access",
-        }.get(request.permission_id, request.permission_id)
+        }.get(request.permission_id, host_definition.label if host_definition is not None else request.permission_id)
         access_summary = ""
+        typed_confirmation_required = self._typed_confirmation_required(request)
+        confirmation_phrase = self._confirmation_phrase(request)
+        if resource.get("kind") == "host_intent" or request.permission_id.startswith("host."):
+            operation = str(resource.get("operation") or request.permission_id)
+            caller = " / ".join(
+                item
+                for item in (
+                    resource.get("caller_pack_id") or resource.get("pack_id"),
+                    resource.get("caller_function_id") or resource.get("function_id"),
+                )
+                if item
+            )
+            stream_label = "stream" if resource.get("stream_enabled") else "one-shot"
+            title = f"Host操作 {operation} を許可しますか？"
+            summary = f"{caller or request.principal_id} が {operation} ({stream_label}) を要求しています。"
+            access_summary = f"{operation} / {stream_label}"
         if has_rich_provider_metadata and request.permission_id in {"model.invoke", "api_key.use", "network.egress"}:
             app_label = app_name or "defaultspack"
             provider_label = provider_display_name or provider_id or "provider"
@@ -735,6 +795,8 @@ class AuthorityService:
             "permission_label": permission_label,
             "access_summary": access_summary or None,
             "risk_level": request.risk_level,
+            "typed_confirmation_required": typed_confirmation_required,
+            "confirmation_phrase": confirmation_phrase or None,
             "audit_text": (
                 "Approving records a signed local UI-operator action and grants only "
                 "the requested resource constraints."
@@ -742,6 +804,8 @@ class AuthorityService:
         }
 
     def _allowed_scopes(self, request: AuthorityRequest) -> list[str]:
+        if self._typed_confirmation_required(request):
+            return ["once"]
         scopes = ["once"]
         if request.conversation_id:
             scopes.append("conversation")
@@ -751,6 +815,21 @@ class AuthorityService:
         if request.node_id or parts.get("node"):
             scopes.append("node")
         return scopes
+
+    def _typed_confirmation_required(self, request: AuthorityRequest) -> bool:
+        resource = dict(request.resource or {})
+        definition = get_host_permission_definition(request.permission_id)
+        return bool(
+            request.risk_level == "critical"
+            or request.permission_id == "host.process.exec_guarded"
+            or resource.get("typed_confirmation_required")
+            or (definition.typed_confirmation_required if definition is not None else False)
+        )
+
+    @staticmethod
+    def _confirmation_phrase(request: AuthorityRequest) -> str:
+        resource = dict(request.resource or {})
+        return str(resource.get("confirmation_phrase") or resource.get("typed_confirmation_phrase") or "").strip()
 
     def _audit_check(self, action: str, principal_id: str, permission_id: str, resource: dict[str, Any]) -> None:
         self._request_store.audit(

@@ -7,7 +7,13 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from .permission_check import AMBIENT_TRIGGER_DISPATCH, CAMERA_CAPTURE, MICROPHONE_CAPTURE
+from .permission_check import (
+    AMBIENT_TRIGGER_DISPATCH,
+    CAMERA_CAPTURE,
+    MICROPHONE_CAPTURE,
+    LEGACY_PERMISSION_ALIASES,
+    normalize_ambient_permission_id,
+)
 
 
 class AmbientStore:
@@ -26,6 +32,7 @@ class AmbientStore:
             data = {}
         base = _default_state()
         _deep_update(base, data)
+        _migrate_legacy_permissions(base)
         return base
 
     def write(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -56,6 +63,7 @@ class AmbientStore:
 
     def grant_permission(self, permission_id: str, *, os_status: str | None = None) -> dict[str, Any]:
         state = self.read()
+        permission_id = normalize_ambient_permission_id(permission_id)
         permission = _rumi_permission(state, permission_id)
         permission["granted"] = True
         permission["updated_at"] = _now()
@@ -65,6 +73,7 @@ class AmbientStore:
 
     def revoke_permission(self, permission_id: str) -> dict[str, Any]:
         state = self.read()
+        permission_id = normalize_ambient_permission_id(permission_id)
         permission = _rumi_permission(state, permission_id)
         permission["granted"] = False
         permission["updated_at"] = _now()
@@ -72,14 +81,18 @@ class AmbientStore:
 
     def update_os_permission(self, permission_id: str, status: str) -> dict[str, Any]:
         state = self.read()
-        self._update_os_permission_in_state(state, permission_id, status)
+        self._update_os_permission_in_state(state, normalize_ambient_permission_id(permission_id), status)
         return self.write(state)
 
     def update_os_permissions(self, statuses: dict[str, Any]) -> dict[str, Any]:
         state = self.read()
         for permission_id, status in statuses.items():
             if str(permission_id).strip():
-                self._update_os_permission_in_state(state, str(permission_id), str(status or "unknown"))
+                self._update_os_permission_in_state(
+                    state,
+                    normalize_ambient_permission_id(str(permission_id)),
+                    str(status or "unknown"),
+                )
         return self.write(state)
 
     def save_voice_enrollment(self, embedding: list[float], *, threshold: float = 0.88) -> dict[str, Any]:
@@ -189,6 +202,7 @@ def _permission(permission_id: str, label: str, risk: str) -> dict[str, Any]:
 
 
 def _rumi_permission(state: dict[str, Any], permission_id: str) -> dict[str, Any]:
+    permission_id = normalize_ambient_permission_id(permission_id)
     permissions = state.setdefault("permissions", {}).setdefault("rumi", {})
     permissions.setdefault(permission_id, _permission(permission_id, permission_id, "medium"))
     return permissions[permission_id]
@@ -217,6 +231,24 @@ def _deep_update(target: dict[str, Any], source: dict[str, Any]) -> None:
             _deep_update(target[key], value)
         else:
             target[key] = value
+
+
+def _migrate_legacy_permissions(state: dict[str, Any]) -> None:
+    permissions = state.setdefault("permissions", {})
+    for scope in ("rumi", "os"):
+        bucket = permissions.get(scope)
+        if not isinstance(bucket, dict):
+            continue
+        for legacy_id, host_id in LEGACY_PERMISSION_ALIASES.items():
+            legacy = bucket.pop(legacy_id, None)
+            if not isinstance(legacy, dict):
+                continue
+            current = bucket.get(host_id) if isinstance(bucket.get(host_id), dict) else {}
+            merged = dict(current)
+            merged.update(legacy)
+            if merged.get("permission_id") == legacy_id:
+                merged["permission_id"] = host_id
+            bucket[host_id] = merged
 
 
 def _now() -> str:

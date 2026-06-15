@@ -3,11 +3,20 @@ from __future__ import annotations
 from typing import Any
 
 
-MICROPHONE_CAPTURE = "microphone.capture"
-CAMERA_CAPTURE = "camera.capture"
+MICROPHONE_CAPTURE = "host.microphone.capture"
+CAMERA_CAPTURE = "host.camera.capture"
 AMBIENT_TRIGGER_DISPATCH = "ambient.trigger.dispatch"
 
 REQUIRED_PERMISSIONS = (MICROPHONE_CAPTURE, CAMERA_CAPTURE, AMBIENT_TRIGGER_DISPATCH)
+LEGACY_PERMISSION_ALIASES = {
+    "microphone.capture": MICROPHONE_CAPTURE,
+    "camera.capture": CAMERA_CAPTURE,
+}
+
+
+def normalize_ambient_permission_id(permission_id: str) -> str:
+    raw = str(permission_id or "").strip()
+    return LEGACY_PERMISSION_ALIASES.get(raw, raw)
 
 
 def permissions_for_source(source: str) -> tuple[str, ...]:

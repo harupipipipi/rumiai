@@ -47,6 +47,8 @@ const AUTHORITY_APPROVAL_WINDOW_LABEL: &str = "authority-approval";
 const AUTHORITY_APPROVAL_WINDOW_TITLE: &str = "Rumi Approval";
 const AMBIENT_TRIGGER_WINDOW_LABEL: &str = "ambient-trigger";
 const AMBIENT_TRIGGER_WINDOW_TITLE: &str = "Rumi Finger Recording";
+const HOST_PERMISSIONS_WINDOW_LABEL: &str = "host-permissions";
+const HOST_PERMISSIONS_WINDOW_TITLE: &str = "Rumi Host Permissions";
 const AUTHORITY_UI_OPERATOR_TTL_SECONDS: u64 = 180;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -176,6 +178,13 @@ fn ambient_trigger_url() -> Result<Url, String> {
     .map_err(|error| format!("failed to build ambient trigger window URL: {error}"))
 }
 
+fn host_permissions_url() -> Result<Url, String> {
+    Url::parse(&format!(
+        "http://127.0.0.1:{DEFAULTSPACK_RESERVED_PORT}/host-permissions"
+    ))
+    .map_err(|error| format!("failed to build host permissions window URL: {error}"))
+}
+
 fn focus_authority_approval_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     window
         .unminimize()
@@ -267,6 +276,48 @@ fn open_ambient_trigger_window_for_app(app: &AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn open_ambient_trigger_window(app: AppHandle) -> Result<(), String> {
     open_ambient_trigger_window_for_app(&app)
+}
+
+fn focus_host_permissions_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    window
+        .unminimize()
+        .map_err(|error| format!("failed to unminimize host permissions window: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show host permissions window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus host permissions window: {error}"))
+}
+
+fn open_host_permissions_window_for_app(app: &AppHandle) -> Result<(), String> {
+    let host_permissions_url = host_permissions_url()?;
+    if let Some(window) = app.get_webview_window(HOST_PERMISSIONS_WINDOW_LABEL) {
+        window
+            .navigate(host_permissions_url)
+            .map_err(|error| format!("failed to navigate host permissions window: {error}"))?;
+        return focus_host_permissions_window(&window);
+    }
+
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        HOST_PERMISSIONS_WINDOW_LABEL,
+        tauri::WebviewUrl::External(host_permissions_url),
+    )
+    .title(HOST_PERMISSIONS_WINDOW_TITLE)
+    .inner_size(900.0, 680.0)
+    .min_inner_size(620.0, 480.0)
+    .resizable(true)
+    .focused(true)
+    .visible(true)
+    .build()
+    .map_err(|error| format!("failed to open host permissions window: {error}"))?;
+    focus_host_permissions_window(&window)
+}
+
+#[tauri::command]
+async fn open_host_permissions_window(app: AppHandle) -> Result<(), String> {
+    open_host_permissions_window_for_app(&app)
 }
 
 #[cfg(debug_assertions)]
@@ -1486,11 +1537,14 @@ pub fn run() {
             open_external_url,
             open_authority_approval_window,
             open_ambient_trigger_window,
+            open_host_permissions_window,
             authority_approval_context,
             send_to_background,
             show_app_window,
             get_background_control_status,
             desktop_system_info::get_desktop_system_info,
+            desktop_system_info::get_host_permission_status,
+            desktop_system_info::open_host_permission_settings,
             dock_registration::register_defaultspack_dock,
             dock_registration::launch_defaultspack_desktop
         ])

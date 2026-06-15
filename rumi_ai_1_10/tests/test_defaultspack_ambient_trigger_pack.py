@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+MIC_PERMISSION = "host.microphone.capture"
+CAMERA_PERMISSION = "host.camera.capture"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
@@ -38,7 +40,7 @@ def test_ambient_router_requires_enabled_monitor_and_rumi_permissions(monkeypatc
         }
     )
     assert denied["status"] == "denied"
-    assert set(denied["missing_permissions"]) == {"microphone.capture", "ambient.trigger.dispatch"}
+    assert set(denied["missing_permissions"]) == {MIC_PERMISSION, "ambient.trigger.dispatch"}
 
 
 def test_voice_wake_enrolls_first_audio_sample_and_matches_by_embedding(monkeypatch, tmp_path):
@@ -49,8 +51,8 @@ def test_voice_wake_enrolls_first_audio_sample_and_matches_by_embedding(monkeypa
 
     router = AmbientTriggerRouter()
     router.start_monitor()
-    router.grant_permission("microphone.capture", os_status="granted")
-    router.grant_permission("camera.capture", os_status="granted")
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
     router.grant_permission("ambient.trigger.dispatch")
 
     enrolled = router.submit_event(
@@ -103,8 +105,8 @@ def test_pinch_and_agent_dispatch_share_ambient_router(monkeypatch, tmp_path):
 
     router = AmbientTriggerRouter()
     router.start_monitor()
-    router.grant_permission("microphone.capture", os_status="granted")
-    router.grant_permission("camera.capture", os_status="granted")
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
     router.grant_permission("ambient.trigger.dispatch")
 
     pinch_start = router.submit_event(
@@ -186,7 +188,7 @@ def test_gesture_choice_dispatches_numeric_reply_without_audio(monkeypatch, tmp_
 
     router = AmbientTriggerRouter()
     router.start_monitor()
-    router.grant_permission("camera.capture", os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
     router.grant_permission("ambient.trigger.dispatch")
 
     with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": ""}) as submit:
@@ -220,7 +222,7 @@ def test_approval_gesture_is_audited_without_dispatch(monkeypatch, tmp_path):
 
     router = AmbientTriggerRouter()
     router.start_monitor()
-    router.grant_permission("camera.capture", os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
     router.grant_permission("ambient.trigger.dispatch")
 
     with patch("domain.ambient.router.submit_input") as submit:
@@ -247,11 +249,11 @@ def test_os_permission_check_updates_status_without_granting_rumi_permissions(mo
     from domain.ambient.router import AmbientTriggerRouter
 
     router = AmbientTriggerRouter()
-    state = router.check_os_permissions({"microphone.capture": "denied", "camera.capture": "granted"})
+    state = router.check_os_permissions({MIC_PERMISSION: "denied", CAMERA_PERMISSION: "granted"})
 
-    assert state["permissions"]["os"]["microphone.capture"]["status"] == "denied"
-    assert state["permissions"]["os"]["camera.capture"]["status"] == "granted"
-    assert state["permissions"]["rumi"]["microphone.capture"]["granted"] is False
+    assert state["permissions"]["os"][MIC_PERMISSION]["status"] == "denied"
+    assert state["permissions"]["os"][CAMERA_PERMISSION]["status"] == "granted"
+    assert state["permissions"]["rumi"][MIC_PERMISSION]["granted"] is False
     audit_records = [
         json.loads(line)
         for line in (tmp_path / "ambient-audit.jsonl").read_text(encoding="utf-8").splitlines()
@@ -268,12 +270,13 @@ def test_ambient_routes_and_functions_are_registered():
     assert ("POST", "/api/ambient/monitor/start", "blocks.ambient.monitor") in routes
     assert ("POST", "/api/ambient/events", "blocks.ambient.event_submit") in routes
     assert ("POST", "/api/ambient/permissions/check", "blocks.ambient.permissions") in routes
+    assert ("GET", "/host-permissions", "") in routes
     assert block_module_for("ambient_event_submit") == "blocks.ambient.event_submit"
     assert default_args_for("ambient_monitor_stop") == {"action": "stop"}
     assert default_args_for("ambient_permission_check") == {"action": "check_os"}
     assert get_spec("ambient_monitor_start").requires == (
-        "microphone.capture",
-        "camera.capture",
+        MIC_PERMISSION,
+        CAMERA_PERMISSION,
         "ambient.trigger.dispatch",
     )
 
@@ -283,8 +286,8 @@ def test_rumi_ambient_trigger_pack_metadata_exposes_install_prompt_permissions_a
     pack = json.loads(pack_json.read_text(encoding="utf-8"))
     assert pack["supports_all_ok"] is False
     assert pack["required_permissions"] == [
-        "microphone.capture",
-        "camera.capture",
+        MIC_PERMISSION,
+        CAMERA_PERMISSION,
         "ambient.trigger.dispatch",
     ]
     assert "マイク/カメラ" in pack["install_prompt"]["title"]

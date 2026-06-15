@@ -806,6 +806,7 @@ class DefaultsHttpServer:
                             "platform_release": _platform_release(),
                             "permission_subject": str(payload.get("permission_subject") or "Rumi Viewer"),
                             "host_broker": host_broker,
+                            "host_permissions": payload.get("host_permissions") if isinstance(payload.get("host_permissions"), list) else [],
                             "permissions": permissions,
                         })
             except Exception:
@@ -827,6 +828,7 @@ class DefaultsHttpServer:
                     "status": "unavailable",
                     "recovery": "Open Rumi Viewer and grant macOS permissions there.",
                 },
+                "host_permissions": [],
                 "permissions": [],
             })
 
@@ -855,6 +857,7 @@ class DefaultsHttpServer:
                 "available": False,
                 "status": "unsupported",
             },
+            "host_permissions": [],
             "permissions": permissions,
         })
 

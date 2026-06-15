@@ -1,0 +1,48 @@
+{
+  "pack_id": "rumi_host_capabilities_pack",
+  "display_name": "Rumi Host Capabilities Pack",
+  "description": "Local host capability broker for OS-facing Rumi operations.",
+  "target_pack_id": "rumi_host_capabilities_pack",
+  "version": "0.1.0",
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "compatibility": {
+    "target_pack_version": ">=0.1.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "marketplace": {
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": true,
+  "risk_level": "high",
+  "supports_all_ok": false,
+  "required_permissions": [
+    "host.permission.status",
+    "host.permission.open_settings",
+    "host.intent.execute",
+    "host.stream.start",
+    "host.stream.stop"
+  ],
+  "install_prompt": {
+    "title": "このpackは端末操作の仲介を要求しています",
+    "body": "Rumi内のhost許可と、macOS/Windows/Linuxの実OS許可は別々に確認されます。音声・画像そのものは保存しません。",
+    "confirm_label": "許可",
+    "deny_label": "拒否"
+  },
+  "overlap_policy": {
+    "defaultspack_host_execution": "forbidden",
+    "defaultspack_authority_ui": "allowed",
+    "viewer_host_broker": "required"
+  }
+}

@@ -15,18 +15,18 @@
     }
   ],
   "capabilities": [
-    "microphone.capture",
-    "camera.capture",
+    "host.microphone.capture",
+    "host.camera.capture",
     "ambient.trigger.dispatch"
   ],
   "permissions_required": {
-    "microphone.capture": {
+    "host.microphone.capture": {
       "label": "Microphone capture",
       "risk": "high",
       "requires_user_grant": true,
       "os_permission_hint": "Windows/macOS/Linux microphone permission may also be required."
     },
-    "camera.capture": {
+    "host.camera.capture": {
       "label": "Camera capture",
       "risk": "high",
       "requires_user_grant": true,

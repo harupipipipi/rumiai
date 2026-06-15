@@ -22,12 +22,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isAuthorityApprovalEvent(event: Record<string, unknown>): boolean {
+  const permissionId = typeof event.permission_id === "string" ? event.permission_id : "";
   return Boolean(
     event.authority
     || event.approval_kind === "authority"
+    || event.approval_kind === "host_intent"
+    || event.approval_kind === "critical_host_function"
     || event.permission_id === "model.invoke"
     || event.permission_id === "api_key.use"
-    || event.permission_id === "network.egress",
+    || event.permission_id === "network.egress"
+    || permissionId.startsWith("host.")
+    || permissionId.startsWith("authority."),
   );
 }
 
@@ -67,15 +72,22 @@ export function authorityApprovalConfig(approval: AuthorityApprovalResource): Re
   const packId = typeof resource.pack_id === "string" ? resource.pack_id.trim() : "";
   const domain = typeof resource.domain === "string" ? resource.domain.trim() : "";
   const hostAction = typeof resource.host_action === "string" ? resource.host_action.trim() : "";
+  const operation = typeof resource.operation === "string" ? resource.operation.trim() : "";
   if (providerId) config.provider_ids = [providerId];
   if (apiId) config.api_ids = [apiId];
   if (modelId) config.model_ids = [modelId];
   if (functionId) config.function_ids = [functionId];
   if (packId) config.pack_ids = [packId];
   if (domain) config.domains = [domain];
-  if (hostAction) config.host_actions = [hostAction];
+  if (hostAction || operation) config.host_actions = [hostAction || operation];
+  if (typeof resource.caller_pack_id === "string" && resource.caller_pack_id.trim()) {
+    config.caller_pack_ids = [resource.caller_pack_id.trim()];
+  }
+  if (typeof resource.caller_function_id === "string" && resource.caller_function_id.trim()) {
+    config.caller_function_ids = [resource.caller_function_id.trim()];
+  }
   if (resource.port !== undefined && resource.port !== null) config.ports = [resource.port];
-  if (resource.stream === true) config.allow_stream = true;
+  if (resource.stream === true || resource.stream_enabled === true) config.allow_stream = true;
   if (typeof resource.input_tokens === "number" && Number.isFinite(resource.input_tokens)) {
     config.max_input_tokens = resource.input_tokens;
   }
@@ -106,6 +118,12 @@ export function authorityApprovalTitle(approval: AuthorityApprovalResource): str
   const pack = typeof resource.pack_id === "string" ? resource.pack_id : "";
   const domain = typeof resource.domain === "string" ? resource.domain : "";
   const hostAction = typeof resource.host_action === "string" ? resource.host_action : "";
+  const operation = typeof resource.operation === "string" ? resource.operation : "";
+  if (approval.permissionId.startsWith("host.") || operation) {
+    const callerPack = typeof resource.caller_pack_id === "string" ? resource.caller_pack_id : pack;
+    const callerFunction = typeof resource.caller_function_id === "string" ? resource.caller_function_id : fn;
+    return [operation || approval.permissionId, callerPack, callerFunction].filter(Boolean).join(" / ") || approval.permissionId;
+  }
   return [provider, api, model, fn, pack, domain, hostAction].filter(Boolean).join(" / ") || approval.permissionId;
 }
 
@@ -117,8 +135,12 @@ export function authorityApprovalRuntimeContent(approval: AuthorityApproval, tok
     ...(token ? { approval_token: token } : {}),
   };
   return [
-    "The user approved the pending model/API authority request.",
-    "Continue the conversation by retrying the same model/API request once with the approved provider, API key use, and network access context.",
+    approval.permissionId.startsWith("host.")
+      ? "The user approved the pending host authority request."
+      : "The user approved the pending model/API authority request.",
+    approval.permissionId.startsWith("host.")
+      ? "Continue by retrying the same host intent once with the approved host operation context."
+      : "Continue the conversation by retrying the same model/API request once with the approved provider, API key use, and network access context.",
     "Do not ask the user for the same authority approval again unless a new request id is produced.",
     `Authority request id: ${approval.requestId}`,
     `Permission: ${approval.permissionId}`,

@@ -6,6 +6,7 @@ import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
+import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { WarmActionIcon } from "./components/WarmActionIcon";
 import {
@@ -5595,6 +5596,9 @@ export default function App() {
   }
   if (window.location.pathname === "/ambient") {
     return <AmbientTriggerPanel variant="window" />;
+  }
+  if (window.location.pathname === "/host-permissions") {
+    return <HostPermissionsPage />;
   }
   return <ChatApp />;
 }

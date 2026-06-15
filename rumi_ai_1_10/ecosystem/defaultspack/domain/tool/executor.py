@@ -659,6 +659,16 @@ class ToolExecutor:
         output = getattr(response, "output", None)
         error = getattr(response, "error", None)
         if not success:
+            if isinstance(output, dict) and output.get("approval_required"):
+                summary = output.get("display_summary") or output.get("message") or output.get("reason") or "Authority approval required"
+                return {
+                    "result": str(summary),
+                    "is_error": True,
+                    "widget": dict(output),
+                    "approval_required": True,
+                    "authority": True,
+                    **dict(output),
+                }
             if getattr(response, "error_type", None) == "pack_not_approved":
                 tool_name = _tool_approval_tool_name(tool_def) if isinstance(tool_def, dict) else ""
                 if (

@@ -502,7 +502,7 @@
       "method": "POST",
       "path": "/api/ambient/permissions/grant",
       "flow_id": "transport_direct",
-      "description": "Grant a Rumi ambient permission such as microphone.capture, camera.capture, or ambient.trigger.dispatch"
+      "description": "Grant a Rumi ambient permission such as host.microphone.capture, host.camera.capture, or ambient.trigger.dispatch"
     },
     {
       "method": "POST",

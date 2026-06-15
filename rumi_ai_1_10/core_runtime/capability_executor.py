@@ -18,6 +18,7 @@ Phase D: FunctionRegistry を唯一のレジストリとして統一。
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import subprocess
@@ -106,7 +107,7 @@ MAX_ARGS_SUMMARY_LENGTH = 500
 
 logger = logging.getLogger(__name__)
 FUNCTION_RUNNER_PATH = Path(__file__).with_name("function_runner.py")
-TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
+TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack", "rumi_host_capabilities_pack"}
 
 # デフォルトタイムアウト
 DEFAULT_TIMEOUT = 30.0
@@ -1054,6 +1055,25 @@ class CapabilityExecutor:
                             trusted=True, detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {caller_requires}")
                 return resp
 
+        host_boundary_resp = self._host_boundary_response_if_needed(
+            entry=entry,
+            principal_id=principal_id,
+            request_id=request_id,
+            start_time=start_time,
+        )
+        if host_boundary_resp is not None:
+            self._audit(
+                principal_id,
+                effective_permission_id,
+                handler_id,
+                host_boundary_resp,
+                args,
+                request_id,
+                trusted=True,
+                detail_reason="Direct host access requires critical typed confirmation",
+            )
+            return host_boundary_resp
+
         # 4. Grant チェック（host/binary/command は manifest grant_config がなくても必須）
         calling_convention = getattr(entry, "calling_convention", None)
         entry_grant_config = self._entry_grant_config(entry)
@@ -1114,12 +1134,21 @@ class CapabilityExecutor:
             resp = self._dispatch_by_calling_convention(
                 calling_convention=calling_convention, entry=entry, principal_id=principal_id,
                 effective_permission_id=effective_permission_id, grant_config=grant_config,
-                args=args, timeout_seconds=timeout_seconds, request_id=request_id, start_time=start_time)
+                args=args, timeout_seconds=timeout_seconds, request_id=request_id, start_time=start_time,
+                request_context=request_context)
         else:
             resp = self._dispatch_by_permission_id(
                 entry=entry, principal_id=principal_id, effective_permission_id=effective_permission_id,
                 grant_config=grant_config, args=args, timeout_seconds=timeout_seconds,
                 request_id=request_id, start_time=start_time)
+
+        resp = self._response_after_host_intent_handling(
+            resp,
+            entry=entry,
+            principal_id=principal_id,
+            request_context=request_context,
+            start_time=start_time,
+        )
 
         # 6. 監査
         extra = {"unified_path": True}
@@ -1430,6 +1459,23 @@ class CapabilityExecutor:
                 self._audit(principal_id, "function.call", None, resp, args, request_id,
                             detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {entry.caller_requires}")
                 return resp
+        host_boundary_resp = self._host_boundary_response_if_needed(
+            entry=entry,
+            principal_id=principal_id,
+            request_id=request_id,
+            start_time=start_time,
+        )
+        if host_boundary_resp is not None:
+            self._audit(
+                principal_id,
+                "function.call",
+                None,
+                host_boundary_resp,
+                args,
+                request_id,
+                detail_reason="Direct host access requires critical typed confirmation",
+            )
+            return host_boundary_resp
         calling_convention = getattr(entry, "calling_convention", None)
         authorized, auth_resp, dispatch_grant_config = self._authorized_core_dispatch_config(
             principal_id, entry, start_time
@@ -1543,6 +1589,13 @@ class CapabilityExecutor:
                 grant_config=dispatch_grant_config,
                 request_context=request_context,
             )
+        resp = self._response_after_host_intent_handling(
+            resp,
+            entry=entry,
+            principal_id=principal_id,
+            request_context=request_context,
+            start_time=start_time,
+        )
         self._audit(principal_id, "function.call", None, resp, args, request_id,
                     extra_details={"qualified_name": qualified_name, "pack_id": pack_id, "is_core": is_core, "calling_convention": calling_convention})
         return resp
@@ -1570,6 +1623,137 @@ class CapabilityExecutor:
     def _caller_requires_high_risk_approval_only(caller_requires):
         required = {str(item or "").strip() for item in caller_requires or []}
         return bool(required) and required <= {"user.approved.high_risk"}
+
+    @staticmethod
+    def _is_host_capability_pack(pack_id: str) -> bool:
+        return str(pack_id or "").strip() == "rumi_host_capabilities_pack"
+
+    @staticmethod
+    def _entry_declares_direct_host_access(entry) -> bool:
+        manifest = getattr(entry, "manifest", None)
+        if not isinstance(manifest, dict):
+            manifest = {}
+        calling_convention = str(getattr(entry, "calling_convention", "") or "").strip()
+        return bool(
+            manifest.get("host_operation")
+            or manifest.get("host_execution") is True
+            or getattr(entry, "host_execution", False)
+            or calling_convention in {"python_host", "binary", "command"}
+        )
+
+    def _critical_host_confirmation_required_response(
+        self,
+        *,
+        entry,
+        principal_id: str,
+        request_id: str,
+        start_time: float,
+    ) -> CapabilityResponse:
+        phrase_seed = hashlib.sha256(
+            f"{getattr(entry, 'qualified_name', '')}:{request_id}:{time.time_ns()}".encode("utf-8")
+        ).hexdigest()[:4].upper()
+        phrase = f"RUMI-HOST-{phrase_seed}"
+        manifest = getattr(entry, "manifest", None)
+        resource = {
+            "kind": "critical_host_function",
+            "pack_id": getattr(entry, "pack_id", ""),
+            "function_id": getattr(entry, "function_id", ""),
+            "function_qualified_name": getattr(entry, "qualified_name", ""),
+            "calling_convention": getattr(entry, "calling_convention", None),
+            "host_operation": manifest.get("host_operation") if isinstance(manifest, dict) else None,
+            "confirmation_phrase": phrase,
+        }
+        try:
+            from .authority import get_authority_service
+
+            decision = get_authority_service().check(
+                principal_id=principal_id,
+                permission_id="host.process.exec_guarded",
+                resource=resource,
+                reason="Direct host execution requires typed confirmation",
+                request_id=request_id or None,
+            )
+            event = decision.to_approval_event() if decision.approval_required else decision.to_dict()
+        except Exception:
+            event = {
+                "approval_required": True,
+                "permission_id": "host.process.exec_guarded",
+                "resource": resource,
+                "risk_level": "critical",
+            }
+        event.update(
+            {
+                "approval_kind": "critical_host_function",
+                "critical": True,
+                "typed_confirmation_required": True,
+                "confirmation_phrase": phrase,
+            }
+        )
+        return CapabilityResponse(
+            success=False,
+            output=event,
+            error="Critical host confirmation required",
+            error_type="critical_host_confirmation_required",
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+
+    def _host_boundary_response_if_needed(
+        self,
+        *,
+        entry,
+        principal_id: str,
+        request_id: str,
+        start_time: float,
+    ) -> CapabilityResponse | None:
+        pack_id = str(getattr(entry, "pack_id", "") or "").strip()
+        if self._is_host_capability_pack(pack_id):
+            return None
+        if not self._entry_declares_direct_host_access(entry):
+            return None
+        return self._critical_host_confirmation_required_response(
+            entry=entry,
+            principal_id=principal_id,
+            request_id=request_id,
+            start_time=start_time,
+        )
+
+    def _response_after_host_intent_handling(
+        self,
+        resp: CapabilityResponse,
+        *,
+        entry,
+        principal_id: str,
+        request_context: dict[str, Any] | None,
+        start_time: float,
+    ) -> CapabilityResponse:
+        if not resp.success:
+            return resp
+        try:
+            from .host_intent import maybe_handle_host_intent_output
+
+            handled = maybe_handle_host_intent_output(
+                resp.output,
+                principal_id=principal_id,
+                caller_pack_id=str(getattr(entry, "pack_id", "") or ""),
+                caller_function_id=str(getattr(entry, "function_id", "") or ""),
+                request_context=request_context,
+            )
+        except Exception as exc:
+            return CapabilityResponse(
+                success=False,
+                error=f"Host intent handling failed: {exc}",
+                error_type="host_intent_error",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        if handled is None:
+            return resp
+        return CapabilityResponse(
+            success=bool(handled.get("success")),
+            output=handled,
+            error=None if handled.get("success") else str(handled.get("error_type") or "Host intent requires approval"),
+            error_type=None if handled.get("success") else str(handled.get("error_type") or "host_intent_approval_required"),
+            latency_ms=(time.time() - start_time) * 1000,
+        )
 
     # ------------------------------------------------------------------
     # Docker / user function helpers
@@ -1725,6 +1909,9 @@ class CapabilityExecutor:
             allow_fallback = os.environ.get("RUMI_ALLOW_HOST_FALLBACK", "").lower()
             if allow_fallback not in ("1", "true"):
                 return CapabilityResponse(success=False, error="Docker is not available and host fallback is disabled. Set RUMI_ALLOW_HOST_FALLBACK=1 to enable.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
+            rumi_environment = os.environ.get("RUMI_ENVIRONMENT", "").strip().lower()
+            if rumi_environment not in {"development", "dev"}:
+                return CapabilityResponse(success=False, error="Docker is not available and host fallback is limited to development mode.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
             return self._execute_user_function_host(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout, grant_config=grant_config, request_context=request_context)
 
     def _execute_user_function_docker(self, principal_id, entry, args, request_id, start_time, timeout, grant_config=None, request_context=None):

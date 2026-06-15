@@ -3,11 +3,13 @@ import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loade
 
 import { cn } from "../lib/cn";
 import { subscribeAuthorityApprovalSettlements } from "../lib/authorityApprovalEvents";
-import { openAmbientTriggerWindow, openAuthorityApprovalWindow } from "../lib/desktopApproval";
+import { openAmbientTriggerWindow, openAuthorityApprovalWindow, openHostPermissionsPageWindow } from "../lib/desktopApproval";
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { ambientTriggerClient, type AmbientPermissionId, type AmbientStatus } from "./ambientTriggerClient";
 import {
   AMBIENT_AUTHORITY_REQUEST_ID,
+  AMBIENT_CAMERA_PERMISSION,
+  AMBIENT_MIC_PERMISSION,
   AMBIENT_OS_PERMISSIONS,
   AMBIENT_REQUIRED_PERMISSIONS,
   ambientCopyJa,
@@ -104,6 +106,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   }, [monitorEnabled, pinchDetectorStatus, pinchRecording]);
   const uiState = useMemo(() => deriveAmbientUiState(status, runtimeStatus), [runtimeStatus, status]);
   const stateCopy = ambientCopyJa.states[uiState];
+  const manualFallbackIsOsPermission = uiState === "denied" || uiState === "blocked" || uiState === "osPermissionNeeded";
   const rumiPermissionCount = useMemo(
     () => grantedPermissionCount(status, AMBIENT_REQUIRED_PERMISSIONS, "rumi"),
     [status],
@@ -277,7 +280,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       pinchRecorderRef.current = recorder;
       setPinchRecording(true);
       setRecordingStartedAt(performance.now());
-      await ambientTriggerClient.grantPermission("microphone.capture", "granted");
+      await ambientTriggerClient.grantPermission(AMBIENT_MIC_PERMISSION, "granted");
       await ambientTriggerClient.submitEvent({
         source: "camera",
         trigger: "pinch",
@@ -436,8 +439,8 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     const statuses: Record<AmbientPermissionId, string> = {};
     const mic = await queryBrowserPermission("microphone");
     const camera = await queryBrowserPermission("camera");
-    if (mic) statuses["microphone.capture"] = mic;
-    if (camera) statuses["camera.capture"] = camera;
+    if (mic) statuses[AMBIENT_MIC_PERMISSION] = mic;
+    if (camera) statuses[AMBIENT_CAMERA_PERMISSION] = camera;
     const platform = navigator.platform || "";
     const isMac = /Mac/i.test(platform);
     console.info(
@@ -530,8 +533,8 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       });
       await refreshDevices();
       return ambientTriggerClient.checkOsPermissions({
-        "microphone.capture": "granted",
-        "camera.capture": "granted",
+        [AMBIENT_MIC_PERMISSION]: "granted",
+        [AMBIENT_CAMERA_PERMISSION]: "granted",
       });
     }, "マイクとカメラを使用できます。次は手の認識を開始してください。");
   }
@@ -612,7 +615,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       }, selectedMicId || undefined);
       audioStopRef.current = stop;
       setMicListening(true);
-      await ambientTriggerClient.grantPermission("microphone.capture", "granted");
+      await ambientTriggerClient.grantPermission(AMBIENT_MIC_PERMISSION, "granted");
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "マイクを開始できませんでした。");
@@ -687,7 +690,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       case "denied":
       case "blocked":
         setExpanded(true);
-        setManualRumiFallbackOpen(true);
+        if (!(await openHostPermissionsPageWindow())) {
+          setManualRumiFallbackOpen(true);
+        }
         return;
       case "error":
         await refresh({ probeOs: true });
@@ -840,7 +845,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                   {AMBIENT_OS_PERMISSIONS.map((permissionId) => (
                     <PermissionRow
                       key={permissionId}
-                      label={permissionId === "microphone.capture" ? "マイク" : "カメラ"}
+                      label={permissionId === AMBIENT_MIC_PERMISSION ? "マイク" : "カメラ"}
                       bucket={osPermissionBucket(status, permissionId)}
                     />
                   ))}
@@ -967,14 +972,28 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                 <div className="flex items-start gap-2 text-red-100">
                   <AlertTriangle size={15} className="mt-0.5 shrink-0" />
                   <div>
-                    <p className="font-medium">承認画面が表示されない場合</p>
-                    <p className="mt-1 text-red-100/75">Rumi設定から「指で録音」を選び、マイク入力・カメラ・AI送信を許可してください。許可後に「再確認」を押します。</p>
+                    <p className="font-medium">{manualFallbackIsOsPermission ? "端末の許可を確認してください" : "承認画面が表示されない場合"}</p>
+                    <p className="mt-1 text-red-100/75">
+                      {manualFallbackIsOsPermission
+                        ? "Rumi側の許可は済んでいます。ブラウザまたはOS設定で、マイクとカメラをこのアプリに許可してください。"
+                        : "Rumi設定から「指で録音」を選び、マイク入力・カメラ・AI送信を許可してください。許可後に「再確認」を押します。"}
+                    </p>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setSettingsOpen(true)} className="ambient-mini-button">
-                    <Settings size={14} />
-                    手動で許可する
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (manualFallbackIsOsPermission) {
+                        window.location.assign("/host-permissions");
+                        return;
+                      }
+                      setSettingsOpen(true);
+                    }}
+                    className="ambient-mini-button"
+                  >
+                    {manualFallbackIsOsPermission ? <ExternalLink size={14} /> : <Settings size={14} />}
+                    {manualFallbackIsOsPermission ? "権限一覧を開く" : "手動で許可する"}
                   </button>
                   <button type="button" onClick={() => void refresh({ probeOs: true })} className="ambient-mini-button">
                     <RefreshCcw size={14} />

@@ -354,7 +354,7 @@ AMBIENT_FUNCTIONS: tuple[FunctionSpec, ...] = (
         risk="high",
         block="blocks.ambient.monitor",
         default_args={"action": "start"},
-        requires=("microphone.capture", "camera.capture", "ambient.trigger.dispatch"),
+        requires=("host.microphone.capture", "host.camera.capture", "ambient.trigger.dispatch"),
     ),
     _spec(
         "ambient_monitor_stop",

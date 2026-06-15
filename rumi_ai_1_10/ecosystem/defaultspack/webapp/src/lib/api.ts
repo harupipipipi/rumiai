@@ -210,6 +210,8 @@ export type AuthorityRequestDisplayMetadata = {
   credential_label?: string | null;
   access_summary?: string | null;
   risk_level?: string;
+  typed_confirmation_required?: boolean;
+  confirmation_phrase?: string | null;
   audit_text?: string;
 };
 

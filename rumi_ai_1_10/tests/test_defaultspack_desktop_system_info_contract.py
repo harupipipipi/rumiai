@@ -43,6 +43,7 @@ def test_desktop_system_info_fallback_is_unreliable_without_missing_permission(m
     assert data["source"] == "fallback"
     assert data["reliable"] is False
     assert data["permissions"] == []
+    assert data["host_permissions"] == []
 
 
 def test_desktop_system_info_viewer_broker_is_authoritative_when_available(monkeypatch):
@@ -71,6 +72,13 @@ def test_desktop_system_info_viewer_broker_is_authoritative_when_available(monke
                         "settings_hint": "System Settings > Privacy & Security > Screen Recording",
                     }
                 ],
+                "host_permissions": [
+                    {
+                        "id": "host.screen.capture",
+                        "label": "Screen Capture",
+                        "os_status": "missing",
+                    }
+                ],
             }
 
     monkeypatch.setattr(http.sys, "platform", "darwin")
@@ -86,6 +94,7 @@ def test_desktop_system_info_viewer_broker_is_authoritative_when_available(monke
     assert data["source"] == "viewer_broker"
     assert data["reliable"] is True
     assert data["permissions"][0]["status"] == "missing"
+    assert data["host_permissions"][0]["id"] == "host.screen.capture"
 
 
 def test_desktop_system_info_viewer_broker_payload_can_be_unreliable(monkeypatch):
@@ -118,3 +127,4 @@ def test_desktop_system_info_viewer_broker_payload_can_be_unreliable(monkeypatch
 
     assert data["source"] == "viewer_broker"
     assert data["reliable"] is False
+    assert data["host_permissions"] == []

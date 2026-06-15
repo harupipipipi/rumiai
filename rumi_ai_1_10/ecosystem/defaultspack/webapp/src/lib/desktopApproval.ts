@@ -52,6 +52,24 @@ export async function openAmbientTriggerWindow(): Promise<boolean> {
   return true;
 }
 
+export async function openHostPermissionsPageWindow(): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_host_permissions_window");
+  return true;
+}
+
+export async function openHostPermissionSettings(permissionId: string): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_host_permission_settings", { permissionId });
+  return true;
+}
+
+export async function openHostPermissionsWindow(permissionId: string): Promise<boolean> {
+  return openHostPermissionSettings(permissionId);
+}
+
 export async function getAuthorityApprovalContext(requestId: string): Promise<AuthorityApprovalContext> {
   const invoke = await loadTauriInvoke();
   if (!invoke) {

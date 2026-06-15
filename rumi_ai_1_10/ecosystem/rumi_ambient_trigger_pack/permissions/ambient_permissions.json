@@ -1,14 +1,14 @@
 {
   "permissions": [
     {
-      "id": "microphone.capture",
+      "id": "host.microphone.capture",
       "label": "Microphone capture",
       "risk": "high",
       "requires_user_grant": true,
       "os_permission_hint": "Windows/macOS/Linux microphone permission may also be required."
     },
     {
-      "id": "camera.capture",
+      "id": "host.camera.capture",
       "label": "Camera capture",
       "risk": "high",
       "requires_user_grant": true,
