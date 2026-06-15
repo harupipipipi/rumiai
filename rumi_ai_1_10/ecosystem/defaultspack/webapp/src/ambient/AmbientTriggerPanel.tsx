@@ -1,10 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronUp, Hand, Loader2, Mic, Radio, Settings, Shield, Video, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Hand, Loader2, Mic, Play, Radio, RefreshCcw, Settings, Shield, Square, Video, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { ambientTriggerClient, type AmbientPermissionId, type AmbientStatus } from "./ambientTriggerClient";
-import { AmbientTriggerStatusIcon } from "./AmbientTriggerStatusIcon";
+import {
+  AMBIENT_OS_PERMISSIONS,
+  AMBIENT_REQUIRED_PERMISSIONS,
+  ambientCopyJa,
+  ambientPermissionLabels,
+  deriveAmbientUiState,
+  grantedPermissionCount,
+  hasAllOsPermissions,
+  hasAllRumiPermissions,
+  osPermissionBucket,
+  permissionBucketLabel,
+  rumiPermissionBucket,
+  type AmbientPermissionBucket,
+  type AmbientRuntimeStatus,
+  type AmbientUiState,
+} from "./ambientUiState";
 import { startHandLandmarkerLoop } from "./mediaPipeHandLandmarker";
 import type { PinchState } from "./gesturePinchDetector";
 
@@ -24,12 +39,6 @@ type Props = {
   finalAnswerText?: string | null;
 };
 
-const REQUIRED_PERMISSIONS: AmbientPermissionId[] = [
-  "microphone.capture",
-  "camera.capture",
-  "ambient.trigger.dispatch",
-];
-
 const MIC_DEVICE_STORAGE_KEY = "rumi.ambient.selectedMicId";
 const CAMERA_DEVICE_STORAGE_KEY = "rumi.ambient.selectedCameraId";
 const FRONT_ON_FINAL_STORAGE_KEY = "rumi.ambient.frontOnFinal";
@@ -38,6 +47,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const [status, setStatus] = useState<AmbientStatus | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [manualRumiFallbackOpen, setManualRumiFallbackOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
@@ -46,6 +56,8 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const [selectedCameraId, setSelectedCameraId] = useState(() => safeLocalStorageGet(CAMERA_DEVICE_STORAGE_KEY));
   const [micListening, setMicListening] = useState(false);
   const [pinchRecording, setPinchRecording] = useState(false);
+  const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [pinchDetectorStatus, setPinchDetectorStatus] = useState("idle");
   const [frontOnFinal, setFrontOnFinal] = useState(() => safeLocalStorageGet(FRONT_ON_FINAL_STORAGE_KEY) !== "false");
   const [frontFlash, setFrontFlash] = useState(false);
@@ -62,12 +74,28 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const onApprovalGestureRef = useRef<Props["onApprovalGesture"]>(onApprovalGesture);
 
   const monitorEnabled = Boolean(status?.ambient_monitor.enabled);
-  const micGranted = Boolean(status?.permissions.rumi["microphone.capture"]?.granted);
-  const cameraGranted = Boolean(status?.permissions.rumi["camera.capture"]?.granted);
   const dispatchGranted = Boolean(status?.permissions.rumi["ambient.trigger.dispatch"]?.granted);
   const voice = status?.services.voice_wake_monitor;
-  const gesture = status?.services.gesture_wake_monitor;
   const lastTrigger = status?.last_trigger;
+  const runtimeStatus = useMemo<AmbientRuntimeStatus>(() => {
+    if (pinchDetectorStatus === "unavailable") return "blocked";
+    if (pinchDetectorStatus === "sending") return "sending";
+    if (pinchRecording || pinchDetectorStatus === "recording") return "recording";
+    if (monitorEnabled) return "monitoring";
+    return "off";
+  }, [monitorEnabled, pinchDetectorStatus, pinchRecording]);
+  const uiState = useMemo(() => deriveAmbientUiState(status, runtimeStatus), [runtimeStatus, status]);
+  const stateCopy = ambientCopyJa.states[uiState];
+  const rumiPermissionCount = useMemo(
+    () => grantedPermissionCount(status, AMBIENT_REQUIRED_PERMISSIONS, "rumi"),
+    [status],
+  );
+  const osPermissionCount = useMemo(
+    () => grantedPermissionCount(status, AMBIENT_OS_PERMISSIONS, "os"),
+    [status],
+  );
+  const allRumiPermissionsGranted = useMemo(() => hasAllRumiPermissions(status), [status]);
+  const allOsPermissionsGranted = useMemo(() => hasAllOsPermissions(status), [status]);
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -83,7 +111,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         if (!cancelled) void refreshDevices();
       })
       .catch((error) => {
-        if (!cancelled) setMessage(error instanceof Error ? error.message : "ambient status failed");
+        if (!cancelled) setMessage(error instanceof Error ? error.message : "指で録音の状態を確認できませんでした。");
       });
     return () => {
       cancelled = true;
@@ -103,10 +131,21 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   }, [frontOnFinal]);
 
   useEffect(() => {
+    if (!pinchRecording || !recordingStartedAt) {
+      setRecordingSeconds(0);
+      return;
+    }
+    const update = () => setRecordingSeconds(Math.max(0, Math.floor((performance.now() - recordingStartedAt) / 1000)));
+    update();
+    const timer = window.setInterval(update, 500);
+    return () => window.clearInterval(timer);
+  }, [pinchRecording, recordingStartedAt]);
+
+  useEffect(() => {
     const text = String(finalAnswerText ?? "").trim();
     if (!text || text === lastFinalAnswer) return;
     setLastFinalAnswer(text);
-    setMessage("final answer ready");
+    setMessage("AIの回答が届きました。");
     if (!frontOnFinal) return;
     setExpanded(true);
     setFrontFlash(true);
@@ -135,11 +174,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     if (!recorder) return;
     pinchRecorderRef.current = null;
     setPinchRecording(false);
+    setRecordingStartedAt(null);
     setPinchDetectorStatus("sending");
     try {
       const recording = await recorder.stop();
       if (recording.size <= 0) {
-        setMessage("pinch recording was empty");
+        setMessage("録音が空でした。もう一度お試しください。");
         setPinchDetectorStatus("tracking");
         return;
       }
@@ -148,7 +188,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         trigger: "pinch",
         mode: "dispatch_audio",
         action_id: "chat.message",
-        input_text: "このpinch中に録音した音声を入力として処理してください。",
+        input_text: "指をくっつけている間に録音した音声を入力として処理してください。",
         conversation_id: conversationIdRef.current || undefined,
         confidence: state.confidence,
         duration_ms: recording.durationMs,
@@ -172,12 +212,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           },
         ],
       });
-      setMessage(String(result.reason ?? result.status ?? "pinch audio sent"));
+      setMessage(String(result.reason ?? result.status ?? "音声をAIに送信しました"));
       onOpenInputRef.current?.("");
       focusComposer();
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "pinch audio dispatch failed");
+      setMessage(error instanceof Error ? error.message : "送信できませんでした。録音は保存されていません。");
     } finally {
       setPinchDetectorStatus("tracking");
     }
@@ -186,11 +226,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const beginPinchRecording = useCallback(async (state: PinchState) => {
     if (pinchRecorderRef.current) return;
     setPinchDetectorStatus("recording");
-    setMessage("recording while pinch is held");
+    setMessage("録音中です。指を離すとAIに送信します。");
     try {
       const recorder = await startPinchAudioRecorder(selectedMicId || undefined);
       pinchRecorderRef.current = recorder;
       setPinchRecording(true);
+      setRecordingStartedAt(performance.now());
       await ambientTriggerClient.grantPermission("microphone.capture", "granted");
       await ambientTriggerClient.submitEvent({
         source: "camera",
@@ -210,8 +251,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       pinchRecorderRef.current?.cancel();
       pinchRecorderRef.current = null;
       setPinchRecording(false);
+      setRecordingStartedAt(null);
       setPinchDetectorStatus("tracking");
-      setMessage(error instanceof Error ? error.message : "pinch recording failed");
+      setMessage(error instanceof Error ? error.message : "録音を開始できませんでした。");
     }
   }, [selectedMicId]);
 
@@ -225,6 +267,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       pinchRecorderRef.current.cancel();
       pinchRecorderRef.current = null;
       setPinchRecording(false);
+      setRecordingStartedAt(null);
     }
     const approvalDecision = approvalDecisionForChoice(choice, approvalTargetRef.current);
     if (approvalDecision) {
@@ -256,7 +299,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       focusComposer();
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "choice dispatch failed");
+      setMessage(error instanceof Error ? error.message : "数字ジェスチャーを送信できませんでした。");
     } finally {
       setPinchDetectorStatus("tracking");
     }
@@ -310,7 +353,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       .catch((error) => {
         if (!cancelled) {
           setPinchDetectorStatus("unavailable");
-          setMessage(error instanceof Error ? error.message : "pinch detector failed");
+          setMessage(error instanceof Error ? error.message : "指の検出を開始できませんでした。");
         }
       });
     return () => {
@@ -319,11 +362,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       gestureStopRef.current = null;
     };
   }, [Boolean(approvalTarget), cameraStream, handlePinchState, monitorEnabled]);
-
-  const permissionSummary = useMemo(() => {
-    const granted = REQUIRED_PERMISSIONS.filter((permissionId) => status?.permissions.rumi[permissionId]?.granted).length;
-    return `${granted}/${REQUIRED_PERMISSIONS.length}`;
-  }, [status]);
 
   async function refresh(options?: { probeOs?: boolean }) {
     const next = await ambientTriggerClient.status();
@@ -370,45 +408,85 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       else await refresh();
       if (success) setMessage(success);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "ambient action failed");
+      setMessage(error instanceof Error ? error.message : "操作を完了できませんでした。");
+      await refresh({ probeOs: true }).catch(() => undefined);
     } finally {
       setBusy(false);
     }
   }
 
-  async function toggleMonitor() {
-    if (monitorEnabled) {
-      await runAction(() => ambientTriggerClient.stopMonitor(), "monitor paused");
-      return;
-    }
-    await runAction(() => ambientTriggerClient.startMonitor({ voice_wake: true, gesture_pinch: true }), "monitor listening");
-  }
-
   async function grantAll() {
+    setManualRumiFallbackOpen(false);
     await runAction(async () => {
       let next: AmbientStatus | null = null;
-      for (const permissionId of REQUIRED_PERMISSIONS) {
+      for (const permissionId of AMBIENT_REQUIRED_PERMISSIONS) {
         next = await ambientTriggerClient.grantPermission(permissionId);
       }
       return next ?? ambientTriggerClient.status();
-    }, "Rumi permissions granted");
+    }, "Rumi内の許可を保存しました。次に端末のマイク・カメラを許可してください。");
+    const next = await ambientTriggerClient.status().catch(() => null);
+    if (next) {
+      setStatus(next);
+      setManualRumiFallbackOpen(!hasAllRumiPermissions(next));
+    } else {
+      setManualRumiFallbackOpen(true);
+    }
   }
 
-  async function requestCamera() {
+  async function requestMediaPermissions() {
     await runAction(async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error("camera capture is not available in this browser");
+        throw new Error("このブラウザではマイク・カメラを使用できません。");
       }
-      const stream = await navigator.mediaDevices.getUserMedia({ video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : true });
-      setCameraStream(stream);
+      const micStream = await navigator.mediaDevices.getUserMedia({ audio: audioCaptureConstraints(selectedMicId || undefined) });
+      micStream.getTracks().forEach((track) => track.stop());
+      const stream = await navigator.mediaDevices.getUserMedia({ video: videoCaptureConstraints(selectedCameraId || undefined) });
+      setCameraStream((current) => {
+        current?.getTracks().forEach((track) => track.stop());
+        return stream;
+      });
       await refreshDevices();
-      return ambientTriggerClient.grantPermission("camera.capture", "granted");
-    }, "camera ready");
+      return ambientTriggerClient.checkOsPermissions({
+        "microphone.capture": "granted",
+        "camera.capture": "granted",
+      });
+    }, "マイクとカメラを使用できます。開始すると指の検出を待機します。");
+  }
+
+  async function startMonitoring() {
+    await runAction(async () => {
+      if (!cameraStream) {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("このブラウザではカメラを使用できません。");
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({ video: videoCaptureConstraints(selectedCameraId || undefined) });
+        setCameraStream((current) => {
+          current?.getTracks().forEach((track) => track.stop());
+          return stream;
+        });
+        await refreshDevices();
+      }
+      return ambientTriggerClient.startMonitor({ voice_wake: true, gesture_pinch: true });
+    }, "待機中です。指をくっつけると録音します。");
+  }
+
+  async function stopMonitoring() {
+    await runAction(async () => {
+      pinchRecorderRef.current?.cancel();
+      pinchRecorderRef.current = null;
+      setPinchRecording(false);
+      setRecordingStartedAt(null);
+      setCameraStream((current) => {
+        current?.getTracks().forEach((track) => track.stop());
+        return null;
+      });
+      return ambientTriggerClient.stopMonitor();
+    }, "停止しました。マイク・カメラの監視は止まっています。");
   }
 
   async function enrollWakeVoice() {
     setBusy(true);
-    setMessage("recording wake sample");
+    setMessage("声で起動するための音声を短く録音しています。");
     try {
       const embedding = await captureAudioEmbedding(900, selectedMicId || undefined);
       const result = await ambientTriggerClient.submitEvent({
@@ -418,10 +496,10 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         audio_embedding: embedding,
         metadata: { panel: "ambient_mini_window" },
       });
-      setMessage(String(result.reason ?? "wake voice enrolled"));
+      setMessage(String(result.reason ?? "声で起動する音声を登録しました。"));
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "wake enrollment failed");
+      setMessage(error instanceof Error ? error.message : "声で起動する音声を登録できませんでした。");
     } finally {
       setBusy(false);
     }
@@ -453,7 +531,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       await ambientTriggerClient.grantPermission("microphone.capture", "granted");
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "microphone start failed");
+      setMessage(error instanceof Error ? error.message : "マイクを開始できませんでした。");
     }
   }
 
@@ -483,11 +561,11 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     if (!target || approvalGestureBusyRef.current) return;
     if (decision === "approve" && target.canApprove === false) return;
     if (decision === "reject" && target.canReject === false) {
-      setMessage("reject gesture ignored for this approval");
+      setMessage("この承認では拒否ジェスチャーは使えません。");
       return;
     }
     approvalGestureBusyRef.current = true;
-    setMessage(decision === "approve" ? "approval gesture accepted" : "rejection gesture accepted");
+    setMessage(decision === "approve" ? "承認ジェスチャーを受け取りました。" : "拒否ジェスチャーを受け取りました。");
     try {
       await ambientTriggerClient.submitEvent({
         source: "camera",
@@ -507,10 +585,51 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       await onApprovalGestureRef.current?.(decision);
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "approval gesture failed");
+      setMessage(error instanceof Error ? error.message : "承認ジェスチャーを処理できませんでした。");
     } finally {
       approvalGestureBusyRef.current = false;
       setPinchDetectorStatus("tracking");
+    }
+  }
+
+  async function handlePrimaryAction() {
+    switch (uiState) {
+      case "setupNeeded":
+        setExpanded(true);
+        return;
+      case "rumiPermissionNeeded":
+        setExpanded(true);
+        await grantAll();
+        return;
+      case "osPermissionNeeded":
+        setExpanded(true);
+        await requestMediaPermissions();
+        return;
+      case "readyOff":
+      case "paused":
+        await startMonitoring();
+        return;
+      case "monitoring":
+        await stopMonitoring();
+        return;
+      case "recording":
+        pinchRecorderRef.current?.cancel();
+        pinchRecorderRef.current = null;
+        setPinchRecording(false);
+        setRecordingStartedAt(null);
+        setPinchDetectorStatus("tracking");
+        setMessage("録音をキャンセルしました。保存はされていません。");
+        return;
+      case "denied":
+      case "blocked":
+        setExpanded(true);
+        setManualRumiFallbackOpen(true);
+        return;
+      case "error":
+        await refresh({ probeOs: true });
+        return;
+      case "sending":
+        return;
     }
   }
 
@@ -518,114 +637,185 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     <LayerPortal layer="globalOverlay">
       <section
         className={cn(
-          "fixed bottom-4 right-4 w-[min(360px,calc(100vw-24px))] rounded-xl border border-zinc-800/90 bg-zinc-950/95 text-zinc-200 shadow-2xl shadow-black/40 backdrop-blur",
+          "fixed bottom-4 right-4 w-[min(380px,calc(100vw-24px))] overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-950/96 text-zinc-200 shadow-2xl shadow-black/40 backdrop-blur",
           frontFlash && "border-emerald-300/60 shadow-emerald-500/20",
+          stateCopy.tone === "red" && "border-red-400/35",
+          stateCopy.tone === "amber" && "border-amber-400/30",
+          uiState === "recording" && "shadow-red-500/20",
         )}
-        aria-label="Ambient trigger mini window"
+        aria-label="指で録音"
       >
-        <div className="flex items-center gap-2 border-b border-zinc-800/80 px-3 py-2">
-          <AmbientTriggerStatusIcon kind="listening" active={monitorEnabled} title={monitorEnabled ? "listening" : "paused"} />
+        <div className="flex items-start gap-3 border-b border-zinc-800/80 px-3.5 py-3">
+          <StatusGlyph uiState={uiState} />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate text-sm font-semibold">Ambient</span>
-              <span className={cn(
-                "rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
-                monitorEnabled ? "border-emerald-400/30 text-emerald-200" : "border-zinc-800 text-zinc-500",
-              )}>
-                {monitorEnabled ? "on" : "off"}
-              </span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-[15px] font-semibold leading-5 text-zinc-50">{ambientCopyJa.title}</span>
+              <StateBadge state={uiState} />
             </div>
-            <p className="truncate text-[11px] text-zinc-500">Rumi {permissionSummary} / OS mic {osStatus(status, "microphone.capture")} / camera {osStatus(status, "camera.capture")}</p>
+            <p className="mt-1 text-[12px] leading-5 text-zinc-300">{stateCopy.headline}</p>
           </div>
           <button
             type="button"
             onClick={() => setExpanded((value) => !value)}
             className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
-            title={expanded ? "collapse" : "expand"}
+            title={expanded ? "閉じる" : "詳しく見る"}
+            aria-label={expanded ? "指で録音の詳細を閉じる" : "指で録音の詳細を見る"}
           >
             {expanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
           </button>
         </div>
 
-        <div className="flex items-center gap-2 px-3 py-2">
+        <div className="space-y-2.5 px-3.5 py-3">
+          <p className="text-[12px] leading-5 text-zinc-400">{stateCopy.body}</p>
           <button
             type="button"
-            onClick={() => void toggleMonitor()}
-            disabled={busy}
+            onClick={() => void handlePrimaryAction()}
+            disabled={busy || uiState === "sending"}
             className={cn(
-              "inline-flex h-8 min-w-[76px] items-center justify-center gap-1 rounded-lg px-2 text-xs font-semibold",
-              monitorEnabled ? "bg-emerald-400 text-zinc-950" : "bg-zinc-100 text-zinc-950",
+              "inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold transition",
+              primaryButtonClass(uiState),
             )}
           >
-            {busy ? <Loader2 size={14} className="animate-spin" /> : <Radio size={14} />}
-            {monitorEnabled ? "ON" : "OFF"}
+            {busy ? <Loader2 size={15} className="animate-spin" /> : <PrimaryActionIcon uiState={uiState} />}
+            {uiState === "recording" && recordingSeconds > 0 ? `${stateCopy.primary} ${formatRecordingTime(recordingSeconds)}` : stateCopy.primary}
           </button>
-          <AmbientTriggerStatusIcon kind="mic" active={monitorEnabled && micGranted && (micListening || pinchRecording)} title={micStatus(status, micListening, pinchRecording)} />
-          <AmbientTriggerStatusIcon kind="camera" active={monitorEnabled && cameraGranted && Boolean(cameraStream)} title={cameraStatus(status, cameraStream)} />
-          <AmbientTriggerStatusIcon kind="pinch" active={monitorEnabled && Boolean(gesture?.enabled) && pinchDetectorStatus === "tracking"} title={`pinch ${pinchDetectorStatus}`} />
-          {!dispatchGranted && <AmbientTriggerStatusIcon kind="denied" active={false} title="dispatch denied" />}
-          <div className="ml-auto truncate text-[11px] text-zinc-500">
-            {lastTrigger ? `${String(lastTrigger.source)}:${String(lastTrigger.trigger)}` : "no trigger"}
+          <div className="flex items-center gap-2 text-[11px] leading-4 text-zinc-500">
+            <Shield size={12} className="shrink-0 text-emerald-300" />
+            <span>{ambientCopyJa.gestureShort}</span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] leading-4 text-zinc-500">
+            <Shield size={12} className="shrink-0 text-zinc-400" />
+            <span>{ambientCopyJa.privacyShort}</span>
           </div>
         </div>
 
         {expanded && (
-          <div className="space-y-2 border-t border-zinc-800/80 px-3 py-3">
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => void grantAll()} className="ambient-mini-button">
-                <Shield size={14} />
-                Grant
-              </button>
-              <button type="button" onClick={() => setSettingsOpen((value) => !value)} className="ambient-mini-button">
-                <Settings size={14} />
-                Settings
-              </button>
-              <button type="button" onClick={() => void requestCamera()} className="ambient-mini-button">
-                <Video size={14} />
-                Camera
-              </button>
-              <button type="button" onClick={() => void enrollWakeVoice()} className="ambient-mini-button">
-                <Mic size={14} />
-                Enroll
-              </button>
-              <button type="button" onClick={() => void toggleMicListening()} className="ambient-mini-button">
-                <Radio size={14} />
-                {micListening ? "Pause" : "Listen"}
-              </button>
-              <button type="button" onClick={() => void submitPinch()} className="ambient-mini-button col-span-2">
-                <Hand size={14} />
-                Hold test
-              </button>
-            </div>
+          <div className="space-y-3 border-t border-zinc-800/80 px-3.5 py-3">
+            <section className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase text-zinc-500">次にやること</p>
+              <p className="text-[13px] leading-5 text-zinc-200">{nextActionText(uiState, allRumiPermissionsGranted, allOsPermissionsGranted)}</p>
+            </section>
+
+            <section className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase text-zinc-500">使い方</p>
+              <div className="grid gap-1.5 text-[12px] leading-5 text-zinc-300">
+                <InstructionStep index={1} text="親指と人差し指をくっつける" />
+                <InstructionStep index={2} text="そのまま話す" />
+                <InstructionStep index={3} text="指を離すとAIに送信" />
+              </div>
+            </section>
+
+            <section className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase text-zinc-500">セットアップ</p>
+                <button type="button" onClick={() => void refresh({ probeOs: true })} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100">
+                  <RefreshCcw size={12} />
+                  再確認
+                </button>
+              </div>
+              <SetupStep
+                index={1}
+                title="Rumiで許可"
+                statusText={`${rumiPermissionCount}/${AMBIENT_REQUIRED_PERMISSIONS.length} 許可済み`}
+                complete={allRumiPermissionsGranted}
+                active={!allRumiPermissionsGranted}
+              >
+                <p className="text-[12px] leading-5 text-zinc-400">この機能に必要な操作をRumi内で許可します。</p>
+                <div className="mt-2 space-y-1.5">
+                  {AMBIENT_REQUIRED_PERMISSIONS.map((permissionId) => (
+                    <PermissionRow
+                      key={permissionId}
+                      label={ambientPermissionLabels[permissionId] ?? permissionId}
+                      bucket={rumiPermissionBucket(status, permissionId)}
+                    />
+                  ))}
+                </div>
+                {!allRumiPermissionsGranted && (
+                  <button type="button" onClick={() => void grantAll()} disabled={busy} className="ambient-mini-button mt-2 w-full">
+                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Shield size={14} />}
+                    Rumiで許可する
+                  </button>
+                )}
+              </SetupStep>
+
+              <SetupStep
+                index={2}
+                title="端末のマイク・カメラを許可"
+                statusText={`${osPermissionCount}/${AMBIENT_OS_PERMISSIONS.length} 許可済み`}
+                complete={allOsPermissionsGranted}
+                active={allRumiPermissionsGranted && !allOsPermissionsGranted}
+              >
+                <p className="text-[12px] leading-5 text-zinc-400">ブラウザまたはOSの確認画面で、マイクとカメラを許可してください。</p>
+                <div className="mt-2 space-y-1.5">
+                  {AMBIENT_OS_PERMISSIONS.map((permissionId) => (
+                    <PermissionRow
+                      key={permissionId}
+                      label={permissionId === "microphone.capture" ? "マイク" : "カメラ"}
+                      bucket={osPermissionBucket(status, permissionId)}
+                    />
+                  ))}
+                </div>
+                {!allOsPermissionsGranted && (
+                  <button type="button" onClick={() => void requestMediaPermissions()} disabled={busy || !allRumiPermissionsGranted} className="ambient-mini-button mt-2 w-full">
+                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Video size={14} />}
+                    マイク・カメラを許可
+                  </button>
+                )}
+                {!allOsPermissionsGranted && (
+                  <p className="mt-1 text-[11px] leading-4 text-zinc-500">確認画面が出ない場合は、アドレスバーまたはOS設定から許可してください。</p>
+                )}
+              </SetupStep>
+
+              <SetupStep
+                index={3}
+                title="指の動きをテスト"
+                statusText={gestureStatusLabel(pinchDetectorStatus, monitorEnabled)}
+                complete={monitorEnabled && pinchDetectorStatus === "tracking"}
+                active={allRumiPermissionsGranted && allOsPermissionsGranted}
+              >
+                <p className="text-[12px] leading-5 text-zinc-400">カメラの前で、親指と人差し指をくっつけてください。くっついている間だけ録音します。</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => void startMonitoring()} disabled={busy || !allRumiPermissionsGranted || !allOsPermissionsGranted || monitorEnabled} className="ambient-mini-button">
+                    <Play size={14} />
+                    開始する
+                  </button>
+                  <button type="button" onClick={() => void submitPinch()} disabled={busy || !monitorEnabled} className="ambient-mini-button">
+                    <Hand size={14} />
+                    送信テスト
+                  </button>
+                </div>
+              </SetupStep>
+            </section>
 
             {settingsOpen && (
-              <div className="space-y-2 rounded-lg border border-zinc-800 bg-black/25 p-2">
+              <section className="space-y-2 border-t border-zinc-800/80 pt-3">
+                <p className="text-[11px] font-semibold uppercase text-zinc-500">詳細設定</p>
                 <label className="block text-[11px] text-zinc-500">
-                  Mic
+                  マイク
                   <select
                     value={selectedMicId}
                     onChange={(event) => setSelectedMicId(event.target.value)}
                     className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
                   >
-                    <option value="">Default</option>
+                    <option value="">デフォルト</option>
                     {devices.filter((device) => device.kind === "audioinput").map((device, index) => (
                       <option key={device.deviceId || `mic-${index}`} value={device.deviceId}>
-                        {deviceLabel(device, index, "Mic")}
+                        {deviceLabel(device, index, "マイク")}
                       </option>
                     ))}
                   </select>
                 </label>
                 <label className="block text-[11px] text-zinc-500">
-                  Camera
+                  カメラ
                   <select
                     value={selectedCameraId}
                     onChange={(event) => setSelectedCameraId(event.target.value)}
                     className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
                   >
-                    <option value="">Default</option>
+                    <option value="">デフォルト</option>
                     {devices.filter((device) => device.kind === "videoinput").map((device, index) => (
                       <option key={device.deviceId || `camera-${index}`} value={device.deviceId}>
-                        {deviceLabel(device, index, "Camera")}
+                        {deviceLabel(device, index, "カメラ")}
                       </option>
                     ))}
                   </select>
@@ -633,11 +823,11 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                 <div className="grid grid-cols-2 gap-2">
                   <button type="button" onClick={() => void refreshDevices()} className="ambient-mini-button">
                     <Settings size={14} />
-                    Devices
+                    デバイス更新
                   </button>
                   <button type="button" onClick={() => void refresh({ probeOs: true })} className="ambient-mini-button">
                     <Shield size={14} />
-                    OS check
+                    許可を再確認
                   </button>
                 </div>
                 <button
@@ -646,9 +836,19 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                   className={cn("ambient-mini-button w-full", frontOnFinal && "border-emerald-400/30 text-emerald-200")}
                 >
                   <Radio size={14} />
-                  Front on final {frontOnFinal ? "ON" : "OFF"}
+                  最終回答で前面表示: {frontOnFinal ? "有効" : "無効"}
                 </button>
-              </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => void enrollWakeVoice()} className="ambient-mini-button">
+                    <Mic size={14} />
+                    声で起動を登録
+                  </button>
+                  <button type="button" onClick={() => void toggleMicListening()} className="ambient-mini-button">
+                    <Radio size={14} />
+                    {micListening ? "音声待機を停止" : "音声待機を開始"}
+                  </button>
+                </div>
+              </section>
             )}
 
             {cameraStream && (
@@ -661,22 +861,54 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
               />
             )}
 
-            <div className="grid grid-cols-3 gap-2 text-[11px] text-zinc-500">
-              <StatusPill label="voice" value={voice?.status ?? "paused"} active={voice?.status === "listening"} />
-              <StatusPill label="camera" value={pinchDetectorStatus} active={pinchDetectorStatus === "tracking"} />
-              <StatusPill label="wake" value={voice?.enrolled ? "enrolled" : "empty"} active={Boolean(voice?.enrolled)} />
-            </div>
+            <section className="space-y-2 border-t border-zinc-800/80 pt-3">
+              <p className="text-[11px] font-semibold uppercase text-zinc-500">状態</p>
+              <div className="grid grid-cols-3 gap-2 text-[11px] text-zinc-500">
+                <StatusPill label="マイク" value={pinchRecording ? "録音中" : voice?.status === "listening" ? "音声待機中" : "停止"} active={pinchRecording || voice?.status === "listening"} />
+                <StatusPill label="カメラ" value={gestureStatusLabel(pinchDetectorStatus, monitorEnabled)} active={pinchDetectorStatus === "tracking"} />
+                <StatusPill label="送信" value={dispatchGranted ? "許可済み" : "未許可"} active={dispatchGranted} />
+              </div>
+            </section>
 
             {approvalTarget && monitorEnabled && (
               <div className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-2 py-1.5 text-[11px] text-amber-100">
-                {approvalTarget.canReject !== false && <span className="mr-2"><X size={11} className="mr-1 inline" />{approvalTarget.rejectLabel ?? "Reject"} (2)</span>}
-                {approvalTarget.canApprove !== false && <span><Check size={11} className="mr-1 inline" />{approvalTarget.approveLabel ?? "Approve"} ({approvalTarget.canReject === false ? "2" : "3"})</span>}
+                {approvalTarget.canReject !== false && <span className="mr-2"><X size={11} className="mr-1 inline" />{approvalTarget.rejectLabel ?? "拒否"} (2)</span>}
+                {approvalTarget.canApprove !== false && <span><Check size={11} className="mr-1 inline" />{approvalTarget.approveLabel ?? "許可"} ({approvalTarget.canReject === false ? "2" : "3"})</span>}
               </div>
             )}
 
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 text-[11px] text-zinc-400">
-              2 / 3 / 4 replies {approvalTarget ? "or approval buttons" : "after pinch hold"}
-            </div>
+            <section className="space-y-1 border-t border-zinc-800/80 pt-3 text-[12px] leading-5 text-zinc-400">
+              <p className="font-medium text-zinc-300">プライバシー</p>
+              <p>音声・画像・カメラ映像は保存しません。</p>
+              <p>記録されるのは「トリガーが使われた」イベントだけです。</p>
+            </section>
+
+            {manualRumiFallbackOpen && (
+              <section className="space-y-2 border-t border-red-400/25 pt-3 text-[12px] leading-5">
+                <div className="flex items-start gap-2 text-red-100">
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium">承認画面が表示されない場合</p>
+                    <p className="mt-1 text-red-100/75">Rumi設定から「指で録音」を選び、マイク入力・カメラ・AI送信を許可してください。許可後に「再確認」を押します。</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setSettingsOpen(true)} className="ambient-mini-button">
+                    <Settings size={14} />
+                    手動で許可する
+                  </button>
+                  <button type="button" onClick={() => void refresh({ probeOs: true })} className="ambient-mini-button">
+                    <RefreshCcw size={14} />
+                    許可状態を再確認
+                  </button>
+                </div>
+              </section>
+            )}
+
+            <button type="button" onClick={() => setSettingsOpen((value) => !value)} className="ambient-mini-button w-full">
+              <Settings size={14} />
+              {settingsOpen ? "詳細設定を閉じる" : "詳細設定を開く"}
+            </button>
 
             {lastFinalAnswer && (
               <div className="max-h-28 overflow-auto rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-2 py-1.5 text-[11px] leading-5 text-emerald-50">
@@ -696,6 +928,144 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   );
 }
 
+function StatusGlyph({ uiState }: { uiState: AmbientUiState }) {
+  const className = cn(
+    "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
+    uiState === "recording" && "border-red-400/40 bg-red-500/12 text-red-100",
+    uiState === "monitoring" && "border-emerald-400/35 bg-emerald-400/10 text-emerald-100",
+    uiState === "sending" && "border-violet-400/35 bg-violet-400/10 text-violet-100",
+    (uiState === "setupNeeded" || uiState === "rumiPermissionNeeded" || uiState === "osPermissionNeeded") && "border-amber-400/35 bg-amber-400/10 text-amber-100",
+    (uiState === "denied" || uiState === "blocked" || uiState === "error") && "border-red-400/35 bg-red-500/10 text-red-100",
+    (uiState === "readyOff" || uiState === "paused") && "border-zinc-800 bg-zinc-900 text-zinc-300",
+  );
+
+  if (uiState === "recording") return <span className={className}><Mic size={20} /></span>;
+  if (uiState === "sending") return <span className={className}><Loader2 size={20} className="animate-spin" /></span>;
+  if (uiState === "monitoring") return <span className={className}><Hand size={20} /></span>;
+  if (uiState === "denied" || uiState === "blocked" || uiState === "error") return <span className={className}><AlertTriangle size={20} /></span>;
+  if (uiState === "setupNeeded" || uiState === "rumiPermissionNeeded" || uiState === "osPermissionNeeded") return <span className={className}><Shield size={20} /></span>;
+  return <span className={className}><Radio size={20} /></span>;
+}
+
+function StateBadge({ state }: { state: AmbientUiState }) {
+  const copy = ambientCopyJa.states[state];
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold leading-4",
+        copy.tone === "emerald" && "border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
+        copy.tone === "amber" && "border-amber-400/30 bg-amber-400/10 text-amber-100",
+        copy.tone === "red" && "border-red-400/35 bg-red-500/10 text-red-100",
+        copy.tone === "purple" && "border-violet-400/30 bg-violet-400/10 text-violet-100",
+        copy.tone === "zinc" && "border-zinc-800 bg-zinc-900 text-zinc-300",
+      )}
+    >
+      {copy.badge}
+    </span>
+  );
+}
+
+function PrimaryActionIcon({ uiState }: { uiState: AmbientUiState }) {
+  if (uiState === "readyOff" || uiState === "paused") return <Play size={15} />;
+  if (uiState === "monitoring") return <Square size={14} />;
+  if (uiState === "recording") return <X size={15} />;
+  if (uiState === "sending") return <Loader2 size={15} className="animate-spin" />;
+  if (uiState === "osPermissionNeeded") return <Video size={15} />;
+  if (uiState === "denied" || uiState === "blocked" || uiState === "error") return <AlertTriangle size={15} />;
+  return <Shield size={15} />;
+}
+
+function primaryButtonClass(uiState: AmbientUiState): string {
+  if (uiState === "recording") return "bg-red-400 text-zinc-950 hover:bg-red-300";
+  if (uiState === "monitoring") return "border border-zinc-800 bg-zinc-900 text-zinc-100 hover:border-zinc-700 hover:bg-zinc-800";
+  if (uiState === "sending") return "cursor-wait bg-violet-300 text-zinc-950 opacity-80";
+  if (uiState === "denied" || uiState === "blocked" || uiState === "error") return "bg-red-100 text-zinc-950 hover:bg-white";
+  if (uiState === "setupNeeded" || uiState === "rumiPermissionNeeded" || uiState === "osPermissionNeeded") return "bg-amber-200 text-zinc-950 hover:bg-amber-100";
+  return "bg-zinc-100 text-zinc-950 hover:bg-white";
+}
+
+function nextActionText(uiState: AmbientUiState, rumiReady: boolean, osReady: boolean): string {
+  if (!rumiReady) return "まずRumiでこの機能を許可してください。";
+  if (!osReady) return "次に、端末のマイクとカメラを許可してください。";
+  if (uiState === "readyOff") return "開始すると、カメラで指の動きを待機します。録音はまだ始まりません。";
+  if (uiState === "monitoring") return "親指と人差し指をくっつけると録音します。離すとAIに送信します。";
+  if (uiState === "recording") return "録音中です。指を離すとAIに送信します。保存はされません。";
+  if (uiState === "sending") return "音声をAIに送っています。送信後に待機へ戻ります。";
+  if (uiState === "denied") return "拒否された許可を、ブラウザまたはOS設定から許可に戻してください。";
+  if (uiState === "blocked") return "この環境でマイク・カメラが使えるか確認してください。";
+  return "開始できます。";
+}
+
+function InstructionStep({ index, text }: { index: number; text: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-[11px] font-semibold text-zinc-200">{index}</span>
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function SetupStep({
+  index,
+  title,
+  statusText,
+  complete,
+  active,
+  children,
+}: {
+  index: number;
+  title: string;
+  statusText: string;
+  complete: boolean;
+  active: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className={cn("border-t border-zinc-800/80 pt-2.5", active && "border-amber-400/25")}>
+      <div className="flex items-start gap-2">
+        <span
+          className={cn(
+            "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold",
+            complete ? "bg-emerald-400 text-zinc-950" : active ? "bg-amber-300 text-zinc-950" : "bg-zinc-800 text-zinc-400",
+          )}
+        >
+          {complete ? <Check size={12} /> : index}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[12px] font-semibold text-zinc-100">{title}</p>
+            <span className={cn("shrink-0 text-[11px]", complete ? "text-emerald-200" : active ? "text-amber-100" : "text-zinc-500")}>{statusText}</span>
+          </div>
+          <div className="mt-1">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PermissionRow({ label, bucket }: { label: string; bucket: AmbientPermissionBucket }) {
+  const granted = bucket === "granted";
+  return (
+    <div className="flex items-center justify-between gap-2 text-[12px] leading-5">
+      <span className="text-zinc-300">{label}</span>
+      <span className={cn("inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]", granted ? "bg-emerald-400/10 text-emerald-200" : bucket === "denied" || bucket === "blocked" ? "bg-red-500/10 text-red-100" : "bg-zinc-800 text-zinc-400")}>
+        {granted ? <Check size={11} /> : null}
+        {permissionBucketLabel(bucket)}
+      </span>
+    </div>
+  );
+}
+
+function gestureStatusLabel(status: string, monitorEnabled: boolean): string {
+  if (!monitorEnabled) return "未開始";
+  if (status === "tracking") return "待機中";
+  if (status === "recording") return "録音中";
+  if (status === "sending") return "送信中";
+  if (status === "loading") return "準備中";
+  if (status === "unavailable") return "利用不可";
+  return "確認中";
+}
+
 function StatusPill({ label, value, active }: { label: string; value: string; active?: boolean }) {
   return (
     <div className={cn("rounded-lg border px-2 py-1", active ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-200" : "border-zinc-800 bg-zinc-950")}>
@@ -705,21 +1075,10 @@ function StatusPill({ label, value, active }: { label: string; value: string; ac
   );
 }
 
-function osStatus(status: AmbientStatus | null, permissionId: AmbientPermissionId): string {
-  return String(status?.permissions.os[permissionId]?.status ?? "unknown");
-}
-
-function micStatus(status: AmbientStatus | null, listening: boolean, pinchRecording: boolean): string {
-  if (!status?.permissions.rumi["microphone.capture"]?.granted) return "denied";
-  if (pinchRecording) return "recording";
-  if (listening) return "listening";
-  return status.services.voice_wake_monitor.status ?? "paused";
-}
-
-function cameraStatus(status: AmbientStatus | null, stream: MediaStream | null): string {
-  if (!status?.permissions.rumi["camera.capture"]?.granted) return "denied";
-  if (stream) return "listening";
-  return status.services.gesture_wake_monitor.status ?? "paused";
+function formatRecordingTime(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
 function isAmbientStatus(value: unknown): value is AmbientStatus {
@@ -735,13 +1094,13 @@ function focusComposer() {
 
 async function captureAudioEmbedding(durationMs: number, deviceId?: string): Promise<number[]> {
   if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("microphone capture is not available in this browser");
+    throw new Error("このブラウザではマイクを使用できません。");
   }
   const stream = await navigator.mediaDevices.getUserMedia({ audio: audioCaptureConstraints(deviceId) });
   try {
     const AudioContextClass = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) {
-      throw new Error("audio context is not available in this browser");
+      throw new Error("このブラウザでは音声解析を使用できません。");
     }
     const context = new AudioContextClass();
     const source = context.createMediaStreamSource(stream);
@@ -780,10 +1139,10 @@ type AmbientAudioRecording = {
 
 async function startPinchAudioRecorder(deviceId?: string): Promise<ActiveAudioRecorder> {
   if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("microphone capture is not available in this browser");
+    throw new Error("このブラウザではマイクを使用できません。");
   }
   if (typeof MediaRecorder === "undefined") {
-    throw new Error("audio recording is not available in this browser");
+    throw new Error("このブラウザでは音声録音を使用できません。");
   }
   const stream = await navigator.mediaDevices.getUserMedia({ audio: audioCaptureConstraints(deviceId) });
   const mimeType = preferredAudioMimeType();
@@ -804,7 +1163,7 @@ async function startPinchAudioRecorder(deviceId?: string): Promise<ActiveAudioRe
   return {
     stop: () => new Promise<AmbientAudioRecording>((resolve, reject) => {
       if (stopped) {
-        reject(new Error("pinch recorder already stopped"));
+        reject(new Error("録音はすでに停止しています。"));
         return;
       }
       stopped = true;
@@ -860,7 +1219,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error ?? new Error("audio recording could not be read"));
+    reader.onerror = () => reject(reader.error ?? new Error("録音データを読み取れませんでした。"));
     reader.readAsDataURL(blob);
   });
 }
@@ -886,6 +1245,15 @@ function audioCaptureConstraints(deviceId?: string): MediaTrackConstraints {
     echoCancellation: true,
     noiseSuppression: true,
     autoGainControl: true,
+    ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+  };
+}
+
+function videoCaptureConstraints(deviceId?: string): MediaTrackConstraints {
+  return {
+    width: { ideal: 640 },
+    height: { ideal: 480 },
+    facingMode: "user",
     ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
   };
 }
