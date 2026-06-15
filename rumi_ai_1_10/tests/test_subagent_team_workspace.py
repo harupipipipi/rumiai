@@ -181,6 +181,27 @@ def test_creator_preview_returns_plan_without_workspace_side_effects(tmp_path, m
     assert before_messages == after_messages
 
 
+def test_file_tree_payload_hides_absolute_workspace_root(tmp_path):
+    workspace = tmp_path / "team-workspace"
+    workspace.mkdir()
+    (workspace / "notes.txt").write_text("hello\n", encoding="utf-8")
+
+    from domain.subagent_team.file_tree import build_file_tree
+
+    payload = build_file_tree(
+        {"workspace_root": str(workspace), "directory": ".", "include_git": False},
+        {},
+    )
+    encoded = json.dumps(payload, sort_keys=True)
+
+    assert str(workspace.resolve()) not in encoded
+    assert "/Users/" not in encoded
+    assert payload["root"] == "."
+    assert str(payload["workspace_root"]).startswith("workspace:")
+    assert str(payload["workspace_id"]).startswith("ws_")
+    assert payload["files"][0]["path"] == "notes.txt"
+
+
 def test_channel_check_context_includes_membership_pm_gate_and_rich_policy(tmp_path, monkeypatch):
     _configure_temp_runtime(tmp_path, monkeypatch)
     store, runtime_store, company = _create_workspace()

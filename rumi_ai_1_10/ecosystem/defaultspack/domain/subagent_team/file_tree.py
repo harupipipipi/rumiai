@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from domain.coding.file_ops import FileOps
@@ -25,10 +26,12 @@ def build_file_tree(input_data: dict[str, Any] | None = None, context: dict[str,
             git_status = GitOps(resolution.root_path).status()
         except Exception as exc:
             git_error = str(exc)
+    workspace_hash = hashlib.sha256(str(resolution.root_path or "").encode("utf-8")).hexdigest()[:16]
     return {
-        "workspace_id": resolution.workspace_id,
-        "workspace_root": resolution.root_path,
-        "root": resolution.root_path,
+        "workspace_id": resolution.workspace_id or f"ws_{workspace_hash}",
+        "workspace_hash": workspace_hash,
+        "workspace_root": f"workspace:{workspace_hash}",
+        "root": ".",
         "directory": directory,
         "recursive": recursive,
         "files": files,

@@ -1186,6 +1186,9 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
     def do_PUT(self):
         self._handle_request("PUT")
 
+    def do_PATCH(self):
+        self._handle_request("PATCH")
+
     def do_DELETE(self):
         self._handle_request("DELETE")
 
@@ -1204,7 +1207,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 if values
             }
             request_data["_headers"] = {str(key): str(value) for key, value in self.headers.items()}
-            if method in ("POST", "PUT"):
+            if method in ("POST", "PUT", "PATCH"):
                 content_length = int(self.headers.get("Content-Length", 0))
                 if content_length > 0:
                     raw_body = self.rfile.read(content_length)
@@ -1386,7 +1389,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         if not provided or not hmac.compare_digest(provided, expected):
             return (401, "local auth token required", "AUTH_REQUIRED")
         if (
-            method.upper() in {"POST", "PUT", "DELETE"}
+            method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
             and origin
             and not self.headers.get("X-Rumi-CSRF", "").strip()
         ):
@@ -1402,7 +1405,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                     self.send_header("Access-Control-Allow-Origin", origin)
                     self.send_header("Vary", "Origin")
             self.send_header(
-                "Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"
+                "Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS"
             )
             self.send_header(
                 "Access-Control-Allow-Headers",
@@ -1414,7 +1417,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Vary", "Origin")
         elif not origin:
             self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Rumi-CSRF")
 
     def log_message(self, format, *args):

@@ -194,6 +194,42 @@
     },
     {
       "method": "GET",
+      "path": "/api/change-requests",
+      "flow_id": "transport_direct",
+      "description": "List Rumi Review change requests"
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests",
+      "flow_id": "transport_direct",
+      "description": "Create a Rumi Review change request snapshot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/change-requests/{id}",
+      "flow_id": "transport_direct",
+      "description": "Get a Rumi Review change request"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/change-requests/{id}",
+      "flow_id": "transport_direct",
+      "description": "Update Rumi Review change request metadata"
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id}/refresh",
+      "flow_id": "transport_direct",
+      "description": "Refresh a Rumi Review change request snapshot and report drift"
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id}/export-patch",
+      "flow_id": "transport_direct",
+      "description": "Export the latest Rumi Review change request patch"
+    },
+    {
+      "method": "GET",
       "path": "/api/coding/git/branch",
       "flow_id": "transport_direct",
       "description": "Read git branch information"
