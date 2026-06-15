@@ -1,10 +1,9 @@
 # Architecture
 
-Voice wake, camera pinch, and optional LINE/Discord/Web hook triggers produce an
-`AmbientTriggerEvent`.
+Voice wake and camera pinch triggers produce an `AmbientTriggerEvent`.
 
 ```text
-voice / gesture / hook
+voice / gesture
   -> AmbientTriggerEvent
   -> Rumi permission check
   -> debounce / cooldown

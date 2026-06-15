@@ -14,24 +14,6 @@
       "type": "input_dispatcher_alias",
       "alias": "defaults.console.input",
       "default_enabled": true
-    },
-    {
-      "id": "line_hook",
-      "type": "external_input_profile",
-      "profile_id": "line.default",
-      "default_enabled": false
-    },
-    {
-      "id": "discord_hook",
-      "type": "external_input_profile",
-      "profile_id": "discord.default",
-      "default_enabled": false
-    },
-    {
-      "id": "web_hook",
-      "type": "external_input_profile",
-      "profile_id": "generic.webhook.default",
-      "default_enabled": false
     }
   ],
   "install_prompt": {
@@ -39,7 +21,7 @@
     "body": "Rumi側の host.microphone.capture / host.camera.capture / ambient.trigger.dispatch 許可は、OSのマイク/カメラ許可とは別に管理されます。",
     "confirm_label": "許可",
     "deny_label": "拒否",
-    "surface_question": "小型window・defaultspack input・LINE/Discord/Web hookへ追加しますか？"
+    "surface_question": "小型windowとdefaultspack inputへ追加しますか？"
   },
   "privacy": {
     "store_audio": false,

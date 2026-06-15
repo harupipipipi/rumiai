@@ -400,12 +400,14 @@ def test_rumi_ambient_trigger_pack_metadata_exposes_install_prompt_permissions_a
         "ambient.trigger.dispatch",
     ]
     assert "マイク/カメラ" in pack["install_prompt"]["title"]
-    assert {"small_window", "defaultspack_input", "line_hook", "discord_hook", "web_hook"} <= set(pack["install_surfaces"])
+    assert pack["install_surfaces"] == ["small_window", "defaultspack_input"]
+    assert "LINE" not in pack["install_prompt"]["surface_question"]
 
     extension_json = ROOT / "ecosystem" / "rumi_ambient_trigger_pack" / "frontend_extensions" / "ambient_trigger.ui.json"
     extension = json.loads(extension_json.read_text(encoding="utf-8"))
     surface_ids = {surface["id"] for surface in extension["surfaces"]}
-    assert {"ambient_mini_window", "defaultspack_input", "line_hook", "discord_hook", "web_hook"} <= surface_ids
+    assert surface_ids == {"ambient_mini_window", "defaultspack_input"}
+    assert "LINE" not in extension["install_prompt"]["surface_question"]
     assert extension["privacy"]["store_audio"] is False
     assert extension["privacy"]["store_images"] is False
     assert extension["privacy"]["gesture_choice"]["choices"] == [2, 3, 4]
