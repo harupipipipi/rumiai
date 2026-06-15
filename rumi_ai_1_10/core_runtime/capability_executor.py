@@ -1731,11 +1731,12 @@ class CapabilityExecutor:
         try:
             from .host_intent import maybe_handle_host_intent_output
 
+            caller_pack_id, caller_function_id = self._host_intent_caller_ids(entry, request_context)
             handled = maybe_handle_host_intent_output(
                 resp.output,
                 principal_id=principal_id,
-                caller_pack_id=str(getattr(entry, "pack_id", "") or ""),
-                caller_function_id=str(getattr(entry, "function_id", "") or ""),
+                caller_pack_id=caller_pack_id,
+                caller_function_id=caller_function_id,
                 request_context=request_context,
             )
         except Exception as exc:
@@ -1754,6 +1755,37 @@ class CapabilityExecutor:
             error_type=None if handled.get("success") else str(handled.get("error_type") or "host_intent_approval_required"),
             latency_ms=(time.time() - start_time) * 1000,
         )
+
+    def _host_intent_caller_ids(self, entry, request_context: dict[str, Any] | None) -> tuple[str, str]:
+        entry_pack_id = str(getattr(entry, "pack_id", "") or "").strip()
+        entry_function_id = str(getattr(entry, "function_id", "") or "").strip()
+        if entry_function_id == "ambient_monitor_start":
+            return "rumi_ambient_trigger_pack", "ambient_monitor_start"
+        if self._is_host_capability_pack(entry_pack_id):
+            context = request_context if isinstance(request_context, dict) else {}
+            delegated_pack_id = self._first_context_string(
+                context,
+                "caller_pack_id",
+                "owner_pack",
+                "_source_pack_id",
+            )
+            delegated_function_id = self._first_context_string(
+                context,
+                "caller_function_id",
+                "function_id",
+                "_source_function_id",
+            )
+            if delegated_pack_id and delegated_function_id:
+                return delegated_pack_id, delegated_function_id
+        return entry_pack_id, entry_function_id
+
+    @staticmethod
+    def _first_context_string(context: dict[str, Any], *keys: str) -> str:
+        for key in keys:
+            value = str(context.get(key) or "").strip()
+            if value:
+                return value
+        return ""
 
     # ------------------------------------------------------------------
     # Docker / user function helpers

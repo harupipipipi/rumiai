@@ -302,8 +302,8 @@ def test_ambient_monitor_start_function_returns_host_stream_intent(monkeypatch):
     )
     validation = validate_host_intent(
         result,
-        caller_pack_id="fallback",
-        caller_function_id="fallback",
+        caller_pack_id="rumi_ambient_trigger_pack",
+        caller_function_id="ambient_monitor_start",
     )
 
     assert validation.ok is True

@@ -73,6 +73,24 @@ def test_host_intent_validator_enforces_typed_operations_and_stream_rules():
         caller_pack_id="pack.bad",
         caller_function_id="do",
     )
+    spoofed_pack = validate_host_intent(
+        {
+            "type": "host_intent",
+            "operation": "host.microphone.capture",
+            "caller": {"pack_id": "pack.attacker", "function_id": "listen"},
+        },
+        caller_pack_id="pack.voice",
+        caller_function_id="listen",
+    )
+    spoofed_function = validate_host_intent(
+        {
+            "type": "host_intent",
+            "operation": "host.microphone.capture",
+            "caller": {"pack_id": "pack.voice", "function_id": "borrowed_function"},
+        },
+        caller_pack_id="pack.voice",
+        caller_function_id="listen",
+    )
 
     assert ok.ok is True
     assert ok.intent.operation == "host.microphone.capture"
@@ -80,6 +98,10 @@ def test_host_intent_validator_enforces_typed_operations_and_stream_rules():
     assert any("does not allow streams" in error for error in rejected.errors)
     assert unknown.ok is False
     assert any("unknown host operation" in error for error in unknown.errors)
+    assert spoofed_pack.ok is False
+    assert any("caller pack id does not match" in error for error in spoofed_pack.errors)
+    assert spoofed_function.ok is False
+    assert any("caller function id does not match" in error for error in spoofed_function.errors)
 
 
 def test_default_builtin_grants_allow_host_pack_but_not_exec_guarded(tmp_path):
@@ -175,8 +197,8 @@ def test_host_mediator_function_returns_valid_host_intent(monkeypatch):
     )
     validation = validate_host_intent(
         result,
-        caller_pack_id="fallback_pack",
-        caller_function_id="fallback_function",
+        caller_pack_id="rumi_ambient_trigger_pack",
+        caller_function_id="ambient_monitor_start",
     )
 
     assert result["type"] == "host_stream_intent"
@@ -187,6 +209,37 @@ def test_host_mediator_function_returns_valid_host_intent(monkeypatch):
     assert result["conversation_id"] == "conversation-1"
     assert "approval_token" not in result["args"]
     assert validation.ok is True
+
+
+def test_capability_executor_uses_trusted_host_intent_caller_context():
+    from core_runtime.capability_executor import CapabilityExecutor
+
+    executor = CapabilityExecutor()
+    ambient_entry = SimpleNamespace(
+        pack_id="defaultspack",
+        function_id="ambient_monitor_start",
+    )
+    host_facade_entry = SimpleNamespace(
+        pack_id="rumi_host_capabilities_pack",
+        function_id="host_microphone_capture",
+    )
+    ordinary_entry = SimpleNamespace(
+        pack_id="ordinary_pack",
+        function_id="ordinary_function",
+    )
+
+    assert executor._host_intent_caller_ids(ambient_entry, None) == (
+        "rumi_ambient_trigger_pack",
+        "ambient_monitor_start",
+    )
+    assert executor._host_intent_caller_ids(
+        host_facade_entry,
+        {"owner_pack": "rumi_ambient_trigger_pack", "function_id": "ambient_monitor_start"},
+    ) == ("rumi_ambient_trigger_pack", "ambient_monitor_start")
+    assert executor._host_intent_caller_ids(ordinary_entry, {"owner_pack": "spoofed"}) == (
+        "ordinary_pack",
+        "ordinary_function",
+    )
 
 
 def test_host_intent_executor_dispatches_approved_stream_to_viewer_broker(monkeypatch):
