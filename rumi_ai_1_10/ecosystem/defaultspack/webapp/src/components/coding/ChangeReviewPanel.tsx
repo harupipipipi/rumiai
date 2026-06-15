@@ -3,22 +3,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { CodingDiffResponse, CodingGitStatus } from "../../lib/api";
 import type { ChangeRequestRecord } from "../../lib/changeRequests";
-import { createChangeRequest, listChangeRequests, refreshChangeRequest } from "../../lib/changeRequests";
+import { createChangeRequest, getChangeRequest, listChangeRequests, refreshChangeRequest } from "../../lib/changeRequests";
 import { codingResources } from "../../features/coding/resources/codingResources";
 import { FilesChangedPane, filesFromStatusAndDiff } from "./FilesChangedPane";
 
 type DetailTab = "summary" | "files" | "checks" | "review" | "seal";
 type ReviewFilter = "open" | "closed";
-
-function statusSignature(status: CodingGitStatus | null): string {
-  if (!status) return "";
-  return JSON.stringify({
-    staged: [...(status.staged ?? [])].sort(),
-    modified: [...(status.modified ?? [])].sort(),
-    untracked: [...(status.untracked ?? [])].sort(),
-    porcelain: status.porcelain ?? "",
-  });
-}
 
 function checkLabel(review: ChangeRequestRecord): string {
   const checks = review.check_summary;
@@ -75,6 +65,13 @@ function Placeholder({ title, text }: { title: string; text: string }) {
   );
 }
 
+function reviewIsStale(review: ChangeRequestRecord | null): boolean {
+  if (!review) return false;
+  if (review.is_stale !== undefined) return review.is_stale === true;
+  const drift = review.drift;
+  return Boolean(drift?.stale ?? drift?.has_drift ?? drift?.mismatched ?? drift?.changed);
+}
+
 export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null }) {
   const [status, setStatus] = useState<CodingGitStatus | null>(null);
   const [diff, setDiff] = useState<CodingDiffResponse | null>(null);
@@ -87,14 +84,13 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
   const [error, setError] = useState<string | null>(null);
 
   const changedFiles = useMemo(() => filesFromStatusAndDiff(status, diff), [status, diff]);
-  const workingTreeSignature = useMemo(() => statusSignature(status), [status]);
   const selectedReview = reviews.find((review) => review.id === selectedReviewId) ?? null;
   const displayFiles = selectedReview?.files?.length ? selectedReview.files : changedFiles;
   const displayDiff = selectedReview?.snapshot?.diff ?? diff?.diff ?? "";
   const dirty = !status?.clean && changedFiles.length > 0;
   const untrackedCount = changedFiles.filter((file) => file.untracked).length;
   const highRiskCount = changedFiles.filter((file) => file.highRisk).length;
-  const stale = Boolean(selectedReview?.snapshot?.signature && workingTreeSignature && selectedReview.snapshot.signature !== workingTreeSignature);
+  const stale = reviewIsStale(selectedReview);
   const visibleReviews = reviews.filter((review) => {
     const closed = String(review.status).toLowerCase().includes("closed");
     return filter === "closed" ? closed : !closed;
@@ -119,6 +115,22 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
       setBusy(false);
     }
   }, [workspaceId]);
+
+  const handleSelectReview = useCallback(async (nextReview: ChangeRequestRecord) => {
+    setSelectedReviewId(nextReview.id);
+    setDetailTab("summary");
+    setError(null);
+    try {
+      const hydrated = await getChangeRequest(nextReview.id);
+      if (hydrated) {
+        setReviews((items) => items.map((item) => item.id === hydrated.id ? hydrated : item));
+      } else {
+        setApiAvailable(false);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
 
   useEffect(() => {
     void load();
@@ -250,10 +262,7 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
                 key={review.id}
                 review={review}
                 selected={selectedReviewId === review.id}
-                onSelect={(nextReview) => {
-                  setSelectedReviewId(nextReview.id);
-                  setDetailTab("summary");
-                }}
+                onSelect={(nextReview) => void handleSelectReview(nextReview)}
               />
             ))}
             {visibleReviews.length === 0 && <p className="rounded-md border border-zinc-800 bg-black/20 px-2 py-4 text-center text-[11px] text-zinc-600">No {filter} reviews</p>}

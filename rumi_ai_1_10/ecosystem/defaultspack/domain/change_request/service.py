@@ -29,7 +29,16 @@ class ChangeRequestService:
 
     def get(self, change_request_id: str) -> dict[str, Any] | None:
         record = self.store.get(change_request_id)
-        return public_record(record) if record else None
+        if not record:
+            return None
+        public = public_record(record)
+        drift = drift_status(record)
+        if drift is not None:
+            public["drift"] = drift
+            public["is_stale"] = bool(drift.get("changed"))
+            public["current_working_tree_hash"] = drift.get("current_working_tree_hash")
+            public["snapshot_working_tree_hash"] = drift.get("previous_working_tree_hash")
+        return public
 
     def create(
         self,
@@ -130,6 +139,7 @@ class ChangeRequestService:
             "totals": latest.get("totals") or {"files": 0, "additions": 0, "deletions": 0},
             "riskTags": latest.get("riskTags") or [],
             "file_stats": latest.get("file_stats") or [],
+            "latest_snapshot": public_snapshot(latest, record) if latest else {},
         }
 
 
@@ -190,6 +200,18 @@ def public_record(record: dict[str, Any]) -> dict[str, Any]:
         public["latest_snapshot"] = public_snapshot(public["latest_snapshot"], record)
     public["metadata"] = safe_metadata(public.get("metadata"))
     return public
+
+
+def drift_status(record: dict[str, Any]) -> dict[str, Any] | None:
+    previous = record.get("latest_snapshot") if isinstance(record.get("latest_snapshot"), dict) else {}
+    workspace_root = record.get("workspace_root")
+    if not previous or not workspace_root:
+        return None
+    try:
+        current = ChangeRequestSnapshotter(str(workspace_root)).snapshot()
+    except Exception:
+        return None
+    return compare_snapshots(previous, current)
 
 
 def compare_snapshots(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:

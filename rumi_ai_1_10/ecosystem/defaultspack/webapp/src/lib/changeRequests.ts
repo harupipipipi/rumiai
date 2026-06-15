@@ -34,6 +34,20 @@ export type ChangeRequestSnapshot = {
   files?: ChangeRequestFile[];
 };
 
+export type ChangeRequestDrift = {
+  changed?: boolean;
+  stale?: boolean;
+  has_drift?: boolean;
+  mismatched?: boolean;
+  base_changed?: boolean;
+  previous_working_tree_hash?: string;
+  current_working_tree_hash?: string;
+  snapshot_working_tree_hash?: string;
+  added_paths?: string[];
+  removed_paths?: string[];
+  changed_paths?: string[];
+};
+
 export type ChangeRequestRecord = {
   id: string;
   status: ChangeRequestStatus;
@@ -44,6 +58,10 @@ export type ChangeRequestRecord = {
   workspace_id?: string | null;
   check_summary?: ChangeRequestCheckSummary;
   snapshot?: ChangeRequestSnapshot;
+  drift?: ChangeRequestDrift;
+  is_stale?: boolean;
+  current_working_tree_hash?: string;
+  snapshot_working_tree_hash?: string;
   files?: ChangeRequestFile[];
 };
 
@@ -79,6 +97,14 @@ function readNumber(record: Record<string, unknown>, keys: string[]): number | u
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function readBoolean(record: Record<string, unknown>, keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "boolean") return value;
   }
   return undefined;
 }
@@ -125,17 +151,55 @@ function normalizeFiles(value: unknown): ChangeRequestFile[] {
   return Array.isArray(value) ? value.map(normalizeFile).filter((file): file is ChangeRequestFile => file !== null) : [];
 }
 
+function mergeFiles(...groups: Array<ChangeRequestFile[] | undefined>): ChangeRequestFile[] {
+  const byPath = new Map<string, ChangeRequestFile>();
+  for (const group of groups) {
+    for (const file of group ?? []) {
+      byPath.set(file.path, { ...byPath.get(file.path), ...file });
+    }
+  }
+  return [...byPath.values()];
+}
+
+function normalizeStringList(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : undefined;
+}
+
 function normalizeSnapshot(value: unknown): ChangeRequestSnapshot | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
+  const signature = readString(record, ["signature", "tree_signature", "working_tree_signature", "working_tree_hash"]);
+  const diff = readString(record, ["diff", "patch", "normalized_patch"]);
+  const stat = readString(record, ["stat", "diff_stat"]);
+  const files = normalizeFiles(record.files ?? record.file_stats);
+  if (!signature && !diff && !stat && files.length === 0) return undefined;
   return {
     id: readString(record, ["id", "snapshot_id"]),
     created_at: readString(record, ["created_at", "createdAt"]),
-    signature: readString(record, ["signature", "tree_signature", "working_tree_signature", "working_tree_hash"]),
-    diff: readString(record, ["diff", "patch", "normalized_patch"]),
-    stat: readString(record, ["stat", "diff_stat"]),
-    files: normalizeFiles(record.files ?? record.file_stats),
+    signature,
+    diff,
+    stat,
+    files,
   };
+}
+
+function normalizeDrift(value: unknown): ChangeRequestDrift | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const drift: ChangeRequestDrift = {
+    changed: readBoolean(record, ["changed"]),
+    stale: readBoolean(record, ["stale"]),
+    has_drift: readBoolean(record, ["has_drift"]),
+    mismatched: readBoolean(record, ["mismatched"]),
+    base_changed: readBoolean(record, ["base_changed"]),
+    previous_working_tree_hash: readString(record, ["previous_working_tree_hash", "previous_worktree_hash"]),
+    current_working_tree_hash: readString(record, ["current_working_tree_hash", "current_worktree_hash"]),
+    snapshot_working_tree_hash: readString(record, ["snapshot_working_tree_hash", "snapshot_worktree_hash"]),
+    added_paths: normalizeStringList(record.added_paths),
+    removed_paths: normalizeStringList(record.removed_paths),
+    changed_paths: normalizeStringList(record.changed_paths ?? record.mismatch_paths),
+  };
+  return Object.values(drift).some((item) => item !== undefined) ? drift : undefined;
 }
 
 function normalizeReview(value: unknown): ChangeRequestRecord | null {
@@ -144,7 +208,9 @@ function normalizeReview(value: unknown): ChangeRequestRecord | null {
   const id = readString(record, ["id", "change_request_id", "cr_id", "review_id"]);
   if (!id) return null;
   const status = readString(record, ["status", "state"]) ?? "open";
-  const snapshot = normalizeSnapshot(record.snapshot ?? record.latest_snapshot ?? record.base_snapshot);
+  const snapshot = normalizeSnapshot(record.snapshot ?? record.latest_snapshot ?? record.base_snapshot ?? record);
+  const topLevelFiles = normalizeFiles(record.files ?? record.file_stats);
+  const drift = normalizeDrift(record.drift ?? record.last_drift);
   return {
     id,
     status,
@@ -155,7 +221,11 @@ function normalizeReview(value: unknown): ChangeRequestRecord | null {
     workspace_id: readString(record, ["workspace_id"]) ?? null,
     check_summary: normalizeCheckSummary(record.check_summary ?? record.checks),
     snapshot,
-    files: normalizeFiles(record.files).concat(snapshot?.files ?? []),
+    drift,
+    is_stale: readBoolean(record, ["is_stale", "stale"]),
+    current_working_tree_hash: readString(record, ["current_working_tree_hash", "current_worktree_hash"]),
+    snapshot_working_tree_hash: readString(record, ["snapshot_working_tree_hash", "snapshot_worktree_hash"]),
+    files: mergeFiles(topLevelFiles, snapshot?.files),
   };
 }
 
@@ -218,11 +288,23 @@ export async function createChangeRequest(payload: { workspace_id?: string | nul
   return normalizeReview(record?.review ?? record?.change_request ?? result);
 }
 
+export async function getChangeRequest(reviewId: string): Promise<ChangeRequestRecord | null> {
+  const result = await requestChangeRequest<unknown>(`/api/change-requests/${encodeURIComponent(reviewId)}`);
+  const record = asRecord(result);
+  return normalizeReview(record?.review ?? record?.change_request ?? result);
+}
+
 export async function refreshChangeRequest(reviewId: string, payload: { workspace_id?: string | null }): Promise<ChangeRequestRecord | null> {
   const result = await requestChangeRequest<unknown>(`/api/change-requests/${encodeURIComponent(reviewId)}/refresh`, {
     method: "POST",
     body: JSON.stringify({ workspace_id: payload.workspace_id }),
   });
   const record = asRecord(result);
-  return normalizeReview(record?.review ?? record?.change_request ?? result);
+  const review = normalizeReview(record?.review ?? record?.change_request ?? result);
+  if (!review) return null;
+  return {
+    ...review,
+    drift: normalizeDrift(record?.drift) ?? review.drift,
+    is_stale: false,
+  };
 }

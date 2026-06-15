@@ -334,5 +334,9 @@ def test_service_payloads_hide_absolute_roots_and_drop_patch_metadata(tmp_path, 
     assert created["latest_snapshot"]["workspace_root"] == "."
     assert created["latest_snapshot"]["git_root"] == "."
     assert listed[0]["workspace_id"] == created["workspace_id"]
+    assert listed[0]["latest_snapshot"]["workspace_root"] == "."
+    assert listed[0]["latest_snapshot"]["git_root"] == "."
+    assert listed[0]["latest_snapshot"]["file_stats"]
+    assert "normalized_patch" in listed[0]["latest_snapshot"]
     assert "leaked_path" not in (patched.get("metadata") or {})
     assert "arbitrary" not in (patched.get("metadata") or {})
