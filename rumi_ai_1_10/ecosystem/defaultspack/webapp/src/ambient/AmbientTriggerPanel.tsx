@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, Mic, Play, Radio, RefreshCcw, Settings, Shield, Square, Video, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, MessageSquare, Mic, Play, Radio, RefreshCcw, Search, Settings, Shield, Square, Video, X } from "lucide-react";
 
+import { HistoryBoard, type ChatItem } from "../components/HistoryBoard";
+import { api, type Conversation, type ModelSearchItem } from "../lib/api";
+import { formatRelativeTime } from "../lib/chat";
 import { cn } from "../lib/cn";
 import { subscribeAuthorityApprovalSettlements } from "../lib/authorityApprovalEvents";
 import { openAmbientTriggerWindow, openAuthorityApprovalWindow, openHostPermissionsPageWindow } from "../lib/desktopApproval";
 import { LayerPortal } from "../ui/layers/LayerPortal";
-import { ambientTriggerClient, type AmbientPermissionId, type AmbientStatus } from "./ambientTriggerClient";
+import { ambientTriggerClient, type AmbientPermissionId, type AmbientRoutingConfig, type AmbientRoutingMode, type AmbientStatus } from "./ambientTriggerClient";
 import {
   AMBIENT_AUTHORITY_REQUEST_ID,
   AMBIENT_CAMERA_PERMISSION,
@@ -45,6 +48,15 @@ type Props = {
   variant?: "floating" | "window";
 };
 
+type NormalizedAmbientRouting = {
+  mode: AmbientRoutingMode;
+  conversation_id: string | null;
+  group_enabled: boolean;
+  group_id: string;
+  group_title: string;
+  model: string;
+};
+
 const MIC_DEVICE_STORAGE_KEY = "rumi.ambient.selectedMicId";
 const CAMERA_DEVICE_STORAGE_KEY = "rumi.ambient.selectedCameraId";
 const FRONT_ON_FINAL_STORAGE_KEY = "rumi.ambient.frontOnFinal";
@@ -81,6 +93,19 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const [frontOnFinal, setFrontOnFinal] = useState(() => safeLocalStorageGet(FRONT_ON_FINAL_STORAGE_KEY) !== "false");
   const [frontFlash, setFrontFlash] = useState(false);
   const [lastFinalAnswer, setLastFinalAnswer] = useState("");
+  const [chatPickerOpen, setChatPickerOpen] = useState(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationsLoading, setConversationsLoading] = useState(false);
+  const [routingMode, setRoutingMode] = useState<AmbientRoutingMode>("selected_chat");
+  const [routingConversationId, setRoutingConversationId] = useState<string | null>(conversationId || null);
+  const [routingGroupEnabled, setRoutingGroupEnabled] = useState(true);
+  const [routingGroupId, setRoutingGroupId] = useState("gesture");
+  const [routingGroupTitle, setRoutingGroupTitle] = useState("Gesture");
+  const [routingModel, setRoutingModel] = useState("");
+  const [modelQuery, setModelQuery] = useState("");
+  const [modelResults, setModelResults] = useState<ModelSearchItem[]>([]);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioStopRef = useRef<(() => void) | null>(null);
   const gestureStopRef = useRef<(() => void) | null>(null);
@@ -94,9 +119,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const onApprovalGestureRef = useRef<Props["onApprovalGesture"]>(onApprovalGesture);
 
   const monitorEnabled = Boolean(status?.ambient_monitor.enabled);
-  const dispatchGranted = Boolean(status?.permissions.rumi["ambient.trigger.dispatch"]?.granted);
-  const voice = status?.services.voice_wake_monitor;
-  const lastTrigger = status?.last_trigger;
   const runtimeStatus = useMemo<AmbientRuntimeStatus>(() => {
     if (pinchDetectorStatus === "unavailable") return "blocked";
     if (pinchDetectorStatus === "sending") return "sending";
@@ -117,6 +139,16 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   );
   const allRumiPermissionsGranted = useMemo(() => hasAllRumiPermissions(status), [status]);
   const allOsPermissionsGranted = useMemo(() => hasAllOsPermissions(status), [status]);
+  const routingNeedsNewChatSettings = routingMode === "startup_new_chat" || routingMode === "always_new_chat";
+  const routingSelectedConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === routingConversationId) ?? null,
+    [conversations, routingConversationId],
+  );
+  const routingChatItems = useMemo(() => conversationsToChatItems(conversations), [conversations]);
+  const routingSummary = useMemo(
+    () => routingLabel(routingMode, routingSelectedConversation, routingConversationId, status?.routing?.session_conversation_id),
+    [routingConversationId, routingMode, routingSelectedConversation, status?.routing?.session_conversation_id],
+  );
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -124,6 +156,24 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     approvalTargetRef.current = approvalTarget;
     onApprovalGestureRef.current = onApprovalGesture;
   }, [approvalTarget, conversationId, onApprovalGesture, onOpenInput]);
+
+  useEffect(() => {
+    const routing = normalizeRouting(status?.routing, conversationId || null);
+    setRoutingMode(routing.mode);
+    setRoutingConversationId(routing.conversation_id ?? null);
+    setRoutingGroupEnabled(routing.group_enabled);
+    setRoutingGroupId(routing.group_id || "gesture");
+    setRoutingGroupTitle(routing.group_title || "Gesture");
+    setRoutingModel(routing.model || "");
+  }, [
+    conversationId,
+    status?.routing?.conversation_id,
+    status?.routing?.group_enabled,
+    status?.routing?.group_id,
+    status?.routing?.group_title,
+    status?.routing?.mode,
+    status?.routing?.model,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,7 +191,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
 
   useEffect(() => {
     safeLocalStorageSet(MIC_DEVICE_STORAGE_KEY, selectedMicId);
-  }, []);
+  }, [selectedMicId]);
 
   useEffect(() => {
     safeLocalStorageSet(CAMERA_DEVICE_STORAGE_KEY, selectedCameraId);
@@ -366,7 +416,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       return;
     }
     if (state.choiceCommitted) {
-      void submitFingerChoice(state);
+      if (approvalTargetRef.current) {
+        void submitFingerChoice(state);
+      }
       return;
     }
     if (state.triggered) {
@@ -432,6 +484,70 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       setDevices(nextDevices.filter((device) => device.kind === "audioinput" || device.kind === "videoinput"));
     } catch (error) {
       console.info("[ambient] media device listing unavailable", error);
+    }
+  }
+
+  async function loadConversations() {
+    setConversationsLoading(true);
+    try {
+      const result = await api.listConversations({ limit: 80 });
+      setConversations(result.conversations);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "チャット一覧を読み込めませんでした。");
+    } finally {
+      setConversationsLoading(false);
+    }
+  }
+
+  async function openChatPicker() {
+    setChatPickerOpen(true);
+    await loadConversations();
+  }
+
+  async function saveRouting(patch: Partial<AmbientRoutingConfig>, success?: string) {
+    const next = normalizeRouting({
+      mode: routingMode,
+      conversation_id: routingConversationId,
+      group_enabled: routingGroupEnabled,
+      group_id: routingGroupId,
+      group_title: routingGroupTitle,
+      model: routingModel,
+      ...patch,
+    }, conversationId || null);
+    setRoutingMode(next.mode);
+    setRoutingConversationId(next.conversation_id ?? null);
+    setRoutingGroupEnabled(next.group_enabled);
+    setRoutingGroupId(next.group_id || "gesture");
+    setRoutingGroupTitle(next.group_title || "Gesture");
+    setRoutingModel(next.model || "");
+    setBusy(true);
+    try {
+      const configured = await ambientTriggerClient.configure(next);
+      setStatus(configured);
+      if (success) setMessage(success);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "送信先を保存できませんでした。");
+      await refresh().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function selectConversationForRouting(chatId: string) {
+    setChatPickerOpen(false);
+    await saveRouting({ mode: "selected_chat", conversation_id: chatId }, "このチャットに送ります。");
+  }
+
+  async function searchRoutingModels(query = modelQuery) {
+    const trimmed = query.trim();
+    setModelLoading(true);
+    try {
+      const result = await api.searchModels({ query: trimmed, max_results: 12 });
+      setModelResults(result.models ?? []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "モデルを検索できませんでした。");
+    } finally {
+      setModelLoading(false);
     }
   }
 
@@ -711,7 +827,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             : "fixed bottom-4 right-4 flex max-h-[calc(100vh-2rem)] w-[min(400px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-950/96 text-zinc-200 shadow-2xl shadow-black/40 backdrop-blur",
           frontFlash && "border-emerald-300/60 shadow-emerald-500/20",
           stateCopy.tone === "red" && "border-red-400/35",
-          stateCopy.tone === "amber" && "border-amber-400/30",
+          stateCopy.tone === "blue" && "border-sky-400/30",
           uiState === "recording" && "shadow-red-500/20",
         )}
         aria-label="指で録音"
@@ -760,8 +876,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         )}
 
         <div className="min-h-0 overflow-y-auto overscroll-contain">
-        <div className="space-y-2.5 px-3.5 py-3">
-          <p className="text-[12px] leading-5 text-zinc-400">{stateCopy.body}</p>
+        <div className="space-y-2 px-3 py-2.5">
           <button
             type="button"
             onClick={() => void handlePrimaryAction()}
@@ -774,48 +889,67 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             {busy ? <Loader2 size={15} className="animate-spin" /> : <PrimaryActionIcon uiState={uiState} />}
             {uiState === "recording" && recordingSeconds > 0 ? `${stateCopy.primary} ${formatRecordingTime(recordingSeconds)}` : stateCopy.primary}
           </button>
-          <div className="flex items-center gap-2 text-[11px] leading-4 text-zinc-500">
-            <Shield size={12} className="shrink-0 text-emerald-300" />
-            <span>{ambientCopyJa.gestureShort}</span>
+          <div className="flex items-center justify-between gap-2 text-[11px] leading-4 text-zinc-500">
+            <span className="min-w-0 truncate">{stateCopy.body}</span>
+            <button
+              type="button"
+              onClick={() => setPrivacyOpen((value) => !value)}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-zinc-800 text-[11px] font-semibold text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
+              aria-label="プライバシー"
+              title="プライバシー"
+            >
+              プ
+            </button>
           </div>
-          <div className="flex items-center gap-2 text-[11px] leading-4 text-zinc-500">
-            <Shield size={12} className="shrink-0 text-zinc-400" />
-            <span>{ambientCopyJa.privacyShort}</span>
-          </div>
+          {privacyOpen && (
+            <div className="border-l border-emerald-400/35 pl-2 text-[11px] leading-5 text-zinc-400">
+              音声と映像は保存しません。残るのは、使われた時刻と結果だけです。
+            </div>
+          )}
+          {allRumiPermissionsGranted && (
+            <RoutingSettings
+              busy={busy}
+              mode={routingMode}
+              summary={routingSummary}
+              selectedConversationId={routingConversationId}
+              groupEnabled={routingGroupEnabled}
+              groupId={routingGroupId}
+              groupTitle={routingGroupTitle}
+              model={routingModel}
+              modelQuery={modelQuery}
+              modelResults={modelResults}
+              modelLoading={modelLoading}
+              needsNewChatSettings={routingNeedsNewChatSettings}
+              onModeChange={(mode) => void saveRouting({ mode })}
+              onPickChat={() => void openChatPicker()}
+              onGroupEnabledChange={(enabled) => void saveRouting({ group_enabled: enabled }, enabled ? "新しいチャットをグループ内に作ります。" : "新しいチャットを通常の履歴に作ります。")}
+              onGroupIdChange={setRoutingGroupId}
+              onGroupTitleChange={setRoutingGroupTitle}
+              onGroupCommit={() => void saveRouting({ group_id: routingGroupId, group_title: routingGroupTitle }, "新しいチャットのグループを保存しました。")}
+              onModelChange={setRoutingModel}
+              onModelCommit={(model) => void saveRouting({ model }, model ? "新しいチャットのモデルを保存しました。" : "モデル指定を外しました。")}
+              onModelQueryChange={setModelQuery}
+              onModelSearch={() => void searchRoutingModels()}
+            />
+          )}
         </div>
 
         {expanded && (
-          <div className="space-y-3 border-t border-zinc-800/80 px-3.5 py-3">
-            <section className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase text-zinc-500">次にやること</p>
-              <p className="text-[13px] leading-5 text-zinc-200">{nextActionText(uiState, allRumiPermissionsGranted, allOsPermissionsGranted)}</p>
-            </section>
-
-            <section className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase text-zinc-500">使い方</p>
-              <div className="grid gap-1.5 text-[12px] leading-5 text-zinc-300">
-                <InstructionStep index={1} text="親指と人差し指をくっつける" />
-                <InstructionStep index={2} text="そのまま話す" />
-                <InstructionStep index={3} text="指を離すとAIに送信" />
-              </div>
-            </section>
-
+          <div className="space-y-2.5 border-t border-zinc-800/80 px-3 py-2.5">
             <section className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-[11px] font-semibold uppercase text-zinc-500">セットアップ</p>
+                <p className="text-[11px] font-semibold uppercase text-zinc-500">現在</p>
                 <button type="button" onClick={() => void refresh({ probeOs: true })} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100">
                   <RefreshCcw size={12} />
                   再確認
                 </button>
               </div>
-              <SetupStep
-                index={1}
-                title="Rumiで許可"
-                statusText={`${rumiPermissionCount}/${AMBIENT_REQUIRED_PERMISSIONS.length} 許可済み`}
-                complete={allRumiPermissionsGranted}
-                active={!allRumiPermissionsGranted}
-              >
-                <p className="text-[12px] leading-5 text-zinc-400">この機能に必要な操作をRumi内で許可します。</p>
+              {!allRumiPermissionsGranted && (
+                <div className="border-l border-sky-400/40 pl-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[12px] font-semibold text-zinc-100">Rumiで許可</p>
+                    <span className="text-[11px] text-sky-200">{rumiPermissionCount}/{AMBIENT_REQUIRED_PERMISSIONS.length}</span>
+                  </div>
                 <div className="mt-2 space-y-1.5">
                   {AMBIENT_REQUIRED_PERMISSIONS.map((permissionId) => (
                     <PermissionRow
@@ -825,22 +959,19 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                     />
                   ))}
                 </div>
-                {!allRumiPermissionsGranted && (
-                  <button type="button" onClick={() => void openRumiPermissionApproval()} disabled={busy} className="ambient-mini-button mt-2 w-full">
-                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Shield size={14} />}
-                    承認画面で許可する
-                  </button>
-                )}
-              </SetupStep>
+                <button type="button" onClick={() => void openRumiPermissionApproval()} disabled={busy} className="ambient-mini-button mt-2 w-full">
+                  {busy ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />}
+                  Rumiで許可
+                </button>
+                </div>
+              )}
 
-              <SetupStep
-                index={2}
-                title="端末のマイク・カメラを許可"
-                statusText={`${osPermissionCount}/${AMBIENT_OS_PERMISSIONS.length} 許可済み`}
-                complete={allOsPermissionsGranted}
-                active={allRumiPermissionsGranted && !allOsPermissionsGranted}
-              >
-                <p className="text-[12px] leading-5 text-zinc-400">ブラウザまたはOSの確認画面で、マイクとカメラを許可してください。</p>
+              {allRumiPermissionsGranted && !allOsPermissionsGranted && (
+                <div className="border-l border-sky-400/40 pl-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[12px] font-semibold text-zinc-100">端末のマイク・カメラ</p>
+                    <span className="text-[11px] text-sky-200">{osPermissionCount}/{AMBIENT_OS_PERMISSIONS.length}</span>
+                  </div>
                 <div className="mt-2 space-y-1.5">
                   {AMBIENT_OS_PERMISSIONS.map((permissionId) => (
                     <PermissionRow
@@ -850,35 +981,30 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                     />
                   ))}
                 </div>
-                {!allOsPermissionsGranted && (
-                  <button type="button" onClick={() => void requestMediaPermissions()} disabled={busy || !allRumiPermissionsGranted} className="ambient-mini-button mt-2 w-full">
-                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Video size={14} />}
-                    マイク・カメラを許可
-                  </button>
-                )}
-                {!allOsPermissionsGranted && (
-                  <p className="mt-1 text-[11px] leading-4 text-zinc-500">確認画面が出ない場合は、アドレスバーまたはOS設定から許可してください。</p>
-                )}
-              </SetupStep>
+                <button type="button" onClick={() => void requestMediaPermissions()} disabled={busy} className="ambient-mini-button mt-2 w-full">
+                  {busy ? <Loader2 size={14} className="animate-spin" /> : <Video size={14} />}
+                  マイク・カメラを許可
+                </button>
+                </div>
+              )}
 
-              <SetupStep
-                index={3}
-                title="手を映して録音"
-                statusText={gestureStatusLabel(pinchDetectorStatus, monitorEnabled)}
-                complete={monitorEnabled && pinchDetectorStatus === "tracking"}
-                active={allRumiPermissionsGranted && allOsPermissionsGranted}
-              >
-                <p className="text-[12px] leading-5 text-zinc-400">カメラの前で、親指と人差し指をくっつけてください。くっついている間だけ録音します。</p>
+              {allRumiPermissionsGranted && allOsPermissionsGranted && (
+                <div className="border-l border-emerald-400/40 pl-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[12px] font-semibold text-zinc-100">手の認識</p>
+                    <span className="text-[11px] text-emerald-200">{gestureStatusLabel(pinchDetectorStatus, monitorEnabled)}</span>
+                  </div>
                 <button
                   type="button"
                   onClick={() => void (monitorEnabled ? stopMonitoring() : startMonitoring())}
-                  disabled={busy || !allRumiPermissionsGranted || !allOsPermissionsGranted}
+                  disabled={busy}
                   className="ambient-mini-button mt-2 w-full"
                 >
                   {monitorEnabled ? <Square size={14} /> : <Play size={14} />}
                   {monitorEnabled ? "手の認識を停止" : "手の認識を開始"}
                 </button>
-              </SetupStep>
+                </div>
+              )}
             </section>
 
             {settingsOpen && (
@@ -945,27 +1071,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
               </section>
             )}
 
-            <section className="space-y-2 border-t border-zinc-800/80 pt-3">
-              <p className="text-[11px] font-semibold uppercase text-zinc-500">状態</p>
-              <div className="grid grid-cols-3 gap-2 text-[11px] text-zinc-500">
-                <StatusPill label="マイク" value={pinchRecording ? "録音中" : voice?.status === "listening" ? "音声待機中" : "停止"} active={pinchRecording || voice?.status === "listening"} />
-                <StatusPill label="カメラ" value={gestureStatusLabel(pinchDetectorStatus, monitorEnabled)} active={pinchDetectorStatus === "tracking"} />
-                <StatusPill label="送信" value={dispatchGranted ? "許可済み" : "未許可"} active={dispatchGranted} />
-              </div>
-            </section>
-
             {approvalTarget && monitorEnabled && (
-              <div className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-2 py-1.5 text-[11px] text-amber-100">
+              <div className="border-l border-sky-400/35 pl-2 text-[11px] text-sky-100">
                 {approvalTarget.canReject !== false && <span className="mr-2"><X size={11} className="mr-1 inline" />{approvalTarget.rejectLabel ?? "拒否"} (2)</span>}
                 {approvalTarget.canApprove !== false && <span><Check size={11} className="mr-1 inline" />{approvalTarget.approveLabel ?? "許可"} ({approvalTarget.canReject === false ? "2" : "3"})</span>}
               </div>
             )}
-
-            <section className="space-y-1 border-t border-zinc-800/80 pt-3 text-[12px] leading-5 text-zinc-400">
-              <p className="font-medium text-zinc-300">プライバシー</p>
-              <p>音声・画像・カメラ映像は保存しません。</p>
-              <p>あとから安全確認できるよう、使った時刻と結果だけを履歴に残します。</p>
-            </section>
 
             {manualRumiFallbackOpen && (
               <section className="space-y-2 border-t border-red-400/25 pt-3 text-[12px] leading-5">
@@ -1030,6 +1141,17 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           onCancel={() => setRumiApprovalOpen(false)}
         />
       )}
+      {chatPickerOpen && (
+        <ChatPickerDialog
+          activeChatId={conversationId ?? null}
+          selectedChatId={routingConversationId}
+          chatItems={routingChatItems}
+          loading={conversationsLoading}
+          onRefresh={() => void loadConversations()}
+          onSelect={(chatId) => void selectConversationForRouting(chatId)}
+          onClose={() => setChatPickerOpen(false)}
+        />
+      )}
       </>
   );
   if (standalone) return content;
@@ -1045,64 +1167,72 @@ function RumiPermissionApprovalDialog({
   onApprove: () => void;
   onCancel: () => void;
 }) {
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   return (
     <div className="fixed inset-0 rumi-layer-modal flex items-end justify-center bg-black/55 px-3 py-4 backdrop-blur-sm sm:items-center">
       <section
-        className="flex max-h-[calc(100vh-2rem)] w-[min(460px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border border-amber-300/25 bg-zinc-950 text-zinc-100 shadow-2xl shadow-black/50"
+        className="flex max-h-[calc(100vh-2rem)] w-[min(380px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border border-sky-300/30 bg-zinc-950 text-zinc-100 shadow-2xl shadow-black/50"
         aria-label="Rumi ambient permission approval"
       >
-        <header className="flex items-start gap-3 border-b border-zinc-800 px-4 py-3">
-          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-300/35 bg-amber-300/10 text-amber-100">
-            <Shield size={20} />
+        <header className="flex items-start gap-3 border-b border-zinc-800 px-3 py-2.5">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-sky-300/35 bg-sky-400/10 text-sky-100">
+            <Hand size={18} />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-zinc-50">指で録音をRumiで許可</p>
-            <p className="mt-1 text-xs leading-5 text-zinc-400">このpackは、録音・指の検出・AI送信のためにRumi側の許可を要求しています。</p>
+            <p className="text-sm font-semibold text-zinc-50">指録音をRumiで許可</p>
+            <p className="mt-0.5 text-xs leading-5 text-zinc-400">Rumi内の入口を許可します。端末のマイク・カメラ許可は次に確認します。</p>
           </div>
           <button
             type="button"
             onClick={onCancel}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
             aria-label="閉じる"
           >
-            <X size={15} />
+            <X size={14} />
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3 text-xs leading-5">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2.5 text-xs leading-5">
           <section className="space-y-2">
-            <p className="text-[11px] font-semibold uppercase text-zinc-500">Rumiで許可すること</p>
+            <p className="text-[11px] font-semibold text-sky-200">Rumiが受け取る入口</p>
             <div className="space-y-1.5">
               {AMBIENT_REQUIRED_PERMISSIONS.map((permissionId) => (
-                <div key={permissionId} className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/45 px-2.5 py-2">
+                <div key={permissionId} className="flex items-center gap-2 border-l border-sky-400/35 pl-2">
                   <Check size={13} className="shrink-0 text-emerald-200" />
-                  <span className="text-zinc-200">{ambientPermissionLabels[permissionId] ?? permissionId}</span>
+                  <span className={cn(
+                    "text-zinc-200",
+                    permissionId === "ambient.trigger.dispatch" && "text-sky-200",
+                  )}>
+                    {ambientPermissionLabels[permissionId] ?? permissionId}
+                  </span>
                 </div>
               ))}
             </div>
           </section>
 
           <section className="space-y-2">
-            <p className="text-[11px] font-semibold uppercase text-zinc-500">追加される入口</p>
-            <div className="grid gap-1.5 text-zinc-300">
-              <InstructionStep index={1} text="別ウィンドウで指録音を開く" />
-              <InstructionStep index={2} text="defaultspack inputへ音声入力を投入" />
-              <InstructionStep index={3} text="LINE / Discord / Web hookの外部入力profileへ接続" />
+            <div className="border-l border-zinc-700 pl-2 text-zinc-400">
+              <span className="text-zinc-200">OS許可とは別。</span>
+              この許可だけでは、まだマイク・カメラは動きません。
             </div>
-          </section>
-
-          <section className="rounded-lg border border-zinc-800 bg-black/25 px-3 py-2 text-zinc-400">
-            <p className="font-medium text-zinc-200">OSの許可とは別です</p>
-            <p className="mt-1">この承認はRumi内の許可だけを保存します。次の画面でブラウザまたはOSのマイク・カメラ許可を確認します。</p>
-          </section>
-
-          <section className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-emerald-50">
-            <p className="font-medium">プライバシー</p>
-            <p className="mt-1 text-emerald-50/80">録音データやカメラ映像は残しません。履歴には、指録音を使った時刻と結果だけを残します。</p>
+            <button
+              type="button"
+              onClick={() => setPrivacyOpen((value) => !value)}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-emerald-400/25 text-[11px] font-semibold text-emerald-200 hover:border-emerald-300/45"
+              aria-label="プライバシー"
+              title="プライバシー"
+            >
+              プ
+            </button>
+            {privacyOpen && (
+              <div className="border-l border-emerald-400/35 pl-2 text-emerald-50/85">
+                録音データやカメラ映像は保存しません。残るのは、指録音が使われた時刻と結果だけです。
+              </div>
+            )}
           </section>
         </div>
 
-        <footer className="flex items-center justify-end gap-2 border-t border-zinc-800 px-4 py-3">
+        <footer className="flex items-center justify-end gap-2 border-t border-zinc-800 px-3 py-2.5">
           <button type="button" onClick={onCancel} disabled={busy} className="ambient-mini-button min-w-24">
             あとで
           </button>
@@ -1110,12 +1240,237 @@ function RumiPermissionApprovalDialog({
             type="button"
             onClick={onApprove}
             disabled={busy}
-            className="inline-flex h-9 min-w-36 items-center justify-center gap-2 rounded-lg bg-amber-200 px-3 text-sm font-semibold text-zinc-950 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-9 min-w-32 items-center justify-center gap-2 rounded-lg bg-sky-300 px-3 text-sm font-semibold text-zinc-950 hover:bg-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {busy ? <Loader2 size={15} className="animate-spin" /> : <Shield size={15} />}
+            {busy ? <Loader2 size={15} className="animate-spin" /> : <Hand size={15} />}
             許可する
           </button>
         </footer>
+      </section>
+    </div>
+  );
+}
+
+function RoutingSettings({
+  busy,
+  mode,
+  summary,
+  selectedConversationId,
+  groupEnabled,
+  groupId,
+  groupTitle,
+  model,
+  modelQuery,
+  modelResults,
+  modelLoading,
+  needsNewChatSettings,
+  onModeChange,
+  onPickChat,
+  onGroupEnabledChange,
+  onGroupIdChange,
+  onGroupTitleChange,
+  onGroupCommit,
+  onModelChange,
+  onModelCommit,
+  onModelQueryChange,
+  onModelSearch,
+}: {
+  busy: boolean;
+  mode: AmbientRoutingMode;
+  summary: string;
+  selectedConversationId: string | null;
+  groupEnabled: boolean;
+  groupId: string;
+  groupTitle: string;
+  model: string;
+  modelQuery: string;
+  modelResults: ModelSearchItem[];
+  modelLoading: boolean;
+  needsNewChatSettings: boolean;
+  onModeChange: (mode: AmbientRoutingMode) => void;
+  onPickChat: () => void;
+  onGroupEnabledChange: (enabled: boolean) => void;
+  onGroupIdChange: (value: string) => void;
+  onGroupTitleChange: (value: string) => void;
+  onGroupCommit: () => void;
+  onModelChange: (value: string) => void;
+  onModelCommit: (model: string) => void;
+  onModelQueryChange: (value: string) => void;
+  onModelSearch: () => void;
+}) {
+  return (
+    <section className="space-y-2 border-l border-sky-400/35 pl-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase text-zinc-500">話す先</span>
+        <span className="min-w-0 truncate text-[11px] text-zinc-300">{summary}</span>
+      </div>
+      <div className="grid grid-cols-3 gap-1">
+        <RouteModeButton label="選ぶ" active={mode === "selected_chat"} disabled={busy} onClick={() => onModeChange("selected_chat")} />
+        <RouteModeButton label="再起動ごと" active={mode === "startup_new_chat"} disabled={busy} onClick={() => onModeChange("startup_new_chat")} />
+        <RouteModeButton label="毎回新規" active={mode === "always_new_chat"} disabled={busy} onClick={() => onModeChange("always_new_chat")} />
+      </div>
+      {mode === "selected_chat" && (
+        <button type="button" onClick={onPickChat} disabled={busy} className="ambient-mini-button w-full justify-between">
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <MessageSquare size={14} />
+            <span className="truncate">{selectedConversationId ? "チャットを変更" : "チャットを選ぶ"}</span>
+          </span>
+          <ChevronUp size={13} className="rotate-90 text-zinc-500" />
+        </button>
+      )}
+      {needsNewChatSettings && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => onGroupEnabledChange(!groupEnabled)}
+            disabled={busy}
+            className={cn(
+              "flex h-8 w-full items-center justify-between rounded-md border px-2 text-[11px] transition",
+              groupEnabled
+                ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
+                : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
+            )}
+          >
+            <span>グループ内に作成</span>
+            <span className="font-semibold">{groupEnabled ? "ON" : "OFF"}</span>
+          </button>
+          {groupEnabled && (
+            <div className="grid grid-cols-[0.75fr_1fr] gap-1.5">
+              <label className="block text-[10px] text-zinc-500">
+                グループID
+                <input
+                  value={groupId}
+                  onChange={(event) => onGroupIdChange(event.target.value)}
+                  onBlur={onGroupCommit}
+                  className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+                />
+              </label>
+              <label className="block text-[10px] text-zinc-500">
+                表示名
+                <input
+                  value={groupTitle}
+                  onChange={(event) => onGroupTitleChange(event.target.value)}
+                  onBlur={onGroupCommit}
+                  className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+                />
+              </label>
+            </div>
+          )}
+          <div className="space-y-1">
+            <label className="block text-[10px] text-zinc-500">
+              送信モデル
+              <div className="mt-1 flex gap-1.5">
+                <input
+                  value={modelQuery}
+                  onChange={(event) => onModelQueryChange(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      onModelSearch();
+                    }
+                  }}
+                  placeholder={model || "検索"}
+                  className="h-8 min-w-0 flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+                />
+                <button type="button" onClick={onModelSearch} disabled={modelLoading} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
+                  {modelLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                </button>
+              </div>
+            </label>
+            {model && (
+              <button type="button" onClick={() => onModelCommit("")} className="text-[11px] text-emerald-200 hover:text-emerald-100">
+                {model}
+              </button>
+            )}
+            {modelResults.length > 0 && (
+              <div className="max-h-28 overflow-auto border-l border-zinc-800 pl-2">
+                {modelResults
+                  .map((item) => ({ item, id: modelIdForSearchItem(item) }))
+                  .filter(({ id }) => Boolean(id))
+                  .slice(0, 6)
+                  .map(({ item, id }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        onModelChange(id);
+                        onModelCommit(id);
+                      }}
+                      className="block w-full truncate py-1 text-left text-[11px] text-zinc-300 hover:text-zinc-50"
+                    >
+                      {modelLabelForSearchItem(item)}
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RouteModeButton({ label, active, disabled, onClick }: { label: string; active: boolean; disabled: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "h-8 rounded-md border px-2 text-[11px] font-medium transition",
+        active
+          ? "border-sky-300/35 bg-sky-400/15 text-sky-100"
+          : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+function ChatPickerDialog({
+  activeChatId,
+  selectedChatId,
+  chatItems,
+  loading,
+  onRefresh,
+  onSelect,
+  onClose,
+}: {
+  activeChatId: string | null;
+  selectedChatId: string | null;
+  chatItems: ChatItem[];
+  loading: boolean;
+  onRefresh: () => void;
+  onSelect: (chatId: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 rumi-layer-modal flex items-end justify-center bg-black/60 px-3 py-4 backdrop-blur-sm sm:items-center">
+      <section className="flex h-[min(720px,calc(100vh-32px))] w-[min(390px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl shadow-black/50">
+        <header className="flex h-10 items-center gap-2 border-b border-zinc-800 px-3">
+          <MessageSquare size={15} className="text-sky-200" />
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold">チャットを選ぶ</span>
+          <button type="button" onClick={onRefresh} disabled={loading} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
+            {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCcw size={13} />}
+          </button>
+          <button type="button" onClick={onClose} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
+            <X size={13} />
+          </button>
+        </header>
+        <div className="min-h-0 flex-1">
+          <HistoryBoard
+            activeChatId={activeChatId}
+            selectedChatId={selectedChatId}
+            selectionMode
+            selectionLabel="送信先"
+            chatItems={chatItems}
+            onChatSelect={onSelect}
+            onNewTask={() => undefined}
+            onSettingsClick={() => undefined}
+            isCompact
+          />
+        </div>
       </section>
     </div>
   );
@@ -1183,7 +1538,7 @@ function RecognitionMonitor({
                 x2={landmarkPercent(indexTip.x)}
                 y2={landmarkPercent(indexTip.y)}
                 vectorEffect="non-scaling-stroke"
-                className={recording ? "stroke-red-200" : "stroke-amber-100"}
+                className={recording ? "stroke-red-200" : "stroke-sky-100"}
                 strokeWidth={2.5}
               />
             )}
@@ -1194,7 +1549,7 @@ function RecognitionMonitor({
                 cy={landmarkPercent(landmark.y)}
                 r={index === THUMB_TIP_INDEX || index === INDEX_TIP_INDEX ? 2.2 : 1.35}
                 vectorEffect="non-scaling-stroke"
-                className={index === THUMB_TIP_INDEX || index === INDEX_TIP_INDEX ? "fill-amber-100 stroke-black/70" : "fill-emerald-200 stroke-black/60"}
+                className={index === THUMB_TIP_INDEX || index === INDEX_TIP_INDEX ? "fill-sky-100 stroke-black/70" : "fill-emerald-200 stroke-black/60"}
                 strokeWidth={0.7}
               />
             ))}
@@ -1244,7 +1599,7 @@ function StatusGlyph({ uiState }: { uiState: AmbientUiState }) {
     uiState === "recording" && "border-red-400/40 bg-red-500/12 text-red-100",
     uiState === "monitoring" && "border-emerald-400/35 bg-emerald-400/10 text-emerald-100",
     uiState === "sending" && "border-violet-400/35 bg-violet-400/10 text-violet-100",
-    (uiState === "setupNeeded" || uiState === "rumiPermissionNeeded" || uiState === "osPermissionNeeded") && "border-amber-400/35 bg-amber-400/10 text-amber-100",
+    (uiState === "setupNeeded" || uiState === "rumiPermissionNeeded" || uiState === "osPermissionNeeded") && "border-sky-400/35 bg-sky-400/10 text-sky-100",
     (uiState === "denied" || uiState === "blocked" || uiState === "error") && "border-red-400/35 bg-red-500/10 text-red-100",
     (uiState === "readyOff" || uiState === "paused") && "border-zinc-800 bg-zinc-900 text-zinc-300",
   );
@@ -1253,7 +1608,7 @@ function StatusGlyph({ uiState }: { uiState: AmbientUiState }) {
   if (uiState === "sending") return <span className={className}><Loader2 size={20} className="animate-spin" /></span>;
   if (uiState === "monitoring") return <span className={className}><Hand size={20} /></span>;
   if (uiState === "denied" || uiState === "blocked" || uiState === "error") return <span className={className}><AlertTriangle size={20} /></span>;
-  if (uiState === "setupNeeded" || uiState === "rumiPermissionNeeded" || uiState === "osPermissionNeeded") return <span className={className}><Shield size={20} /></span>;
+  if (uiState === "setupNeeded" || uiState === "rumiPermissionNeeded" || uiState === "osPermissionNeeded") return <span className={className}><Hand size={20} /></span>;
   return <span className={className}><Radio size={20} /></span>;
 }
 
@@ -1264,7 +1619,7 @@ function StateBadge({ state }: { state: AmbientUiState }) {
       className={cn(
         "shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold leading-4",
         copy.tone === "emerald" && "border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
-        copy.tone === "amber" && "border-amber-400/30 bg-amber-400/10 text-amber-100",
+        copy.tone === "blue" && "border-sky-400/30 bg-sky-400/10 text-sky-100",
         copy.tone === "red" && "border-red-400/35 bg-red-500/10 text-red-100",
         copy.tone === "purple" && "border-violet-400/30 bg-violet-400/10 text-violet-100",
         copy.tone === "zinc" && "border-zinc-800 bg-zinc-900 text-zinc-300",
@@ -1282,7 +1637,7 @@ function PrimaryActionIcon({ uiState }: { uiState: AmbientUiState }) {
   if (uiState === "sending") return <Loader2 size={15} className="animate-spin" />;
   if (uiState === "osPermissionNeeded") return <Video size={15} />;
   if (uiState === "denied" || uiState === "blocked" || uiState === "error") return <AlertTriangle size={15} />;
-  return <Shield size={15} />;
+  return <Hand size={15} />;
 }
 
 function primaryButtonClass(uiState: AmbientUiState): string {
@@ -1290,67 +1645,8 @@ function primaryButtonClass(uiState: AmbientUiState): string {
   if (uiState === "monitoring") return "border border-zinc-800 bg-zinc-900 text-zinc-100 hover:border-zinc-700 hover:bg-zinc-800";
   if (uiState === "sending") return "cursor-wait bg-violet-300 text-zinc-950 opacity-80";
   if (uiState === "denied" || uiState === "blocked" || uiState === "error") return "bg-red-100 text-zinc-950 hover:bg-white";
-  if (uiState === "setupNeeded" || uiState === "rumiPermissionNeeded" || uiState === "osPermissionNeeded") return "bg-amber-200 text-zinc-950 hover:bg-amber-100";
+  if (uiState === "setupNeeded" || uiState === "rumiPermissionNeeded" || uiState === "osPermissionNeeded") return "bg-sky-300 text-zinc-950 hover:bg-sky-200";
   return "bg-zinc-100 text-zinc-950 hover:bg-white";
-}
-
-function nextActionText(uiState: AmbientUiState, rumiReady: boolean, osReady: boolean): string {
-  if (!rumiReady) return "まずRumiでこの機能を許可してください。";
-  if (!osReady) return "次に、端末のマイクとカメラを許可してください。";
-  if (uiState === "readyOff") return "Rumiと端末の許可は済んでいます。まだ手の認識を開始していない状態です。";
-  if (uiState === "monitoring") return "親指と人差し指をくっつけると録音します。離すとAIに送信します。";
-  if (uiState === "recording") return "録音中です。指を離すとAIに送信します。保存はされません。";
-  if (uiState === "sending") return "音声をAIに送っています。送信後に待機へ戻ります。";
-  if (uiState === "denied") return "拒否された許可を、ブラウザまたはOS設定から許可に戻してください。";
-  if (uiState === "blocked") return "この環境でマイク・カメラが使えるか確認してください。";
-  return "開始できます。";
-}
-
-function InstructionStep({ index, text }: { index: number; text: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-[11px] font-semibold text-zinc-200">{index}</span>
-      <span>{text}</span>
-    </div>
-  );
-}
-
-function SetupStep({
-  index,
-  title,
-  statusText,
-  complete,
-  active,
-  children,
-}: {
-  index: number;
-  title: string;
-  statusText: string;
-  complete: boolean;
-  active: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <div className={cn("border-t border-zinc-800/80 pt-2.5", active && "border-amber-400/25")}>
-      <div className="flex items-start gap-2">
-        <span
-          className={cn(
-            "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold",
-            complete ? "bg-emerald-400 text-zinc-950" : active ? "bg-amber-300 text-zinc-950" : "bg-zinc-800 text-zinc-400",
-          )}
-        >
-          {complete ? <Check size={12} /> : index}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[12px] font-semibold text-zinc-100">{title}</p>
-            <span className={cn("shrink-0 text-[11px]", complete ? "text-emerald-200" : active ? "text-amber-100" : "text-zinc-500")}>{statusText}</span>
-          </div>
-          <div className="mt-1">{children}</div>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function PermissionRow({ label, bucket }: { label: string; bucket: AmbientPermissionBucket }) {
@@ -1376,15 +1672,6 @@ function gestureStatusLabel(status: string, monitorEnabled: boolean): string {
   return "確認中";
 }
 
-function StatusPill({ label, value, active }: { label: string; value: string; active?: boolean }) {
-  return (
-    <div className={cn("rounded-lg border px-2 py-1", active ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-200" : "border-zinc-800 bg-zinc-950")}>
-      <span className="mr-1 text-zinc-500">{label}</span>
-      <span>{active ? <Check size={11} className="mr-1 inline" /> : null}{value}</span>
-    </div>
-  );
-}
-
 function formatRecordingTime(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
@@ -1393,6 +1680,85 @@ function formatRecordingTime(seconds: number): string {
 
 function isAmbientStatus(value: unknown): value is AmbientStatus {
   return Boolean(value && typeof value === "object" && "ambient_monitor" in value);
+}
+
+function normalizeRouting(value: AmbientRoutingConfig | null | undefined, fallbackConversationId: string | null): NormalizedAmbientRouting {
+  const mode = value?.mode === "startup_new_chat" || value?.mode === "always_new_chat" || value?.mode === "selected_chat"
+    ? value.mode
+    : "selected_chat";
+  return {
+    mode,
+    conversation_id: cleanOptionalText(value?.conversation_id) ?? fallbackConversationId,
+    group_enabled: cleanBool(value?.group_enabled, true),
+    group_id: cleanOptionalText(value?.group_id) ?? "gesture",
+    group_title: cleanOptionalText(value?.group_title) ?? "Gesture",
+    model: cleanOptionalText(value?.model) ?? "",
+  };
+}
+
+function conversationsToChatItems(conversations: Conversation[]): ChatItem[] {
+  const byId = new Map(conversations.map((conversation) => [conversation.id, conversation]));
+  const build = (conversation: Conversation): ChatItem => ({
+    id: conversation.id,
+    title: conversation.title || "New Conversation",
+    date: formatRelativeTime(conversation.updated_at || conversation.created_at || Date.now()),
+    type: "chat",
+    parentId: conversation.parent_conversation_id ?? null,
+    conversationKind: conversation.conversation_kind,
+    tags: conversation.tags ?? [],
+    isStarred: Boolean(conversation.is_starred),
+    isPinned: Boolean(conversation.is_pinned),
+    companyId: cleanOptionalText(conversation.metadata?.company_id ?? conversation.metadata?.companyId),
+    workspaceId: cleanOptionalText(conversation.metadata?.workspace_id ?? conversation.metadata?.workspaceId),
+    metadata: conversation.metadata ?? {},
+    children: (conversation.child_conversation_ids ?? [])
+      .map((id) => byId.get(id))
+      .filter((item): item is Conversation => Boolean(item))
+      .map(build),
+  });
+  const childIds = new Set(conversations.flatMap((conversation) => conversation.child_conversation_ids ?? []));
+  return conversations.filter((conversation) => !childIds.has(conversation.id)).map(build);
+}
+
+function routingLabel(
+  mode: AmbientRoutingMode,
+  conversation: Conversation | null,
+  conversationId: string | null,
+  sessionConversationId: string | null | undefined,
+): string {
+  if (mode === "selected_chat") {
+    return conversation?.title || (conversationId ? "選択済み" : "未選択");
+  }
+  if (mode === "startup_new_chat") {
+    return sessionConversationId ? "この起動のチャット" : "起動ごとに新規";
+  }
+  return "毎回新しいチャット";
+}
+
+function modelIdForSearchItem(item: ModelSearchItem): string {
+  return String(item.profile_id || item.qualified_model_id || item.model_id || item.display_name || item.label || "").trim();
+}
+
+function modelLabelForSearchItem(item: ModelSearchItem): string {
+  const id = modelIdForSearchItem(item);
+  const label = String(item.display_name || item.label || id).trim();
+  const provider = String(item.provider_display_name || item.provider_id || "").trim();
+  return provider && !label.includes(provider) ? `${label} · ${provider}` : label;
+}
+
+function cleanOptionalText(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  return text || null;
+}
+
+function cleanBool(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off"].includes(normalized)) return false;
+  }
+  return fallback;
 }
 
 function focusComposer() {

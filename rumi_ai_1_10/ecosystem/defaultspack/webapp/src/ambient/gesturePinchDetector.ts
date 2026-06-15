@@ -52,9 +52,9 @@ export type PinchFrame = {
 
 const DEFAULTS = {
   pinchStartThreshold: 0.28,
-  pinchReleaseThreshold: 0.38,
+  pinchReleaseThreshold: 0.46,
   pinchStartMs: 300,
-  pinchReleaseMs: 200,
+  pinchReleaseMs: 650,
   cooldownMs: 1500,
   choiceHoldMs: 3000,
   choiceCooldownMs: 1200,
@@ -88,17 +88,21 @@ export class GesturePinchDetector {
       Number(frame.trackingConfidence ?? 1),
     );
     if (confidence < options.minHandConfidence || confidence < options.minTrackingConfidence) {
-      this.candidateStartedAt = null;
-      this.resetChoice();
-      this.swipeSamples = [];
+      if (!this.active) {
+        this.candidateStartedAt = null;
+        this.resetChoice();
+        this.swipeSamples = [];
+      }
       return this.state(frame, 1, confidence, "low_confidence");
     }
 
     const normalizedDistance = normalizedThumbIndexDistance(frame.landmarks);
     if (!Number.isFinite(normalizedDistance)) {
-      this.candidateStartedAt = null;
-      this.resetChoice();
-      this.swipeSamples = [];
+      if (!this.active) {
+        this.candidateStartedAt = null;
+        this.resetChoice();
+        this.swipeSamples = [];
+      }
       return this.state(frame, 1, confidence, "missing_landmarks");
     }
 

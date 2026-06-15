@@ -787,6 +787,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/ambient/status", block_module="blocks.ambient.status"),
     HttpRouteSpec("POST", "/api/ambient/monitor/start", block_module="blocks.ambient.monitor", defaults={"action": "start"}),
     HttpRouteSpec("POST", "/api/ambient/monitor/stop", block_module="blocks.ambient.monitor", defaults={"action": "stop"}),
+    HttpRouteSpec("POST", "/api/ambient/config", block_module="blocks.ambient.config"),
     HttpRouteSpec("POST", "/api/ambient/events", block_module="blocks.ambient.event_submit"),
     HttpRouteSpec("POST", "/api/ambient/permissions/grant", block_module="blocks.ambient.permissions", defaults={"action": "grant"}),
     HttpRouteSpec("POST", "/api/ambient/permissions/revoke", block_module="blocks.ambient.permissions", defaults={"action": "revoke"}),

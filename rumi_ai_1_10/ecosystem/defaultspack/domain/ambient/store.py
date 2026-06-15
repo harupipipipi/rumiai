@@ -33,6 +33,7 @@ class AmbientStore:
         base = _default_state()
         _deep_update(base, data)
         _migrate_legacy_permissions(base)
+        _migrate_legacy_gesture_thresholds(base)
         return base
 
     def write(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -114,6 +115,14 @@ class AmbientStore:
         state["services"]["voice_wake_monitor"]["enrolled"] = False
         return self.write(state)
 
+    def update_routing(self, routing: dict[str, Any]) -> dict[str, Any]:
+        state = self.read()
+        state["routing"] = _normalized_routing({
+            **dict(state.get("routing") if isinstance(state.get("routing"), dict) else {}),
+            **dict(routing if isinstance(routing, dict) else {}),
+        })
+        return self.write(state)
+
     def mark_trigger(self, event: dict[str, Any]) -> dict[str, Any]:
         state = self.read()
         state["last_trigger"] = {
@@ -156,7 +165,7 @@ def _default_state() -> dict[str, Any]:
                 "status": "paused",
                 "detector": "thumb_tip_index_tip_distance_v1",
                 "pinch_threshold": 0.28,
-                "release_threshold": 0.38,
+                "release_threshold": 0.46,
                 "cooldown_ms": 1500,
                 "last_trigger_at": None,
                 "action": "open_input",
@@ -185,6 +194,14 @@ def _default_state() -> dict[str, Any]:
             "audit_event_only": True,
             "audit_fields": ["event_id", "source", "trigger", "status", "action_id", "created_at"],
         },
+        "routing": {
+            "mode": "selected_chat",
+            "conversation_id": None,
+            "group_enabled": True,
+            "group_id": "gesture",
+            "group_title": "Gesture",
+            "model": "",
+        },
         "voice_enrollment": None,
         "last_trigger": None,
     }
@@ -210,12 +227,51 @@ def _rumi_permission(state: dict[str, Any], permission_id: str) -> dict[str, Any
 
 def _privacy_safe_state(state: dict[str, Any]) -> dict[str, Any]:
     clean = deepcopy(state)
+    clean["routing"] = _normalized_routing(clean.get("routing") if isinstance(clean.get("routing"), dict) else {})
     enrollment = clean.get("voice_enrollment")
     if isinstance(enrollment, dict):
         enrollment.pop("raw_audio", None)
         enrollment.pop("samples", None)
         enrollment.pop("audio_embedding_raw", None)
     return clean
+
+
+def _normalized_routing(value: dict[str, Any]) -> dict[str, Any]:
+    mode = str(value.get("mode") or "selected_chat").strip()
+    if mode not in {"selected_chat", "startup_new_chat", "always_new_chat"}:
+        mode = "selected_chat"
+    conversation_id = _clean_optional_string(value.get("conversation_id"))
+    group_enabled = _coerce_bool(value.get("group_enabled"), True)
+    group_id = _clean_optional_string(value.get("group_id")) or "gesture"
+    group_title = _clean_optional_string(value.get("group_title")) or "Gesture"
+    model = _clean_optional_string(value.get("model")) or ""
+    return {
+        "mode": mode,
+        "conversation_id": conversation_id,
+        "group_enabled": group_enabled,
+        "group_id": group_id,
+        "group_title": group_title,
+        "model": model,
+    }
+
+
+def _clean_optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
 
 
 def _state_path() -> Path:
@@ -249,6 +305,22 @@ def _migrate_legacy_permissions(state: dict[str, Any]) -> None:
             if merged.get("permission_id") == legacy_id:
                 merged["permission_id"] = host_id
             bucket[host_id] = merged
+
+
+def _migrate_legacy_gesture_thresholds(state: dict[str, Any]) -> None:
+    service = (
+        state.get("services", {}).get("gesture_wake_monitor")
+        if isinstance(state.get("services"), dict)
+        else None
+    )
+    if not isinstance(service, dict):
+        return
+    try:
+        release_threshold = float(service.get("release_threshold"))
+    except (TypeError, ValueError):
+        release_threshold = 0.0
+    if release_threshold <= 0.38:
+        service["release_threshold"] = 0.46
 
 
 def _now() -> str:

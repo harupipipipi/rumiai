@@ -1,0 +1,28 @@
+{
+  "function_id": "ambient_configure",
+  "description": "Configure ambient trigger chat routing and new-chat defaults.",
+  "tags": ["ambient", "defaultspack", "settings"],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ambient.configure",
+    "defaultspack.ambient.configure"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ambient.config",
+      "default_args": {}
+    }
+  }
+}

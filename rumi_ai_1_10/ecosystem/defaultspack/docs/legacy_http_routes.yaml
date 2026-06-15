@@ -2359,6 +2359,13 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: POST
+  pattern: /api/ambient/config
+  legacy_block_module: blocks.ambient.config
+  replacement_function_id: ambient_configure
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
   pattern: /api/ambient/events
   legacy_block_module: blocks.ambient.event_submit
   replacement_function_id: ambient_event_submit

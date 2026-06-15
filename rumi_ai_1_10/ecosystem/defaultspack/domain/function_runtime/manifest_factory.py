@@ -364,6 +364,13 @@ AMBIENT_FUNCTIONS: tuple[FunctionSpec, ...] = (
         default_args={"action": "stop"},
     ),
     _spec(
+        "ambient_configure",
+        "Configure ambient trigger chat routing and new-chat defaults.",
+        ("ambient", "settings"),
+        block="blocks.ambient.config",
+        aliases=("defaults.ambient.configure", "defaultspack.ambient.configure"),
+    ),
+    _spec(
         "ambient_event_submit",
         "Submit a sanitized ambient trigger event to the ambient trigger router.",
         ("ambient", "input"),

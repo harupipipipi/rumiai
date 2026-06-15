@@ -45,7 +45,7 @@ type AmbientStateCopy = {
   headline: string;
   body: string;
   primary: string;
-  tone: "amber" | "blue" | "emerald" | "red" | "purple" | "zinc";
+  tone: "blue" | "emerald" | "red" | "purple" | "zinc";
 };
 
 export const ambientPermissionLabels: Record<string, string> = {
@@ -62,25 +62,25 @@ export const ambientCopyJa = {
   auditShort: "履歴には使った時刻と結果だけ残します",
   states: {
     setupNeeded: {
-      badge: "準備が必要",
-      headline: "まずRumiでこの機能を許可してください",
-      body: "Rumi許可の後に、端末のマイク・カメラ許可へ進みます",
-      primary: "セットアップする",
-      tone: "amber",
+      badge: "Rumi許可",
+      headline: "指録音をRumiで許可してください",
+      body: "許可後に端末のマイク・カメラを確認します",
+      primary: "Rumiで許可",
+      tone: "blue",
     },
     rumiPermissionNeeded: {
-      badge: "Rumi許可が必要",
-      headline: "Rumi内の許可が必要です",
-      body: "この機能にマイク・カメラ・AI送信を許可してください",
-      primary: "Rumiで許可する",
-      tone: "amber",
+      badge: "Rumi許可",
+      headline: "指録音をRumiで許可してください",
+      body: "マイク入力・カメラ・AI送信の入口を許可します",
+      primary: "Rumiで許可",
+      tone: "blue",
     },
     osPermissionNeeded: {
       badge: "端末許可が必要",
       headline: "マイク・カメラを許可してください",
       body: "ブラウザまたはOSの確認画面で許可します",
       primary: "マイク・カメラを許可",
-      tone: "amber",
+      tone: "blue",
     },
     readyOff: {
       badge: "停止中",

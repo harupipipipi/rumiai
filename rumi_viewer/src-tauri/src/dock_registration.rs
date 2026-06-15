@@ -838,7 +838,6 @@ fn spawn_defaultspack_local_server(
         .env("RUMI_USER_DATA", &config.user_data_dir)
         .env("RUMI_API_TOKEN", &api_token)
         .env("RUMI_PANEL_BOOTSTRAP_SECRET", &panel_bootstrap_secret)
-        .env("RUMI_DEFAULTSPACK_OPEN_BROWSER", "0")
         .current_dir(&metadata.app_working_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -847,6 +846,7 @@ fn spawn_defaultspack_local_server(
     for (key, value) in &metadata.env_vars {
         command.env(key, value);
     }
+    command.env("RUMI_DEFAULTSPACK_OPEN_BROWSER", "0");
 
     command
         .spawn()

@@ -17,6 +17,7 @@ def run(context: dict[str, Any]):
         ("GET", "/api/ambient/status", "blocks.ambient.status", {}),
         ("POST", "/api/ambient/monitor/start", "blocks.ambient.monitor", {"action": "start"}),
         ("POST", "/api/ambient/monitor/stop", "blocks.ambient.monitor", {"action": "stop"}),
+        ("POST", "/api/ambient/config", "blocks.ambient.config", {}),
         ("POST", "/api/ambient/events", "blocks.ambient.event_submit", {}),
         ("POST", "/api/ambient/permissions/grant", "blocks.ambient.permissions", {"action": "grant"}),
         ("POST", "/api/ambient/permissions/revoke", "blocks.ambient.permissions", {"action": "revoke"}),

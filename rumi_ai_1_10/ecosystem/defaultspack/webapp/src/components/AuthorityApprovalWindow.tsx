@@ -662,7 +662,7 @@ function AmbientPackAuthorityApprovalWindow() {
           <div className="border-b border-zinc-800 bg-zinc-950">
             <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
               {!rumiReady && (
-                <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-100">
+                <span className="rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-100">
                   許可が必要
                 </span>
               )}
@@ -695,22 +695,10 @@ function AmbientPackAuthorityApprovalWindow() {
                 {!rumiReady && (
                   <>
                     <section className="border-t border-zinc-800 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">実入力 / 送信</p>
+                      <p className="text-[10px] font-semibold text-sky-200">Rumiが受け取る入口</p>
                       <div className="mt-1.5 grid gap-1.5">
                         {ambientApprovalPermissionRows.map((row) => (
                           <AmbientApprovalRow key={row.permissionId} {...row} granted={Boolean(status?.permissions.rumi[row.permissionId]?.granted)} />
-                        ))}
-                      </div>
-                    </section>
-
-                    <section className="border-t border-zinc-800 px-3 py-2">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-300">入口（申請・未検証）</p>
-                        <p className="text-[10px] text-amber-200/70">実接続は起動後に確認</p>
-                      </div>
-                      <div className="mt-1.5 grid gap-1.5">
-                        {ambientApprovalEntranceRows.map((row) => (
-                          <AmbientApprovalRow key={row.label} {...row} />
                         ))}
                       </div>
                     </section>
@@ -751,7 +739,7 @@ function AmbientPackAuthorityApprovalWindow() {
                 type="button"
                 onClick={() => void approve()}
                 disabled={loading || action !== null}
-                className="flex h-9 min-w-32 items-center justify-center gap-2 rounded-md bg-amber-200 px-3 text-sm font-semibold text-zinc-950 hover:bg-amber-100 disabled:opacity-50"
+                className="flex h-9 min-w-32 items-center justify-center gap-2 rounded-md bg-sky-300 px-3 text-sm font-semibold text-zinc-950 hover:bg-sky-200 disabled:opacity-50"
               >
                 {action === "approve" ? <Loader2 className="animate-spin" size={15} /> : <Check size={15} />}
                 許可する
@@ -770,7 +758,7 @@ const ambientApprovalPermissionRows = [
     label: "マイク入力",
     detail: "指をくっつけている間の録音に使う実入力",
     badge: "実入力",
-    className: "border-rose-400/25 bg-rose-500/10 text-rose-100",
+    className: "border-rose-400/40 text-rose-100",
     dotClassName: "bg-rose-300",
     badgeClassName: "text-rose-200/80",
   },
@@ -779,7 +767,7 @@ const ambientApprovalPermissionRows = [
     label: "カメラで手を見る",
     detail: "映像を保存せず、手の点だけをその場で判定",
     badge: "実入力",
-    className: "border-cyan-400/25 bg-cyan-500/10 text-cyan-100",
+    className: "border-cyan-400/40 text-cyan-100",
     dotClassName: "bg-cyan-300",
     badgeClassName: "text-cyan-200/80",
   },
@@ -788,38 +776,11 @@ const ambientApprovalPermissionRows = [
     label: "音声をAIに送る",
     detail: "指を離した後、録音を入力としてdispatch",
     badge: "送信",
-    className: "border-violet-400/25 bg-violet-500/10 text-violet-100",
+    className: "border-violet-400/40 text-violet-100",
     dotClassName: "bg-violet-300",
     badgeClassName: "text-violet-200/80",
   },
 ] satisfies Array<AmbientApprovalRowProps & { permissionId: string }>;
-
-const ambientApprovalEntranceRows = [
-  {
-    label: "指録音ウィンドウ",
-    detail: "申請された入口。別ウィンドウで開けるかは起動後に確認",
-    badge: "入口・未検証",
-    className: "border-amber-400/25 bg-amber-500/10 text-amber-100",
-    dotClassName: "bg-amber-300",
-    badgeClassName: "text-amber-200/80",
-  },
-  {
-    label: "defaultspack input",
-    detail: "音声を入力に流す予定の入口。実dispatchで確認",
-    badge: "入口・未検証",
-    className: "border-amber-400/20 bg-amber-500/10 text-amber-100",
-    dotClassName: "bg-amber-300",
-    badgeClassName: "text-amber-200/75",
-  },
-  {
-    label: "LINE / Discord / Web hook",
-    detail: "外部profileへつなぐ申請。実接続は別途チェック",
-    badge: "入口・未検証",
-    className: "border-amber-400/20 bg-amber-500/10 text-amber-100",
-    dotClassName: "bg-amber-300",
-    badgeClassName: "text-amber-200/75",
-  },
-] satisfies AmbientApprovalRowProps[];
 
 type AmbientApprovalRowProps = {
   label: string;
@@ -841,7 +802,7 @@ function AmbientApprovalRow({
   granted,
 }: AmbientApprovalRowProps) {
   return (
-    <div className={cn("flex min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-xs", className)}>
+    <div className={cn("flex min-w-0 items-center gap-2 border-l pl-2 py-1 text-xs", className)}>
       <span className={cn("h-2 w-2 shrink-0 rounded-full", dotClassName)} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
@@ -872,7 +833,7 @@ function AmbientApprovalPrivacyToggle() {
         aria-label="プライバシー"
         title="プライバシー"
       >
-        秘
+        プ
       </button>
       {open && (
         <div className="absolute right-0 top-9 rumi-layer-local-popover w-64 rounded-lg border border-emerald-400/25 bg-zinc-950 p-3 text-xs leading-5 text-emerald-50 shadow-2xl shadow-black/50">

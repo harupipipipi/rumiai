@@ -294,7 +294,7 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
   };
   const tagBuckets = new Map<string, ChatItem[]>();
   const integrationGroups = new Map<string, ChatGroup>();
-  const customGroupsById = new Map(customGroups.map((group) => [group.id, group]));
+  const metadataGroupsById = new Map(customGroups.map((group) => [group.id, group]));
   const customChatBuckets = new Map(customGroups.map((group) => [group.id, [] as ChatItem[]]));
   const useMetadataGrouping = chatItems.some(hasWorkspaceGroupingMetadata);
 
@@ -304,7 +304,14 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
       type: classifyChatType(chat),
     };
     const customGroupId = stringOrNull(normalized.metadata?.group_id ?? normalized.metadata?.groupId);
-    if (customGroupId && customGroupsById.has(customGroupId)) {
+    if (customGroupId) {
+      if (!metadataGroupsById.has(customGroupId)) {
+        metadataGroupsById.set(customGroupId, {
+          id: customGroupId,
+          title: stringOrNull(normalized.metadata?.group_title ?? normalized.metadata?.groupTitle) ?? customGroupId,
+        });
+        customChatBuckets.set(customGroupId, []);
+      }
       customChatBuckets.get(customGroupId)?.push(normalized);
       return;
     }
@@ -423,7 +430,7 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
       ];
 
   const visibleGroups = groups.filter((group) => group.chats.length > 0 || group.subGroups.length > 0);
-  const custom = customGroups.map((group) => ({
+  const custom = [...metadataGroupsById.values()].map((group) => ({
     id: group.id,
     title: group.title,
     workspaceId: group.workspaceId ?? null,
@@ -599,6 +606,9 @@ function createCustomCollision(activeType: string | null): CollisionDetection {
 interface SortableChatItemProps {
   chat: ChatItem;
   activeChatId: string | null;
+  selectedChatId?: string | null;
+  selectionMode?: boolean;
+  selectionLabel?: string;
   onChatSelect: (chatId: string) => void;
   onRename: (id: string, newTitle: string) => void;
   onTogglePinned?: (chat: ChatItem) => void;
@@ -608,18 +618,19 @@ interface SortableChatItemProps {
   depth?: number;
 }
 
-function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onTogglePinned, onToggleStarred, onToggleChildren, isChildrenExpanded, depth = 0 }: SortableChatItemProps) {
+function SortableChatItem({ chat, activeChatId, selectedChatId = null, selectionMode = false, selectionLabel = "選択中", onChatSelect, onRename, onTogglePinned, onToggleStarred, onToggleChildren, isChildrenExpanded, depth = 0 }: SortableChatItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(chat.title);
   const children = chat.children ?? [];
   const hasChildren = children.length > 0;
   const expanded = hasChildren && isChildrenExpanded(chat.id);
   const isActive = activeChatId === chat.id;
+  const isSelected = selectedChatId === chat.id;
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: chat.id,
     data: { type: 'Chat', chat },
-    disabled: isEditing,
+    disabled: isEditing || selectionMode,
   });
 
   const style = {
@@ -663,7 +674,8 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
         data-testid={`history-chat-card-${chat.id}`}
         className={cn(
           "box-border w-full max-w-full min-h-7 flex items-center gap-1.5 pr-1.5 py-1 rounded-[3px] text-left group/chat transition-colors cursor-grab active:cursor-grabbing outline-none",
-          isActive ? "bg-zinc-800/80" : "hover:bg-zinc-800/50",
+          selectionMode && "cursor-pointer active:cursor-pointer",
+          isSelected ? "bg-emerald-500/15 ring-1 ring-inset ring-emerald-400/25" : isActive ? "bg-zinc-800/80" : "hover:bg-zinc-800/50",
           chat.conversationKind === "subagent" && "text-zinc-400",
           isDragging && "ring-1 ring-emerald-500/50 rumi-layer-modal"
         )}
@@ -710,6 +722,11 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
             {chat.date}
           </span>
         )}
+        {selectionMode && isSelected && (
+          <span className="ml-auto shrink-0 rounded border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] leading-none text-emerald-100">
+            {selectionLabel}
+          </span>
+        )}
         <ConversationPinStarMenu
           isPinned={chat.isPinned}
           isStarred={chat.isStarred}
@@ -724,6 +741,9 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
               key={child.id}
               chat={child}
               activeChatId={activeChatId}
+              selectedChatId={selectedChatId}
+              selectionMode={selectionMode}
+              selectionLabel={selectionLabel}
               onChatSelect={onChatSelect}
               onRename={onRename}
               onTogglePinned={onTogglePinned}
@@ -746,6 +766,9 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
 interface SubGroupProps {
   group: ChatGroup;
   activeChatId: string | null;
+  selectedChatId?: string | null;
+  selectionMode?: boolean;
+  selectionLabel?: string;
   onChatSelect: (chatId: string) => void;
   onChatRename: (chatId: string, newTitle: string) => void;
   onToggleCollapse: (id: string) => void;
@@ -759,7 +782,7 @@ interface SubGroupProps {
   depth: number;
 }
 
-function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCollapse, onRenameGroup, onUngroup, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, onGroupHeaderClick, depth }: SubGroupProps) {
+function SubGroup({ group, activeChatId, selectedChatId = null, selectionMode = false, selectionLabel = "選択中", onChatSelect, onChatRename, onToggleCollapse, onRenameGroup, onUngroup, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, onGroupHeaderClick, depth }: SubGroupProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -773,7 +796,7 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
   } = useSortable({
     id: `drag-col-${group.id}`,
     data: { type: 'ColumnDrag', group },
-    disabled: isEditing,
+    disabled: isEditing || selectionMode,
   });
 
   const { setNodeRef: setDropRef, isOver } = useDroppable({
@@ -867,6 +890,9 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
                 key={chat.id}
                 chat={chat}
                 activeChatId={activeChatId}
+                selectedChatId={selectedChatId}
+                selectionMode={selectionMode}
+                selectionLabel={selectionLabel}
                 onChatSelect={onChatSelect}
                 onRename={onChatRename}
                 onTogglePinned={onTogglePinned}
@@ -882,6 +908,9 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
               key={sub.id}
               group={sub}
               activeChatId={activeChatId}
+              selectedChatId={selectedChatId}
+              selectionMode={selectionMode}
+              selectionLabel={selectionLabel}
               onChatSelect={onChatSelect}
               onChatRename={onChatRename}
               onToggleCollapse={onToggleCollapse}
@@ -908,6 +937,9 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
 interface DroppableColumnProps {
   group: ChatGroup;
   activeChatId: string | null;
+  selectedChatId?: string | null;
+  selectionMode?: boolean;
+  selectionLabel?: string;
   onChatSelect: (chatId: string) => void;
   onNewTask: (groupId: string) => void;
   onSettingsClick: () => void;
@@ -925,7 +957,7 @@ interface DroppableColumnProps {
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, onGroupHeaderClick, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
+function DroppableColumn({ group, activeChatId, selectedChatId = null, selectionMode = false, selectionLabel = "選択中", onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, onGroupHeaderClick, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -1027,6 +1059,9 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
                 key={chat.id}
                 chat={chat}
                 activeChatId={activeChatId}
+                selectedChatId={selectedChatId}
+                selectionMode={selectionMode}
+                selectionLabel={selectionLabel}
                 onChatSelect={onChatSelect}
                 onRename={onChatRename}
                 onTogglePinned={onTogglePinned}
@@ -1042,6 +1077,9 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
               key={sub.id}
               group={sub}
               activeChatId={activeChatId}
+              selectedChatId={selectedChatId}
+              selectionMode={selectionMode}
+              selectionLabel={selectionLabel}
               onChatSelect={onChatSelect}
               onChatRename={onChatRename}
               onToggleCollapse={onToggleCollapse}
@@ -1138,6 +1176,9 @@ interface HistoryBoardProps {
   onDirectorySelect?: () => Promise<string | null | undefined>;
   onGroupDataPathPrepare?: (rootPath: string) => Promise<{ rootPath: string; rumiDataPath: string } | null | undefined>;
   onCodingWorkspacesRefresh?: () => void | Promise<void>;
+  selectionMode?: boolean;
+  selectedChatId?: string | null;
+  selectionLabel?: string;
 }
 
 type GroupWorkspaceChoice = "none" | "current" | "custom";
@@ -1343,6 +1384,9 @@ export function HistoryBoard({
   onDirectorySelect,
   onGroupDataPathPrepare,
   onCodingWorkspacesRefresh,
+  selectionMode = false,
+  selectedChatId = null,
+  selectionLabel = "選択中",
 }: HistoryBoardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
@@ -2070,6 +2114,9 @@ export function HistoryBoard({
                   <DroppableColumn
                     group={group}
                     activeChatId={activeChatId}
+                    selectedChatId={selectedChatId}
+                    selectionMode={selectionMode}
+                    selectionLabel={selectionLabel}
                     onChatSelect={onChatSelect}
                     onNewTask={handleNewTaskInGroup}
                     onSettingsClick={onSettingsClick}

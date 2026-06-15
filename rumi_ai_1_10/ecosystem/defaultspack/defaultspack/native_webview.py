@@ -12,12 +12,11 @@ def open_desktop_surface(url: str, title: str = "Rumi Defaultspack") -> SurfaceR
     if os.environ.get("RUMI_DEFAULTSPACK_OPEN_BROWSER", "1") == "0":
         return "disabled"
 
-    surface = os.environ.get("RUMI_DEFAULTSPACK_SURFACE", "browser").strip().lower()
+    surface = os.environ.get("RUMI_DEFAULTSPACK_SURFACE", "webview").strip().lower()
     if surface == "webview":
         try:
             import webview  # type: ignore[import-not-found]
         except Exception:
-            webbrowser.open(url)
             return "webview_unavailable"
 
         window = webview.create_window(title, url)

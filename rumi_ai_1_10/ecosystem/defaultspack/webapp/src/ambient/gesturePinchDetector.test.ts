@@ -56,6 +56,38 @@ test("pinch detector releases and observes cooldown before retriggering", () => 
   assert.equal(detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 2601 }).triggered, true);
 });
 
+test("pinch detector does not release when tracking confidence briefly drops", () => {
+  const detector = new GesturePinchDetector({
+    pinchStartMs: 0,
+    pinchReleaseMs: 100,
+    minHandConfidence: 0.6,
+    minTrackingConfidence: 0.6,
+  });
+  assert.equal(detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 1000 }).triggered, true);
+  const lowConfidence = detector.updateFromLandmarks({
+    landmarks: landmarks(0.8),
+    handPresenceConfidence: 0.2,
+    trackingConfidence: 0.2,
+    now: 1300,
+  });
+  assert.equal(lowConfidence.active, true);
+  assert.equal(lowConfidence.reason, "low_confidence");
+  const stillPinched = detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 1450 });
+  assert.equal(stillPinched.active, true);
+  assert.notEqual(stillPinched.reason, "pinch_released");
+});
+
+test("pinch detector does not release on a brief missing-landmark frame while active", () => {
+  const detector = new GesturePinchDetector({ pinchStartMs: 0, pinchReleaseMs: 100 });
+  assert.equal(detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 1000 }).triggered, true);
+  const missing = detector.updateFromLandmarks({ landmarks: [], now: 1300 });
+  assert.equal(missing.active, true);
+  assert.equal(missing.reason, "missing_landmarks");
+  const stillPinched = detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 1450 });
+  assert.equal(stillPinched.active, true);
+  assert.notEqual(stillPinched.reason, "pinch_released");
+});
+
 test("pinch plus stable two three or four finger pose commits a choice after hold", () => {
   assert.equal(fingerChoiceFromLandmarks(landmarks(0.55, ["index", "middle", "ring"])), 3);
   const detector = new GesturePinchDetector({ pinchStartMs: 0, choiceHoldMs: 3000, choiceCooldownMs: 500 });

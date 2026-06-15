@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from domain.chat.store import ChatStore
 from domain.input.envelope import RumiInputEnvelope
 from domain.input.submit import submit_input
 
@@ -23,6 +24,7 @@ ACTION_ALIASES = {
 PINCH_RECORD_START_MODES = {"record_audio_start", "hold_to_record_start", "start_voice_capture"}
 PINCH_RECORD_RELEASE_MODES = {"record_audio_release", "dispatch_audio", "submit_recording", "stop_voice_capture"}
 APPROVAL_GESTURE_MODES = {"approval_approve", "approval_reject", "swipe_approve", "swipe_reject"}
+ROUTING_MODES = {"selected_chat", "startup_new_chat", "always_new_chat"}
 
 ALLOWED_ACTIONS = {
     "chat.message",
@@ -33,6 +35,8 @@ ALLOWED_ACTIONS = {
     "model.route",
 }
 
+_SESSION_CONVERSATION_IDS: dict[str, str] = {}
+
 
 class AmbientTriggerRouter:
     def __init__(self, store: AmbientStore | None = None, audit: AmbientAuditLog | None = None) -> None:
@@ -41,6 +45,10 @@ class AmbientTriggerRouter:
 
     def status(self) -> dict[str, Any]:
         state = self.store.read()
+        routing = state.get("routing") if isinstance(state.get("routing"), dict) else {}
+        session_key = self._session_route_key(routing)
+        if session_key and _SESSION_CONVERSATION_IDS.get(session_key):
+            routing["session_conversation_id"] = _SESSION_CONVERSATION_IDS[session_key]
         state["audit_tail"] = self.audit.tail(10)
         state["allowed_actions"] = sorted(ALLOWED_ACTIONS)
         state["input_aliases"] = dict(ACTION_ALIASES)
@@ -79,6 +87,14 @@ class AmbientTriggerRouter:
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
         )
+        return state
+
+    def configure(self, payload: dict[str, Any]) -> dict[str, Any]:
+        routing = payload.get("routing") if isinstance(payload.get("routing"), dict) else payload
+        state = self.store.update_routing(routing if isinstance(routing, dict) else {})
+        state["audit_tail"] = self.audit.tail(10)
+        state["allowed_actions"] = sorted(ALLOWED_ACTIONS)
+        state["input_aliases"] = dict(ACTION_ALIASES)
         return state
 
     def submit_event(self, payload: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -140,7 +156,7 @@ class AmbientTriggerRouter:
                 focus_composer=True,
             )
 
-        return self._dispatch(event, action_id, context or {}, attachments=attachments)
+        return self._dispatch(event, action_id, context or {}, state=state, attachments=attachments)
 
     def _handle_voice_wake(self, event: AmbientTriggerEvent, state: dict[str, Any]) -> dict[str, Any] | None:
         embedding = embedding_from_payload(event.payload)
@@ -173,23 +189,30 @@ class AmbientTriggerRouter:
         action_id: str,
         context: dict[str, Any],
         *,
+        state: dict[str, Any],
         attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if action_id not in ALLOWED_ACTIONS:
             return self._record(event, "denied", "ambient.action_not_allowed", action_id=action_id)
         attachments = attachments or []
         input_text = event.input_text or self._default_input_text(event, attachments)
+        target_conversation_id = self._target_conversation_id(event, context, state)
+        routing = state.get("routing") if isinstance(state.get("routing"), dict) else {}
+        model = str(routing.get("model") or "").strip()
         envelope = RumiInputEnvelope(
             role="user",
             input=input_text,
-            chat={"conversation_id": event.payload.get("conversation_id") or context.get("conversation_id")},
+            chat={
+                "conversation_id": target_conversation_id,
+                **({"model": model} if model and routing.get("mode") != "selected_chat" else {}),
+            },
             source={
                 "provider": "ambient",
                 "kind": f"{event.source}_{event.trigger}",
                 "event_id": event.event_id,
             },
             target={
-                "conversation_id": event.payload.get("conversation_id") or context.get("conversation_id"),
+                "conversation_id": target_conversation_id,
                 "direct": True,
             },
             delivery={
@@ -217,6 +240,57 @@ class AmbientTriggerRouter:
         if isinstance(result, dict):
             audit["dispatch"] = result
         return audit
+
+    def _target_conversation_id(
+        self,
+        event: AmbientTriggerEvent,
+        context: dict[str, Any],
+        state: dict[str, Any],
+    ) -> str | None:
+        routing = state.get("routing") if isinstance(state.get("routing"), dict) else {}
+        mode = str(routing.get("mode") or "selected_chat").strip()
+        if mode not in ROUTING_MODES:
+            mode = "selected_chat"
+        if mode == "selected_chat":
+            return _clean_string(routing.get("conversation_id")) or _clean_string(event.payload.get("conversation_id")) or _clean_string(context.get("conversation_id"))
+        if mode == "always_new_chat":
+            return self._create_routed_conversation(routing)["id"]
+        session_key = self._session_route_key(routing)
+        if not session_key:
+            return self._create_routed_conversation(routing)["id"]
+        conversation_id = _SESSION_CONVERSATION_IDS.get(session_key)
+        if conversation_id:
+            existing = ChatStore().get_conversation(conversation_id)
+            if existing:
+                return conversation_id
+        created = self._create_routed_conversation(routing)
+        _SESSION_CONVERSATION_IDS[session_key] = created["id"]
+        return created["id"]
+
+    def _create_routed_conversation(self, routing: dict[str, Any]) -> dict[str, Any]:
+        group_enabled = _coerce_bool(routing.get("group_enabled"), True)
+        group_id = (_clean_string(routing.get("group_id")) or "gesture") if group_enabled else ""
+        group_title = (_clean_string(routing.get("group_title")) or "Gesture") if group_enabled else ""
+        model = _clean_string(routing.get("model"))
+        return ChatStore().create_conversation(
+            model=model or None,
+            tags=["ambient", "gesture"],
+            conversation_kind="chat",
+            group_id=group_id or None,
+            metadata={
+                "source": "ambient",
+                "mode": "gesture",
+                **({"group_id": group_id, "group_title": group_title} if group_enabled else {}),
+            },
+        )
+
+    def _session_route_key(self, routing: dict[str, Any]) -> str:
+        if str(routing.get("mode") or "") != "startup_new_chat":
+            return ""
+        group_enabled = _coerce_bool(routing.get("group_enabled"), True)
+        group_id = (_clean_string(routing.get("group_id")) or "gesture") if group_enabled else ""
+        model = _clean_string(routing.get("model")) or ""
+        return f"{self.store.path}:{group_enabled}:{group_id}:{model}"
 
     def _record(self, event: AmbientTriggerEvent, status: str, reason: str, **extra: Any) -> dict[str, Any]:
         record = {
@@ -313,3 +387,19 @@ class AmbientTriggerRouter:
 def _is_audio_attachment(attachment: dict[str, Any]) -> bool:
     mime_type = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
     return mime_type.startswith("audio/")
+
+
+def _clean_string(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default

@@ -43,6 +43,19 @@ export type AmbientStatus = {
   audit_tail?: Array<Record<string, unknown>>;
   allowed_actions?: string[];
   input_aliases?: Record<string, string>;
+  routing?: AmbientRoutingConfig;
+};
+
+export type AmbientRoutingMode = "selected_chat" | "startup_new_chat" | "always_new_chat";
+
+export type AmbientRoutingConfig = {
+  mode?: AmbientRoutingMode | string;
+  conversation_id?: string | null;
+  group_enabled?: boolean | string | null;
+  group_id?: string | null;
+  group_title?: string | null;
+  model?: string | null;
+  session_conversation_id?: string | null;
 };
 
 export type AmbientEventPayload = {
@@ -96,6 +109,13 @@ export const ambientTriggerClient = {
     return requestJson<AmbientStatus>("/api/ambient/monitor/stop", {
       method: "POST",
       body: JSON.stringify({}),
+    });
+  },
+
+  configure(routing: AmbientRoutingConfig) {
+    return requestJson<AmbientStatus>("/api/ambient/config", {
+      method: "POST",
+      body: JSON.stringify({ routing }),
     });
   },
 

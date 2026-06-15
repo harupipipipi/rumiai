@@ -460,6 +460,8 @@
           "defaultspack.ambient.monitor_start",
           "defaults.ambient.monitor_stop",
           "defaultspack.ambient.monitor_stop",
+          "defaults.ambient.configure",
+          "defaultspack.ambient.configure",
           "defaults.ambient.event_submit",
           "defaultspack.ambient.event_submit",
           "defaults.ambient.permission_grant",
@@ -635,7 +637,7 @@
     "env": {
       "DEFAULTS_HTTP_PORT": "8766",
       "RUMI_DEFAULTSPACK_PORT": "8766",
-      "RUMI_DEFAULTSPACK_SURFACE": "browser"
+      "RUMI_DEFAULTSPACK_SURFACE": "webview"
     },
     "capabilities": [
       "desktop_app.execute"
@@ -868,6 +870,12 @@
       "method": "POST",
       "path": "/api/ambient/monitor/stop",
       "function_id": "ambient_monitor_stop",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/config",
+      "function_id": "ambient_configure",
       "pass_body": true
     },
     {

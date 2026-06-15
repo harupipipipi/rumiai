@@ -215,6 +215,58 @@ def test_gesture_choice_dispatches_numeric_reply_without_audio(monkeypatch, tmp_
     assert envelope.metadata["ambient"]["trigger"] == "gesture_choice"
 
 
+def test_ambient_routing_can_create_session_or_per_trigger_chats(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "conversations.json"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+    from domain.chat.store import ChatStore
+
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+    router.configure({
+        "routing": {
+            "mode": "startup_new_chat",
+            "group_id": "gesture",
+            "group_title": "Gesture",
+            "model": "opencode-go/kimi-k2.6",
+        }
+    })
+
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": ""}) as submit:
+        first = router.submit_event(_pinch_audio_payload())
+        second = router.submit_event(_pinch_audio_payload())
+
+    assert first["status"] == "ok"
+    assert second["status"] == "ok"
+    first_envelope = submit.call_args_list[0].args[0]
+    second_envelope = submit.call_args_list[1].args[0]
+    assert first_envelope.target["conversation_id"] == second_envelope.target["conversation_id"]
+    created = ChatStore().get_conversation(first_envelope.target["conversation_id"])
+    assert created["group_id"] == "gesture"
+    assert created["model"] == "opencode-go/kimi-k2.6"
+
+    router.configure({"routing": {"mode": "always_new_chat", "group_id": "gesture"}})
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": ""}) as submit:
+        router.submit_event(_pinch_audio_payload())
+        router.submit_event(_pinch_audio_payload())
+
+    assert submit.call_args_list[0].args[0].target["conversation_id"] != submit.call_args_list[1].args[0].target["conversation_id"]
+
+    router.configure({"routing": {"mode": "always_new_chat", "group_enabled": False, "group_id": "gesture"}})
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": ""}) as submit:
+        router.submit_event(_pinch_audio_payload())
+
+    ungrouped_id = submit.call_args.args[0].target["conversation_id"]
+    ungrouped = ChatStore().get_conversation(ungrouped_id)
+    assert ungrouped["group_id"] is None
+    assert "group_id" not in ungrouped.get("metadata", {})
+
+
 def test_approval_gesture_is_audited_without_dispatch(monkeypatch, tmp_path):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
@@ -262,6 +314,27 @@ def test_os_permission_check_updates_status_without_granting_rumi_permissions(mo
     assert audit_records[-1]["trigger"] == "permission_check"
 
 
+def test_ambient_store_migrates_legacy_gesture_release_threshold(monkeypatch, tmp_path):
+    state_path = tmp_path / "ambient-state.json"
+    state_path.write_text(
+        json.dumps({
+            "services": {
+                "gesture_wake_monitor": {
+                    "release_threshold": 0.38,
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(state_path))
+
+    from domain.ambient.store import AmbientStore
+
+    state = AmbientStore().read()
+
+    assert state["services"]["gesture_wake_monitor"]["release_threshold"] == 0.46
+
+
 def test_ambient_routes_and_functions_are_registered():
     from domain.function_runtime.registry import block_module_for, default_args_for, get_spec
     from transport.registry import canonical_http_route_specs
@@ -269,10 +342,12 @@ def test_ambient_routes_and_functions_are_registered():
     routes = {(route.method, route.pattern, route.block_module) for route in canonical_http_route_specs()}
     assert ("GET", "/api/ambient/status", "blocks.ambient.status") in routes
     assert ("POST", "/api/ambient/monitor/start", "blocks.ambient.monitor") in routes
+    assert ("POST", "/api/ambient/config", "blocks.ambient.config") in routes
     assert ("POST", "/api/ambient/events", "blocks.ambient.event_submit") in routes
     assert ("POST", "/api/ambient/permissions/check", "blocks.ambient.permissions") in routes
     assert ("GET", "/host-permissions", "") in routes
     assert block_module_for("ambient_event_submit") == "blocks.ambient.event_submit"
+    assert block_module_for("ambient_configure") == "blocks.ambient.config"
     assert default_args_for("ambient_monitor_stop") == {"action": "stop"}
     assert default_args_for("ambient_permission_check") == {"action": "check_os"}
     assert get_spec("ambient_monitor_start").requires == (
@@ -348,3 +423,24 @@ def _contains_any_key(value, keys: set[str]) -> bool:
     if isinstance(value, list):
         return any(_contains_any_key(item, keys) for item in value)
     return False
+
+
+def _pinch_audio_payload() -> dict:
+    return {
+        "source": "camera",
+        "trigger": "pinch",
+        "confidence": 0.94,
+        "duration_ms": 900,
+        "mode": "dispatch_audio",
+        "attachments": [
+            {
+                "name": "pinch.webm",
+                "type": "audio/webm",
+                "size": 1234,
+                "dataUrl": "data:audio/webm;base64,AAAA",
+                "ephemeral": True,
+                "do_not_persist": True,
+            }
+        ],
+        "metadata": {"hand": "Right", "normalized_distance": 0.42},
+    }
