@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { AlertTriangle, Check, ChevronDown, ChevronUp, Hand, Loader2, Mic, Play, Radio, RefreshCcw, Settings, Shield, Square, Video, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
+import { subscribeAuthorityApprovalSettlements } from "../lib/authorityApprovalEvents";
+import { openAuthorityApprovalWindow } from "../lib/desktopApproval";
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { ambientTriggerClient, type AmbientPermissionId, type AmbientStatus } from "./ambientTriggerClient";
 import {
+  AMBIENT_AUTHORITY_REQUEST_ID,
   AMBIENT_OS_PERMISSIONS,
   AMBIENT_REQUIRED_PERMISSIONS,
   ambientCopyJa,
@@ -48,6 +51,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const [expanded, setExpanded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [manualRumiFallbackOpen, setManualRumiFallbackOpen] = useState(false);
+  const [rumiApprovalOpen, setRumiApprovalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
@@ -68,6 +72,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const pinchRecorderRef = useRef<ActiveAudioRecorder | null>(null);
   const choiceHandledAtRef = useRef(0);
   const approvalGestureBusyRef = useRef(false);
+  const rumiApprovalAutoOpenRef = useRef(false);
   const conversationIdRef = useRef<string | null | undefined>(conversationId);
   const onOpenInputRef = useRef<Props["onOpenInput"]>(onOpenInput);
   const approvalTargetRef = useRef<Props["approvalTarget"]>(approvalTarget);
@@ -153,6 +158,19 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     const timer = window.setTimeout(() => setFrontFlash(false), 1600);
     return () => window.clearTimeout(timer);
   }, [finalAnswerText, frontOnFinal, lastFinalAnswer]);
+
+  useEffect(() => subscribeAuthorityApprovalSettlements((event) => {
+    if (event.requestId !== AMBIENT_AUTHORITY_REQUEST_ID) return;
+    setMessage(event.status === "approved" ? "Rumi内の許可を保存しました。次に端末のマイク・カメラを許可してください。" : null);
+    void refresh({ probeOs: true });
+  }), []);
+
+  useEffect(() => {
+    if (!status || allRumiPermissionsGranted || rumiApprovalAutoOpenRef.current) return;
+    rumiApprovalAutoOpenRef.current = true;
+    setExpanded(true);
+    void openRumiPermissionApproval();
+  }, [allRumiPermissionsGranted, status]);
 
   useEffect(() => {
     if (videoRef.current && cameraStream) {
@@ -415,7 +433,22 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     }
   }
 
-  async function grantAll() {
+  async function openRumiPermissionApproval() {
+    setManualRumiFallbackOpen(false);
+    setMessage(null);
+    try {
+      const opened = await openAuthorityApprovalWindow(AMBIENT_AUTHORITY_REQUEST_ID);
+      if (opened) {
+        setMessage("Rumiの承認ウィンドウを開きました。そこで許可してください。");
+        return;
+      }
+    } catch (error) {
+      console.info("[ambient] authority approval window unavailable", error);
+    }
+    setRumiApprovalOpen(true);
+  }
+
+  async function grantAllPermissions() {
     setManualRumiFallbackOpen(false);
     await runAction(async () => {
       let next: AmbientStatus | null = null;
@@ -431,6 +464,11 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     } else {
       setManualRumiFallbackOpen(true);
     }
+  }
+
+  async function approveRumiPermissionsFromDialog() {
+    setRumiApprovalOpen(false);
+    await grantAllPermissions();
   }
 
   async function requestMediaPermissions() {
@@ -596,10 +634,11 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     switch (uiState) {
       case "setupNeeded":
         setExpanded(true);
+        await openRumiPermissionApproval();
         return;
       case "rumiPermissionNeeded":
         setExpanded(true);
-        await grantAll();
+        await openRumiPermissionApproval();
         return;
       case "osPermissionNeeded":
         setExpanded(true);
@@ -635,9 +674,10 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
 
   return (
     <LayerPortal layer="globalOverlay">
+      <>
       <section
         className={cn(
-          "fixed bottom-4 right-4 w-[min(380px,calc(100vw-24px))] overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-950/96 text-zinc-200 shadow-2xl shadow-black/40 backdrop-blur",
+          "fixed bottom-4 right-4 flex max-h-[calc(100vh-2rem)] w-[min(400px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-950/96 text-zinc-200 shadow-2xl shadow-black/40 backdrop-blur",
           frontFlash && "border-emerald-300/60 shadow-emerald-500/20",
           stateCopy.tone === "red" && "border-red-400/35",
           stateCopy.tone === "amber" && "border-amber-400/30",
@@ -665,6 +705,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           </button>
         </div>
 
+        <div className="min-h-0 overflow-y-auto overscroll-contain">
         <div className="space-y-2.5 px-3.5 py-3">
           <p className="text-[12px] leading-5 text-zinc-400">{stateCopy.body}</p>
           <button
@@ -731,9 +772,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                   ))}
                 </div>
                 {!allRumiPermissionsGranted && (
-                  <button type="button" onClick={() => void grantAll()} disabled={busy} className="ambient-mini-button mt-2 w-full">
+                  <button type="button" onClick={() => void openRumiPermissionApproval()} disabled={busy} className="ambient-mini-button mt-2 w-full">
                     {busy ? <Loader2 size={14} className="animate-spin" /> : <Shield size={14} />}
-                    Rumiで許可する
+                    承認画面で許可する
                   </button>
                 )}
               </SetupStep>
@@ -923,8 +964,102 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             )}
           </div>
         )}
+        </div>
       </section>
+      {rumiApprovalOpen && (
+        <RumiPermissionApprovalDialog
+          busy={busy}
+          onApprove={() => void approveRumiPermissionsFromDialog()}
+          onCancel={() => setRumiApprovalOpen(false)}
+        />
+      )}
+      </>
     </LayerPortal>
+  );
+}
+
+function RumiPermissionApprovalDialog({
+  busy,
+  onApprove,
+  onCancel,
+}: {
+  busy: boolean;
+  onApprove: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 rumi-layer-modal flex items-end justify-center bg-black/55 px-3 py-4 backdrop-blur-sm sm:items-center">
+      <section
+        className="flex max-h-[calc(100vh-2rem)] w-[min(460px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border border-amber-300/25 bg-zinc-950 text-zinc-100 shadow-2xl shadow-black/50"
+        aria-label="Rumi ambient permission approval"
+      >
+        <header className="flex items-start gap-3 border-b border-zinc-800 px-4 py-3">
+          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-300/35 bg-amber-300/10 text-amber-100">
+            <Shield size={20} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-zinc-50">指で録音をRumiで許可</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">このpackは、録音・指の検出・AI送信のためにRumi側の許可を要求しています。</p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
+            aria-label="閉じる"
+          >
+            <X size={15} />
+          </button>
+        </header>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3 text-xs leading-5">
+          <section className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase text-zinc-500">Rumiで許可すること</p>
+            <div className="space-y-1.5">
+              {AMBIENT_REQUIRED_PERMISSIONS.map((permissionId) => (
+                <div key={permissionId} className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/45 px-2.5 py-2">
+                  <Check size={13} className="shrink-0 text-emerald-200" />
+                  <span className="text-zinc-200">{ambientPermissionLabels[permissionId] ?? permissionId}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase text-zinc-500">追加される入口</p>
+            <div className="grid gap-1.5 text-zinc-300">
+              <InstructionStep index={1} text="小型windowに指で録音パネルを表示" />
+              <InstructionStep index={2} text="defaultspack inputへ音声入力を投入" />
+              <InstructionStep index={3} text="LINE / Discord / Web hookの外部入力profileへ接続" />
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-zinc-800 bg-black/25 px-3 py-2 text-zinc-400">
+            <p className="font-medium text-zinc-200">OSの許可とは別です</p>
+            <p className="mt-1">この承認はRumi内の許可だけを保存します。次の画面でブラウザまたはOSのマイク・カメラ許可を確認します。</p>
+          </section>
+
+          <section className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-emerald-50">
+            <p className="font-medium">プライバシー</p>
+            <p className="mt-1 text-emerald-50/80">音声・画像・カメラ映像は保存しません。auditに残るのはトリガーイベントだけです。</p>
+          </section>
+        </div>
+
+        <footer className="flex items-center justify-end gap-2 border-t border-zinc-800 px-4 py-3">
+          <button type="button" onClick={onCancel} disabled={busy} className="ambient-mini-button min-w-24">
+            あとで
+          </button>
+          <button
+            type="button"
+            onClick={onApprove}
+            disabled={busy}
+            className="inline-flex h-9 min-w-36 items-center justify-center gap-2 rounded-lg bg-amber-200 px-3 text-sm font-semibold text-zinc-950 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy ? <Loader2 size={15} className="animate-spin" /> : <Shield size={15} />}
+            許可する
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 

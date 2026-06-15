@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Loader2, RefreshCw, ShieldAlert, ShieldCheck, ShieldX, X } from "lucide-react";
 
 import { AmbientTriggerPanel } from "../ambient/AmbientTriggerPanel";
-import { ambientTriggerClient } from "../ambient/ambientTriggerClient";
+import { ambientTriggerClient, type AmbientStatus } from "../ambient/ambientTriggerClient";
+import {
+  AMBIENT_AUTHORITY_REQUEST_ID,
+  AMBIENT_OS_PERMISSIONS,
+  AMBIENT_REQUIRED_PERMISSIONS,
+  ambientPermissionLabels,
+  grantedPermissionCount,
+  hasAllRumiPermissions,
+} from "../ambient/ambientUiState";
 import { authorityApprovalResources, type AuthorityApprovalDecision, type AuthorityRequest } from "../features/chat/resources/authorityApprovalResources";
 import {
   authorityApprovalConfig,
@@ -84,6 +92,7 @@ function windowTitle(request: AuthorityRequest | null): string {
 
 export function AuthorityApprovalWindow() {
   const [requestId, setRequestId] = useState(requestIdFromLocation());
+  const isAmbientPackApproval = requestId === AMBIENT_AUTHORITY_REQUEST_ID;
   const [request, setRequest] = useState<AuthorityRequest | null>(null);
   const [pendingRequests, setPendingRequests] = useState<AuthorityRequest[]>([]);
   const [selectedScope, setSelectedScope] = useState<AuthorityApprovalScope>("once");
@@ -118,8 +127,9 @@ export function AuthorityApprovalWindow() {
   const controlsDisabled = !request || request.status !== "pending" || action !== null || decisionState.kind !== "idle";
 
   useEffect(() => {
+    if (isAmbientPackApproval) return;
     document.title = title;
-  }, [title]);
+  }, [isAmbientPackApproval, title]);
 
   useEffect(() => {
     let cancelled = false;
@@ -149,6 +159,12 @@ export function AuthorityApprovalWindow() {
     let cancelled = false;
 
     async function load() {
+      if (isAmbientPackApproval) {
+        setLoading(false);
+        setRequest(null);
+        setPendingRequests([]);
+        return;
+      }
       setLoading(true);
       setError(null);
       setDecisionState({ kind: "idle" });
@@ -173,7 +189,7 @@ export function AuthorityApprovalWindow() {
     return () => {
       cancelled = true;
     };
-  }, [requestId, refreshNonce]);
+  }, [isAmbientPackApproval, requestId, refreshNonce]);
 
   const selectRequest = (nextRequestId: string) => {
     if (!nextRequestId || nextRequestId === requestId) return;
@@ -277,6 +293,10 @@ export function AuthorityApprovalWindow() {
       setAction(null);
     }
   };
+
+  if (isAmbientPackApproval) {
+    return <AmbientPackAuthorityApprovalWindow />;
+  }
 
   return (
     <main className="min-h-screen bg-[#09090b] text-zinc-100">
@@ -462,6 +482,179 @@ export function AuthorityApprovalWindow() {
           else void reject();
         }}
       />
+    </main>
+  );
+}
+
+function AmbientPackAuthorityApprovalWindow() {
+  const [status, setStatus] = useState<AmbientStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [action, setAction] = useState<"approve" | "close" | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const rumiPermissionCount = grantedPermissionCount(status, AMBIENT_REQUIRED_PERMISSIONS, "rumi");
+  const osPermissionCount = grantedPermissionCount(status, AMBIENT_OS_PERMISSIONS, "os");
+  const rumiReady = hasAllRumiPermissions(status);
+
+  const reloadStatus = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setStatus(await ambientTriggerClient.status());
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "指で録音の状態を取得できませんでした。");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    document.title = "指で録音のRumi許可";
+    void reloadStatus();
+  }, []);
+
+  const approve = async () => {
+    setAction("approve");
+    setError(null);
+    setMessage(null);
+    try {
+      let next: AmbientStatus | null = null;
+      for (const permissionId of AMBIENT_REQUIRED_PERMISSIONS) {
+        next = await ambientTriggerClient.grantPermission(permissionId);
+      }
+      setStatus(next ?? await ambientTriggerClient.status());
+      broadcastAuthorityApprovalSettlement({
+        requestId: AMBIENT_AUTHORITY_REQUEST_ID,
+        status: "approved",
+      });
+      setMessage("Rumi側の許可を保存しました。元の画面で端末のマイク・カメラ許可へ進んでください。");
+    } catch (approvalError) {
+      setError(approvalError instanceof Error ? approvalError.message : "Rumi許可を保存できませんでした。");
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const closeWindow = () => {
+    setAction("close");
+    window.close();
+    window.setTimeout(() => setAction(null), 300);
+  };
+
+  return (
+    <main className="min-h-screen bg-[#09090b] text-zinc-100">
+      <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-5 py-5">
+        <header className="flex items-start justify-between gap-4 border-b border-zinc-800 pb-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-zinc-500">
+              <ShieldAlert size={14} />
+              Authority
+            </div>
+            <h1 className="mt-2 break-words text-xl font-semibold text-zinc-50">指で録音をRumiで許可</h1>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">
+              rumi_ambient_trigger_pack が、マイク入力・カメラ検出・AI送信のRumi許可を要求しています。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void reloadStatus()}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
+            title="再読み込み"
+          >
+            <RefreshCw size={15} />
+          </button>
+        </header>
+
+        {error && (
+          <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100">
+            {error}
+          </div>
+        )}
+
+        {message && (
+          <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+            <div className="flex items-center gap-2 font-medium">
+              <ShieldCheck size={16} />
+              {message}
+            </div>
+          </div>
+        )}
+
+        <section className="mt-5 grid gap-4">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={cn(
+                "rounded border px-2 py-1 text-[11px] font-medium",
+                rumiReady ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-amber-500/30 bg-amber-500/10 text-amber-100",
+              )}>
+                {rumiReady ? "許可済み" : "許可が必要"}
+              </span>
+              <span className="rounded border border-zinc-800 px-2 py-1 text-[11px] text-zinc-400">
+                Rumi {rumiPermissionCount}/{AMBIENT_REQUIRED_PERMISSIONS.length}
+              </span>
+              <span className="rounded border border-zinc-800 px-2 py-1 text-[11px] text-zinc-400">
+                OS {osPermissionCount}/{AMBIENT_OS_PERMISSIONS.length}
+              </span>
+            </div>
+
+            {loading ? (
+              <div className="mt-5 flex min-h-32 items-center justify-center rounded-lg border border-zinc-800 bg-black/20">
+                <Loader2 className="animate-spin text-zinc-500" size={22} />
+              </div>
+            ) : (
+              <div className="mt-5 grid gap-4">
+                <section className="space-y-2">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-600">Rumiで許可すること</p>
+                  <div className="grid gap-2">
+                    {AMBIENT_REQUIRED_PERMISSIONS.map((permissionId) => (
+                      <div key={permissionId} className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-black/25 px-3 py-2 text-sm">
+                        <span className="text-zinc-200">{ambientPermissionLabels[permissionId] ?? permissionId}</span>
+                        <Check size={14} className={rumiReady ? "text-emerald-200" : "text-zinc-600"} />
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-zinc-800 bg-black/25 p-3 text-xs leading-5 text-zinc-400">
+                  <p className="font-medium text-zinc-200">追加される入口</p>
+                  <p className="mt-1">小型window、defaultspack input、LINE / Discord / Web hook の外部入力profileへ接続します。</p>
+                </section>
+
+                <section className="rounded-lg border border-zinc-800 bg-black/25 p-3 text-xs leading-5 text-zinc-400">
+                  <p className="font-medium text-zinc-200">OS許可とは別管理</p>
+                  <p className="mt-1">この画面で保存するのはRumi側の許可です。実際のマイク・カメラ使用は、元の画面でブラウザまたはOSの確認に進みます。</p>
+                </section>
+
+                <section className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs leading-5 text-emerald-50">
+                  <p className="font-medium">プライバシー</p>
+                  <p className="mt-1 text-emerald-50/80">音声・画像・カメラ映像は保存しません。auditに残るのはトリガーイベントだけです。</p>
+                </section>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeWindow}
+              disabled={action !== null}
+              className="flex h-10 min-w-28 items-center justify-center gap-2 rounded-lg border border-zinc-800 px-4 text-sm font-semibold text-zinc-300 hover:border-zinc-700 hover:text-zinc-100 disabled:opacity-50"
+            >
+              {action === "close" ? <Loader2 className="animate-spin" size={15} /> : <X size={15} />}
+              あとで
+            </button>
+            <button
+              type="button"
+              onClick={() => void approve()}
+              disabled={loading || action !== null || rumiReady}
+              className="flex h-10 min-w-32 items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-50"
+            >
+              {action === "approve" ? <Loader2 className="animate-spin" size={15} /> : <Check size={15} />}
+              {rumiReady ? "許可済み" : "許可する"}
+            </button>
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

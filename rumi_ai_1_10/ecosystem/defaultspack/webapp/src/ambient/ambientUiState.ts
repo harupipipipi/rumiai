@@ -6,6 +6,8 @@ export const AMBIENT_REQUIRED_PERMISSIONS: AmbientPermissionId[] = [
   "ambient.trigger.dispatch",
 ];
 
+export const AMBIENT_AUTHORITY_REQUEST_ID = "rumi_ambient_trigger_pack";
+
 export const AMBIENT_OS_PERMISSIONS: AmbientPermissionId[] = [
   "microphone.capture",
   "camera.capture",
