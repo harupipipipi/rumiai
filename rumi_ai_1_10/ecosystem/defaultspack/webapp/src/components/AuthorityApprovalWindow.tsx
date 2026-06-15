@@ -583,12 +583,11 @@ function AmbientPackAuthorityApprovalWindow() {
         <section className="mt-5 grid gap-4">
           <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
             <div className="flex flex-wrap items-center gap-2">
-              <span className={cn(
-                "rounded border px-2 py-1 text-[11px] font-medium",
-                rumiReady ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-amber-500/30 bg-amber-500/10 text-amber-100",
-              )}>
-                {rumiReady ? "許可済み" : "許可が必要"}
-              </span>
+              {!rumiReady && (
+                <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-100">
+                  許可が必要
+                </span>
+              )}
               <span className="rounded border border-zinc-800 px-2 py-1 text-[11px] text-zinc-400">
                 Rumi {rumiPermissionCount}/{AMBIENT_REQUIRED_PERMISSIONS.length}
               </span>
@@ -641,17 +640,19 @@ function AmbientPackAuthorityApprovalWindow() {
               className="flex h-10 min-w-28 items-center justify-center gap-2 rounded-lg border border-zinc-800 px-4 text-sm font-semibold text-zinc-300 hover:border-zinc-700 hover:text-zinc-100 disabled:opacity-50"
             >
               {action === "close" ? <Loader2 className="animate-spin" size={15} /> : <X size={15} />}
-              あとで
+              {rumiReady ? "閉じる" : "あとで"}
             </button>
-            <button
-              type="button"
-              onClick={() => void approve()}
-              disabled={loading || action !== null || rumiReady}
-              className="flex h-10 min-w-32 items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-50"
-            >
-              {action === "approve" ? <Loader2 className="animate-spin" size={15} /> : <Check size={15} />}
-              {rumiReady ? "許可済み" : "許可する"}
-            </button>
+            {!rumiReady && (
+              <button
+                type="button"
+                onClick={() => void approve()}
+                disabled={loading || action !== null}
+                className="flex h-10 min-w-32 items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-50"
+              >
+                {action === "approve" ? <Loader2 className="animate-spin" size={15} /> : <Check size={15} />}
+                許可する
+              </button>
+            )}
           </div>
         </section>
       </div>
