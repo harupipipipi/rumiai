@@ -2534,6 +2534,11 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.ambient.event_submit
+  defaults.ambient.configure:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.configure
   defaults.ambient.monitor_start:
     owner: ambient
     reason: legacy caller compatibility

@@ -300,4 +300,8 @@ domains:
     may_import:
     - domain/coding
     path: domain/workspace
-exceptions: []
+exceptions:
+- file: domain/ambient/router.py
+  from: ambient
+  import: domain/chat
+  reason: ambient trigger routing creates destination conversations through the chat store
