@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -279,6 +280,42 @@ def test_ambient_routes_and_functions_are_registered():
         CAMERA_PERMISSION,
         "ambient.trigger.dispatch",
     )
+
+
+def test_ambient_monitor_start_function_returns_host_stream_intent(monkeypatch):
+    from core_runtime.host_intent import validate_host_intent
+
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    main_path = DEFAULTSPACK_ROOT / "functions" / "ambient_monitor_start" / "main.py"
+    spec = importlib.util.spec_from_file_location("ambient_monitor_start_main", main_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    result = module.run(
+        {
+            "owner_pack": "rumi_ambient_trigger_pack",
+            "function_id": "ambient_monitor_start",
+            "conversation_id": "conversation-ambient",
+        },
+        {"max_duration_ms": 30_000, "sample_rate": 16_000, "channels": 1},
+    )
+    validation = validate_host_intent(
+        result,
+        caller_pack_id="fallback",
+        caller_function_id="fallback",
+    )
+
+    assert validation.ok is True
+    assert result["type"] == "host_stream_intent"
+    assert result["operation"] == MIC_PERMISSION
+    assert result["host_function_id"] == "host_microphone_capture"
+    assert result["stream"]["enabled"] is True
+    assert result["args"]["privacy_mode"] == "audio_embedding_or_ephemeral_recording"
+    assert result["consumer"] == {
+        "pack_id": "rumi_ambient_trigger_pack",
+        "function_id": "ambient_audio_classifier",
+    }
 
 
 def test_rumi_ambient_trigger_pack_metadata_exposes_install_prompt_permissions_and_hooks():

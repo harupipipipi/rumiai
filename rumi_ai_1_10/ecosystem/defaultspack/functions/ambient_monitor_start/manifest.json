@@ -1,6 +1,6 @@
 {
   "function_id": "ambient_monitor_start",
-  "description": "Enable ambient_monitor.enabled and start voice wake and camera pinch monitoring.",
+  "description": "Request an approved host microphone stream for ambient wake monitoring.",
   "tags": ["ambient", "monitor"],
   "risk": "high",
   "requires": ["host.microphone.capture", "host.camera.capture", "ambient.trigger.dispatch"],
