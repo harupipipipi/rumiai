@@ -7,12 +7,14 @@ capability broker.
 
 from __future__ import annotations
 
+import importlib
+import time
 from typing import Any
 
 from core_runtime.authority import get_authority_service
 
 from .approval import check_host_intent_authority
-from .models import is_host_intent_payload
+from .models import HostIntent, is_host_intent_payload
 from .validator import validate_host_intent
 
 
@@ -65,6 +67,13 @@ class HostIntentExecutor:
                 "host_intent": intent.to_dict(),
                 "authority": authority,
             }
+        brokered = _dispatch_to_viewer_broker(intent, request_id=request_id)
+        if brokered is not None:
+            return {
+                "host_intent": intent.to_dict(),
+                "authority": authority,
+                **brokered,
+            }
         return {
             "status": "prepared",
             "success": True,
@@ -93,8 +102,64 @@ def maybe_handle_host_intent_output(
     )
 
 
+def _dispatch_to_viewer_broker(intent: HostIntent, *, request_id: str | None = None) -> dict[str, Any] | None:
+    try:
+        broker_client_module = importlib.import_module(
+            _defaultspack_module("domain", "host_bridge", "viewer_broker_client")
+        )
+        approval = importlib.import_module(_defaultspack_module("domain", "safety", "approval"))
+    except Exception:
+        return None
+
+    ViewerBrokerClient = getattr(broker_client_module, "ViewerBrokerClient", None)
+    if ViewerBrokerClient is None:
+        return None
+    client = ViewerBrokerClient.from_environment()
+    if not client.available():
+        return {
+            "status": "prepared",
+            "success": True,
+            "host_broker": {"available": False},
+            "message": "Host intent is approved and ready for host capability broker execution.",
+        }
+
+    execution_token = approval.issue_execution_token(
+        request_id or f"host_intent:{intent.operation}:{intent.args_hash[:12]}",
+        intent.args_hash,
+        expires_at=int(time.time()) + 300,
+        operation=intent.operation,
+        function_id=intent.host_function_id or intent.operation,
+        pack_id=intent.caller_pack_id,
+        conversation_id=intent.conversation_id,
+    )
+    payload = intent.to_dict()
+    payload["approval_token"] = execution_token
+    try:
+        broker_response = client.start_stream(payload) if intent.is_stream else client.execute_intent(payload)
+    except Exception as exc:
+        return {
+            "status": "host_broker_error",
+            "success": False,
+            "error_type": "host_broker_error",
+            "host_broker": {"available": True, "error": str(exc)},
+        }
+
+    success = bool(isinstance(broker_response, dict) and broker_response.get("ok") is True)
+    return {
+        "status": "executed" if success else "host_broker_error",
+        "success": success,
+        "error_type": None if success else "host_broker_error",
+        "host_broker": broker_response if isinstance(broker_response, dict) else {},
+    }
+
+
+def _defaultspack_module(*parts: str) -> str:
+    return ".".join(("ecosystem", "defaultspack", *parts))
+
+
 def _authority_followup_for_operation(context: dict[str, Any], operation: str) -> tuple[str | None, str | None]:
-    authority = context.get("authority") if isinstance(context.get("authority"), dict) else {}
+    raw_authority = context.get("authority")
+    authority: dict[str, Any] = raw_authority if isinstance(raw_authority, dict) else {}
     approvals = authority.get("approvals") or authority.get("approval_tokens")
     if isinstance(approvals, list):
         for item in approvals:

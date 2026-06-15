@@ -53,7 +53,7 @@ HOST_CAPABILITIES_PACK_PERMISSIONS = (
 )
 
 
-DEFAULT_BUILTIN_GRANTS = (
+DEFAULT_BUILTIN_GRANTS: tuple[dict[str, Any], ...] = (
     {
         "principal_id": AUTHORITY_WINDOW_PRINCIPAL,
         "permission_ids": AUTHORITY_WINDOW_PERMISSIONS,
@@ -90,8 +90,11 @@ def apply_default_builtin_grants(grant_manager: Any) -> list[dict[str, Any]]:
     applied: list[dict[str, Any]] = []
     for record in DEFAULT_BUILTIN_GRANTS:
         principal_id = str(record["principal_id"])
-        config = dict(record.get("config") or {})
-        for permission_id in record["permission_ids"]:
+        config: dict[str, Any] = dict(record.get("config") or {})
+        raw_permission_ids = record.get("permission_ids")
+        if not isinstance(raw_permission_ids, (list, tuple, set, frozenset)):
+            continue
+        for permission_id in raw_permission_ids:
             if permission_id == "host.process.exec_guarded":
                 continue
             grant_manager.grant_permission(principal_id, permission_id, config)

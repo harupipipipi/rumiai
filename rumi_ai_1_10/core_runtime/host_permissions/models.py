@@ -58,12 +58,15 @@ class HostPermissionDefinition:
 
     @classmethod
     def from_dict(cls, permission_id: str, data: dict[str, Any]) -> "HostPermissionDefinition":
-        raw_os = data.get("os_permissions") if isinstance(data.get("os_permissions"), dict) else {}
+        raw_os_permissions = data.get("os_permissions")
+        raw_os = raw_os_permissions if isinstance(raw_os_permissions, dict) else {}
         os_permissions = {
             str(platform): [str(item) for item in values if str(item or "").strip()]
             for platform, values in raw_os.items()
             if isinstance(values, list)
         }
+        raw_privacy = data.get("privacy")
+        privacy = raw_privacy if isinstance(raw_privacy, dict) else {}
         return cls(
             permission_id=permission_id,
             label=str(data.get("label") or permission_id),
@@ -74,7 +77,7 @@ class HostPermissionDefinition:
             max_duration_ms_default=_optional_int(data.get("max_duration_ms_default")),
             max_duration_ms_hard=_optional_int(data.get("max_duration_ms_hard")),
             os_permissions=os_permissions,
-            privacy=dict(data.get("privacy") if isinstance(data.get("privacy"), dict) else {}),
+            privacy=dict(privacy),
         )
 
     def to_dict(self) -> dict[str, Any]:

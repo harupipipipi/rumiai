@@ -51,12 +51,17 @@ class HostIntent:
         caller_function_id: str = "",
         conversation_id: str = "",
     ) -> "HostIntent":
-        caller = payload.get("caller") if isinstance(payload.get("caller"), dict) else {}
+        raw_args = payload.get("args")
+        args = raw_args if isinstance(raw_args, dict) else {}
+        raw_stream = payload.get("stream")
+        stream = raw_stream if isinstance(raw_stream, dict) else {}
+        raw_caller = payload.get("caller")
+        caller = raw_caller if isinstance(raw_caller, dict) else {}
         return cls(
             type=str(payload.get("type") or "").strip(),
             operation=normalize_host_permission_id(str(payload.get("operation") or "").strip()),
-            args=dict(payload.get("args") if isinstance(payload.get("args"), dict) else {}),
-            stream=dict(payload.get("stream") if isinstance(payload.get("stream"), dict) else {}),
+            args=dict(args),
+            stream=dict(stream),
             reason=str(payload.get("reason") or "").strip(),
             caller_pack_id=str(caller.get("pack_id") or caller_pack_id or "").strip(),
             caller_function_id=str(caller.get("function_id") or caller_function_id or "").strip(),

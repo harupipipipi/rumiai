@@ -189,6 +189,84 @@ def test_host_mediator_function_returns_valid_host_intent(monkeypatch):
     assert validation.ok is True
 
 
+def test_host_intent_executor_dispatches_approved_stream_to_viewer_broker(monkeypatch):
+    from core_runtime.authority.models import AuthorityDecision
+    from core_runtime.host_intent import executor as host_intent_executor
+    from core_runtime.host_intent.executor import HostIntentExecutor
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+    from ecosystem.defaultspack.domain.safety import approval
+
+    captured: dict[str, object] = {}
+
+    class Authority:
+        def check(self, **kwargs):
+            captured["authority_check"] = kwargs
+            return AuthorityDecision(
+                allowed=True,
+                permission_id=kwargs["permission_id"],
+                principal_id=kwargs["principal_id"],
+                reason="approved",
+                risk_level="high",
+                resource=kwargs["resource"],
+            )
+
+    class FakeClient:
+        def available(self):
+            return True
+
+        def start_stream(self, payload):
+            captured["broker_payload"] = dict(payload)
+            return {"ok": True, "stream_id": "host-stream-1"}
+
+    def fake_issue_execution_token(request_id, args_hash, **kwargs):
+        captured["execution_token"] = {
+            "request_id": request_id,
+            "args_hash": args_hash,
+            **kwargs,
+        }
+        return "viewer-execution-token"
+
+    monkeypatch.setattr(host_intent_executor, "get_authority_service", lambda: Authority())
+    monkeypatch.setattr(ViewerBrokerClient, "from_environment", classmethod(lambda cls: FakeClient()))
+    monkeypatch.setattr(approval, "issue_execution_token", fake_issue_execution_token)
+
+    result = HostIntentExecutor().handle(
+        {
+            "type": "host_stream_intent",
+            "operation": "host.microphone.capture",
+            "args": {"duration_ms": 1000},
+            "stream": {"enabled": True, "max_duration_ms": 1000},
+            "caller": {
+                "pack_id": "rumi_ambient_trigger_pack",
+                "function_id": "ambient_monitor_start",
+            },
+            "host_function_id": "host_microphone_capture",
+        },
+        principal_id="rumi_ambient_trigger_pack",
+        caller_pack_id="rumi_ambient_trigger_pack",
+        caller_function_id="ambient_monitor_start",
+        request_context={
+            "conversation_id": "conv-1",
+            "authority": {
+                "permission_id": "host.microphone.capture",
+                "request_id": "auth-1",
+                "approval_token": "authority-token",
+            },
+        },
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "executed"
+    assert result["host_broker"]["stream_id"] == "host-stream-1"
+    assert captured["broker_payload"]["approval_token"] == "viewer-execution-token"
+    assert result["host_intent"].get("approval_token") is None
+    assert captured["execution_token"]["request_id"] == "auth-1"
+    assert captured["execution_token"]["operation"] == "host.microphone.capture"
+    assert captured["execution_token"]["function_id"] == "host_microphone_capture"
+    assert captured["execution_token"]["pack_id"] == "rumi_ambient_trigger_pack"
+    assert captured["execution_token"]["conversation_id"] == "conv-1"
+
+
 def test_direct_host_function_from_non_host_pack_becomes_critical_authority_request(monkeypatch):
     from core_runtime.authority.models import AuthorityDecision
     from core_runtime.capability_executor import CapabilityExecutor
