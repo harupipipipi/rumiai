@@ -30,51 +30,58 @@ export function ProfileGraphCanvas({
   const positions = new Map(layout.nodes.map((node) => [node.id, node]));
 
   return (
-    <div className="relative min-h-[540px] overflow-hidden rounded-2xl border border-border bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.08),_transparent_45%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent)]">
-      <svg viewBox={`0 0 ${layout.width} ${layout.height}`} className="absolute inset-0 h-full w-full">
-        {edges.map((edge) => {
-          const path = edgePath(edge, positions);
-          if (!path) {
-            return null;
-          }
-          return (
-            <path
-              key={edge.id}
-              d={path}
-              fill="none"
-              stroke={edgeStroke(edge)}
-              strokeWidth={edge.kind === 'fallback' ? 1.5 : 2}
-              strokeDasharray={edge.kind === 'fallback' ? '4 4' : edge.kind.includes('api') ? '2 0' : '0'}
-              opacity={edge.active ? 0.88 : 0.4}
-            />
-          );
-        })}
-      </svg>
-
-      {layout.nodes.map((node) => (
-        <button
-          key={node.id}
-          type="button"
-          className={cn(
-            'absolute rounded-2xl border px-3 py-2 text-left shadow-[0_18px_40px_-28px_rgba(0,0,0,0.85)] transition-all',
-            nodeChrome(node),
-            selectedNodeId === node.id && 'ring-2 ring-white/70 shadow-[0_24px_50px_-30px_rgba(255,255,255,0.55)]',
-          )}
-          style={{
-            left: node.x,
-            top: node.y,
-            width: node.width,
-            height: node.height,
-          }}
-          onClick={() => onSelectNode?.(node.id)}
+    <div className="relative min-h-[620px] overflow-auto rounded-xl border border-border bg-bg-main">
+      <div className="relative" style={{width: layout.width, height: layout.height}}>
+        <svg
+          width={layout.width}
+          height={layout.height}
+          viewBox={`0 0 ${layout.width} ${layout.height}`}
+          className="absolute left-0 top-0"
         >
-          <div className="truncate text-[11px] uppercase tracking-[0.18em] text-white/55">
-            {graphNodeKindLabel(node)}
-          </div>
-          <div className="mt-1 truncate text-sm font-semibold text-white">{node.label || node.ref || node.id}</div>
-          <div className="truncate text-xs text-white/65">{node.ref || node.id}</div>
-        </button>
-      ))}
+          {edges.map((edge) => {
+            const path = edgePath(edge, positions);
+            if (!path) {
+              return null;
+            }
+            return (
+              <path
+                key={edge.id}
+                d={path}
+                fill="none"
+                stroke={edgeStroke(edge)}
+                strokeWidth={edge.kind === 'fallback' ? 1.5 : 2}
+                strokeDasharray={edge.kind === 'fallback' ? '4 4' : edge.kind.includes('api') ? '2 0' : '0'}
+                opacity={edge.active ? 0.88 : 0.4}
+              />
+            );
+          })}
+        </svg>
+
+        {layout.nodes.map((node) => (
+          <button
+            key={node.id}
+            type="button"
+            className={cn(
+              'absolute rounded-xl border px-3 py-2 text-left shadow-none transition-colors hover:bg-bg-hover',
+              nodeChrome(node),
+              selectedNodeId === node.id && 'ring-2 ring-accent/40',
+            )}
+            style={{
+              left: node.x,
+              top: node.y,
+              width: node.width,
+              height: node.height,
+            }}
+            onClick={() => onSelectNode?.(node.id)}
+          >
+            <div className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted">
+              {graphNodeKindLabel(node)}
+            </div>
+            <div className="mt-1 truncate text-sm font-semibold text-text-main">{node.label || node.ref || node.id}</div>
+            <div className="truncate text-xs text-text-muted">{node.ref || node.id}</div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -92,13 +99,13 @@ function edgeStroke(edge: ApiProfileGraphEdge): string {
 
 function nodeChrome(node: ApiProfileGraphNode): string {
   const prefix = node.id.split(':', 1)[0];
-  if (prefix === 'profile') return 'border-white/35 bg-white/10 backdrop-blur-sm';
-  if (prefix === 'tool') return 'border-emerald-400/40 bg-emerald-500/14';
-  if (prefix === 'webhook') return 'border-orange-400/40 bg-orange-500/14';
-  if (prefix === 'api') return 'border-amber-400/45 bg-amber-500/14';
-  if (prefix === 'prompt') return 'border-fuchsia-400/40 bg-fuchsia-500/14';
-  if (prefix === 'frontend') return 'border-sky-400/40 bg-sky-500/14';
-  if (prefix === 'flow') return 'border-teal-400/40 bg-teal-500/14';
-  if (prefix === 'storage' || node.kind === 'storage') return 'border-slate-400/35 bg-slate-500/10';
-  return 'border-slate-300/25 bg-slate-500/10';
+  if (prefix === 'profile') return 'border-accent/50 bg-accent/8';
+  if (prefix === 'tool') return 'border-emerald-500/40 bg-emerald-500/10';
+  if (prefix === 'webhook') return 'border-orange-500/40 bg-orange-500/10';
+  if (prefix === 'api') return 'border-amber-500/45 bg-amber-500/10';
+  if (prefix === 'prompt') return 'border-fuchsia-500/40 bg-fuchsia-500/10';
+  if (prefix === 'frontend') return 'border-sky-500/40 bg-sky-500/10';
+  if (prefix === 'flow') return 'border-teal-500/40 bg-teal-500/10';
+  if (prefix === 'storage' || node.kind === 'storage') return 'border-slate-500/35 bg-slate-500/10';
+  return 'border-border bg-bg-card';
 }
