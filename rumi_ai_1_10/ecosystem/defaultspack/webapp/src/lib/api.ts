@@ -2790,11 +2790,11 @@ export const api = {
   }) {
     const { companyId, conversationId, ...settings } = payload;
     return request<SubagentTeamCreatorSettingsResponse>("/api/subagent-team/creator/settings", {
-      method: "POST",
+      method: "PATCH",
       body: JSON.stringify({
         company_id: companyId,
         conversation_id: conversationId,
-        ...settings,
+        settings,
       }),
     });
   },

@@ -589,6 +589,18 @@
       "description": "Record frontend diagnostics and fallback events in the local audit log"
     },
     {
+      "method": "POST",
+      "path": "/api/subagent-team/bootstrap",
+      "flow_id": "subagent_team_workspace",
+      "description": "Bootstrap a guarded Subagents / Teams workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/subagent-team/workspace/metadata",
+      "flow_id": "subagent_team_workspace",
+      "description": "Update Subagents / Teams workspace metadata"
+    },
+    {
       "method": "GET",
       "path": "/api/subagent-team/status",
       "flow_id": "subagent_team_workspace",
@@ -704,6 +716,12 @@
     },
     {
       "method": "GET",
+      "path": "/api/subagent-team/creator/decision-preview",
+      "flow_id": "subagent_team_workspace",
+      "description": "Preview Creator routing decisions"
+    },
+    {
+      "method": "GET",
       "path": "/api/subagent-team/creator/settings",
       "flow_id": "subagent_team_workspace",
       "description": "Read Subagent Creator settings"
@@ -725,6 +743,12 @@
       "path": "/api/subagent-team/rich",
       "flow_id": "subagent_team_workspace",
       "description": "Update /rich state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/subagent-team/messages",
+      "flow_id": "subagent_team_workspace",
+      "description": "Post a Subagents / Teams message through CompanySlackRuntime"
     },
     {
       "method": "GET",

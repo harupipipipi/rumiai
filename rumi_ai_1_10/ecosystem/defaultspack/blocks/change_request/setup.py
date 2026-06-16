@@ -28,6 +28,37 @@ def run(context: dict[str, Any]):
             "blocks.change_request.export_patch",
             {"id": "id"},
         ),
+        ("GET", "/api/change-requests/{id}/comments", "blocks.change_request.comments", {"id": "id"}),
+        ("POST", "/api/change-requests/{id}/comments", "blocks.change_request.comments", {"id": "id"}),
+        (
+            "GET",
+            "/api/change-requests/{id}/comments/{comment_id}",
+            "blocks.change_request.comments",
+            {"id": "id", "comment_id": "comment_id"},
+        ),
+        (
+            "PATCH",
+            "/api/change-requests/{id}/comments/{comment_id}",
+            "blocks.change_request.comments",
+            {"id": "id", "comment_id": "comment_id"},
+        ),
+        ("POST", "/api/change-requests/{id}/decision", "blocks.change_request.decision", {"id": "id"}),
+        ("GET", "/api/change-requests/{id}/viewed-files", "blocks.change_request.viewed_files", {"id": "id"}),
+        ("PATCH", "/api/change-requests/{id}/viewed-files", "blocks.change_request.viewed_files", {"id": "id"}),
+        ("POST", "/api/change-requests/{id}/viewed-files", "blocks.change_request.viewed_files", {"id": "id"}),
+        ("GET", "/api/change-requests/{id}/checks", "blocks.change_request.checks", {"id": "id"}),
+        ("POST", "/api/change-requests/{id}/checks", "blocks.change_request.checks", {"id": "id"}),
+        ("POST", "/api/change-requests/{id}/checks/run", "blocks.change_request.checks", {"id": "id"}),
+        ("POST", "/api/change-requests/{id}/checks/run-check", "blocks.change_request.checks", {"id": "id"}),
+        ("POST", "/api/change-requests/{id}/run-check", "blocks.change_request.checks", {"id": "id"}),
+        (
+            "GET",
+            "/api/change-requests/{id}/checks/{check_id}",
+            "blocks.change_request.checks",
+            {"id": "id", "check_id": "check_id"},
+        ),
+        ("GET", "/api/change-requests/{id}/seal", "blocks.change_request.seal", {"id": "id"}),
+        ("POST", "/api/change-requests/{id}/commit", "blocks.change_request.commit", {"id": "id"}),
     ]
 
     for method, pattern, module_path, path_inject in routes:

@@ -216,6 +216,146 @@ legacy_routes:
   owner: human_operator
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}/comments
+  legacy_block_module: blocks.change_request.comments
+  replacement_function_id: coding_change_request_comment
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/comments
+  legacy_block_module: blocks.change_request.comments
+  replacement_function_id: coding_change_request_comment
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}/comments/{comment_id}
+  legacy_block_module: blocks.change_request.comments
+  replacement_function_id: coding_change_request_comment
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PATCH
+  pattern: /api/change-requests/{id}/comments/{comment_id}
+  legacy_block_module: blocks.change_request.comments
+  replacement_function_id: coding_change_request_comment_update
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/decision
+  legacy_block_module: blocks.change_request.decision
+  replacement_function_id: coding_change_request_decision
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}/viewed-files
+  legacy_block_module: blocks.change_request.viewed_files
+  replacement_function_id: coding_change_request_viewed_file
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PATCH
+  pattern: /api/change-requests/{id}/viewed-files
+  legacy_block_module: blocks.change_request.viewed_files
+  replacement_function_id: coding_change_request_viewed_file
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/viewed-files
+  legacy_block_module: blocks.change_request.viewed_files
+  replacement_function_id: coding_change_request_viewed_file
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}/checks
+  legacy_block_module: blocks.change_request.checks
+  replacement_function_id: coding_change_request_check_list
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/checks
+  legacy_block_module: blocks.change_request.checks
+  replacement_function_id: coding_change_request_run_check
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/checks/run
+  legacy_block_module: blocks.change_request.checks
+  replacement_function_id: coding_change_request_run_check
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/checks/run-check
+  legacy_block_module: blocks.change_request.checks
+  replacement_function_id: coding_change_request_run_check
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/run-check
+  legacy_block_module: blocks.change_request.checks
+  replacement_function_id: coding_change_request_run_check
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}/checks/{check_id}
+  legacy_block_module: blocks.change_request.checks
+  replacement_function_id: coding_change_request_check_get
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}/seal
+  legacy_block_module: blocks.change_request.seal
+  replacement_function_id: coding_change_request_seal
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/commit
+  legacy_block_module: blocks.change_request.commit
+  replacement_function_id: coding_change_request_commit
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/bootstrap
+  legacy_block_module: blocks.subagent_team.bootstrap
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/workspace/metadata
+  legacy_block_module: blocks.subagent_team.workspace_metadata
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/creator/decision-preview
+  legacy_block_module: blocks.subagent_team.creator
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/messages
+  legacy_block_module: blocks.subagent_team.messages
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
 - method: POST
   pattern: /api/chat/group-storage
   legacy_block_module: blocks.chat.group_storage

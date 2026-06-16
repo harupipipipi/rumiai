@@ -796,6 +796,8 @@ def test_subagent_team_routes_are_registered_in_runtime_and_api_map():
     from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
 
     expected_routes = {
+        ("POST", "/api/subagent-team/bootstrap"),
+        ("POST", "/api/subagent-team/workspace/metadata"),
         ("GET", "/api/subagent-team/status"),
         ("GET", "/api/subagent-team/channels"),
         ("POST", "/api/subagent-team/channels"),
@@ -805,10 +807,12 @@ def test_subagent_team_routes_are_registered_in_runtime_and_api_map():
         ("POST", "/api/subagent-team/channels/{channel_id}/leave"),
         ("POST", "/api/subagent-team/channels/{channel_id}/archive"),
         ("POST", "/api/subagent-team/creator/test"),
+        ("GET", "/api/subagent-team/creator/decision-preview"),
         ("GET", "/api/subagent-team/creator/settings"),
         ("PATCH", "/api/subagent-team/creator/settings"),
         ("GET", "/api/subagent-team/rich"),
         ("POST", "/api/subagent-team/rich"),
+        ("POST", "/api/subagent-team/messages"),
         ("POST", "/api/subagent-team/channel-check"),
         ("GET", "/api/subagent-team/agents/{short_id}"),
         ("PATCH", "/api/subagent-team/agents/{short_id}"),
@@ -871,8 +875,11 @@ def test_subagent_team_http_route_defaults_execute_blocks(tmp_path, monkeypatch)
     specs = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
     rich_spec = specs[("POST", "/api/subagent-team/rich")]
     assert rich_spec.defaults["action"] == "set"
+    creator_settings_spec = specs[("PATCH", "/api/subagent-team/creator/settings")]
+    assert creator_settings_spec.defaults["action"] == "update_settings"
 
     from blocks.subagent_team import rich as rich_block
+    from blocks.subagent_team import creator as creator_block
 
     result = rich_block.run(
         {
@@ -886,3 +893,16 @@ def test_subagent_team_http_route_defaults_execute_blocks(tmp_path, monkeypatch)
 
     assert result["status"] == "ok"
     assert result["data"]["rich_enabled"] is True
+
+    creator_settings = creator_block.run(
+        {
+            **creator_settings_spec.defaults,
+            "company_id": company["id"],
+            "settings": {"auto_create_agents": False, "default_channel_id": "ops-company"},
+        },
+        {"actor_id": "project_manager"},
+    )
+
+    assert creator_settings["status"] == "ok"
+    assert creator_settings["data"]["settings"]["auto_create_agents"] is False
+    assert creator_settings["data"]["settings"]["default_channel_id"] == "ops-company"
