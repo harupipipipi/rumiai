@@ -1,0 +1,27 @@
+taxonomy:
+  pack_id: rumi_code_migration_pack
+  owner_surfaces:
+  - repo_inventory
+  - migration_plan
+  - codemod_plan
+  - pr_shard_plan
+  - compatibility_matrix
+  - risk_ledger
+  - test_gate_plan
+  - rollback_plan
+  - migration_handoff_packet
+  non_owner_surfaces:
+  - CLI IDE command loops
+  - file editing and patch execution
+  - subagent assignment and PR execution
+  - release notes and deploy runbooks
+  - security findings
+  - model provider scoring
+  - runtime telemetry storage
+  handoff_targets:
+  - rumi_code_ide_pack
+  - rumi_devops_release_pack
+  - rumi_model_evals_pack
+  - rumi_observability_pack
+  - rumi_security_review_pack
+  - rumi_subagent_pr_manager_pack

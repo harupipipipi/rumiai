@@ -1,0 +1,28 @@
+profile:
+  id: experiment_design
+  pack_id: rumi_experiment_design_pack
+  mode: local_first_declarative
+  default_presets:
+  - safe_default
+  - handoff_review
+  - quality_gate
+  owned_surfaces:
+  - hypothesis_contract
+  - metric_plan
+  - sample_size_plan
+  - assignment_plan
+  - guardrail_plan
+  - instrumentation_requirements
+  - decision_record
+  - experiment_readiness_packet
+  handoff_surfaces:
+  - analytics query execution
+  - production rollout
+  - runtime telemetry collection
+  - model benchmark execution
+  - business decision execution
+  - feature flag mutation
+  review_contract:
+    external_actions: handoff_only
+    evidence_required: true
+    human_review_required: true

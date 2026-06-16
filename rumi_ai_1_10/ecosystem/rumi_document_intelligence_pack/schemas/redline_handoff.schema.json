@@ -1,0 +1,39 @@
+{
+  "version": "rumi.document_intelligence.redline_handoff.schema.v1",
+  "pack_id": "rumi_document_intelligence_pack",
+  "type": "object",
+  "required": [
+    "handoff_id",
+    "source_version",
+    "target_version",
+    "operations",
+    "privacy_review",
+    "human_review_flags"
+  ],
+  "properties": {
+    "handoff_id": {"type": "string"},
+    "source_version": {"type": "string"},
+    "target_version": {"type": "string"},
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["operation", "page_span", "quote_digest", "risk_flags"],
+        "properties": {
+          "operation": {"type": "string", "enum": ["insert", "delete", "replace", "format"]},
+          "page_span": {
+            "type": "object",
+            "required": ["page_start", "page_end"]
+          },
+          "quote_digest": {"type": "string"},
+          "risk_flags": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "privacy_review": {
+      "type": "object",
+      "required": ["privacy_class", "external_sharing_allowed"]
+    },
+    "human_review_flags": {"type": "array", "items": {"type": "string"}}
+  }
+}

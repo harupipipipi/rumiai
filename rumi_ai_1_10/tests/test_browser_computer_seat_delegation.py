@@ -37,6 +37,24 @@ def _mock_service():
     return svc
 
 
+def _approval_token_for(controller: BrowserComputerController, action: str, payload: dict) -> str:
+    request = controller.run(action, payload)
+    token = str(request.get("approval_token") or "")
+    if token:
+        return token
+    approval_module = getattr(controller, "_approval_module", lambda: None)()
+    assert approval_module is not None
+    approval_args = {"action": action, "payload": payload}
+    approval = approval_module.create_approval_request(
+        action,
+        "high",
+        approval_args,
+        details={"action": action, "pack_id": "defaultspack"},
+    )
+    decision = approval_module.approve(approval["request_id"])
+    return str(decision["token"])
+
+
 def test_click_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc
@@ -70,10 +88,28 @@ def test_scroll_delegates_to_seat(controller):
     svc.scroll.assert_called_once()
 
 
-def test_observe_delegates_to_seat(controller):
+def test_observe_requires_approval_without_yolo(controller):
     svc = _mock_service()
     controller._computer_seat = svc
     result = controller.run("computer.observe", {"app": "Safari"})
+    assert result.get("requires_approval") is True
+    svc.observe.assert_not_called()
+
+
+def test_observe_delegates_to_seat_with_yolo(controller):
+    svc = _mock_service()
+    controller._computer_seat = svc
+    result = controller.run("computer.observe", {"app": "Safari"}, yolo_mode=True)
+    assert result["action"] == "computer.observe"
+    svc.observe.assert_called_once()
+
+
+def test_observe_delegates_to_seat_with_approval(controller):
+    svc = _mock_service()
+    payload = {"app": "Safari"}
+    token = _approval_token_for(controller, "computer.observe", payload)
+    controller._computer_seat = svc
+    result = controller.run("computer.observe", {**payload, "approval_token": token})
     assert result["action"] == "computer.observe"
     svc.observe.assert_called_once()
 

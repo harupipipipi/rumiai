@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService  # noqa: E402
+from domain.ai_client.rumi_process import RUMI_BASE_MODEL, RUMI_MODEL_PACK_REF  # noqa: E402
 
 
 def _profile(
@@ -22,6 +23,7 @@ def _profile(
     profile_type: str = "chat",
     defaults: dict | None = None,
     capabilities: dict | list | None = None,
+    metadata: dict | None = None,
 ):
     profile = {
         "profile_id": profile_id,
@@ -37,6 +39,8 @@ def _profile(
         profile["defaults"] = defaults
     if capabilities is not None:
         profile["capabilities"] = capabilities
+    if metadata is not None:
+        profile["metadata"] = metadata
     return profile
 
 
@@ -57,6 +61,20 @@ def test_model_runtime_settings_preferred_model_and_thinking_level(tmp_path):
     assert service.get_thinking_level()["level"] == "high"
 
 
+def test_model_runtime_settings_deepthink_toggle_warns(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+
+    assert service.get_deepthink_enabled()["enabled"] is False
+    enabled = service.set_deepthink_enabled(True)
+    assert enabled["enabled"] is True
+    assert "数時間" in enabled["message"]
+    assert service.get_settings()["deepthink_enabled"] is True
+
+    disabled = service.set_deepthink_enabled(False)
+    assert disabled["enabled"] is False
+    assert service.get_settings()["deepthink_enabled"] is False
+
+
 def test_model_runtime_settings_utility_models_and_groups(tmp_path):
     service = ModelRuntimeSettingsService(tmp_path)
     settings = service.update_settings(
@@ -68,6 +86,62 @@ def test_model_runtime_settings_utility_models_and_groups(tmp_path):
     assert settings["utility_models"]["tool_selector"] == "google/gemini-2.5-flash"
     assert settings["utility_models"]["vision_ocr"] == ""
     assert settings["model_groups"]["custom"]["allowed_models"] == ["stub/default"]
+
+
+def test_model_runtime_settings_includes_builtin_rumi_model_pack(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service._runtime_rumi_base_model = lambda settings=None: RUMI_BASE_MODEL
+    # This assertion targets the unresolved built-in pack shape, so keep it
+    # isolated from any configured provider catalog state introduced elsewhere.
+    service._base_profile_catalog = lambda settings=None: []
+
+    settings = service.get_settings()
+    rumi_pack = next(pack for pack in settings["model_packs"] if pack["id"] == "rumi")
+    profiles = service.runtime_defined_profiles(settings)
+    rumi_profile = next(profile for profile in profiles if profile["profile_id"] == RUMI_MODEL_PACK_REF)
+
+    assert rumi_pack["display_name"] == "Rumi"
+    assert rumi_pack["mode"] == "review_chain"
+    assert [member["model"] for member in rumi_pack["members"]] == [RUMI_BASE_MODEL, RUMI_BASE_MODEL]
+    assert rumi_pack["metadata"]["base_model"] == RUMI_BASE_MODEL
+    assert rumi_pack["safety"]["pre_action_assumption_block_required"] is True
+    assert rumi_profile["provider_id"] == "modelpack"
+    assert rumi_profile["metadata"]["mode"] == "review_chain"
+    assert rumi_profile["configured"] is False
+    assert rumi_profile["availability"]["status"] == "missing_member_model"
+
+
+def test_model_runtime_settings_materializes_builtin_rumi_against_available_provider(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service._runtime_rumi_base_model = lambda settings=None: "google/gemini-2.5-flash"
+    service._base_profile_catalog = lambda settings=None: [
+        _profile(
+            "google/gemini-2.5-flash",
+            display_name="Gemini 2.5 Flash",
+            provider_id="google",
+            model_id="gemini-2.5-flash",
+            availability={"configured": True, "active": True, "status": "configured"},
+            metadata={
+                "capabilities": {"tool_calls": True, "thinking": True, "vision": True},
+                "supports_tool_calling": True,
+                "supports_thinking": True,
+                "supports_vision": True,
+                "capability_tags": ["tools", "thinking", "vision"],
+            },
+        )
+    ]
+
+    settings = service.get_settings()
+    rumi_pack = next(pack for pack in settings["model_packs"] if pack["id"] == "rumi")
+    profiles = service.runtime_defined_profiles(settings)
+    rumi_profile = next(profile for profile in profiles if profile["profile_id"] == RUMI_MODEL_PACK_REF)
+
+    assert [member["model"] for member in rumi_pack["members"]] == ["google/gemini-2.5-flash", "google/gemini-2.5-flash"]
+    assert rumi_pack["metadata"]["base_model"] == "google/gemini-2.5-flash"
+    assert rumi_profile["configured"] is True
+    assert rumi_profile["availability"]["status"] == "configured"
+    assert rumi_profile["supports_tool_calling"] is True
+    assert rumi_profile["supports_thinking"] is True
 
 
 def test_model_runtime_settings_normalizes_model_api_routes(tmp_path):

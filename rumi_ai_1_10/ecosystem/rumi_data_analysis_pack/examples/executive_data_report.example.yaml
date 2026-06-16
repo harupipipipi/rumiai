@@ -1,0 +1,13 @@
+example_id: rumi_data_analysis.examples.executive_data_report
+preset: manus_genspark_data_report
+title: Produce executive data report inputs
+goal: Summarize local KPI exports into findings, chart specs, and audit notes for a later workspace report.
+inputs:
+  files: [local_exports/kpi_monthly.csv, local_exports/segments.csv]
+  audience: executive_team
+constraints:
+  network: none
+  office_artifact_generation: delegated_to_workspace_pack_if_installed
+deliverable:
+  type: decision_ready_data_report
+  required_sections: [headline_findings, metric_table, chart_specs, audit_trail, limitations, workspace_handoff]

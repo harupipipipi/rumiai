@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Rumi SOP Mining Trace Evidence Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "trace_id",
+    "source_type",
+    "event_order",
+    "evidence_ref",
+    "content_summary",
+    "redaction_state",
+    "redaction_actions",
+    "sensitive_data_classes_found",
+    "consent_basis",
+    "scope_boundary",
+    "owner_pack",
+    "review_status",
+    "raw_payload_included"
+  ],
+  "properties": {
+    "trace_id": {
+      "type": "string",
+      "minLength": 3
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "chat_message",
+        "tool_call",
+        "tool_result",
+        "audit_log",
+        "test_output",
+        "handoff_note",
+        "approval_record"
+      ]
+    },
+    "event_order": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
+    },
+    "observed_at": {
+      "type": "string",
+      "description": "ISO-8601 timestamp or local ordering note when exact time is unavailable."
+    },
+    "evidence_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Local trace reference, file reference, or adjacent-owner evidence id. Do not embed raw payloads."
+    },
+    "content_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actor_role": {
+      "type": "string",
+      "enum": [
+        "user",
+        "assistant",
+        "tool",
+        "system",
+        "reviewer",
+        "unknown"
+      ]
+    },
+    "tool_name": {
+      "type": "string"
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": [
+        "not_started",
+        "redacted",
+        "no_sensitive_data",
+        "blocked_sensitive_data"
+      ]
+    },
+    "redaction_actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "removed_credential_values",
+          "removed_personal_identifiers",
+          "collapsed_raw_payload",
+          "hashed_local_path",
+          "trimmed_private_urls",
+          "none_needed"
+        ]
+      }
+    },
+    "sensitive_data_classes_found": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "credentials",
+          "personal_data",
+          "private_workspace_path",
+          "external_account_identifier",
+          "customer_content",
+          "none"
+        ]
+      }
+    },
+    "consent_basis": {
+      "type": "string",
+      "enum": [
+        "user_supplied_in_scope",
+        "local_workspace_evidence",
+        "adjacent_owner_handoff",
+        "maintainer_review_fixture"
+      ]
+    },
+    "scope_boundary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "owner_pack": {
+      "type": "string",
+      "minLength": 1
+    },
+    "review_status": {
+      "type": "string",
+      "enum": [
+        "needs_review",
+        "redaction_approved",
+        "rejected"
+      ]
+    },
+    "raw_payload_included": {
+      "type": "boolean",
+      "const": false
+    }
+  }
+}

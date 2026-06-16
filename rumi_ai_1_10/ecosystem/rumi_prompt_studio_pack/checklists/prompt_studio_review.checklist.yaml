@@ -1,0 +1,30 @@
+review_checklist:
+  version: 0.1.0
+  required_checks:
+  - id: deterministic_prompt_id
+    blocking: true
+    evidence: prompt_id and version are stable
+  - id: version_ledger_entry
+    blocking: true
+    evidence: prompt_version_ledger contains the current prompt version
+  - id: risk_notes
+    blocking: true
+    evidence: risk_notes name migration, privacy, and owner-boundary risks
+  - id: evidence_requirement
+    blocking: true
+    evidence: evidence_requirement names fixtures and reviewer observations
+  - id: customization_knobs
+    blocking: true
+    evidence: knobs are portable defaults, not stored personal memory
+  - id: fixture_dry_run
+    blocking: true
+    evidence: local fixture expectations are present and require no network
+  - id: lint_dimension_coverage
+    blocking: true
+    evidence: at least one hierarchy, evidence, safety, and non-overlap dimension is checked
+  - id: custom_instruction_source_review
+    blocking: true
+    evidence: Claude, ChatGPT, or Gemini source-specific fields are either migrated or blocked
+  - id: non_overlap_handoffs
+    blocking: true
+    evidence: model eval, memory, API/tool, model routing, and code surfaces are handed off

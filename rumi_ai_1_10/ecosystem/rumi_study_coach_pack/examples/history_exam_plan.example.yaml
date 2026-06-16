@@ -1,0 +1,44 @@
+example:
+  id: history_exam_plan
+  user_request: Turn my Revolution class notes into a one-week exam plan.
+  input_state: local_artifacts_supplied
+  local_notes:
+  - note_id: note_hist_04
+    title: History notebook, Revolution unit
+    spans:
+    - span_id: hist_04_s1
+      summary: Causes list includes taxation, representation disputes, and pamphlet circulation.
+    - span_id: hist_04_s2
+      summary: The teacher marked primary-source comparison as a likely essay skill.
+  expected_result: study_plan_handoff_packet
+  expected_packet:
+    artifact_type: study_plan
+    handoff_owner: rumi_workflow_scheduler_pack
+    source_note_ids:
+    - note_hist_04
+    uncertainty_level: medium
+    sessions:
+    - session_id: hist_plan_day_1
+      focus_skill: Compare two cited causes using note_hist_04.
+      duration_minutes: 25
+      evidence_ids:
+      - hist_04_s1
+    - session_id: hist_plan_day_2
+      focus_skill: Practice primary-source comparison from the teacher-marked span.
+      duration_minutes: 25
+      evidence_ids:
+      - hist_04_s2
+    review_windows:
+    - queue_id: hist_review_01
+      reason: Revisit essay comparison after initial recall and before the exam date.
+      scheduler_handoff_owner: rumi_workflow_scheduler_pack
+    uncertainty_or_limitations:
+    - Plan covers only the supplied Revolution notes and does not add outside dates or events.
+  must_include:
+  - evidence_ids
+  - uncertainty_or_limitations
+  - handoff_owner
+  must_not:
+  - external_action
+  - uncited_claim
+  - credential_requirement

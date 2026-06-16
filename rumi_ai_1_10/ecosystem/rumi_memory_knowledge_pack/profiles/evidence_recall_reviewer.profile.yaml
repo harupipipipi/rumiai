@@ -1,0 +1,17 @@
+profile_id: rumi_memory_knowledge_pack.evidence_recall_reviewer
+version: rumi.profile.v1
+kind: runtime_profile
+locale: en
+display_name:
+  en: Evidence Recall Reviewer
+enabled_capabilities:
+  - memory.recall.session
+  - memory.recall.verify_evidence
+  - memory.hygiene.review
+prompt_set: evidence_backed_recall
+policy:
+  local_first: true
+  evidence_required_for_specific_recall: true
+  label_uncertain_recall: true
+  unsupported_recall_blocked: true
+ui_panels: [recall_panel, evidence_links, confidence_notes]

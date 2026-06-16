@@ -13,6 +13,8 @@ const GENERATED_RESOURCE_DIRS: &[&str] = &[
 fn main() {
     println!("cargo:rerun-if-changed=splash/index.html");
     println!("cargo:rerun-if-changed=src/lib.rs");
+    println!("cargo:rerun-if-changed=../../pack-shell/Cargo.toml");
+    println!("cargo:rerun-if-changed=../../pack-shell/src");
     println!("cargo:rerun-if-changed=../../rumi_ai_1_10/app.py");
     println!("cargo:rerun-if-changed=../../rumi_ai_1_10/core_runtime");
     println!("cargo:rerun-if-changed=../../rumi_ai_1_10/ecosystem");
@@ -87,13 +89,46 @@ fn stage_runtime_bundle() -> io::Result<()> {
 }
 
 fn stage_pack_shell(repo_root: &Path, staged_root: &Path) -> io::Result<()> {
-    let Some(pack_shell) = find_pack_shell_binary(repo_root) else {
+    let Some(pack_shell) = ensure_pack_shell_binary(repo_root)? else {
         return Ok(());
     };
     let bundled_dir = staged_root.join("bundled");
     fs::create_dir_all(&bundled_dir)?;
     copy_file(&pack_shell, &bundled_dir.join(pack_shell_binary_name()))?;
     Ok(())
+}
+
+fn ensure_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
+    if let Some(pack_shell) = find_pack_shell_binary(repo_root) {
+        return Ok(Some(pack_shell));
+    }
+
+    let manifest = repo_root.join("pack-shell").join("Cargo.toml");
+    if !manifest.is_file() {
+        return Ok(None);
+    }
+
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let mut command = Command::new(cargo);
+    command
+        .args(["build", "--locked", "--manifest-path"])
+        .arg(&manifest);
+
+    if std::env::var("PROFILE").as_deref() == Ok("release") {
+        command.arg("--release");
+    }
+
+    let output = command.output()?;
+    if output.status.success() {
+        return Ok(find_pack_shell_binary(repo_root));
+    }
+
+    Err(io::Error::other(format!(
+        "failed to build pack-shell with status {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )))
 }
 
 fn find_pack_shell_binary(repo_root: &Path) -> Option<PathBuf> {

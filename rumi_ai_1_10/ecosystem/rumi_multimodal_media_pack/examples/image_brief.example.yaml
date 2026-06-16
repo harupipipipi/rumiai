@@ -1,0 +1,7 @@
+example_id: rumi_multimodal_media.image_brief
+request: Prepare a product image generation brief and review rubric.
+workflow: image_brief_to_reviewed_asset
+expected_outputs:
+  - prompt_plan
+  - rights_context
+  - review_rubric

@@ -1,0 +1,22 @@
+renderer_capabilities:
+  allowed:
+  - local_static_bundle
+  - same_origin_iframe
+  - readonly_state
+  - static_renderer_prefixes
+  blocked:
+  - remote_module
+  - network_by_default
+  - file_write
+  - mcp_execute_without_approval
+  - allow_scripts_with_same_origin
+  token_policy:
+    safe_default:
+    - allow-same-origin
+    forbidden_pairs:
+    - - allow-scripts
+      - allow-same-origin
+    trusted_renderer_prefixes:
+    - /static/renderers/
+    - /static/assets/renderers/
+    - /static/user_renderers/

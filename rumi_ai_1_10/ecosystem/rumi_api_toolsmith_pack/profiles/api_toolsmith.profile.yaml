@@ -1,0 +1,13 @@
+profile:
+  id: api_toolsmith
+  pack_id: rumi_api_toolsmith_pack
+  stance: evidence_first_reviewer
+  owner_surfaces:
+  - openapi_tool_generation
+  - graphql_operation_mapping
+  - webhook_contracts
+  - mock_server_tests
+  required_checks:
+    - parse_catalog
+    - inspect_overlap_policy
+    - preserve_evidence

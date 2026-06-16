@@ -767,6 +767,54 @@ def test_stream_empty_thinking_retry_preserves_tools_for_tool_calls():
     assert any(event.get("type") == "thinking_delta" for event in events)
 
 
+def test_complete_with_tools_rejects_unattached_model_tool_call():
+    from blocks.chat import send
+
+    ai_calls = 0
+    invoked_tools = []
+
+    def call_handler(name, payload):
+        nonlocal ai_calls
+        if name == "defaults.ai.complete":
+            ai_calls += 1
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call-danger",
+                            "name": "dangerous_tool",
+                            "input": {"payload": "owned"},
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            invoked_tools.append(payload["tool_name"])
+            return {"status": "ok", "data": {"result": "should not run", "is_error": False}}
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "google/gemma-4-31b-it",
+        [{"role": "user", "content": "hello"}],
+        [{"name": "allowed_tool"}],
+        {},
+        call_handler,
+        {"max_tool_calls": 3},
+    )
+
+    assert ai_calls == 1
+    assert invoked_tools == []
+    assert response["finish_reason"] == "tool_call_rejected"
+    assert response["metadata"]["tool_call_rejected"] is True
+    assert response["metadata"]["rejected_tool_name"] == "dangerous_tool"
+    assert response["metadata"]["connected_tools"] == ["allowed_tool"]
+    assert response["tool_logs"] == []
+    assert any(event.get("phase") == "tool_call_rejected" for event in response["events"])
+
+
 def test_legacy_complete_with_tools_retries_transient_ai_error_after_tool_use():
     from blocks.chat import send
 

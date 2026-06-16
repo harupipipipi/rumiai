@@ -187,7 +187,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             return io.BytesIO(b'{"ok":true}')
 
         with patch("domain.ai_client.providers.google_provider.urllib.request.urlopen", fake_urlopen), patch(
-            "domain.ai_client.providers.google_provider.time.sleep"
+            "domain.ai_client.providers.google_provider._retry_sleep"
         ) as sleep:
             response = provider._native_request_json("gemini-test", {"contents": []})
 
@@ -218,7 +218,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             return io.BytesIO(b'{"ok":true}')
 
         with patch("domain.ai_client.providers.google_provider.urllib.request.urlopen", fake_urlopen), patch(
-            "domain.ai_client.providers.google_provider.time.sleep"
+            "domain.ai_client.providers.google_provider._retry_sleep"
         ) as sleep:
             response = provider._native_request_json("gemini-test", {"contents": []})
 
@@ -241,7 +241,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             return io.BytesIO(b'{"ok":true}')
 
         with patch("domain.ai_client.providers.google_provider.urllib.request.urlopen", fake_urlopen), patch(
-            "domain.ai_client.providers.google_provider.time.sleep"
+            "domain.ai_client.providers.google_provider._retry_sleep"
         ) as sleep:
             response = provider._native_request_json("gemini-test", {"contents": []})
 
@@ -319,7 +319,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             return FakeResponse(b'{"ok":true}')
 
         with patch("domain.ai_client.providers.openai_provider.urllib.request.urlopen", fake_urlopen), patch(
-            "domain.ai_client.providers.google_provider.time.sleep"
+            "domain.ai_client.providers.google_provider._retry_sleep"
         ) as sleep:
             response = provider._request_json("/chat/completions", {"model": "gemma-4-31b-it", "messages": []})
 
@@ -355,7 +355,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             return FakeResponse(b'{"ok":true}')
 
         with patch("domain.ai_client.providers.openai_provider.urllib.request.urlopen", fake_urlopen), patch(
-            "domain.ai_client.providers.google_provider.time.sleep"
+            "domain.ai_client.providers.google_provider._retry_sleep"
         ) as sleep:
             response = provider._request_json("/chat/completions", {"model": "gemini-2.5-flash", "messages": []})
 

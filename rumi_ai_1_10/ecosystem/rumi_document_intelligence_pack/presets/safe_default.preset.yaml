@@ -1,0 +1,21 @@
+preset:
+  id: safe_default
+  pack_id: rumi_document_intelligence_pack
+  mode: citation_first_local_review
+  description: Local-first document review that refuses unsupported claims and records page spans.
+  require_evidence: true
+  require_overlap_check: true
+  required_assets:
+    - catalog/document_types.yaml
+    - schemas/citation_trace.schema.json
+    - policies/citation_privacy_review.policy.yaml
+  output_contract:
+    - document_type
+    - privacy_class
+    - claim_to_page_span_map
+    - quote_digest_or_redaction_reason
+    - missing_evidence_questions
+  blocked_defaults:
+    - external_upload
+    - invented_page_numbers
+    - legal_advice_claim

@@ -1,0 +1,51 @@
+taxonomy_id: rumi_business_ops.workflow_taxonomy
+schema_version: 1
+workflow_classes:
+  support_triage:
+    owner_surface: sales_support_workflows
+    evidence_required:
+      - customer_message_excerpt
+      - account_or_case_context
+      - severity_reason
+    risk_default: medium
+    execution_handoff: rumi_connector_gateway_pack
+  sales_followup:
+    owner_surface: sales_support_workflows
+    evidence_required:
+      - account_context
+      - prior_interaction_summary
+      - next_action_reason
+    risk_default: medium
+    execution_handoff: rumi_connector_gateway_pack
+    schedule_handoff: rumi_workflow_scheduler_pack
+  marketing_campaign_brief:
+    owner_surface: marketing_briefs
+    evidence_required:
+      - audience_context
+      - offer_or_message
+      - channel_constraints
+    risk_default: low
+    artifact_handoff: rumi_workspace_pack
+  procurement_comparison:
+    owner_surface: procurement_decision_memos
+    evidence_required:
+      - requirements
+      - vendor_options
+      - scoring_criteria
+      - source_notes
+    risk_default: high
+    research_handoff: rumi_research_pack
+    artifact_handoff: rumi_workspace_pack
+  crm_hygiene:
+    owner_surface: crm_hygiene_contracts
+    evidence_required:
+      - field_audit
+      - duplicate_candidates
+      - stale_item_reason
+    risk_default: high
+    execution_handoff: rumi_connector_gateway_pack
+classification_rules:
+  customer_facing_send_requires_approval: true
+  money_or_contract_impact_is_high_risk: true
+  external_system_mutation_handoff_required: true
+  final_artifacts_route_to_workspace_pack: true

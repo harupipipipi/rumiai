@@ -234,6 +234,26 @@ class TestVerifyHash:
         # Not approved yet, no file_hashes stored
         assert mgr.verify_hash("testpack") is False
 
+    def test_root_component_change_is_critical(self, tmp_path, monkeypatch):
+        mgr, pack_dir = _make_manager(tmp_path, monkeypatch=monkeypatch)
+        component_dir = pack_dir / "components" / "demo"
+        component_dir.mkdir(parents=True)
+        (component_dir / "startup.py").write_text(
+            "def run(): return 'approved'\n", encoding="utf-8"
+        )
+
+        mgr.approve("testpack")
+        (component_dir / "startup.py").write_text(
+            "def run(): return 'tampered'\n", encoding="utf-8"
+        )
+        mgr._hash_cache.clear()
+
+        result = mgr.verify_hash_detailed("testpack")
+        assert result["valid"] is False
+        assert result["critical_changed"] is True
+        assert result["changed_files"] == ["components/demo/startup.py"]
+
+
 
 # ===================================================================
 # HMAC signature on grant files

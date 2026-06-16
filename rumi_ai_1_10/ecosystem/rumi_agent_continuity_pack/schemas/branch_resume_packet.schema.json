@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/branch_resume_packet.schema.json",
+  "title": "Branch Resume Packet",
+  "description": "Agent continuity contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "packet_id",
+    "branch_ref",
+    "base_ref",
+    "worktree_ref",
+    "resume_command_or_instruction",
+    "diff_summary_ref",
+    "uncommitted_state_note",
+    "handoff_owner",
+    "branch_mutation_allowed"
+  ],
+  "properties": {
+    "packet_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "branch_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "base_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "worktree_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resume_command_or_instruction": {
+      "type": "string",
+      "minLength": 1
+    },
+    "diff_summary_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "uncommitted_state_note": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoff_owner": {
+      "type": "string",
+      "enum": [
+        "defaultspack",
+        "rumi_code_ide_pack"
+      ]
+    },
+    "branch_mutation_allowed": {
+      "const": false
+    }
+  }
+}

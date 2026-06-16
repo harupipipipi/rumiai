@@ -1,0 +1,23 @@
+example:
+  intent: bug triage trace
+  inputs:
+  - local_evidence
+  expected_result: sop_mining_handoff_packet
+  trace_record:
+    trace_id: bug-triage-redacted-001
+    source_type: audit_log
+    redaction_state: redacted
+    consent_basis: local_workspace_evidence
+    raw_payload_included: false
+  approval_state: approved
+  human_approval:
+    approver_role: maintainer
+    approval_record_ref: local-approval-note-001
+  non_execution_boundary:
+  - automation_execution
+  - browser_control
+  - schedule_creation
+  - run_ledger_storage
+  handoffs:
+  - rumi_observability_pack
+  - rumi_agentic_qa_pack

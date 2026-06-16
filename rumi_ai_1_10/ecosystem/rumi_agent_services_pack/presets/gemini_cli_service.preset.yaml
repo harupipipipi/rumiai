@@ -1,0 +1,14 @@
+id: gemini_cli_service
+name: Gemini CLI Style Terminal Companion
+profile: rumi_agent_services.coding_operator
+workflow: coding_service_loop
+enabled_capabilities: [local_file, terminal, git, planning, safety_review]
+ui_panels: [chat, plan, terminal, diff]
+behavior: [cli_first, command_preview, local_context, concise_delivery]
+policy:
+  network_default: deny
+  terminal_requires_approval: true
+  file_write_requires_approval: true
+task_defaults:
+  output:
+    type: command_log_and_result

@@ -1,0 +1,21 @@
+preset:
+  id: quality_gate
+  pack_id: rumi_runtime_benchmark_pack
+  mode: release_gate_threshold_review
+  description: Check benchmark evidence against release-gate thresholds without running benchmarks.
+  require_evidence: true
+  require_overlap_check: true
+  required_assets:
+    - catalog/release_gate_thresholds.yaml
+    - policies/sample_size_confidence.policy.yaml
+    - policies/warm_cold_start.policy.yaml
+  gates:
+    - release_gate_thirty_run_for_blocking_decisions
+    - warm_and_cold_samples_separated
+    - variance_and_confidence_notes_attached
+    - cost_units_declared
+  output_contract:
+    - reviewer_decision
+    - threshold_status
+    - variance_notes
+    - release_gate_handoff_notes

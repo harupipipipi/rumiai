@@ -1,0 +1,134 @@
+workflows:
+  default_execution: no_runtime_action
+  ownership:
+    owned:
+    - channel_payload_contract
+    - identity_mapping
+    - channel_acl
+    - thread_to_agent_routing
+    - outbound_draft_approval
+    - notification_preferences
+    - inbox_thread_state
+    - inbox_ui_contract
+    handoff:
+    - actual app connectors
+    - Slack client
+    - Gmail client
+    - mobile client
+    - work execution
+    - schedule execution
+    - security policy review
+    - message sending
+  items:
+  - id: channel_ingress_normalization
+    purpose: Normalize inbound channel payloads from connector owner outputs.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - remote_input_authority_denied
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_external_connector_gateway_owner
+    - handoff_to_connector_or_channel_owner
+    - handoff_to_external_agent_services_owner
+    execution: declarative_only
+  - id: identity_linking
+    purpose: Map sender refs to one identity with evidence.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - remote_input_authority_denied
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_external_connector_gateway_owner
+    - handoff_to_connector_or_channel_owner
+    - handoff_to_external_agent_services_owner
+    execution: declarative_only
+  - id: channel_acl_gate
+    purpose: Deny unauthorized channel-originated work.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - default_deny_applied
+    - remote_input_authority_denied
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_external_connector_gateway_owner
+    - handoff_to_connector_or_channel_owner
+    - handoff_to_external_agent_services_owner
+    execution: declarative_only
+  - id: thread_to_agent_routing
+    purpose: Route approved threads to agent service owner.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - idempotency_key_present
+    - remote_input_authority_denied
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_external_connector_gateway_owner
+    - handoff_to_connector_or_channel_owner
+    - handoff_to_external_agent_services_owner
+    execution: declarative_only
+  - id: outbound_draft_approval
+    purpose: Keep outbound messages draft until approval receipt exists.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - body_hash_matches
+    - approval_not_expired
+    - remote_input_authority_denied
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_external_connector_gateway_owner
+    - handoff_to_connector_or_channel_owner
+    - handoff_to_external_workflow_scheduler_owner
+    - handoff_to_external_agent_services_owner
+    execution: declarative_only
+  - id: notification_preference_handoff
+    purpose: Send scheduling windows to workflow scheduler owner.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_external_connector_gateway_owner
+    - handoff_to_connector_or_channel_owner
+    - handoff_to_external_agent_services_owner
+    execution: declarative_only

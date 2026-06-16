@@ -1,0 +1,25 @@
+quality_matrix:
+  pack_id: rumi_agent_continuity_pack
+  minimum_pass: all_blocking_checks
+  checks:
+  - id: restart_evidence_human_readable
+    blocking: true
+    evidence: restart_evidence_human_readable_evidence_ref
+  - id: safe_next_action_present
+    blocking: true
+    evidence: safe_next_action_present_evidence_ref
+  - id: lost_context_risks_named
+    blocking: true
+    evidence: lost_context_risks_named_evidence_ref
+  - id: owner_boundaries_reviewed
+    blocking: true
+    evidence: owner_boundaries_reviewed_evidence_ref
+  - id: branch_mutation_handoff_only
+    blocking: true
+    evidence: branch_mutation_handoff_only_evidence_ref
+  - id: artifact_manifest_reference_only
+    blocking: true
+    evidence: artifact_manifest_reference_only_evidence_ref
+  - id: asset_index_complete
+    blocking: true
+    evidence: asset_index_complete_evidence_ref

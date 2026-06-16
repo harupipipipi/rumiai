@@ -150,7 +150,7 @@
     },
     "capability_bindings": {
       "type": "object",
-      "description": "Capability Graph binding registration metadata",
+      "description": "Capability Graph binding registration metadata. Community pack registration runs in the host process and requires host_execution approval.",
       "properties": {
         "register": {
           "type": "string",
@@ -317,11 +317,39 @@
       }
     },
     "required_network": {
-      "type": "array",
       "description": "Pack が必要とするネットワークアクセス先のリスト",
-      "items": {
-        "type": "string"
-      }
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "allowed_domains": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "allowed_ports": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            }
+          },
+          "required": [
+            "allowed_domains",
+            "allowed_ports"
+          ],
+          "additionalProperties": false
+        }
+      ]
     },
     "host_execution": {
       "type": "boolean",
@@ -352,7 +380,7 @@
         "static_root": {
           "type": "string",
           "description": "静的ファイルのルートディレクトリ (Pack subdir からの相対パス)",
-          "pattern": "^[a-zA-Z0-9_./\\\\-]+$"
+          "pattern": "^(?![\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))[a-zA-Z0-9_./\\\\-]+$"
         },
         "spa_fallback": {
           "type": "boolean",

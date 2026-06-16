@@ -1,0 +1,15 @@
+id: claude_code_service
+name: Claude Code Style Workspace Service
+profile: rumi_agent_services.coding_operator
+workflow: coding_service_loop
+enabled_capabilities: [coding_workspace, planning, artifact_delivery, safety_review]
+ui_panels: [chat, plan, diff, terminal, tests]
+behavior: [read_before_edit, scoped_patch, test_then_summarize, preserve_user_changes]
+policy:
+  network_default: deny
+  file_write_requires_approval: true
+  terminal_requires_approval: true
+  git_push_requires_approval: true
+task_defaults:
+  output:
+    type: files_changed_tests_summary

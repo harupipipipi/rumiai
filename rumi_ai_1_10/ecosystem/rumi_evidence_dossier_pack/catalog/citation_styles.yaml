@@ -1,0 +1,7 @@
+citation_styles:
+  styles:
+  - source_id_anchor
+  - footnote
+  - inline
+  - workspace_reference
+  missing_citation_blocks_verified_export: true

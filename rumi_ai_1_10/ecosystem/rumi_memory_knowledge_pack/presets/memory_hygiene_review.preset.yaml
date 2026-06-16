@@ -1,0 +1,10 @@
+id: memory_hygiene_review
+name: Memory Hygiene Review
+profile: rumi_memory_knowledge_pack.memory_curator
+enabled_capabilities:
+  - memory.hygiene.review
+  - memory.profile.propose_update
+  - knowledge.project.propose_update
+ui_panels: [memory_review_queue, hygiene_findings, evidence_links]
+behavior: [dedupe, stale_review, sensitivity_review, proposal_only]
+default_outputs: [dedupe_candidates, stale_candidates, sensitivity_flags, archive_proposals]

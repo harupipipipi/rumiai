@@ -29,6 +29,19 @@ def _normalize_run_ids(run_ids: Iterable[str] | str | None) -> list[str] | None:
     return result
 
 
+def _error_text(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        message = str(value.get("message") or "").strip()
+        code = str(value.get("code") or "").strip()
+        if message:
+            return f"{code}: {message}" if code else message
+    return json_dumps(redact_sensitive(value))
+
+
 def default_runtime_dir() -> Path:
     override = os.environ.get("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR")
     if override:
@@ -263,7 +276,7 @@ class AgentRunStore:
                     run.current_transcript_id,
                     run.compaction_count,
                     run.heartbeat_at,
-                    run.error,
+                    _error_text(run.error),
                     json_dumps(redact_sensitive(run.result_json)),
                     json_dumps(redact_sensitive(run.execution_json)),
                 ),
@@ -410,7 +423,7 @@ class AgentRunStore:
                 SET status = ?, error = ?, result_json = ?, completed_at = COALESCE(?, completed_at), updated_at = ?, heartbeat_at = ?
                 WHERE run_id = ?
                 """,
-                (status, error, json_dumps(result), completed_at, utc_now(), utc_now(), run_id),
+                (status, _error_text(error), json_dumps(result), completed_at, utc_now(), utc_now(), run_id),
             )
 
     def replace_steps(self, run_id: str, steps: Iterable[Any]) -> None:
@@ -459,6 +472,24 @@ class AgentRunStore:
                         utc_now(),
                     ),
                 )
+
+    def list_messages(self, run_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        clean_limit = max(1, min(int(limit or 100), 1000))
+        rows = self.conn.execute(
+            """
+            SELECT * FROM agent_messages
+            WHERE run_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (str(run_id), clean_limit),
+        ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in reversed(rows):
+            data = dict(row)
+            data["content_json"] = json_loads(data.get("content_json"), {})
+            result.append(data)
+        return result
 
     def record_tool_call(
         self,

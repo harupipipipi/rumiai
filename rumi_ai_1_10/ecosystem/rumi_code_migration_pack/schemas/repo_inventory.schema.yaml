@@ -1,0 +1,55 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://rumi.local/schemas/repo_inventory.schema.json
+title: Repo Inventory
+description: Code migration planning contract schema.
+type: object
+additionalProperties: false
+required:
+- inventory_id
+- languages
+- package_managers
+- build_systems
+- test_suites
+- dependency_graph
+- ownership_map
+- generated_files
+- deprecated_apis
+- migration_hotspots
+properties:
+  inventory_id:
+    type: string
+    minLength: 1
+  languages:
+    type: array
+    items:
+      type: string
+  package_managers:
+    type: array
+    items:
+      type: string
+  build_systems:
+    type: array
+    items:
+      type: string
+  test_suites:
+    type: array
+    items:
+      type: string
+  dependency_graph:
+    type: string
+    minLength: 1
+  ownership_map:
+    type: string
+    minLength: 1
+  generated_files:
+    type: array
+    items:
+      type: string
+  deprecated_apis:
+    type: array
+    items:
+      type: string
+  migration_hotspots:
+    type: array
+    items:
+      type: string

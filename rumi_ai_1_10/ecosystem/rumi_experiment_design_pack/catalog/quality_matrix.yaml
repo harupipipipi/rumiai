@@ -1,0 +1,80 @@
+quality_matrix:
+  minimum_pass: all_blocking_checks
+  fail_states:
+  - missing_evidence
+  - boundary_violation
+  - unsafe_external_action
+  - unreviewed_handoff
+  checks:
+  - id: hypothesis_metric_alignment
+    blocking: true
+    description: Primary metric directly measures expected effect.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: guardrail_metric_present
+    blocking: true
+    description: Every rollout packet includes guardrail metrics and stop rules.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: sample_size_assumptions
+    blocking: true
+    description: MDE, alpha, power, source state, and limitations are explicit.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: assignment_bias_risk
+    blocking: true
+    description: Randomization or quasi-experiment bias risks are named.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: no_result_claim_without_data
+    blocking: true
+    description: Decision records cannot declare a winner, significance, lift, or metric movement unless supplied results are present.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: no_analytics_query_execution
+    blocking: true
+    description: The pack does not run SQL, analytics queries, or statistical result calculations; it emits a data-analysis handoff instead.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: data_source_state_declared
+    blocking: true
+    description: Instrumentation and data availability are explicit.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: rollback_owner_named
+    blocking: true
+    description: Rollback thresholds hand off to devops release owner.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: privacy_review_state_declared
+    blocking: true
+    description: Instrumentation requests name privacy review state.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note

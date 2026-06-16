@@ -1,0 +1,36 @@
+spec_id: rumi.browser_form_operator.form_taxonomy.v1
+owner: rumi_browser_form_operator_pack
+purpose: Declarative taxonomy for browser form categories and submit-risk posture.
+network_default: none
+form_categories:
+  informational_contact:
+    examples: [contact_us, feedback, newsletter_interest_without_subscription]
+    default_risk: low
+    submit_policy: user_review_required
+  account_profile:
+    examples: [profile_update, address_update, email_change]
+    default_risk: medium
+    submit_policy: explicit_confirmation_required
+  commerce_checkout:
+    examples: [cart_checkout, quote_request_with_payment, subscription_purchase]
+    default_risk: high
+    submit_policy: security_review_required
+  legal_or_government:
+    examples: [tax_form, visa_application, legal_attestation, benefits_application]
+    default_risk: high
+    submit_policy: security_review_required
+  public_or_external_send:
+    examples: [public_post, support_ticket_submit, application_submit, message_send]
+    default_risk: irreversible
+    submit_policy: explicit_confirmation_required_each_time
+required_classification_evidence:
+  - page_origin
+  - visible_form_title
+  - submit_button_text
+  - field_risk_map
+  - consent_or_terms_controls
+  - receipt_expectation
+outputs:
+  - form_category
+  - submit_policy
+  - review_handoff

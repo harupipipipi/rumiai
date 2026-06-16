@@ -1,0 +1,20 @@
+id: rumi_devops_release_pack.incident_rollback
+name: Incident Rollback
+profile: rumi_devops_release_pack.rollback_planner
+intent: Draft rollback decision support and recovery verification.
+network_default: none
+evidence_inputs:
+  - incident summary
+  - last known good version
+  - failing signal
+  - recovery target
+outputs:
+  - rollback trigger
+  - rollback steps
+  - stop conditions
+  - recovery checks
+  - communication draft
+approval_required_for:
+  - production inspection
+  - rollback execution
+  - incident notification send

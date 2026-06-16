@@ -1,13 +1,28 @@
 import { useLocation } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
+import { cn } from '@/src/lib/utils';
+import { describeRuntimeBadge } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
 
 export function Header() {
   const t = useT();
   const profile = useAppStore(state => state.profile);
+  const runtimeReady = useAppStore(state => state.runtimeReady);
+  const runtimeStatus = useAppStore(state => state.runtimeStatus);
+  const runtimeError = useAppStore(state => state.runtimeError);
+  const runtimeDisconnected = useAppStore(state => state.runtimeDisconnected);
+  const lastRuntimeHealthyAt = useAppStore(state => state.lastRuntimeHealthyAt);
   const location = useLocation();
   const isFlows = location.pathname === panelRoutes.flows;
+  const runtimeBadge = describeRuntimeBadge({
+    runtimeReady,
+    runtimeStatus,
+    runtimeError,
+    runtimeDisconnected,
+    lastRuntimeHealthyAt,
+  });
 
   const getPageTitle = () => {
     if (location.pathname === panelRoutes.home) return t('nav.home');
@@ -22,13 +37,67 @@ export function Header() {
     return '';
   };
 
+  const runtimePill = (() => {
+    if (runtimeStatus === 'error') {
+      return {
+        label: 'Runtime error',
+        dotClass: 'bg-red-500',
+        textClass: 'text-red-600 dark:text-red-400',
+      };
+    }
+    if (!runtimeReady) {
+      return {
+        label: 'Warming up',
+        dotClass: 'bg-amber-500 animate-pulse',
+        textClass: 'text-amber-600 dark:text-amber-400',
+      };
+    }
+    return {
+      label: 'Runtime ready',
+      dotClass: 'bg-emerald-500',
+      textClass: 'text-emerald-600 dark:text-emerald-400',
+    };
+  })();
+
   return (
     <header className={`z-40 flex shrink-0 items-center justify-between border-b border-border bg-bg-header transition-colors duration-[var(--transition-base)] ${isFlows ? 'h-12 px-4' : 'h-14 px-6'}`}>
-      <div className="flex items-center gap-2">
-        <h1 className="text-sm font-medium text-text-main">{getPageTitle()}</h1>
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="truncate text-sm font-medium text-text-main">{getPageTitle()}</h1>
+            <span
+              className={`hidden rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] sm:inline-flex ${
+                runtimeBadge.tone === 'success'
+                  ? 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-300'
+                  : runtimeBadge.tone === 'danger'
+                    ? 'bg-red-500/12 text-red-600 dark:text-red-300'
+                    : 'bg-amber-500/12 text-amber-600 dark:text-amber-300'
+              }`}
+            >
+              {runtimeBadge.label}
+            </span>
+          </div>
+          <p className="hidden truncate text-[11px] text-text-muted sm:block">{runtimeBadge.detail}</p>
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
+        <div
+          className={cn(
+            "rumi-control-pill hidden md:inline-flex",
+            runtimePill.textClass,
+          )}
+          role="status"
+          aria-live="polite"
+          title={runtimePill.label}
+        >
+          {!runtimeReady && runtimeStatus !== 'error' ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <span className={cn("rumi-control-pill-dot", runtimePill.dotClass)} />
+          )}
+          <span>{runtimePill.label}</span>
+        </div>
         <span className="text-xs text-text-muted hidden sm:block">{profile.username}</span>
         {profile.avatar ? (
           <img

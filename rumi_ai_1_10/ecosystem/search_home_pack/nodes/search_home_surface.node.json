@@ -1,0 +1,38 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "search_home_pack.web_surface",
+      "kind": "ecosystem.surface",
+      "display_name": {
+        "en": "Search Home",
+        "ja": "検索ホーム"
+      },
+      "ports": [
+        {
+          "id": "surface",
+          "direction": "output",
+          "standards": [
+            "rumi.surface"
+          ],
+          "multiple": true
+        }
+      ],
+      "metadata": {
+        "pack_id": "search_home_pack",
+        "component_type": "frontend",
+        "component_id": "web",
+        "category": "surface",
+        "launch": {
+          "kind": "desktop_app",
+          "pack_id": "search_home_pack",
+          "surface": "browser",
+          "default": true,
+          "env": {
+            "SEARCH_HOME_SURFACE": "browser"
+          }
+        }
+      }
+    }
+  ]
+}

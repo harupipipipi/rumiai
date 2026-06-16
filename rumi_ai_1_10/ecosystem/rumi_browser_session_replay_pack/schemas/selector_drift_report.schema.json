@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/selector_drift_report.schema.json",
+  "title": "Selector Drift Report",
+  "description": "Browser session replay contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "drift_id",
+    "original_selector",
+    "semantic_element_ref",
+    "observed_selector_candidates",
+    "confidence",
+    "drift_reason",
+    "screenshot_evidence_refs",
+    "dom_evidence_refs",
+    "recommended_handoff",
+    "semantic_owner"
+  ],
+  "properties": {
+    "drift_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "original_selector": {
+      "type": "string",
+      "minLength": 1
+    },
+    "semantic_element_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observed_selector_candidates": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "drift_reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "screenshot_evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "dom_evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "recommended_handoff": {
+      "type": "string",
+      "enum": [
+        "handoff_to_rumi_browser_element_pack",
+        "handoff_to_rumi_browser_automation_pack"
+      ]
+    },
+    "semantic_owner": {
+      "const": "rumi_browser_element_pack"
+    }
+  }
+}

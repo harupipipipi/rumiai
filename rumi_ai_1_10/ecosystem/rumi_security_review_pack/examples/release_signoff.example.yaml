@@ -1,0 +1,21 @@
+example_id: rumi_security_review.release_signoff
+pack_id: rumi_security_review_pack
+title: Example release security signoff
+release_scope:
+  release_id: local-review
+  changed_packs:
+    - example_pack
+summary:
+  open_high_findings: 0
+  open_medium_findings: 0
+  accepted_risks: []
+  tests_or_checks:
+    - focused_contract_tests
+    - local_secret_pattern_review
+decision:
+  recommendation: proceed
+  owner: release_owner
+  defaultspack_decision_override: false
+notes:
+  - Signoff is based on local evidence only.
+  - Runtime grants and approvals remain owned by defaultspack.

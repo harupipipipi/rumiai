@@ -5,6 +5,10 @@ on:
     tags:
       - "v*"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -58,8 +62,20 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+          workspaces: |
+            pack-shell -> target
+            rumi_viewer/src-tauri -> target
+
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
+        shell: bash
+        run: |
+          if ! command -v cargo-tauri >/dev/null 2>&1; then
+            cargo install tauri-cli --version "^2" --locked
+          fi
 
       - name: Set up Node
         uses: actions/setup-node@v4

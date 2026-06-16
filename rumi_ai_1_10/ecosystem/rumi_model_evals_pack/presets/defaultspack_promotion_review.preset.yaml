@@ -1,0 +1,13 @@
+preset_id: defaultspack_promotion_review
+name: Defaultspack Promotion Gate Review
+profile: rumi_model_evals.promotion_gate_reviewer
+inspired_by: [provider promotion gates, regression review]
+enabled_capabilities: [promotion_gate_review, model_fit_matrix, flakiness_review, safety]
+ui_panels: [chat, gates, evidence, decision]
+behavior: [advisory_only, evidence_refs_required, conservative_promotion]
+policy:
+  network_default: none
+  defaultspack_catalog_changes_require_approval: true
+task_defaults:
+  output:
+    type: promotion_gate_decision

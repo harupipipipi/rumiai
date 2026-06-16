@@ -1,0 +1,15 @@
+preset_id: rumi_workflow_scheduler.delivery_handoff_digest
+pack_id: rumi_workflow_scheduler_pack
+title: Delivery Handoff Digest
+profile: rumi_workflow_scheduler.scheduler_designer
+schedule_kind: cron_like
+default_owner_route: rumi_connector_gateway_pack
+required_fields:
+  - digest_scope
+  - cadence
+  - audience_policy
+  - evidence_summary
+  - stop_conditions
+  - connector_owner_route
+retry_policy: conservative_retry
+status: draft_until_connector_owner_accepts

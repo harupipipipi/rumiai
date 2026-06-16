@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .validation import check_path_within, validate_pack_id
+
 logger = logging.getLogger(__name__)
 
 # pack-shell バイナリのパスを解決する環境変数
@@ -126,6 +128,9 @@ class DesktopAppManager:
         Returns:
             {"success": True, "shortcut_path": "..."} or {"success": False, "error": "..."}
         """
+        if not validate_pack_id(pack_id):
+            return {"success": False, "error": f"Invalid pack_id: {pack_id}"}
+
         command = desktop_app_config.get("command", "")
         if not command:
             return {"success": False, "error": "desktop_app.command is required"}
@@ -174,6 +179,8 @@ class DesktopAppManager:
         pack_id = ecosystem.get("pack_id") or ecosystem.get("id")
         if not pack_id or not isinstance(pack_id, str):
             return {"success": False, "error": "ecosystem.json pack_id is required"}
+        if not validate_pack_id(pack_id):
+            return {"success": False, "error": f"Invalid pack_id in ecosystem.json: {pack_id}"}
 
         desktop_app_config = ecosystem.get("desktop_app")
         if not isinstance(desktop_app_config, dict):
@@ -213,6 +220,9 @@ class DesktopAppManager:
         env_overrides: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Launch a Pack app, optionally overriding launch-time environment."""
+        if not validate_pack_id(pack_id):
+            return {"success": False, "error": f"Invalid pack_id: {pack_id}"}
+
         if pack_id in self._running:
             proc = self._running[pack_id]
             if proc.poll() is None:
@@ -555,7 +565,14 @@ class DesktopAppManager:
         if not self._repo_dir:
             return {"success": False, "error": "repo dir is not configured"}
 
-        ecosystem_path = Path(self._repo_dir) / "ecosystem" / pack_id / "ecosystem.json"
+        if not validate_pack_id(pack_id):
+            return {"success": False, "error": f"Invalid pack_id: {pack_id}"}
+
+        ecosystem_dir = Path(self._repo_dir) / "ecosystem"
+        ecosystem_path = ecosystem_dir / pack_id / "ecosystem.json"
+        path_ok, path_error = check_path_within(ecosystem_path, ecosystem_dir)
+        if not path_ok:
+            return {"success": False, "error": path_error or f"Invalid ecosystem path for pack: {pack_id}"}
         if not ecosystem_path.is_file():
             return {
                 "success": False,

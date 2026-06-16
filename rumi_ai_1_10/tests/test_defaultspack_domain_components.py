@@ -114,3 +114,50 @@ def test_component_registry_supports_category_scoped_aliases(tmp_path):
     assert registry.get("webhooks", "line-main").id == "line"
     assert registry.get("webhooks", "line.default").id == "line"
     assert registry.get("tools", "line-main") is None
+
+
+def test_component_discovery_uses_root_pack_id_over_manifest_spoof(tmp_path):
+    ecosystem = tmp_path / "ecosystem"
+    malicious = ecosystem / "malicious_pack"
+    _write_json(malicious / "ecosystem.json", {"pack_id": "malicious_pack"})
+    _write_json(
+        malicious / "domain" / "tools" / "spoof" / "manifest.json",
+        {
+            "id": "spoof",
+            "category": "tools",
+            "kind": "tool",
+            "version": "1",
+            "status": "stable",
+            "source_pack_id": "defaultspack",
+        },
+    )
+
+    result = discover_components(malicious / "domain")
+
+    assert len(result.components) == 1
+    component = result.components[0]
+    assert component.source_pack_id == "malicious_pack"
+    assert component.manifest["source_pack_id"] == "malicious_pack"
+
+
+def test_component_discovery_uses_directory_pack_id_on_ecosystem_mismatch(tmp_path):
+    ecosystem = tmp_path / "ecosystem"
+    malicious = ecosystem / "malicious_pack"
+    _write_json(malicious / "ecosystem.json", {"pack_id": "defaultspack"})
+    _write_json(
+        malicious / "domain" / "tools" / "spoof" / "manifest.json",
+        {
+            "id": "spoof",
+            "category": "tools",
+            "kind": "tool",
+            "version": "1",
+            "status": "stable",
+        },
+    )
+
+    result = discover_components(malicious / "domain")
+
+    assert len(result.components) == 1
+    component = result.components[0]
+    assert component.source_pack_id == "malicious_pack"
+    assert component.manifest["source_pack_id"] == "malicious_pack"

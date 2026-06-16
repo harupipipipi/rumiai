@@ -1,0 +1,22 @@
+taxonomy:
+  domains:
+  - study_coaching
+  - diagnostic_assessment
+  - spaced_review
+  artifact_types:
+  - learner_profile
+  - study_goal
+  - practice_session
+  - review_queue
+  - progress_report
+  handoff_targets:
+  - rumi_document_intelligence_pack
+  - rumi_research_pack
+  - rumi_memory_knowledge_pack
+  - rumi_workflow_scheduler_pack
+  - rumi_workspace_pack
+  forbidden_ownership:
+  - document parsing
+  - web research
+  - calendar writes
+  - memory storage

@@ -6,7 +6,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # テスト対象のモジュールへのパスを追加
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -54,11 +54,39 @@ class TestCompileTemplatePath(unittest.TestCase):
 class TestApiRouteTableBuild(unittest.TestCase):
     """load_api_routes のテスト（モック registry 使用）"""
 
-    def _make_mock_registry(self, api_routes):
+    def setUp(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        self._approval_patcher = patch.object(
+            PackAPIHandler,
+            "_is_pack_approved_for_runtime_routes",
+            return_value=True,
+        )
+        self._approval_patcher.start()
+
+    def tearDown(self):
+        self._approval_patcher.stop()
+
+    def _make_mock_registry(
+        self,
+        api_routes,
+        *,
+        pack_id="test_pack",
+        pack_path=None,
+        pre_auth_routes=None,
+        web_mount=None,
+    ):
         pack_info = MagicMock()
         pack_info.ecosystem = {"api_routes": api_routes}
+        if pre_auth_routes is not None:
+            pack_info.ecosystem["pre_auth_routes"] = pre_auth_routes
+        if web_mount is not None:
+            pack_info.ecosystem["web_mount"] = web_mount
+        if pack_path is not None:
+            pack_info.path = pack_path
+            pack_info.subdir = pack_path
         registry = MagicMock()
-        registry.packs = {"test_pack": pack_info}
+        registry.packs = {pack_id: pack_info}
         return registry
 
     def test_exact_route_match(self):
@@ -136,6 +164,34 @@ class TestApiRouteTableBuild(unittest.TestCase):
         count = PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
         self.assertEqual(count, 0)
 
+    def test_function_route_from_untrusted_pack_rejected(self):
+        """第三者 pack の function_id api_route は登録されない"""
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        registry = self._make_mock_registry([
+            {"method": "POST", "path": "/api/pwn", "function_id": "pwn"},
+        ])
+
+        count = PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
+
+        self.assertEqual(count, 0)
+        self.assertNotIn(("POST", "/api/pwn"), PackAPIHandler._api_route_exact)
+
+    def test_pre_auth_routes_from_untrusted_pack_rejected(self):
+        """第三者 pack の pre_auth_routes は認証バイパステーブルに載せない"""
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        registry = self._make_mock_registry(
+            [],
+            pre_auth_routes=[{"method": "POST", "path": "/api/pwn"}],
+            web_mount={"path_prefix": "/public-pack", "static_root": "web", "auth_required": False},
+        )
+
+        count = PackAPIHandler.load_pre_auth_routes(registry, pack_ids={"test_pack"})
+
+        self.assertEqual(count, 0)
+        self.assertEqual(PackAPIHandler._pre_auth_table, [])
+
     def test_pass_body_flag(self):
         """pass_body フラグがエントリに保存される"""
         from core_runtime.pack_api_server import PackAPIHandler
@@ -155,6 +211,88 @@ class TestApiRouteTableBuild(unittest.TestCase):
         PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
         entry = PackAPIHandler._api_route_exact[("POST", "/api/panel/kernel/restart")]
         self.assertEqual(entry["response_mode"], "raw")
+
+    def test_dispatch_response_mode_raw_uses_raw_json_payload(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/panel/kernel/restart"): {
+                "pack_id": "test_pack",
+                "handler": "_panel_restart_kernel",
+                "function_id": "",
+                "pass_body": False,
+                "response_mode": "raw",
+                "args": {},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        handler._panel_restart_kernel = lambda: {
+            "restarting": True,
+            "message": "Kernel restart requested",
+        }
+        handler._send_raw_json = MagicMock()
+        handler._send_result = MagicMock()
+        handler._send_response = MagicMock()
+        handler._send_sse = MagicMock()
+
+        dispatched = handler._dispatch_api_route(
+            "POST",
+            "/api/panel/kernel/restart",
+        )
+
+        self.assertTrue(dispatched)
+        handler._send_raw_json.assert_called_once_with(
+            {
+                "restarting": True,
+                "message": "Kernel restart requested",
+            },
+            status=200,
+        )
+        handler._send_result.assert_not_called()
+        handler._send_response.assert_not_called()
+
+    def test_dispatch_response_mode_raw_preserves_explicit_status_code(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/panel/kernel/restart"): {
+                "pack_id": "test_pack",
+                "handler": "_panel_restart_kernel",
+                "function_id": "",
+                "pass_body": False,
+                "response_mode": "raw",
+                "args": {},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        handler._panel_restart_kernel = lambda: {
+            "error": "Restart rate limited",
+            "status_code": 429,
+        }
+        handler._send_raw_json = MagicMock()
+        handler._send_result = MagicMock()
+        handler._send_response = MagicMock()
+        handler._send_sse = MagicMock()
+
+        dispatched = handler._dispatch_api_route(
+            "POST",
+            "/api/panel/kernel/restart",
+        )
+
+        self.assertTrue(dispatched)
+        handler._send_raw_json.assert_called_once_with(
+            {
+                "error": "Restart rate limited",
+                "status_code": 429,
+            },
+            status=429,
+        )
+        handler._send_result.assert_not_called()
+        handler._send_response.assert_not_called()
 
     def test_none_registry(self):
         """registry が None の場合は 0 を返す"""

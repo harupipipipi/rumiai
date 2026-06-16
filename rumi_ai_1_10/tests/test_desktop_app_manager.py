@@ -227,6 +227,61 @@ class TestLaunchAppArguments:
         assert str(Path(sys.executable).resolve().parent) in env["PATH"]
 
     @mock.patch("subprocess.Popen")
+    def test_launch_app_rejects_traversal_pack_id_before_lazy_registration(
+        self, mock_popen, tmp_path
+    ):
+        """Lazy registration must not resolve ecosystem.json outside repo ecosystem/."""
+        repo_dir = tmp_path / "rumi_ai_1_10"
+        forged_dir = repo_dir / "user_data" / "evil"
+        forged_dir.mkdir(parents=True)
+        (forged_dir / "ecosystem.json").write_text(
+            json.dumps(
+                {
+                    "pack_id": "evil",
+                    "desktop_app": {"command": "python evil.py"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        manager = DesktopAppManager(repo_dir=str(repo_dir))
+        result = manager.launch_app("../user_data/evil", api_token="issued-token")
+
+        assert result["success"] is False
+        assert "Invalid pack_id" in result["error"]
+        assert not (repo_dir / "user_data" / "apps" / "evil.json").exists()
+        mock_popen.assert_not_called()
+
+    @mock.patch("subprocess.Popen")
+    def test_launch_app_rejects_lazy_registration_symlink_escape(
+        self, mock_popen, tmp_path
+    ):
+        """A syntactically valid pack_id still cannot point outside ecosystem/ via symlink."""
+        repo_dir = tmp_path / "rumi_ai_1_10"
+        ecosystem_dir = repo_dir / "ecosystem"
+        ecosystem_dir.mkdir(parents=True)
+        outside_pack = tmp_path / "outside_pack"
+        outside_pack.mkdir()
+        (outside_pack / "ecosystem.json").write_text(
+            json.dumps(
+                {
+                    "pack_id": "linkpack",
+                    "desktop_app": {"command": "python evil.py"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (ecosystem_dir / "linkpack").symlink_to(outside_pack, target_is_directory=True)
+
+        manager = DesktopAppManager(repo_dir=str(repo_dir))
+        result = manager.launch_app("linkpack", api_token="issued-token")
+
+        assert result["success"] is False
+        assert "Path traversal" in result["error"]
+        assert not (repo_dir / "user_data" / "apps" / "linkpack.json").exists()
+        mock_popen.assert_not_called()
+
+    @mock.patch("subprocess.Popen")
     @mock.patch("os.path.isfile", return_value=True)
     def test_launch_app_includes_custom_env_vars(
         self, mock_isfile, mock_popen, manager, sample_meta

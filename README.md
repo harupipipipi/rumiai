@@ -9,6 +9,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 | やりたいこと | まず読む場所 | 補足 |
 |---|---|---|
 | 目的別にドキュメントを辿りたい | [`rumi_ai_1_10/docs/README.md`](./rumi_ai_1_10/docs/README.md) | 「何をしたいか」から読む順番を案内します |
+| 用語の意味を揃えたい | [`rumi_ai_1_10/docs/terminology.md`](./rumi_ai_1_10/docs/terminology.md) | `rule`, `skill`, `team workspace`, `subagent` 互換名の整理です |
 | とにかく起動したい | [`README.md`](./README.md) の `Start` | 最短の起動コマンドだけを載せています |
 | runtime / kernel の全体像を知りたい | [`rumi_ai_1_10/README.md`](./rumi_ai_1_10/README.md) | アーキテクチャと主要ディレクトリの説明があります |
 | コードを読まずに仕組みを理解したい | [`rumi_ai_1_10/docs/concepts/system-mechanism.md`](./rumi_ai_1_10/docs/concepts/system-mechanism.md) | 起動・Flow・承認・Grant の流れを文章で追えます |
@@ -37,6 +38,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 - Python 3.10+
 - Node.js 18+
 - npm
+- uv (`rumi_viewer` を触る場合)
 - Rust / Cargo (`rumi_viewer` を触る場合)
 - Flutter SDK (`rumi_mobile` を触る場合)
 
@@ -49,7 +51,8 @@ cd rumiai
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r rumi_ai_1_10/requirements.txt -r rumi_ai_1_10/requirements-dev.txt
+pip install -r rumi_ai_1_10/requirements.txt
+pip install -r rumi_ai_1_10/requirements-dev.txt
 pip install -e ./rumi_ai_1_10
 
 cd rumi_viewer/frontend

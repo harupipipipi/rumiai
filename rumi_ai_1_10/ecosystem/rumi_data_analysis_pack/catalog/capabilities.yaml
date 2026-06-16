@@ -1,0 +1,52 @@
+catalog_id: rumi.data_analysis.capabilities
+version: rumi.catalog.v1
+description: Local-first data analysis capability bundles and expected runtime providers.
+local_first: true
+network_default: none
+capabilities:
+  data_intake:
+    description: Capture question, data files, grain, privacy boundary, success criteria, and output format.
+    requires: [chat_context, project_context]
+    provided_by: [defaultspack, rumi_local_agent_pack]
+  csv_profile:
+    description: Inspect local CSV shape, columns, types, missingness, units, and candidate keys.
+    requires: [local_file_read, table_preview]
+    provided_by: [rumi_default_tools_pack]
+  sheet_audit:
+    description: Audit exported Sheets or spreadsheet tables for formulas, tabs, schema drift, duplicates, and totals.
+    requires: [local_file_read, table_preview, formula_notes_optional]
+    provided_by: [rumi_default_tools_pack]
+  sql_reasoning:
+    description: Design local SQL queries, joins, filters, and validation checks without embedding credentials.
+    requires: [schema_description, query_plan, approval_for_execution_optional]
+    provided_by: [rumi_data_analysis_pack]
+  notebook_reasoning:
+    description: Structure notebook-style analysis with cells, assumptions, outputs, and reproducibility notes.
+    requires: [analysis_plan, cell_outline, audit_trail]
+    provided_by: [rumi_data_analysis_pack]
+  data_cleaning:
+    description: Declare reversible cleaning steps, affected columns, assumptions, and validation checks.
+    requires: [cleaning_recipe, audit_trail]
+    provided_by: [rumi_data_analysis_pack]
+  chart_design:
+    description: Produce chart specs with chart intent, data grain, encodings, filters, annotations, and accessibility notes.
+    requires: [chart_spec, result_table]
+    provided_by: [rumi_data_analysis_pack]
+  analysis_audit:
+    description: Record provenance, transformations, checks, caveats, and reproducibility status.
+    requires: [audit_trail, source_inventory, validation_checks]
+    provided_by: [rumi_data_analysis_pack]
+  workspace_handoff:
+    description: Hand structured findings, tables, and chart specs to a workspace artifact pack when available.
+    requires: [artifact_optional, handoff_payload]
+    provided_by: [rumi_data_analysis_pack, rumi_workspace_pack_optional]
+guardrails:
+  no_embedded_secrets: true
+  network_default: none
+  approval_required_for:
+    - file_write
+    - terminal_execution
+    - notebook_execution
+    - sql_execution
+    - remote_data_access
+    - workspace_artifact_export

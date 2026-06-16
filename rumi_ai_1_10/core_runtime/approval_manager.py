@@ -41,6 +41,7 @@ from .paths import (
     LOCAL_PACK_DIR,
     ECOSYSTEM_DIR,
     GRANTS_DIR,
+    CORE_PACK_DIR,
     CORE_PACK_ID_PREFIX,
     discover_pack_locations,
     check_pack_id_mismatch,
@@ -143,8 +144,41 @@ class ApprovalManager:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     def _is_core_pack(self, pack_id: str) -> bool:
-        """core_pack かどうかを判定する（pack_id が CORE_PACK_ID_PREFIX で始まるか）"""
-        return pack_id.startswith(CORE_PACK_ID_PREFIX)
+        """Return True only for shipped core packs in the trusted core_pack dir."""
+        normalized_pack_id = str(pack_id or "").strip()
+        if not normalized_pack_id.startswith(CORE_PACK_ID_PREFIX):
+            return False
+
+        trusted_core_dir = self._resolve_core_pack_dir(normalized_pack_id)
+        if trusted_core_dir is None:
+            return False
+
+        # A pack with the same core-looking ID under the user/imported pack
+        # search root must not inherit trust from the shipped core_pack copy.
+        user_pack_dir = self._resolve_pack_dir(normalized_pack_id)
+        if user_pack_dir is None:
+            return True
+
+        try:
+            return user_pack_dir.resolve() == trusted_core_dir.resolve()
+        except OSError:
+            return False
+
+    def _resolve_core_pack_dir(self, pack_id: str) -> Optional[Path]:
+        """Resolve a core pack only if it is inside CORE_PACK_DIR."""
+        core_root = Path(CORE_PACK_DIR)
+        try:
+            core_root_resolved = core_root.resolve()
+            candidate = (core_root / pack_id).resolve()
+            candidate.relative_to(core_root_resolved)
+        except (OSError, ValueError):
+            return None
+
+        if not candidate.is_dir():
+            return None
+        if not (candidate / "ecosystem.json").is_file():
+            return None
+        return candidate
 
     def _is_trusted_builtin_pack(self, pack_id: str) -> bool:
         """Bundled runtime packs are trusted only at their canonical shipped location."""
@@ -615,10 +649,14 @@ class ApprovalManager:
                 
                 file_hashes = self._compute_pack_hashes(pack_dir)
             
+            previous_hashes = dict(approval.file_hashes)
+
             approval.status = PackStatus.APPROVED
             approval.approved_at = self._now_ts()
             approval.file_hashes = file_hashes
             approval.rejection_reason = None
+            if approval.rule_approved and previous_hashes != file_hashes:
+                self._clear_rule_approval(approval)
 
             # G-3: バージョン履歴を記録
             approval.version_history.append({
@@ -749,9 +787,24 @@ class ApprovalManager:
 
         with self._lock:
             approval = self._approvals.get(pack_id)
-            if not approval:
+            if not approval or not approval.rule_approved:
                 return False
-            return approval.rule_approved
+            return self._rule_approval_matches_current_hashes(approval)
+
+    @staticmethod
+    def _clear_rule_approval(approval: PackApproval) -> None:
+        """Pack のルール拡張承認を取り消す。"""
+        approval.rule_approved = False
+        approval.rule_approved_at = None
+
+    @staticmethod
+    def _rule_approval_matches_current_hashes(approval: PackApproval) -> bool:
+        """現在承認済みのハッシュに対して rule approval が付与済みか確認。"""
+        for entry in reversed(approval.version_history):
+            if entry.get("action") != "approve_rule":
+                continue
+            return entry.get("file_hashes") == approval.file_hashes
+        return False
 
     def reject(self, pack_id: str, reason: str = "") -> ApprovalResult:
         """Packを拒否"""
@@ -762,6 +815,7 @@ class ApprovalManager:
             approval = self._approvals[pack_id]
             approval.status = PackStatus.BLOCKED
             approval.rejection_reason = reason
+            self._clear_rule_approval(approval)
             
             self._save_grant(approval)
             
@@ -774,8 +828,10 @@ class ApprovalManager:
         """Packを変更済みとしてマーク（再承認必要）"""
         with self._lock:
             if pack_id in self._approvals:
-                self._approvals[pack_id].status = PackStatus.MODIFIED
-                self._save_grant(self._approvals[pack_id])
+                approval = self._approvals[pack_id]
+                approval.status = PackStatus.MODIFIED
+                self._clear_rule_approval(approval)
+                self._save_grant(approval)
     
     # ------------------------------------------------------------------ #
     # Wave 1-1: ハッシュ粒度緩和 — ファイルごとのクリティカル判定
@@ -783,11 +839,17 @@ class ApprovalManager:
 
     # セキュリティクリティカルファイル/ディレクトリ定義
     CRITICAL_FILES = frozenset({
+        "ecosystem.json",
+        "permissions.json",
+        "routes.json",
         "backend/ecosystem.json",
         "backend/permissions.json",
         "backend/routes.json",
     })
     CRITICAL_DIRS = (
+        "flows/",
+        "lib/",
+        "components/",
         "backend/flows/",
         "backend/lib/",
         "backend/components/",

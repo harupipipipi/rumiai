@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/workroom_session.schema.json",
+  "title": "Workroom Session",
+  "description": "Session-level state for an agent workroom.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session_id",
+    "goal_id",
+    "run_owner",
+    "status",
+    "event_log_id",
+    "human_intervention_policy"
+  ],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "goal_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "paused",
+        "cancelled",
+        "completed",
+        "blocked"
+      ]
+    },
+    "event_log_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "human_intervention_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interrupt_allowed",
+        "redirect_allowed",
+        "cancel_allowed",
+        "approval_required_for_handoff"
+      ],
+      "properties": {
+        "interrupt_allowed": {
+          "type": "boolean"
+        },
+        "redirect_allowed": {
+          "type": "boolean"
+        },
+        "cancel_allowed": {
+          "type": "boolean"
+        },
+        "approval_required_for_handoff": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    }
+  }
+}

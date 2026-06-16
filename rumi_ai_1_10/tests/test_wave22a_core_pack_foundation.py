@@ -189,15 +189,52 @@ class TestApprovalManagerCorePack:
         mgr.initialize()
         return mgr
 
-    def test_is_core_pack_true_for_core_prefix(self, tmp_path):
-        """_is_core_pack() が core_ プレフィックスで True を返す"""
-        mgr = self._make_manager(tmp_path)
-        assert mgr._is_core_pack("core_alpha") is True
+    def _make_trusted_core_pack(self, tmp_path, pack_id="core_alpha"):
+        core_root = tmp_path / "core_runtime" / "core_pack"
+        core_pack = core_root / pack_id
+        _make_ecosystem_json(core_pack, pack_id)
+        return core_root, core_pack
 
-    def test_is_core_pack_true_for_exact_prefix(self, tmp_path):
-        """_is_core_pack() が 'core_' ちょうどでも True を返す"""
+    def test_is_core_pack_true_for_trusted_core_pack(self, tmp_path):
+        """_is_core_pack() は trusted core_pack 配下の core_ Pack だけ True を返す"""
+        from core_runtime import approval_manager as am_mod
+        core_root, _ = self._make_trusted_core_pack(tmp_path, "core_alpha")
         mgr = self._make_manager(tmp_path)
-        assert mgr._is_core_pack("core_") is True
+
+        with patch.object(am_mod, "CORE_PACK_DIR", str(core_root)):
+            assert mgr._is_core_pack("core_alpha") is True
+
+    def test_is_core_pack_false_for_core_prefix_outside_trusted_dir(self, tmp_path):
+        """ecosystem/ 配下の core_ Pack は core_pack として扱わない"""
+        from core_runtime import approval_manager as am_mod
+        core_root = tmp_path / "core_runtime" / "core_pack"
+        _make_ecosystem_json(tmp_path / "ecosystem" / "core_evil", "core_evil")
+        mgr = self._make_manager(tmp_path)
+        mgr.scan_packs()
+
+        with patch.object(am_mod, "CORE_PACK_DIR", str(core_root)):
+            assert mgr._is_core_pack("core_evil") is False
+            assert mgr.get_status("core_evil") == am_mod.PackStatus.INSTALLED
+            assert mgr.is_pack_approved_and_verified("core_evil") == (False, "not_approved")
+            assert mgr.verify_hash("core_evil") is False
+
+    def test_ecosystem_pack_cannot_shadow_trusted_core_pack_id(self, tmp_path):
+        """trusted core_pack と同じ ID の ecosystem/ Pack は承認をバイパスできない"""
+        from core_runtime import approval_manager as am_mod
+        core_root, _ = self._make_trusted_core_pack(tmp_path, "core_shadow")
+        _make_ecosystem_json(tmp_path / "ecosystem" / "core_shadow", "core_shadow")
+        mgr = self._make_manager(tmp_path)
+        mgr.scan_packs()
+
+        with patch.object(am_mod, "CORE_PACK_DIR", str(core_root)):
+            assert mgr._is_core_pack("core_shadow") is False
+            assert mgr.get_status("core_shadow") == am_mod.PackStatus.INSTALLED
+            assert mgr.is_pack_approved_and_verified("core_shadow") == (False, "not_approved")
+
+    def test_is_core_pack_false_for_exact_prefix(self, tmp_path):
+        """'core_' ちょうどの pack_id は実体がない限り False を返す"""
+        mgr = self._make_manager(tmp_path)
+        assert mgr._is_core_pack("core_") is False
 
     def test_is_core_pack_false_for_normal(self, tmp_path):
         """_is_core_pack() が通常 pack_id で False を返す"""
@@ -210,21 +247,32 @@ class TestApprovalManagerCorePack:
         assert mgr._is_core_pack("") is False
 
     def test_is_pack_approved_and_verified_core(self, tmp_path):
-        """core_ プレフィックスの pack_id は (True, None) を返す"""
+        """trusted core_pack 配下の Pack は (True, None) を返す"""
+        from core_runtime import approval_manager as am_mod
+        core_root, _ = self._make_trusted_core_pack(tmp_path, "core_system")
         mgr = self._make_manager(tmp_path)
-        result = mgr.is_pack_approved_and_verified("core_system")
-        assert result == (True, None)
+
+        with patch.object(am_mod, "CORE_PACK_DIR", str(core_root)):
+            result = mgr.is_pack_approved_and_verified("core_system")
+            assert result == (True, None)
 
     def test_get_status_core(self, tmp_path):
-        """core_ プレフィックスの pack_id は APPROVED を返す"""
-        from core_runtime.approval_manager import PackStatus
+        """trusted core_pack 配下の Pack は APPROVED を返す"""
+        from core_runtime import approval_manager as am_mod
+        core_root, _ = self._make_trusted_core_pack(tmp_path, "core_system")
         mgr = self._make_manager(tmp_path)
-        assert mgr.get_status("core_system") == PackStatus.APPROVED
+
+        with patch.object(am_mod, "CORE_PACK_DIR", str(core_root)):
+            assert mgr.get_status("core_system") == am_mod.PackStatus.APPROVED
 
     def test_verify_hash_core(self, tmp_path):
-        """core_ プレフィックスの pack_id は True を返す"""
+        """trusted core_pack 配下の Pack は True を返す"""
+        from core_runtime import approval_manager as am_mod
+        core_root, _ = self._make_trusted_core_pack(tmp_path, "core_system")
         mgr = self._make_manager(tmp_path)
-        assert mgr.verify_hash("core_system") is True
+
+        with patch.object(am_mod, "CORE_PACK_DIR", str(core_root)):
+            assert mgr.verify_hash("core_system") is True
 
     def test_normal_pack_not_found(self, tmp_path):
         """通常 pack_id は従来通り not_found を返す（回帰テスト）"""
@@ -239,15 +287,21 @@ class TestApprovalManagerCorePack:
         assert mgr.get_status("unknown_pack") is None
 
     def test_core_pack_no_approval_record_needed(self, tmp_path):
-        """core_pack は _approvals に登録しなくても承認済みになる"""
+        """trusted core_pack は _approvals に登録しなくても承認済みになる"""
+        from core_runtime import approval_manager as am_mod
+        core_root, _ = self._make_trusted_core_pack(tmp_path, "core_magic")
         mgr = self._make_manager(tmp_path)
-        # _approvals にエントリが無いことを確認
-        assert "core_magic" not in mgr._approvals
-        # それでも承認済み
-        assert mgr.is_pack_approved_and_verified("core_magic") == (True, None)
+
+        with patch.object(am_mod, "CORE_PACK_DIR", str(core_root)):
+            assert "core_magic" not in mgr._approvals
+            assert mgr.is_pack_approved_and_verified("core_magic") == (True, None)
 
     def test_core_pack_verify_hash_no_approval_record(self, tmp_path):
-        """core_pack は _approvals に登録しなくてもハッシュ検証 True"""
+        """trusted core_pack は _approvals に登録しなくてもハッシュ検証 True"""
+        from core_runtime import approval_manager as am_mod
+        core_root, _ = self._make_trusted_core_pack(tmp_path, "core_data")
         mgr = self._make_manager(tmp_path)
-        assert "core_data" not in mgr._approvals
-        assert mgr.verify_hash("core_data") is True
+
+        with patch.object(am_mod, "CORE_PACK_DIR", str(core_root)):
+            assert "core_data" not in mgr._approvals
+            assert mgr.verify_hash("core_data") is True

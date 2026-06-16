@@ -5,22 +5,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 """
 evaluator.py — Evaluator
 
-複数の出力を比較・評価して最良のものを選ぶ。
+複数の出力を比較・評価して最良のもの選ぶ。
 基本評価・構造評価・LLM ジャッジ・カスタム評価を組み合わせる。
 """
 
 import json
 
+from blocks.chat._prompt_helpers import extract_text as _shared_extract_text
+
 
 def _extract_text(response):
     """StandardResponse から全テキストを結合して返す。"""
-    if not response or "content" not in response:
-        return ""
-    parts = []
-    for block in response.get("content", []):
-        if block.get("type") == "text":
-            parts.append(block.get("text", ""))
-    return "".join(parts)
+    return _shared_extract_text(response)
 
 
 def _is_error(response):

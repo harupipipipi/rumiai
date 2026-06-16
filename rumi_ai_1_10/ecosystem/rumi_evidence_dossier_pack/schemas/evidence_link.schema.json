@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/evidence_link.schema.json",
+  "title": "Evidence Link",
+  "description": "Evidence edge linking claims to source anchors.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evidence_id",
+    "source_id",
+    "source_anchor",
+    "excerpt_summary",
+    "supports_claim_ids",
+    "contradicts_claim_ids"
+  ],
+  "properties": {
+    "evidence_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchor_type",
+        "anchor_value"
+      ],
+      "properties": {
+        "anchor_type": {
+          "type": "string",
+          "enum": [
+            "page",
+            "line",
+            "timestamp",
+            "cell",
+            "url_fragment",
+            "span"
+          ]
+        },
+        "anchor_value": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "excerpt_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "supports_claim_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "contradicts_claim_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

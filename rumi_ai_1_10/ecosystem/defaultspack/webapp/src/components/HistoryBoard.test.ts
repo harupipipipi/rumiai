@@ -90,7 +90,7 @@ test("buildGroupsFromChats groups metadata chats in compact workspace buckets", 
 
   const groups = buildGroupsFromChats(chats);
 
-  assert.deepEqual(groups.map((group) => group.title), ["Pinned", "Company", "Coding", "Tags", "Recent"]);
+  assert.deepEqual(groups.map((group) => group.title), ["Pinned", "Team", "Coding", "Tags", "Recent"]);
   assert.deepEqual(groups[0]?.chats.map((chat) => chat.id), ["pinned-1"]);
   assert.deepEqual(groups[1]?.chats.map((chat) => chat.id), ["company-1", "company-2"]);
   assert.deepEqual(groups[2]?.chats.map((chat) => chat.id), ["coding-1"]);

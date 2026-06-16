@@ -1,0 +1,44 @@
+spec_id: rumi.api_toolsmith.openapi_schema_review.v1
+owner: rumi_api_toolsmith_pack
+purpose: Declarative review checklist for turning OpenAPI operations into safe Rumi tool schemas.
+network_default: none
+required_inputs:
+  - spec_path_or_user_supplied_document
+  - selected_operation_ids
+  - auth_boundary
+  - mock_response_fixture
+review_dimensions:
+  operation_selection:
+    checks:
+      - operation_id_present_and_stable
+      - method_and_path_match_user_intent
+      - destructive_methods_require_handoff
+      - pagination_and_rate_limit_notes_captured
+  parameter_schema:
+    checks:
+      - required_parameters_have_user_safe_descriptions
+      - enums_preserved
+      - default_values_not_confused_with_user_inputs
+      - path_parameters_distinguished_from_query_parameters
+  request_body:
+    checks:
+      - content_type_recorded
+      - writable_fields_classified
+      - pii_or_payment_fields_flagged
+      - idempotency_key_policy_recorded
+  response_schema:
+    checks:
+      - success_shape_summarized
+      - error_shape_summarized
+      - nullable_fields_noted
+      - mock_response_fixture_matches_schema
+  auth_boundary:
+    checks:
+      - credential_names_redacted
+      - scope_requirements_recorded_without_keys
+      - secret_handling_handoff_to_security_review
+outputs:
+  - tool_schema_draft
+  - risk_notes
+  - mock_test_plan
+  - handoff_recommendation

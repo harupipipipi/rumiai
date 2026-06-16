@@ -1,0 +1,88 @@
+quality_matrix:
+  minimum_pass: all_blocking_checks
+  fail_states:
+  - missing_evidence
+  - boundary_violation
+  - unsafe_external_action
+  - unreviewed_handoff
+  checks:
+  - id: consent_state_present
+    blocking: true
+    description: Every evidence item has granted, limited, revoked, or unknown consent.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: redaction_state
+    blocking: true
+    description: No raw personal identifiers enter insight cards.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: source_quote_ids
+    blocking: true
+    description: Each claim links to source quote or response IDs.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: source_quote_coverage
+    blocking: true
+    description: Every insight card claim has non-empty source_quote_ids that resolve to allowed, redacted source quotes.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: revoked_consent_excluded
+    blocking: true
+    description: Revoked or do_not_use participant records cannot produce insight cards or reusable source quote IDs.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: counter_evidence_checked
+    blocking: true
+    description: Conflicting evidence is listed or marked absent.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: no_live_recruiting
+    blocking: true
+    description: The pack never recruits, emails, or updates CRM records.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: sample_limit_noted
+    blocking: true
+    description: Survey limitations are explicit.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: decision_boundary_present
+    blocking: true
+    description: Opportunity maps do not become roadmap decisions.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: handoff_owner_named
+    blocking: true
+    description: External actions name an owner pack.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note

@@ -1,0 +1,19 @@
+task:
+  title: Refresh project knowledge
+  preset: rumi_memory_knowledge_pack.project_knowledge_refresh
+  goal: Propose updates to project knowledge from local notes and recent sessions.
+  inputs:
+    project_id: rumi_desktop
+    source_context:
+      - workspace/notes/project_decisions.md
+      - workspace/notes/release_constraints.md
+    existing_project_knowledge: workspace/memory/project_knowledge.yaml
+  output:
+    artifacts:
+      - type: project_knowledge_proposals
+        path: memory_outputs/project_knowledge_proposals.yaml
+      - type: conflict_notes
+        path: memory_outputs/project_knowledge_conflicts.md
+  workflow: project_knowledge_refresh
+  review:
+    checks: [project_scope_required, preserve_evidence_links]

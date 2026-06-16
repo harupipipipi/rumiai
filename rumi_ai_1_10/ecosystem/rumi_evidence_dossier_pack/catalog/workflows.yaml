@@ -1,0 +1,117 @@
+workflows:
+  default_execution: no_runtime_action
+  ownership:
+    owned:
+    - source_registry
+    - source_quality_label
+    - claim_evidence_graph
+    - evidence_link_contract
+    - contradiction_review_contract
+    - citation_ledger
+    - reviewer_queue
+    - dossier_export_manifest
+    handoff:
+    - source retrieval
+    - connector access
+    - data transformation
+    - document rendering
+    - workspace export
+    - model eval scoring
+    - web browsing
+  items:
+  - id: source_intake_registry
+    purpose: Register sources and quality labels from retrieval owner outputs.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_defaultspack
+    - handoff_to_rumi_default_tools_pack
+    execution: declarative_only
+  - id: claim_evidence_graph
+    purpose: Build claim/evidence graph with source anchors.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_defaultspack
+    - handoff_to_rumi_default_tools_pack
+    execution: declarative_only
+  - id: contradiction_review
+    purpose: Detect and review conflicting evidence edges.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_defaultspack
+    - handoff_to_rumi_default_tools_pack
+    execution: declarative_only
+  - id: citation_completeness_gate
+    purpose: Block dossiers with uncited claims.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_defaultspack
+    - handoff_to_rumi_default_tools_pack
+    execution: declarative_only
+  - id: reviewer_queue_triage
+    purpose: Queue unresolved contradictions and quality label gaps.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_defaultspack
+    - handoff_to_rumi_default_tools_pack
+    execution: declarative_only
+  - id: dossier_export_manifest
+    purpose: Emit export manifest after citations and contradictions are reviewed.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_defaultspack
+    - handoff_to_rumi_default_tools_pack
+    execution: declarative_only

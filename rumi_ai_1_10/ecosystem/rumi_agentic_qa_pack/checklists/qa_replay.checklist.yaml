@@ -1,0 +1,29 @@
+qa_replay_checklist:
+  id: rumi_agentic_qa_pack.qa_replay
+  required_checks:
+    - id: scenario_defined
+      question: Is the scenario id present in the scenario catalog?
+      evidence: scenario_catalog
+      blocking: true
+    - id: subagent_coverage
+      question: Are scenario, adversarial, regression, evidence, and handoff subagents assigned?
+      evidence: qa_routing_matrix
+      blocking: true
+    - id: expected_actual_pair
+      question: Are expected and actual observations both recorded?
+      evidence: qa_evidence_ledger
+      blocking: true
+    - id: owner_handoff
+      question: Is the owner pack recorded for every failure or out-of-scope implementation task?
+      evidence: regression_triage_report
+      blocking: true
+    - id: setup_policy
+      question: Are supports_all_ok false and defaultspack promotion disabled?
+      evidence: setup_pack_metadata
+      blocking: true
+  reviewer_decisions:
+    - pass
+    - pass_with_notes
+    - flaky
+    - fail_handoff_required
+    - blocked_missing_evidence

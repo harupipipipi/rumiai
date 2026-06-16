@@ -1,0 +1,14 @@
+contract_fixture:
+  positive_cases:
+  - id: approved_mock_handoff_positive
+    given: approved call task, matching script, consent disclosure reviewed, and never-call evidence
+    expected: provider handoff packet only
+  - id: redaction_positive
+    given: transcript with phone and email plus configured redaction rules
+    expected: redacted transcript packet
+  minimum_expected:
+  - schema_valid
+  - evidence_linked
+  - handoff_scoped
+  - human_approval_explicit
+  - no_external_action

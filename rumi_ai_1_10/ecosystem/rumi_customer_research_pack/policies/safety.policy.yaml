@@ -1,0 +1,27 @@
+policy:
+  id: customer_research_safety_policy
+  default_mode: draft_and_handoff_only
+  blocked_by_default:
+  - use participant data without consent
+  - store raw personal identifiers in insight cards
+  - send recruiting emails
+  - write to CRM records
+  - perform generic web research
+  - claim statistical significance without supplied analysis
+  allowed_outputs:
+  - validated_schema_packet
+  - evidence_linked_draft
+  - review_checklist
+  - handoff_packet
+  requires_human_review_before:
+  - external_connector_action
+  - message_send
+  - calendar_write
+  - production_change
+  - real_world_action
+  evidence_rules:
+  - cite source IDs for claims
+  - require source_quote_ids for each insight card claim
+  - exclude revoked or do_not_use participants from insight cards
+  - record uncertainty when evidence is thin
+  - name owner pack for adjacent runtime actions

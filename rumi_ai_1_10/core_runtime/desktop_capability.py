@@ -15,6 +15,7 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from .runtime_port import DEFAULT_RUNTIME_PORT, resolve_runtime_port
+from .validation import validate_pack_id
 
 if TYPE_CHECKING:
     from .desktop_app_manager import DesktopAppManager
@@ -65,6 +66,8 @@ class DesktopCapabilityHandler:
         target_pack_id = args.get("pack_id") or principal_id
         if not target_pack_id or not isinstance(target_pack_id, str):
             return {"error": "pack_id is required"}
+        if not validate_pack_id(target_pack_id):
+            return {"error": f"Invalid pack_id for desktop app execution: {target_pack_id}"}
 
         allowed_packs = grant_config.get("allowed_packs", [])
         if not self._is_pack_allowed(target_pack_id, allowed_packs):

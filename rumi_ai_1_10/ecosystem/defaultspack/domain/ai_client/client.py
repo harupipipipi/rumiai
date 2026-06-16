@@ -4,13 +4,20 @@ import json
 import re
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from domain.ai_client.model_pack_router import select_model_pack
+from domain.ai_client.model_pack import ModelPack
 from domain.ai_client.model_pack_store import ModelPackStore
 from domain.ai_client.api_key_store import provider_api_metadata, provider_has_api_key, provider_named_api_keys, read_provider_api_key
+from domain.ai_client.authority_resource import build_provider_authority_resource, provider_authority_reason
+from domain.ai_client.authority_gate import provider_requires_authority
 from domain.ai_client.capabilities.registry import get_model_provider_capabilities
+from domain.ai_client import rumi_process
+from domain.ai_client.rumi_process_runner import RumiProcessRunner
+from domain.ai_client.oauth_store import provider_has_oauth_connection
 from domain.ai_client.providers import (
     _cloud_runtime_enabled,
     build_profile_catalog,
@@ -20,6 +27,14 @@ from domain.ai_client.providers import (
     get_provider_catalog,
     get_provider_catalog_map,
 )
+
+_HIDDEN_RUNTIME_LIST_PROVIDER_IDS = {"human-operator", "rumi"}
+
+
+class AuthorityApprovalRequired(RuntimeError):
+    def __init__(self, decision):
+        self.decision = decision
+        super().__init__(getattr(decision, "reason", "") or "Authority approval required")
 
 
 class AIClient:
@@ -64,7 +79,7 @@ class AIClient:
                 ):
                     continue
                 if not cloud_enabled and entry.get("kind") not in {"builtin", "local"}:
-                    if not provider_has_api_key(name):
+                    if not provider_has_api_key(name) and not provider_has_oauth_connection(name):
                         continue
                 self._providers[name] = instance
         except Exception:
@@ -103,7 +118,11 @@ class AIClient:
         self._profiles[name] = payload
 
     def _active_provider_ids(self):
-        return set(self._providers.keys())
+        return {
+            provider_id
+            for provider_id in self._providers.keys()
+            if provider_id not in _HIDDEN_RUNTIME_LIST_PROVIDER_IDS
+        }
 
     def _provider_model_candidates(self, provider_name):
         provider = self._providers.get(provider_name)
@@ -431,18 +450,264 @@ class AIClient:
             "Configure a real or local AI provider before sending a message."
         )
 
-    def _api_route_attempts(self, model, route_refs):
+    @staticmethod
+    def _authority_context_from_params(params):
+        if not isinstance(params, dict):
+            return {}
+        value = params.get("_authority_context")
+        return dict(value) if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _authority_token_for_permission(context, permission_id):
+        permission_id = str(permission_id or "").strip()
+        tokens = context.get("approval_tokens") if isinstance(context, dict) else None
+        if isinstance(tokens, dict):
+            raw = tokens.get(permission_id)
+            if isinstance(raw, dict):
+                request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+                token = str(raw.get("approval_token") or raw.get("token") or "").strip()
+                if request_id and token:
+                    return request_id, token
+        context_permission = str(context.get("permission_id") or "").strip() if isinstance(context, dict) else ""
+        if context_permission and context_permission != permission_id:
+            return "", ""
+        request_id = str(context.get("request_id") or "").strip() if isinstance(context, dict) else ""
+        token = str(context.get("approval_token") or "").strip() if isinstance(context, dict) else ""
+        return request_id, token
+
+    def _has_authority_token_for_permission(self, params, permission_id):
+        context = self._authority_context_from_params(params)
+        _, token = self._authority_token_for_permission(context, permission_id)
+        return bool(token)
+
+    @staticmethod
+    def _strip_authority_params(params):
+        clean = dict(params or {})
+        clean.pop("_authority_context", None)
+        return clean
+
+    @staticmethod
+    def _provider_api_key_configured(provider_id, api_id):
+        provider_id = str(provider_id or "").strip()
+        api_id = str(api_id or "").strip() or "legacy"
+        if not provider_id:
+            return False
+        if api_id not in {"", "main", "legacy"}:
+            for item in provider_named_api_keys(provider_id):
+                if str(item.get("api_id") or "").strip() == api_id and item.get("configured"):
+                    return True
+        return provider_has_api_key(provider_id)
+
+    @staticmethod
+    def _provider_requires_authority(provider_id, provider, api_id="legacy"):
+        return provider_requires_authority(provider_id, provider=provider, api_id=api_id)
+
+    def _provider_id_for_provider(self, provider, model_ref=""):
+        if isinstance(model_ref, str) and "/" in model_ref:
+            provider_id = model_ref.split("/", 1)[0].strip()
+            if provider_id:
+                return provider_id
+        for provider_id, candidate in self._providers.items():
+            if candidate is provider:
+                return provider_id
+        return ""
+
+    def _check_authority_for_provider_api(
+        self,
+        *,
+        permission_id,
+        resource_kind,
+        provider_id,
+        api_id,
+        model_id,
+        model_ref,
+        params,
+        provider=None,
+        stream=False,
+        reason=None,
+    ):
+        provider_id = str(provider_id or "").strip()
+        if provider_id in {"", "stub", "rumi"}:
+            return
+
+        context = self._authority_context_from_params(params)
+        principal_id = str(context.get("principal_id") or "defaultspack")
+        api_metadata = provider_api_metadata(provider_id, api_id or "legacy")
+        resource = build_provider_authority_resource(
+            permission_id=permission_id,
+            resource_kind=resource_kind,
+            provider_id=provider_id,
+            api_id=api_id or "legacy",
+            model_id=model_id,
+            model_ref=model_ref,
+            provider=provider,
+            api_metadata=api_metadata,
+            stream=stream,
+        )
+
+        from core_runtime.authority import get_authority_service
+
+        decision = get_authority_service().check(
+            principal_id=principal_id,
+            permission_id=permission_id,
+            resource=resource,
+            reason=reason or provider_authority_reason(permission_id, resource),
+            conversation_id=context.get("conversation_id"),
+            profile_id=context.get("profile_id"),
+            node_id=context.get("node_id"),
+            graph_id=context.get("graph_id"),
+            request_id=self._authority_token_for_permission(context, permission_id)[0] or context.get("request_id"),
+            approval_token=self._authority_token_for_permission(context, permission_id)[1],
+        )
+        if not decision.allowed:
+            raise AuthorityApprovalRequired(decision)
+
+    def _check_authority_for_model_api(
+        self,
+        *,
+        provider_id,
+        api_id,
+        model_id,
+        model_ref,
+        params,
+        provider=None,
+        stream=False,
+    ):
+        self._check_authority_for_provider_api(
+            permission_id="model.invoke",
+            resource_kind="model",
+            provider_id=provider_id,
+            api_id=api_id,
+            model_id=model_id,
+            model_ref=model_ref,
+            params=params,
+            provider=provider,
+            stream=stream,
+            reason=None,
+        )
+
+    def _check_authority_for_api_key_use(
+        self,
+        *,
+        provider_id,
+        api_id,
+        model_id,
+        model_ref,
+        params,
+        provider=None,
+        stream=False,
+    ):
+        self._check_authority_for_provider_api(
+            permission_id="api_key.use",
+            resource_kind="api_key",
+            provider_id=provider_id,
+            api_id=api_id,
+            model_id=model_id,
+            model_ref=model_ref,
+            params=params,
+            provider=provider,
+            stream=stream,
+            reason=None,
+        )
+
+    def _check_authority_for_network_egress(
+        self,
+        *,
+        provider_id,
+        api_id,
+        model_id,
+        model_ref,
+        params,
+        provider=None,
+        stream=False,
+    ):
+        self._check_authority_for_provider_api(
+            permission_id="network.egress",
+            resource_kind="network",
+            provider_id=provider_id,
+            api_id=api_id,
+            model_id=model_id,
+            model_ref=model_ref,
+            params=params,
+            provider=provider,
+            stream=stream,
+            reason=None,
+        )
+
+    def _check_authority_for_model_and_api_key_use(
+        self,
+        *,
+        provider_id,
+        api_id,
+        model_id,
+        model_ref,
+        params,
+        provider=None,
+        stream=False,
+    ):
+        checks = [
+            ("model.invoke", lambda: self._check_authority_for_model_api(
+                provider_id=provider_id,
+                api_id=api_id,
+                model_id=model_id,
+                model_ref=model_ref,
+                params=params,
+                provider=provider,
+                stream=stream,
+            )),
+            ("api_key.use", lambda: self._check_authority_for_api_key_use(
+                provider_id=provider_id,
+                api_id=api_id,
+                model_id=model_id,
+                model_ref=model_ref,
+                params=params,
+                provider=provider,
+                stream=stream,
+            )),
+            ("network.egress", lambda: self._check_authority_for_network_egress(
+                provider_id=provider_id,
+                api_id=api_id,
+                model_id=model_id,
+                model_ref=model_ref,
+                params=params,
+                provider=provider,
+                stream=stream,
+            )),
+        ]
+        if self._has_authority_token_for_permission(params, "model.invoke"):
+            missing_related = [
+                item
+                for item in checks
+                if item[0] != "model.invoke" and not self._has_authority_token_for_permission(params, item[0])
+            ]
+            if missing_related:
+                checks = missing_related + [item for item in checks if item not in missing_related]
+        for _, check in checks:
+            check()
+
+    def _api_route_attempts(self, model, route_refs, params=None, stream=False):
         attempts = []
         for route_ref in route_refs:
             provider_id, api_id = self._route_parts(route_ref)
             if not provider_id:
                 continue
-            api_key = read_provider_api_key(provider_id, api_id)
-            if not api_key:
-                continue
             route_model = self._model_for_route(model, provider_id)
             provider, model_name = self.resolve_provider(route_model)
             if provider.__class__.__name__ == "StubProvider":
+                continue
+            if not self._provider_api_key_configured(provider_id, api_id):
+                continue
+            self._check_authority_for_model_and_api_key_use(
+                provider_id=provider_id,
+                api_id=api_id,
+                model_id=model_name,
+                model_ref=model,
+                params=params,
+                provider=provider,
+                stream=stream,
+            )
+            api_key = read_provider_api_key(provider_id, api_id)
+            if not api_key:
                 continue
             attempts.append((provider, model_name, api_key, provider_api_metadata(provider_id, api_id)))
         return attempts
@@ -468,8 +733,6 @@ class AIClient:
         )
         if not named_key:
             return None
-        if not read_provider_api_key(provider_id, api_id):
-            return None
         metadata = provider_api_metadata(provider_id, api_id)
         allowed = {str(item) for item in metadata.get("allowed_models", []) if str(item or "").strip()}
         if allowed and model_id not in allowed and f"{provider_id}/{model_id}" not in allowed:
@@ -481,34 +744,55 @@ class AIClient:
         if parts is None:
             return None, False
         provider_id, api_id, model_id, metadata = parts
-        api_key = read_provider_api_key(provider_id, api_id)
         route_model = f"{provider_id}/{model_id}"
         provider, model_name = self.resolve_provider(route_model)
         if provider.__class__.__name__ == "StubProvider":
+            return None, False
+        self._check_authority_for_model_and_api_key_use(
+            provider_id=provider_id,
+            api_id=api_id,
+            model_id=model_id,
+            model_ref=model,
+            params=params,
+            provider=provider,
+            stream=(method_name == "stream"),
+        )
+        api_key = read_provider_api_key(provider_id, api_id)
+        if not api_key:
             return None, False
         if method_name == "stream":
             return self._stream_with_api_routes([(provider, model_name, api_key, metadata)], messages, tools, params), True
         return self._call_provider_with_overrides(provider, model_name, api_key, metadata, method_name, messages, tools, params), True
 
     def _call_provider_with_overrides(self, provider, model_name, api_key, metadata, method_name, messages, tools=None, params=None):
+        had_key = hasattr(provider, "_api_key")
         previous_key = getattr(provider, "_api_key", None)
+        had_base_url = hasattr(provider, "_base_url")
         previous_base_url = getattr(provider, "_base_url", None)
+        had_base_url_attr = hasattr(provider, "BASE_URL")
         previous_base_url_attr = getattr(provider, "BASE_URL", None)
         base_url = str((metadata or {}).get("base_url") or "").strip().rstrip("/")
         try:
-            if previous_key is not None and api_key:
+            if api_key:
                 provider._api_key = api_key
-            if base_url and previous_base_url is not None:
+            if base_url:
                 provider._base_url = base_url
                 provider.BASE_URL = base_url
             method = getattr(provider, method_name)
-            return method(model_name, messages, tools or [], params or {})
+            return method(model_name, messages, tools or [], self._strip_authority_params(params))
         finally:
-            if previous_key is not None:
+            if had_key:
                 provider._api_key = previous_key
-            if previous_base_url is not None:
+            elif api_key and hasattr(provider, "_api_key"):
+                delattr(provider, "_api_key")
+            if had_base_url:
                 provider._base_url = previous_base_url
+            elif base_url and hasattr(provider, "_base_url"):
+                delattr(provider, "_base_url")
+            if had_base_url_attr:
                 provider.BASE_URL = previous_base_url_attr
+            elif base_url and hasattr(provider, "BASE_URL"):
+                delattr(provider, "BASE_URL")
 
     def _call_with_api_routes(self, method_name, model, messages, tools=None, params=None):
         routed, handled = self._call_api_bound_profile(method_name, model, messages, tools, params)
@@ -519,24 +803,13 @@ class AIClient:
             return None, False
 
         if method_name == "stream":
-            route_attempts = self._api_route_attempts(model, route_refs)
+            route_attempts = self._api_route_attempts(model, route_refs, params=params, stream=True)
             if not route_attempts:
                 return None, False
             return self._stream_with_api_routes(route_attempts, messages, tools, params), True
 
         last_error = None
-        for route_ref in route_refs:
-            provider_id, api_id = self._route_parts(route_ref)
-            if not provider_id:
-                continue
-            api_key = read_provider_api_key(provider_id, api_id)
-            if not api_key:
-                continue
-            route_model = self._model_for_route(model, provider_id)
-            provider, model_name = self.resolve_provider(route_model)
-            if provider.__class__.__name__ == "StubProvider":
-                continue
-            metadata = provider_api_metadata(provider_id, api_id)
+        for provider, model_name, api_key, metadata in self._api_route_attempts(model, route_refs, params=params, stream=False):
             try:
                 return self._call_provider_with_overrides(provider, model_name, api_key, metadata, method_name, messages, tools, params), True
             except Exception as exc:
@@ -550,18 +823,21 @@ class AIClient:
     def _stream_with_api_routes(self, route_attempts, messages, tools=None, params=None):
         last_error = None
         for provider, model_name, api_key, metadata in route_attempts:
+            had_key = hasattr(provider, "_api_key")
             previous_key = getattr(provider, "_api_key", None)
+            had_base_url = hasattr(provider, "_base_url")
             previous_base_url = getattr(provider, "_base_url", None)
+            had_base_url_attr = hasattr(provider, "BASE_URL")
             previous_base_url_attr = getattr(provider, "BASE_URL", None)
             base_url = str((metadata or {}).get("base_url") or "").strip().rstrip("/")
             yielded = False
             try:
-                if previous_key is not None:
+                if api_key:
                     provider._api_key = api_key
-                if base_url and previous_base_url is not None:
+                if base_url:
                     provider._base_url = base_url
                     provider.BASE_URL = base_url
-                for chunk in provider.stream(model_name, messages, tools or [], params or {}):
+                for chunk in provider.stream(model_name, messages, tools or [], self._strip_authority_params(params)):
                     yielded = True
                     yield chunk
                 return
@@ -570,11 +846,18 @@ class AIClient:
                 if yielded or not self._is_rate_limit_error(exc):
                     raise
             finally:
-                if previous_key is not None:
+                if had_key:
                     provider._api_key = previous_key
-                if previous_base_url is not None:
+                elif api_key and hasattr(provider, "_api_key"):
+                    delattr(provider, "_api_key")
+                if had_base_url:
                     provider._base_url = previous_base_url
+                elif base_url and hasattr(provider, "_base_url"):
+                    delattr(provider, "_base_url")
+                if had_base_url_attr:
                     provider.BASE_URL = previous_base_url_attr
+                elif base_url and hasattr(provider, "BASE_URL"):
+                    delattr(provider, "BASE_URL")
         if last_error is not None:
             raise last_error
 
@@ -615,6 +898,14 @@ class AIClient:
         return store.get(model)
 
     def _complete_model_pack(self, model_pack, messages, tools=None, params=None):
+        params = dict(params or {})
+        if (
+            str(getattr(model_pack, "id", "") or "").strip() == rumi_process.RUMI_MODEL_PACK_ID
+            and str(params.get("rumi_base_model_override") or "").strip()
+        ):
+            model_pack = ModelPack.from_dict(
+                rumi_process.default_rumi_model_pack(base_model=str(params.get("rumi_base_model_override")).strip())
+            )
         selection = select_model_pack(
             model_pack,
             {
@@ -628,12 +919,22 @@ class AIClient:
         )
         if selection is None or not selection.ordered_members:
             raise RuntimeError("model pack has no runnable members")
+        pack_mode = str(getattr(model_pack, "mode", "fallback_chain") or "fallback_chain")
+        composite_mode = pack_mode if pack_mode in {"ensemble", "review_chain"} else "fallback_chain"
         composite = {
             "id": selection.pack_id,
-            "mode": "ensemble" if getattr(model_pack, "mode", "fallback_chain") == "ensemble" else "fallback_chain",
+            "mode": composite_mode,
             "members": selection.ordered_members,
         }
         metadata = getattr(model_pack, "metadata", {}) if model_pack is not None else {}
+        if isinstance(metadata, dict):
+            composite["metadata"] = dict(metadata)
+        budget = getattr(model_pack, "budget", {}) if model_pack is not None else {}
+        if isinstance(budget, dict):
+            composite["budget"] = dict(budget)
+        safety = getattr(model_pack, "safety", {}) if model_pack is not None else {}
+        if isinstance(safety, dict):
+            composite["safety"] = dict(safety)
         merge_model = str(metadata.get("merge_model") or "").strip() if isinstance(metadata, dict) else ""
         if merge_model:
             composite["merge_model"] = merge_model
@@ -653,6 +954,8 @@ class AIClient:
             raise RuntimeError("composite model has no members")
         if mode == "ensemble":
             return self._complete_ensemble(composite, members, messages, tools, params)
+        if mode == "review_chain":
+            return self._complete_review_chain(composite, members, messages, tools, params)
         return self._complete_fallback_chain(members, messages, tools, params)
 
     def _member_model(self, member):
@@ -872,6 +1175,123 @@ class AIClient:
             "metadata": {"ensemble": {"members": [item["model"] for item in responses], "errors": errors}},
         }
 
+    def _complete_review_chain(self, composite, members, messages, tools=None, params=None):
+        params = dict(params or {})
+        runnable_members = [
+            member
+            for member in members
+            if self._member_model(member) and self._member_conditions_match(member, messages, tools, params)
+        ]
+        if not runnable_members:
+            raise RuntimeError("review_chain composite has no runnable members")
+
+        generator_member = self._review_chain_member(
+            runnable_members,
+            {"generator", "primary", "drafter", "planner"},
+            default_index=0,
+        )
+        reviewer_member = self._review_chain_member(
+            runnable_members,
+            {"reviewer", "judge", "critic"},
+            default_index=1 if len(runnable_members) > 1 else 0,
+        )
+        generator_model = self._member_model(generator_member)
+        reviewer_model = self._member_model(reviewer_member)
+        composite_metadata = composite.get("metadata") if isinstance(composite.get("metadata"), dict) else {}
+        budget = composite.get("budget") if isinstance(composite.get("budget"), dict) else {}
+        generator_model = self._resolve_rumi_member_model(generator_model, params)
+        reviewer_model = self._resolve_rumi_member_model(reviewer_model, params)
+        context = rumi_process.context_for_request(messages, tools or [], params)
+        max_reviews = RumiProcessRunner._positive_int(
+            params.get("max_review_rounds")
+            or budget.get("max_review_rounds")
+            or composite_metadata.get("max_review_rounds"),
+            default=2,
+            upper=5,
+        )
+        base_model_metadata = (
+            rumi_process.rumi_base_model_metadata(generator_model)
+            if composite.get("id") == rumi_process.RUMI_MODEL_PACK_ID or composite_metadata.get("builtin")
+            else {}
+        )
+        process = {
+            "trace_id": rumi_process.trace_id(),
+            "process_version": rumi_process.RUMI_PROCESS_VERSION,
+            "mode": context["mode"],
+            "deepthink_enabled": rumi_process.deepthink_enabled(params),
+            "base_model": generator_model,
+            **base_model_metadata,
+            "reviewer_model": reviewer_model,
+            "events": [],
+            "watchdog": {
+                "max_review_rounds": max_reviews,
+                "quarantine_on_exhaustion": True,
+            },
+            "criteria": list(rumi_process.RUMI_CRITERIA),
+            "action_preflight_required": bool(context.get("action_preflight_required")),
+        }
+        if process["deepthink_enabled"]:
+            harness_tool_selection = rumi_process.select_harness_tools(messages, tools or [], params)
+            context["harness_tool_selection"] = harness_tool_selection
+            process["mode"] = "deepthink"
+            process["warnings"] = [rumi_process.RUMI_DEEPTHINK_WARNING_JA]
+            process["tooling"] = {
+                "model_tool_ids": harness_tool_selection.get("model_tool_ids", []),
+                "harness_tool_ids": harness_tool_selection.get("harness_tool_ids", []),
+                "vision_tool_ids": harness_tool_selection.get("vision_tool_ids", []),
+                "model_tools_are_separate_from_harness_tools": True,
+            }
+        runner = RumiProcessRunner(
+            complete=self.complete,
+            response_text=self._response_text,
+            error_kind=self._error_kind,
+        )
+        return runner.run_review_chain(
+            composite=composite,
+            generator_member=generator_member,
+            reviewer_member=reviewer_member,
+            generator_model=generator_model,
+            reviewer_model=reviewer_model,
+            messages=messages,
+            tools=tools or [],
+            params=params,
+            context=context,
+            process=process,
+            max_reviews=max_reviews,
+        )
+
+    @staticmethod
+    def _review_chain_member(members, roles, default_index=0):
+        for member in members:
+            metadata = member.get("metadata") if isinstance(member, dict) and isinstance(member.get("metadata"), dict) else {}
+            role_value = ""
+            if isinstance(member, dict):
+                role_value = metadata.get("role") or member.get("role") or ""
+            role = str(role_value).strip().casefold()
+            if role in roles:
+                return member
+        index = min(max(0, int(default_index or 0)), len(members) - 1)
+        return members[index]
+
+    def _resolve_rumi_member_model(self, model, params=None):
+        model_id = str(model or "").strip()
+        if model_id != rumi_process.RUMI_BASE_MODEL:
+            return model
+        if isinstance(params, dict) and params.get("rumi_require_intended_base_model"):
+            return model
+        available_models: list[str] = []
+        for profile in self.list_models():
+            if not isinstance(profile, dict):
+                continue
+            for key in ("id", "profile_id", "qualified_model_id", "model_ref"):
+                value = str(profile.get(key) or "").strip()
+                if value:
+                    available_models.append(value)
+        return rumi_process.resolve_rumi_base_model(
+            available_models,
+            available_providers=set(self._providers.keys()),
+        )
+
     @staticmethod
     def _response_text(response):
         if not isinstance(response, dict):
@@ -902,14 +1322,26 @@ class AIClient:
         composite = self._composite_for_model(model) if int(params.get("_composite_depth", 0) or 0) < 3 else None
         if composite is not None:
             return self._complete_composite(composite, messages, tools, params)
+        provider_params = self._provider_params(params)
         routed, handled = self._call_with_api_routes("complete", model, messages, tools, params)
         if handled:
             return routed
         provider, model_name = self.resolve_provider(model)
         if provider.__class__.__name__ == "StubProvider":
             raise RuntimeError(self._provider_unconfigured_message(model))
+        provider_id = self._provider_id_for_provider(provider, model)
+        if self._provider_requires_authority(provider_id, provider, "legacy"):
+            self._check_authority_for_model_and_api_key_use(
+                provider_id=provider_id,
+                api_id="legacy",
+                model_id=model_name,
+                model_ref=model,
+                params=params,
+                provider=provider,
+                stream=False,
+            )
         try:
-            return provider.complete(model_name, messages, tools or [], params or {})
+            return provider.complete(model_name, messages, tools or [], self._strip_authority_params(provider_params))
         except NotImplementedError as e:
             raise RuntimeError(str(e)) from None
 
@@ -925,16 +1357,46 @@ class AIClient:
             response = self._complete_composite(composite, messages, tools, params)
             text = self._response_text(response)
             return iter([{"type": "text_delta", "text": text}, {"finish_reason": response.get("finish_reason", "stop") if isinstance(response, dict) else "stop"}])
+        provider_params = self._provider_params(params)
         routed, handled = self._call_with_api_routes("stream", model, messages, tools, params)
         if handled:
             return routed
         provider, model_name = self.resolve_provider(model)
         if provider.__class__.__name__ == "StubProvider":
             raise RuntimeError(self._provider_unconfigured_message(model))
+        provider_id = self._provider_id_for_provider(provider, model)
+        if self._provider_requires_authority(provider_id, provider, "legacy"):
+            self._check_authority_for_model_and_api_key_use(
+                provider_id=provider_id,
+                api_id="legacy",
+                model_id=model_name,
+                model_ref=model,
+                params=params,
+                provider=provider,
+                stream=True,
+            )
         try:
-            return provider.stream(model_name, messages, tools or [], params or {})
+            return provider.stream(model_name, messages, tools or [], self._strip_authority_params(provider_params))
         except NotImplementedError as e:
             raise RuntimeError(str(e)) from None
+
+    @staticmethod
+    def _provider_params(params):
+        provider_params = dict(params or {})
+        for key in (
+            "deepthink_enabled",
+            "deepthink",
+            "rumi_deepthink",
+            "deepthink_max_review_iterations",
+            "deepthink_user_rejection_review_cycles",
+            "deepthink_max_sections",
+            "deepthink_loop_breaker",
+            "rumi_base_model_override",
+            "rumi_require_intended_base_model",
+            "_authority_context",
+        ):
+            provider_params.pop(key, None)
+        return provider_params
 
     def supports_stream(self, model):
         provider, _ = self.resolve_provider(model)

@@ -1,0 +1,23 @@
+example:
+  id: contract_clause_review
+  pack_id: rumi_document_intelligence_pack
+  workflow: extract_cited_answers
+  intent: Review termination and liability clauses in a local contract PDF with page-span citations.
+  document_type: contract
+  expected_passes:
+    - citation_mapper
+    - privacy_reviewer
+    - final_evidence_integrator
+  evidence:
+    - page_span
+    - quote_digest
+    - privacy_class
+    - missing_evidence_reason
+  handoff: none_until_user_requests_artifact_creation
+  expected_result:
+    decision: needs_human_review_for_legal_interpretation
+    deliverables:
+      - clause_summary_with_page_spans
+      - quote_digest_table
+      - privacy_classification_summary
+      - questions_for_contract_owner

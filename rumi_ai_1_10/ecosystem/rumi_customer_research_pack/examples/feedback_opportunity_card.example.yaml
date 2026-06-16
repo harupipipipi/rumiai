@@ -1,0 +1,14 @@
+example:
+  id: feedback_opportunity_card
+  user_request: Create an opportunity card from support feedback
+  input_state: local_artifacts_supplied
+  expected_result: opportunity_map_handoff_packet
+  must_include:
+  - evidence_ids
+  - source_quote_ids
+  - uncertainty_or_limitations
+  - handoff_owner
+  must_not:
+  - external_action
+  - uncited_claim
+  - credential_requirement
