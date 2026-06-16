@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from ..host_permissions.models import HOST_PERMISSION_IDS
+
 
 AUTHORITY_PERMISSION_IDS = frozenset(
     {
@@ -23,32 +25,8 @@ AUTHORITY_PERMISSION_IDS = frozenset(
         "authority.request.deny",
         "authority.host_intent.approve",
         "authority.host_intent.deny",
-        "host.permission.status",
-        "host.permission.open_settings",
-        "host.intent.execute",
-        "host.stream.start",
-        "host.stream.stop",
-        "host.screen.capture",
-        "host.accessibility.read",
-        "host.accessibility.mutate",
-        "host.input.pointer",
-        "host.input.keyboard",
-        "host.clipboard.read",
-        "host.clipboard.write",
-        "host.microphone.capture",
-        "host.audio.capture",
-        "host.audio.output",
-        "host.speech.transcribe",
-        "host.speech.synthesize",
-        "host.camera.capture",
-        "host.file.open_dialog",
-        "host.file.read_user_selected",
-        "host.file.write_user_selected",
-        "host.process.open_url",
-        "host.process.launch_app",
-        "host.process.exec_guarded",
     }
-)
+) | HOST_PERMISSION_IDS
 
 
 @dataclass(frozen=True)

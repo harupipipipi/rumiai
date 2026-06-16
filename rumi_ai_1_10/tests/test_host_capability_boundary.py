@@ -18,16 +18,6 @@ HOST_FUNCTION_ID_OVERRIDES = {
     "host.file.write_user_selected": "host_file_write_selected",
 }
 
-HOST_CAPABILITY_PACK_DEFAULT_GRANT_EXCLUSIONS = frozenset(
-    {
-        "host.intent.execute",
-        "host.stream.start",
-        "host.stream.stop",
-        "host.process.exec_guarded",
-    }
-)
-
-
 def _host_permission_registry() -> dict[str, dict]:
     return json.loads((ROOT / "core_runtime" / "host_permissions" / "default_registry.json").read_text())
 
@@ -65,6 +55,28 @@ def test_host_permission_registry_normalizes_ambient_aliases():
     assert normalize_host_permission_id("camera.capture") == "host.camera.capture"
     assert get_host_permission_definition("host.microphone.capture").stream_allowed is True
     assert get_host_permission_definition("host.process.exec_guarded").typed_confirmation_required is True
+
+
+def test_authority_and_frontend_host_permission_definitions_follow_canonical_registry():
+    from core_runtime.authority.models import AUTHORITY_PERMISSION_IDS
+    from core_runtime.host_permissions.models import HOST_PERMISSION_IDS
+
+    registry = _host_permission_registry()
+    frontend_registry = json.loads(
+        (
+            ROOT
+            / "ecosystem"
+            / "defaultspack"
+            / "webapp"
+            / "src"
+            / "hostPermissions"
+            / "hostPermissionRegistry.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert set(registry) == HOST_PERMISSION_IDS
+    assert HOST_PERMISSION_IDS <= AUTHORITY_PERMISSION_IDS
+    assert frontend_registry == registry
 
 
 def test_host_intent_validator_enforces_typed_operations_and_stream_rules():
@@ -172,7 +184,7 @@ def test_host_capabilities_pack_registry_grants_follow_canonical_host_registry()
         *(
             permission_id
             for permission_id in registry
-            if permission_id not in HOST_CAPABILITY_PACK_DEFAULT_GRANT_EXCLUSIONS
+            if permission_id not in default_builtin_grants.HOST_CAPABILITIES_PACK_DEFAULT_GRANT_EXCLUSIONS
         ),
     )
 

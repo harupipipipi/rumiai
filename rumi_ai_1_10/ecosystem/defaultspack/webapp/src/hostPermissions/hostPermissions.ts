@@ -1,5 +1,6 @@
 import type { AuthorityRequest } from "../lib/api";
 import type { DesktopHostPermissionStatus, DesktopPermissionStatus, DesktopSystemInfo, HostPermissionId } from "../lib/desktopSystemInfo";
+import hostPermissionRegistry from "./hostPermissionRegistry.json";
 
 export type HostPermissionBucket = "approved" | "pending" | "missing" | "denied" | "blocked" | "unsupported" | "unknown";
 export type HostPermissionRisk = "low" | "medium" | "high" | "critical" | string;
@@ -29,68 +30,84 @@ export type HostPermissionRow = {
   source: "desktop" | "fallback";
 };
 
-const HOST_PERMISSION_DEFINITIONS: HostPermissionDefinition[] = [
-  {
-    id: "host.microphone.capture",
+type RegistryHostPermissionDefinition = {
+  label?: string;
+  risk_level?: HostPermissionRisk;
+  stream_allowed?: boolean;
+  os_permissions?: Record<string, string[]>;
+};
+
+type HostPermissionUiMetadata = Partial<Pick<HostPermissionDefinition, "label" | "description" | "rumiAliases" | "osAliases" | "requiredByFunctions">>;
+
+const HOST_PERMISSION_UI_METADATA: Record<string, HostPermissionUiMetadata> = {
+  "host.microphone.capture": {
     label: "Microphone",
     description: "Capture microphone input for ambient voice and transcription features.",
     rumiAliases: ["host.microphone.capture", "microphone.capture"],
     osAliases: ["host.microphone.capture", "microphone.capture", "microphone", "mic"],
-    riskLevel: "high",
-    streamAllowed: true,
     requiredByFunctions: ["ambient_monitor_start", "ai_transcribe", "recording_capture"],
   },
-  {
-    id: "host.camera.capture",
+  "host.camera.capture": {
     label: "Camera",
     description: "Capture camera frames for gesture and visual input workflows.",
     rumiAliases: ["host.camera.capture", "camera.capture"],
     osAliases: ["host.camera.capture", "camera.capture", "camera", "webcam"],
-    riskLevel: "high",
-    streamAllowed: true,
     requiredByFunctions: ["ambient_monitor_start", "recording_capture"],
   },
-  {
-    id: "host.screen.capture",
+  "host.screen.capture": {
     label: "Screen Capture",
     description: "Read visible screen content for screenshots and computer-use context.",
     rumiAliases: ["host.screen.capture", "screen.capture", "media.screenshot", "computer.screenshot"],
     osAliases: ["host.screen.capture", "screen.capture", "screen_recording", "screen-recording", "screen", "display_capture", "media.screenshot", "computer.screenshot"],
-    riskLevel: "high",
-    streamAllowed: true,
     requiredByFunctions: ["computer_screenshot", "media_screenshot", "recording_capture"],
   },
-  {
-    id: "host.input.pointer",
+  "host.input.pointer": {
     label: "Pointer Input",
     description: "Move or click the pointer through approved computer-use actions.",
     rumiAliases: ["host.input.pointer", "input.pointer", "computer.click", "computer.drag"],
     osAliases: ["host.input.pointer", "input.pointer", "accessibility", "input_monitoring", "pointer", "mouse"],
-    riskLevel: "high",
-    streamAllowed: false,
     requiredByFunctions: ["computer_click"],
   },
-  {
-    id: "host.input.keyboard",
+  "host.input.keyboard": {
     label: "Keyboard Input",
     description: "Type keystrokes through approved computer-use actions.",
     rumiAliases: ["host.input.keyboard", "input.keyboard", "computer.type"],
     osAliases: ["host.input.keyboard", "input.keyboard", "accessibility", "input_monitoring", "keyboard"],
-    riskLevel: "high",
-    streamAllowed: false,
     requiredByFunctions: ["computer_type"],
   },
-  {
-    id: "host.clipboard.*",
-    label: "Clipboard",
-    description: "Read or write the system clipboard when an approved media tool needs it.",
-    rumiAliases: ["host.clipboard.*", "host.clipboard.read", "host.clipboard.write", "media.clipboard.read", "media.clipboard.write"],
-    osAliases: ["host.clipboard.*", "clipboard", "clipboard.read", "clipboard.write", "media.clipboard.read", "media.clipboard.write"],
-    riskLevel: "high",
-    streamAllowed: false,
-    requiredByFunctions: ["media_clipboard_read", "media_clipboard_write"],
+  "host.clipboard.read": {
+    label: "Clipboard Read",
+    description: "Read the system clipboard when an approved media tool needs it.",
+    rumiAliases: ["host.clipboard.read", "host.clipboard.*", "media.clipboard.read"],
+    osAliases: ["host.clipboard.read", "host.clipboard.*", "clipboard", "clipboard.read", "media.clipboard.read"],
+    requiredByFunctions: ["media_clipboard_read"],
   },
-];
+  "host.clipboard.write": {
+    label: "Clipboard Write",
+    description: "Write the system clipboard when an approved media tool needs it.",
+    rumiAliases: ["host.clipboard.write", "media.clipboard.write"],
+    osAliases: ["host.clipboard.write", "clipboard.write", "media.clipboard.write"],
+    requiredByFunctions: ["media_clipboard_write"],
+  },
+};
+
+const HOST_PERMISSION_REGISTRY = hostPermissionRegistry as Record<string, RegistryHostPermissionDefinition>;
+
+const HOST_PERMISSION_DEFINITIONS: HostPermissionDefinition[] = Object.entries(HOST_PERMISSION_REGISTRY).map(([id, registryDefinition]) => {
+  const metadata = HOST_PERMISSION_UI_METADATA[id] ?? {};
+  const label = metadata.label ?? registryDefinition.label ?? titleizeHostPermissionId(id);
+  const registryOsAliases = Object.values(registryDefinition.os_permissions ?? {}).flat();
+  return {
+    id: id as HostPermissionId,
+    label,
+    description: metadata.description ?? `${label}.`,
+    rumiAliases: uniqueStrings([id, ...(metadata.rumiAliases ?? [])]),
+    osAliases: uniqueStrings([id, ...registryOsAliases, ...(metadata.osAliases ?? [])]),
+    riskLevel: registryDefinition.risk_level ?? "medium",
+    streamAllowed: Boolean(registryDefinition.stream_allowed),
+    requiredByFunctions: metadata.requiredByFunctions ?? [],
+  };
+});
 
 export function hostPermissionDefinitions(): HostPermissionDefinition[] {
   return HOST_PERMISSION_DEFINITIONS;
@@ -113,7 +130,7 @@ export function buildHostPermissionRows(
       rumiStatus,
       osStatus,
       riskLevel: normalizeRisk(entry?.risk_level) || definition.riskLevel,
-      streamAllowed: readNullableBoolean(entry, ["stream_allowed", "streamAllowed", "allow_stream", "stream"]) ?? definition.streamAllowed,
+      streamAllowed: definition.streamAllowed,
       requiredByFunctions: normalizedStringList(entry?.required_by_functions).length > 0
         ? normalizedStringList(entry?.required_by_functions)
         : definition.requiredByFunctions,
@@ -209,7 +226,7 @@ function normalizeOsStatus(
     return normalizeStatus(match.status, "unknown");
   }
 
-  if (definition.id === "host.clipboard.*") return "unsupported";
+  if (String(definition.id).startsWith("host.clipboard.")) return "unsupported";
   return "unknown";
 }
 
@@ -282,4 +299,16 @@ function normalizedStringList(value: unknown): string[] {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function titleizeHostPermissionId(id: string): string {
+  return id
+    .replace(/^host\./, "")
+    .split(".")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }

@@ -167,12 +167,23 @@ pub fn collect_host_permissions(
             "host.screen.capture",
             "Screen Capture",
             "high",
-            Some(true),
+            Some(false),
             &["screen_recording"],
             &["computer_screenshot", "recording_capture"],
             os_permissions,
             "Capture visible screen content for approved computer-use workflows.",
             "System Settings > Privacy & Security > Screen Recording",
+        ),
+        host_permission_row(
+            "host.audio.capture",
+            "System Audio Capture",
+            "high",
+            Some(true),
+            &[],
+            &["recording_capture"],
+            os_permissions,
+            "Capture system audio after Rumi approval. Raw audio is not stored by defaultspack.",
+            "",
         ),
         host_permission_row(
             "host.input.pointer",
@@ -284,13 +295,15 @@ fn host_permission_settings_url(permission_id: &str) -> Option<&'static str> {
             "host.camera.capture" | "camera" | "camera.capture" => {
                 Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")
             }
-            "host.screen.capture" | "screen_recording" | "screen.capture" => {
-                Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
-            }
-            "host.accessibility.read" | "host.accessibility.mutate" | "host.input.pointer"
-            | "accessibility" => {
-                Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-            }
+            "host.screen.capture" | "screen_recording" | "screen.capture" => Some(
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+            ),
+            "host.accessibility.read"
+            | "host.accessibility.mutate"
+            | "host.input.pointer"
+            | "accessibility" => Some(
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+            ),
             "host.input.keyboard" | "input_monitoring" => {
                 Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
             }
@@ -504,5 +517,16 @@ mod tests {
         assert_eq!(mic.rumi_status, "unknown");
         assert_eq!(camera.os_status, "missing");
         assert_eq!(camera.risk_level, "high");
+
+        let screen = rows
+            .iter()
+            .find(|row| row.id == "host.screen.capture")
+            .expect("screen capture host permission row");
+        let audio = rows
+            .iter()
+            .find(|row| row.id == "host.audio.capture")
+            .expect("system audio host permission row");
+        assert_eq!(screen.stream_allowed, Some(false));
+        assert_eq!(audio.stream_allowed, Some(true));
     }
 }

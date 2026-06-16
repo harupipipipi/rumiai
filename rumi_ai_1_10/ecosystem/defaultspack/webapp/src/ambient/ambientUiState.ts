@@ -48,6 +48,16 @@ type AmbientStateCopy = {
   tone: "blue" | "emerald" | "red" | "purple" | "zinc";
 };
 
+export type AmbientVisualIcon = "alert" | "hand" | "loader" | "mic" | "play" | "radio" | "square" | "video" | "x";
+
+type AmbientStateVisual = {
+  glyphIcon: AmbientVisualIcon;
+  glyphClass: string;
+  primaryIcon: AmbientVisualIcon;
+  primaryButtonClass: string;
+  badgeClass: string;
+};
+
 export const ambientPermissionLabels: Record<string, string> = {
   [AMBIENT_MIC_PERMISSION]: "マイク入力を使う",
   [AMBIENT_CAMERA_PERMISSION]: "手の動きを見る",
@@ -140,6 +150,86 @@ export const ambientCopyJa = {
     },
   } satisfies Record<AmbientUiState, AmbientStateCopy>,
 };
+
+export const ambientStateVisuals = {
+  setupNeeded: {
+    glyphIcon: "hand",
+    glyphClass: "border-sky-400/35 bg-sky-400/10 text-sky-100",
+    primaryIcon: "hand",
+    primaryButtonClass: "bg-sky-300 text-zinc-950 hover:bg-sky-200",
+    badgeClass: "border-sky-400/30 bg-sky-400/10 text-sky-100",
+  },
+  rumiPermissionNeeded: {
+    glyphIcon: "hand",
+    glyphClass: "border-sky-400/35 bg-sky-400/10 text-sky-100",
+    primaryIcon: "hand",
+    primaryButtonClass: "bg-sky-300 text-zinc-950 hover:bg-sky-200",
+    badgeClass: "border-sky-400/30 bg-sky-400/10 text-sky-100",
+  },
+  osPermissionNeeded: {
+    glyphIcon: "hand",
+    glyphClass: "border-sky-400/35 bg-sky-400/10 text-sky-100",
+    primaryIcon: "video",
+    primaryButtonClass: "bg-sky-300 text-zinc-950 hover:bg-sky-200",
+    badgeClass: "border-sky-400/30 bg-sky-400/10 text-sky-100",
+  },
+  readyOff: {
+    glyphIcon: "radio",
+    glyphClass: "border-zinc-800 bg-zinc-900 text-zinc-300",
+    primaryIcon: "play",
+    primaryButtonClass: "bg-zinc-100 text-zinc-950 hover:bg-white",
+    badgeClass: "border-zinc-800 bg-zinc-900 text-zinc-300",
+  },
+  monitoring: {
+    glyphIcon: "hand",
+    glyphClass: "border-emerald-400/35 bg-emerald-400/10 text-emerald-100",
+    primaryIcon: "square",
+    primaryButtonClass: "border border-zinc-800 bg-zinc-900 text-zinc-100 hover:border-zinc-700 hover:bg-zinc-800",
+    badgeClass: "border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
+  },
+  recording: {
+    glyphIcon: "mic",
+    glyphClass: "border-red-400/40 bg-red-500/12 text-red-100",
+    primaryIcon: "x",
+    primaryButtonClass: "bg-red-400 text-zinc-950 hover:bg-red-300",
+    badgeClass: "border-red-400/35 bg-red-500/10 text-red-100",
+  },
+  sending: {
+    glyphIcon: "loader",
+    glyphClass: "border-violet-400/35 bg-violet-400/10 text-violet-100",
+    primaryIcon: "loader",
+    primaryButtonClass: "cursor-wait bg-violet-300 text-zinc-950 opacity-80",
+    badgeClass: "border-violet-400/30 bg-violet-400/10 text-violet-100",
+  },
+  paused: {
+    glyphIcon: "radio",
+    glyphClass: "border-zinc-800 bg-zinc-900 text-zinc-300",
+    primaryIcon: "play",
+    primaryButtonClass: "bg-zinc-100 text-zinc-950 hover:bg-white",
+    badgeClass: "border-zinc-800 bg-zinc-900 text-zinc-300",
+  },
+  denied: {
+    glyphIcon: "alert",
+    glyphClass: "border-red-400/35 bg-red-500/10 text-red-100",
+    primaryIcon: "alert",
+    primaryButtonClass: "bg-red-100 text-zinc-950 hover:bg-white",
+    badgeClass: "border-red-400/35 bg-red-500/10 text-red-100",
+  },
+  blocked: {
+    glyphIcon: "alert",
+    glyphClass: "border-red-400/35 bg-red-500/10 text-red-100",
+    primaryIcon: "alert",
+    primaryButtonClass: "bg-red-100 text-zinc-950 hover:bg-white",
+    badgeClass: "border-red-400/35 bg-red-500/10 text-red-100",
+  },
+  error: {
+    glyphIcon: "alert",
+    glyphClass: "border-red-400/35 bg-red-500/10 text-red-100",
+    primaryIcon: "alert",
+    primaryButtonClass: "bg-red-100 text-zinc-950 hover:bg-white",
+    badgeClass: "border-red-400/35 bg-red-500/10 text-red-100",
+  },
+} satisfies Record<AmbientUiState, AmbientStateVisual>;
 
 export function deriveAmbientUiState(
   status: AmbientStatus | null,
