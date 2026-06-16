@@ -52,6 +52,20 @@ export async function openAmbientTriggerWindow(): Promise<boolean> {
   return true;
 }
 
+export async function openFingerRecordingWindow(): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_finger_recording_window");
+  return true;
+}
+
+export async function openDefaultsConsoleWindow(): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_defaults_console_window");
+  return true;
+}
+
 export async function openHostPermissionsPageWindow(): Promise<boolean> {
   const invoke = await loadTauriInvoke();
   if (!invoke) return false;
@@ -63,6 +77,13 @@ export async function openHostPermissionSettings(permissionId: string): Promise<
   const invoke = await loadTauriInvoke();
   if (!invoke) return false;
   await invoke("open_host_permission_settings", { permissionId });
+  return true;
+}
+
+export async function closeCurrentWindow(): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("close_current_window");
   return true;
 }
 

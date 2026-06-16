@@ -48,7 +48,7 @@ export function Packs() {
       console.log('[defaultspack-launch] success:', message);
       addToast(message, 'success');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to launch Defaultspack';
+      const msg = e instanceof Error ? e.message : 'Defaultspackを開けませんでした';
       console.error('[defaultspack-launch] failed:', msg);
       addToast(msg, 'error');
     } finally {
@@ -121,7 +121,7 @@ export function Packs() {
                         loading={launchingDesktop}
                       >
                         <AppWindow className="h-3.5 w-3.5" />
-                        Open UI
+                        Defaultspackを開く
                       </Button>
                     )}
                     <Switch

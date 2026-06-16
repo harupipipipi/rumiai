@@ -44,9 +44,13 @@ pub struct AllowedNavigationPorts(pub Arc<Mutex<Vec<u16>>>);
 const PRIMARY_WINDOW_LABELS: [&str; 2] = ["panel", "main"];
 const DEFAULTSPACK_RESERVED_PORT: u16 = 8766;
 const AUTHORITY_APPROVAL_WINDOW_LABEL: &str = "authority-approval";
-const AUTHORITY_APPROVAL_WINDOW_TITLE: &str = "Rumi Approval";
+const AUTHORITY_APPROVAL_WINDOW_TITLE: &str = "Rumiの許可";
 const AMBIENT_TRIGGER_WINDOW_LABEL: &str = "ambient-trigger";
-const AMBIENT_TRIGGER_WINDOW_TITLE: &str = "Rumi Finger Recording";
+const AMBIENT_TRIGGER_WINDOW_TITLE: &str = "合図待ち";
+const FINGER_RECORDING_WINDOW_LABEL: &str = "finger-recording";
+const FINGER_RECORDING_WINDOW_TITLE: &str = "指で録音";
+const DEFAULTS_CONSOLE_WINDOW_LABEL: &str = "defaults-console";
+const DEFAULTS_CONSOLE_WINDOW_TITLE: &str = "詳細ログ";
 const HOST_PERMISSIONS_WINDOW_LABEL: &str = "host-permissions";
 const HOST_PERMISSIONS_WINDOW_TITLE: &str = "Rumi Host Permissions";
 const AUTHORITY_UI_OPERATOR_TTL_SECONDS: u64 = 180;
@@ -151,6 +155,16 @@ fn open_external_url(url: String) -> Result<(), String> {
     open::that_detached(url).map_err(|error| format!("failed to open external url: {error}"))
 }
 
+#[tauri::command]
+fn close_current_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    if should_send_to_background_on_close(window.label()) {
+        return Err("primary windows are sent to the background instead of closed".into());
+    }
+    window
+        .close()
+        .map_err(|error| format!("failed to close current window: {error}"))
+}
+
 fn valid_authority_request_id(request_id: &str) -> bool {
     let trimmed = request_id.trim();
     !trimmed.is_empty()
@@ -176,6 +190,20 @@ fn ambient_trigger_url() -> Result<Url, String> {
         "http://127.0.0.1:{DEFAULTSPACK_RESERVED_PORT}/ambient"
     ))
     .map_err(|error| format!("failed to build ambient trigger window URL: {error}"))
+}
+
+fn finger_recording_url() -> Result<Url, String> {
+    Url::parse(&format!(
+        "http://127.0.0.1:{DEFAULTSPACK_RESERVED_PORT}/finger-recording"
+    ))
+    .map_err(|error| format!("failed to build finger recording window URL: {error}"))
+}
+
+fn defaults_console_url() -> Result<Url, String> {
+    Url::parse(&format!(
+        "http://127.0.0.1:{DEFAULTSPACK_RESERVED_PORT}/console"
+    ))
+    .map_err(|error| format!("failed to build defaults console window URL: {error}"))
 }
 
 fn host_permissions_url() -> Result<Url, String> {
@@ -216,7 +244,7 @@ fn open_authority_approval_window_for_app(app: &AppHandle, request_id: &str) -> 
         tauri::WebviewUrl::External(approval_url),
     )
     .title(AUTHORITY_APPROVAL_WINDOW_TITLE)
-    .inner_size(620.0, 720.0)
+    .inner_size(520.0, 620.0)
     .min_inner_size(480.0, 560.0)
     .resizable(true)
     .focused(true)
@@ -262,8 +290,8 @@ fn open_ambient_trigger_window_for_app(app: &AppHandle) -> Result<(), String> {
         tauri::WebviewUrl::External(ambient_url),
     )
     .title(AMBIENT_TRIGGER_WINDOW_TITLE)
-    .inner_size(440.0, 700.0)
-    .min_inner_size(360.0, 560.0)
+    .inner_size(360.0, 240.0)
+    .min_inner_size(320.0, 180.0)
     .resizable(true)
     .focused(true)
     .visible(true)
@@ -276,6 +304,81 @@ fn open_ambient_trigger_window_for_app(app: &AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn open_ambient_trigger_window(app: AppHandle) -> Result<(), String> {
     open_ambient_trigger_window_for_app(&app)
+}
+
+fn focus_floating_window(window: &tauri::WebviewWindow, label: &str) -> Result<(), String> {
+    window
+        .unminimize()
+        .map_err(|error| format!("failed to unminimize {label} window: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show {label} window: {error}"))?;
+    window
+        .set_always_on_top(true)
+        .map_err(|error| format!("failed to float {label} window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus {label} window: {error}"))
+}
+
+fn open_small_defaultspack_window_for_app(
+    app: &AppHandle,
+    label: &'static str,
+    title: &str,
+    url: Url,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(label) {
+        window
+            .navigate(url)
+            .map_err(|error| format!("failed to navigate {label} window: {error}"))?;
+        return focus_floating_window(&window, label);
+    }
+
+    let window = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::External(url))
+        .title(title)
+        .inner_size(width, height)
+        .min_inner_size(360.0, 420.0)
+        .resizable(true)
+        .focused(true)
+        .visible(true)
+        .always_on_top(true)
+        .build()
+        .map_err(|error| format!("failed to open {label} window: {error}"))?;
+    focus_floating_window(&window, label)
+}
+
+fn open_finger_recording_window_for_app(app: &AppHandle) -> Result<(), String> {
+    open_small_defaultspack_window_for_app(
+        app,
+        FINGER_RECORDING_WINDOW_LABEL,
+        FINGER_RECORDING_WINDOW_TITLE,
+        finger_recording_url()?,
+        380.0,
+        460.0,
+    )
+}
+
+#[tauri::command]
+async fn open_finger_recording_window(app: AppHandle) -> Result<(), String> {
+    open_finger_recording_window_for_app(&app)
+}
+
+fn open_defaults_console_window_for_app(app: &AppHandle) -> Result<(), String> {
+    open_small_defaultspack_window_for_app(
+        app,
+        DEFAULTS_CONSOLE_WINDOW_LABEL,
+        DEFAULTS_CONSOLE_WINDOW_TITLE,
+        defaults_console_url()?,
+        760.0,
+        520.0,
+    )
+}
+
+#[tauri::command]
+async fn open_defaults_console_window(app: AppHandle) -> Result<(), String> {
+    open_defaults_console_window_for_app(&app)
 }
 
 fn focus_host_permissions_window(window: &tauri::WebviewWindow) -> Result<(), String> {
@@ -1535,8 +1638,11 @@ pub fn run() {
             restart_kernel,
             reauthorize_panel_session,
             open_external_url,
+            close_current_window,
             open_authority_approval_window,
             open_ambient_trigger_window,
+            open_finger_recording_window,
+            open_defaults_console_window,
             open_host_permissions_window,
             authority_approval_context,
             send_to_background,
@@ -1621,6 +1727,20 @@ mod tests {
         let url = ambient_trigger_url().unwrap();
 
         assert_eq!(url.as_str(), "http://127.0.0.1:8766/ambient");
+    }
+
+    #[test]
+    fn finger_recording_url_targets_dedicated_defaultspack_window_route() {
+        let url = finger_recording_url().unwrap();
+
+        assert_eq!(url.as_str(), "http://127.0.0.1:8766/finger-recording");
+    }
+
+    #[test]
+    fn defaults_console_url_targets_defaultspack_console_surface() {
+        let url = defaults_console_url().unwrap();
+
+        assert_eq!(url.as_str(), "http://127.0.0.1:8766/console");
     }
 
     #[test]

@@ -420,7 +420,7 @@ export function Dashboard() {
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : String(error);
       console.error('[defaultspack-launch] failed:', rawMessage);
-      setErrorFeedback(translateActionError(error, 'open Defaultspack v2'));
+      setErrorFeedback(translateActionError(error, 'Defaultspackを開く'));
     } finally {
       setLaunchingDefaultspack(false);
     }
@@ -491,7 +491,7 @@ export function Dashboard() {
                 disabled={!runtimeReady || launchingDefaultspack}
                 loading={launchingDefaultspack}
               >
-                <AppWindow className="h-4 w-4" /> Open Defaultspack
+                <AppWindow className="h-4 w-4" /> Defaultspackを開く
               </Button>
             )}
             <label className="flex items-center gap-2 rounded-lg border border-border bg-bg-card px-3 py-2 text-sm">

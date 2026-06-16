@@ -846,6 +846,8 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/coding", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/approval", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/ambient", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/finger-recording", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/console", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/host-permissions", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/static/{path}", handler_name="_handle_static_file"),
 ]

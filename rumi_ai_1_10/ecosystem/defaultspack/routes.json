@@ -518,6 +518,18 @@
     },
     {
       "method": "GET",
+      "path": "/finger-recording",
+      "flow_id": "transport_direct",
+      "description": "Render the dedicated finger recording window surface"
+    },
+    {
+      "method": "GET",
+      "path": "/console",
+      "flow_id": "transport_direct",
+      "description": "Render the dedicated Defaultspack detailed log window"
+    },
+    {
+      "method": "GET",
       "path": "/api/agent/companies",
       "flow_id": "company_workspace",
       "description": "List company workspaces"

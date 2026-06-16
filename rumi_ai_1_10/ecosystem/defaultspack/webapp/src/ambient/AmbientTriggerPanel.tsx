@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, MessageSquare, Mic, Play, Radio, RefreshCcw, Search, Settings, Shield, Square, Video, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, MessageSquare, Mic, Play, Radio, RefreshCcw, Search, Settings, Shield, Square, Video, Volume2, VolumeX, X } from "lucide-react";
 
 import { HistoryBoard, type ChatItem } from "../components/HistoryBoard";
 import { api, type Conversation, type ModelSearchItem } from "../lib/api";
 import { formatRelativeTime } from "../lib/chat";
 import { cn } from "../lib/cn";
 import { subscribeAuthorityApprovalSettlements } from "../lib/authorityApprovalEvents";
-import { openAmbientTriggerWindow, openAuthorityApprovalWindow, openHostPermissionsPageWindow } from "../lib/desktopApproval";
+import { openDefaultsConsoleWindow, openFingerRecordingWindow, openAuthorityApprovalWindow, openHostPermissionsPageWindow } from "../lib/desktopApproval";
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { ambientTriggerClient, type AmbientPermissionId, type AmbientRoutingConfig, type AmbientRoutingMode, type AmbientStatus } from "./ambientTriggerClient";
 import {
@@ -60,6 +60,7 @@ type NormalizedAmbientRouting = {
 const MIC_DEVICE_STORAGE_KEY = "rumi.ambient.selectedMicId";
 const CAMERA_DEVICE_STORAGE_KEY = "rumi.ambient.selectedCameraId";
 const FRONT_ON_FINAL_STORAGE_KEY = "rumi.ambient.frontOnFinal";
+const READOUT_ENABLED_STORAGE_KEY = "rumi.ambient.readoutEnabled";
 const THUMB_TIP_INDEX = 4;
 const INDEX_TIP_INDEX = 8;
 const HAND_LANDMARK_CONNECTIONS = [
@@ -90,9 +91,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [pinchDetectorStatus, setPinchDetectorStatus] = useState("idle");
   const [trackingFrame, setTrackingFrame] = useState<HandTrackingFrame | null>(null);
+  const [cameraDebugOpen, setCameraDebugOpen] = useState(false);
   const [frontOnFinal, setFrontOnFinal] = useState(() => safeLocalStorageGet(FRONT_ON_FINAL_STORAGE_KEY) !== "false");
   const [frontFlash, setFrontFlash] = useState(false);
   const [lastFinalAnswer, setLastFinalAnswer] = useState("");
+  const [readoutEnabled, setReadoutEnabled] = useState(() => safeLocalStorageGet(READOUT_ENABLED_STORAGE_KEY) === "true");
+  const [readoutPlaying, setReadoutPlaying] = useState(false);
   const [chatPickerOpen, setChatPickerOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(false);
@@ -110,6 +114,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const audioStopRef = useRef<(() => void) | null>(null);
   const gestureStopRef = useRef<(() => void) | null>(null);
   const pinchRecorderRef = useRef<ActiveAudioRecorder | null>(null);
+  const lastPinchStateRef = useRef<PinchState | null>(null);
   const choiceHandledAtRef = useRef(0);
   const approvalGestureBusyRef = useRef(false);
   const rumiApprovalAutoOpenRef = useRef(false);
@@ -149,6 +154,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     () => routingLabel(routingMode, routingSelectedConversation, routingConversationId, status?.routing?.session_conversation_id),
     [routingConversationId, routingMode, routingSelectedConversation, status?.routing?.session_conversation_id],
   );
+  const surfaceTitle = standalone && window.location.pathname === "/finger-recording" ? ambientCopyJa.subtitle : ambientCopyJa.title;
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -202,6 +208,14 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   }, [frontOnFinal]);
 
   useEffect(() => {
+    safeLocalStorageSet(READOUT_ENABLED_STORAGE_KEY, readoutEnabled ? "true" : "false");
+  }, [readoutEnabled]);
+
+  useEffect(() => () => {
+    stopSpeechReadout();
+  }, []);
+
+  useEffect(() => {
     if (!pinchRecording || !recordingStartedAt) {
       setRecordingSeconds(0);
       return;
@@ -217,24 +231,27 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     if (!text || text === lastFinalAnswer) return;
     setLastFinalAnswer(text);
     setMessage("AIの回答が届きました。");
+    if (readoutEnabled && !pinchRecording) {
+      speakFinalAnswer(text);
+    }
     if (!frontOnFinal) return;
     setExpanded(true);
     setFrontFlash(true);
     window.focus();
     const timer = window.setTimeout(() => setFrontFlash(false), 1600);
     return () => window.clearTimeout(timer);
-  }, [finalAnswerText, frontOnFinal, lastFinalAnswer]);
+  }, [finalAnswerText, frontOnFinal, lastFinalAnswer, pinchRecording, readoutEnabled]);
 
   useEffect(() => subscribeAuthorityApprovalSettlements((event) => {
     if (event.requestId !== AMBIENT_AUTHORITY_REQUEST_ID) return;
-    setMessage(event.status === "approved" ? "Rumiの承認が届きました。次に端末のマイク・カメラを許可してください。" : null);
+    setMessage(event.status === "approved" ? "使えるようになりました。次にMacのマイク/カメラを確認します。" : "許可しませんでした。必要になったらもう一度許可できます。");
     void refresh({ probeOs: true });
   }), []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("authority_approved") !== "1") return;
-    setMessage("Rumiの承認が戻ってきました。次に端末のマイク・カメラを許可してください。");
+    setMessage("使えるようになりました。次にMacのマイク/カメラを確認します。");
     params.delete("authority_approved");
     const nextSearch = params.toString();
     const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
@@ -266,6 +283,34 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     pinchRecorderRef.current = null;
     audioStopRef.current?.();
   }, [cameraStream]);
+
+  function stopSpeechReadout() {
+    if (!("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    setReadoutPlaying(false);
+  }
+
+  function speakFinalAnswer(text = lastFinalAnswer) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (!("speechSynthesis" in window)) {
+      setMessage("この環境では回答の読み上げを使えません。");
+      return;
+    }
+    if (pinchRecording || pinchRecorderRef.current) {
+      setMessage("録音中は読み上げを止めています。");
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(trimmed);
+    utterance.lang = "ja-JP";
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.onstart = () => setReadoutPlaying(true);
+    utterance.onend = () => setReadoutPlaying(false);
+    utterance.onerror = () => setReadoutPlaying(false);
+    window.speechSynthesis.speak(utterance);
+  }
 
   const finishPinchRecording = useCallback(async (state: PinchState) => {
     const recorder = pinchRecorderRef.current;
@@ -310,7 +355,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           },
         ],
       });
-      setMessage(String(result.reason ?? result.status ?? "音声をAIに送信しました"));
+      setMessage(String(result.reason ?? result.status ?? "音声をAIに送信しました。"));
       onOpenInputRef.current?.("");
       focusComposer();
       await refresh();
@@ -321,10 +366,33 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     }
   }, []);
 
+  useEffect(() => {
+    if (!pinchRecording || !recordingStartedAt) return;
+    const remainingMs = Math.max(0, 30_000 - (performance.now() - recordingStartedAt));
+    const timer = window.setTimeout(() => {
+      const fallbackState = lastPinchStateRef.current ?? {
+        active: false,
+        triggered: false,
+        confidence: 1,
+        normalizedDistance: 0,
+        hand: "Unknown",
+      } satisfies PinchState;
+      void finishPinchRecording({
+        ...fallbackState,
+        active: false,
+        releasedAt: performance.now(),
+        reason: "max_duration",
+      });
+    }, remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [finishPinchRecording, pinchRecording, recordingStartedAt]);
+
   const beginPinchRecording = useCallback(async (state: PinchState) => {
     if (pinchRecorderRef.current) return;
+    lastPinchStateRef.current = state;
+    stopSpeechReadout();
     setPinchDetectorStatus("recording");
-    setMessage("録音中です。指を離すとAIに送信します。");
+    setMessage("録音中。指を離すと送ります。");
     try {
       const recorder = await startPinchAudioRecorder(selectedMicId || undefined);
       pinchRecorderRef.current = recorder;
@@ -380,6 +448,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   }, []);
 
   const handlePinchState = useCallback((state: PinchState) => {
+    lastPinchStateRef.current = state;
     if (state.approvalGestureCommitted) {
       void handleApprovalSwipe(state);
       return;
@@ -411,6 +480,8 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     setPinchDetectorStatus("loading");
     startHandLandmarkerLoop(videoRef.current, handlePinchState, {
       choiceRequiresPinch: !approvalTargetRef.current,
+      pinchStartMs: 250,
+      pinchReleaseMs: 180,
       onFrame: (frame) => setTrackingFrame(frame),
     })
       .then((stop) => {
@@ -569,16 +640,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   async function openAmbientWindow() {
     setMessage(null);
     try {
-      const opened = await openAmbientTriggerWindow();
+      const opened = await openFingerRecordingWindow();
       if (opened) return;
     } catch (error) {
-      console.info("[ambient] ambient trigger window unavailable", error);
+      console.info("[ambient] finger recording window unavailable", error);
     }
-    const url = new URL("/ambient", window.location.href);
-    const popup = window.open(url.toString(), "rumi-ambient-trigger", "popup,width=440,height=700");
-    if (!popup) {
-      setMessage("別ウィンドウを開けませんでした。ブラウザで /ambient を開いてください。");
-    }
+    setMessage("Rumi Viewerから開くと、指録音は小さな別ウィンドウで表示されます。");
   }
 
   async function grantAllPermissions() {
@@ -799,17 +866,30 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           stateCopy.tone === "blue" && "border-sky-400/30",
           uiState === "recording" && "shadow-red-500/20",
         )}
-        aria-label="指で録音"
+        aria-label={surfaceTitle}
       >
         <div className="flex items-start gap-3 border-b border-zinc-800/80 px-3.5 py-3">
           <StatusGlyph uiState={uiState} />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-[15px] font-semibold leading-5 text-zinc-50">{ambientCopyJa.title}</span>
+              <span className="truncate text-[15px] font-semibold leading-5 text-zinc-50">{surfaceTitle}</span>
               <StateBadge state={uiState} />
             </div>
             <p className="mt-1 text-[12px] leading-5 text-zinc-300">{stateCopy.headline}</p>
           </div>
+          <button
+            type="button"
+            onClick={() => readoutPlaying ? stopSpeechReadout() : speakFinalAnswer()}
+            disabled={!lastFinalAnswer || pinchRecording}
+            className={cn(
+              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-35",
+              readoutPlaying && "border-emerald-400/35 bg-emerald-400/10 text-emerald-100",
+            )}
+            title={readoutPlaying ? "読み上げを停止" : "最新回答を読み上げる"}
+            aria-label={readoutPlaying ? "読み上げを停止" : "最新回答を読み上げる"}
+          >
+            {readoutPlaying ? <VolumeX size={15} /> : <Volume2 size={15} />}
+          </button>
           {!standalone && (
             <button
               type="button"
@@ -841,6 +921,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             status={pinchDetectorStatus}
             recording={pinchRecording}
             recordingSeconds={recordingSeconds}
+            debug={cameraDebugOpen}
           />
         )}
 
@@ -858,8 +939,30 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             {busy ? <Loader2 size={15} className="animate-spin" /> : <PrimaryActionIcon uiState={uiState} />}
             {uiState === "recording" && recordingSeconds > 0 ? `${stateCopy.primary} ${formatRecordingTime(recordingSeconds)}` : stateCopy.primary}
           </button>
+          <div className="grid grid-cols-[1fr_auto] items-center gap-2 rounded-lg border border-zinc-800/80 bg-zinc-900/35 px-2 py-1.5">
+            <button
+              type="button"
+              onClick={() => setReadoutEnabled((value) => !value)}
+              className={cn(
+                "inline-flex min-w-0 items-center gap-2 text-left text-[11px] font-medium",
+                readoutEnabled ? "text-emerald-100" : "text-zinc-400",
+              )}
+            >
+              {readoutEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
+              <span className="truncate">回答を自動で読み上げる: {readoutEnabled ? "使用中" : "停止中"}</span>
+            </button>
+            {readoutPlaying && (
+              <button
+                type="button"
+                onClick={stopSpeechReadout}
+                className="inline-flex h-7 items-center justify-center rounded-md border border-emerald-400/25 px-2 text-[11px] font-semibold text-emerald-100 hover:border-emerald-300/45"
+              >
+                停止
+              </button>
+            )}
+          </div>
           <div className="flex items-center justify-between gap-2 text-[11px] leading-4 text-zinc-500">
-            <span className="min-w-0 truncate">{stateCopy.body}</span>
+            <span className="min-w-0 flex-1">{stateCopy.body}</span>
             <button
               type="button"
               onClick={() => setPrivacyOpen((value) => !value)}
@@ -867,7 +970,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
               aria-label="プライバシー"
               title="プライバシー"
             >
-              プ
+              i
             </button>
           </div>
           {privacyOpen && (
@@ -960,7 +1063,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
               {allRumiPermissionsGranted && allOsPermissionsGranted && (
                 <div className="border-l border-emerald-400/40 pl-2">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-[12px] font-semibold text-zinc-100">手の認識</p>
+                    <p className="text-[12px] font-semibold text-zinc-100">合図待ち</p>
                     <span className="text-[11px] text-emerald-200">{gestureStatusLabel(pinchDetectorStatus, monitorEnabled)}</span>
                   </div>
                 <button
@@ -970,7 +1073,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                   className="ambient-mini-button mt-2 w-full"
                 >
                   {monitorEnabled ? <Square size={14} /> : <Play size={14} />}
-                  {monitorEnabled ? "手の認識を停止" : "手の認識を開始"}
+                  {monitorEnabled ? "合図待ちを停止" : "合図待ちを開始"}
                 </button>
                 </div>
               )}
@@ -1021,11 +1124,29 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                 </div>
                 <button
                   type="button"
+                  onClick={() => setCameraDebugOpen((value) => !value)}
+                  className={cn("ambient-mini-button w-full", cameraDebugOpen && "border-amber-400/30 text-amber-100")}
+                >
+                  <Video size={14} />
+                  カメラ映像を確認する（開発者向け）
+                </button>
+                <button
+                  type="button"
                   onClick={() => setFrontOnFinal((value) => !value)}
                   className={cn("ambient-mini-button w-full", frontOnFinal && "border-emerald-400/30 text-emerald-200")}
                 >
                   <Radio size={14} />
                   最終回答で前面表示: {frontOnFinal ? "有効" : "無効"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void openDefaultsConsoleWindow().then((opened) => {
+                    if (!opened) setMessage("Rumi Viewerから開くと、詳細ログは別ウィンドウで表示されます。");
+                  })}
+                  className="ambient-mini-button w-full"
+                >
+                  <ExternalLink size={14} />
+                  詳細ログを開く
                 </button>
                 <div className="grid grid-cols-2 gap-2">
                   <button type="button" onClick={() => void enrollWakeVoice()} className="ambient-mini-button">
@@ -1063,13 +1184,16 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={() => void (async () => {
                       if (manualFallbackIsOsPermission) {
-                        window.location.assign("/host-permissions");
+                        const opened = await openHostPermissionsPageWindow();
+                        if (!opened) {
+                          setMessage("Rumi Viewerから開くと、権限一覧は別ウィンドウで表示されます。");
+                        }
                         return;
                       }
                       setSettingsOpen(true);
-                    }}
+                    })()}
                     className="ambient-mini-button"
                   >
                     {manualFallbackIsOsPermission ? <ExternalLink size={14} /> : <Settings size={14} />}
@@ -1089,8 +1213,22 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             </button>
 
             {lastFinalAnswer && (
-              <div className="max-h-28 overflow-auto rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-2 py-1.5 text-[11px] leading-5 text-emerald-50">
-                {lastFinalAnswer}
+              <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 text-emerald-50">
+                <div className="flex items-center justify-between gap-2 border-b border-emerald-400/15 px-2 py-1.5">
+                  <span className="min-w-0 truncate text-[11px] font-semibold">最新の回答</span>
+                  <button
+                    type="button"
+                    onClick={() => readoutPlaying ? stopSpeechReadout() : speakFinalAnswer()}
+                    disabled={pinchRecording}
+                    className="inline-flex h-7 items-center gap-1 rounded-md border border-emerald-300/25 px-2 text-[11px] font-semibold text-emerald-50 hover:border-emerald-200/45 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {readoutPlaying ? <VolumeX size={12} /> : <Volume2 size={12} />}
+                    {readoutPlaying ? "停止" : "読み上げ"}
+                  </button>
+                </div>
+                <div className="max-h-24 overflow-auto px-2 py-1.5 text-[11px] leading-5">
+                  {lastFinalAnswer}
+                </div>
               </div>
             )}
 
@@ -1191,7 +1329,7 @@ function RumiPermissionApprovalDialog({
               aria-label="プライバシー"
               title="プライバシー"
             >
-              プ
+              i
             </button>
             {privacyOpen && (
               <div className="border-l border-emerald-400/35 pl-2 text-emerald-50/85">
@@ -1267,6 +1405,9 @@ function RoutingSettings({
   onModelQueryChange: (value: string) => void;
   onModelSearch: () => void;
 }) {
+  const [modelChangeOpen, setModelChangeOpen] = useState(false);
+  const modelLabel = model ? modelLabelFromId(model) : "未指定";
+
   return (
     <section className="space-y-2 border-l border-sky-400/35 pl-2">
       <div className="flex items-center justify-between gap-2">
@@ -1301,7 +1442,7 @@ function RoutingSettings({
             )}
           >
             <span>グループ内に作成</span>
-            <span className="font-semibold">{groupEnabled ? "ON" : "OFF"}</span>
+            <span className="font-semibold">{groupEnabled ? "有効" : "無効"}</span>
           </button>
           {groupEnabled && (
             <div className="grid grid-cols-[0.75fr_1fr] gap-1.5">
@@ -1325,51 +1466,90 @@ function RoutingSettings({
               </label>
             </div>
           )}
-          <div className="space-y-1">
-            <label className="block text-[10px] text-zinc-500">
-              送信モデル
-              <div className="mt-1 flex gap-1.5">
-                <input
-                  value={modelQuery}
-                  onChange={(event) => onModelQueryChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      onModelSearch();
-                    }
-                  }}
-                  placeholder={model || "検索"}
-                  className="h-8 min-w-0 flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
-                />
-                <button type="button" onClick={onModelSearch} disabled={modelLoading} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
-                  {modelLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-                </button>
-              </div>
-            </label>
-            {model && (
-              <button type="button" onClick={() => onModelCommit("")} className="text-[11px] text-emerald-200 hover:text-emerald-100">
-                {model}
+          <div className="space-y-1.5 rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold text-zinc-500">送信モデル</span>
+              {model && (
+                <span className="min-w-0 truncate rounded border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] text-emerald-100" title={model}>
+                  モデル: {modelLabel}
+                </span>
+              )}
+            </div>
+            {!modelChangeOpen && (
+              <button
+                type="button"
+                onClick={() => {
+                  setModelChangeOpen(true);
+                  onModelQueryChange("");
+                }}
+                disabled={busy}
+                className="ambient-mini-button w-full justify-between"
+              >
+                <span>{model ? "変更" : "モデルを選ぶ"}</span>
+                <Search size={13} />
               </button>
             )}
-            {modelResults.length > 0 && (
-              <div className="max-h-28 overflow-auto border-l border-zinc-800 pl-2">
-                {modelResults
-                  .map((item) => ({ item, id: modelIdForSearchItem(item) }))
-                  .filter(({ id }) => Boolean(id))
-                  .slice(0, 6)
-                  .map(({ item, id }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => {
-                        onModelChange(id);
-                        onModelCommit(id);
-                      }}
-                      className="block w-full truncate py-1 text-left text-[11px] text-zinc-300 hover:text-zinc-50"
-                    >
-                      {modelLabelForSearchItem(item)}
-                    </button>
-                  ))}
+            {modelChangeOpen && (
+              <div className="space-y-1.5">
+                <div className="flex gap-1.5">
+                  <input
+                    value={modelQuery}
+                    onChange={(event) => onModelQueryChange(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        onModelSearch();
+                      }
+                      if (event.key === "Escape") {
+                        setModelChangeOpen(false);
+                      }
+                    }}
+                    placeholder="すべてから探す"
+                    className="h-8 min-w-0 flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+                    autoFocus
+                  />
+                  <button type="button" onClick={onModelSearch} disabled={modelLoading} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
+                    {modelLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                  </button>
+                  <button type="button" onClick={() => setModelChangeOpen(false)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
+                    <X size={13} />
+                  </button>
+                </div>
+                {model && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onModelCommit("");
+                      setModelChangeOpen(false);
+                    }}
+                    className="text-[11px] text-zinc-400 hover:text-zinc-100"
+                  >
+                    モデル指定を外す
+                  </button>
+                )}
+                {modelResults.length > 0 && (
+                  <div className="max-h-28 overflow-auto border-l border-zinc-800 pl-2">
+                    {modelResults
+                      .map((item) => ({ item, id: modelIdForSearchItem(item) }))
+                      .filter(({ id }) => Boolean(id))
+                      .slice(0, 6)
+                      .map(({ item, id }) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => {
+                            onModelChange(id);
+                            onModelCommit(id);
+                            onModelQueryChange("");
+                            setModelChangeOpen(false);
+                          }}
+                          className="block w-full truncate py-1 text-left text-[11px] text-zinc-300 hover:text-zinc-50"
+                        >
+                          {modelLabelForSearchItem(item)}
+                        </button>
+                      ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1451,12 +1631,14 @@ function RecognitionMonitor({
   status,
   recording,
   recordingSeconds,
+  debug,
 }: {
   videoRef: RefObject<HTMLVideoElement | null>;
   frame: HandTrackingFrame | null;
   status: string;
   recording: boolean;
   recordingSeconds: number;
+  debug: boolean;
 }) {
   const landmarks = frame?.landmarks ?? [];
   const hasHand = landmarks.length > 0;
@@ -1466,23 +1648,24 @@ function RecognitionMonitor({
   const indexTip = landmarks[INDEX_TIP_INDEX];
 
   return (
-    <section className="border-b border-zinc-800/80 bg-black/35 px-3.5 py-3">
-      <div className="relative overflow-hidden rounded-lg border border-zinc-800 bg-black">
-        <div className="relative aspect-[4/3]">
-          <video
-            ref={videoRef}
-            className="absolute inset-0 h-full w-full object-cover"
-            autoPlay
-            muted
-            playsInline
-          />
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/20" />
-          <svg
-            className="pointer-events-none absolute inset-0 h-full w-full"
-            viewBox="0 0 100 100"
-            preserveAspectRatio="none"
-            aria-hidden="true"
-          >
+    <section className="relative border-b border-zinc-800/80 bg-black/25 px-3.5 py-2">
+      <div className="flex items-center gap-2">
+        <div
+          className={cn(
+            "relative shrink-0 overflow-hidden rounded-md border bg-zinc-950",
+            recording ? "h-[54px] w-24 border-red-300/45" : hasHand ? "h-12 w-[72px] border-emerald-300/35" : "h-12 w-[72px] border-zinc-800",
+          )}
+          aria-hidden="true"
+        >
+          <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <rect width="100" height="100" className={recording ? "fill-red-950/35" : "fill-zinc-950"} />
+            {!hasHand && (
+              <>
+                <path d="M30 74 C34 48 47 34 59 45 C68 53 69 70 61 78" className="fill-none stroke-zinc-700" strokeWidth="4" strokeLinecap="round" />
+                <circle cx="43" cy="45" r="5" className="fill-zinc-700" />
+                <circle cx="59" cy="45" r="5" className="fill-zinc-700" />
+              </>
+            )}
             {hasHand && HAND_LANDMARK_CONNECTIONS.map(([from, to]) => {
               const a = landmarks[from];
               const b = landmarks[to];
@@ -1495,8 +1678,8 @@ function RecognitionMonitor({
                   x2={landmarkPercent(b.x)}
                   y2={landmarkPercent(b.y)}
                   vectorEffect="non-scaling-stroke"
-                  className="stroke-emerald-200/70"
-                  strokeWidth={1.4}
+                  className={recording ? "stroke-red-200/80" : "stroke-emerald-200/75"}
+                  strokeWidth={1.6}
                 />
               );
             })}
@@ -1507,8 +1690,8 @@ function RecognitionMonitor({
                 x2={landmarkPercent(indexTip.x)}
                 y2={landmarkPercent(indexTip.y)}
                 vectorEffect="non-scaling-stroke"
-                className={recording ? "stroke-red-200" : "stroke-sky-100"}
-                strokeWidth={2.5}
+                className={recording ? "stroke-red-50" : "stroke-sky-100"}
+                strokeWidth={3}
               />
             )}
             {hasHand && landmarks.map((landmark, index) => (
@@ -1516,26 +1699,35 @@ function RecognitionMonitor({
                 key={index}
                 cx={landmarkPercent(landmark.x)}
                 cy={landmarkPercent(landmark.y)}
-                r={index === THUMB_TIP_INDEX || index === INDEX_TIP_INDEX ? 2.2 : 1.35}
+                r={index === THUMB_TIP_INDEX || index === INDEX_TIP_INDEX ? 2.6 : 1.45}
                 vectorEffect="non-scaling-stroke"
-                className={index === THUMB_TIP_INDEX || index === INDEX_TIP_INDEX ? "fill-sky-100 stroke-black/70" : "fill-emerald-200 stroke-black/60"}
-                strokeWidth={0.7}
+                className={index === THUMB_TIP_INDEX || index === INDEX_TIP_INDEX ? "fill-sky-100 stroke-black/70" : recording ? "fill-red-100 stroke-black/60" : "fill-emerald-200 stroke-black/60"}
+                strokeWidth={0.8}
               />
             ))}
           </svg>
-          <div className="absolute left-2 right-2 top-2 flex items-center justify-between gap-2">
-            <span className={cn("inline-flex min-h-7 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium shadow-lg shadow-black/20", toneClass)}>
-              {recording ? <Mic size={12} /> : hasHand ? <Hand size={12} /> : <Video size={12} />}
-              {label}
-            </span>
-            {frame?.handedness && frame.handedness !== "Unknown" && (
-              <span className="rounded-md border border-zinc-700/80 bg-black/55 px-2 py-1 text-[10px] text-zinc-300">
-                {frame.handedness}
-              </span>
-            )}
-          </div>
+        </div>
+        <div className="min-w-0 flex-1">
+          <span className={cn("inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium", toneClass)}>
+            {recording ? <Mic size={12} /> : hasHand ? <Hand size={12} /> : <Video size={12} />}
+            <span className="truncate">{label}</span>
+          </span>
+          {frame?.handedness && frame.handedness !== "Unknown" && (
+            <p className="mt-1 text-[10px] text-zinc-500">認識: {frame.handedness}</p>
+          )}
         </div>
       </div>
+      <video
+        ref={videoRef}
+        className={cn(
+          debug
+            ? "mt-2 h-auto max-h-[135px] w-full max-w-[240px] rounded-md border border-amber-400/25 object-cover"
+            : "pointer-events-none absolute h-px w-px opacity-0",
+        )}
+        autoPlay
+        muted
+        playsInline
+      />
     </section>
   );
 }
@@ -1546,11 +1738,11 @@ function landmarkPercent(value: number): number {
 }
 
 function recognitionMonitorLabel(status: string, hasHand: boolean, recording: boolean, recordingSeconds: number): string {
-  if (recording) return `録音中 ${formatRecordingTime(recordingSeconds)}・指を離すと送信`;
+  if (recording) return `録音中 ${formatRecordingTime(recordingSeconds)}・離すと送信`;
   if (status === "sending") return "AIに送信中";
-  if (status === "loading") return "手の認識モデルを読み込み中";
-  if (status === "unavailable") return "手の認識を開始できません";
-  if (hasHand) return "手を認識中・指をくっつけると録音";
+  if (status === "loading") return "合図の認識を準備中";
+  if (status === "unavailable") return "合図待ちを開始できません";
+  if (hasHand) return "手を認識中・つまむと録音";
   return "手をカメラに入れてください";
 }
 
@@ -1713,6 +1905,13 @@ function modelLabelForSearchItem(item: ModelSearchItem): string {
   const label = String(item.display_name || item.label || id).trim();
   const provider = String(item.provider_display_name || item.provider_id || "").trim();
   return provider && !label.includes(provider) ? `${label} · ${provider}` : label;
+}
+
+function modelLabelFromId(value: string): string {
+  const text = value.trim();
+  if (!text) return "未指定";
+  const withoutProviderPrefix = text.includes("/") ? text.split("/").slice(1).join("/") : text;
+  return withoutProviderPrefix || text;
 }
 
 function cleanOptionalText(value: unknown): string | null {

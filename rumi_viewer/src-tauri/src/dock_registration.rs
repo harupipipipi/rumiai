@@ -20,7 +20,7 @@ use crate::process_utils;
 const DEFAULTSPACK_DEFAULT_PORT: u16 = 8766;
 const DEFAULTSPACK_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULTSPACK_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
-const DEFAULTSPACK_WINDOW_LABEL: &str = "defaultspack";
+const DEFAULTSPACK_WINDOW_LABEL: &str = "defaultspack-main";
 const DEFAULTSPACK_WINDOW_TITLE: &str = "Rumi Defaultspack";
 
 #[derive(Debug, Clone)]
@@ -160,8 +160,8 @@ fn kernel_command_for_python(python: &Path) -> String {
     format!("{} -m app", shell_quote_path(python))
 }
 
-fn defaultspack_browser_url(port: u16) -> String {
-    format!("http://localhost:{port}/chat")
+fn defaultspack_window_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/chat")
 }
 
 fn defaultspack_health_url(port: u16) -> String {
@@ -569,16 +569,30 @@ pub(crate) fn launch_defaultspack_desktop_window_impl(
     let url = ensure_defaultspack_desktop_ready(config)?;
     open_defaultspack_tauri_window(app, &url)?;
     info!("launch_defaultspack_desktop_impl: opened Tauri window {url}");
-    Ok(format!("Opening Rumi Defaultspack at {url}"))
+    Ok("Rumi Defaultspackを開きました".into())
 }
 
 #[allow(dead_code)]
 pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<String> {
-    info!("launch_defaultspack_desktop_impl: starting external browser launch");
+    info!("launch_defaultspack_desktop_impl: starting legacy external launch");
+    let allow_browser_debug = std::env::var("RUMI_DEFAULTSPACK_ALLOW_BROWSER_DEBUG")
+        .ok()
+        .as_deref()
+        == Some("1");
+    let requested_browser_surface = std::env::var("RUMI_DEFAULTSPACK_SURFACE")
+        .ok()
+        .is_some_and(|surface| surface.trim().eq_ignore_ascii_case("browser"));
+    if !(allow_browser_debug && requested_browser_surface) {
+        bail!(
+            "external browser Defaultspack launch is disabled; use the Rumi Viewer window or set RUMI_DEFAULTSPACK_ALLOW_BROWSER_DEBUG=1 with RUMI_DEFAULTSPACK_SURFACE=browser for debug"
+        );
+    }
     let url = ensure_defaultspack_desktop_ready(config)?;
     open::that_detached(&url).with_context(|| format!("failed to open {url}"))?;
-    info!("launch_defaultspack_desktop_impl: opened browser URL {url}");
-    Ok(format!("Opening Rumi Defaultspack at {url}"))
+    info!("launch_defaultspack_desktop_impl: opened legacy external URL {url}");
+    Ok(format!(
+        "Opening Rumi Defaultspack in debug browser at {url}"
+    ))
 }
 
 fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
@@ -597,8 +611,8 @@ fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
             return Err(e);
         }
     };
-    let url = defaultspack_browser_url(metadata.port);
-    info!("launch_defaultspack_desktop_impl: browser URL will be {url}");
+    let url = defaultspack_window_url(metadata.port);
+    info!("launch_defaultspack_desktop_impl: Defaultspack window URL will be {url}");
 
     if !is_defaultspack_http_ready(metadata.port) {
         info!("launch_defaultspack_desktop_impl: health check indicates server not ready, spawning...");
@@ -667,8 +681,8 @@ fn open_defaultspack_tauri_window(app: &AppHandle, url: &str) -> AnyResult<()> {
     let window =
         WebviewWindowBuilder::new(app, DEFAULTSPACK_WINDOW_LABEL, WebviewUrl::External(url))
             .title(DEFAULTSPACK_WINDOW_TITLE)
-            .inner_size(1280.0, 800.0)
-            .min_inner_size(800.0, 600.0)
+            .inner_size(980.0, 720.0)
+            .min_inner_size(860.0, 600.0)
             .resizable(true)
             .focused(true)
             .visible(true)
@@ -1117,6 +1131,14 @@ mod tests {
         let err =
             read_defaultspack_port(&[("DEFAULTS_HTTP_PORT".into(), "nope".into())]).unwrap_err();
         assert!(err.to_string().contains("DEFAULTS_HTTP_PORT"));
+    }
+
+    #[test]
+    fn defaultspack_window_url_targets_loopback_chat_route() {
+        assert_eq!(
+            defaultspack_window_url(DEFAULTSPACK_DEFAULT_PORT),
+            "http://127.0.0.1:8766/chat"
+        );
     }
 
     #[test]

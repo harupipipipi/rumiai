@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import webbrowser
 from typing import Literal
 
 SurfaceResult = Literal["disabled", "browser", "webview", "webview_unavailable"]
@@ -13,6 +12,16 @@ def open_desktop_surface(url: str, title: str = "Rumi Defaultspack") -> SurfaceR
         return "disabled"
 
     surface = os.environ.get("RUMI_DEFAULTSPACK_SURFACE", "webview").strip().lower()
+    if surface == "browser":
+        browser_debug_allowed = os.environ.get("RUMI_DEFAULTSPACK_ALLOW_BROWSER_DEBUG") == "1"
+        if not browser_debug_allowed:
+            return "disabled"
+
+        import webbrowser
+
+        webbrowser.open(url)
+        return "browser"
+
     if surface == "webview":
         try:
             import webview  # type: ignore[import-not-found]
@@ -23,5 +32,4 @@ def open_desktop_surface(url: str, title: str = "Rumi Defaultspack") -> SurfaceR
         webview.start()
         return "webview" if window is not None else "webview_unavailable"
 
-    webbrowser.open(url)
-    return "browser"
+    return "disabled"

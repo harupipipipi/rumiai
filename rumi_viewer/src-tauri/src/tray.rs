@@ -26,7 +26,7 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_defaultspack_i = MenuItem::with_id(
         app,
         "open_defaultspack",
-        "Open Defaultspack",
+        "Defaultspackを開く",
         true,
         None::<&str>,
     )?;
@@ -34,7 +34,7 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let register_dock_i = MenuItem::with_id(
         app,
         "register_dock",
-        "Register Defaultspack to Dock",
+        "DefaultspackをDockに追加",
         true,
         None::<&str>,
     )?;

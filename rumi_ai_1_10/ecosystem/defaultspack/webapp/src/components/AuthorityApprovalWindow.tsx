@@ -22,7 +22,7 @@ import {
   type AuthorityApprovalScope,
 } from "../lib/authorityApproval";
 import { broadcastAuthorityApprovalSettlement } from "../lib/authorityApprovalEvents";
-import { getAuthorityApprovalContext, openAmbientTriggerWindow } from "../lib/desktopApproval";
+import { closeCurrentWindow, getAuthorityApprovalContext, openFingerRecordingWindow } from "../lib/desktopApproval";
 import { cn } from "../lib/cn";
 
 type DecisionState =
@@ -33,8 +33,8 @@ type DecisionState =
 const SCOPE_LABELS: Record<AuthorityApprovalScope, string> = {
   once: "今回のみ",
   conversation: "会話",
-  profile: "Profile",
-  node: "Node",
+  profile: "プロファイル",
+  node: "ノード",
 };
 
 function requestIdFromLocation(): string {
@@ -72,11 +72,16 @@ function formattedDate(value: string | null | undefined): string {
   return date.toLocaleString();
 }
 
-function returnToAmbientAfterApproval() {
+async function returnToFingerRecordingAfterApproval() {
+  try {
+    if (await closeCurrentWindow()) return;
+  } catch {
+    // Fall back below when the approval page is not inside Rumi Viewer.
+  }
   window.close();
   window.setTimeout(() => {
     if (document.hidden) return;
-    window.location.replace("/ambient?authority_approved=1");
+    window.location.replace("/finger-recording?authority_approved=1");
   }, 250);
 }
 
@@ -96,7 +101,7 @@ function relatedPermissionsForApproval(approval: AuthorityApproval): string[] {
 }
 
 function windowTitle(request: AuthorityRequest | null): string {
-  if (!request) return "Authority approval";
+  if (!request) return "Rumiの許可";
   return request.display_metadata?.title || authorityApprovalTitle(requestToApproval(request));
 }
 
@@ -115,18 +120,18 @@ export function AuthorityApprovalWindow() {
   const [confirmationText, setConfirmationText] = useState("");
 
   const approval = useMemo(() => request ? requestToApproval(request) : null, [request]);
-  const title = request ? windowTitle(request) : "Authority approval";
+  const title = request ? windowTitle(request) : "Rumiの許可";
   const detailRows = useMemo(() => {
     if (!request) return [];
     const resource = request.resource ?? {};
     const metadata = request.display_metadata ?? {};
     return [
-      { label: "app", value: metadata.app_display_name || metadata.pack_id || stringValue(resource.app_display_name) || stringValue(resource.pack_id) },
-      { label: "provider", value: metadata.provider_display_name || metadata.provider_id || stringValue(resource.provider_display_name) || stringValue(resource.provider_id) },
-      { label: "model", value: metadata.model_display_name || metadata.model_id || stringValue(resource.model_display_name) || stringValue(resource.model_id) },
+      { label: "アプリ", value: metadata.app_display_name || metadata.pack_id || stringValue(resource.app_display_name) || stringValue(resource.pack_id) },
+      { label: "提供元", value: metadata.provider_display_name || metadata.provider_id || stringValue(resource.provider_display_name) || stringValue(resource.provider_id) },
+      { label: "モデル", value: metadata.model_display_name || metadata.model_id || stringValue(resource.model_display_name) || stringValue(resource.model_id) },
       { label: "API key", value: metadata.credential_label || stringValue(resource.credential_label) || "secret value is never shown" },
-      { label: "endpoint", value: metadata.endpoint_url || stringValue(resource.endpoint_url) || metadata.endpoint_host || stringValue(resource.domain) },
-      { label: "expires", value: formattedDate(request.expires_at) },
+      { label: "接続先", value: metadata.endpoint_url || stringValue(resource.endpoint_url) || metadata.endpoint_host || stringValue(resource.domain) },
+      { label: "有効期限", value: formattedDate(request.expires_at) },
     ].filter((row) => row.value);
   }, [request]);
   const allowedScopes = useMemo<AuthorityApprovalScope[]>(() => {
@@ -327,9 +332,9 @@ export function AuthorityApprovalWindow() {
       <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-5 py-5">
         <header className="flex items-start justify-between gap-4 border-b border-zinc-800 pb-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-zinc-500">
+            <div className="flex items-center gap-2 text-[11px] font-medium text-amber-200">
               <ShieldAlert size={14} />
-              Authority
+              Rumiの許可
             </div>
             <h1 className="mt-2 break-words text-xl font-semibold text-zinc-50">{title}</h1>
             <p className="mt-1 text-xs leading-5 text-zinc-500">{request?.display_metadata?.summary || request?.reason || "pending request"}</p>
@@ -363,7 +368,7 @@ export function AuthorityApprovalWindow() {
             </div>
             {decisionState.kind === "approved" && (
               <p className="mt-1 text-xs text-emerald-200/80">
-                scope: {decisionState.decision.scope}{decisionState.resumed ? " / assistant resume sent" : ""}
+                許可範囲: {SCOPE_LABELS[decisionState.decision.scope] ?? decisionState.decision.scope}{decisionState.resumed ? " / 続行しました" : ""}
               </p>
             )}
           </div>
@@ -386,7 +391,7 @@ export function AuthorityApprovalWindow() {
                   )}>
                     {request.risk_level || "authority"}
                   </span>
-                  <span className="rounded border border-zinc-800 px-2 py-1 text-[11px] text-zinc-400">
+                  <span className="rounded border border-zinc-800 px-2 py-1 text-[11px] text-zinc-400" title="詳しい権限ID">
                     {request.permission_id}
                   </span>
                   <span className="rounded border border-zinc-800 px-2 py-1 text-[11px] text-zinc-400">
@@ -396,7 +401,7 @@ export function AuthorityApprovalWindow() {
 
                 <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2">
                   {detailRows.map((row) => (
-                    <div key={row.label} className={row.label === "endpoint" ? "sm:col-span-2" : undefined}>
+                    <div key={row.label} className={row.label === "接続先" ? "sm:col-span-2" : undefined}>
                       <dt className="text-zinc-600">{row.label}</dt>
                       <dd className="mt-1 break-words text-zinc-200">{row.value}</dd>
                     </div>
@@ -405,7 +410,7 @@ export function AuthorityApprovalWindow() {
 
                 {typedConfirmationRequired && (
                   <div className="mt-4 rounded-lg border border-red-500/35 bg-red-500/10 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-red-200">critical host confirmation</p>
+                    <p className="text-[11px] font-semibold text-red-200">重要な確認</p>
                     <p className="mt-2 text-xs leading-5 text-red-100/85">
                       この操作はRumiの外側に触れる可能性があります。続けるには次の文字をそのまま入力してください。
                     </p>
@@ -425,7 +430,7 @@ export function AuthorityApprovalWindow() {
                 )}
 
                 <div className="mt-4 rounded-lg border border-zinc-800 bg-black/30 p-3">
-                  <p className="text-[11px] font-medium text-zinc-400">scope</p>
+                  <p className="text-[11px] font-medium text-zinc-400">許可する範囲</p>
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     {allowedScopes.map((scope) => (
                       <button
@@ -447,14 +452,14 @@ export function AuthorityApprovalWindow() {
                 </div>
 
                 <div className="mt-4 rounded-lg border border-zinc-800 bg-black/30 p-3">
-                  <p className="text-[11px] font-medium text-zinc-400">audit</p>
+                  <p className="text-[11px] font-medium text-zinc-400">記録される内容</p>
                   <p className="mt-1 text-xs leading-5 text-zinc-500">
-                    {request.display_metadata?.audit_text || "Approving records a signed local UI-operator action."}
+                    {request.display_metadata?.audit_text || "この許可操作だけをローカルに記録します。"}
                   </p>
                 </div>
 
                 <details className="mt-4 text-xs text-zinc-500">
-                  <summary className="cursor-pointer select-none hover:text-zinc-300">resource</summary>
+                  <summary className="cursor-pointer select-none hover:text-zinc-300">詳しい内容</summary>
                   <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-zinc-800 bg-black/40 p-3 font-mono text-[11px]">
                     {stableJson(request.resource)}
                   </pre>
@@ -555,7 +560,7 @@ function AmbientPackAuthorityApprovalWindow() {
   };
 
   useEffect(() => {
-    document.title = "指で録音のRumi許可";
+    document.title = "Rumiの許可";
     void reloadStatus();
   }, []);
 
@@ -564,12 +569,12 @@ function AmbientPackAuthorityApprovalWindow() {
     if (closingAfterApprovalRef.current) return;
     closingAfterApprovalRef.current = true;
     setError(null);
-    setMessage("承認されました。指で録音に戻ります。");
+    setMessage("使えるようになりました。");
     broadcastAuthorityApprovalSettlement({
       requestId: AMBIENT_AUTHORITY_REQUEST_ID,
       status: "approved",
     });
-    window.setTimeout(returnToAmbientAfterApproval, 650);
+    window.setTimeout(() => void returnToFingerRecordingAfterApproval(), 700);
   }, []);
 
   useEffect(() => {
@@ -604,13 +609,13 @@ function AmbientPackAuthorityApprovalWindow() {
     setAction("open");
     setError(null);
     try {
-      const opened = await openAmbientTriggerWindow();
+      const opened = await openFingerRecordingWindow();
       if (!opened) {
-        window.location.assign("/ambient");
+        setMessage("Rumi Viewerから開くと、指で録音は別ウィンドウで表示されます。");
       }
     } catch (openError) {
       console.info("[ambient] ambient trigger window unavailable", openError);
-      window.location.assign("/ambient");
+      setMessage("Rumi Viewerから開くと、指で録音は別ウィンドウで表示されます。");
     } finally {
       window.setTimeout(() => setAction(null), 300);
     }
@@ -621,13 +626,13 @@ function AmbientPackAuthorityApprovalWindow() {
       <div className="mx-auto flex min-h-screen w-full max-w-[520px] flex-col">
         <header className="flex items-start justify-between gap-2 border-b border-zinc-800 px-3 py-2">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-500">
+            <div className="flex items-center gap-2 text-[10px] font-medium text-amber-200">
               <ShieldAlert size={14} />
-              Authority
+              Rumi内の許可
             </div>
-            <h1 className="mt-1 break-words text-base font-semibold leading-5 text-zinc-50">指で録音の許可</h1>
-            <p className="mt-0.5 text-[11px] leading-4 text-zinc-500">
-              Rumi内で使えるようにします。端末のマイク・カメラ許可は次の画面です。
+            <h1 className="mt-1 break-words text-base font-semibold leading-5 text-zinc-50">Rumiの許可</h1>
+            <p className="mt-0.5 text-[11px] leading-4 text-zinc-400">
+              指で録音をRumi内で使えるようにします。Macのマイク/カメラ許可は別に確認します。
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -731,7 +736,7 @@ function AmbientPackAuthorityApprovalWindow() {
                 className="flex h-9 min-w-36 items-center justify-center gap-2 rounded-md bg-emerald-200 px-3 text-sm font-semibold text-zinc-950 hover:bg-emerald-100 disabled:opacity-50"
               >
                 {action === "open" ? <Loader2 className="animate-spin" size={15} /> : <ExternalLink size={15} />}
-                戻る
+                指で録音を開く
               </button>
             )}
             {!rumiReady && (
@@ -833,7 +838,7 @@ function AmbientApprovalPrivacyToggle() {
         aria-label="プライバシー"
         title="プライバシー"
       >
-        プ
+        i
       </button>
       {open && (
         <div className="absolute right-0 top-9 rumi-layer-local-popover w-64 rounded-lg border border-emerald-400/25 bg-zinc-950 p-3 text-xs leading-5 text-emerald-50 shadow-2xl shadow-black/50">

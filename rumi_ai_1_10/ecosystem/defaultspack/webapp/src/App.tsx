@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
 import { AmbientTriggerPanel, type AmbientApprovalTarget } from "./ambient/AmbientTriggerPanel";
+import { DefaultsConsoleWindow } from "./ambient/DefaultsConsoleWindow";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
@@ -5596,6 +5597,12 @@ export default function App() {
   }
   if (window.location.pathname === "/ambient") {
     return <AmbientTriggerPanel variant="window" />;
+  }
+  if (window.location.pathname === "/finger-recording") {
+    return <AmbientTriggerPanel variant="window" />;
+  }
+  if (window.location.pathname === "/console") {
+    return <DefaultsConsoleWindow />;
   }
   if (window.location.pathname === "/host-permissions") {
     return <HostPermissionsPage />;
