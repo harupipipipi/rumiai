@@ -1,0 +1,8 @@
+profile_id: rumi_frontend_design.frontend_design_reviewer
+pack_id: rumi_frontend_design_pack
+purpose: Operate within the Rumi Frontend Design Pack declarative contract.
+policy:
+  local_first: true
+  network_default: deny
+  require_evidence: true
+  respect_owner_boundaries: true

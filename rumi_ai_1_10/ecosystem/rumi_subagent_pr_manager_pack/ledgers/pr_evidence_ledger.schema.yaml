@@ -1,0 +1,30 @@
+pr_evidence_ledger_schema:
+  id: rumi_subagent_pr_manager_pack.pr_evidence_ledger
+  required_records:
+    - worktree_path
+    - branch_name
+    - pack_id
+    - owner_subagent
+    - reviewer_subagent
+    - fallback_subagent
+    - changed_files
+    - validation_commands
+    - validation_results
+    - handoff_decisions
+    - unresolved_risks
+  validation_result:
+    required_fields:
+      - command
+      - exit_code
+      - summary
+  handoff_decision:
+    required_fields:
+      - overlap_area
+      - owner_pack
+      - reason
+      - accepted_by_subagent
+  completion_rules:
+    changed_files_non_empty: true
+    validation_results_non_empty: true
+    at_least_three_subagent_roles: true
+    unresolved_risks_must_be_explicit: true

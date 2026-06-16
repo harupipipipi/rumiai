@@ -1,0 +1,21 @@
+example:
+  intent: Review English to French app strings for placeholders, protected terms, and expansion risk without changing layout.
+  surface: app_string
+  locale_pair: en-fr
+  inputs:
+  - source_segment_id: settings.profile.cta.en
+    target_segment_id: settings.profile.cta.fr
+    string_key: settings.profile.save_button
+    source_excerpt: Save {{user_name}} profile
+    target_excerpt: Enregistrer le profil {{user_name}}
+    glossary_terms:
+    - term_user_name_placeholder
+  expected_result: localization_handoff_packet
+  expected_issue_categories:
+  - placeholder_integrity
+  - protected_term
+  - handoff_boundary
+  handoffs:
+  - rumi_frontend_design_pack
+  protected_terms_expected:
+  - "{{user_name}}"

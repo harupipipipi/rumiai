@@ -1,0 +1,25 @@
+preset_id: rumi_observability.safe_default
+profile: rumi_observability.observability_reviewer
+features:
+  local_first: true
+  evidence_required: true
+  owner_boundary_check: true
+  network_default: none
+  redact_before_share: true
+required_assets:
+  - schemas/observability_event.schema.json
+  - catalog/run_ledger_contract.yaml
+  - policies/privacy_cost_redaction.policy.yaml
+workflow:
+  - classify the requested observability surface before collecting evidence
+  - create or update a local run ledger entry with run_id, owner_pack, status, and evidence_refs
+  - record cost and latency with explicit units and pricing_source when available
+  - redact secret-like values, account identifiers, private prompts, and connector payloads before handoff
+blocked_defaults:
+  - external_log_export
+  - raw_connector_payload_inclusion
+  - treating_estimated_cost_as_billed_cost
+outputs:
+  - redacted_run_ledger_summary
+  - evidence_reference_list
+  - owner_pack_handoff_status

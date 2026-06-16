@@ -1,0 +1,14 @@
+example_id: rumi_data_analysis.examples.csv_sales_analysis
+preset: chatgpt_data_analysis_local
+title: Analyze local sales CSV
+goal: Profile a local sales export, clean reversible category and date issues, summarize trends, and produce chart specs.
+inputs:
+  files: [local_exports/sales_sample.csv]
+  data_grain: one_row_per_order
+constraints:
+  network: none
+  no_credentials: true
+  file_write: approval_required
+deliverable:
+  type: analysis_summary_with_chart_specs
+  required_sections: [data_profile, cleaning_recipe, findings, chart_specs, audit_notes, limitations]

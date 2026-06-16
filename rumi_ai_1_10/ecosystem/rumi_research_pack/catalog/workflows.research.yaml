@@ -1,0 +1,54 @@
+catalog_id: rumi_research_pack.workflows
+version: 1.0.0
+workflows:
+  local_deep_research_report:
+    title: Local deep research report
+    intent: Turn local notes and supplied sources into a cited, traceable research report.
+    mode: local_first
+    inputs: [research_question, local_sources, audience, constraints]
+    steps:
+      - id: plan
+        capability: research.plan.create
+      - id: triage
+        capability: research.source.triage
+      - id: evidence
+        capability: research.evidence.extract
+      - id: contradictions
+        capability: research.contradiction.review
+      - id: synthesis
+        capability: research.synthesis.write
+      - id: handoff
+        capability: research.handoff.package
+    outputs: [research_report, evidence_cards, source_manifest, claim_trace]
+  comparison_research_brief:
+    title: Comparison research brief
+    intent: Compare options with evidence cards, confidence labels, and decision criteria.
+    mode: local_first
+    inputs: [options, evaluation_criteria, local_sources]
+    steps:
+      - id: plan
+        capability: research.plan.create
+      - id: evidence
+        capability: research.evidence.extract
+      - id: review
+        capability: research.contradiction.review
+      - id: synthesis
+        capability: research.synthesis.write
+    outputs: [comparison_table, cited_brief, limitations]
+  evidence_audit:
+    title: Evidence audit
+    intent: Review an existing report for citation quality, unsupported claims, and contradictions.
+    mode: review
+    inputs: [draft_report, evidence_cards, source_manifest]
+    steps:
+      - id: triage
+        capability: research.source.triage
+      - id: contradictions
+        capability: research.contradiction.review
+      - id: handoff
+        capability: research.handoff.package
+    outputs: [audit_findings, unsupported_claims, citation_repairs]
+review_policy:
+  unsupported_claims_block_final: true
+  contradiction_table_required: true
+  limitations_section_required: true

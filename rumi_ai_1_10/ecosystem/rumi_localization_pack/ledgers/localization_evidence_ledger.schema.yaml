@@ -1,0 +1,26 @@
+evidence_ledger_schema:
+  required_records:
+  - record_id
+  - source_evidence_id
+  - locale_pair
+  - source_segment_id
+  - target_segment_id
+  - owner_surface
+  - handoff_owner
+  - review_state
+  - protected_terms_checked
+  - glossary_version
+  - issue_ids
+  completion_rules:
+    every_record_has_evidence: true
+    every_issue_has_locale_pair: true
+    every_protected_term_has_decision: true
+    adjacent_execution_requires_handoff: true
+    no_runtime_grant_created: true
+    no_connector_delivery_created: true
+  allowed_review_states:
+  - draft
+  - needs_revision
+  - blocked
+  - handoff_ready
+  - accepted_with_notes

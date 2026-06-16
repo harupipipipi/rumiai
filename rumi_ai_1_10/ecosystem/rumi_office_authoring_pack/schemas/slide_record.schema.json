@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/slide_record.schema.json",
+  "title": "Slide Record",
+  "description": "Office authoring contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "slide_id",
+    "title",
+    "layout_intent",
+    "message",
+    "content_blocks",
+    "speaker_notes",
+    "source_refs",
+    "accessibility_notes"
+  ],
+  "properties": {
+    "slide_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "layout_intent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "content_blocks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "speaker_notes": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "accessibility_notes": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

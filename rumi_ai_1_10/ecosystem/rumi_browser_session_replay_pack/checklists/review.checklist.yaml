@@ -1,0 +1,18 @@
+review_checklist:
+  pack_id: rumi_browser_session_replay_pack
+  minimum_pass: all_blocking_items
+  items:
+  - id: redaction_before_share
+    blocking: true
+  - id: hash_refs_not_inline_binaries
+    blocking: true
+  - id: observed_events_only
+    blocking: true
+  - id: selector_drift_evidence_present
+    blocking: true
+  - id: browser_execution_handoff_only
+    blocking: true
+  - id: transport_owner_named
+    blocking: true
+  - id: asset_index_complete
+    blocking: true

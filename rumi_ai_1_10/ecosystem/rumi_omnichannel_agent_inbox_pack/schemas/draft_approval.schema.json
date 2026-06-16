@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/draft_approval.schema.json",
+  "title": "Draft Approval",
+  "description": "Hash and expiry bound approval for outbound drafts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "approval_id",
+    "draft_id",
+    "approval_state",
+    "approver_ref",
+    "body_hash",
+    "expires_at",
+    "remote_input_can_approve",
+    "hash_algorithm",
+    "approval_scope",
+    "replay_policy",
+    "remote_input_can_issue_token"
+  ],
+  "properties": {
+    "approval_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "draft_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approval_state": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "approved",
+        "denied",
+        "expired"
+      ]
+    },
+    "approver_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "body_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "remote_input_can_approve": {
+      "type": "boolean",
+      "const": false
+    },
+    "hash_algorithm": {
+      "type": "string",
+      "const": "sha256"
+    },
+    "approval_scope": {
+      "type": "string",
+      "enum": [
+        "single_draft_body",
+        "single_thread_draft"
+      ]
+    },
+    "replay_policy": {
+      "type": "string",
+      "const": "single_use_receipt"
+    },
+    "remote_input_can_issue_token": {
+      "type": "boolean",
+      "const": false
+    }
+  }
+}

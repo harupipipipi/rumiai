@@ -1,0 +1,88 @@
+quality_matrix:
+  minimum_pass: all_blocking_checks
+  fail_states:
+  - missing_evidence
+  - boundary_violation
+  - unsafe_external_action
+  - unreviewed_handoff
+  checks:
+  - id: network_denied_by_default
+    blocking: true
+    description: Artifact manifests deny network by default.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: first_tool_call_approval
+    blocking: true
+    description: First tool/MCP/API call requires explicit approval.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: client_approved_never_trusted
+    blocking: true
+    description: Client supplied approved flags are ignored; only server-issued approval tokens count.
+    review_evidence:
+    - schema
+    - policy
+    - fixture
+    - contract_test
+  - id: export_share_package_only
+    blocking: true
+    description: Export/share records are package contracts and never create files, zips, links, uploads, or tokens.
+    review_evidence:
+    - schema
+    - policy
+    - fixture
+    - contract_test
+  - id: sandbox_owner_named
+    blocking: true
+    description: Sandbox runtime owner is named for render execution.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: workspace_handoff_for_storage
+    blocking: true
+    description: State and export persistence hand off to workspace.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: rollback_parent_present
+    blocking: true
+    description: Rollback records point to parent version or explicitly root.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: error_boundary_safe_fallback
+    blocking: true
+    description: Errors produce safe fallback rather than execution.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: no_direct_execution
+    blocking: true
+    description: The pack never executes artifact code.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: asset_index_complete
+    blocking: true
+    description: Every artifact is listed in metadata and file index.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test

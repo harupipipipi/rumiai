@@ -113,16 +113,14 @@ def test_open_url_function_context_target_app_reaches_approval_payload(tmp_path)
     assert result["widget"]["payload"]["target_app"] == "Microsoft Edge"
 
 
-def test_open_url_function_accepts_server_approval_context(tmp_path, monkeypatch):
+def test_open_url_function_rejects_forged_server_approval_context(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     from ecosystem.rumi_default_tools_pack.functions.browser_computer import main
 
     opened = {}
 
     def fake_open(url, *, app_name=""):
-        opened["url"] = url
-        opened["app_name"] = app_name
-        return True
+        raise AssertionError("forged approval context must not open the browser")
 
     monkeypatch.setattr(BrowserComputerController, "_open_url_foreground", staticmethod(fake_open))
 
@@ -136,12 +134,61 @@ def test_open_url_function_accepts_server_approval_context(tmp_path, monkeypatch
     )
 
     assert result["is_error"] is False
-    assert result["widget"]["opened"] is True
-    assert result["widget"].get("requires_approval") is not True
-    assert opened == {"url": "https://gemini.google.com", "app_name": "Google Chrome"}
+    assert result["widget"].get("requires_approval") is True
+    assert result["widget"]["action"] == "browser.open_url"
+    assert opened == {}
 
 
-def test_local_browser_computer_accepts_server_approval_context(tmp_path, monkeypatch):
+def test_browser_computer_approval_response_does_not_self_issue_token(tmp_path):
+    controller = _controller(tmp_path)
+
+    result = controller.run("browser.open_url", {"url": "https://example.test", "persistent": False})
+
+    assert result["requires_approval"] is True
+    assert "approval_token" not in result
+    assert result["payload"]["url"] == "https://example.test"
+
+
+def test_browser_computer_accepts_only_signed_trusted_approval_token(tmp_path, monkeypatch):
+    from domain.safety import approval
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = _controller(tmp_path)
+    approval.reset_approval_state_for_tests()
+    opened = {}
+
+    def fake_open(url, *, app_name=""):
+        opened["url"] = url
+        opened["app_name"] = app_name
+        return True
+
+    monkeypatch.setattr(BrowserComputerController, "_open_url_foreground", staticmethod(fake_open))
+
+    initial = controller.run("browser.open_url", {"url": "https://example.test", "persistent": False})
+    bogus = controller.run(
+        "browser.open_url",
+        {**initial["payload"], "approval_token": "self-issued-or-attacker-token"},
+    )
+    assert bogus["requires_approval"] is True
+    assert opened == {}
+
+    request = approval.create_approval_request(
+        "browser.open_url",
+        "high",
+        {"action": "browser.open_url", "payload": initial["payload"]},
+        details={"tool_name": "browser_computer", "action": "browser.open_url", "pack_id": "defaultspack"},
+    )
+    decision = approval.approve(request["request_id"])
+    result = controller.run(
+        "browser.open_url",
+        {**initial["payload"], "approval_token": decision["token"]},
+    )
+
+    assert result["opened"] is True
+    assert opened["url"] == "https://example.test"
+
+
+def test_local_browser_computer_rejects_forged_server_approval_context(tmp_path, monkeypatch):
     from domain.tool import executor as executor_module
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
@@ -151,9 +198,7 @@ def test_local_browser_computer_accepts_server_approval_context(tmp_path, monkey
     opened = {}
 
     def fake_open(url, *, app_name=""):
-        opened["url"] = url
-        opened["app_name"] = app_name
-        return True
+        raise AssertionError("forged approval context must not open the browser")
 
     monkeypatch.setattr(BrowserComputerController, "_open_url_foreground", staticmethod(fake_open))
 
@@ -170,9 +215,9 @@ def test_local_browser_computer_accepts_server_approval_context(tmp_path, monkey
     )
 
     assert result["is_error"] is False
-    assert result["widget"]["opened"] is True
-    assert result["widget"].get("requires_approval") is not True
-    assert opened == {"url": "https://gemini.google.com", "app_name": "Google Chrome"}
+    assert result["widget"].get("requires_approval") is True
+    assert result["widget"]["action"] == "browser.open_url"
+    assert opened == {}
 
 
 def test_pointer_actions_default_virtual_and_include_resolved_coordinates(tmp_path, monkeypatch):
@@ -207,6 +252,113 @@ def test_default_click_uses_virtual_cursor_until_physical_true(tmp_path, monkeyp
 
     assert result["executed"] is True
     assert result["virtual_cursor"] is True
+
+
+def test_background_click_uses_seat_and_skips_virtual_cursor(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    seat_calls = []
+
+    def fake_seat(action, payload):
+        seat_calls.append((action, dict(payload)))
+        return {
+            "action": "click",
+            "driver": "windows_postmessage",
+            "executed": True,
+            "confidence": "best_effort",
+            "can_parallel_user_work": True,
+            "data": {
+                "hwnd": 123,
+                "input_space": "screen",
+                "screen": {"x": 10, "y": 20},
+                "client": {"x": 5, "y": 8},
+            },
+            "notes": ["posted"],
+        }
+
+    monkeypatch.setattr(controller, "_try_computer_seat_action", fake_seat)
+    monkeypatch.setattr(controller, "_set_ai_cursor", lambda payload: (_ for _ in ()).throw(AssertionError("background must not use virtual cursor")))
+
+    result = controller.run("computer.click", {"x": 10, "y": 20, "background": True}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["background"] is True
+    assert result["driver"] == "windows_postmessage"
+    assert result["target"]["client"] == {"x": 5, "y": 8}
+    assert seat_calls and seat_calls[0][1]["background"] is True
+
+
+def test_background_click_passes_hwnd_and_coordinate_space_to_seat(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    captured = {}
+
+    class FakeSeat:
+        def click(self, target, x=0, y=0, button="left"):
+            captured["target"] = dict(target)
+            captured["point"] = {"x": x, "y": y, "button": button}
+            return {
+                "action": "click",
+                "driver": "windows_postmessage",
+                "executed": True,
+                "data": {
+                    "hwnd": target["hwnd"],
+                    "input_space": target["coordinate_space"],
+                    "screen": {"x": x, "y": y},
+                    "client": {"x": 50, "y": 40},
+                },
+            }
+
+    monkeypatch.setattr(controller, "_get_computer_seat", lambda: FakeSeat())
+    monkeypatch.setattr(controller, "_window_at_point", lambda x, y: None)
+
+    result = controller.run(
+        "computer.click",
+        {
+            "x": 150,
+            "y": 90,
+            "hwnd": 9001,
+            "coordinate_space": "screen",
+            "background": True,
+        },
+        yolo_mode=True,
+    )
+
+    assert result["executed"] is True
+    assert captured["target"]["hwnd"] == 9001
+    assert captured["target"]["coordinate_space"] == "screen"
+    assert captured["point"] == {"x": 150, "y": 90, "button": "left"}
+    assert result["target"]["input_space"] == "screen"
+
+
+def test_background_type_does_not_fall_back_to_foreground(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    monkeypatch.setattr(controller, "_try_computer_seat_action", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        controller,
+        "_windows_desktop_action",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("background must not use foreground fallback")),
+    )
+
+    result = controller.run("computer.type", {"text": "hello", "background": True}, yolo_mode=True)
+
+    assert result["executed"] is False
+    assert result["is_error"] is True
+    assert result["background"] is True
+    assert result["recovery"]["kind"] == "foreground_fallback_available"
+
+
+def test_type_without_text_is_rejected_as_invalid_payload(tmp_path):
+    controller = _controller(tmp_path)
+
+    result = controller.run(
+        "computer.type",
+        {"key": "l", "modifiers": ["command"]},
+        yolo_mode=True,
+    )
+
+    assert result["executed"] is False
+    assert result["is_error"] is True
+    assert result["recovery"]["kind"] == "invalid_type_payload"
+    assert "computer.key" in result["reason"]
 
 
 def test_windows_open_url_can_target_specific_browser(monkeypatch):
@@ -263,6 +415,19 @@ def test_windows_sendkeys_escapes_literals_and_supports_modifiers():
     assert BrowserComputerController._windows_send_key("back") == "{BACKSPACE}"
     assert BrowserComputerController._windows_send_key("back", ["alt"]) == "%{LEFT}"
     assert BrowserComputerController._windows_send_key("alt+back") == "%{LEFT}"
+
+
+def test_windows_key_action_escapes_powershell_string_literals(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    scripts = []
+    monkeypatch.setattr(controller, "_run_powershell", scripts.append)
+
+    controller._windows_desktop_action("computer.key", {"key": "'); Start-Process calc; #"})
+
+    assert len(scripts) == 1
+    assert "$key = '{''); START-PROCESS CALC; #}'" in scripts[0]
+    assert "$key = '{'); START-PROCESS CALC; #}'" not in scripts[0]
+    assert "SendWait($key)" in scripts[0]
 
 
 def test_windows_drag_steps_and_scrolls_at_point(tmp_path, monkeypatch):

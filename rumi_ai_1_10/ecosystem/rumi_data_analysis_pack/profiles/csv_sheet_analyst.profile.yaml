@@ -1,0 +1,22 @@
+profile_id: rumi_data_analysis.csv_sheet_analyst
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: CSV/Sheets分析役
+  en: CSV and Sheets Analyst
+description:
+  ja: CSVやスプレッドシート書き出しのプロファイル、クリーニング、集計、監査を担う役割。
+  en: Analyst profile for profiling, cleaning, aggregating, and auditing CSV or spreadsheet exports.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.local_research_writer
+enabled_capabilities: [csv_profile, sheet_audit, data_cleaning, chart_design, analysis_audit]
+prompt_set: csv_sheet_analyst
+policy:
+  network_default: none
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  audit_level: strict
+  local_first: true

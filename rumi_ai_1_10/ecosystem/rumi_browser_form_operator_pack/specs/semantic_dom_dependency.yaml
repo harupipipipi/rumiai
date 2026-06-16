@@ -1,0 +1,29 @@
+spec_id: rumi.browser_form_operator.semantic_dom_dependency.v1
+owner: rumi_browser_form_operator_pack
+purpose: Required semantic DOM evidence contract before field mapping or staged form filling.
+network_default: none
+dependency_owner: rumi_browser_element_pack
+required_semantic_evidence:
+  - field_selector_map
+  - visible_label_map
+  - role_and_type_map
+  - aria_label_or_description_map
+  - autocomplete_map
+  - required_or_optional_map
+  - disabled_or_readonly_map
+  - validation_message_map
+  - form_owner_and_submit_controls
+quality_gates:
+  - selector_stability_reviewed
+  - labels_match_user_intent
+  - duplicate_field_names_resolved
+  - hidden_fields_excluded_or_explained
+  - validation_messages_recorded
+  - screenshot_ids_linked
+fallback_policy:
+  missing_semantic_dom: handoff_to_rumi_browser_element_pack
+  ambiguous_field_mapping: stop_and_request_user_review
+outputs:
+  - semantic_dom_dependency_report
+  - field_mapping_confidence
+  - unresolved_field_questions

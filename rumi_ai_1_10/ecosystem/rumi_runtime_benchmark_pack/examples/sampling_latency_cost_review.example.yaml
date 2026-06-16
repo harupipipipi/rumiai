@@ -1,0 +1,17 @@
+id: rumi_runtime_benchmark_pack.examples.sampling_latency_cost_review
+profile: rumi_runtime_benchmark_pack.runtime_benchmark_reviewer
+task: Assess latency and cost claims from a ten-run runtime comparison.
+expected_passes:
+  - sampling_reviewer
+  - latency_cost_analyst
+  - final_benchmark_integrator
+required_outputs:
+  - sampling_plan_assessment
+  - median_and_p95_latency_notes
+  - estimated_cost_summary
+  - reliability_summary
+  - claim_scope_corrections
+safety_notes:
+  - do not claim p95 from smoke samples
+  - disclose cache and warmup posture
+  - live billing lookup requires explicit approval

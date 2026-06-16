@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Rumi Browser Companion Options</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main class="page">
+      <section class="card">
+        <h1>Rumi Browser Companion</h1>
+        <p class="lede">Configure the local Rumi bridge endpoint and pairing token used by this browser.</p>
+        <form id="settings-form">
+          <label class="field">
+            <span>Server URL</span>
+            <input id="server-url" name="serverUrl" type="url" placeholder="http://127.0.0.1:8766" required>
+          </label>
+          <label class="field">
+            <span>Pairing Token</span>
+            <input id="pairing-token" name="pairingToken" type="password" placeholder="Paste your bridge pairing token" required>
+          </label>
+          <label class="field">
+            <span>Client Label</span>
+            <input id="client-label" name="clientLabel" type="text" placeholder="Optional name shown to Rumi">
+          </label>
+          <label class="field">
+            <span>Poll Interval (minutes)</span>
+            <input id="poll-interval" name="pollIntervalMinutes" type="number" min="1" step="1" value="1" required>
+          </label>
+          <div class="actions">
+            <button type="submit">Save Settings</button>
+            <button id="poll-now" type="button" class="secondary">Poll Bridge Now</button>
+          </div>
+        </form>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </section>
+      <section class="card">
+        <h2>Capabilities</h2>
+        <ul class="capabilities">
+          <li>Periodic bridge poll with browser metadata and tabs summary</li>
+          <li>Tab operations: list, select, navigate, capture visible tab</li>
+          <li>Semantic DOM snapshot with element id, role, labels, nearby text, geometry, and action hints</li>
+          <li>Element actions by `element_id` or CSS selector: click, type, press, scroll, extract, highlight</li>
+        </ul>
+      </section>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

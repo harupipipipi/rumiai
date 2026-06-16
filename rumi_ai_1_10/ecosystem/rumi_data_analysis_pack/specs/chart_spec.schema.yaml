@@ -1,0 +1,37 @@
+spec_id: rumi.data_analysis.chart_spec.v1
+description: Declarative chart handoff spec for analysis outputs.
+required_fields:
+  - chart_id
+  - title
+  - question_answered
+  - data_source
+  - data_grain
+  - chart_kind
+  - encodings
+  - filters
+  - transformations
+  - annotations
+  - accessibility
+  - caveats
+fields:
+  chart_id:
+    type: string
+  data_source:
+    type: object
+    required: [label, origin, refresh_state]
+  data_grain:
+    type: string
+    examples: [one_row_per_order, one_row_per_customer_month, one_row_per_project]
+  encodings:
+    type: object
+    examples:
+      line: {x: order_month, y: revenue, color: region}
+      bar: {category: segment, value: churn_rate}
+  accessibility:
+    required: [alt_text, color_notes, label_strategy]
+  caveats:
+    type: list
+handoff_targets:
+  - workspace_artifact_pack_optional
+  - report_writer
+  - chart_renderer_optional

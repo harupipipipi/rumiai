@@ -1,0 +1,9 @@
+negative_cases:
+  pack_id: rumi_browser_session_replay_pack
+  cases:
+  - raw_private_url_share
+  - inline_binary_screenshot
+  - owned_click_action
+  - unredacted_typed_input
+  - missing_selector_evidence
+  expected_behavior: block_or_handoff_without_external_action

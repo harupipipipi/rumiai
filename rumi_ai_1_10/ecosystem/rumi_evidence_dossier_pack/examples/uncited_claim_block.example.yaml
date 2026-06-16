@@ -1,0 +1,13 @@
+example:
+  id: uncited_claim_block
+  user_request: Block export with missing citation
+  input_state: local_records_supplied
+  expected_result: citation_block_handoff_packet
+  must_include:
+  - evidence_ids_or_approval_receipt
+  - review_state
+  - handoff_owner
+  must_not:
+  - external_action
+  - uncited_claim
+  - unapproved_tool_call

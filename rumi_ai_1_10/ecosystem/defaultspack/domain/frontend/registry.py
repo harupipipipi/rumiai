@@ -23,7 +23,7 @@ from domain.external.input_profile_registry import InputProfileRegistry
 from domain.external.io_templates import external_io_template_catalog
 from domain.external.output_profile_registry import OutputProfileRegistry
 from domain.external.source_store import ExternalSourceStore, external_source_key
-from domain.external.token_store import external_token_status, set_external_token
+from domain.external.token_store import external_token_status
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
 from transport.registry import component_http_route_specs, component_route_diagnostics
@@ -129,7 +129,7 @@ class FrontendRegistry:
     def _app_metadata(self, ui_surfaces: list[dict[str, Any]]) -> dict[str, Any]:
         app: dict[str, Any] = {
             "id": "defaultspack",
-            "name": "Console",
+            "name": "rumi DP",
             "icon": "/static/assets/icons/defaultspack-icon.png",
             "account": self._rumi_account_metadata(),
         }
@@ -509,7 +509,39 @@ class FrontendRegistry:
                             "Concrete UI entries are supplied by frontend extension packs.",
                         ],
                     },
-                }
+                },
+                {
+                    "id": "runtime-management",
+                    "label": "Runtime Management",
+                    "category": "system",
+                    "description": "Pack modules, pack requests, and migration state.",
+                    "tags": ["pack", "management", "runtime"],
+                    "origin": {"kind": "builtin", "path": "ecosystem/defaultspack/api_routes"},
+                    "panel": {
+                        "kind": "actions",
+                        "title": "Runtime Management",
+                        "actions": [
+                            {
+                                "id": "list_modules",
+                                "label": "Modules",
+                                "method": "GET",
+                                "endpoint": "/api/defaultspack/modules",
+                            },
+                            {
+                                "id": "list_pack_requests",
+                                "label": "Pack Requests",
+                                "method": "GET",
+                                "endpoint": "/api/defaultspack/pack-requests",
+                            },
+                            {
+                                "id": "migration_status",
+                                "label": "Migration Status",
+                                "method": "GET",
+                                "endpoint": "/api/defaultspack/migration/status",
+                            },
+                        ],
+                    },
+                },
             ]
         )
 
@@ -635,6 +667,27 @@ class FrontendRegistry:
                         "type": "toggle",
                         "default": False,
                         "help": "Tab/Enterでcomposerや右サイドバーのボタンへ移動・実行できるようにします。Offでもslash候補のTab選択は使えます。",
+                    },
+                    {
+                        "id": "spotlight_shortcut_enabled",
+                        "label": "Spotlight Shortcut",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "Enable the global conversation Spotlight shortcut.",
+                    },
+                    {
+                        "id": "spotlight_shortcut",
+                        "label": "Spotlight Keys",
+                        "type": "text",
+                        "default": "Ctrl+K",
+                        "help": "Use combinations such as Ctrl+K, Ctrl+Alt+K, or Win+K where the browser receives Win-key events.",
+                    },
+                    {
+                        "id": "spotlight_shortcut_text_input",
+                        "label": "Shortcut In Text Inputs",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "Allow the Spotlight shortcut while an input or textarea is focused.",
                     },
                     {
                         "id": "language",
@@ -951,6 +1004,13 @@ class FrontendRegistry:
                             {"value": "xhigh", "label": "Extra High"},
                         ],
                         "help": "Rumi は none/low/medium/high/xhigh を送り、各 provider が対応する API パラメータへ変換します。Gemini/Gemma では未対応の値を自動で近い値へ落とします。",
+                    },
+                    {
+                        "id": "deepthink_enabled",
+                        "label": "DeepThink",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "thinker型のDeepThink loopを有効にします。タスクには数時間かかる可能性があります。",
                     },
                     {
                         "id": "favorite_profiles",
@@ -1368,10 +1428,11 @@ class FrontendRegistry:
                         "default": "all",
                         "options": [
                             {"value": "all", "label": "All tools: expose every tool"},
+                            {"value": "auto", "label": "Auto: always tools plus relevant vector matches"},
                             {"value": "vector", "label": "Vector: recommend relevant tools"},
                             {"value": "off", "label": "Off: only manually selected tools"},
                         ],
-                        "help": "既定ではすべての tool を AI に渡します。Vector は入力文と tool の名前・説明・タグを照合し、関連度が高い tool だけを推薦します。",
+                        "help": "既定ではすべての tool を AI に渡します。Auto は常時読み込み宣言の tool と、入力文に関連する vector tool だけを渡します。",
                     },
                     {
                         "id": "tool_assist_limit",
@@ -2133,6 +2194,9 @@ class FrontendRegistry:
                 "composer_placeholder": "メッセージを入力...",
                 "show_activity_in_messages": True,
                 "keyboard_button_navigation": False,
+                "spotlight_shortcut_enabled": True,
+                "spotlight_shortcut": "Ctrl+K",
+                "spotlight_shortcut_text_input": True,
                 "language": "ja",
             },
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
@@ -2509,6 +2573,24 @@ class FrontendRegistry:
         return default
 
     @staticmethod
+    def _setting_bool(value: Any, default: bool) -> bool:
+        if value is None or value == "":
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if not normalized:
+                return default
+            if normalized in {"false", "0", "off", "no", "n", "disable", "disabled"}:
+                return False
+            if normalized in {"true", "1", "on", "yes", "y", "enable", "enabled"}:
+                return True
+        return bool(value)
+
+    @staticmethod
     def _clamped_float(value: Any, default: float, minimum: float, maximum: float) -> float:
         try:
             return max(minimum, min(maximum, float(value)))
@@ -2555,51 +2637,18 @@ class FrontendRegistry:
                         monthly_request_limit=request_limit_value,
                         kind=str(api_key_patch.get("kind") or "").strip() or None,
                     )
-                    # If the provider matches an external-output channel
-                    # (line/discord/slack/generic), mirror the secret into the
-                    # external token store. This makes "APIs / Tokens" the
-                    # single entry point for configuring secrets.
-                    _EXTERNAL_TOKEN_PROVIDERS = {"line", "discord", "slack", "generic"}
-                    if provider_id in _EXTERNAL_TOKEN_PROVIDERS:
-                        # Use api_id as token_id so users can keep multiple
-                        # tokens per provider (e.g. "channel_access_token",
-                        # "channel_secret"). The token kind defaults to the
-                        # api_id which already encodes the role.
-                        external_kind = (
-                            str(api_key_patch.get("external_token_kind") or "").strip()
-                            or name
-                            or "token"
-                        )
-                        try:
-                            set_external_token(
-                                provider_id,
-                                value,
-                                token_id=name,
-                                name=name,
-                                kind=external_kind,
-                                pack_root=self._pack_root,
-                            )
-                        except Exception:  # noqa: BLE001 - best-effort mirroring
-                            pass
             apis["api_keys"] = []
         external_output = sanitized.get("external_output")
         legacy_external_inputs = sanitized.get("external_inputs")
         token_container = external_output if isinstance(external_output, dict) else legacy_external_inputs
         if isinstance(token_container, dict):
-            token_patch = token_container.pop("external_tokens", None)
-            if isinstance(token_patch, dict) and token_patch.get("action") == "upsert":
-                provider_id = str(token_patch.get("provider_id") or "").strip()
-                token_id = str(token_patch.get("token_id") or token_patch.get("name") or "").strip()
-                value = str(token_patch.get("value") or "")
-                if provider_id and token_id and value.strip():
-                    set_external_token(
-                        provider_id,
-                        value,
-                        pack_root=self._pack_root,
-                        token_id=token_id,
-                        name=str(token_patch.get("name") or token_id),
-                        kind=str(token_patch.get("kind") or "token"),
-                    )
+            # External tokens are secrets and must only be changed through the
+            # dedicated /api/external/tokens route, where standalone HTTP applies
+            # local-origin, bearer-token, and CSRF checks.  Keep the settings
+            # response shape stable, but treat any submitted token patch as
+            # display-only data so /api/ui/settings cannot become a secret-write
+            # bypass.
+            token_container.pop("external_tokens", None)
             token_container["external_tokens"] = []
         if isinstance(legacy_external_inputs, dict) and "external_inputs" in sanitized:
             sanitized.pop("external_inputs", None)
@@ -2624,6 +2673,16 @@ class FrontendRegistry:
             refreshed["general"] = general
         language = str(general.get("language") or "ja").strip().lower()
         general["language"] = language if language in {"ja", "en", "auto"} else "ja"
+        general["spotlight_shortcut_enabled"] = self._setting_bool(
+            general.get("spotlight_shortcut_enabled"),
+            True,
+        )
+        shortcut = str(general.get("spotlight_shortcut") or "Ctrl+K").strip()
+        general["spotlight_shortcut"] = shortcut or "Ctrl+K"
+        general["spotlight_shortcut_text_input"] = self._setting_bool(
+            general.get("spotlight_shortcut_text_input"),
+            True,
+        )
 
         tools = refreshed.setdefault("tools", {})
         if not isinstance(tools, dict):
@@ -2647,9 +2706,7 @@ class FrontendRegistry:
             )
         )
         tool_assist_mode = str(tools.get("tool_assist_mode") or "all").strip().lower()
-        if tool_assist_mode == "auto":
-            tool_assist_mode = "vector"
-        tools["tool_assist_mode"] = tool_assist_mode if tool_assist_mode in {"all", "vector", "off"} else "all"
+        tools["tool_assist_mode"] = tool_assist_mode if tool_assist_mode in {"all", "auto", "vector", "off"} else "all"
         try:
             tools["tool_assist_limit"] = max(1, min(24, int(tools.get("tool_assist_limit", 8))))
         except (TypeError, ValueError):

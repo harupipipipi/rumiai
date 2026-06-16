@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/run_board_view.schema.json",
+  "title": "Run Board View",
+  "description": "Read-only UI contract for workroom run boards; actions create control-request or handoff-review packets only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "view_id",
+    "session_id",
+    "lanes",
+    "visible_event_types",
+    "approval_actions",
+    "forbidden_runtime_actions",
+    "actions_effect",
+    "readonly"
+  ],
+  "properties": {
+    "view_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lanes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lane_id",
+          "title",
+          "event_filters"
+        ],
+        "properties": {
+          "lane_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "event_filters": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "visible_event_types": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "approval_actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "request_interrupt",
+          "request_pause",
+          "request_resume",
+          "request_redirect",
+          "request_cancel",
+          "open_handoff_packet",
+          "approve_handoff_request",
+          "request_human_review",
+          "copy_review_summary"
+        ]
+      }
+    },
+    "forbidden_runtime_actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "run_terminal",
+          "execute_tool",
+          "invoke_tool",
+          "call_tool",
+          "open_browser",
+          "browser_action",
+          "desktop_action",
+          "restore_files",
+          "write_files",
+          "delete_files",
+          "create_schedule",
+          "schedule_run",
+          "collect_metrics",
+          "export_metrics",
+          "push_pr",
+          "merge_pr",
+          "create_subagent_pr",
+          "call_api_route",
+          "/api"
+        ]
+      }
+    },
+    "actions_effect": {
+      "type": "string",
+      "const": "control_request_or_handoff_packet_only"
+    },
+    "readonly": {
+      "type": "boolean",
+      "const": true
+    }
+  }
+}

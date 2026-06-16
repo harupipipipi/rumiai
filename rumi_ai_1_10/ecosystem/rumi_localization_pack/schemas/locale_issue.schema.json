@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Rumi Localization Locale Issue",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "issue_id",
+    "locale_pair",
+    "source_locale",
+    "target_locale",
+    "surface",
+    "source_segment_id",
+    "target_segment_id",
+    "severity",
+    "category",
+    "evidence",
+    "recommended_action",
+    "handoff"
+  ],
+  "properties": {
+    "issue_id": {
+      "type": "string",
+      "pattern": "^loc-[a-z0-9][a-z0-9_-]*$"
+    },
+    "locale_pair": {
+      "type": "string",
+      "pattern": "^[a-z]{2}(-[A-Z]{2})?-[a-z]{2}(-[A-Z]{2})?$"
+    },
+    "source_locale": {
+      "type": "string",
+      "pattern": "^[a-z]{2}(-[A-Z]{2})?$"
+    },
+    "target_locale": {
+      "type": "string",
+      "pattern": "^[a-z]{2}(-[A-Z]{2})?$"
+    },
+    "surface": {
+      "type": "string",
+      "enum": [
+        "app_string",
+        "documentation",
+        "support_copy",
+        "release_note",
+        "policy_copy",
+        "connector_message"
+      ]
+    },
+    "source_segment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_segment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "blocker",
+        "major",
+        "minor",
+        "note"
+      ]
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "terminology",
+        "protected_term",
+        "tone_register",
+        "locale_format",
+        "untranslated",
+        "mistranslation",
+        "hallucinated_content",
+        "placeholder_integrity",
+        "handoff_boundary",
+        "evidence_gap"
+      ]
+    },
+    "glossary_term_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_excerpt",
+        "target_excerpt",
+        "artifact_ref",
+        "reason",
+        "reviewer",
+        "confidence"
+      ],
+      "properties": {
+        "source_excerpt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_excerpt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reviewer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        }
+      }
+    },
+    "recommended_action": {
+      "type": "string",
+      "enum": [
+        "accept",
+        "revise_translation",
+        "request_glossary_decision",
+        "request_locale_owner_review",
+        "handoff_to_adjacent_owner",
+        "block_release"
+      ]
+    },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "owner_pack",
+        "reason"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "owner_pack": {
+          "type": "string",
+          "enum": [
+            "rumi_localization_pack",
+            "rumi_document_intelligence_pack",
+            "rumi_frontend_design_pack",
+            "rumi_workspace_pack",
+            "rumi_connector_gateway_pack",
+            "rumi_agentic_qa_pack"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

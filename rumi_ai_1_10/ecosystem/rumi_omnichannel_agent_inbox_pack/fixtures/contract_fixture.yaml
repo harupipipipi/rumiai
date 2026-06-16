@@ -1,0 +1,15 @@
+contract_fixture:
+  positive_cases:
+  - id: slack_gmail_identity
+    given: Link Slack and Gmail sender refs to one identity
+    expected: identity_map_handoff_packet
+  - id: outbound_draft_approval
+    given: Prepare outbound reply for approval
+    expected: outbound_draft_handoff_packet
+  - id: notification_preference
+    given: Hand off quiet hours to scheduler
+    expected: notification_handoff_packet
+  minimum_expected:
+  - schema_valid
+  - evidence_linked
+  - handoff_scoped

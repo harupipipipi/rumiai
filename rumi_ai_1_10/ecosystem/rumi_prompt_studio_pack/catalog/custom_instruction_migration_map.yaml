@@ -1,0 +1,54 @@
+custom_instruction_migration_map:
+  version: 0.1.0
+  owner_surface: custom_instruction_migration
+  sources:
+  - platform: claude
+    source_surfaces:
+    - project_instructions
+    - style_preferences
+    portable_fields:
+    - role
+    - tone
+    - response_format
+    - collaboration_rules
+    blocked_imports:
+    - category: tool_permissions
+      reason: Tool permissions belong to runtime/tool owners and cannot be migrated as prompt authority.
+    - category: remembered_user_preferences
+      reason: Persistent user memory belongs to a memory owner.
+  - platform: chatgpt
+    source_surfaces:
+    - custom_instructions_about_user
+    - custom_instructions_response_style
+    portable_fields:
+    - audience_context
+    - tone
+    - formatting_preferences
+    - clarify_when_missing_context
+    blocked_imports:
+    - category: hidden_profile_memory
+      reason: User-specific persistent memory must not be embedded in a setup pack.
+    - category: model_choice
+      reason: Model routing remains outside Prompt Studio.
+  - platform: gemini
+    source_surfaces:
+    - gem_instructions
+    - response_guidance
+    portable_fields:
+    - task_scope
+    - tone
+    - output_shape
+    - safety_boundary
+    blocked_imports:
+    - category: google_workspace_action
+      reason: Workspace execution and API actions require an adjacent owner.
+    - category: benchmark_claim
+      reason: Model quality claims belong to model evaluation owners.
+  migration_record_requirements:
+  - source_platform
+  - source_fixture_id
+  - portable_instructions
+  - platform_specific_notes
+  - blocked_imports
+  - reviewer_questions
+  - handoff_owner_when_needed

@@ -164,11 +164,11 @@ class TestWave28B_RuntimeDispatch:
         }
         return executor
 
-    def test_host_execution_binary_rejected(self):
-        """6. host_execution=True + runtime='binary' → security_violation エラー"""
+    def test_user_binary_runtime_without_host_execution_rejected(self):
+        """6. host_execution=False + runtime='binary' → security_violation エラー"""
         executor = self._make_executor()
         entry = _make_entry(
-            host_execution=True,
+            host_execution=False,
             runtime="binary",
             manifest={},
         )
@@ -181,7 +181,7 @@ class TestWave28B_RuntimeDispatch:
         )
         assert resp.success is False
         assert resp.error_type == "security_violation"
-        assert "runtime='binary'" in resp.error
+        assert "host_execution" in resp.error
 
     def test_binary_execution_normal(self, tmp_path):
         """7. runtime='binary' 正常実行 — stdin/stdout プロトコル"""
@@ -205,18 +205,20 @@ class TestWave28B_RuntimeDispatch:
             bin_file.chmod(bin_file.stat().st_mode | stat.S_IEXEC)
 
         entry = _make_entry(
+            host_execution=True,
             runtime="binary",
             main_binary_path=bin_file,
             function_dir=func_dir,
             manifest={},
         )
-        resp = executor._execute_binary_function(
-            principal_id="user1",
-            entry=entry,
-            args={"key": "value"},
-            request_id="req1",
-            start_time=time.time(),
-        )
+        with patch.dict(os.environ, {"RUMI_ALLOW_HOST_EXECUTION": "1"}):
+            resp = executor._execute_binary_function(
+                principal_id="user1",
+                entry=entry,
+                args={"key": "value"},
+                request_id="req1",
+                start_time=time.time(),
+            )
         assert resp.success is True
         assert resp.output["result"] == "ok"
         assert resp.output["got_args"] == {"key": "value"}
@@ -235,6 +237,7 @@ class TestWave28B_RuntimeDispatch:
         )
 
         entry = _make_entry(
+            host_execution=True,
             runtime="command",
             command=[sys.executable, str(script)],
             function_dir=func_dir,
@@ -273,8 +276,14 @@ class TestWave28B_RuntimeDispatch:
             manifest={},
         )
 
-        with patch("core_runtime.capability_executor._DockerRunBuilder", mock_builder_cls), \
-             patch("subprocess.run", return_value=mock_proc), \
+        mock_subprocess = MagicMock()
+        mock_subprocess.run.return_value = mock_proc
+        mock_subprocess.TimeoutExpired = TimeoutError
+
+        with patch.dict(
+            executor._execute_user_function_docker.__globals__,
+            {"_DockerRunBuilder": mock_builder_cls, "subprocess": mock_subprocess},
+        ), \
              patch.object(executor, "_is_docker_available", return_value=True), \
              patch("os.unlink"), \
              patch("tempfile.NamedTemporaryFile") as mock_tmp:
@@ -436,15 +445,17 @@ class TestEdgeCases:
         executor._core_function_handlers = {}
 
         entry = _make_entry(
+            host_execution=True,
             runtime="binary",
             main_binary_path="/nonexistent/binary",
             function_dir="/tmp",
             manifest={},
         )
-        resp = executor._execute_binary_function(
-            principal_id="user1", entry=entry, args={},
-            request_id="req1", start_time=time.time(),
-        )
+        with patch.dict(os.environ, {"RUMI_ALLOW_HOST_EXECUTION": "1"}):
+            resp = executor._execute_binary_function(
+                principal_id="user1", entry=entry, args={},
+                request_id="req1", start_time=time.time(),
+            )
         assert resp.success is False
         assert resp.error_type == "binary_not_found"
 
@@ -456,27 +467,29 @@ class TestEdgeCases:
         executor._core_function_handlers = {}
 
         entry = _make_entry(
+            host_execution=True,
             runtime="command",
             command=[],
             function_dir="/tmp",
             manifest={},
         )
-        resp = executor._execute_command_function(
-            principal_id="user1", entry=entry, args={},
-            request_id="req1", start_time=time.time(),
-        )
+        with patch.dict(os.environ, {"RUMI_ALLOW_HOST_EXECUTION": "1"}):
+            resp = executor._execute_command_function(
+                principal_id="user1", entry=entry, args={},
+                request_id="req1", start_time=time.time(),
+            )
         assert resp.success is False
         assert resp.error_type == "invalid_config"
 
-    def test_host_execution_command_rejected(self):
-        """host_execution=True + runtime='command' → security_violation"""
+    def test_user_command_runtime_without_host_execution_rejected(self):
+        """host_execution=False + runtime='command' → security_violation"""
         from core_runtime.capability_executor import CapabilityExecutor
         executor = CapabilityExecutor()
         executor._initialized = True
         executor._core_function_handlers = {}
 
         entry = _make_entry(
-            host_execution=True,
+            host_execution=False,
             runtime="command",
             command=["echo", "hello"],
             manifest={},
@@ -484,6 +497,35 @@ class TestEdgeCases:
         resp = executor._execute_user_function(
             principal_id="user1", entry=entry, args={},
             request_id="req1", start_time=time.time(),
+        )
+        assert resp.success is False
+        assert resp.error_type == "security_violation"
+
+
+    def test_calling_convention_command_without_host_execution_rejected(self):
+        """calling_convention='command' also requires explicit host execution approval."""
+        from core_runtime.capability_executor import CapabilityExecutor
+        executor = CapabilityExecutor()
+        executor._initialized = True
+        executor._core_function_handlers = {}
+
+        entry = _make_entry(
+            host_execution=False,
+            runtime="command",
+            calling_convention="command",
+            command=["echo", "hello"],
+            manifest={},
+        )
+        resp = executor._dispatch_by_calling_convention(
+            calling_convention="command",
+            entry=entry,
+            principal_id="user1",
+            effective_permission_id="function.call",
+            grant_config={},
+            args={},
+            timeout_seconds=1.0,
+            request_id="req1",
+            start_time=time.time(),
         )
         assert resp.success is False
         assert resp.error_type == "security_violation"

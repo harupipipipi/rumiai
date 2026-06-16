@@ -1,0 +1,30 @@
+policy:
+  blocked_by_default:
+  - send follow-up without participant consent
+  - invent absent attendee decisions
+  - schedule calendar changes from inferred action items
+  - fetch remote calendar, mail, chat, or drive context directly
+  - record or transcribe live meeting audio
+  - parse attached documents directly
+  - execute CRM, ticket, project, or business workflow updates
+  allowed_without_network:
+  - draft_record
+  - review_checklist
+  - handoff_packet
+  - evidence_linked_recap_bundle
+  - follow_up_draft
+  requires_human_review:
+  - external_action
+  - low_confidence_evidence
+  - adjacent_owner_execution
+  - participant_private_data
+  handoff_required_for:
+  - connector_delivery
+  - calendar_or_reminder_scheduling
+  - voice_capture
+  - document_parsing
+  - business_workflow_execution
+  redaction_defaults:
+    attendee_private_notes: summarize_only
+    personal_data: minimize
+    unclear_consent: block_external_followup

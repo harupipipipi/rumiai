@@ -51,6 +51,14 @@ let panelSessionRecoveryPromise: Promise<boolean> | null = null;
 const inflightGetRequests = new Map<string, Promise<unknown>>();
 
 type TauriInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+type TauriWindow = Window & {
+  __TAURI_INTERNALS__?: unknown;
+  __TAURI__?: {
+    core?: {
+      invoke?: TauriInvoke;
+    };
+  };
+};
 
 function getStoredPanelCsrfToken(): string {
   return sessionStorage.getItem(PANEL_CSRF_STORAGE_KEY) || '';
@@ -115,24 +123,38 @@ async function exchangePanelBootstrapCode(code: string): Promise<void> {
 }
 
 function getTauriInvoke(): TauriInvoke | null {
-  const maybeWindow = window as Window & {
-    __TAURI__?: {
-      core?: {
-        invoke?: TauriInvoke;
-      };
-    };
-  };
-
+  const maybeWindow = window as TauriWindow;
   const invoke = maybeWindow.__TAURI__?.core?.invoke;
   return typeof invoke === 'function' ? invoke : null;
 }
 
+function isLikelyTauriShell(): boolean {
+  const maybeWindow = window as TauriWindow;
+  return Boolean(maybeWindow.__TAURI__ || maybeWindow.__TAURI_INTERNALS__);
+}
+
+async function loadTauriInvoke(): Promise<TauriInvoke | null> {
+  const globalInvoke = getTauriInvoke();
+  if (globalInvoke) {
+    return globalInvoke;
+  }
+  if (!isLikelyTauriShell()) {
+    return null;
+  }
+  try {
+    const mod = await import('@tauri-apps/api/core');
+    return mod.invoke as TauriInvoke;
+  } catch {
+    return null;
+  }
+}
+
 export function isDesktopShellAvailable(): boolean {
-  return getTauriInvoke() !== null;
+  return getTauriInvoke() !== null || isLikelyTauriShell();
 }
 
 export async function openExternalUrl(url: string): Promise<void> {
-  const invoke = getTauriInvoke();
+  const invoke = await loadTauriInvoke();
   if (invoke) {
     await invoke('open_external_url', {url});
     return;
@@ -142,7 +164,7 @@ export async function openExternalUrl(url: string): Promise<void> {
 }
 
 export async function sendToBackground(): Promise<void> {
-  const invoke = getTauriInvoke();
+  const invoke = await loadTauriInvoke();
   if (!invoke) {
     throw new Error('Background control is only available in Rumi Viewer.');
   }
@@ -151,7 +173,7 @@ export async function sendToBackground(): Promise<void> {
 }
 
 export async function showAppWindow(): Promise<void> {
-  const invoke = getTauriInvoke();
+  const invoke = await loadTauriInvoke();
   if (!invoke) {
     throw new Error('Window restore is only available in Rumi Viewer.');
   }
@@ -160,7 +182,7 @@ export async function showAppWindow(): Promise<void> {
 }
 
 export async function fetchBackgroundControlStatus(): Promise<BackgroundControlStatus | null> {
-  const invoke = getTauriInvoke();
+  const invoke = await loadTauriInvoke();
   if (!invoke) {
     return null;
   }
@@ -169,7 +191,7 @@ export async function fetchBackgroundControlStatus(): Promise<BackgroundControlS
 }
 
 export async function fetchDesktopSystemInfo(): Promise<DesktopSystemInfo | null> {
-  const invoke = getTauriInvoke();
+  const invoke = await loadTauriInvoke();
   if (!invoke) {
     return null;
   }
@@ -178,16 +200,23 @@ export async function fetchDesktopSystemInfo(): Promise<DesktopSystemInfo | null
 }
 
 export async function launchDefaultspackDesktop(): Promise<string> {
-  const invoke = getTauriInvoke();
+  const invoke = await loadTauriInvoke();
   if (!invoke) {
     throw new Error('Defaultspack desktop launch is only available in Rumi Viewer.');
   }
 
-  return invoke<string>('launch_defaultspack_desktop');
+  try {
+    return await invoke<string>('launch_defaultspack_desktop');
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error(String(error || 'Failed to launch Defaultspack'));
+  }
 }
 
 async function requestDesktopPanelBootstrapCode(): Promise<string | null> {
-  const invoke = getTauriInvoke();
+  const invoke = await loadTauriInvoke();
   if (!invoke) {
     return null;
   }

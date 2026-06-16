@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/claim_evidence_graph.schema.json",
+  "title": "Claim Evidence Graph",
+  "description": "Graph-level contract tying claims, evidence anchors, contradictions, and citations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "graph_id",
+    "claim_ids",
+    "evidence_ids",
+    "source_ids",
+    "contradiction_ids",
+    "citation_ledger_id",
+    "ready_for_export",
+    "export_gate"
+  ],
+  "properties": {
+    "graph_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claim_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "evidence_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "source_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "contradiction_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "citation_ledger_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ready_for_export": {
+      "type": "boolean"
+    },
+    "export_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "citation_ledger_complete",
+        "uncited_claim_ids",
+        "unresolved_contradiction_ids",
+        "blocking_reviewer_queue_ids",
+        "render_owner"
+      ],
+      "properties": {
+        "citation_ledger_complete": {
+          "type": "boolean"
+        },
+        "uncited_claim_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unresolved_contradiction_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "blocking_reviewer_queue_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "render_owner": {
+          "type": "string",
+          "const": "defaultspack"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,39 @@
+review_checklist:
+  minimum_pass: all_blocking_items
+  items:
+  - id: hypothesis_metric_alignment
+    question: Primary metric directly measures expected effect.
+    blocking: true
+  - id: guardrail_metric_present
+    question: Every rollout packet includes guardrail metrics and stop rules.
+    blocking: true
+  - id: sample_size_assumptions
+    question: MDE, alpha, power, source state, and limitations are explicit.
+    blocking: true
+  - id: assignment_bias_risk
+    question: Randomization or quasi-experiment bias risks are named.
+    blocking: true
+  - id: no_result_claim_without_data
+    question: Decision records cannot declare a winner, significance, lift, or metric movement unless supplied results are present.
+    blocking: true
+  - id: no_analytics_query_execution
+    question: Confirm SQL, analytics queries, and statistical result calculations are handed off to the data-analysis owner.
+    blocking: true
+  - id: data_source_state_declared
+    question: Instrumentation and data availability are explicit.
+    blocking: true
+  - id: rollback_owner_named
+    question: Rollback thresholds hand off to devops release owner.
+    blocking: true
+  - id: privacy_review_state_declared
+    question: Instrumentation requests name privacy review state.
+    blocking: true
+  - id: no_credentials_or_network
+    question: Confirm the pack declares no credentials and no network by default.
+    blocking: true
+  - id: defaultspack_not_eligible
+    question: Confirm defaultspack promotion remains false until evidence is supplied.
+    blocking: true
+  - id: owner_boundary_review
+    question: Confirm adjacent runtime ownership is expressed as handoff policy.
+    blocking: true

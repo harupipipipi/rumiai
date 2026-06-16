@@ -143,7 +143,7 @@ export function ProfileGraphEditorShell({
         <div>
           <h1 className="text-2xl font-semibold text-text-main">Profile Graph</h1>
           <p className="mt-1 text-sm text-text-muted">
-            Wire tools, webhooks, API routes, prompts, frontend pieces, flows, and launch nodes into a visible runtime profile.
+            Wire tools, webhooks, API routes, rules, frontend pieces, flows, and launch nodes into a visible runtime profile.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -152,7 +152,7 @@ export function ProfileGraphEditorShell({
             <>
               <Badge variant="secondary">{graphData.summary.selected_tool_count} tools</Badge>
               <Badge variant="secondary">{graphData.summary.selected_webhook_count} webhooks</Badge>
-              <Badge variant="secondary">{graphData.summary.selected_prompt_count} prompts</Badge>
+              <Badge variant="secondary">{graphData.summary.selected_prompt_count} rules</Badge>
             </>
           ) : null}
         </div>
@@ -164,7 +164,7 @@ export function ProfileGraphEditorShell({
         </div>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
+      <div className="grid gap-4 2xl:grid-cols-[260px_minmax(0,1fr)_300px]">
         <section className="space-y-4">
           <div className="rounded-2xl border border-border bg-bg-card p-4">
             <div className="mb-3 flex items-center gap-2">
@@ -188,7 +188,7 @@ export function ProfileGraphEditorShell({
                   <div className="truncate text-xs text-text-muted">{profile.profile_id}</div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Badge variant="outline">{profile.base_pack}</Badge>
-                    {profile.system_prompt_id ? <Badge variant="secondary">prompt</Badge> : null}
+                    {profile.system_prompt_id ? <Badge variant="secondary">rule</Badge> : null}
                   </div>
                 </button>
               ))}
@@ -208,12 +208,10 @@ export function ProfileGraphEditorShell({
 
         <section className="space-y-4">
           <ProfileGraphToolbar
-            activeCategory={activeCategory}
             dirty={dirty}
             saving={saving}
             previewing={previewing}
             launching={launching}
-            onCategoryChange={onCategoryChange}
             onPreview={onPreview}
             onApply={onApply}
             onLaunch={onLaunch}
@@ -245,7 +243,7 @@ export function ProfileGraphEditorShell({
                 <div className="space-y-3 text-sm text-text-muted">
                   <div className="flex flex-wrap gap-2">
                     <Badge variant="default">{preview.compile_preview.ok ? 'Preview ready' : 'Preview has issues'}</Badge>
-                    <Badge variant="outline">{String(preview.profile_graph_runtime_preview.prompt_resolution?.selected_prompt_id ?? 'no prompt')}</Badge>
+                    <Badge variant="outline">{String(preview.profile_graph_runtime_preview.prompt_resolution?.selected_prompt_id ?? 'no rule')}</Badge>
                   </div>
                   <div>selected tools: {(preview.profile_graph_runtime_preview.selected?.tools || []).join(', ') || '--'}</div>
                   <div>frontend catalog: {(preview.profile_graph_runtime_preview.selected?.frontend || []).join(', ') || '--'}</div>
@@ -254,7 +252,7 @@ export function ProfileGraphEditorShell({
                   <div>api strict mode: {String(Boolean(preview.profile_graph_runtime_preview.api_route_policy?.enforce))}</div>
                 </div>
               ) : (
-                <p className="text-sm text-text-muted">Run Preview Runtime to inspect the effective prompt, tool filter result, launch surface, webhook status, and API policy.</p>
+                <p className="text-sm text-text-muted">Run Preview Runtime to inspect the effective rule prompt, tool filter result, launch surface, webhook status, and API policy.</p>
               )}
             </article>
 

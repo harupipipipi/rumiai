@@ -1,0 +1,7 @@
+preset_id: rumi_browser_automation.authenticated_browser_task
+profile: rumi_browser_automation.operator
+playbook: authenticated_ui_qa
+features:
+  account_context_check: required
+  destructive_actions: pause
+  evidence_ledger: required

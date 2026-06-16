@@ -1,0 +1,16 @@
+handoff_policy:
+  default: do_not_execute_adjacent_runtime_action
+  overlap_policy:
+    document_parsing: handoff_to_rumi_document_intelligence_pack
+    web_research: handoff_to_rumi_research_pack
+    long_term_memory: handoff_to_rumi_memory_knowledge_pack
+    review_scheduling: handoff_to_rumi_workflow_scheduler_pack
+    study_artifact_export: handoff_to_rumi_workspace_pack
+    diagnostic_assessment: owned_by_rumi_study_coach_pack
+    quiz_item_contract: owned_by_rumi_study_coach_pack
+    spaced_review_queue: owned_by_rumi_study_coach_pack
+    tool_aliases: prefer_explicit_pack_namespace
+  conflict_resolution:
+  - If an action mutates external state, stop and emit a handoff packet.
+  - If evidence is missing, mark uncertainty instead of fabricating details.
+  - If pack ownership is ambiguous, prefer the narrower owner surface and require human review.

@@ -68,22 +68,10 @@ _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECAS
 
 
 def _conversation_system_prompt(conv, manager):
-    prompt_id = str((conv or {}).get("system_prompt_id") or "").strip()
-    if not prompt_id:
-        return manager.get_system_prompt()
-    prompt = manager.get_prompt(prompt_id) or manager.get_prompt_by_name(prompt_id)
-    if isinstance(prompt, dict):
-        body = prompt.get("body") or prompt.get("content")
-        if body:
-            return str(body)
-    if _PROMPT_ID_RE.match(prompt_id):
-        prompt_path = Path(__file__).resolve().parents[2] / "prompts" / (prompt_id + ".system.md")
-        try:
-            if prompt_path.is_file():
-                return prompt_path.read_text(encoding="utf-8")
-        except OSError:
-            pass
-    return manager.get_system_prompt()
+    from blocks.chat._prompt_helpers import resolve_conversation_system_prompt
+    from domain.kanban.service import append_kanban_system_prompt_note
+
+    return append_kanban_system_prompt_note(resolve_conversation_system_prompt(conv, manager), conv)
 
 
 def _has_real_provider(gateway, model):
@@ -736,6 +724,40 @@ def _tool_limit_message(limit, tool_uses):
         "同じ依頼を続ける場合は、もう一度送信してください。"
         f" (max_tool_calls: {limit}{suffix})"
     )
+
+
+def _unconnected_tool_call_response(tool_name, tool_call_id, connected_names):
+    connected = sorted(str(name) for name in connected_names if name)
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    f"{tool_name} はこの会話に接続されていないため実行しませんでした。"
+                    "接続済みの tool だけを使用してください。"
+                ),
+            }
+        ],
+        "finish_reason": "tool_call_rejected",
+        "usage": {},
+        "metadata": {
+            "tool_call_rejected": True,
+            "rejected_tool_name": tool_name,
+            "rejected_tool_call_id": tool_call_id,
+            "connected_tools": connected,
+        },
+    }
+
+
+def _reject_unconnected_tool_use(tool_uses, connected_names):
+    allowed = {str(name) for name in connected_names if name}
+    for block in tool_uses:
+        tool_name = str(block.get("name") or block.get("tool_name") or "").strip()
+        if not tool_name or tool_name in allowed:
+            continue
+        tool_call_id = str(block.get("id") or block.get("tool_call_id") or "")
+        return tool_name, tool_call_id
+    return None
 
 
 def _tool_result_data(result):
@@ -1604,6 +1626,24 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         if not tool_uses:
             break
 
+        rejected_tool_call = _reject_unconnected_tool_use(tool_uses, connected_names)
+        if rejected_tool_call is not None:
+            rejected_tool_name, rejected_tool_call_id = rejected_tool_call
+            response = _unconnected_tool_call_response(rejected_tool_name, rejected_tool_call_id, connected_names)
+            _append_event(
+                events,
+                context,
+                _event(
+                    "tool_call_rejected",
+                    "接続されていない tool call を拒否しました",
+                    phase="tool_call_rejected",
+                    tool_name=rejected_tool_name,
+                    tool_call_id=rejected_tool_call_id,
+                    connected_tools=sorted(str(name) for name in connected_names if name),
+                )
+            )
+            break
+
         _append_assistant_tool_use_message(working_messages, tool_uses)
         for block in tool_uses:
             _raise_if_cancelled(context)
@@ -1720,6 +1760,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             "attached_tools": [tool_name_from_definition(tool) for tool in tools if tool_name_from_definition(tool)],
             "thinking": {"state": "completed"},
             "thinking_level": params.get("thinking_level"),
+            "deepthink_enabled": bool(params.get("deepthink_enabled")),
         }
     )
     if debug_logs:

@@ -1,0 +1,299 @@
+domains:
+  agent:
+    may_import:
+    - domain/agent_runtime
+    - domain/ai_client
+    - domain/capabilities
+    - domain/chat
+    - domain/coding
+    - domain/extensions
+    - domain/input
+    - domain/tool
+    - domain/tool_policy
+    path: domain/agent
+  agent_runtime:
+    may_import: []
+    path: domain/agent_runtime
+  ai_client:
+    may_import:
+    - domain/chat
+    - domain/components
+    - domain/extensions
+    - domain/human_operator
+    - domain/temporal_context
+    - domain/tool
+    path: domain/ai_client
+  api_map:
+    may_import:
+    - domain/external
+    - domain/function_runtime
+    - domain/tool
+    - domain/webhook
+    path: domain/api_map
+  artifact:
+    may_import: []
+    path: domain/artifact
+  audience_policies:
+    may_import: []
+    path: domain/audience_policies
+  browser:
+    may_import: []
+    path: domain/browser
+  capabilities:
+    may_import: []
+    path: domain/capabilities
+  capability:
+    may_import: []
+    path: domain/capability
+  chat:
+    may_import:
+    - domain/ai_client
+    - domain/capabilities
+    - domain/capability
+    - domain/coding
+    - domain/context_engine
+    - domain/dev
+    - domain/extensions
+    - domain/human_operator
+    - domain/kanban
+    - domain/prompt
+    - domain/safety
+    - domain/skill_trigger
+    - domain/stream
+    - domain/temporal_context
+    - domain/tool
+    - domain/vision
+    path: domain/chat
+  coding:
+    may_import: []
+    path: domain/coding
+  coding_backends:
+    may_import: []
+    path: domain/coding_backends
+  company:
+    may_import:
+    - domain/agent_runtime
+    - domain/ai_client
+    - domain/chat
+    - domain/input
+    path: domain/company
+  components:
+    may_import: []
+    path: domain/components
+  context:
+    may_import:
+    - domain/chat
+    - domain/dev
+    - domain/knowledge
+    - domain/memory
+    - domain/prompt
+    - domain/tool
+    path: domain/context
+  context_engine:
+    may_import: []
+    path: domain/context_engine
+  dev:
+    may_import: []
+    path: domain/dev
+  extensions:
+    may_import: []
+    path: domain/extensions
+  external:
+    may_import:
+    - domain/components
+    - domain/input
+    - domain/integrations
+    - domain/memory2
+    path: domain/external
+  flow:
+    may_import:
+    - domain/function_runtime
+    path: domain/flow
+  frontend:
+    may_import:
+    - domain/ai_client
+    - domain/capability
+    - domain/chat
+    - domain/components
+    - domain/dev
+    - domain/extensions
+    - domain/external
+    - domain/tool
+    - domain/webhook
+    path: domain/frontend
+  function_runtime:
+    may_import:
+    - domain/ai_client
+    - domain/browser
+    - domain/external
+    - domain/prompt
+    - domain/safety
+    - domain/tool
+    - domain/webhook
+    path: domain/function_runtime
+  gateway:
+    may_import:
+    - domain/gateway_channels
+    - domain/runtime_config
+    path: domain/gateway
+  gateway_channels:
+    may_import:
+    - domain/gateway
+    path: domain/gateway_channels
+  hooks:
+    may_import:
+    - domain/agent_runtime
+    path: domain/hooks
+  host_bridge:
+    may_import:
+    - domain/safety
+    - domain/tool_policy
+    path: domain/host_bridge
+  human_operator:
+    may_import:
+    - domain/ai_client
+    - domain/chat
+    - domain/prompt
+    path: domain/human_operator
+  input:
+    may_import:
+    - domain/ai_client
+    - domain/chat
+    - domain/integrations
+    path: domain/input
+  input_profiles:
+    may_import: []
+    path: domain/input_profiles
+  integrations:
+    may_import:
+    - domain/external
+    - domain/input
+    - domain/webhook
+    path: domain/integrations
+  knowledge:
+    may_import:
+    - domain/ai_client
+    - domain/extensions
+    path: domain/knowledge
+  kanban:
+    may_import:
+    - domain/ai_client
+    - domain/chat
+    path: domain/kanban
+  media:
+    may_import: []
+    path: domain/media
+  memory:
+    may_import:
+    - domain/memory2
+    path: domain/memory
+  memory2:
+    may_import: []
+    path: domain/memory2
+  output_profiles:
+    may_import: []
+    path: domain/output_profiles
+  p2p:
+    may_import:
+    - domain/external
+    path: domain/p2p
+  prompt:
+    may_import:
+    - domain/capability
+    - domain/components
+    - domain/extensions
+    path: domain/prompt
+  prompts:
+    may_import: []
+    path: domain/prompts
+  providers:
+    may_import: []
+    path: domain/providers
+  recording:
+    may_import: []
+    path: domain/recording
+  remote:
+    may_import:
+    - domain/agent_runtime
+    - domain/company
+    path: domain/remote
+  research:
+    may_import: []
+    path: domain/research
+  safety:
+    may_import: []
+    path: domain/safety
+  scheduler:
+    may_import:
+    - domain/agent
+    - domain/chat
+    - domain/runtime_config
+    path: domain/scheduler
+  share:
+    may_import: []
+    path: domain/share
+  stream:
+    may_import: []
+    path: domain/stream
+  template:
+    may_import: []
+    path: domain/template
+  templates:
+    may_import: []
+    path: domain/templates
+  tool:
+    may_import:
+    - domain/ai_client
+    - domain/artifact
+    - domain/capabilities
+    - domain/chat
+    - domain/coding
+    - domain/components
+    - domain/extensions
+    - domain/host_bridge
+    - domain/human_operator
+    - domain/integrations
+    - domain/kanban
+    - domain/prompt
+    - domain/research
+    - domain/runtime_config
+    - domain/safety
+    - domain/tool_policy
+    path: domain/tool
+  tool_policy:
+    may_import:
+    - domain/agent_runtime
+    - domain/hooks
+    - domain/tool
+    path: domain/tool_policy
+  tools:
+    may_import: []
+    path: domain/tools
+  transports:
+    may_import: []
+    path: domain/transports
+  ui_surfaces:
+    may_import: []
+    path: domain/ui_surfaces
+  vision:
+    may_import:
+    - domain/chat
+    path: domain/vision
+  webhook:
+    may_import:
+    - domain/components
+    - domain/external
+    - domain/webhook_url_providers
+    path: domain/webhook
+  webhook_url_providers:
+    may_import:
+    - domain/webhook
+    path: domain/webhook_url_providers
+  webhooks:
+    may_import: []
+    path: domain/webhooks
+  workspace:
+    may_import:
+    - domain/coding
+    path: domain/workspace
+exceptions: []

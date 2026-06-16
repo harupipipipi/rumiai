@@ -1,0 +1,155 @@
+{
+  "id": "tool_task_board_agent_session",
+  "description": "Start and track coding agent sessions from Kanban-backed task board cards.",
+  "config": {
+    "tool_id": "tool_task_board_agent_session",
+    "name": "tool_task_board_agent_session",
+    "summary": "Task Board agent sessions",
+    "tool_category": "planning",
+    "action_type": "update",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "planning",
+      "task_board",
+      "agent",
+      "coding_session"
+    ],
+    "metadata": {
+      "keywords": [
+        "task board",
+        "agent session",
+        "task run",
+        "ready",
+        "apply",
+        "dismiss"
+      ]
+    },
+    "ui": {
+      "group_id": "planning",
+      "group_label": "Planning",
+      "group_icon": "columns",
+      "item_icon": "play-circle",
+      "widget_kind": "tool_toggle",
+      "drop_capabilities": [
+        "composer.toggle_chip"
+      ],
+      "composer_label": "Task Board Agent Run",
+      "composer_description": "Link Kanban task cards to coding agent sessions.",
+      "composer_icon": "play-circle"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "status",
+              "merge_report",
+              "mark_ready",
+              "apply",
+              "dismiss",
+              "unlink"
+            ],
+            "default": "start"
+          },
+          "card_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "board_id": {
+            "type": "string"
+          },
+          "kanban_board_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "scope_type": {
+                "type": "string"
+              },
+              "scope_id": {
+                "type": "string"
+              }
+            }
+          },
+          "scope_type": {
+            "type": "string"
+          },
+          "scope_id": {
+            "type": "string"
+          },
+          "task": {
+            "type": "string"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "model": {
+            "type": "string"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "orchestration": {
+            "type": "string",
+            "enum": [
+              "round_robin",
+              "directed",
+              "free"
+            ]
+          },
+          "max_turns": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "worktree_mode": {
+            "type": "string"
+          },
+          "workspace_root": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          },
+          "column": {
+            "type": "string"
+          },
+          "move_to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "card_id"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.task_board_agent_session:tool_task_board_agent_session"
+    }
+  }
+}

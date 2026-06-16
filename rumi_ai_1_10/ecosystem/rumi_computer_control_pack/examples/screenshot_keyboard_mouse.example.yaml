@@ -1,0 +1,14 @@
+id: rumi_computer_control_pack.examples.screenshot_keyboard_mouse
+profile: rumi_computer_control_pack.local_testing_observer
+preset: rumi_computer_control_pack.unrestricted_local_testing_contract
+task: Test a local app using screenshot, keyboard, and mouse observations.
+expected_agent_steps:
+  - confirm local target and boundary
+  - capture or inspect current visual state
+  - list intended keyboard and mouse actions
+  - identify which actions need approval
+  - stop if the foreground app changes unexpectedly
+safety_notes:
+  - unrestricted request does not bypass runtime approval
+  - do not paste secret-like data
+  - do not interact with remote pages unless explicitly requested

@@ -331,7 +331,26 @@
     border-color: var(--border);
   }
 
+  html {
+    min-height: 100%;
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body,
+  #root {
+    min-height: 100vh;
+    background-color: var(--bg-main);
+  }
+
   body {
+    margin: 0;
+    min-width: 320px;
     background-color: var(--bg-main);
     color: var(--text-main);
     font-family: var(--font-sans);
@@ -353,6 +372,29 @@
   }
   .focus-ring:focus-visible {
     box-shadow: 0 0 0 var(--ring-offset) var(--bg-main), 0 0 0 calc(var(--ring-offset) + 2px) var(--ring-color);
+  }
+
+  .rumi-select {
+    min-width: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: var(--bg-main);
+    background-image:
+      linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position:
+      calc(100% - 18px) calc(50% - 3px),
+      calc(100% - 12px) calc(50% - 3px);
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+    box-shadow: none;
+    color: var(--text-main);
+  }
+
+  .rumi-select:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--ring-color);
   }
 
   /* ----------------------------------
@@ -667,5 +709,49 @@
 
   .page-enter {
     animation: fadeInUp var(--transition-slow) ease-out;
+  }
+
+  /* ----------------------------------
+     Luxe control-panel accents
+     Reusable, additive design tokens that reinforce the
+     workspace-as-runtime feel without competing with the theme system.
+     ---------------------------------- */
+  .rumi-control-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.18rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-main);
+    background: color-mix(in srgb, var(--bg-card) 80%, transparent 20%);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .rumi-control-pill-dot {
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 999px;
+    background: currentColor;
+    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 18%, transparent);
+  }
+
+  .rumi-control-divider {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--border) 80%, transparent 20%) 50%,
+      transparent 100%
+    );
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .rumi-control-pill {
+      transition: background-color 200ms ease, border-color 200ms ease;
+    }
   }
 }

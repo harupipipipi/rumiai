@@ -1,0 +1,10 @@
+id: project_knowledge_refresh
+name: Project Knowledge Refresh
+profile: rumi_memory_knowledge_pack.project_knowledge_steward
+enabled_capabilities:
+  - knowledge.project.propose_update
+  - memory.recall.session
+  - memory.recall.verify_evidence
+ui_panels: [project_knowledge_board, recall_panel, evidence_links]
+behavior: [project_scope, decision_tracking, convention_updates, stale_fact_review]
+default_outputs: [project_knowledge_proposals, conflict_notes, stale_candidates]

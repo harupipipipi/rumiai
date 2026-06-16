@@ -1,0 +1,36 @@
+spec_id: rumi.browser_form_operator.submission_review_checklist.v1
+owner: rumi_browser_form_operator_pack
+purpose: Declarative pre-submit and post-submit review gate for browser forms.
+network_default: none
+submit_path_policy:
+  rule: no_submit_path_without_explicit_approval_and_receipt_evidence
+  requires:
+    - user_confirmation_ref
+    - pre_submit_review
+    - field_risk_map
+    - receipt_evidence_plan
+pre_submit_required:
+  - user_goal_matches_form_action
+  - destination_origin_recorded
+  - all_filled_fields_listed
+  - field_risk_map_reviewed
+  - irreversible_actions_flagged
+  - consent_controls_reviewed
+  - submit_button_text_recorded
+  - before_screenshot_id_recorded
+approval_gates:
+  low_risk_submit: user_review_required
+  medium_risk_submit: explicit_confirmation_required
+  high_risk_submit: security_review_required
+  irreversible_submit: explicit_confirmation_required_each_time
+post_submit_required:
+  - after_screenshot_id_recorded
+  - receipt_url_or_state_recorded
+  - confirmation_message_recorded
+  - changed_account_or_order_state_flagged
+  - rollback_or_contact_path_recorded_if_visible
+outputs:
+  - pre_submit_review
+  - approval_decision
+  - submission_receipt
+  - rollback_notes

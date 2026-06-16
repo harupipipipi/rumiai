@@ -1,0 +1,47 @@
+registry_id: rumi_mcp_gateway.marketplace_registry
+version: 1
+pack_id: rumi_mcp_gateway_pack
+marketplace:
+  id: rumi.mcp_gateway_pack
+  registry: bundled
+  publisher: rumi-ai
+  status: verified
+  category: mcp-gateway
+  optional: true
+  install_label: MCP Gateway Catalog
+discovery_surfaces:
+  - surface_id: setup_pack_selector
+    display_name: Setup Pack Selector
+    purpose: Offer the gateway catalog as an optional pack.
+  - surface_id: mcp_server_review
+    display_name: MCP Server Review
+    purpose: Show unsupported server category, risk, namespace, and approval requirements.
+  - surface_id: tool_picker
+    display_name: Tool Picker
+    purpose: Show discovered MCP tools only after defaultspack lists an approved server.
+registry_import:
+  accepts:
+    - local_descriptor
+    - user_pasted_manifest_summary
+    - defaultspack_mcp_list_result
+  rejects:
+    - embedded_credentials
+    - auto_run_install_commands
+    - unscoped_remote_claims
+  required_metadata:
+    - server_id
+    - proposed_namespace
+    - category_id
+    - risk_level
+    - review_status
+    - approval_required
+trust_badges:
+  - badge_id: directly_supported_elsewhere
+    label: Direct pack support available
+    meaning: Prefer the direct pack over gateway routing.
+  - badge_id: gateway_reviewed
+    label: Gateway reviewed
+    meaning: Metadata was reviewed, but execution still requires runtime approval.
+  - badge_id: unknown_unsupported
+    label: Unknown unsupported server
+    meaning: No direct support contract; block until explicit approval.

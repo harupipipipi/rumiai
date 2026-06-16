@@ -1,0 +1,60 @@
+asset_index:
+  pack_id: rumi_telephony_delegate_pack
+  generated_on: '2026-06-04'
+  categories:
+    index:
+    - asset_index.yaml
+    readme:
+    - README.md
+    docs:
+    - docs/README.md
+    - docs/architecture.md
+    - docs/interfaces.md
+    - docs/operations.md
+    catalog:
+    - catalog/workflows.yaml
+    - catalog/quality_matrix.yaml
+    - catalog/taxonomy.yaml
+    - catalog/handoff_matrix.yaml
+    schema:
+    - schemas/call_session.schema.json
+    - schemas/call_task.schema.json
+    - schemas/dial_approval.schema.json
+    - schemas/escalation_record.schema.json
+    - schemas/never_call_entry.schema.json
+    - schemas/pre_call_script.schema.json
+    - schemas/transcript_redaction.schema.json
+    policy:
+    - policies/safety.policy.yaml
+    - policies/handoff.policy.yaml
+    checklist:
+    - checklists/review.checklist.yaml
+    ledger:
+    - ledgers/evidence_ledger.schema.yaml
+    template:
+    - templates/handoff.template.md
+    - templates/review_report.template.md
+    - templates/artifact_card.template.md
+    fixtures:
+    - fixtures/contract_fixture.yaml
+    - fixtures/negative_cases.yaml
+    profiles:
+    - profiles/telephony_delegate_reviewer.profile.yaml
+    prompts:
+    - prompts/call_script_reviewer.system.md
+    presets:
+    - presets/safe_default.preset.yaml
+    - presets/handoff_review.preset.yaml
+    - presets/quality_gate.preset.yaml
+    example:
+    - examples/appointment_reschedule_script.example.yaml
+    - examples/customer_callback_mock.example.yaml
+    - examples/never_call_blocked_case.example.yaml
+    - examples/transcript_redaction_case.example.yaml
+  invariants:
+    required_secrets: []
+    required_network: []
+    executable_code: false
+    supports_all_ok: false
+    external_actions_are_handoffs: true
+    defaultspack_promotion_eligible: false

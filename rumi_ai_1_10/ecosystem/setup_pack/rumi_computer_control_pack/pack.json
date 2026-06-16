@@ -1,0 +1,77 @@
+{
+  "pack_id": "rumi_computer_control_pack",
+  "display_name": "Rumi Computer Control Pack",
+  "description": "Optional declarative local-first computer and desktop control pack for evidence-first app, screenshot, keyboard/mouse, terminal, and sandbox/host workflows.",
+  "target_pack_id": "rumi_computer_control_pack",
+  "version": "1.0.0",
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.10",
+    "platforms": ["macos", "windows", "linux"]
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    },
+    {
+      "pack_id": "rumi_default_tools_pack",
+      "version": ">=1.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "default": "prefer_explicit_pack_namespace",
+    "defaultspack_grants": "do_not_override",
+    "actual_computer_use_tool": "do_not_override",
+    "actual_chrome_tool": "do_not_override",
+    "rumi_browser_automation_pack": "browser_navigation_and_dom_playbooks_remain_browser_pack_owned",
+    "rumi_security_review_pack": "grant_and_privacy_risk_review_remains_security_pack_owned",
+    "rumi_agent_services_pack": "multi_agent_routing_remains_agent_services_owned",
+    "owns": [
+      "computer_control_evidence_contracts",
+      "foreground_app_context_playbooks",
+      "screenshot_keyboard_mouse_safety",
+      "terminal_backend_observation",
+      "sandbox_host_boundary_policy"
+    ],
+    "does_not_own": [
+      "computer_use_plugin_execution",
+      "chrome_plugin_execution",
+      "browser_dom_automation",
+      "security_grant_decisions",
+      "agent_service_topology"
+    ]
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Optional high-sensitivity control playbook pack; defaultspack remains the grant, approval, audit, and routing authority.",
+    "promotes": []
+  },
+  "marketplace": {
+    "id": "rumi.computer_control_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "source": "repository",
+    "status": "verified",
+    "category": "computer-control",
+    "optional": true
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "security_notes": [
+    "No secrets, executable drivers, remote endpoints, or network connector configuration are embedded.",
+    "Network is none by default.",
+    "This pack does not override Computer Use, Chrome, browser automation, or defaultspack grants."
+  ],
+  "conflict_notes": [
+    "Computer Use and Chrome plugins remain the actual execution owners.",
+    "Browser automation playbooks remain in rumi_browser_automation_pack.",
+    "Security review and grant decisions remain in rumi_security_review_pack and defaultspack."
+  ]
+}

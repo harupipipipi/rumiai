@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/agent_run.schema.json",
+  "title": "Agent Run",
+  "description": "Compatibility contract for existing defaultspack AgentRunStore-style run records without creating a second run database.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "workroom_id",
+    "session_key",
+    "parent_run_id",
+    "root_run_id",
+    "owner_pack_id",
+    "executor_ref",
+    "task_plan_id",
+    "transcript_id",
+    "current_transcript_id",
+    "checkpoint_refs",
+    "replay_index_refs",
+    "status",
+    "redaction_state"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "execution_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional AgentExecution alias for run_id when emitted by defaultspack runtime surfaces."
+    },
+    "agent_run_store_ref": {
+      "type": "string",
+      "const": "defaultspack.domain.agent_runtime.AgentRunStore"
+    },
+    "workroom_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "conversation_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "agent_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task": {
+      "type": "string"
+    },
+    "parent_run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "root_run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "owner_pack_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "executor_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "transcript_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Workroom alias for current_transcript_id when the host requires the shorter field name."
+    },
+    "current_transcript_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "checkpoint_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "replay_index_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "created",
+        "queued",
+        "running",
+        "waiting_approval",
+        "waiting_user_input",
+        "compacting",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled",
+        "stale",
+        "resumable",
+        "planned",
+        "error"
+      ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "system_prompt_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "system_prompt_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "runtime_profile_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "runtime_profile_json": {
+      "type": "object"
+    },
+    "capability_graph_json": {
+      "type": "object"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "updated_at": {
+      "type": "string"
+    },
+    "started_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "completed_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "compaction_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "heartbeat_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "result_json": {
+      "type": [
+        "object",
+        "array",
+        "string",
+        "number",
+        "boolean",
+        "null"
+      ]
+    },
+    "execution_json": {
+      "type": "object"
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": [
+        "raw_blocked",
+        "redacted",
+        "not_applicable"
+      ]
+    }
+  }
+}
