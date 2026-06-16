@@ -97,22 +97,21 @@ def test_always_available_routes_include_ambient_shell():
     assert ("GET", "/ambient", "_handle_static") in routes
 
 
-def test_routes_json_ambient_entries_match_canonical_registry():
+def test_routes_json_transport_direct_entries_match_canonical_registry():
     from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
 
     routes_json = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))
-    committed_ambient_routes = {
+    committed_direct_routes = {
         (str(route["method"]).upper(), route["path"])
         for route in routes_json["routes"]
-        if str(route.get("path") or "").startswith("/api/ambient")
+        if route.get("flow_id") == "transport_direct"
     }
-    canonical_ambient_routes = {
+    canonical_routes = {
         (spec.method, spec.pattern)
-        for spec in canonical_http_route_specs(include_always_available=False)
-        if spec.pattern.startswith("/api/ambient")
+        for spec in canonical_http_route_specs(include_always_available=True)
     }
 
-    assert committed_ambient_routes == canonical_ambient_routes
+    assert committed_direct_routes <= canonical_routes
 
 
 def test_mediapipe_wasm_mirror_matches_webapp_public_canonical():

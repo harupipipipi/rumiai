@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use log::{error, warn};
 use rand::{distributions::Alphanumeric, Rng};
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -312,10 +312,7 @@ fn route_request(request: &ParsedRequest, shared: &Arc<HostBrokerShared>) -> (u1
         ("GET", HEALTH_PATH) => (200, json!({"ok": true, "status": "running"})),
         ("GET", PERMISSIONS_PATH) => {
             if let Err(error) = authorize_request(request, shared) {
-                return (
-                    401,
-                    json!({"ok": false, "error": {"code": "UNAUTHORIZED", "message": error.to_string()}}),
-                );
+                return unauthorized_response(error);
             }
             (
                 200,
@@ -327,73 +324,28 @@ fn route_request(request: &ParsedRequest, shared: &Arc<HostBrokerShared>) -> (u1
                 }),
             )
         }
-        ("POST", COMPUTER_RUN_PATH) => {
-            if let Err(error) = authorize_request(request, shared) {
-                return (
-                    401,
-                    json!({"ok": false, "error": {"code": "UNAUTHORIZED", "message": error.to_string()}}),
-                );
-            }
-            match serde_json::from_slice::<HostBrokerComputerRunRequest>(&request.body) {
-                Ok(run_request) => (200, execute_computer_run(shared, run_request)),
-                Err(error) => (
-                    400,
-                    json!({"ok": false, "error": {"code": "INVALID_JSON", "message": format!("Invalid JSON payload: {error}")}}),
-                ),
-            }
-        }
+        ("POST", COMPUTER_RUN_PATH) => handle_authorized_json(request, shared, |run_request| {
+            execute_computer_run(shared, run_request)
+        }),
         ("POST", HOST_INTENT_EXECUTE_PATH) => {
-            if let Err(error) = authorize_request(request, shared) {
-                return (
-                    401,
-                    json!({"ok": false, "error": {"code": "UNAUTHORIZED", "message": error.to_string()}}),
-                );
-            }
-            match serde_json::from_slice::<HostBrokerIntentRequest>(&request.body) {
-                Ok(intent_request) => (200, execute_host_intent(shared, intent_request)),
-                Err(error) => (
-                    400,
-                    json!({"ok": false, "error": {"code": "INVALID_JSON", "message": format!("Invalid JSON payload: {error}")}}),
-                ),
-            }
+            handle_authorized_json(request, shared, |intent_request| {
+                execute_host_intent(shared, intent_request)
+            })
         }
         ("POST", HOST_STREAM_START_PATH) => {
-            if let Err(error) = authorize_request(request, shared) {
-                return (
-                    401,
-                    json!({"ok": false, "error": {"code": "UNAUTHORIZED", "message": error.to_string()}}),
-                );
-            }
-            match serde_json::from_slice::<HostBrokerIntentRequest>(&request.body) {
-                Ok(intent_request) => (200, execute_host_stream_start(shared, intent_request)),
-                Err(error) => (
-                    400,
-                    json!({"ok": false, "error": {"code": "INVALID_JSON", "message": format!("Invalid JSON payload: {error}")}}),
-                ),
-            }
+            handle_authorized_json(request, shared, |intent_request| {
+                execute_host_stream_start(shared, intent_request)
+            })
         }
         ("POST", HOST_STREAM_STOP_PATH) => {
-            if let Err(error) = authorize_request(request, shared) {
-                return (
-                    401,
-                    json!({"ok": false, "error": {"code": "UNAUTHORIZED", "message": error.to_string()}}),
-                );
-            }
-            match serde_json::from_slice::<HostBrokerStreamStopRequest>(&request.body) {
-                Ok(stop_request) => (200, execute_host_stream_stop(shared, stop_request)),
-                Err(error) => (
-                    400,
-                    json!({"ok": false, "error": {"code": "INVALID_JSON", "message": format!("Invalid JSON payload: {error}")}}),
-                ),
-            }
+            handle_authorized_json(request, shared, |stop_request| {
+                execute_host_stream_stop(shared, stop_request)
+            })
         }
         _ => {
             if request.method == "GET" && request.path.starts_with(HOST_STREAM_EVENTS_PREFIX) {
                 if let Err(error) = authorize_request(request, shared) {
-                    return (
-                        401,
-                        json!({"ok": false, "error": {"code": "UNAUTHORIZED", "message": error.to_string()}}),
-                    );
+                    return unauthorized_response(error);
                 }
                 let stream_id = percent_decode_path_segment(
                     request.path.trim_start_matches(HOST_STREAM_EVENTS_PREFIX),
@@ -407,6 +359,37 @@ fn route_request(request: &ParsedRequest, shared: &Arc<HostBrokerShared>) -> (u1
             }
         }
     }
+}
+
+fn handle_authorized_json<T>(
+    request: &ParsedRequest,
+    shared: &HostBrokerShared,
+    handler: impl FnOnce(T) -> Value,
+) -> (u16, Value)
+where
+    T: DeserializeOwned,
+{
+    if let Err(error) = authorize_request(request, shared) {
+        return unauthorized_response(error);
+    }
+    match serde_json::from_slice::<T>(&request.body) {
+        Ok(payload) => (200, handler(payload)),
+        Err(error) => invalid_json_response(error),
+    }
+}
+
+fn unauthorized_response(error: anyhow::Error) -> (u16, Value) {
+    (
+        401,
+        json!({"ok": false, "error": {"code": "UNAUTHORIZED", "message": error.to_string()}}),
+    )
+}
+
+fn invalid_json_response(error: serde_json::Error) -> (u16, Value) {
+    (
+        400,
+        json!({"ok": false, "error": {"code": "INVALID_JSON", "message": format!("Invalid JSON payload: {error}")}}),
+    )
 }
 
 fn authorize_request(request: &ParsedRequest, shared: &HostBrokerShared) -> Result<()> {

@@ -17,6 +17,9 @@ from domain.function_runtime.registry import TOOL_FUNCTION_ACTIONS  # noqa: E402
 from domain.function_runtime.security import HIGH_RISK_CALLER_REQUIREMENT  # noqa: E402
 
 
+AMBIENT_CUSTOM_WRAPPER_FUNCTIONS = frozenset({"ambient_monitor_start"})
+
+
 def _manifest(function_id: str) -> dict:
     path = DEFAULTSPACK_ROOT / "functions" / function_id / "manifest.json"
     return json.loads(path.read_text(encoding="utf-8"))
@@ -88,10 +91,11 @@ def test_ambient_function_manifests_and_wrappers_follow_factory_specs():
         generated = manifest_for(spec)
         for key in factory_owned_manifest_keys:
             assert committed.get(key) == generated.get(key), f"{function_id}:{key}"
-        if function_id == "ambient_monitor_start":
-            continue
         main_path = DEFAULTSPACK_ROOT / "functions" / function_id / "main.py"
-        assert main_path.read_text(encoding="utf-8") == _generated_main_template(function_id)
+        if function_id in AMBIENT_CUSTOM_WRAPPER_FUNCTIONS:
+            assert main_path.read_text(encoding="utf-8") != _generated_main_template(function_id)
+        else:
+            assert main_path.read_text(encoding="utf-8") == _generated_main_template(function_id)
 
 
 def test_high_risk_functions_declare_caller_requirements():

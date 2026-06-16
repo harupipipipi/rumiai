@@ -1,15 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, MessageSquare, Mic, Play, Radio, RefreshCcw, Search, Settings, Shield, Square, Video, Volume2, VolumeX, X } from "lucide-react";
 
-import { HistoryBoard, type ChatItem } from "../components/HistoryBoard";
-import { api, type Conversation, type ModelSearchItem } from "../lib/api";
-import { formatRelativeTime } from "../lib/chat";
 import { cn } from "../lib/cn";
 import { subscribeAuthorityApprovalSettlements } from "../lib/authorityApprovalEvents";
 import { openDefaultsConsoleWindow, openFingerRecordingWindow, openAuthorityApprovalWindow, openHostPermissionsPageWindow } from "../lib/desktopApproval";
 import { LayerPortal } from "../ui/layers/LayerPortal";
-import { ambientTriggerClient, type AmbientPermissionId, type AmbientRoutingConfig, type AmbientRoutingMode, type AmbientStatus } from "./ambientTriggerClient";
-import { AMBIENT_FINAL_ANSWER_CHANNEL, AMBIENT_FINAL_ANSWER_STORAGE_KEY, parseAmbientFinalAnswerPayload, type AmbientFinalAnswerPayload } from "./finalAnswerBridge";
+import { ambientTriggerClient, type AmbientStatus } from "./ambientTriggerClient";
+import {
+  audioCaptureConstraints,
+  captureAudioEmbedding,
+  deviceLabel,
+  probeOsPermissions,
+  startPinchAudioRecorder,
+  startPinchSpeechRecognition,
+  startWakeListening,
+  videoCaptureConstraints,
+  type ActiveAudioRecorder,
+  type SpeechRecognitionLike,
+} from "./ambientMedia";
 import {
   AMBIENT_AUTHORITY_REQUEST_ID,
   AMBIENT_CAMERA_PERMISSION,
@@ -23,14 +31,18 @@ import {
   hasAllOsPermissions,
   hasAllRumiPermissions,
   osPermissionBucket,
-  permissionBucketLabel,
   rumiPermissionBucket,
-  type AmbientPermissionBucket,
   type AmbientRuntimeStatus,
   type AmbientUiState,
 } from "./ambientUiState";
 import { startHandLandmarkerLoop, type HandTrackingFrame } from "./mediaPipeHandLandmarker";
 import type { PinchState } from "./gesturePinchDetector";
+import { ChatPickerDialog, RoutingSettings } from "./AmbientRoutingSettings";
+import { PrimaryActionIcon, StateBadge, StatusGlyph, primaryButtonClass } from "./AmbientTriggerVisuals";
+import { PermissionSection, gestureStatusLabel } from "./AmbientPermissionSections";
+import { modelLabelFromId } from "./ambientRouting";
+import { useFinalAnswerBridge } from "./useFinalAnswerBridge";
+import { useAmbientRouting } from "./useAmbientRouting";
 
 export type AmbientApprovalTarget = {
   kind: "browser" | "runtime" | "authority";
@@ -49,19 +61,8 @@ type Props = {
   variant?: "floating" | "window";
 };
 
-type NormalizedAmbientRouting = {
-  mode: AmbientRoutingMode;
-  conversation_id: string | null;
-  group_enabled: boolean;
-  group_id: string;
-  group_title: string;
-  model: string;
-};
-
 const MIC_DEVICE_STORAGE_KEY = "rumi.ambient.selectedMicId";
 const CAMERA_DEVICE_STORAGE_KEY = "rumi.ambient.selectedCameraId";
-const FRONT_ON_FINAL_STORAGE_KEY = "rumi.ambient.frontOnFinal";
-const READOUT_ENABLED_STORAGE_KEY = "rumi.ambient.readoutEnabled";
 const THUMB_TIP_INDEX = 4;
 const INDEX_TIP_INDEX = 8;
 const HAND_LANDMARK_CONNECTIONS = [
@@ -94,23 +95,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const [pinchDetectorStatus, setPinchDetectorStatus] = useState("idle");
   const [trackingFrame, setTrackingFrame] = useState<HandTrackingFrame | null>(null);
   const [cameraDebugOpen, setCameraDebugOpen] = useState(false);
-  const [frontOnFinal, setFrontOnFinal] = useState(() => safeLocalStorageGet(FRONT_ON_FINAL_STORAGE_KEY) !== "false");
-  const [frontFlash, setFrontFlash] = useState(false);
-  const [lastFinalAnswer, setLastFinalAnswer] = useState("");
-  const [readoutEnabled, setReadoutEnabled] = useState(() => safeLocalStorageGet(READOUT_ENABLED_STORAGE_KEY) === "true");
-  const [readoutPlaying, setReadoutPlaying] = useState(false);
-  const [chatPickerOpen, setChatPickerOpen] = useState(false);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [conversationsLoading, setConversationsLoading] = useState(false);
-  const [routingMode, setRoutingMode] = useState<AmbientRoutingMode>("selected_chat");
-  const [routingConversationId, setRoutingConversationId] = useState<string | null>(conversationId || null);
-  const [routingGroupEnabled, setRoutingGroupEnabled] = useState(true);
-  const [routingGroupId, setRoutingGroupId] = useState("gesture");
-  const [routingGroupTitle, setRoutingGroupTitle] = useState("Gesture");
-  const [routingModel, setRoutingModel] = useState("");
-  const [modelQuery, setModelQuery] = useState("");
-  const [modelResults, setModelResults] = useState<ModelSearchItem[]>([]);
-  const [modelLoading, setModelLoading] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioStopRef = useRef<(() => void) | null>(null);
@@ -119,7 +103,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const pinchSpeechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const pinchTranscriptRef = useRef("");
   const lastPinchStateRef = useRef<PinchState | null>(null);
-  const lastFinalAnswerRef = useRef("");
   const choiceHandledAtRef = useRef(0);
   const approvalGestureBusyRef = useRef(false);
   const rumiApprovalAutoOpenRef = useRef(false);
@@ -127,6 +110,60 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const onOpenInputRef = useRef<Props["onOpenInput"]>(onOpenInput);
   const approvalTargetRef = useRef<Props["approvalTarget"]>(approvalTarget);
   const onApprovalGestureRef = useRef<Props["onApprovalGesture"]>(onApprovalGesture);
+
+  const readoutBlocked = useCallback(() => pinchRecording || Boolean(pinchRecorderRef.current), [pinchRecording]);
+  const {
+    frontOnFinal,
+    setFrontOnFinal,
+    frontFlash,
+    lastFinalAnswer,
+    readoutEnabled,
+    setReadoutEnabled,
+    readoutPlaying,
+    stopSpeechReadout,
+    speakFinalAnswer,
+  } = useFinalAnswerBridge({
+    finalAnswerText,
+    standalone,
+    pinchRecording,
+    readoutBlocked,
+    onFrontRequested: () => setExpanded(true),
+    onMessage: setMessage,
+  });
+  const routing = useAmbientRouting({
+    status,
+    conversationId,
+    setStatus,
+    setBusy,
+    setMessage,
+    refresh,
+  });
+  const {
+    chatPickerOpen,
+    setChatPickerOpen,
+    conversationsLoading,
+    routingMode,
+    routingConversationId,
+    routingGroupEnabled,
+    routingGroupId,
+    setRoutingGroupId,
+    routingGroupTitle,
+    setRoutingGroupTitle,
+    routingModel,
+    setRoutingModel,
+    modelQuery,
+    setModelQuery,
+    modelResults,
+    modelLoading,
+    routingNeedsNewChatSettings,
+    routingChatItems,
+    routingSummary,
+    loadConversations,
+    openChatPicker,
+    saveRouting,
+    selectConversationForRouting,
+    searchRoutingModels,
+  } = routing;
 
   const monitorEnabled = Boolean(status?.ambient_monitor.enabled);
   const runtimeStatus = useMemo<AmbientRuntimeStatus>(() => {
@@ -147,19 +184,19 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     () => grantedPermissionCount(status, AMBIENT_OS_PERMISSIONS, "os"),
     [status],
   );
+  const rumiPermissionRows = useMemo(() => AMBIENT_REQUIRED_PERMISSIONS.map((permissionId) => ({
+    id: permissionId,
+    label: ambientPermissionLabels[permissionId] ?? permissionId,
+    bucket: rumiPermissionBucket(status, permissionId),
+  })), [status]);
+  const osPermissionRows = useMemo(() => AMBIENT_OS_PERMISSIONS.map((permissionId) => ({
+    id: permissionId,
+    label: permissionId === AMBIENT_MIC_PERMISSION ? "マイク" : "カメラ",
+    bucket: osPermissionBucket(status, permissionId),
+  })), [status]);
   const allRumiPermissionsGranted = useMemo(() => hasAllRumiPermissions(status), [status]);
   const allOsPermissionsGranted = useMemo(() => hasAllOsPermissions(status), [status]);
   const rumiApprovalPending = rumiApprovalOpen && !allRumiPermissionsGranted;
-  const routingNeedsNewChatSettings = routingMode === "startup_new_chat" || routingMode === "always_new_chat";
-  const routingSelectedConversation = useMemo(
-    () => conversations.find((conversation) => conversation.id === routingConversationId) ?? null,
-    [conversations, routingConversationId],
-  );
-  const routingChatItems = useMemo(() => conversationsToChatItems(conversations), [conversations]);
-  const routingSummary = useMemo(
-    () => routingLabel(routingMode, routingSelectedConversation, routingConversationId, status?.routing?.session_conversation_id),
-    [routingConversationId, routingMode, routingSelectedConversation, status?.routing?.session_conversation_id],
-  );
   const surfaceTitle = standalone && window.location.pathname === "/finger-recording" ? ambientCopyJa.subtitle : ambientCopyJa.title;
 
   useEffect(() => {
@@ -168,24 +205,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     approvalTargetRef.current = approvalTarget;
     onApprovalGestureRef.current = onApprovalGesture;
   }, [approvalTarget, conversationId, onApprovalGesture, onOpenInput]);
-
-  useEffect(() => {
-    const routing = normalizeRouting(status?.routing, conversationId || null);
-    setRoutingMode(routing.mode);
-    setRoutingConversationId(routing.conversation_id ?? null);
-    setRoutingGroupEnabled(routing.group_enabled);
-    setRoutingGroupId(routing.group_id || "gesture");
-    setRoutingGroupTitle(routing.group_title || "Gesture");
-    setRoutingModel(routing.model || "");
-  }, [
-    conversationId,
-    status?.routing?.conversation_id,
-    status?.routing?.group_enabled,
-    status?.routing?.group_id,
-    status?.routing?.group_title,
-    status?.routing?.mode,
-    status?.routing?.model,
-  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -210,22 +229,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   }, [selectedCameraId]);
 
   useEffect(() => {
-    safeLocalStorageSet(FRONT_ON_FINAL_STORAGE_KEY, frontOnFinal ? "true" : "false");
-  }, [frontOnFinal]);
-
-  useEffect(() => {
-    safeLocalStorageSet(READOUT_ENABLED_STORAGE_KEY, readoutEnabled ? "true" : "false");
-  }, [readoutEnabled]);
-
-  useEffect(() => () => {
-    stopSpeechReadout();
-  }, []);
-
-  useEffect(() => {
-    lastFinalAnswerRef.current = lastFinalAnswer;
-  }, [lastFinalAnswer]);
-
-  useEffect(() => {
     if (!pinchRecording || !recordingStartedAt) {
       setRecordingSeconds(0);
       return;
@@ -235,49 +238,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     const timer = window.setInterval(update, 500);
     return () => window.clearInterval(timer);
   }, [pinchRecording, recordingStartedAt]);
-
-  useEffect(() => {
-    const timer = applyFinalAnswerText(String(finalAnswerText ?? ""));
-    return () => {
-      if (timer) window.clearTimeout(timer);
-    };
-  }, [finalAnswerText, frontOnFinal, pinchRecording, readoutEnabled]);
-
-  useEffect(() => {
-    if (!standalone) return;
-    const timers = new Set<number>();
-    const applyPayload = (payload: AmbientFinalAnswerPayload | null) => {
-      if (!payload) return;
-      const timer = applyFinalAnswerText(payload.text);
-      if (timer) timers.add(timer);
-    };
-    try {
-      applyPayload(parseAmbientFinalAnswerPayload(window.localStorage.getItem(AMBIENT_FINAL_ANSWER_STORAGE_KEY)));
-    } catch {
-      // Local storage may be blocked; live BroadcastChannel updates still work when available.
-    }
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === AMBIENT_FINAL_ANSWER_STORAGE_KEY) {
-        applyPayload(parseAmbientFinalAnswerPayload(event.newValue));
-      }
-    };
-    window.addEventListener("storage", handleStorage);
-    let channel: BroadcastChannel | null = null;
-    try {
-      channel = new BroadcastChannel(AMBIENT_FINAL_ANSWER_CHANNEL);
-      channel.onmessage = (event) => {
-        const data = event.data as AmbientFinalAnswerPayload | undefined;
-        applyPayload(data ? parseAmbientFinalAnswerPayload(JSON.stringify(data)) : null);
-      };
-    } catch {
-      channel = null;
-    }
-    return () => {
-      window.removeEventListener("storage", handleStorage);
-      channel?.close();
-      timers.forEach((timer) => window.clearTimeout(timer));
-    };
-  }, [frontOnFinal, pinchRecording, readoutEnabled, standalone]);
 
   useEffect(() => subscribeAuthorityApprovalSettlements((event) => {
     if (event.requestId !== AMBIENT_AUTHORITY_REQUEST_ID) return;
@@ -343,50 +303,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     pinchTranscriptRef.current = "";
     audioStopRef.current?.();
   }, [cameraStream]);
-
-  function stopSpeechReadout() {
-    if (!("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    setReadoutPlaying(false);
-  }
-
-  function speakFinalAnswer(text = lastFinalAnswer) {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    if (!("speechSynthesis" in window)) {
-      setMessage("この環境では回答の読み上げを使えません。");
-      return;
-    }
-    if (pinchRecording || pinchRecorderRef.current) {
-      setMessage("録音中は読み上げを止めています。");
-      return;
-    }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(trimmed);
-    utterance.lang = "ja-JP";
-    utterance.rate = 1;
-    utterance.pitch = 1;
-    utterance.onstart = () => setReadoutPlaying(true);
-    utterance.onend = () => setReadoutPlaying(false);
-    utterance.onerror = () => setReadoutPlaying(false);
-    window.speechSynthesis.speak(utterance);
-  }
-
-  function applyFinalAnswerText(value: string): number | null {
-    const text = value.trim();
-    if (!text || text === lastFinalAnswerRef.current) return null;
-    lastFinalAnswerRef.current = text;
-    setLastFinalAnswer(text);
-    setMessage("AIの回答が届きました。");
-    if (readoutEnabled && !pinchRecording) {
-      speakFinalAnswer(text);
-    }
-    if (!frontOnFinal) return null;
-    setExpanded(true);
-    setFrontFlash(true);
-    window.focus();
-    return window.setTimeout(() => setFrontFlash(false), 1600);
-  }
 
   function stopPinchSpeechRecognition(abort = false): string {
     const recognition = pinchSpeechRecognitionRef.current;
@@ -633,85 +549,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     } catch (error) {
       console.info("[ambient] media device listing unavailable", error);
     }
-  }
-
-  async function loadConversations() {
-    setConversationsLoading(true);
-    try {
-      const result = await api.listConversations({ limit: 80 });
-      setConversations(result.conversations);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "チャット一覧を読み込めませんでした。");
-    } finally {
-      setConversationsLoading(false);
-    }
-  }
-
-  async function openChatPicker() {
-    setChatPickerOpen(true);
-    await loadConversations();
-  }
-
-  async function saveRouting(patch: Partial<AmbientRoutingConfig>, success?: string) {
-    const next = normalizeRouting({
-      mode: routingMode,
-      conversation_id: routingConversationId,
-      group_enabled: routingGroupEnabled,
-      group_id: routingGroupId,
-      group_title: routingGroupTitle,
-      model: routingModel,
-      ...patch,
-    }, conversationId || null);
-    setRoutingMode(next.mode);
-    setRoutingConversationId(next.conversation_id ?? null);
-    setRoutingGroupEnabled(next.group_enabled);
-    setRoutingGroupId(next.group_id || "gesture");
-    setRoutingGroupTitle(next.group_title || "Gesture");
-    setRoutingModel(next.model || "");
-    setBusy(true);
-    try {
-      const configured = await ambientTriggerClient.configure(next);
-      setStatus(configured);
-      if (success) setMessage(success);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "送信先を保存できませんでした。");
-      await refresh().catch(() => undefined);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function selectConversationForRouting(chatId: string) {
-    setChatPickerOpen(false);
-    await saveRouting({ mode: "selected_chat", conversation_id: chatId }, "このチャットに送ります。");
-  }
-
-  async function searchRoutingModels(query = modelQuery) {
-    const trimmed = query.trim();
-    setModelLoading(true);
-    try {
-      const result = await api.searchModels({ query: trimmed, max_results: 12 });
-      setModelResults(result.models ?? []);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "モデルを検索できませんでした。");
-    } finally {
-      setModelLoading(false);
-    }
-  }
-
-  async function probeOsPermissions(): Promise<Record<AmbientPermissionId, string>> {
-    const statuses: Record<AmbientPermissionId, string> = {};
-    const mic = await queryBrowserPermission("microphone");
-    const camera = await queryBrowserPermission("camera");
-    if (mic) statuses[AMBIENT_MIC_PERMISSION] = mic;
-    if (camera) statuses[AMBIENT_CAMERA_PERMISSION] = camera;
-    const platform = navigator.platform || "";
-    const isMac = /Mac/i.test(platform);
-    console.info(
-      isMac ? "[ambient] macOS camera/microphone permission check" : "[ambient] camera/microphone permission check",
-      statuses,
-    );
-    return statuses;
   }
 
   async function runAction(action: () => Promise<AmbientStatus | Record<string, unknown>>, success?: string) {
@@ -1141,47 +978,33 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                 </button>
               </div>
               {!allRumiPermissionsGranted && (
-                <div className="border-l border-sky-400/40 pl-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[12px] font-semibold text-zinc-100">Rumiで許可</p>
-                    <span className="text-[11px] text-sky-200">{rumiPermissionCount}/{AMBIENT_REQUIRED_PERMISSIONS.length}</span>
-                  </div>
-                <div className="mt-2 space-y-1.5">
-                  {AMBIENT_REQUIRED_PERMISSIONS.map((permissionId) => (
-                    <PermissionRow
-                      key={permissionId}
-                      label={ambientPermissionLabels[permissionId] ?? permissionId}
-                      bucket={rumiPermissionBucket(status, permissionId)}
-                    />
-                  ))}
-                </div>
-                <button type="button" onClick={() => void openRumiPermissionApproval()} disabled={busy || rumiApprovalPending} className="ambient-mini-button mt-2 w-full">
-                  {busy ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />}
-                  Rumiで許可
-                </button>
-                </div>
+                <PermissionSection
+                  title="Rumiで許可"
+                  count={rumiPermissionCount}
+                  total={AMBIENT_REQUIRED_PERMISSIONS.length}
+                  rows={rumiPermissionRows}
+                  actionLabel="Rumiで許可"
+                  actionIcon={<Hand size={14} />}
+                  busyIcon={<Loader2 size={14} className="animate-spin" />}
+                  busy={busy}
+                  disabled={busy || rumiApprovalPending}
+                  onAction={() => void openRumiPermissionApproval()}
+                />
               )}
 
               {allRumiPermissionsGranted && !allOsPermissionsGranted && (
-                <div className="border-l border-sky-400/40 pl-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[12px] font-semibold text-zinc-100">端末のマイク・カメラ</p>
-                    <span className="text-[11px] text-sky-200">{osPermissionCount}/{AMBIENT_OS_PERMISSIONS.length}</span>
-                  </div>
-                <div className="mt-2 space-y-1.5">
-                  {AMBIENT_OS_PERMISSIONS.map((permissionId) => (
-                    <PermissionRow
-                      key={permissionId}
-                      label={permissionId === AMBIENT_MIC_PERMISSION ? "マイク" : "カメラ"}
-                      bucket={osPermissionBucket(status, permissionId)}
-                    />
-                  ))}
-                </div>
-                <button type="button" onClick={() => void requestMediaPermissions()} disabled={busy || rumiApprovalPending} className="ambient-mini-button mt-2 w-full">
-                  {busy ? <Loader2 size={14} className="animate-spin" /> : <Video size={14} />}
-                  マイク・カメラを許可
-                </button>
-                </div>
+                <PermissionSection
+                  title="端末のマイク・カメラ"
+                  count={osPermissionCount}
+                  total={AMBIENT_OS_PERMISSIONS.length}
+                  rows={osPermissionRows}
+                  actionLabel="マイク・カメラを許可"
+                  actionIcon={<Video size={14} />}
+                  busyIcon={<Loader2 size={14} className="animate-spin" />}
+                  busy={busy}
+                  disabled={busy || rumiApprovalPending}
+                  onAction={() => void requestMediaPermissions()}
+                />
               )}
 
               {allRumiPermissionsGranted && allOsPermissionsGranted && (
@@ -1404,273 +1227,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   return <LayerPortal layer="globalOverlay">{content}</LayerPortal>;
 }
 
-function RoutingSettings({
-  busy,
-  mode,
-  summary,
-  selectedConversationId,
-  groupEnabled,
-  groupId,
-  groupTitle,
-  model,
-  modelQuery,
-  modelResults,
-  modelLoading,
-  needsNewChatSettings,
-  onModeChange,
-  onPickChat,
-  onGroupEnabledChange,
-  onGroupIdChange,
-  onGroupTitleChange,
-  onGroupCommit,
-  onModelChange,
-  onModelCommit,
-  onModelQueryChange,
-  onModelSearch,
-}: {
-  busy: boolean;
-  mode: AmbientRoutingMode;
-  summary: string;
-  selectedConversationId: string | null;
-  groupEnabled: boolean;
-  groupId: string;
-  groupTitle: string;
-  model: string;
-  modelQuery: string;
-  modelResults: ModelSearchItem[];
-  modelLoading: boolean;
-  needsNewChatSettings: boolean;
-  onModeChange: (mode: AmbientRoutingMode) => void;
-  onPickChat: () => void;
-  onGroupEnabledChange: (enabled: boolean) => void;
-  onGroupIdChange: (value: string) => void;
-  onGroupTitleChange: (value: string) => void;
-  onGroupCommit: () => void;
-  onModelChange: (value: string) => void;
-  onModelCommit: (model: string) => void;
-  onModelQueryChange: (value: string) => void;
-  onModelSearch: () => void;
-}) {
-  const [modelChangeOpen, setModelChangeOpen] = useState(false);
-  const modelLabel = model ? modelLabelFromId(model) : "未指定";
-
-  return (
-    <section className="space-y-2 border-l border-sky-400/35 pl-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase text-zinc-500">話す先</span>
-        <span className="min-w-0 truncate text-[11px] text-zinc-300">{summary}</span>
-      </div>
-      <div className="grid grid-cols-3 gap-1">
-        <RouteModeButton label="選ぶ" active={mode === "selected_chat"} disabled={busy} onClick={() => onModeChange("selected_chat")} />
-        <RouteModeButton label="再起動ごと" active={mode === "startup_new_chat"} disabled={busy} onClick={() => onModeChange("startup_new_chat")} />
-        <RouteModeButton label="毎回新規" active={mode === "always_new_chat"} disabled={busy} onClick={() => onModeChange("always_new_chat")} />
-      </div>
-      {mode === "selected_chat" && (
-        <button type="button" onClick={onPickChat} disabled={busy} className="ambient-mini-button w-full justify-between">
-          <span className="inline-flex min-w-0 items-center gap-2">
-            <MessageSquare size={14} />
-            <span className="truncate">{selectedConversationId ? "チャットを変更" : "チャットを選ぶ"}</span>
-          </span>
-          <ChevronUp size={13} className="rotate-90 text-zinc-500" />
-        </button>
-      )}
-      {needsNewChatSettings && (
-        <div className="space-y-2">
-          <button
-            type="button"
-            onClick={() => onGroupEnabledChange(!groupEnabled)}
-            disabled={busy}
-            className={cn(
-              "flex h-8 w-full items-center justify-between rounded-md border px-2 text-[11px] transition",
-              groupEnabled
-                ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
-                : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
-            )}
-          >
-            <span>グループ内に作成</span>
-            <span className="font-semibold">{groupEnabled ? "有効" : "無効"}</span>
-          </button>
-          {groupEnabled && (
-            <div className="grid grid-cols-[0.75fr_1fr] gap-1.5">
-              <label className="block text-[10px] text-zinc-500">
-                グループID
-                <input
-                  value={groupId}
-                  onChange={(event) => onGroupIdChange(event.target.value)}
-                  onBlur={onGroupCommit}
-                  className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
-                />
-              </label>
-              <label className="block text-[10px] text-zinc-500">
-                表示名
-                <input
-                  value={groupTitle}
-                  onChange={(event) => onGroupTitleChange(event.target.value)}
-                  onBlur={onGroupCommit}
-                  className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
-                />
-              </label>
-            </div>
-          )}
-        </div>
-      )}
-      <div className="space-y-1.5 rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-semibold text-zinc-500">送信モデル</span>
-              {model && (
-                <span className="min-w-0 truncate rounded border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] text-emerald-100" title={model}>
-                  モデル: {modelLabel}
-                </span>
-              )}
-            </div>
-            {!modelChangeOpen && (
-              <button
-                type="button"
-                onClick={() => {
-                  setModelChangeOpen(true);
-                  onModelQueryChange("");
-                }}
-                disabled={busy}
-                className="ambient-mini-button w-full justify-between"
-              >
-                <span>{model ? "変更" : "モデルを選ぶ"}</span>
-                <Search size={13} />
-              </button>
-            )}
-            {modelChangeOpen && (
-              <div className="space-y-1.5">
-                <div className="flex gap-1.5">
-                  <input
-                    value={modelQuery}
-                    onChange={(event) => onModelQueryChange(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        onModelSearch();
-                      }
-                      if (event.key === "Escape") {
-                        setModelChangeOpen(false);
-                      }
-                    }}
-                    placeholder="すべてから探す"
-                    className="h-8 min-w-0 flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
-                    autoFocus
-                  />
-                  <button type="button" onClick={onModelSearch} disabled={modelLoading} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
-                    {modelLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-                  </button>
-                  <button type="button" onClick={() => setModelChangeOpen(false)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
-                    <X size={13} />
-                  </button>
-                </div>
-                {model && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onModelCommit("");
-                      setModelChangeOpen(false);
-                    }}
-                    className="text-[11px] text-zinc-400 hover:text-zinc-100"
-                  >
-                    モデル指定を外す
-                  </button>
-                )}
-                {modelResults.length > 0 && (
-                  <div className="max-h-28 overflow-auto border-l border-zinc-800 pl-2">
-                    {modelResults
-                      .map((item) => ({ item, id: modelIdForSearchItem(item) }))
-                      .filter(({ id }) => Boolean(id))
-                      .slice(0, 6)
-                      .map(({ item, id }) => (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => {
-                            onModelChange(id);
-                            onModelCommit(id);
-                            onModelQueryChange("");
-                            setModelChangeOpen(false);
-                          }}
-                          className="block w-full truncate py-1 text-left text-[11px] text-zinc-300 hover:text-zinc-50"
-                        >
-                          {modelLabelForSearchItem(item)}
-                        </button>
-                      ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-    </section>
-  );
-}
-
-function RouteModeButton({ label, active, disabled, onClick }: { label: string; active: boolean; disabled: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        "h-8 rounded-md border px-2 text-[11px] font-medium transition",
-        active
-          ? "border-sky-300/35 bg-sky-400/15 text-sky-100"
-          : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
-      )}
-    >
-      {label}
-    </button>
-  );
-}
-
-function ChatPickerDialog({
-  activeChatId,
-  selectedChatId,
-  chatItems,
-  loading,
-  onRefresh,
-  onSelect,
-  onClose,
-}: {
-  activeChatId: string | null;
-  selectedChatId: string | null;
-  chatItems: ChatItem[];
-  loading: boolean;
-  onRefresh: () => void;
-  onSelect: (chatId: string) => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 rumi-layer-modal flex items-end justify-center bg-black/60 px-3 py-4 backdrop-blur-sm sm:items-center">
-      <section className="flex h-[min(720px,calc(100vh-32px))] w-[min(390px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl shadow-black/50">
-        <header className="flex h-10 items-center gap-2 border-b border-zinc-800 px-3">
-          <MessageSquare size={15} className="text-sky-200" />
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold">チャットを選ぶ</span>
-          <button type="button" onClick={onRefresh} disabled={loading} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
-            {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCcw size={13} />}
-          </button>
-          <button type="button" onClick={onClose} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
-            <X size={13} />
-          </button>
-        </header>
-        <div className="min-h-0 flex-1">
-          <HistoryBoard
-            activeChatId={activeChatId}
-            selectedChatId={selectedChatId}
-            selectionMode
-            selectionLabel="送信先"
-            chatItems={chatItems}
-            onChatSelect={onSelect}
-            onNewTask={() => undefined}
-            onSettingsClick={() => undefined}
-            isCompact
-          />
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function RecognitionMonitor({
   videoRef,
   frame,
@@ -1800,85 +1356,6 @@ function recognitionMonitorToneClass(status: string, hasHand: boolean, recording
   return "border-zinc-700/80 bg-black/55 text-zinc-200";
 }
 
-function StatusGlyph({ uiState }: { uiState: AmbientUiState }) {
-  const className = cn(
-    "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
-    uiState === "recording" && "border-red-400/40 bg-red-500/12 text-red-100",
-    uiState === "monitoring" && "border-emerald-400/35 bg-emerald-400/10 text-emerald-100",
-    uiState === "sending" && "border-violet-400/35 bg-violet-400/10 text-violet-100",
-    (uiState === "setupNeeded" || uiState === "rumiPermissionNeeded" || uiState === "osPermissionNeeded") && "border-sky-400/35 bg-sky-400/10 text-sky-100",
-    (uiState === "denied" || uiState === "blocked" || uiState === "error") && "border-red-400/35 bg-red-500/10 text-red-100",
-    (uiState === "readyOff" || uiState === "paused") && "border-zinc-800 bg-zinc-900 text-zinc-300",
-  );
-
-  if (uiState === "recording") return <span className={className}><Mic size={20} /></span>;
-  if (uiState === "sending") return <span className={className}><Loader2 size={20} className="animate-spin" /></span>;
-  if (uiState === "monitoring") return <span className={className}><Hand size={20} /></span>;
-  if (uiState === "denied" || uiState === "blocked" || uiState === "error") return <span className={className}><AlertTriangle size={20} /></span>;
-  if (uiState === "setupNeeded" || uiState === "rumiPermissionNeeded" || uiState === "osPermissionNeeded") return <span className={className}><Hand size={20} /></span>;
-  return <span className={className}><Radio size={20} /></span>;
-}
-
-function StateBadge({ state }: { state: AmbientUiState }) {
-  const copy = ambientCopyJa.states[state];
-  return (
-    <span
-      className={cn(
-        "shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold leading-4",
-        copy.tone === "emerald" && "border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
-        copy.tone === "blue" && "border-sky-400/30 bg-sky-400/10 text-sky-100",
-        copy.tone === "red" && "border-red-400/35 bg-red-500/10 text-red-100",
-        copy.tone === "purple" && "border-violet-400/30 bg-violet-400/10 text-violet-100",
-        copy.tone === "zinc" && "border-zinc-800 bg-zinc-900 text-zinc-300",
-      )}
-    >
-      {copy.badge}
-    </span>
-  );
-}
-
-function PrimaryActionIcon({ uiState }: { uiState: AmbientUiState }) {
-  if (uiState === "readyOff" || uiState === "paused") return <Play size={15} />;
-  if (uiState === "monitoring") return <Square size={14} />;
-  if (uiState === "recording") return <X size={15} />;
-  if (uiState === "sending") return <Loader2 size={15} className="animate-spin" />;
-  if (uiState === "osPermissionNeeded") return <Video size={15} />;
-  if (uiState === "denied" || uiState === "blocked" || uiState === "error") return <AlertTriangle size={15} />;
-  return <Hand size={15} />;
-}
-
-function primaryButtonClass(uiState: AmbientUiState): string {
-  if (uiState === "recording") return "bg-red-400 text-zinc-950 hover:bg-red-300";
-  if (uiState === "monitoring") return "border border-zinc-800 bg-zinc-900 text-zinc-100 hover:border-zinc-700 hover:bg-zinc-800";
-  if (uiState === "sending") return "cursor-wait bg-violet-300 text-zinc-950 opacity-80";
-  if (uiState === "denied" || uiState === "blocked" || uiState === "error") return "bg-red-100 text-zinc-950 hover:bg-white";
-  if (uiState === "setupNeeded" || uiState === "rumiPermissionNeeded" || uiState === "osPermissionNeeded") return "bg-sky-300 text-zinc-950 hover:bg-sky-200";
-  return "bg-zinc-100 text-zinc-950 hover:bg-white";
-}
-
-function PermissionRow({ label, bucket }: { label: string; bucket: AmbientPermissionBucket }) {
-  const granted = bucket === "granted";
-  return (
-    <div className="flex items-center justify-between gap-2 text-[12px] leading-5">
-      <span className="text-zinc-300">{label}</span>
-      <span className={cn("inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]", granted ? "bg-emerald-400/10 text-emerald-200" : bucket === "denied" || bucket === "blocked" ? "bg-red-500/10 text-red-100" : "bg-zinc-800 text-zinc-400")}>
-        {granted ? <Check size={11} /> : null}
-        {permissionBucketLabel(bucket)}
-      </span>
-    </div>
-  );
-}
-
-function gestureStatusLabel(status: string, monitorEnabled: boolean): string {
-  if (!monitorEnabled) return "未開始";
-  if (status === "tracking") return "待機中";
-  if (status === "recording") return "録音中";
-  if (status === "sending") return "送信中";
-  if (status === "loading") return "準備中";
-  if (status === "unavailable") return "利用不可";
-  return "確認中";
-}
-
 function formatRecordingTime(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
@@ -1889,357 +1366,11 @@ function isAmbientStatus(value: unknown): value is AmbientStatus {
   return Boolean(value && typeof value === "object" && "ambient_monitor" in value);
 }
 
-function normalizeRouting(value: AmbientRoutingConfig | null | undefined, fallbackConversationId: string | null): NormalizedAmbientRouting {
-  const mode = value?.mode === "startup_new_chat" || value?.mode === "always_new_chat" || value?.mode === "selected_chat"
-    ? value.mode
-    : "selected_chat";
-  return {
-    mode,
-    conversation_id: cleanOptionalText(value?.conversation_id) ?? fallbackConversationId,
-    group_enabled: cleanBool(value?.group_enabled, true),
-    group_id: cleanOptionalText(value?.group_id) ?? "gesture",
-    group_title: cleanOptionalText(value?.group_title) ?? "Gesture",
-    model: cleanOptionalText(value?.model) ?? "",
-  };
-}
-
-function conversationsToChatItems(conversations: Conversation[]): ChatItem[] {
-  const byId = new Map(conversations.map((conversation) => [conversation.id, conversation]));
-  const build = (conversation: Conversation): ChatItem => ({
-    id: conversation.id,
-    title: conversation.title || "New Conversation",
-    date: formatRelativeTime(conversation.updated_at || conversation.created_at || Date.now()),
-    type: "chat",
-    parentId: conversation.parent_conversation_id ?? null,
-    conversationKind: conversation.conversation_kind,
-    tags: conversation.tags ?? [],
-    isStarred: Boolean(conversation.is_starred),
-    isPinned: Boolean(conversation.is_pinned),
-    companyId: cleanOptionalText(conversation.metadata?.company_id ?? conversation.metadata?.companyId),
-    workspaceId: cleanOptionalText(conversation.metadata?.workspace_id ?? conversation.metadata?.workspaceId),
-    metadata: conversation.metadata ?? {},
-    children: (conversation.child_conversation_ids ?? [])
-      .map((id) => byId.get(id))
-      .filter((item): item is Conversation => Boolean(item))
-      .map(build),
-  });
-  const childIds = new Set(conversations.flatMap((conversation) => conversation.child_conversation_ids ?? []));
-  return conversations.filter((conversation) => !childIds.has(conversation.id)).map(build);
-}
-
-function routingLabel(
-  mode: AmbientRoutingMode,
-  conversation: Conversation | null,
-  conversationId: string | null,
-  sessionConversationId: string | null | undefined,
-): string {
-  if (mode === "selected_chat") {
-    return conversation?.title || (conversationId ? "選択済み" : "未選択");
-  }
-  if (mode === "startup_new_chat") {
-    return sessionConversationId ? "この起動のチャット" : "起動ごとに新規";
-  }
-  return "毎回新しいチャット";
-}
-
-function modelIdForSearchItem(item: ModelSearchItem): string {
-  return String(item.profile_id || item.qualified_model_id || item.model_id || item.display_name || item.label || "").trim();
-}
-
-function modelLabelForSearchItem(item: ModelSearchItem): string {
-  const id = modelIdForSearchItem(item);
-  const label = String(item.display_name || item.label || id).trim();
-  const provider = String(item.provider_display_name || item.provider_id || "").trim();
-  return provider && !label.includes(provider) ? `${label} · ${provider}` : label;
-}
-
-function modelLabelFromId(value: string): string {
-  const text = value.trim();
-  if (!text) return "未指定";
-  const withoutProviderPrefix = text.includes("/") ? text.split("/").slice(1).join("/") : text;
-  return withoutProviderPrefix || text;
-}
-
-function cleanOptionalText(value: unknown): string | null {
-  const text = String(value ?? "").trim();
-  return text || null;
-}
-
-function cleanBool(value: unknown, fallback: boolean): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (["1", "true", "yes", "on"].includes(normalized)) return true;
-    if (["0", "false", "no", "off"].includes(normalized)) return false;
-  }
-  return fallback;
-}
-
 function focusComposer() {
   window.setTimeout(() => {
     const composer = document.querySelector("textarea");
     if (composer instanceof HTMLTextAreaElement) composer.focus();
   }, 0);
-}
-
-async function captureAudioEmbedding(durationMs: number, deviceId?: string): Promise<number[]> {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("このブラウザではマイクを使用できません。");
-  }
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: audioCaptureConstraints(deviceId) });
-  try {
-    const AudioContextClass = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextClass) {
-      throw new Error("このブラウザでは音声解析を使用できません。");
-    }
-    const context = new AudioContextClass();
-    const source = context.createMediaStreamSource(stream);
-    const analyser = context.createAnalyser();
-    analyser.fftSize = 1024;
-    source.connect(analyser);
-    const samples: number[] = [];
-    const data = new Float32Array(analyser.fftSize);
-    const startedAt = performance.now();
-    while (performance.now() - startedAt < durationMs) {
-      analyser.getFloatTimeDomainData(data);
-      for (let index = 0; index < data.length; index += 32) {
-        samples.push(data[index]);
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, 60));
-    }
-    await context.close();
-    return audioEmbedding(samples);
-  } finally {
-    stream.getTracks().forEach((track) => track.stop());
-  }
-}
-
-type ActiveAudioRecorder = {
-  stop: () => Promise<AmbientAudioRecording>;
-  cancel: () => void;
-};
-
-type AmbientAudioRecording = {
-  dataUrl: string;
-  mimeType: string;
-  extension: string;
-  size: number;
-  durationMs: number;
-};
-
-type SpeechRecognitionAlternativeLike = {
-  transcript?: string;
-};
-
-type SpeechRecognitionResultLike = {
-  isFinal?: boolean;
-  length?: number;
-  0?: SpeechRecognitionAlternativeLike;
-};
-
-type SpeechRecognitionEventLike = {
-  resultIndex?: number;
-  results?: ArrayLike<SpeechRecognitionResultLike>;
-};
-
-type SpeechRecognitionLike = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-  onerror: ((event: unknown) => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-};
-
-type SpeechRecognitionConstructorLike = new () => SpeechRecognitionLike;
-
-type SpeechRecognitionWindow = Window & {
-  SpeechRecognition?: SpeechRecognitionConstructorLike;
-  webkitSpeechRecognition?: SpeechRecognitionConstructorLike;
-};
-
-function startPinchSpeechRecognition(onTranscript: (transcript: string) => void): SpeechRecognitionLike | null {
-  const SpeechRecognitionConstructor = (window as SpeechRecognitionWindow).SpeechRecognition ?? (window as SpeechRecognitionWindow).webkitSpeechRecognition;
-  if (!SpeechRecognitionConstructor) return null;
-  const recognition = new SpeechRecognitionConstructor();
-  let finalTranscript = "";
-  let interimTranscript = "";
-  recognition.lang = navigator.language || "ja-JP";
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.onerror = () => undefined;
-  recognition.onend = () => undefined;
-  recognition.onresult = (event) => {
-    const results = event.results;
-    if (!results) return;
-    interimTranscript = "";
-    const startIndex = Math.max(0, event.resultIndex ?? 0);
-    for (let index = startIndex; index < results.length; index += 1) {
-      const result = results[index];
-      const text = String(result?.[0]?.transcript ?? "").trim();
-      if (!text) continue;
-      if (result?.isFinal) finalTranscript = `${finalTranscript} ${text}`.trim();
-      else interimTranscript = `${interimTranscript} ${text}`.trim();
-    }
-    onTranscript(`${finalTranscript} ${interimTranscript}`.trim());
-  };
-  try {
-    recognition.start();
-    return recognition;
-  } catch {
-    return null;
-  }
-}
-
-async function startPinchAudioRecorder(deviceId?: string): Promise<ActiveAudioRecorder> {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("このブラウザではマイクを使用できません。");
-  }
-  if (typeof MediaRecorder === "undefined") {
-    throw new Error("このブラウザでは音声録音を使用できません。");
-  }
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: audioCaptureConstraints(deviceId) });
-  const mimeType = preferredAudioMimeType();
-  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-  const chunks: Blob[] = [];
-  const startedAt = performance.now();
-  let stopped = false;
-
-  recorder.addEventListener("dataavailable", (event) => {
-    if (event.data.size > 0) chunks.push(event.data);
-  });
-  recorder.start(250);
-
-  const stopTracks = () => {
-    stream.getTracks().forEach((track) => track.stop());
-  };
-
-  return {
-    stop: () => new Promise<AmbientAudioRecording>((resolve, reject) => {
-      if (stopped) {
-        reject(new Error("録音はすでに停止しています。"));
-        return;
-      }
-      stopped = true;
-      recorder.addEventListener("stop", async () => {
-        try {
-          stopTracks();
-          const type = recorder.mimeType || mimeType || "audio/webm";
-          const blob = new Blob(chunks, { type });
-          resolve({
-            dataUrl: await blobToDataUrl(blob),
-            mimeType: type,
-            extension: audioExtension(type),
-            size: blob.size,
-            durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
-          });
-        } catch (error) {
-          reject(error);
-        }
-      }, { once: true });
-      recorder.stop();
-    }),
-    cancel: () => {
-      if (!stopped && recorder.state !== "inactive") {
-        stopped = true;
-        recorder.stop();
-      }
-      stopTracks();
-    },
-  };
-}
-
-function preferredAudioMimeType(): string {
-  for (const type of [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/mp4",
-    "audio/ogg;codecs=opus",
-  ]) {
-    if (MediaRecorder.isTypeSupported(type)) return type;
-  }
-  return "";
-}
-
-function audioExtension(mimeType: string): string {
-  const lowered = mimeType.toLowerCase();
-  if (lowered.includes("mp4") || lowered.includes("m4a")) return "m4a";
-  if (lowered.includes("ogg")) return "ogg";
-  if (lowered.includes("wav")) return "wav";
-  return "webm";
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error ?? new Error("録音データを読み取れませんでした。"));
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function startWakeListening(onEmbedding: (embedding: number[]) => Promise<void>, deviceId?: string): Promise<() => void> {
-  let stopped = false;
-  async function loop() {
-    while (!stopped) {
-      const embedding = await captureAudioEmbedding(700, deviceId);
-      if (stopped) return;
-      await onEmbedding(embedding).catch(() => undefined);
-      await new Promise((resolve) => window.setTimeout(resolve, 900));
-    }
-  }
-  void loop();
-  return () => {
-    stopped = true;
-  };
-}
-
-function audioCaptureConstraints(deviceId?: string): MediaTrackConstraints {
-  return {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true,
-    ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-  };
-}
-
-function videoCaptureConstraints(deviceId?: string): MediaTrackConstraints {
-  return {
-    width: { ideal: 640 },
-    height: { ideal: 480 },
-    facingMode: "user",
-    ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-  };
-}
-
-function audioEmbedding(samples: number[]): number[] {
-  const bucketCount = 16;
-  const stride = Math.max(1, Math.ceil(samples.length / bucketCount));
-  const features: number[] = [];
-  for (let bucket = 0; bucket < bucketCount; bucket += 1) {
-    const chunk = samples.slice(bucket * stride, (bucket + 1) * stride);
-    const energy = chunk.length ? chunk.reduce((sum, item) => sum + Math.abs(item), 0) / chunk.length : 0;
-    features.push(energy);
-  }
-  const norm = Math.sqrt(features.reduce((sum, item) => sum + item * item, 0)) || 1;
-  return features.map((item) => item / norm);
-}
-
-async function queryBrowserPermission(name: "microphone" | "camera"): Promise<string> {
-  if (!navigator.permissions?.query) return "unknown";
-  try {
-    const result = await navigator.permissions.query({ name } as PermissionDescriptor);
-    return result.state || "unknown";
-  } catch {
-    return "unknown";
-  }
-}
-
-function deviceLabel(device: MediaDeviceInfo, index: number, fallback: string): string {
-  return device.label || `${fallback} ${index + 1}`;
 }
 
 function approvalDecisionForChoice(choice: 2 | 3 | 4, target: AmbientApprovalTarget | null | undefined): "approve" | "reject" | null {

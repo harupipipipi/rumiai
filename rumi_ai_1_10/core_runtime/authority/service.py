@@ -14,6 +14,19 @@ from ..host_permissions import get_host_permission_definition
 
 AUTHORITY_APPROVAL_SCOPES = frozenset({"once", "conversation", "profile", "node"})
 
+RESOURCE_CONFIG_FIELDS: tuple[tuple[str, str], ...] = (
+    ("provider_id", "provider_ids"),
+    ("api_id", "api_ids"),
+    ("model_id", "model_ids"),
+    ("function_id", "function_ids"),
+    ("pack_id", "pack_ids"),
+    ("caller_pack_id", "caller_pack_ids"),
+    ("caller_function_id", "caller_function_ids"),
+    ("domain", "domains"),
+    ("host_action", "host_actions"),
+    ("operation", "host_actions"),
+)
+
 
 class AuthorityService:
     def __init__(
@@ -497,24 +510,18 @@ class AuthorityService:
 
     @staticmethod
     def _resource_allowed(config: dict[str, Any], resource: dict[str, Any]) -> bool:
-        checks = (
-            ("provider_ids", "provider_id"),
-            ("api_ids", "api_id"),
-            ("model_ids", "model_id"),
-            ("function_ids", "function_id"),
-            ("pack_ids", "pack_id"),
-            ("caller_pack_ids", "caller_pack_id"),
-            ("caller_function_ids", "caller_function_id"),
-            ("domains", "domain"),
-            ("host_actions", "host_action"),
-        )
-        for config_key, resource_key in checks:
+        for config_key, resource_keys in AuthorityService._config_resource_fields().items():
             if config_key not in config:
                 continue
             allowed = set(AuthorityService._string_values(config.get(config_key)))
             if not allowed:
                 return False
-            if str(resource.get(resource_key) or "") not in allowed:
+            resource_values = {
+                value
+                for resource_key in resource_keys
+                if (value := str(resource.get(resource_key) or "").strip())
+            }
+            if not resource_values.intersection(allowed):
                 return False
         if "ports" in config:
             allowed_ports = set(AuthorityService._port_values(config.get("ports")))
@@ -593,19 +600,7 @@ class AuthorityService:
     @staticmethod
     def _grant_config_from_resource(resource: dict[str, Any]) -> dict[str, Any]:
         config: dict[str, Any] = {}
-        mapping = {
-            "provider_id": "provider_ids",
-            "api_id": "api_ids",
-            "model_id": "model_ids",
-            "function_id": "function_ids",
-            "pack_id": "pack_ids",
-            "caller_pack_id": "caller_pack_ids",
-            "caller_function_id": "caller_function_ids",
-            "domain": "domains",
-            "host_action": "host_actions",
-            "operation": "host_actions",
-        }
-        for resource_key, config_key in mapping.items():
+        for resource_key, config_key in RESOURCE_CONFIG_FIELDS:
             value = str(resource.get(resource_key) or "").strip()
             if value:
                 config[config_key] = [value]
@@ -627,17 +622,7 @@ class AuthorityService:
         if not isinstance(client_config, dict):
             return grant_config
 
-        for key in (
-            "provider_ids",
-            "api_ids",
-            "model_ids",
-            "function_ids",
-            "pack_ids",
-            "caller_pack_ids",
-            "caller_function_ids",
-            "domains",
-            "host_actions",
-        ):
+        for key in AuthorityService._resource_config_keys():
             if key not in client_config or key not in grant_config:
                 continue
             base_values = AuthorityService._string_values(grant_config.get(key))
@@ -665,6 +650,17 @@ class AuthorityService:
             )
 
         return grant_config
+
+    @staticmethod
+    def _resource_config_keys() -> tuple[str, ...]:
+        return tuple(dict.fromkeys(config_key for _, config_key in RESOURCE_CONFIG_FIELDS))
+
+    @staticmethod
+    def _config_resource_fields() -> dict[str, tuple[str, ...]]:
+        fields: dict[str, list[str]] = {}
+        for resource_key, config_key in RESOURCE_CONFIG_FIELDS:
+            fields.setdefault(config_key, []).append(resource_key)
+        return {config_key: tuple(resource_keys) for config_key, resource_keys in fields.items()}
 
     @staticmethod
     def _principal_for_scope(request: AuthorityRequest, scope: str) -> str:

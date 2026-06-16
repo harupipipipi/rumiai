@@ -1,0 +1,154 @@
+import { useEffect, useMemo, useState } from "react";
+
+import { api, type Conversation, type ModelSearchItem } from "../lib/api";
+import { ambientTriggerClient, type AmbientRoutingConfig, type AmbientRoutingMode, type AmbientStatus } from "./ambientTriggerClient";
+import { conversationsToChatItems, normalizeRouting, routingLabel } from "./ambientRouting";
+
+export function useAmbientRouting({
+  status,
+  conversationId,
+  setStatus,
+  setBusy,
+  setMessage,
+  refresh,
+}: {
+  status: AmbientStatus | null;
+  conversationId: string | null | undefined;
+  setStatus: (status: AmbientStatus) => void;
+  setBusy: (busy: boolean) => void;
+  setMessage: (message: string | null) => void;
+  refresh: () => Promise<void>;
+}) {
+  const [chatPickerOpen, setChatPickerOpen] = useState(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationsLoading, setConversationsLoading] = useState(false);
+  const [routingMode, setRoutingMode] = useState<AmbientRoutingMode>("selected_chat");
+  const [routingConversationId, setRoutingConversationId] = useState<string | null>(conversationId || null);
+  const [routingGroupEnabled, setRoutingGroupEnabled] = useState(true);
+  const [routingGroupId, setRoutingGroupId] = useState("gesture");
+  const [routingGroupTitle, setRoutingGroupTitle] = useState("Gesture");
+  const [routingModel, setRoutingModel] = useState("");
+  const [modelQuery, setModelQuery] = useState("");
+  const [modelResults, setModelResults] = useState<ModelSearchItem[]>([]);
+  const [modelLoading, setModelLoading] = useState(false);
+
+  useEffect(() => {
+    const routing = normalizeRouting(status?.routing, conversationId || null);
+    setRoutingMode(routing.mode);
+    setRoutingConversationId(routing.conversation_id ?? null);
+    setRoutingGroupEnabled(routing.group_enabled);
+    setRoutingGroupId(routing.group_id || "gesture");
+    setRoutingGroupTitle(routing.group_title || "Gesture");
+    setRoutingModel(routing.model || "");
+  }, [
+    conversationId,
+    status?.routing?.conversation_id,
+    status?.routing?.group_enabled,
+    status?.routing?.group_id,
+    status?.routing?.group_title,
+    status?.routing?.mode,
+    status?.routing?.model,
+  ]);
+
+  const routingNeedsNewChatSettings = routingMode === "startup_new_chat" || routingMode === "always_new_chat";
+  const routingSelectedConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === routingConversationId) ?? null,
+    [conversations, routingConversationId],
+  );
+  const routingChatItems = useMemo(() => conversationsToChatItems(conversations), [conversations]);
+  const routingSummary = useMemo(
+    () => routingLabel(routingMode, routingSelectedConversation, routingConversationId, status?.routing?.session_conversation_id),
+    [routingConversationId, routingMode, routingSelectedConversation, status?.routing?.session_conversation_id],
+  );
+
+  async function loadConversations() {
+    setConversationsLoading(true);
+    try {
+      const result = await api.listConversations({ limit: 80 });
+      setConversations(result.conversations);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "チャット一覧を読み込めませんでした。");
+    } finally {
+      setConversationsLoading(false);
+    }
+  }
+
+  async function openChatPicker() {
+    setChatPickerOpen(true);
+    await loadConversations();
+  }
+
+  async function saveRouting(patch: Partial<AmbientRoutingConfig>, success?: string) {
+    const next = normalizeRouting({
+      mode: routingMode,
+      conversation_id: routingConversationId,
+      group_enabled: routingGroupEnabled,
+      group_id: routingGroupId,
+      group_title: routingGroupTitle,
+      model: routingModel,
+      ...patch,
+    }, conversationId || null);
+    setRoutingMode(next.mode);
+    setRoutingConversationId(next.conversation_id ?? null);
+    setRoutingGroupEnabled(next.group_enabled);
+    setRoutingGroupId(next.group_id || "gesture");
+    setRoutingGroupTitle(next.group_title || "Gesture");
+    setRoutingModel(next.model || "");
+    setBusy(true);
+    try {
+      const configured = await ambientTriggerClient.configure(next);
+      setStatus(configured);
+      if (success) setMessage(success);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "送信先を保存できませんでした。");
+      await refresh().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function selectConversationForRouting(chatId: string) {
+    setChatPickerOpen(false);
+    await saveRouting({ mode: "selected_chat", conversation_id: chatId }, "このチャットに送ります。");
+  }
+
+  async function searchRoutingModels(query = modelQuery) {
+    const trimmed = query.trim();
+    setModelLoading(true);
+    try {
+      const result = await api.searchModels({ query: trimmed, max_results: 12 });
+      setModelResults(result.models ?? []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "モデルを検索できませんでした。");
+    } finally {
+      setModelLoading(false);
+    }
+  }
+
+  return {
+    chatPickerOpen,
+    setChatPickerOpen,
+    conversationsLoading,
+    routingMode,
+    routingConversationId,
+    routingGroupEnabled,
+    routingGroupId,
+    setRoutingGroupId,
+    routingGroupTitle,
+    setRoutingGroupTitle,
+    routingModel,
+    setRoutingModel,
+    modelQuery,
+    setModelQuery,
+    modelResults,
+    modelLoading,
+    routingNeedsNewChatSettings,
+    routingChatItems,
+    routingSummary,
+    loadConversations,
+    openChatPicker,
+    saveRouting,
+    selectConversationForRouting,
+    searchRoutingModels,
+  };
+}

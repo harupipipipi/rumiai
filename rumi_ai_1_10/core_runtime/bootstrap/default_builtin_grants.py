@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from ..host_permissions import load_host_permission_registry
+
 
 AUTHORITY_WINDOW_PRINCIPAL = "system:authority-approval-window"
 HOST_CAPABILITY_BROKER_PRINCIPAL = "system:host-capability-broker"
@@ -28,28 +30,22 @@ HOST_BROKER_PERMISSIONS = (
     "host.stream.stop",
 )
 
+HOST_CAPABILITIES_PACK_DEFAULT_GRANT_EXCLUSIONS = frozenset(
+    {
+        "host.intent.execute",
+        "host.stream.start",
+        "host.stream.stop",
+        "host.process.exec_guarded",
+    }
+)
+
 HOST_CAPABILITIES_PACK_PERMISSIONS = (
     "function.call",
-    "host.permission.status",
-    "host.permission.open_settings",
-    "host.screen.capture",
-    "host.accessibility.read",
-    "host.accessibility.mutate",
-    "host.input.pointer",
-    "host.input.keyboard",
-    "host.clipboard.read",
-    "host.clipboard.write",
-    "host.microphone.capture",
-    "host.audio.capture",
-    "host.audio.output",
-    "host.speech.transcribe",
-    "host.speech.synthesize",
-    "host.camera.capture",
-    "host.file.open_dialog",
-    "host.file.read_user_selected",
-    "host.file.write_user_selected",
-    "host.process.open_url",
-    "host.process.launch_app",
+    *(
+        permission_id
+        for permission_id in load_host_permission_registry()
+        if permission_id not in HOST_CAPABILITIES_PACK_DEFAULT_GRANT_EXCLUSIONS
+    ),
 )
 
 

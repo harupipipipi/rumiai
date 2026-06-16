@@ -2588,7 +2588,7 @@ aliases:
     owner: ambient
     reason: legacy caller compatibility
     remove_after: v2.3
-    replacement: defaultspack.ambient.permission_grant
+    replacement: defaultspack.ambient.permission.grant
   defaults.ambient.permission_revoke:
     owner: ambient
     reason: legacy caller compatibility
@@ -2598,7 +2598,7 @@ aliases:
     owner: ambient
     reason: legacy caller compatibility
     remove_after: v2.3
-    replacement: defaultspack.ambient.permission_revoke
+    replacement: defaultspack.ambient.permission.revoke
   defaults.ambient.status:
     owner: ambient
     reason: legacy caller compatibility
