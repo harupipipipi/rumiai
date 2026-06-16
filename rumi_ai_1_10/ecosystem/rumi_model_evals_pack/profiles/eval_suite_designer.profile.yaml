@@ -1,0 +1,23 @@
+profile_id: rumi_model_evals.eval_suite_designer
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: モデル評価スイート設計
+  en: Model Eval Suite Designer
+description:
+  ja: contract/smoke/e2e の層を分け、評価目的、フィクスチャ、メトリクス、ゲートを設計するローカル優先プロファイル。
+  en: Local-first profile for designing layered contract, smoke, and e2e model eval suites.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.local_agent
+enabled_capabilities: [eval_intake, contract_eval_design, e2e_eval_design, pass_k_metrics, safety]
+prompt_set: eval_suite_designer
+policy:
+  network_default: none
+  provider_calls_require_approval: true
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  audit_level: strict
+  local_first: true

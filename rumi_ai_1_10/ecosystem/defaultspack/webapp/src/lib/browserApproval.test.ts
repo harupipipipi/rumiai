@@ -161,6 +161,33 @@ test("accepts request id browser approvals without legacy tokens", () => {
   });
 });
 
+test("does not treat model authority approvals as browser approvals", () => {
+  const approval = pendingBrowserApproval([
+    agentMessage({
+      events: [{
+        type: "approval_requested",
+        approval_kind: "authority",
+        authority: true,
+        requires_approval: true,
+        approval_request_id: "auth_model_1",
+        principal_id: "conversation:abc",
+        permission_id: "model.invoke",
+        resource: {
+          kind: "model",
+          provider_id: "opencode-go",
+          api_id: "legacy",
+          model_id: "qwen3.5-plus",
+          model_ref: "opencode-go/qwen3.5-plus",
+        },
+        risk_level: "medium",
+        display_summary: "Model invocation: opencode-go/qwen3.5-plus",
+      }],
+    }),
+  ]);
+
+  assert.equal(approval, null);
+});
+
 test("browserApprovalRuntimeContent includes request id without exposing the token", () => {
   const text = browserApprovalRuntimeContent(
     {

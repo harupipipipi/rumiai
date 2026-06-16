@@ -1,0 +1,32 @@
+version: rumi.runtime_benchmark.environment_descriptor.v1
+pack_id: rumi_runtime_benchmark_pack
+network_default: none
+
+descriptor_fields:
+  required:
+    - environment_descriptor_id
+    - os_family
+    - runtime_surface
+    - python_version
+    - node_version
+    - git_ref
+    - dependency_lock_state
+    - network_policy
+    - cache_policy
+    - warm_cold_policy_id
+  optional:
+    - cpu_arch
+    - memory_class
+    - container_or_sandbox
+    - provider_label
+    - model_label
+
+redaction:
+  disallowed:
+    - secret_values
+    - account_ids
+    - private_hostnames
+  allowed:
+    - provider_label_without_credentials
+    - model_label
+    - generic_os_family

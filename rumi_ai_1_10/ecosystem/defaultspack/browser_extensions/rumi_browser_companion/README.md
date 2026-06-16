@@ -98,9 +98,19 @@ The extension talks to these local endpoints:
       "ok": true,
       "result": {
         "snapshot": {
+          "schema_version": "semantic_dom_v2",
           "url": "https://example.com",
           "title": "Example",
-          "nodes": []
+          "nodes": [
+            {
+              "element_id": "rumi-el-...",
+              "semantic_id": "button:button:submit",
+              "accessible_name": "Submit",
+              "labels": ["Submit"],
+              "action_hints": ["extract", "click", "press"],
+              "selector_hint": "button.primary"
+            }
+          ]
         }
       }
     }
@@ -120,12 +130,15 @@ The extension talks to these local endpoints:
 - `page.press`
 - `page.scroll`
 - `page.extract`
+- `page.highlight`
+- `page.clear_highlight`
 
 ## Safety Notes
 
 - This extension can inspect and act on pages in the user's real browser profile.
 - Only pair it with a local Rumi server you control.
 - Do not share the pairing token.
+- The pairing token is stored in browser-local extension storage and is not synced between browser profiles.
 - Capture and tab selection may foreground the browser tab.
 - DOM actions are best-effort and may not work on all pages.
 

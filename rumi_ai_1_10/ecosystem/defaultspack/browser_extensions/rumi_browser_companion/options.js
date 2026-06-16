@@ -24,7 +24,7 @@ pollNowButton.addEventListener("click", () => {
 });
 
 async function loadSettings() {
-  const stored = await chrome.storage.sync.get(STORAGE_KEY);
+  const stored = await chrome.storage.local.get(STORAGE_KEY);
   const settings = {
     ...DEFAULT_SETTINGS,
     ...(stored[STORAGE_KEY] || {})
@@ -45,7 +45,7 @@ async function saveSettings() {
     clientLabel: String(form.clientLabel.value || "").trim(),
     pollIntervalMinutes: Math.max(1, Number(form.pollIntervalMinutes.value) || 1)
   };
-  await chrome.storage.sync.set({ [STORAGE_KEY]: settings });
+  await chrome.storage.local.set({ [STORAGE_KEY]: settings });
   setStatus("Settings saved.", true);
 }
 

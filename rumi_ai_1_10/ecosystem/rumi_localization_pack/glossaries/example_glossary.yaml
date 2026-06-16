@@ -1,0 +1,70 @@
+glossary:
+  id: rumi_localization_seed_glossary
+  owner: rumi_localization_pack
+  change_control: issue_record_required
+  locale_pairs:
+  - en-ja
+  - en-es
+  - en-fr
+  - ja-en
+  default_term_policy: preserve_locked_terms
+  terms:
+  - term_id: term_rumi
+    source: Rumi
+    allowed_targets:
+      ja: Rumi
+      es: Rumi
+      fr: Rumi
+    forbidden_targets:
+    - Rumi AI translated as a generic assistant
+    category: brand
+    locked: true
+    notes: Product brand; never translate, abbreviate, or inflect.
+  - term_id: term_defaultspack
+    source: defaultspack
+    allowed_targets:
+      ja: defaultspack
+      es: defaultspack
+      fr: defaultspack
+    forbidden_targets:
+    - defaults package
+    - paquet par defaut
+    category: product
+    locked: true
+    notes: Pack identifier; preserve casing and spelling in all locales.
+  - term_id: term_setup_pack
+    source: setup pack
+    allowed_targets:
+      ja: setup pack
+      es: paquete de configuracion
+      fr: pack de configuration
+    forbidden_targets:
+    - installer
+    - plugin bundle
+    category: product
+    locked: false
+    notes: Translate for reader clarity unless referring to a literal pack_id.
+  - term_id: term_all_ok
+    source: all-ok
+    allowed_targets:
+      ja: all-ok
+      es: all-ok
+      fr: all-ok
+    forbidden_targets:
+    - all okay
+    - todo correcto
+    category: code
+    locked: true
+    notes: Permission mode token; preserve exactly.
+  - term_id: term_user_name_placeholder
+    source: "{{user_name}}"
+    allowed_targets:
+      ja: "{{user_name}}"
+      es: "{{user_name}}"
+      fr: "{{user_name}}"
+    forbidden_targets:
+    - user_name
+    - nombre_de_usuario
+    category: placeholder
+    locked: true
+    notes: Runtime placeholder; copy byte-for-byte.

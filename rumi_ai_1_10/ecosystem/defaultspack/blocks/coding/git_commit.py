@@ -50,7 +50,15 @@ def run(input_data, context=None):
 
     try:
         git = GitOps(workspace.root_path)
-        result = git.commit(message, all_tracked=all_tracked, paths=paths)
+        result = git.commit(
+            message,
+            all_tracked=all_tracked,
+            paths=paths,
+            actor_id=input_data.get("actor_id") or input_data.get("agent_id"),
+            agent_role=input_data.get("agent_role"),
+            session_id=input_data.get("session_id"),
+            metadata=input_data.get("metadata") if isinstance(input_data.get("metadata"), dict) else None,
+        )
         record_execution(operation, "high", {"message": message, "paths": paths}, commit_hash=result.get("commit_hash"))
         return ok(with_workspace(result, workspace))
     except WorkspacePathViolation as e:

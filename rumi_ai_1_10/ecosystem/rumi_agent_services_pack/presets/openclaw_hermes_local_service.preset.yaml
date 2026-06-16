@@ -1,0 +1,15 @@
+id: openclaw_hermes_local_service
+name: OpenClaw/Hermes Style Local Service
+profile: rumi_agent_services.service_director
+workflow: autonomous_project_service
+enabled_capabilities: [planning, subagent_coordination, coding_workspace, artifact_delivery, safety_review]
+ui_panels: [chat, plan, workers, diffs, artifacts]
+behavior: [local_orchestrator, explicit_handoffs, audit_trail, conservative_autonomy]
+policy:
+  network_default: deny
+  subagents_require_approval: true
+  terminal_requires_approval: true
+  file_write_requires_approval: true
+task_defaults:
+  output:
+    type: audited_work_package_summary

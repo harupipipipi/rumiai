@@ -1,0 +1,18 @@
+example:
+  id: policy_brief_doc
+  pack_id: rumi_office_authoring_pack
+  scenario: A policy brief document outline is paired with citation insertion targets
+    and evidence owner handoff.
+  input_refs:
+  - workspace_ref:case-file
+  evidence_refs:
+  - evidence:review-note
+  - evidence:source-fragment
+  handoff_owner: rumi_evidence_dossier_pack
+  review_gate: all_blocking_checks
+  expected_result: reviewed_handoff_packet
+  must_not:
+  - external_action
+  - runtime_execution
+  - secret_material
+  status: ready_for_owner_handoff

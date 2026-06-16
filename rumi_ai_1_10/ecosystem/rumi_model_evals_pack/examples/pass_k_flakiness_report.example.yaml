@@ -1,0 +1,10 @@
+example_id: rumi_model_evals.examples.pass_k_flakiness_report
+preset: routing_fit_matrix
+title: Summarize pass@k and flakiness for a coding model
+goal: Convert local eval run records into pass@k, pass^k, flakiness, and routing fit notes.
+constraints:
+  network: none
+  run_records: local_or_user_provided
+deliverable:
+  type: metric_set_and_fit_rows
+  required_sections: [sample_count, pass_at_k, pass_power_k, flakiness, cost_latency, caveats, fit_matrix_update]

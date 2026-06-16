@@ -1,0 +1,94 @@
+catalog_id: rumi_mcp_gateway.connector_catalog
+version: 1
+pack_id: rumi_mcp_gateway_pack
+purpose: Catalog unsupported MCP servers without shipping executable connector code.
+default_posture:
+  local_first: true
+  executable_connector_code: false
+  network_default: deny
+  unknown_server_default_risk: high
+  connection_owner: defaultspack.tool.mcp_connect
+  listing_owner: defaultspack.tool.mcp_list
+review_fields:
+  - server_id
+  - display_name
+  - claimed_capabilities
+  - transport
+  - requested_network
+  - requested_filesystem_scope
+  - requested_credentials
+  - proposed_namespace
+  - approval_reason
+categories:
+  - category_id: filesystem
+    title: Filesystem and workspace context
+    discovery_cues:
+      - file read or search tools
+      - workspace indexing tools
+      - document or artifact access tools
+    default_risk: high
+    required_review:
+      - filesystem root scope
+      - write capability claims
+      - path traversal behavior
+    route_hint: mcp_gateway.filesystem
+  - category_id: source_control
+    title: Source control and issue trackers
+    discovery_cues:
+      - repository metadata tools
+      - pull request or issue tools
+      - branch or commit tools
+    default_risk: high
+    required_review:
+      - remote host
+      - write operations
+      - credential source
+    route_hint: mcp_gateway.source_control
+  - category_id: browser_web
+    title: Browser and web data
+    discovery_cues:
+      - fetch tools
+      - browser automation tools
+      - scraping or indexing tools
+    default_risk: high
+    required_review:
+      - allowed domains
+      - data retention claims
+      - form submission capability
+    route_hint: mcp_gateway.browser_web
+  - category_id: productivity
+    title: Notes, docs, mail, calendar, and tasks
+    discovery_cues:
+      - note search tools
+      - mail or calendar tools
+      - task or project tools
+    default_risk: high
+    required_review:
+      - user account scope
+      - write or send operations
+      - export behavior
+    route_hint: mcp_gateway.productivity
+  - category_id: database
+    title: Databases and data warehouses
+    discovery_cues:
+      - query tools
+      - schema inspection tools
+      - migration or write tools
+    default_risk: high
+    required_review:
+      - read only versus write access
+      - production data indicator
+      - query safety limits
+    route_hint: mcp_gateway.database
+  - category_id: ai_tooling
+    title: AI tooling and model adjuncts
+    discovery_cues:
+      - embedding tools
+      - vector search tools
+      - model or agent orchestration tools
+    default_risk: medium
+    required_review:
+      - data sent to model services
+      - tool recursion behavior
+      - external provider dependency
+    route_hint: mcp_gateway.ai_tooling

@@ -1,0 +1,23 @@
+template_id: rumi_voice_mobile.mobile_handoff_receipt_template.v1
+owner: rumi_voice_mobile_pack
+purpose: Template for recording reviewed voice/mobile handoff receipts.
+fields:
+  receipt_id: required
+  source_surface: voice_memo_or_mobile_notification
+  intent_class: required
+  transcript_ref: required_when_voice
+  consent_refs: required
+  handoff_target_pack: required
+  evidence_refs: required
+  reviewer_decision: required
+reviewer_decisions:
+  - accept_handoff
+  - needs_consent
+  - needs_transcript_review
+  - blocked_high_risk_action
+  - cancelled
+template_rules:
+  - no_audio_bytes
+  - no_transcript_secret_values
+  - no_delivery_tokens
+  - link_owner_pack_receipts_by_ref

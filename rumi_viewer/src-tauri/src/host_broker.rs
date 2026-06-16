@@ -38,6 +38,8 @@ const REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const HELPER_TIMEOUT: Duration = Duration::from_secs(45);
 const APPROVAL_TOKEN_VERSION: &str = "v1";
+const HOST_BROKER_DISABLED_REASON: &str =
+    "Viewer host broker is only enabled on macOS and Windows.";
 
 const ARG_HASH_IGNORE_KEYS: &[&str] = &[
     "approval_token",
@@ -95,22 +97,20 @@ impl Drop for RequestSlot {
 
 impl HostBrokerRuntime {
     pub fn start(config: &AppConfig) -> Result<Self> {
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             return Ok(Self {
                 inner: Arc::new(HostBrokerShared {
                     config: config.clone(),
                     token: None,
-                    status: Mutex::new(HostBrokerStatus::disabled(
-                        "Viewer host broker is only enabled on macOS.",
-                    )),
+                    status: Mutex::new(HostBrokerStatus::disabled(HOST_BROKER_DISABLED_REASON)),
                     active_requests: Mutex::new(0),
                     used_approval_tokens: Mutex::new(HashSet::new()),
                 }),
             });
         }
 
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         {
             fs::create_dir_all(config.host_broker_dir()).with_context(|| {
                 format!(
@@ -1260,6 +1260,17 @@ mod tests {
             "direct-token".to_string(),
         );
         assert_eq!(parse_auth_token(&headers).as_deref(), Some("direct-token"));
+    }
+
+    #[test]
+    fn disabled_reason_names_supported_host_broker_platforms() {
+        assert!(HOST_BROKER_DISABLED_REASON.contains("macOS and Windows"));
+        let status = HostBrokerStatus::disabled(HOST_BROKER_DISABLED_REASON);
+        assert!(!status.enabled);
+        assert_eq!(
+            status.recovery.as_deref(),
+            Some(HOST_BROKER_DISABLED_REASON)
+        );
     }
 
     #[test]

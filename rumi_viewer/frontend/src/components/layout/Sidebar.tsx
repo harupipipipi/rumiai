@@ -10,6 +10,8 @@ type NavGroup = {
   items: { to: string; icon: typeof Home; label: string }[];
 };
 
+const sidebarAnimation = 'duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]';
+
 export function Sidebar() {
   const t = useT();
   const location = useLocation();
@@ -49,43 +51,90 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "flex-shrink-0 flex flex-col bg-bg-sidebar border-r border-border transition-[width] duration-[var(--transition-slow)] overflow-hidden",
+        "flex-shrink-0 flex flex-col bg-bg-sidebar border-r border-border transition-[width] overflow-hidden will-change-[width]",
+        sidebarAnimation,
         isSidebarOpen ? "w-[240px]" : "w-[56px]"
       )}
     >
       {/* Brand + Toggle */}
-      <div className={cn("flex items-center h-14 border-b border-border", isSidebarOpen ? "px-4 justify-between" : "justify-center")}>
-        {isSidebarOpen && (
-          <span className="text-base font-semibold tracking-tight text-text-main">Rumi AI</span>
+      <div
+        className={cn(
+          "grid h-14 grid-cols-[minmax(0,1fr)_32px] items-center overflow-hidden border-b border-border transition-[padding]",
+          sidebarAnimation,
+          isSidebarOpen ? "px-4" : "px-3",
         )}
+      >
+        <span
+          className={cn(
+            "block min-w-0 overflow-hidden whitespace-nowrap text-base font-semibold tracking-tight text-text-main transition-[max-width,opacity,transform]",
+            sidebarAnimation,
+            isSidebarOpen ? "max-w-32 translate-x-0 opacity-100" : "max-w-0 -translate-x-2 opacity-0",
+          )}
+          aria-hidden={!isSidebarOpen}
+        >
+          Rumi AI
+        </span>
         <button
           onClick={() => setSidebarOpen(!isSidebarOpen)}
-          className="p-1.5 rounded-md text-text-muted hover:bg-bg-hover hover:text-text-main transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+          className={cn(
+            "justify-self-center rounded-md p-1.5 text-text-muted transition-[background-color,color,transform] hover:bg-bg-hover hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]",
+            sidebarAnimation,
+            !isSidebarOpen && "scale-105",
+          )}
           aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
         >
-          <PanelLeft className={cn("w-4 h-4 transition-transform duration-[var(--transition-slow)]", !isSidebarOpen && "rotate-180")} />
+          <PanelLeft className={cn("w-4 h-4 transition-transform", sidebarAnimation, !isSidebarOpen && "rotate-180")} />
         </button>
       </div>
 
       {/* Navigation */}
-      <nav className={cn("flex-1 overflow-y-auto py-3", isSidebarOpen ? "px-3" : "px-1.5")} aria-label="Main navigation">
-        <ul className="flex flex-col gap-4">
+      <nav
+        className={cn(
+          "flex-1 overflow-y-auto py-3 transition-[padding]",
+          sidebarAnimation,
+          isSidebarOpen ? "px-3" : "px-1.5",
+        )}
+        aria-label="Main navigation"
+      >
+        <ul
+          className={cn(
+            "flex flex-col transition-[gap]",
+            sidebarAnimation,
+            isSidebarOpen ? "gap-4" : "gap-2",
+          )}
+        >
           {navGroups.map((group, groupIndex) => (
             <li key={group.id} className="flex flex-col gap-1">
-              {isSidebarOpen && (
+              {groupIndex > 0 && (
                 <div
                   className={cn(
-                    "px-3 pt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-text-muted/70",
-                    groupIndex > 0 && "border-t border-border/60 pt-3",
+                    "mx-2 h-px bg-border/60 transition-[margin,opacity]",
+                    sidebarAnimation,
+                    isSidebarOpen ? "my-0 opacity-0" : "my-1 opacity-100",
                   )}
-                >
-                  {groupLabels[group.id]}
-                </div>
+                  aria-hidden="true"
+                />
               )}
-              {groupIndex > 0 && !isSidebarOpen && (
-                <div className="mx-2 my-1 h-px bg-border/60" aria-hidden="true" />
-              )}
-              <ul className="flex flex-col gap-1">
+              <div
+                className={cn(
+                  "overflow-hidden px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-text-muted/70 transition-[max-height,padding,opacity,transform,border-color]",
+                  sidebarAnimation,
+                  groupIndex > 0 && "border-t border-border/60",
+                  isSidebarOpen
+                    ? cn("max-h-10 translate-x-0 pt-1 opacity-100", groupIndex > 0 && "pt-3")
+                    : "max-h-0 -translate-x-1 pt-0 opacity-0 border-transparent",
+                )}
+                aria-hidden={!isSidebarOpen}
+              >
+                {groupLabels[group.id]}
+              </div>
+              <ul
+                className={cn(
+                  "flex flex-col transition-[gap]",
+                  sidebarAnimation,
+                  isSidebarOpen ? "gap-1" : "gap-1.5",
+                )}
+              >
                 {group.items.map((link) => {
                   const isActive =
                     location.pathname === link.to ||
@@ -95,20 +144,36 @@ export function Sidebar() {
                       <Link
                         to={link.to}
                         title={!isSidebarOpen ? link.label : undefined}
+                        aria-label={link.label}
                         aria-current={isActive ? 'page' : undefined}
                         className={cn(
-                          "group relative flex items-center rounded-lg transition-colors duration-[var(--transition-fast)] text-sm font-medium",
-                          isSidebarOpen ? "gap-3 px-3 py-2" : "justify-center p-2.5",
+                          "group relative flex items-center rounded-lg text-sm font-medium transition-[gap,padding,background-color,color]",
+                          sidebarAnimation,
+                          isSidebarOpen ? "gap-3 px-3 py-2" : "justify-center gap-0 p-2.5",
                           isActive
                             ? "bg-accent/8 text-accent"
                             : "text-text-muted hover:bg-bg-hover hover:text-text-main"
                         )}
                       >
-                        {isActive && isSidebarOpen && (
-                          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-accent rounded-r-full" />
-                        )}
+                        <div
+                          className={cn(
+                            "absolute left-0 top-1/2 w-[3px] -translate-y-1/2 rounded-r-full bg-accent transition-[height,opacity]",
+                            sidebarAnimation,
+                            isActive && isSidebarOpen ? "h-4 opacity-100" : "h-2 opacity-0",
+                          )}
+                          aria-hidden="true"
+                        />
                         <link.icon className={cn("w-[18px] h-[18px] shrink-0", isActive ? "text-accent" : "text-text-muted group-hover:text-text-main")} />
-                        {isSidebarOpen && <span>{link.label}</span>}
+                        <span
+                          className={cn(
+                            "block min-w-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform]",
+                            sidebarAnimation,
+                            isSidebarOpen ? "max-w-40 translate-x-0 opacity-100" : "max-w-0 -translate-x-2 opacity-0",
+                          )}
+                          aria-hidden={!isSidebarOpen}
+                        >
+                          {link.label}
+                        </span>
                       </Link>
                     </li>
                   );
@@ -121,13 +186,21 @@ export function Sidebar() {
 
       {/* User section */}
       <div className="border-t border-border">
-        <div className={cn(isSidebarOpen ? "p-3" : "p-1.5 flex justify-center")}>
+        <div
+          className={cn(
+            "transition-[padding]",
+            sidebarAnimation,
+            isSidebarOpen ? "p-3" : "flex justify-center p-1.5",
+          )}
+        >
           <Link
             to={panelRoutes.settings}
             title={!isSidebarOpen ? profile.username : undefined}
+            aria-label={profile.username}
             className={cn(
-              "flex items-center rounded-lg transition-colors hover:bg-bg-hover",
-              isSidebarOpen ? "gap-3 p-2 w-full" : "p-2 justify-center"
+              "flex items-center rounded-lg transition-[gap,padding,background-color] hover:bg-bg-hover",
+              sidebarAnimation,
+              isSidebarOpen ? "gap-3 p-2 w-full" : "justify-center gap-0 p-2"
             )}
           >
             {profile.avatar ? (
@@ -137,11 +210,16 @@ export function Sidebar() {
                 {profile.username.charAt(0).toUpperCase()}
               </div>
             )}
-            {isSidebarOpen && (
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-text-main truncate">{profile.username}</div>
-              </div>
-            )}
+            <div
+              className={cn(
+                "min-w-0 flex-1 overflow-hidden transition-[max-width,opacity,transform]",
+                sidebarAnimation,
+                isSidebarOpen ? "max-w-32 translate-x-0 opacity-100" : "max-w-0 -translate-x-2 opacity-0",
+              )}
+              aria-hidden={!isSidebarOpen}
+            >
+              <div className="truncate text-sm font-medium text-text-main">{profile.username}</div>
+            </div>
           </Link>
         </div>
       </div>

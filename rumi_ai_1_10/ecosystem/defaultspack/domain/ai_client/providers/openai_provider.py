@@ -46,13 +46,13 @@ class OpenAIProvider(BaseProvider):
             h["Content-Type"] = content_type
         return h
 
-    def _request_json(self, path, body):
+    def _request_json(self, path, body, *, timeout=120.0):
         """POST して JSON をパースして返す"""
         url = self.BASE_URL + path
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
         try:
-            with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120) as resp:
+            with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout) as resp:
                 raw_bytes = resp.read().decode("utf-8")
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
@@ -64,14 +64,14 @@ class OpenAIProvider(BaseProvider):
         except (json.JSONDecodeError, ValueError) as e:
             raise RuntimeError("OpenAI API returned invalid JSON: {}".format(raw_bytes[:500]))
 
-    def _request_stream(self, path, body):
+    def _request_stream(self, path, body, *, timeout=120.0):
         """POST して SSE ストリームを返す (generator)"""
         url = self.BASE_URL + path
         body["stream"] = True
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
         try:
-            resp = urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120)
+            resp = urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout)
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
             raise RuntimeError("OpenAI API error {}: {}".format(e.code, err_body))
@@ -246,6 +246,22 @@ class OpenAIProvider(BaseProvider):
             translated["reasoning_effort"] = "high" if thinking_level == "xhigh" else thinking_level
         return translated
 
+    @staticmethod
+    def _request_timeout(params):
+        raw = dict(params or {})
+        value = raw.get("request_timeout", raw.get("timeout", 120))
+        try:
+            timeout = float(value)
+        except (TypeError, ValueError):
+            timeout = 120.0
+        return max(2.0, min(timeout, 120.0))
+
+    def _request_timeout_kwargs(self, params):
+        raw = dict(params or {})
+        if "request_timeout" not in raw and "timeout" not in raw:
+            return {}
+        return {"timeout": self._request_timeout(raw)}
+
     def _translate_model_params(self, model, params):
         del model
         return dict(params or {})
@@ -306,7 +322,7 @@ class OpenAIProvider(BaseProvider):
         if tools:
             body["tools"] = tools
         self._copy_chat_params(body, params)
-        raw = self._request_json("/chat/completions", body)
+        raw = self._request_json("/chat/completions", body, **self._request_timeout_kwargs(params))
         return self.parse_response(raw)
 
     def stream(self, model, messages, tools, params):
@@ -317,7 +333,7 @@ class OpenAIProvider(BaseProvider):
             body["tools"] = tools
         self._copy_chat_params(body, params)
         body.setdefault("stream_options", {"include_usage": True})
-        resp = self._request_stream("/chat/completions", body)
+        resp = self._request_stream("/chat/completions", body, **self._request_timeout_kwargs(params))
         tool_call_state = {}
         try:
             for payload in self._parse_sse_lines(resp):

@@ -1,0 +1,38 @@
+example:
+  id: biology_uncertainty_report
+  user_request: Explain the full ATP yield of cellular respiration from my notes.
+  input_state: local_artifacts_supplied
+  local_notes:
+  - note_id: note_bio_02
+    title: Biology notes, glycolysis day
+    spans:
+    - span_id: bio_02_s1
+      summary: Glycolysis splits glucose into two pyruvate molecules.
+    - span_id: bio_02_s2
+      summary: The note mentions ATP investment and payoff but does not cover Krebs cycle or electron transport.
+  expected_result: progress_report_handoff_packet
+  expected_packet:
+    artifact_type: progress_report
+    handoff_owner: rumi_document_intelligence_pack
+    source_note_ids:
+    - note_bio_02
+    uncertainty_level: high_due_to_missing_notes
+    evidence_summary:
+    - evidence_id: ev_bio_glycolysis_01
+      source_note_id: note_bio_02
+      span_id: bio_02_s1
+      summary: Glycolysis is present in the local notes.
+    uncertainty_notes:
+    - skill_id: respiration_atp_yield
+      reason: Local notes are insufficient for total ATP yield because Krebs cycle and electron transport spans are missing.
+      safe_next_step: Ask for the missing lecture notes or hand off parsing of newly supplied local material.
+    uncertainty_or_limitations:
+    - Can discuss glycolysis from note_bio_02, but must not guess total ATP yield.
+  must_include:
+  - evidence_ids
+  - uncertainty_or_limitations
+  - handoff_owner
+  must_not:
+  - external_action
+  - uncited_claim
+  - credential_requirement

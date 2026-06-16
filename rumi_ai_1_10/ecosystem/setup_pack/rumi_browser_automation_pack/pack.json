@@ -1,0 +1,49 @@
+{
+  "pack_id": "rumi_browser_automation_pack",
+  "display_name": "Rumi Browser Automation Pack",
+  "description": "Declarative browser task playbooks for safe page operation, QA, collection, and visual checks.",
+  "target_pack_id": "rumi_browser_automation_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    },
+    {
+      "pack_id": "rumi_default_tools_pack",
+      "version": ">=1.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "browser_execution": "do_not_override_rumi_default_tools_pack",
+    "semantic_dom": "prefer_rumi_browser_element_pack_when_installed",
+    "tool_aliases": "prefer_explicit_pack_namespace",
+    "agent_services": "expose_playbooks_not_service_ownership"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "criteria": [
+      "semantic_dom_contract_stable",
+      "browser_safety_review",
+      "interactive_regression_suite"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.browser_automation_pack",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed"
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "Browser actions require the existing companion bridge and grants."
+  ],
+  "conflict_notes": [
+    "This pack owns automation playbooks, not browser transport or DOM snapshot execution."
+  ]
+}

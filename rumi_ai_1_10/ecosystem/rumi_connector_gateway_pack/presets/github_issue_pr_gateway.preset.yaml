@@ -1,0 +1,7 @@
+preset_id: rumi_connector_gateway.github_issue_pr
+profile: rumi_connector_gateway.router
+connector_classes: [developer]
+features:
+  untrusted_issue_text: true
+  repo_context_handoff: required
+  security_review_on_workflow_tokens: true

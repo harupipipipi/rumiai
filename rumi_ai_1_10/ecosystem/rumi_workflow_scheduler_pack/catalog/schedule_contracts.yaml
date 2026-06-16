@@ -1,0 +1,79 @@
+catalog_id: rumi_workflow_scheduler.schedule_contracts
+version: 1
+pack_id: rumi_workflow_scheduler_pack
+purpose: Define local schedule contracts without executing automations.
+default_posture:
+  local_first: true
+  network_default: deny
+  executable_code: false
+  implements_automations: false
+  approval_required_for_install: true
+required_contract_fields:
+  - schedule_id
+  - schedule_kind
+  - owner_route
+  - cadence
+  - evidence_required
+  - stop_conditions
+  - retry_policy
+  - delivery_handoff
+schedule_kinds:
+  - kind_id: cron_like
+    title: Cron-like schedule
+    intent: Run on a calendar expression interpreted by an owner automation surface.
+    allowed_cadence_fields:
+      - expression
+      - timezone
+      - jitter_window
+    requires_stop_conditions: true
+    requires_owner_approval: true
+  - kind_id: interval
+    title: Interval schedule
+    intent: Run after a fixed elapsed interval.
+    allowed_cadence_fields:
+      - every
+      - timezone
+      - max_runs
+    requires_stop_conditions: true
+    requires_owner_approval: true
+  - kind_id: one_shot_wakeup
+    title: One-shot wakeup
+    intent: Wake a thread, workflow, or review at a specific time.
+    allowed_cadence_fields:
+      - at
+      - timezone
+    requires_stop_conditions: true
+    requires_owner_approval: true
+  - kind_id: recurring_followup
+    title: Recurring follow-up
+    intent: Revisit pending work until evidence says it is done or should stop.
+    allowed_cadence_fields:
+      - every
+      - until
+      - timezone
+      - max_runs
+    requires_stop_conditions: true
+    requires_owner_approval: true
+  - kind_id: monitor
+    title: Monitor
+    intent: Check local evidence or owner-provided state for a condition.
+    allowed_cadence_fields:
+      - every
+      - quiet_hours
+      - max_runs
+    requires_stop_conditions: true
+    requires_owner_approval: true
+evidence_requirements:
+  - source_must_be_local_or_owner_provided
+  - expected_change_must_be_named
+  - delivery_requires_summary
+  - failure_requires_reason
+stop_condition_templates:
+  - condition_id: max_runs_reached
+    description: Stop after a configured maximum run count.
+  - condition_id: objective_resolved
+    description: Stop when evidence shows the objective is complete.
+  - condition_id: owner_cancels
+    description: Stop when the user or owner automation surface cancels the schedule.
+  - condition_id: repeated_failure
+    description: Stop after retry policy exhaustion or repeated missing evidence.

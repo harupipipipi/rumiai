@@ -29,7 +29,9 @@
               "page.type",
               "page.press",
               "page.scroll",
-              "page.extract"
+              "page.extract",
+              "page.highlight",
+              "page.clear_highlight"
             ],
             "default": "session"
           },
@@ -69,6 +71,10 @@
           "timeout_ms": {"type": "integer"},
           "format": {"type": "string"},
           "quality": {"type": "integer"},
+          "duration_ms": {"type": "integer"},
+          "color": {"type": "string"},
+          "clear_existing": {"type": "boolean"},
+          "include_semantics": {"type": "boolean"},
           "rotate": {"type": "boolean"}
         }
       }

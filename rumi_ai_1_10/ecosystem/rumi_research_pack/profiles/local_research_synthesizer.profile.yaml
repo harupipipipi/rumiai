@@ -1,0 +1,19 @@
+profile_id: rumi_research_pack.local_research_synthesizer
+version: rumi.profile.v1
+kind: runtime_profile
+locale: en
+display_name:
+  en: Local Research Synthesizer
+enabled_capabilities:
+  - research.plan.create
+  - research.evidence.extract
+  - research.synthesis.write
+  - research.handoff.package
+prompt_set: local_synthesis
+policy:
+  local_first: true
+  network_default: none
+  use_only_provided_sources: true
+  evidence_manifest_required: true
+  cite_every_section: true
+ui_panels: [chat, evidence_table, synthesis]

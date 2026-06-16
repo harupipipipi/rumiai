@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
 import struct
 import subprocess
@@ -712,9 +713,19 @@ class BrowserComputerController:
     def _running_apps(self) -> list[dict[str, Any]]:
         system = platform.system()
         if system == "Darwin":
+            swift_apps = self._darwin_swift_apps()
+            if swift_apps:
+                return swift_apps
             return self._darwin_running_apps()
         if system == "Windows":
             return self._windows_running_apps()
+        if system == "Linux":
+            try:
+                from ..computer.linux import xdotool
+
+                return xdotool.running_apps()
+            except Exception:
+                return []
         return []
 
     def _installed_apps(self, payload: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -728,6 +739,13 @@ class BrowserComputerController:
             return self._darwin_installed_apps(limit=limit)
         if system == "Windows":
             return self._windows_installed_apps(limit=limit)
+        if system == "Linux":
+            try:
+                from ..computer.linux import xdotool
+
+                return xdotool.installed_apps(limit=limit)
+            except Exception:
+                return []
         return []
 
     def _select_app(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1354,11 +1372,19 @@ class BrowserComputerController:
 
     def _computer_seat_target(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Build a ComputerTarget dict from payload."""
+        coordinate_space = str(payload.get("coordinate_space") or payload.get("space") or "window").strip() or "window"
         return {
+            "kind": payload.get("target_kind") or payload.get("kind") or "desktop",
             "app": payload.get("app") or payload.get("application"),
             "pid": payload.get("pid"),
             "window_id": payload.get("window_id"),
             "window_title": payload.get("title") or payload.get("window_title"),
+            "hwnd": payload.get("hwnd"),
+            "bundle_id": payload.get("bundle_id"),
+            "browser_client_id": payload.get("browser_client_id") or payload.get("client_id"),
+            "browser_tab_id": payload.get("browser_tab_id") or payload.get("tab_id"),
+            "url": payload.get("url"),
+            "coordinate_space": coordinate_space,
         }
 
     def _computer_seat_metadata_for_target(self, target_record: dict[str, Any] | None) -> dict[str, Any]:
@@ -1526,6 +1552,18 @@ class BrowserComputerController:
         dry_run = self._truthy(payload.get("dry_run"))
         if dry_run:
             return {"action": action, "dry_run": True, "requires_approval": False, "payload": payload}
+        if action == "computer.type" and not str(payload.get("text") or ""):
+            return {
+                "action": action,
+                "executed": False,
+                "is_error": True,
+                "platform": platform.system(),
+                "reason": "computer.type requires non-empty text. Use computer.key for shortcuts or individual key presses.",
+                "recovery": {
+                    "kind": "invalid_type_payload",
+                    "note": "For shortcuts, retry with action=key and key/modifier/modifiers/key_combo.",
+                },
+            }
         system = platform.system()
         action_payload = dict(payload)
         click_marker = None
@@ -1538,11 +1576,41 @@ class BrowserComputerController:
         approval_payload = self._desktop_approval_payload(action, payload, action_payload, virtual_only=virtual_only)
         if not (yolo_mode or self._consume_approval(payload, action, approval_payload)):
             return self._approval_required(action, approval_payload)
+        remember_pointer = not self._background_requested(payload)
         if action == "computer.drag":
-            action_payload, click_marker, drag_marker = self._resolve_drag_points(payload, remember_cursor=True)
+            action_payload, click_marker, drag_marker = self._resolve_drag_points(payload, remember_cursor=remember_pointer)
         elif action in {"computer.move", "computer.click"}:
-            action_payload, click_marker = self._resolve_action_point(payload, infer_window=action == "computer.click", remember_cursor=True)
+            action_payload, click_marker = self._resolve_action_point(
+                payload,
+                infer_window=action == "computer.click",
+                remember_cursor=remember_pointer,
+            )
         virtual_only = self._pointer_action_is_virtual_only(action, payload)
+        background_only = self._background_requested(action_payload)
+        if background_only:
+            with self._edge_haze(action, action_payload) as edge_haze:
+                seat_result = self._try_computer_seat_action(action, action_payload)
+            if seat_result is not None and seat_result.get("executed"):
+                if self._seat_result_is_background_safe(seat_result):
+                    result = self._background_action_success(action, action_payload, seat_result, system)
+                    self._attach_edge_haze_result(result, edge_haze)
+                    if action in {"computer.move", "computer.click"}:
+                        resolved = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
+                        if "target" in result:
+                            result["resolved_coordinates"] = resolved
+                        else:
+                            result["target"] = resolved
+                        if click_marker:
+                            result["marker"] = click_marker
+                    if action == "computer.drag":
+                        result["target"] = {
+                            "from": {"x": int(action_payload.get("x1", 0)), "y": int(action_payload.get("y1", 0))},
+                            "to": {"x": int(action_payload.get("x2", 0)), "y": int(action_payload.get("y2", 0))},
+                        }
+                        if drag_marker:
+                            result["drag_marker"] = drag_marker
+                    return result
+            return self._background_visible_window_required(action, action_payload, system)
         if action in {"computer.move", "computer.click", "computer.drag"} and virtual_only:
             self._set_ai_cursor(action_payload)
             result: dict[str, Any] = {"action": action, "executed": True, "platform": system, "virtual_cursor": True}
@@ -1566,18 +1634,6 @@ class BrowserComputerController:
                 )
                 result.update(screenshot)
             return result
-        if action in {"computer.type", "computer.key", "computer.scroll"} and self._background_requested(action_payload):
-            return {
-                "action": action,
-                "executed": False,
-                "is_error": True,
-                "platform": system,
-                "reason": "Background computer-use is disabled. Only currently visible windows can be operated.",
-                "recovery": {
-                    "kind": "visible_window_required",
-                    "note": "Show or focus the target app/window, then retry without background/method=background.",
-                },
-            }
         if action in {"computer.type", "computer.key", "computer.scroll"} and action_payload.get("focus") is False:
             return {
                 "action": action,
@@ -1649,7 +1705,7 @@ class BrowserComputerController:
                     "action": action,
                     "supported": False,
                     "platform": system,
-                    "reason": "Desktop actions are supported on macOS and Windows.",
+                    "reason": "Desktop actions are supported on macOS, Windows, and Linux when a visible desktop driver is available.",
                 }
         result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
         self._attach_edge_haze_result(result, edge_haze)
@@ -1681,6 +1737,77 @@ class BrowserComputerController:
             )
             result.update(screenshot)
         return result
+
+    @staticmethod
+    def _background_action_success(
+        action: str,
+        action_payload: dict[str, Any],
+        seat_result: dict[str, Any],
+        system: str,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "action": action,
+            "executed": True,
+            "platform": system,
+            "background": True,
+            "driver": seat_result.get("driver", "computer_seat"),
+            "confidence": seat_result.get("confidence", "best_effort"),
+            "can_parallel_user_work": seat_result.get("can_parallel_user_work", True),
+        }
+        if seat_result.get("notes"):
+            result["notes"] = seat_result.get("notes")
+        if seat_result.get("data"):
+            result["target"] = seat_result.get("data")
+        if action == "computer.key":
+            result["count"] = _key_press_count(action_payload)
+        if action == "computer.scroll":
+            result["amount"] = int(action_payload.get("amount", action_payload.get("clicks", 1)))
+        return result
+
+    @staticmethod
+    def _seat_result_is_background_safe(seat_result: dict[str, Any]) -> bool:
+        if seat_result.get("uses_physical_input") is True:
+            return False
+        driver = str(seat_result.get("driver") or "").strip()
+        return driver in {
+            "browser_cdp",
+            "linux_x11_virtual",
+            "windows_postmessage",
+            "windows_uia",
+        }
+
+    @staticmethod
+    def _background_visible_window_required(
+        action: str,
+        action_payload: dict[str, Any],
+        system: str,
+    ) -> dict[str, Any]:
+        app = BrowserComputerController._app_name_from_payload(action_payload)
+        visible_target_required = bool(app or action_payload.get("window_id") or action_payload.get("hwnd"))
+        recovery_kind = (
+            "visible_window_required"
+            if visible_target_required
+            else "foreground_fallback_available"
+        )
+        note = (
+            "Show or focus the target app/window, then retry without background."
+            if visible_target_required
+            else "Retry with fallback='foreground' or physical=true only after explicit approval."
+        )
+        return {
+            "action": action,
+            "executed": False,
+            "is_error": True,
+            "platform": system,
+            "background": True,
+            "reason": "Background input is disabled for this target. Use visible windows and foreground approval instead.",
+            "recovery": {
+                "kind": recovery_kind,
+                "requires_approval": True,
+                "note": note,
+            },
+            **({"target_app": app} if app else {}),
+        }
 
     def _clipboard_read(self, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
         include_content = self._truthy(payload.get("include_content")) or self._truthy(payload.get("full_content"))
@@ -1741,7 +1868,14 @@ class BrowserComputerController:
                 check=False,
             )
             return completed.stdout
-        raise RuntimeError("Clipboard is supported on macOS and Windows.")
+        if system == "Linux":
+            for command in (["wl-paste"], ["xclip", "-selection", "clipboard", "-out"], ["xsel", "--clipboard", "--output"]):
+                if shutil.which(command[0]):
+                    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+                    if completed.returncode == 0:
+                        return completed.stdout
+            raise RuntimeError("Linux clipboard requires wl-paste, xclip, or xsel.")
+        raise RuntimeError("Clipboard is supported on macOS, Windows, and Linux.")
 
     @staticmethod
     def _system_clipboard_write(content: str) -> None:
@@ -1757,7 +1891,13 @@ class BrowserComputerController:
                 check=True,
             )
             return
-        raise RuntimeError("Clipboard is supported on macOS and Windows.")
+        if system == "Linux":
+            for command in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]):
+                if shutil.which(command[0]):
+                    subprocess.run(command, input=content, text=True, check=True)
+                    return
+            raise RuntimeError("Linux clipboard requires wl-copy, xclip, or xsel.")
+        raise RuntimeError("Clipboard is supported on macOS, Windows, and Linux.")
 
     @staticmethod
     def _clipboard_preview(content: str) -> str:
@@ -1859,13 +1999,28 @@ class BrowserComputerController:
         active = self._active_window()
         if active and self._window_records_match(active, target):
             return None
+        if (
+            action == "computer.click"
+            and active
+            and self._same_app_window(active, target)
+            and self._action_point_inside_window(payload, active)
+        ):
+            return None
         self._focus_window(target)
         time.sleep(0.2)
         active = self._active_window()
         if active and self._window_records_match(active, target):
             return None
+        if (
+            action == "computer.click"
+            and active
+            and self._same_app_window(active, target)
+            and self._action_point_inside_window(payload, active)
+        ):
+            return None
         filters = self._window_filter(payload)
-        if active and self._window_matches_filter(
+        target_window_id = self._window_id_int(target.get("window_id"))
+        if not target_window_id and active and self._window_matches_filter(
             active,
             app=filters.get("app", "").lower(),
             title=filters.get("title", "").lower(),
@@ -1885,6 +2040,29 @@ class BrowserComputerController:
             },
         }
 
+    @classmethod
+    def _same_app_window(cls, active: dict[str, Any], target: dict[str, Any]) -> bool:
+        active_app = str(active.get("app") or "").strip().lower()
+        target_app = str(target.get("app") or "").strip().lower()
+        if not (active_app and target_app):
+            return False
+        return cls._app_name_matches(target_app, active_app)
+
+    @staticmethod
+    def _action_point_inside_window(payload: dict[str, Any], window: dict[str, Any]) -> bool:
+        try:
+            x = int(payload.get("x"))
+            y = int(payload.get("y"))
+            left = int(window.get("x"))
+            top = int(window.get("y"))
+            width = int(window.get("width"))
+            height = int(window.get("height"))
+        except (TypeError, ValueError):
+            return False
+        if width <= 0 or height <= 0:
+            return False
+        return left <= x <= left + width - 1 and top <= y <= top + height - 1
+
     def _foreground_action_target(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         selected = self._capture_target(payload)
         if selected and self._is_usable_target_window(selected):
@@ -1897,14 +2075,10 @@ class BrowserComputerController:
 
     @classmethod
     def _window_records_match(cls, active: dict[str, Any], target: dict[str, Any]) -> bool:
-        try:
-            active_id = int(active.get("window_id") or 0)
-            target_id = int(target.get("window_id") or 0)
-        except Exception:
-            active_id = 0
-            target_id = 0
-        if active_id and target_id and active_id == target_id:
-            return True
+        active_id = cls._window_id_int(active.get("window_id"))
+        target_id = cls._window_id_int(target.get("window_id"))
+        if active_id and target_id:
+            return active_id == target_id
         target_app = str(target.get("app") or "").strip().lower()
         target_title = str(target.get("title") or "").strip().lower()
         if not (target_app or target_title):
@@ -2272,6 +2446,9 @@ class BrowserComputerController:
                 "target_filter": self._window_filter(payload),
             }
         if system == "Darwin":
+            swift_capture = self._darwin_swift_screenshot(path, payload, target)
+            if swift_capture is not None:
+                return swift_capture
             if target:
                 capture_rect = self._normalize_rect(target.get("capture_rect"))
                 if capture_rect:
@@ -2337,7 +2514,65 @@ class BrowserComputerController:
                 "target_window": target,
                 "action_coordinate_system": action_coordinate_system,
             }
+        if system == "Linux":
+            try:
+                from ..computer.linux import xdotool
+
+                capture = xdotool.screenshot(path, target=target)
+                if capture.get("path"):
+                    return {
+                        "platform": system,
+                        "target_window": target,
+                        "action_coordinate_system": self._action_coordinate_system(
+                            system,
+                            (int(capture.get("width", 0)), int(capture.get("height", 0))),
+                            capture_target=target,
+                        ),
+                    }
+                return {
+                    "platform": system,
+                    "supported": False,
+                    "reason": capture.get("error") or "Linux screenshot capture failed.",
+                    "target_window": target,
+                }
+            except Exception as exc:
+                return {"platform": system, "supported": False, "reason": str(exc), "target_window": target}
         return {"platform": system, "supported": False}
+
+    def _darwin_swift_screenshot(
+        self,
+        path: Path,
+        payload: dict[str, Any],
+        target: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        try:
+            from ..computer.mac.swift_host import MacSwiftComputerHost
+
+            host = MacSwiftComputerHost()
+            if not host.available():
+                return None
+            args = dict(payload or {})
+            args["output_path"] = str(path)
+            if isinstance(target, dict):
+                for key in ("window_id", "pid", "app", "title", "x", "y", "width", "height"):
+                    if target.get(key) is not None:
+                        args.setdefault(key, target.get(key))
+            result = host.run("computer.screenshot", args)
+            if result.get("is_error") or not path.exists():
+                return None
+            action_coordinate_system = self._action_coordinate_system(
+                "Darwin",
+                (int(result.get("width", 0)), int(result.get("height", 0))),
+                capture_target=result.get("target_window") if isinstance(result.get("target_window"), dict) else target,
+            )
+            return {
+                "platform": "Darwin",
+                "target_window": result.get("target_window") if isinstance(result.get("target_window"), dict) else target,
+                "action_coordinate_system": action_coordinate_system,
+                "driver": "mac_swift_host",
+            }
+        except Exception:
+            return None
 
     def _capture_target(self, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
         payload = payload or {}
@@ -2838,6 +3073,13 @@ class BrowserComputerController:
                 return windows
             active = self._windows_active_window()
             return [active] if active else []
+        if system == "Linux":
+            try:
+                from ..computer.linux import xdotool
+
+                return xdotool.list_windows()
+            except Exception:
+                return []
         return []
 
     def _active_window(self) -> dict[str, Any] | None:
@@ -2847,6 +3089,8 @@ class BrowserComputerController:
             return next((item for item in windows if item.get("active")), None)
         if system == "Windows":
             return self._windows_active_window()
+        if system == "Linux":
+            return next((item for item in self._list_windows() if item.get("active")), None)
         return None
 
     def _active_window_for_app(self, app_name: str) -> dict[str, Any] | None:
@@ -2889,11 +3133,9 @@ class BrowserComputerController:
             "active": bool(value.get("active")),
         }
         window_id = value.get("window_id") or value.get("id")
-        try:
-            if window_id is not None:
-                normalized["window_id"] = int(window_id)
-        except Exception:
-            pass
+        parsed_window_id = BrowserComputerController._window_id_int(window_id)
+        if parsed_window_id:
+            normalized["window_id"] = parsed_window_id
         for rect_key in ("capture_rect", "content_rect"):
             rect = BrowserComputerController._normalize_rect(value.get(rect_key))
             if rect:
@@ -2912,6 +3154,14 @@ class BrowserComputerController:
         if capture_method:
             normalized["capture_method"] = capture_method
         return normalized
+
+    @staticmethod
+    def _window_id_int(value: Any) -> int:
+        try:
+            text = str(value or "").strip()
+            return int(text, 0) if text else 0
+        except Exception:
+            return 0
 
     @staticmethod
     def _is_usable_target_window(value: Any) -> bool:
@@ -2975,6 +3225,9 @@ class BrowserComputerController:
         return {"x": x, "y": y, "width": width, "height": height}
 
     def _darwin_windows(self) -> list[dict[str, Any]]:
+        swift_windows = self._darwin_swift_windows()
+        if swift_windows:
+            return swift_windows
         quartz_windows = self._darwin_windows_quartz()
         if quartz_windows:
             return quartz_windows
@@ -3044,6 +3297,40 @@ end tell
             return (completed.stdout or "").strip()
         except Exception:
             return ""
+
+    @staticmethod
+    def _darwin_swift_host_result(action: str, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        try:
+            from ..computer.mac.swift_host import MacSwiftComputerHost
+
+            host = MacSwiftComputerHost()
+            if not host.available():
+                return None
+            result = host.run(action, dict(payload or {}))
+            return result if isinstance(result, dict) and not result.get("is_error") else None
+        except Exception:
+            return None
+
+    def _darwin_swift_windows(self) -> list[dict[str, Any]]:
+        result = self._darwin_swift_host_result("computer.windows")
+        windows = result.get("windows") if isinstance(result, dict) else None
+        return [item for item in windows if isinstance(item, dict)] if isinstance(windows, list) else []
+
+    def _darwin_swift_apps(self) -> list[dict[str, Any]]:
+        result = self._darwin_swift_host_result("computer.apps")
+        apps = result.get("apps") if isinstance(result, dict) else None
+        return [item for item in apps if isinstance(item, dict)] if isinstance(apps, list) else []
+
+    def _darwin_swift_activate_app(self, app_name: str = "", *, pid: Any = None, bundle_id: str = "") -> bool:
+        payload: dict[str, Any] = {}
+        if app_name:
+            payload["app"] = app_name
+        if pid not in (None, ""):
+            payload["pid"] = pid
+        if bundle_id:
+            payload["bundle_id"] = bundle_id
+        result = self._darwin_swift_host_result("computer.activate_app", payload)
+        return bool(result and result.get("executed") and result.get("active"))
 
     def _darwin_running_apps(self) -> list[dict[str, Any]]:
         script = r'''
@@ -3135,6 +3422,8 @@ end tell
             return False
         system = platform.system()
         if system == "Darwin":
+            if self._darwin_swift_activate_app(app_name):
+                return True
             script = """
 tell application "System Events"
   set appNeedle to %s
@@ -3177,6 +3466,14 @@ return "not_found"
                 return True
             except Exception:
                 return False
+        if system == "Linux":
+            try:
+                from ..computer.linux import xdotool
+
+                window = xdotool.find_window(app=app_name)
+                return xdotool.activate_window(window)
+            except Exception:
+                return False
         return False
 
     def _launch_app(self, app: dict[str, Any]) -> bool:
@@ -3194,6 +3491,12 @@ return "not_found"
             if system == "Windows" and path:
                 self._run_powershell(f"Start-Process -FilePath '{self._ps_single(path)}'")
                 return True
+            if system == "Linux":
+                command = str(app.get("exec") or "").strip()
+                if command:
+                    executable = command.split()[0]
+                    subprocess.Popen([executable], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return True
         except Exception:
             return False
         return False
@@ -3321,6 +3624,8 @@ print(json.dumps(windows))
         if not app:
             return
         if platform.system() == "Darwin":
+            if self._darwin_swift_activate_app(raw_app):
+                return
             script = """
 tell application "System Events"
   set appName to %s
@@ -3373,6 +3678,13 @@ $hwnd = [IntPtr]{hwnd}
 """
             try:
                 self._run_powershell(script)
+            except Exception:
+                pass
+        elif platform.system() == "Linux":
+            try:
+                from ..computer.linux import xdotool
+
+                xdotool.activate_window(window)
             except Exception:
                 pass
 
@@ -4097,21 +4409,25 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
     @staticmethod
     def _capabilities() -> dict[str, bool]:
         system = platform.system()
+        desktop_systems = {"Darwin", "Windows", "Linux"}
         return {
             "browser_open_url": True,
             "browser_persistent_profiles": True,
             "browser_cookie_management": True,
             "browser_cache_management": True,
-            "screenshot": system in {"Darwin", "Windows"},
-            "app_listing": system in {"Darwin", "Windows"},
-            "app_selection": system in {"Darwin", "Windows"},
-            "installed_app_listing": system in {"Darwin", "Windows"},
-            "window_selection": system in {"Darwin", "Windows"},
-            "desktop_actions": system in {"Darwin", "Windows"},
-            "cursor_move": system in {"Darwin", "Windows"},
+            "screenshot": system in desktop_systems,
+            "app_listing": system in desktop_systems,
+            "app_selection": system in desktop_systems,
+            "installed_app_listing": system in desktop_systems,
+            "window_selection": system in desktop_systems,
+            "desktop_actions": system in desktop_systems,
+            "cursor_move": system in desktop_systems,
             "virtual_ai_cursor": True,
-            "driver_auto_switch": system in {"Darwin", "Windows"},
+            "driver_auto_switch": system in desktop_systems,
             "visible_window_only": True,
+            "platform_separated_drivers": True,
+            "mac_swift_host": system == "Darwin",
+            "linux_visible_driver": system == "Linux",
         }
 
     def _read_sessions(self) -> dict[str, Any]:
@@ -4397,7 +4713,7 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             return False
         approval = self._approval_module()
         if approval is None:
-            return False
+            return self._consume_legacy_approval(token, action, expected_payload)
         expected_args = {"action": action, "payload": expected_payload}
         verification = approval.verify_execution_token(
             token,
@@ -4405,7 +4721,34 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             approval.hash_arguments(expected_args),
             pack_id="defaultspack",
         )
-        return bool(getattr(verification, "valid", False))
+        if bool(getattr(verification, "valid", False)):
+            return True
+        return self._consume_legacy_approval(token, action, expected_payload)
+
+    def _issue_legacy_approval(self, action: str, payload: dict[str, Any]) -> str:
+        approvals = self._read_approvals()
+        token = secrets.token_urlsafe(24)
+        approvals[token] = {
+            "action": action,
+            "payload": payload,
+            "expires_at": time.time() + 300,
+        }
+        self._write_approvals(approvals)
+        return token
+
+    def _consume_legacy_approval(self, token: str, action: str, expected_payload: dict[str, Any]) -> bool:
+        approvals = self._read_approvals()
+        record = approvals.pop(token, None)
+        self._write_approvals(approvals)
+        if not isinstance(record, dict):
+            return False
+        if record.get("action") != action:
+            return False
+        if record.get("payload") != expected_payload:
+            return False
+        if float(record.get("expires_at") or 0) < time.time():
+            return False
+        return True
 
     @staticmethod
     def _approval_module():

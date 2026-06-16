@@ -1,0 +1,19 @@
+profile_id: rumi_memory_knowledge_pack.memory_curator
+version: rumi.profile.v1
+kind: runtime_profile
+locale: en
+display_name:
+  en: Memory Curator
+enabled_capabilities:
+  - memory.profile.propose_update
+  - knowledge.project.propose_update
+  - memory.hygiene.review
+  - memory.recall.verify_evidence
+prompt_set: memory_curator
+policy:
+  local_first: true
+  writes_runtime_memory: false
+  propose_not_mutate: true
+  approval_before_profile_change: true
+  preserve_evidence_links: true
+ui_panels: [memory_review_queue, evidence_links, hygiene_findings]

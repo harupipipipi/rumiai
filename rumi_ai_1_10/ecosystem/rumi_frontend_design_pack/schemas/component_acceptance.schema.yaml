@@ -1,0 +1,28 @@
+schema_id: rumi_frontend_design.component_acceptance
+schema_version: 1
+required_fields:
+  - component_id
+  - user_goal
+  - target_surface
+  - design_system_fit_score
+  - state_matrix
+  - responsive_requirements
+  - accessibility_requirements
+  - owner_handoffs
+state_matrix_required_states:
+  - default
+  - loading
+  - empty
+  - error
+  - disabled
+  - focused
+  - mobile
+owner_handoff_required_for:
+  code_edits: rumi_code_ide_pack
+  browser_qa: rumi_browser_automation_pack
+  visual_assets: rumi_multimodal_media_pack
+acceptance_rules:
+  design_system_fit_score_minimum: 16
+  every_state_has_copy_and_layout_notes: true
+  responsive_matrix_rows_named: true
+  no_runtime_code_in_this_pack: true

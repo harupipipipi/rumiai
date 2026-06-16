@@ -1,0 +1,30 @@
+version: rumi.observability.privacy_cost_redaction_policy.v1
+policy_id: rumi_observability.privacy_cost_redaction
+pack_id: rumi_observability_pack
+network_default: none
+
+principles:
+  - Record observability evidence locally before sharing externally.
+  - Redact secrets, personal data, account IDs, private URLs, and full prompts when not required.
+  - Preserve enough cost and latency information to audit behavior without exposing credentials.
+  - Treat billed cost as user-provided evidence; otherwise mark cost as estimated.
+
+redaction_classes:
+  - secret_value
+  - account_identifier
+  - personal_data
+  - private_prompt_text
+  - private_url
+  - connector_payload
+
+cost_redaction_rules:
+  - provider_label_allowed_without_credentials
+  - pricing_source_required_for_estimated_usd
+  - account_or_invoice_ids_disallowed
+  - aggregate_cost_allowed_when_unit_source_recorded
+
+blocked_by_default:
+  - exporting_raw_logs_with_secret_like_values
+  - embedding_connector_payloads_in_postmortems
+  - publishing incident ledgers without redaction_state
+  - treating estimated cost as billed cost

@@ -350,24 +350,145 @@ fn validate_hashed_requirements(req_path: &Path) -> Result<()> {
     let contents = fs::read_to_string(req_path)
         .with_context(|| format!("failed to read {}", req_path.display()))?;
 
-    for (index, line) in contents.lines().enumerate() {
-        let trimmed = line.trim();
+    for (line_number, logical_line) in logical_requirement_lines(&contents)? {
+        let trimmed = strip_inline_comment(&logical_line).trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        if trimmed.starts_with("--") {
+        let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+        if tokens.is_empty() {
             continue;
         }
-        if !trimmed.contains("==") || !trimmed.contains("--hash=sha256:") {
+        if tokens[0].starts_with("--") {
+            if tokens.as_slice() == ["--only-binary", ":all:"]
+                || tokens.as_slice() == ["--only-binary=:all:"]
+            {
+                continue;
+            }
             bail!(
-                "{}:{} must pin an exact version and include a SHA-256 hash before automatic installation",
+                "{}:{} contains unsupported pip option {trimmed:?}; automatic installation only permits --only-binary :all:",
                 req_path.display(),
-                index + 1
+                line_number
             );
         }
+
+        validate_requirement_tokens(req_path, line_number, &tokens)?;
     }
 
     Ok(())
+}
+
+fn logical_requirement_lines(contents: &str) -> Result<Vec<(usize, String)>> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut start_line = 0usize;
+
+    for (index, line) in contents.lines().enumerate() {
+        let line_number = index + 1;
+        let trimmed = line.trim();
+        if current.is_empty() && (trimmed.is_empty() || trimmed.starts_with('#')) {
+            continue;
+        }
+
+        if current.is_empty() {
+            start_line = line_number;
+        } else {
+            current.push(' ');
+        }
+
+        let continued = trimmed.ends_with('\\');
+        let segment = if continued {
+            trimmed.trim_end_matches('\\').trim_end()
+        } else {
+            trimmed
+        };
+        current.push_str(segment);
+
+        if !continued {
+            result.push((start_line, current.trim().to_string()));
+            current.clear();
+        }
+    }
+
+    if !current.trim().is_empty() {
+        bail!(
+            "requirements.txt:{} has an unterminated line continuation",
+            start_line
+        );
+    }
+
+    Ok(result)
+}
+
+fn strip_inline_comment(line: &str) -> &str {
+    line.find(" #").map_or(line, |index| &line[..index])
+}
+
+fn validate_requirement_tokens(req_path: &Path, line_number: usize, tokens: &[&str]) -> Result<()> {
+    let package = tokens.first().copied().unwrap_or_default();
+    if !is_exact_package_pin(package) {
+        bail!(
+            "{}:{} must start with an exact name==version package pin before automatic installation",
+            req_path.display(),
+            line_number
+        );
+    }
+
+    let mut hash_count = 0usize;
+    for token in &tokens[1..] {
+        if !token.starts_with("--hash=sha256:") {
+            bail!(
+                "{}:{} contains unsupported requirement token {token:?}; only --hash=sha256:<64hex> is permitted after the package pin",
+                req_path.display(),
+                line_number
+            );
+        }
+        let digest = token.trim_start_matches("--hash=sha256:");
+        if !is_sha256_hex(digest) {
+            bail!(
+                "{}:{} contains an invalid SHA-256 hash {digest:?}",
+                req_path.display(),
+                line_number
+            );
+        }
+        hash_count += 1;
+    }
+
+    if hash_count == 0 {
+        bail!(
+            "{}:{} must include at least one SHA-256 hash before automatic installation",
+            req_path.display(),
+            line_number
+        );
+    }
+
+    Ok(())
+}
+
+fn is_exact_package_pin(token: &str) -> bool {
+    let Some((name, version)) = token.split_once("==") else {
+        return false;
+    };
+    !name.is_empty()
+        && !version.is_empty()
+        && is_valid_package_name(name)
+        && is_valid_version_token(version)
+}
+
+fn is_valid_package_name(name: &str) -> bool {
+    name.as_bytes()
+        .iter()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn is_valid_version_token(version: &str) -> bool {
+    version.as_bytes().iter().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'!' | b'+' | b'-')
+    })
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn install_requirements(config: &AppConfig) -> Result<()> {
@@ -406,6 +527,8 @@ fn install_requirements(config: &AppConfig) -> Result<()> {
             "pip",
             "install",
             "--require-hashes",
+            "--only-binary",
+            ":all:",
             "--python",
             &venv_python.to_string_lossy(),
             "-r",
@@ -488,7 +611,7 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("must pin an exact version"));
+        assert!(err.contains("must start with an exact name==version package pin"));
         fs::remove_dir_all(root).ok();
     }
 
@@ -503,11 +626,104 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(
             &req_path,
-            "pyyaml==6.0.2 --hash=sha256:d584d9ec91ad65861cc08d42e834324ef890a082e591037abe114850ff7bbc3e\n",
+            "--only-binary :all:\npyyaml==6.0.2 --hash=sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5\n",
         )
         .unwrap();
 
         validate_hashed_requirements(&req_path).unwrap();
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn validate_hashed_requirements_accepts_continued_multi_hash_lines() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_multi_hash_requirements_{unique}"));
+        let req_path = root.join("requirements.txt");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &req_path,
+            concat!(
+                "--only-binary=:all:\n",
+                "pyyaml==6.0.2 \\\n",
+                "  --hash=sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5 \\\n",
+                "  --hash=sha256:8388ee1976c416731879ac16da0aff3f63b286ffdd57cdeb95f3f2e085687563\n",
+            ),
+        )
+        .unwrap();
+
+        validate_hashed_requirements(&req_path).unwrap();
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn validate_hashed_requirements_rejects_extra_package_options() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_extra_option_requirements_{unique}"));
+        let req_path = root.join("requirements.txt");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &req_path,
+            concat!(
+                "pyyaml==6.0.2 ",
+                "--hash=sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5 ",
+                "--index-url https://example.invalid/simple\n",
+            ),
+        )
+        .unwrap();
+
+        let err = validate_hashed_requirements(&req_path)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("unsupported requirement token"));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn validate_hashed_requirements_rejects_invalid_hashes() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_bad_hash_requirements_{unique}"));
+        let req_path = root.join("requirements.txt");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&req_path, "pyyaml==6.0.2 --hash=sha256:not-a-real-hash\n").unwrap();
+
+        let err = validate_hashed_requirements(&req_path)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("invalid SHA-256 hash"));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn validate_hashed_requirements_rejects_source_build_options() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_source_build_requirements_{unique}"));
+        let req_path = root.join("requirements.txt");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &req_path,
+            "--no-binary :all:\npyyaml==6.0.2 --hash=sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5\n",
+        )
+        .unwrap();
+
+        let err = validate_hashed_requirements(&req_path)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("unsupported pip option"));
         fs::remove_dir_all(root).ok();
     }
 

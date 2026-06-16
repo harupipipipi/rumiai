@@ -1,0 +1,7 @@
+example_id: rumi_multimodal_media.screenshot_review
+request: Review a dashboard screenshot for layout issues before a release.
+workflow: screenshot_to_issue_report
+expected_outputs:
+  - redaction_notes
+  - visual_defects
+  - handoff_summary

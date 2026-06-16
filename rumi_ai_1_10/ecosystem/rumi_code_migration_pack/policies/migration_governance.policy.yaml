@@ -1,0 +1,11 @@
+policy:
+  pack_id: rumi_code_migration_pack
+  planning_only: true
+  requires_dry_run_before_execution_handoff: true
+  downstream_owners:
+  - rumi_code_ide_pack
+  - rumi_subagent_pr_manager_pack
+  - rumi_devops_release_pack
+  - rumi_security_review_pack
+  - rumi_model_evals_pack
+  - rumi_observability_pack

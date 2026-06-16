@@ -7,6 +7,7 @@ subprocess.run を mock して Docker が無い環境でも全テスト実行可
 
 from __future__ import annotations
 
+import importlib
 import subprocess
 from unittest.mock import MagicMock, call, patch
 
@@ -57,6 +58,11 @@ def _mock_completed(
     return subprocess.CompletedProcess(
         args=[], returncode=returncode, stdout=stdout, stderr=stderr
     )
+
+
+def _docker_run_builder_module():
+    package_name = DockerCapabilityHandler.__module__.rsplit(".", 1)[0]
+    return importlib.import_module(f"{package_name}.docker_run_builder")
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +332,7 @@ class TestPostBuildAssertion:
             "image": "python:3.11-slim",
             "command": ["python", "-c", "print(1)"],
         }
-        import core_runtime.docker_run_builder as drb
+        drb = _docker_run_builder_module()
         original_build = drb.DockerRunBuilder.build
         def patched_build(self_builder):
             cmd = original_build(self_builder)
@@ -352,7 +358,7 @@ class TestPostBuildAssertion:
             "image": "python:3.11-slim",
             "command": ["python", "-c", "print(1)"],
         }
-        import core_runtime.docker_run_builder as drb
+        drb = _docker_run_builder_module()
         original_build = drb.DockerRunBuilder.build
         def patched_build(self_builder):
             cmd = original_build(self_builder)
@@ -379,7 +385,7 @@ class TestPostBuildAssertion:
             "image": "python:3.11-slim",
             "command": ["python", "-c", "print(1)"],
         }
-        import core_runtime.docker_run_builder as drb
+        drb = _docker_run_builder_module()
         original_build = drb.DockerRunBuilder.build
         def patched_build(self_builder):
             cmd = original_build(self_builder)
@@ -405,7 +411,7 @@ class TestPostBuildAssertion:
             "image": "python:3.11-slim",
             "command": ["python", "-c", "print(1)"],
         }
-        import core_runtime.docker_run_builder as drb
+        drb = _docker_run_builder_module()
         original_build = drb.DockerRunBuilder.build
         def patched_build(self_builder):
             cmd = original_build(self_builder)
@@ -431,7 +437,7 @@ class TestPostBuildAssertion:
             "image": "python:3.11-slim",
             "command": ["python", "-c", "print(1)"],
         }
-        import core_runtime.docker_run_builder as drb
+        drb = _docker_run_builder_module()
         original_build = drb.DockerRunBuilder.build
         def patched_build(self_builder):
             cmd = original_build(self_builder)
@@ -457,7 +463,7 @@ class TestPostBuildAssertion:
             "image": "python:3.11-slim",
             "command": ["python", "-c", "print(1)"],
         }
-        import core_runtime.docker_run_builder as drb
+        drb = _docker_run_builder_module()
         original_build = drb.DockerRunBuilder.build
         def patched_build(self_builder):
             cmd = original_build(self_builder)
@@ -483,7 +489,7 @@ class TestPostBuildAssertion:
             "image": "python:3.11-slim",
             "command": ["python", "-c", "print(1)"],
         }
-        import core_runtime.docker_run_builder as drb
+        drb = _docker_run_builder_module()
         original_build = drb.DockerRunBuilder.build
         def patched_build(self_builder):
             cmd = original_build(self_builder)
@@ -517,7 +523,7 @@ class TestPostBuildAudit:
             "image": "python:3.11-slim",
             "command": ["python", "-c", "print(1)"],
         }
-        import core_runtime.docker_run_builder as drb
+        drb = _docker_run_builder_module()
         original_build = drb.DockerRunBuilder.build
         def patched_build(self_builder):
             cmd = original_build(self_builder)

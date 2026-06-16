@@ -1,0 +1,36 @@
+review_checklist:
+  minimum_pass: all_blocking_items
+  items:
+  - id: learner_goal_alignment
+    question: Every quiz, plan step, and report line maps to a declared goal.
+    blocking: true
+  - id: source_note_citation
+    question: Every answer or explanation cites source_note_ids.
+    blocking: true
+  - id: uncertainty_when_notes_insufficient
+    question: Missing or thin notes create uncertainty notes instead of confident answers.
+    blocking: true
+  - id: no_external_fact_invention
+    question: The pack does not add uncited external facts.
+    blocking: true
+  - id: spacing_reason_present
+    question: Review queue entries state why the next review window exists.
+    blocking: true
+  - id: difficulty_calibration
+    question: Questions are tagged recall, application, or transfer.
+    blocking: true
+  - id: accessibility_constraint_respected
+    question: Learner accommodations are present in plan generation.
+    blocking: true
+  - id: handoff_owner_named
+    question: Scheduler, memory, and workspace handoffs name the owner pack.
+    blocking: true
+  - id: no_credentials_or_network
+    question: Confirm the pack declares no credentials and no network by default.
+    blocking: true
+  - id: defaultspack_not_eligible
+    question: Confirm defaultspack promotion remains false until evidence is supplied.
+    blocking: true
+  - id: owner_boundary_review
+    question: Confirm adjacent runtime ownership is expressed as handoff policy.
+    blocking: true

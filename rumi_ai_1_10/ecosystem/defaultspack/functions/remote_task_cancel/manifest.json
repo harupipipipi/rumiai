@@ -1,0 +1,44 @@
+{
+  "function_id": "remote_task_cancel",
+  "description": "Cancel a remote task and linked agent runs.",
+  "tags": [
+    "remote",
+    "task"
+  ],
+  "risk": "medium",
+  "requires": [
+    "remote.task.cancel"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.remote.task_cancel",
+    "defaultspack.remote.task_cancel",
+    "defaults.remote.task.cancel",
+    "defaultspack.remote.task.cancel"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.remote.task_cancel",
+      "default_args": {}
+    }
+  }
+}

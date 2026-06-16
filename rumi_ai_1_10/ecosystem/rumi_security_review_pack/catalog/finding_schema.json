@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rumi.security_review.finding.v1",
+  "title": "Rumi Security Review Finding",
+  "type": "object",
+  "required": [
+    "finding_id",
+    "pack_id",
+    "category_id",
+    "severity",
+    "summary",
+    "evidence",
+    "recommendation",
+    "status"
+  ],
+  "properties": {
+    "finding_id": {
+      "type": "string",
+      "pattern": "^SEC-[0-9]{3,}$"
+    },
+    "pack_id": {
+      "type": "string"
+    },
+    "category_id": {
+      "type": "string"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "recommendation": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["open", "accepted_risk", "resolved", "not_applicable"]
+    },
+    "owner": {
+      "type": "string"
+    },
+    "defaultspack_decision_override": {
+      "type": "boolean",
+      "const": false
+    }
+  },
+  "additionalProperties": false
+}

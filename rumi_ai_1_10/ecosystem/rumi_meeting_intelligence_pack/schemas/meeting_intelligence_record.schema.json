@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Rumi Meeting Intelligence Pack Record",
+  "type": "object",
+  "required": [
+    "record_id",
+    "meeting",
+    "source_evidence",
+    "decision_records",
+    "action_items",
+    "follow_up_drafts",
+    "recap_bundle",
+    "handoff_owner",
+    "review_state"
+  ],
+  "properties": {
+    "record_id": {
+      "type": "string"
+    },
+    "meeting": {
+      "type": "object",
+      "required": [
+        "title",
+        "source_mode",
+        "local_only"
+      ],
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "source_mode": {
+          "type": "string",
+          "enum": [
+            "existing_transcript",
+            "existing_notes",
+            "existing_agenda",
+            "mixed_local_sources"
+          ]
+        },
+        "local_only": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "source_evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "source_type",
+          "source_span",
+          "excerpt_summary"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "transcript_text",
+              "meeting_notes",
+              "agenda_text",
+              "chat_excerpt",
+              "already_extracted_document_text"
+            ]
+          },
+          "source_span": {
+            "type": "string",
+            "minLength": 1
+          },
+          "excerpt_summary": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "decision_records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "decision_id",
+          "decision",
+          "source_evidence_ids",
+          "confidence"
+        ],
+        "properties": {
+          "decision_id": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "source_evidence_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "action_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "action_id",
+          "summary",
+          "owner",
+          "due_date",
+          "due_date_confidence",
+          "source_evidence_ids",
+          "handoff_owner"
+        ],
+        "properties": {
+          "action_id": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "due_date": {
+            "type": "string"
+          },
+          "due_date_confidence": {
+            "type": "string",
+            "enum": [
+              "explicit",
+              "inferred",
+              "unknown"
+            ]
+          },
+          "source_evidence_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "handoff_owner": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "follow_up_drafts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "draft_id",
+          "channel_hint",
+          "draft_only",
+          "human_review_required",
+          "handoff_owner"
+        ],
+        "properties": {
+          "draft_id": {
+            "type": "string"
+          },
+          "channel_hint": {
+            "type": "string",
+            "enum": [
+              "email",
+              "chat",
+              "ticket",
+              "generic_handoff"
+            ]
+          },
+          "draft_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "human_review_required": {
+            "type": "boolean",
+            "const": true
+          },
+          "handoff_owner": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "recap_bundle": {
+      "type": "object",
+      "required": [
+        "summary",
+        "decision_ids",
+        "action_ids",
+        "evidence_ids",
+        "open_questions"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "decision_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "action_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "handoff_owner": {
+      "type": "string"
+    },
+    "review_state": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "needs_human_review",
+        "ready_for_owner_handoff"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

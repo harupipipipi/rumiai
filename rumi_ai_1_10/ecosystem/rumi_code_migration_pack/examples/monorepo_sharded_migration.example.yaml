@@ -1,0 +1,224 @@
+example:
+  id: monorepo_sharded_migration
+  pack_id: rumi_code_migration_pack
+  scenario: pnpm workspace monorepo migration from shared config v1 to v2, split into ordered PR shard planning packets with conflict risk and downstream PR owner handoff.
+  input_refs:
+  - repo_inventory:workspace-config-v2-2026-06-04
+  - migration_request:shared-config-v2
+  evidence_refs:
+  - evidence:workspace-package-graph
+  - evidence:affected-package-list
+  - evidence:current-ci-duration
+  handoff_owner: rumi_subagent_pr_manager_pack
+  review_gate: all_blocking_checks
+  expected_result: reviewed_handoff_packet
+  must_not:
+  - external_action
+  - runtime_execution
+  - file_edit
+  - codemod_execution
+  - pull_request_creation
+  - merge_operation
+  - secret_material
+  status: ready_for_owner_handoff
+  handoff_packet:
+    packet_id: workspace-config-v2-shard-handoff
+    downstream_owner_pack: rumi_subagent_pr_manager_pack
+    external_action: handoff_only
+    repo_inventory:
+      inventory_id: workspace-config-v2-2026-06-04
+      languages:
+      - TypeScript
+      - Go
+      package_managers:
+      - pnpm
+      - go modules
+      build_systems:
+      - turborepo
+      - go test
+      test_suites:
+      - pnpm turbo test
+      - pnpm turbo lint
+      - go test ./...
+      dependency_graph: shared config package fans out to 48 workspace packages; backend adapters import generated env bindings.
+      ownership_map: config owned by platform; package shards owned by domain teams; release runbook owned elsewhere.
+      generated_files:
+      - packages/config/generated/**
+      - services/*/internal/generated/**
+      deprecated_apis:
+      - config.getLegacyEnv
+      - config.loadSync
+      migration_hotspots:
+      - packages/config/**
+      - apps/*/src/config.ts
+      - services/*/internal/config
+      - turbo pipeline cache keys
+    migration_plan:
+      plan_id: workspace-config-v2-plan
+      current_state: shared config v1 sync loader used across apps and services.
+      target_state: shared config v2 async loader with package-level compatibility wrappers.
+      non_goals:
+      - no deployment rollout
+      - no telemetry backend changes
+      phases:
+      - inventory package graph and owner map
+      - define shard order by dependency fanout
+      - prepare codemod dry-run packet
+      - hand off PR shard execution to subagent PR manager
+      prerequisites:
+      - package ownership map confirmed
+      - affected package list frozen for first batch
+      invariants:
+      - generated env bindings are excluded
+      - every shard has a rollback link
+      compatibility_constraints:
+      - packages without async startup support must use compatibility wrapper
+      - CI time per shard stays under owner-approved budget
+      acceptance_gates:
+      - each shard names blast radius and conflict risk
+      - aggregate matrix covers app and service package classes
+    codemod_plan:
+      codemod_plan_id: workspace-config-v2-codemod-plan
+      transform_intent: Replace config.getLegacyEnv and config.loadSync usage with async v2 loader or compatibility wrapper.
+      matcher_strategy: AST match imports from @acme/config and Go calls to config.LoadSync, grouped by package owner.
+      dry_run_requirements:
+      - produce package-level diffstat without writes
+      - classify packages by async-ready or wrapper-required
+      manual_review_buckets:
+      - service startup paths
+      - packages with custom test environments
+      - cache key definitions
+      generated_file_exclusions:
+      - packages/config/generated/**
+      - services/*/internal/generated/**
+      idempotency_checks:
+      - second dry-run reports zero legacy loader callsites outside compatibility wrapper
+      validation_commands:
+      - pnpm turbo lint --filter affected
+      - pnpm turbo test --filter affected
+      - go test ./...
+    pr_shard_plan:
+      shard_plan_id: workspace-config-v2-shards
+      shards:
+      - shard_id: shard-01-config-core
+        scope: shared config package compatibility wrapper and type contract
+        dependencies: []
+        max_blast_radius:
+        - packages/config/**
+        ordering: first
+        owner_handoff: rumi_subagent_pr_manager_pack
+        reviewer_notes:
+        - no consumers changed in this shard
+        merge_sequencing: foundation shard before consumers
+        conflict_risk: high
+      - shard_id: shard-02-low-fanout-packages
+        scope: packages with fewer than three dependents
+        dependencies:
+        - shard-01-config-core
+        max_blast_radius:
+        - packages/notifications/**
+        - packages/reports/**
+        ordering: second
+        owner_handoff: rumi_subagent_pr_manager_pack
+        reviewer_notes:
+        - validate owner-specific tests only
+        merge_sequencing: merge before high fanout app shards
+        conflict_risk: medium
+      - shard_id: shard-03-app-entrypoints
+        scope: app startup and config entrypoints
+        dependencies:
+        - shard-01-config-core
+        - shard-02-low-fanout-packages
+        max_blast_radius:
+        - apps/admin/**
+        - apps/customer/**
+        ordering: third
+        owner_handoff: rumi_subagent_pr_manager_pack
+        reviewer_notes:
+        - watch CI duration and route smoke tests
+        merge_sequencing: final application shard
+        conflict_risk: high
+    compatibility_matrix:
+      matrix_id: workspace-config-v2-compatibility
+      runtime_versions:
+      - Node 20
+      - Go 1.22
+      framework_versions:
+      - config v1 current
+      - config v2 target
+      os_platform: linux CI and macos local dev
+      package_manager_constraints:
+      - pnpm workspace lockfile unchanged in consumer shards
+      - Go module changes isolated to service shard
+      api_behavior_deltas:
+      - sync load becomes async for app entrypoints
+      - wrapper required for packages without async startup
+      supported_cells:
+      - async-ready TypeScript packages
+      - Go services with startup context
+      unsupported_cells:
+      - generated env binding edits
+      - sync-only app entrypoints without wrapper plan
+    risk_ledger:
+    - risk_id: migration_risk_cross_shard_conflicts
+      impact: merge conflicts across package owners
+      likelihood: high
+      detection_signal: overlapping package scopes in shard plan
+      mitigation: shard by ownership and fanout with explicit sequencing
+      owner: platform
+      escalation_path: rumi_subagent_pr_manager_pack merge readiness review
+      rollback_linkage: rollback-workspace-config-v2
+    - risk_id: risk_startup_regression
+      impact: apps fail startup after async config conversion
+      likelihood: medium
+      detection_signal: app startup smoke test failure
+      mitigation: wrapper-required bucket and route smoke gate
+      owner: app-platform
+      escalation_path: rumi_devops_release_pack for release gate handoff
+      rollback_linkage: rollback-workspace-config-v2
+    test_gates:
+    - gate_id: package-graph-static
+      static_checks:
+      - pnpm turbo lint --filter affected
+      unit_tests:
+      - pnpm turbo test --filter affected
+      integration_tests: []
+      e2e_tests: []
+      migration_smoke_tests:
+      - legacy loader callsite scan
+      fixture_coverage: low fanout and high fanout package fixtures
+      flake_policy: rerun unrelated turbo cache misses once
+      pass_fail_evidence: shard-level CI links
+    - gate_id: service-startup
+      static_checks: []
+      unit_tests:
+      - go test ./...
+      integration_tests:
+      - service startup smoke
+      e2e_tests: []
+      migration_smoke_tests:
+      - config wrapper startup smoke
+      fixture_coverage: Go service startup path represented
+      flake_policy: startup failures block
+      pass_fail_evidence: startup smoke summary
+    - gate_id: shard-boundary
+      static_checks:
+      - affected package boundary review
+      unit_tests: []
+      integration_tests: []
+      e2e_tests: []
+      migration_smoke_tests:
+      - generated file exclusion check
+      fixture_coverage: package graph and generated paths included
+      flake_policy: deterministic blocker
+      pass_fail_evidence: package diffstat attached to handoff
+    rollback_plan:
+      rollback_id: rollback-workspace-config-v2
+      trigger: startup smoke regression, unbounded CI duration, or cross-shard conflict after implementation handoff.
+      revert_strategy: revert consumer shards first, then config core shard; preserve compatibility wrapper notes for re-plan.
+      data_config_considerations:
+      - no persistent data migration
+      - config env key names must remain backward compatible
+      dependency_downgrade_path: restore config v1 package version and lockfile.
+      user_impact: apps and services remain on sync loader until shard plan is revised.
+      verification_after_rollback: rerun affected package lint, tests, and startup smoke.

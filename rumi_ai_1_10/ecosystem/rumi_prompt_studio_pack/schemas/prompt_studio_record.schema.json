@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Rumi Prompt Studio Pack Record",
+  "type": "object",
+  "required": [
+    "prompt_id",
+    "version",
+    "purpose",
+    "customization_knobs",
+    "evidence_requirement",
+    "risk_notes",
+    "fixture_ids",
+    "lint_dimensions",
+    "boundary_handoffs",
+    "review_status"
+  ],
+  "properties": {
+    "prompt_id": {
+      "type": "string",
+      "pattern": "^prompt_[a-z0-9_]+$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 12
+    },
+    "customization_knobs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_requirement": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risk_notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "fixture_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "lint_dimensions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 3
+    },
+    "boundary_handoffs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "surface",
+          "owner_pack",
+          "reason"
+        ],
+        "properties": {
+          "surface": {
+            "type": "string"
+          },
+          "owner_pack": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "review_status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "needs_revision",
+        "approved_with_handoff",
+        "approved_local_only"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

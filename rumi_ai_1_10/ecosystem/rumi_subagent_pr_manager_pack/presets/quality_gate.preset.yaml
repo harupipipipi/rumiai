@@ -1,0 +1,10 @@
+preset:
+  id: quality_gate
+  pack_id: rumi_subagent_pr_manager_pack
+  mode: quality_gate
+  purpose: Apply the pack PR acceptance rubric before a branch is marked ready for maintainer review.
+  require_evidence: true
+  require_overlap_check: true
+  required_assets:
+    - catalog/pr_acceptance_rubric.yaml
+    - catalog/subagent_routing_matrix.yaml

@@ -1,0 +1,31 @@
+{
+  "catalog_id": "rumi.model_evals.provider_eval_catalog",
+  "version": "rumi.catalog.v1",
+  "purpose": "Provider evidence overlay categories for defaultspack provider catalog entries.",
+  "network_default": "none",
+  "provider_families": [
+    {
+      "id": "opencode_zen",
+      "display_name": "OpenCode Zen",
+      "evidence_scope": ["coding", "cli", "tool_use", "agent_handoff"],
+      "credential_policy": "runtime_supplied_only",
+      "smoke_recipe": "opencode_zen_minimax_smoke"
+    },
+    {
+      "id": "minimax",
+      "display_name": "MiniMax",
+      "evidence_scope": ["chat", "coding", "agent_service", "long_context"],
+      "credential_policy": "runtime_supplied_only",
+      "smoke_recipe": "opencode_zen_minimax_smoke"
+    },
+    {
+      "id": "local_model",
+      "display_name": "Local Model",
+      "evidence_scope": ["offline", "privacy_sensitive", "low_cost"],
+      "credential_policy": "none_required",
+      "smoke_recipe": "local_contract_smoke"
+    }
+  ],
+  "evidence_status_values": ["unseen", "smoke_passed", "smoke_failed", "e2e_passed", "quarantined", "promoted"],
+  "routing_actions": ["recommend", "allow", "hold", "quarantine", "demote", "gather_more_evidence"]
+}

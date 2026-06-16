@@ -1,0 +1,10 @@
+preset_id: rumi_business_ops.quality_gate
+profile: rumi_business_ops.business_ops_operator
+features:
+  local_first: true
+  evidence_required: true
+  owner_boundary_check: true
+purpose: Apply workflow taxonomy and approval risk gates before any business operation moves toward execution.
+required_assets:
+  - catalog/workflow_taxonomy.yaml
+  - policies/approval_risk_matrix.policy.yaml

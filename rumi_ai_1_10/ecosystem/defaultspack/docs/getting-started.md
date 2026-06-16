@@ -26,7 +26,7 @@ blocks/          ← handler（ビジネスロジックの入口）
 domain/          ← ドメインロジック
 transport/       ← HTTP / stdio / UDS サーバー
 flows/           ← Flow 定義
-webapp/          ← standalone frontend の source（luxe-chat ベース）
+webapp/          ← rumi DP standalone frontend の source
 ui/              ← 配信される build 済み frontend（shell.html, shell-app.js など）
 ```
 
@@ -74,7 +74,7 @@ def run(input_data, context):
 
 ## フロントエンドを編集するとき
 
-`http://127.0.0.1:8766/` で出る standalone UI の source は `webapp/` にあります。`dont_push_this_file/luxe-chat` をベースに、`defaultspack` の実 API に繋ぐ形で管理しています。
+`http://127.0.0.1:8766/` で出る standalone UI の source は `webapp/` にあります。`rumi DP` として、`defaultspack` の実 API に繋ぐ形で管理しています。
 
 ```bash
 cd rumi_ai_1_10/ecosystem/defaultspack/webapp

@@ -1,0 +1,30 @@
+policy:
+  pack_id: rumi_agent_continuity_pack
+  blocked_by_default:
+  - runtime action
+  - file mutation
+  - memory writes
+  - metrics collection
+  - schedule creation
+  - branch mutation
+  - checkpoint ownership
+  - replay index ownership
+  - artifact persistence
+  default_effect: restart_evidence_and_handoff_only
+  external_effect: handoff_packet_only
+  owned_outputs:
+  - continuity_packet
+  - restart_evidence_packet
+  - compaction_handoff_packet
+  - attention_drift_recovery_note
+  - run_summary_for_resume
+  - reference_only_artifact_manifest
+  - branch_resume_packet
+  - health_note
+  handoff_required_for:
+    run_board_events_checkpoints: rumi_agent_workroom_pack
+    memory_storage_recall: rumi_memory_knowledge_pack
+    metrics_telemetry_ledgers: rumi_observability_pack
+    schedules_wakeups_retries: rumi_workflow_scheduler_pack
+    artifact_persistence_export: rumi_workspace_pack
+    git_branch_mutation: defaultspack_or_coding_owner

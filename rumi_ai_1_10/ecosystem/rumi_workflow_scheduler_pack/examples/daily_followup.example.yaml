@@ -1,0 +1,23 @@
+example_id: rumi_workflow_scheduler.daily_followup
+pack_id: rumi_workflow_scheduler_pack
+title: Daily follow-up contract
+schedule:
+  schedule_id: daily_followup
+  schedule_kind: recurring_followup
+  owner_route: app_automation_tool
+  cadence:
+    every: 1 day
+    timezone: user_selected_timezone
+    max_runs: 5
+  evidence_required:
+    - pending_task_status
+    - latest_owner_note
+  stop_conditions:
+    - objective_resolved
+    - max_runs_reached
+    - owner_cancels
+  retry_policy: conservative_retry
+  delivery_handoff: local_thread_wakeup
+  status: ready_for_owner_approval
+  network_required: false
+  implements_automation: false
