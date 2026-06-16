@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from domain.chat.tool_pairing import (
+from .tool_pairing import (
     normalize_compaction_range,
     tool_call_count,
     tool_call_ids,
