@@ -1,0 +1,77 @@
+schema_id: rumi_memory_knowledge_pack.memory_objects
+version: 1.0.0
+memory_object:
+  required:
+    - memory_id
+    - memory_type
+    - statement
+    - evidence
+    - confidence
+    - sensitivity
+    - status
+  recommended:
+    - project_id
+    - user_scope
+    - source_session_id
+    - created_at
+    - expires_at
+    - supersedes
+    - tags
+memory_types:
+  - session_recall
+  - user_profile
+  - project_knowledge
+  - preference
+  - decision
+  - routine
+  - skill_learning_signal
+status_values:
+  - proposed
+  - accepted
+  - rejected
+  - superseded
+  - stale
+  - archived
+  - forgotten
+confidence_values: [high, medium, low, unresolved]
+sensitivity_values: [public, normal, personal, sensitive, restricted]
+evidence:
+  required:
+    - evidence_id
+    - source_type
+    - locator
+    - excerpt_or_summary
+  recommended:
+    - session_id
+    - message_id
+    - file_path
+    - timestamp
+    - author
+    - quote_bounds
+source_types:
+  - session_message
+  - session_summary
+  - project_file
+  - user_note
+  - research_evidence_card
+  - system_observation
+user_profile_memory:
+  allowed_categories:
+    - stable_preference
+    - communication_style
+    - recurring_project_context
+    - accessibility_preference
+  disallowed_without_explicit_approval:
+    - health
+    - financial
+    - legal
+    - credential
+    - private_relationship
+project_knowledge:
+  allowed_categories:
+    - architecture_decision
+    - coding_convention
+    - product_context
+    - operational_runbook
+    - known_constraint
+  stale_review_default_days: 90

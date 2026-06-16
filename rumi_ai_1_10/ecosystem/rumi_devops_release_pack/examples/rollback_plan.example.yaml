@@ -1,0 +1,14 @@
+id: rumi_devops_release_pack.examples.rollback_plan
+profile: rumi_devops_release_pack.rollback_planner
+preset: rumi_devops_release_pack.incident_rollback
+task: Create a rollback plan for a risky release.
+expected_agent_steps:
+  - identify rollback trigger and impacted surface
+  - list last known good state and evidence needed
+  - draft rollback steps without executing them
+  - define verification and communication
+  - record followup tasks
+safety_notes:
+  - rollback execution requires explicit approval
+  - production inspection requires explicit approval
+  - no secrets in the plan

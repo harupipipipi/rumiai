@@ -1,0 +1,20 @@
+source_quality_labels:
+  allowed_use: review_label_only
+  numeric_score_allowed: false
+  ranking_allowed: false
+  prohibited_fields:
+  - score
+  - rank
+  - model_quality
+  - eval_metric
+  credibility:
+  - unknown
+  - low
+  - medium
+  - high
+  recency_state:
+  - current
+  - stale
+  - undated
+  - not_time_sensitive
+  not_eval_scores: true

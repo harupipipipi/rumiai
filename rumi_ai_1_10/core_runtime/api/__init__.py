@@ -14,15 +14,21 @@ api パッケージ — PackAPIHandler のハンドラ Mixin 群
 import importlib
 
 from .api_response import APIResponse
+from .auth_gate import AuthGateMixin
 from .flow_handlers import FlowHandlersMixin
+from .http_response import ResponseWriterMixin
+from .request_body import RequestBodyMixin
 from .route_handlers import RouteHandlersMixin
+from .router_table import APIRouteTableMixin
 from .control_panel_handlers import ControlPanelHandlersMixin
 from .capability_graph_handlers import CapabilityGraphHandlersMixin
 from .setup_handlers import SetupHandlersMixin
 from .oauth_handlers import OAuthHandlersMixin
 from .viewer_handlers import ViewerHandlersMixin
 from .desktop_handlers import DesktopHandlersMixin
+from .web_mounts import WebMountMixin
 from .security import (
+    AuthorityHandlersMixin,
     CapabilityGrantHandlersMixin,
     CapabilityInstallerHandlersMixin,
     NetworkHandlersMixin,
@@ -43,6 +49,12 @@ from .store import (
 
 __all__ = [
     "APIResponse",
+    "ResponseWriterMixin",
+    "AuthGateMixin",
+    "WebMountMixin",
+    "APIRouteTableMixin",
+    "RequestBodyMixin",
+    "AuthorityHandlersMixin",
     "PackHandlersMixin",
     "ContainerHandlersMixin",
     "NetworkHandlersMixin",

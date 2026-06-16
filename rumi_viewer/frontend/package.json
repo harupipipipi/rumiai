@@ -15,6 +15,7 @@
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.2",
     "@tailwindcss/vite": "^4.3.1",
+    "@tauri-apps/api": "2.10.1",
     "@uiw/react-codemirror": "^4.25.8",
     "@vitejs/plugin-react": "^6.0.2",
     "@xyflow/react": "^12.10.1",

@@ -17,6 +17,11 @@ from transport.registry import build_fallback_http_routes, component_http_route_
 
 
 class _FakeServer:
+    def __getattr__(self, name):
+        if str(name).startswith("_handle_authority_"):
+            return lambda *_args, **_kwargs: {"status": "ok"}
+        raise AttributeError(name)
+
     def _invoke_fallback_block(self, *args, **kwargs):
         return {"status": "ok", "args": args, "kwargs": kwargs}
 

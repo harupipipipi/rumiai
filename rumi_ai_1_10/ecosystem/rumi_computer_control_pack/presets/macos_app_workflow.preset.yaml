@@ -1,0 +1,20 @@
+id: rumi_computer_control_pack.macos_app_workflow
+name: macOS App Workflow
+profile: rumi_computer_control_pack.macos_desktop_operator
+intent: Navigate and verify macOS app workflows with screenshot evidence before state changes.
+network_default: none
+evidence_inputs:
+  - screenshot
+  - foreground_app
+  - target_control
+  - expected_state_change
+outputs:
+  - observation_summary
+  - action_plan
+  - approval_boundary
+  - verification_step
+approval_required_for:
+  - typing
+  - clicking destructive controls
+  - sending or submitting
+  - changing system settings

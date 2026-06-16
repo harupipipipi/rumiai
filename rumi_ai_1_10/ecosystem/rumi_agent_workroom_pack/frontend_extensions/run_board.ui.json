@@ -1,0 +1,51 @@
+{
+  "ui_contract": {
+    "id": "rumi_agent_workroom.run_board",
+    "kind": "declarative_view",
+    "readonly_by_default": true,
+    "lanes": [
+      "queued",
+      "running",
+      "waiting",
+      "blocked",
+      "done"
+    ],
+    "cards": [
+      "run_id",
+      "status",
+      "current_step",
+      "handoff_owner",
+      "approval_state"
+    ],
+    "actions": [
+      "request_pause",
+      "request_redirect",
+      "request_cancel",
+      "open_handoff_packet",
+      "approve_handoff_request",
+      "request_human_review"
+    ],
+    "actions_effect": "control_request_or_handoff_packet_only",
+    "forbidden_actions": [
+      "run_terminal",
+      "execute_tool",
+      "invoke_tool",
+      "call_tool",
+      "open_browser",
+      "browser_action",
+      "desktop_action",
+      "restore_files",
+      "write_files",
+      "delete_files",
+      "create_schedule",
+      "schedule_run",
+      "collect_metrics",
+      "export_metrics",
+      "push_pr",
+      "merge_pr",
+      "create_subagent_pr",
+      "call_api_route",
+      "/api"
+    ]
+  }
+}

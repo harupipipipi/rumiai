@@ -129,7 +129,7 @@ class FrontendRegistry:
     def _app_metadata(self, ui_surfaces: list[dict[str, Any]]) -> dict[str, Any]:
         app: dict[str, Any] = {
             "id": "defaultspack",
-            "name": "Console",
+            "name": "rumi DP",
             "icon": "/static/assets/icons/defaultspack-icon.png",
             "account": self._rumi_account_metadata(),
         }
@@ -509,7 +509,39 @@ class FrontendRegistry:
                             "Concrete UI entries are supplied by frontend extension packs.",
                         ],
                     },
-                }
+                },
+                {
+                    "id": "runtime-management",
+                    "label": "Runtime Management",
+                    "category": "system",
+                    "description": "Pack modules, pack requests, and migration state.",
+                    "tags": ["pack", "management", "runtime"],
+                    "origin": {"kind": "builtin", "path": "ecosystem/defaultspack/api_routes"},
+                    "panel": {
+                        "kind": "actions",
+                        "title": "Runtime Management",
+                        "actions": [
+                            {
+                                "id": "list_modules",
+                                "label": "Modules",
+                                "method": "GET",
+                                "endpoint": "/api/defaultspack/modules",
+                            },
+                            {
+                                "id": "list_pack_requests",
+                                "label": "Pack Requests",
+                                "method": "GET",
+                                "endpoint": "/api/defaultspack/pack-requests",
+                            },
+                            {
+                                "id": "migration_status",
+                                "label": "Migration Status",
+                                "method": "GET",
+                                "endpoint": "/api/defaultspack/migration/status",
+                            },
+                        ],
+                    },
+                },
             ]
         )
 
@@ -974,6 +1006,13 @@ class FrontendRegistry:
                         "help": "Rumi は none/low/medium/high/xhigh を送り、各 provider が対応する API パラメータへ変換します。Gemini/Gemma では未対応の値を自動で近い値へ落とします。",
                     },
                     {
+                        "id": "deepthink_enabled",
+                        "label": "DeepThink",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "thinker型のDeepThink loopを有効にします。タスクには数時間かかる可能性があります。",
+                    },
+                    {
                         "id": "favorite_profiles",
                         "label": "Composer Model Pins",
                         "type": "textarea",
@@ -1389,10 +1428,11 @@ class FrontendRegistry:
                         "default": "all",
                         "options": [
                             {"value": "all", "label": "All tools: expose every tool"},
+                            {"value": "auto", "label": "Auto: always tools plus relevant vector matches"},
                             {"value": "vector", "label": "Vector: recommend relevant tools"},
                             {"value": "off", "label": "Off: only manually selected tools"},
                         ],
-                        "help": "既定ではすべての tool を AI に渡します。Vector は入力文と tool の名前・説明・タグを照合し、関連度が高い tool だけを推薦します。",
+                        "help": "既定ではすべての tool を AI に渡します。Auto は常時読み込み宣言の tool と、入力文に関連する vector tool だけを渡します。",
                     },
                     {
                         "id": "tool_assist_limit",
@@ -2666,9 +2706,7 @@ class FrontendRegistry:
             )
         )
         tool_assist_mode = str(tools.get("tool_assist_mode") or "all").strip().lower()
-        if tool_assist_mode == "auto":
-            tool_assist_mode = "vector"
-        tools["tool_assist_mode"] = tool_assist_mode if tool_assist_mode in {"all", "vector", "off"} else "all"
+        tools["tool_assist_mode"] = tool_assist_mode if tool_assist_mode in {"all", "auto", "vector", "off"} else "all"
         try:
             tools["tool_assist_limit"] = max(1, min(24, int(tools.get("tool_assist_limit", 8))))
         except (TypeError, ValueError):

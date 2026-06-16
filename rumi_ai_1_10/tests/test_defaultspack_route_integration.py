@@ -289,6 +289,84 @@ def test_http_flow_route_falls_back_to_legacy_chat_block():
     ]
 
 
+def test_authority_test_request_endpoint_is_disabled_by_default(monkeypatch):
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    monkeypatch.delenv("RUMI_AUTHORITY_TEST_ENDPOINT", raising=False)
+    server = DefaultsHttpServer(facade=None)
+
+    result = server._handle_authority_test_request({}, {})
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "AUTHORITY_TEST_DISABLED"
+    assert result["_http_status"] == 404
+
+
+def test_authority_test_request_endpoint_creates_pending_decision(monkeypatch):
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    calls = []
+
+    class Decision:
+        request_id = "auth_smoke"
+
+        def to_dict(self):
+            return {
+                "allowed": False,
+                "approval_required": True,
+                "request_id": self.request_id,
+            }
+
+    class Authority:
+        def check(self, **kwargs):
+            calls.append(kwargs)
+            return Decision()
+
+    monkeypatch.setenv("RUMI_AUTHORITY_TEST_ENDPOINT", "1")
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: Authority())
+    server = DefaultsHttpServer(facade=None)
+
+    result = server._handle_authority_test_request(
+        {
+            "provider_id": "anthropic",
+            "api_id": "manual-smoke",
+            "model_id": "claude-test",
+            "conversation_id": "conv-1",
+            "stream": False,
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["approval_url"] == "/approval?request_id=auth_smoke"
+    assert calls[0]["permission_id"] == "model.invoke"
+    assert calls[0]["resource"] == {
+        "kind": "model",
+        "provider_id": "anthropic",
+        "api_id": "manual-smoke",
+        "model_id": "claude-test",
+        "stream": False,
+    }
+    assert calls[0]["conversation_id"] == "conv-1"
+    assert calls[0]["profile_id"] == "authority-test"
+    assert calls[0]["node_id"] == "approval-window"
+
+
+def test_authority_test_request_route_is_registered():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer(facade=None)
+    handler, params, source, path_inject, _ = server._match_route(
+        "POST",
+        "/api/authority/test/request",
+    )
+
+    assert handler == server._handle_authority_test_request
+    assert params == {}
+    assert source == "fallback"
+    assert path_inject == {}
+
+
 def test_http_chat_flow_route_falls_back_when_success_output_is_not_chat_message():
     from ecosystem.defaultspack.transport.http import DefaultsHttpServer
     from ecosystem.defaultspack.domain.flow.result import FlowResult

@@ -1,0 +1,26 @@
+review_checklist:
+  required_checks:
+  - id: source_spans
+    blocking: true
+    verifies: Every decision, action, and recap claim has at least one source span.
+  - id: participant_consent
+    blocking: true
+    verifies: Follow-up drafts and external handoffs include consent or an explicit review blocker.
+  - id: owner_for_each_action
+    blocking: true
+    verifies: Every action has an owner or an explicit owner_unknown marker.
+  - id: open_questions
+    blocking: true
+    verifies: Ambiguity is surfaced instead of resolved by invention.
+  - id: connector_handoff
+    blocking: false
+    verifies: Remote fetch or delivery is routed to connector owner packs.
+  - id: draft_only_followups
+    blocking: true
+    verifies: Follow-up artifacts are labelled draft_only and human_review_required.
+  - id: recap_bundle_evidence
+    blocking: true
+    verifies: Recap bundle summary, decision ids, action ids, and evidence ids are internally consistent.
+  - id: no_adjacent_execution
+    blocking: true
+    verifies: Calendar writes, message sends, document parsing, voice capture, and business ops execution are not performed by this pack.

@@ -1,0 +1,78 @@
+catalog_id: rumi_security_review.review_controls
+version: 1
+pack_id: rumi_security_review_pack
+purpose: Local review controls for Rumi-native security and privacy assessment.
+default_posture:
+  local_first: true
+  network_default: deny
+  executable_code: false
+  override_grants: false
+control_families:
+  - family_id: threat_modeling
+    title: Threat modeling
+    intent: Identify assets, trust boundaries, abuse cases, and mitigations before release.
+    evidence:
+      - data_flows
+      - trust_boundaries
+      - attacker_goals
+      - mitigations
+    pass_criteria:
+      - user_data_paths_are_named
+      - privileged_boundaries_are_explicit
+      - high_risk_actions_have_owner_policy
+  - family_id: secret_scanning_review
+    title: Secret scanning review
+    intent: Check local files and examples for credential-like material before packaging.
+    evidence:
+      - searched_paths
+      - patterns_reviewed
+      - false_positive_notes
+    pass_criteria:
+      - no_embedded_credentials
+      - examples_use_placeholders_only
+      - required_secrets_documented_as_none_or_named
+  - family_id: permission_grant_review
+    title: Permission and grant review
+    intent: Review defaultspack grants, approvals, and tool policy without changing decisions.
+    evidence:
+      - grant_files_reviewed
+      - approval_paths_reviewed
+      - high_risk_tools_identified
+    pass_criteria:
+      - pack_does_not_override_grants
+      - client_supplied_approval_not_trusted
+      - high_risk_actions_remain_approval_gated
+  - family_id: mcp_browser_risk
+    title: MCP and browser risk
+    intent: Review connector and browser surfaces for namespace, scope, and data exposure risks.
+    evidence:
+      - server_or_browser_scope
+      - namespace_or_origin_policy
+      - requested_permissions
+    pass_criteria:
+      - unsupported_mcp_servers_require_explicit_namespace
+      - browser_access_is_scoped
+      - automation_does_not_claim_approval
+  - family_id: dependency_review
+    title: Dependency review
+    intent: Review dependency changes from local manifests and lockfiles.
+    evidence:
+      - dependency_files_reviewed
+      - added_packages
+      - license_or_supply_chain_notes
+    pass_criteria:
+      - new_dependencies_have_reason
+      - lockfile_changes_are_explained
+      - no_unreviewed_remote_installer_added
+  - family_id: release_security_signoff
+    title: Release security signoff
+    intent: Record final security and privacy review state before release.
+    evidence:
+      - findings
+      - accepted_risks
+      - tests_or_manual_checks
+      - owner_decision
+    pass_criteria:
+      - blockers_resolved_or_deferred_by_owner
+      - residual_risk_recorded
+      - signoff_scope_is_clear

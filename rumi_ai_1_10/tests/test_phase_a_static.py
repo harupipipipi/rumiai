@@ -110,25 +110,39 @@ class TestServeStaticFile:
         assert within is False, "Access outside web_root should be blocked"
 
     def test_setup_path_in_do_get(self):
-        """/setup/* パスが do_GET で処理されること"""
-        import inspect
+        """/setup は web_mount 経由で認証前に処理されること。"""
         from core_runtime.pack_api_server import PackAPIHandler
 
-        source = inspect.getsource(PackAPIHandler.do_GET)
-        assert "/setup/" in source or "/setup" in source, \
-            "/setup path should be handled in do_GET"
+        handler = object.__new__(PackAPIHandler)
+        handler.path = "/setup/"
+        handler.client_address = ("198.51.100.7", 12345)
+        handler._check_rate_limit = MagicMock(return_value=True)
+        handler._check_auth = MagicMock(side_effect=AssertionError("auth should not run"))
+        handler._check_web_mount_auth = MagicMock(side_effect=AssertionError("web auth should not run"))
+        mount = {"path_prefix": "/setup", "auth_required": False}
+        handler._match_web_mount = MagicMock(return_value=mount)
+        handler._serve_static_file = MagicMock()
+
+        PackAPIHandler.do_GET(handler)
+
+        handler._serve_static_file.assert_called_once_with("/setup/", mount)
+        handler._check_auth.assert_not_called()
 
     def test_static_file_no_auth_required(self):
-        """静的ファイル配信は認証不要であること"""
-        import inspect
+        """auth_required=false の web_mount は _check_auth を通さないこと。"""
         from core_runtime.pack_api_server import PackAPIHandler
 
-        source = inspect.getsource(PackAPIHandler.do_GET)
-        setup_pos = source.find('_match_web_mount(')
-        if setup_pos == -1:
-            setup_pos = source.find('_serve_static_file(')
-        auth_pos = source.find('_check_auth("GET", _pre_auth_path)')
-        assert setup_pos != -1, "pre-auth static web_mount handling not found in do_GET"
-        assert auth_pos != -1, "_check_auth not found in do_GET"
-        assert setup_pos < auth_pos, \
-            "Static file serving must appear before _check_auth in do_GET"
+        handler = object.__new__(PackAPIHandler)
+        handler.path = "/setup/assets/app.js"
+        handler.client_address = ("198.51.100.7", 12345)
+        handler._check_rate_limit = MagicMock(return_value=True)
+        handler._check_auth = MagicMock(side_effect=AssertionError("auth should not run"))
+        handler._check_web_mount_auth = MagicMock(side_effect=AssertionError("web auth should not run"))
+        mount = {"path_prefix": "/setup", "auth_required": False}
+        handler._match_web_mount = MagicMock(return_value=mount)
+        handler._serve_static_file = MagicMock()
+
+        PackAPIHandler.do_GET(handler)
+
+        handler._serve_static_file.assert_called_once_with("/setup/assets/app.js", mount)
+        handler._check_auth.assert_not_called()

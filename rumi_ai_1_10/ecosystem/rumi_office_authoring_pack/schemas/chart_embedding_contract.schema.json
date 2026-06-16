@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/chart_embedding_contract.schema.json",
+  "title": "Chart Embedding Contract",
+  "description": "Office authoring contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "chart_id",
+    "chart_spec_ref",
+    "target_artifact",
+    "target_location",
+    "alt_text",
+    "analysis_owner",
+    "render_owner"
+  ],
+  "properties": {
+    "chart_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "chart_spec_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_artifact": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_location": {
+      "type": "string",
+      "minLength": 1
+    },
+    "alt_text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "analysis_owner": {
+      "const": "rumi_data_analysis_pack"
+    },
+    "render_owner": {
+      "const": "rumi_workspace_pack"
+    }
+  }
+}

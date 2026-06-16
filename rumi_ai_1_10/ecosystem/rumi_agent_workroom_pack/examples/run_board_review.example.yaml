@@ -1,0 +1,13 @@
+example:
+  id: run_board_review
+  user_request: Render run-board lanes for review
+  input_state: local_records_supplied
+  expected_result: run_board_handoff_packet
+  must_include:
+  - evidence_ids_or_approval_receipt
+  - review_state
+  - handoff_owner
+  must_not:
+  - external_action
+  - uncited_claim
+  - unapproved_tool_call

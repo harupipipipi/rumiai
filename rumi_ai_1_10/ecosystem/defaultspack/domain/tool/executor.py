@@ -389,6 +389,9 @@ class ToolExecutor:
                 if self._first_party_browser_computer_tool_for_function(pack_id, function_id):
                     context["_tool_server_approved"] = True
                     return None
+                if is_trusted_pack_id(pack_id) and not _requires_approval(tool_def):
+                    context["_tool_server_approved"] = True
+                    return None
                 approved, reason = self._function_call_pack_approval_status(capability_executor, pack_id)
                 if not approved and self._dev_auto_approve_pack(pack_id, capability_executor):
                     approved, reason = self._function_call_pack_approval_status(capability_executor, pack_id)
@@ -478,11 +481,7 @@ class ToolExecutor:
             return None
         local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
         if local_tool:
-            if (
-                error_type == "pack_not_approved"
-                and _requires_approval(tool_def)
-                and not _context_has_tool_server_approval(context)
-            ):
+            if local_tool in {"web_search", "reddit_search"} and error_type != "pack_not_approved":
                 return None
             if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
                 return None
@@ -515,6 +514,8 @@ class ToolExecutor:
         if pack_id == "defaultspack":
             return {
                 "tool_calculator": "calculator",
+                "tool_web_search": "web_search",
+                "tool_reddit_search": "reddit_search",
                 "tool_subagent": "subagent",
                 "tool_todo": "todo",
             }.get(function_id)
@@ -1034,23 +1035,23 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": {"type": "todo", **result},
             }
-        elif tool_name in {"kanban", "tool_kanban"}:
-            from domain.tool.kanban import KanbanController
+        elif tool_name in {"task_board", "tool_task_board"}:
+            from domain.tool.task_board import TaskBoardController
 
-            result = KanbanController().run(arguments, context if isinstance(context, dict) else {})
+            result = TaskBoardController().run(arguments, context if isinstance(context, dict) else {})
             return {
-                "result": result.get("summary", "kanban updated"),
+                "result": result.get("summary", "task board updated"),
                 "is_error": False,
-                "widget": {"type": "kanban", **result},
+                "widget": {"type": "task_board", **result},
             }
-        elif tool_name == "tool_kanban_agent_session":
-            from domain.tool.kanban_agent_session import KanbanAgentSessionController
+        elif tool_name == "tool_task_board_agent_session":
+            from domain.tool.task_board_agent_session import TaskBoardAgentSessionController
 
-            result = KanbanAgentSessionController().run(arguments, context if isinstance(context, dict) else {})
+            result = TaskBoardAgentSessionController().run(arguments, context if isinstance(context, dict) else {})
             return {
-                "result": result.get("summary", "kanban agent session updated"),
+                "result": result.get("summary", "task board agent session updated"),
                 "is_error": False,
-                "widget": {"type": "kanban_agent_session", **result},
+                "widget": {"type": "task_board_agent_session", **result},
             }
         elif tool_name == "subagent":
             from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController
@@ -2236,6 +2237,7 @@ def _function_call_context(context, tool_def):
         "workspace_id",
         "workspace_root",
         "conversation_id",
+        "company_id",
         "conversation_workspace_dir",
         "profile_id",
         "run_id",

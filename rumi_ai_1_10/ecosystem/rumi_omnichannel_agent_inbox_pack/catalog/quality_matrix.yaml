@@ -1,0 +1,111 @@
+quality_matrix:
+  minimum_pass: all_blocking_checks
+  fail_states:
+  - missing_evidence
+  - boundary_violation
+  - unsafe_external_action
+  - unreviewed_handoff
+  checks:
+  - id: identity_merge_evidence
+    blocking: true
+    description: Identity merges require evidence IDs.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: acl_denies_unauthorized_tools
+    blocking: true
+    description: Unauthorized channels cannot run tools.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: outbound_draft_until_approved
+    blocking: true
+    description: Outbound delivery owner receives only approved drafts.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: connector_owner_named
+    blocking: true
+    description: External IO is connector-owned.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: routing_requires_acl
+    blocking: true
+    description: Routing rules require ACL state.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: notification_scheduler_handoff
+    blocking: true
+    description: Notification windows hand off to scheduler.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: security_review_for_risky_acl
+    blocking: true
+    description: ACL review owner is security review pack.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: inbox_ui_readable
+    blocking: true
+    description: Inbox UI lists lanes, filters, and approval actions.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: acl_default_deny
+    blocking: true
+    description: Channel ACLs deny by default and cannot be elevated by remote input.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: remote_input_no_authority
+    blocking: true
+    description: Remote input cannot approve, execute, install, mutate settings, or issue tokens.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: route_idempotency
+    blocking: true
+    description: Thread routing replays return the existing decision for the same idempotency key.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: draft_hash_expiry
+    blocking: true
+    description: Outbound draft approval is bound to one sha256 body hash and an expiry.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: no_provider_clients_or_secrets
+    blocking: true
+    description: Pack assets include no provider client implementation and no bundled secrets.
+    review_evidence:
+    - manifest
+    - setup_pack
+    - contract_test

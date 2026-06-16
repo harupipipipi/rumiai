@@ -1,0 +1,41 @@
+matrix_id: rumi_frontend_design.responsive_qa
+schema_version: 1
+viewport_rows:
+  - id: mobile_360
+    width: 360
+    height: 780
+    required_checks:
+      - no_horizontal_scroll
+      - primary_action_visible
+      - text_does_not_overlap
+      - touch_targets_usable
+  - id: mobile_390
+    width: 390
+    height: 844
+    required_checks:
+      - form_fields_fit
+      - toolbar_wraps_cleanly
+      - modal_or_sheet_usable
+  - id: tablet_768
+    width: 768
+    height: 1024
+    required_checks:
+      - navigation_state_clear
+      - tables_have_responsive_strategy
+      - charts_keep_legends_readable
+  - id: desktop_1440
+    width: 1440
+    height: 900
+    required_checks:
+      - layout_uses_available_space
+      - dense_data_surfaces_remain_scan_friendly
+      - hover_and_focus_states_visible
+evidence_requirements:
+  screenshot_required: true
+  console_error_check_required: true
+  defect_owner_pack_required: true
+defect_classes:
+  layout_overlap: handoff_to_rumi_code_ide_pack
+  missing_visual_asset: handoff_to_rumi_multimodal_media_pack
+  browser_interaction_failure: handoff_to_rumi_browser_automation_pack
+  export_artifact_gap: handoff_to_rumi_workspace_pack

@@ -1,0 +1,34 @@
+replay_event_taxonomy:
+  observed_only:
+  - navigation_observed
+  - dom_mutation_observed
+  - input_observed_redacted
+  - console_observed
+  - network_observed_redacted
+  - screenshot_captured
+  - selector_matched
+  - selector_missed
+  evidence_requirements:
+    navigation_observed:
+    - page_ref
+    - redacted_url_ref
+    dom_mutation_observed:
+    - dom_snapshot_ref
+    - checksum
+    input_observed_redacted:
+    - field_purpose
+    - value_hash_ref
+    screenshot_captured:
+    - artifact_ref
+    - checksum
+    - redaction_overlays
+    selector_missed:
+    - selector_drift_report_ref
+    - semantic_dom_ref
+  forbidden_owned_actions:
+  - click
+  - type
+  - press
+  - scroll
+  - submit
+  - navigate

@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from domain.ai_client.model_pack import ModelPack
+from domain.ai_client.rumi_process import ensure_default_rumi_model_pack
 
 
 def _parse_jsonish(value: Any, fallback: Any) -> Any:
@@ -152,6 +153,14 @@ class ModelPackStore:
             self._settings.get("model_packs"),
             composite_models=self._settings.get("composite_models"),
         )
+        base_model = None
+        try:
+            from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+
+            base_model = ModelRuntimeSettingsService()._runtime_rumi_base_model(self._settings)
+        except Exception:
+            base_model = None
+        normalized = ensure_default_rumi_model_pack(normalized, base_model=base_model)
         return [ModelPack.from_dict(item) for item in normalized if str(item.get("id") or "").strip()]
 
     def get(self, reference: str) -> ModelPack | None:

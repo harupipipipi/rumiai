@@ -1,0 +1,13 @@
+profile:
+  id: runtime_benchmark_reviewer
+  pack_id: rumi_runtime_benchmark_pack
+  stance: evidence_first_reviewer
+  owner_surfaces:
+  - latency_measurement
+  - cost_snapshot
+  - tool_loop_reproducibility
+  - runtime_comparison
+  required_checks:
+    - parse_catalog
+    - inspect_overlap_policy
+    - preserve_evidence

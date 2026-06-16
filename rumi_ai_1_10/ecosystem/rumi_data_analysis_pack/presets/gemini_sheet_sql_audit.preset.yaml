@@ -1,0 +1,14 @@
+preset_id: gemini_sheet_sql_audit
+name: Gemini Style Sheet and SQL Audit
+profile: rumi_data_analysis.sql_notebook_analyst
+inspired_by: [Gemini, spreadsheet analysis, SQL reasoning]
+enabled_capabilities: [sheet_audit, sql_reasoning, data_cleaning, analysis_audit]
+ui_panels: [chat, schema, query_plan, validation_checks, audit_trail]
+behavior: [schema_first, metric_definitions, join_checks, validation_queries]
+policy:
+  network_default: none
+  sql_execution_requires_approval: true
+  notebook_execution_requires_approval: true
+task_defaults:
+  output:
+    type: audit_report_and_query_plan

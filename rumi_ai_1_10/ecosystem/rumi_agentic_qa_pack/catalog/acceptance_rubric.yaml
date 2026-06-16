@@ -1,0 +1,37 @@
+acceptance_rubric:
+  id: rumi_agentic_qa_pack.acceptance_rubric
+  scoring:
+    scale: [fail, flaky, pass_with_notes, pass]
+    minimum_acceptance: pass_with_notes
+  criteria:
+    scenario_reproducibility:
+      description: Scenario has stable inputs, expected observations, and replay steps.
+      blocking_failures:
+        - missing_replay_steps
+        - missing_expected_observation
+    evidence_quality:
+      description: Actual observations are backed by local logs, screenshots, traces, or command output.
+      blocking_failures:
+        - missing_actual_observation
+        - missing_evidence_reference
+    subagent_coverage:
+      description: Multiple QA subagents are named for scenario, adversarial, regression, evidence, and handoff duties.
+      blocking_failures:
+        - single_agent_review_only
+        - missing_evidence_reviewer
+    owner_handoff:
+      description: Failures are routed to model eval, browser automation, security review, or observability owners.
+      blocking_failures:
+        - unknown_triage_owner_pack
+        - failure_without_handoff
+    setup_policy:
+      description: supports_all_ok remains false and defaultspack promotion remains disabled.
+      blocking_failures:
+        - supports_all_ok_true
+        - defaultspack_promotion_eligible
+acceptance_decision:
+  ready_requires:
+    - no_blocking_failures
+    - evidence_ledger_complete
+    - replay_checklist_complete
+    - handoff_owner_identified_for_failures

@@ -1,0 +1,13 @@
+preset_id: claude_artifact_chart_brief
+name: Claude Artifact Style Chart Brief
+profile: rumi_data_analysis.chart_designer
+inspired_by: [Claude artifacts]
+enabled_capabilities: [chart_design, artifact, workspace_handoff, analysis_audit]
+ui_panels: [chat, chart_specs, result_tables, artifact_notes]
+behavior: [chart_intent_first, accessible_alt_text, handoff_ready_specs]
+policy:
+  network_default: none
+  workspace_export_requires_approval: true
+task_defaults:
+  output:
+    type: chart_spec_bundle

@@ -13,6 +13,7 @@ from domain.ai_client.gateway import LLMGateway
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.model_search import get_model_capabilities
+from domain.temporal_context import add_temporal_context_message, current_datetime_context
 
 
 _SECRET_KEY_RE = re.compile(
@@ -86,6 +87,12 @@ def call_model(
     }
     if payload.get("output_schema"):
         params["response_format"] = {"type": "json_object"}
+    temporal_context = current_datetime_context({**runtime_context, **payload})
+    runtime_context["current_datetime_context"] = temporal_context
+    runtime_context.setdefault("current_datetime", temporal_context["iso"])
+    runtime_context.setdefault("current_date", temporal_context["date"])
+    runtime_context.setdefault("current_time_zone", temporal_context["timezone"])
+    add_temporal_context_message(messages, runtime_context, temporal_context=temporal_context)
     sanitized_messages = _sanitize_value(messages)
     try:
         if call_handler is not None:

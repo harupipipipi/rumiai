@@ -1,0 +1,9 @@
+preset:
+  id: handoff_review
+  mode: review_packet
+  requires:
+  - owner_pack
+  - reason
+  - artifact_path
+  - human_review
+  external_actions: handoff_only

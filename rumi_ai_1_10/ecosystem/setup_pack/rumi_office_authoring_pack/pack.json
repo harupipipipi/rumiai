@@ -1,0 +1,74 @@
+{
+  "pack_id": "rumi_office_authoring_pack",
+  "display_name": "Rumi Office Authoring Pack",
+  "description": "Declarative contracts for slide, sheet, document, chart, citation, export, and office-suite authoring handoffs.",
+  "target_pack_id": "rumi_office_authoring_pack",
+  "version": "1.0.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "workspace_artifact_catalog": "handoff_to_rumi_workspace_pack",
+    "office_file_rendering": "handoff_to_rumi_workspace_pack",
+    "pdf_rendering": "handoff_to_rumi_workspace_pack",
+    "document_understanding": "handoff_to_rumi_document_intelligence_pack",
+    "data_analysis": "handoff_to_rumi_data_analysis_pack",
+    "citation_ledger": "handoff_to_rumi_evidence_dossier_pack",
+    "artifact_app_runtime": "handoff_to_rumi_artifact_app_runtime_pack",
+    "external_retrieval": "handoff_to_rumi_research_pack",
+    "connector_access": "handoff_to_rumi_connector_gateway_pack",
+    "office_authoring_contract": "owned_by_rumi_office_authoring_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Office authoring contracts need renderer, evidence, and workspace owner integration before defaultspack promotion.",
+    "promotion_blockers": [
+      "schema_contracts_only",
+      "runtime_rendering_owned_elsewhere",
+      "workspace_lifecycle_owned_elsewhere",
+      "document_understanding_owned_elsewhere",
+      "data_analysis_owned_elsewhere",
+      "citation_ledger_owned_elsewhere",
+      "requires_real_world_office_authoring_cases",
+      "must_prove_review_gate_blocking_cases",
+      "supports_all_ok_false_required"
+    ],
+    "promotion_evidence_required": [
+      "deck_authoring_cases",
+      "workbook_formula_review_cases",
+      "doc_citation_insertion_cases",
+      "pdf_export_plan_cases",
+      "office_suite_handoff_packet_cases",
+      "negative_blocking_cases"
+    ]
+  },
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.9",
+    "platforms": [
+      "windows",
+      "linux",
+      "macos"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.office_authoring_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "office-authoring",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  }
+}

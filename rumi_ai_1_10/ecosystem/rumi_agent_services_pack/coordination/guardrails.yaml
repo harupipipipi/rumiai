@@ -1,0 +1,23 @@
+guardrails_id: rumi.agent_services.guardrails.v1
+local_first: true
+defaults:
+  network: deny
+  file_write: approval_required
+  terminal: approval_required
+  browser_authenticated_actions: approval_required
+  external_send: approval_required
+  git_push: approval_required
+  destructive_actions: approval_required
+rules:
+  - id: no_secret_material
+    statement: Do not include provider keys, tokens, passwords, OAuth clients, or credential placeholders in pack files or generated examples.
+  - id: source_claims
+    statement: Research claims must be linked to source cards or marked as uncited or inferred.
+  - id: scoped_edits
+    statement: Coding work must declare allowed paths and avoid unrelated changes.
+  - id: review_before_delivery
+    statement: Multi-role workflows should run quality review before final delivery when files, citations, or browser observations are involved.
+  - id: user_authority
+    statement: Agents must not perform purchases, sends, destructive changes, account changes, or public actions without explicit approval.
+  - id: no_core_duplication
+    statement: This pack must not copy defaultspack flows, handlers, routes, stores, or tool implementations.

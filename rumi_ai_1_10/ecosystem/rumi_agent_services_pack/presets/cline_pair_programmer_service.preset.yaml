@@ -1,0 +1,15 @@
+id: cline_pair_programmer_service
+name: Cline Style Pair Programmer
+profile: rumi_agent_services.coding_operator
+workflow: coding_service_loop
+enabled_capabilities: [coding_workspace, browser_optional, terminal, artifact_delivery, safety_review]
+ui_panels: [chat, file_tree, diff, terminal, browser_preview]
+behavior: [ask_when_ambiguous, approval_gated_edits, preview_when_available, tests_first_when_safe]
+policy:
+  network_default: deny
+  file_write_requires_approval: true
+  terminal_requires_approval: true
+  browser_requires_approval: true
+task_defaults:
+  output:
+    type: patch_with_preview_notes

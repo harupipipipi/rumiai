@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/dossier_export_manifest.schema.json",
+  "title": "Dossier Export Manifest",
+  "description": "Export manifest that blocks uncited or contradictory dossiers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "export_id",
+    "dossier_id",
+    "claim_ids",
+    "source_ids",
+    "citation_ledger_id",
+    "unresolved_contradictions",
+    "verified",
+    "manifest_only",
+    "render_owner",
+    "requires_citation_ledger_complete",
+    "requires_no_unresolved_contradictions"
+  ],
+  "properties": {
+    "export_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dossier_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claim_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "source_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "citation_ledger_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "unresolved_contradictions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "verified": {
+      "type": "boolean"
+    },
+    "manifest_only": {
+      "type": "boolean",
+      "const": true
+    },
+    "render_owner": {
+      "type": "string",
+      "const": "defaultspack"
+    },
+    "requires_citation_ledger_complete": {
+      "type": "boolean",
+      "const": true
+    },
+    "requires_no_unresolved_contradictions": {
+      "type": "boolean",
+      "const": true
+    }
+  }
+}

@@ -1,0 +1,7 @@
+profile_id: rumi_multimodal_media.visual_qa
+pack_id: rumi_multimodal_media_pack
+purpose: Inspect screenshots and visual assets for readability, layout, accessibility, and defects.
+policy:
+  local_first: true
+  network_default: deny
+  require_evidence_reference: true

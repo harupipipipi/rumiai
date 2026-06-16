@@ -1,0 +1,24 @@
+taxonomy:
+  domains:
+  - customer_research
+  - consent
+  - insight_synthesis
+  artifact_types:
+  - participant
+  - consent_record
+  - interview_evidence
+  - survey_response
+  - insight_card
+  - opportunity_map
+  handoff_targets:
+  - rumi_connector_gateway_pack
+  - rumi_business_ops_pack
+  - rumi_research_pack
+  - rumi_data_analysis_pack
+  - rumi_meeting_intelligence_pack
+  forbidden_ownership:
+  - live recruiting
+  - CRM writes
+  - email sending
+  - generic web research
+  - analytics query execution

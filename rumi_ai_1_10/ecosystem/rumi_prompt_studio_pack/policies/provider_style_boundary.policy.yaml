@@ -1,0 +1,20 @@
+provider_style_boundary_policy:
+  version: 0.1.0
+  allowed:
+  - migrate intent
+  - preserve style knobs
+  - record source provider inspiration
+  - ask reviewer questions about ambiguous provider wording
+  blocked_by_default:
+  - claim provider runtime compatibility
+  - copy hidden system instructions
+  - disable Rumi safety gates
+  - import provider tool permissions
+  - import persistent user memory
+  - claim model benchmark superiority
+  owner_handoff_required:
+    model_benchmarking: rumi_model_evals_pack
+    model_routing: defaultspack_or_model_catalog_owner
+    long_term_memory_storage: rumi_memory_knowledge_pack
+    tool_or_api_creation: rumi_api_toolsmith_pack
+    code_edits: rumi_code_ide_pack

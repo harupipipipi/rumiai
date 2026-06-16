@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/progress_report.schema.json",
+  "title": "Progress Report",
+  "description": "Contract schema for Progress Report.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_id",
+    "study_goal_id",
+    "mastery_estimates",
+    "evidence_summary",
+    "uncertainty_notes",
+    "recommended_handoffs"
+  ],
+  "properties": {
+    "report_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "study_goal_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mastery_estimates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "skill_id",
+          "estimate",
+          "basis",
+          "confidence"
+        ],
+        "properties": {
+          "skill_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "estimate": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "emerging",
+              "stable",
+              "needs_review"
+            ]
+          },
+          "basis": {
+            "type": "string",
+            "minLength": 1
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        }
+      }
+    },
+    "evidence_summary": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evidence_id",
+          "source_note_id",
+          "span_id",
+          "summary"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_note_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "span_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "uncertainty_notes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "skill_id",
+          "reason",
+          "safe_next_step"
+        ],
+        "properties": {
+          "skill_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "safe_next_step": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "recommended_handoffs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner_pack",
+          "reason",
+          "artifact_path"
+        ],
+        "properties": {
+          "owner_pack": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "artifact_path": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

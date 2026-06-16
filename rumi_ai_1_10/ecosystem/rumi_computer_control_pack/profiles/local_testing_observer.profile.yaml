@@ -1,0 +1,47 @@
+profile_id: rumi_computer_control_pack.local_testing_observer
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+
+display_name:
+  ja: Local Testing Observer
+  en: Local Testing Observer
+
+description:
+  ja: "@computer/@chrome のローカルテスト要求を証跡と承認契約として扱うプロファイル。"
+  en: Profile that treats @computer/@chrome local testing requests as evidence and approval contracts.
+
+default_graph: defaultspack.coding_workspace
+default_flow: agent_chat
+
+surfaces:
+  preferred: desktop
+  enabled:
+    - desktop
+    - cli
+
+prompt_layers:
+  system:
+    - prompts/evidence_before_action.system.md
+    - prompts/sandbox_host_boundary.system.md
+
+specs:
+  - specs/session_observation_spec.json
+
+policies:
+  - policies/evidence_first_control.policy.yaml
+  - policies/sandbox_host_boundary.policy.yaml
+
+policy:
+  network_default: none
+  unrestricted_local_testing_grant: false
+  local_testing_requires_surface_classification: true
+  runtime_approval_still_applies: true
+  audit_level: detailed
+
+metadata:
+  pack_id: rumi_computer_control_pack
+  category: local_testing
+  owns:
+    - unrestricted testing safety contract
+    - local host sandbox classification

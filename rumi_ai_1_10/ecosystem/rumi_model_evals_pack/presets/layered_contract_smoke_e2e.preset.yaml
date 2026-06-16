@@ -1,0 +1,13 @@
+preset_id: layered_contract_smoke_e2e
+name: Layered Contract/Smoke/E2E Eval Suite
+profile: rumi_model_evals.eval_suite_designer
+inspired_by: [Cline evals, layered eval practice]
+enabled_capabilities: [contract_eval_design, provider_smoke, e2e_eval_design, pass_k_metrics, flakiness_review]
+ui_panels: [chat, suite_spec, fixtures, metrics, promotion_gate]
+behavior: [separate_layers, local_fixtures_first, approval_gated_provider_smoke]
+policy:
+  network_default: none
+  provider_calls_require_approval: true
+task_defaults:
+  output:
+    type: layered_eval_suite_spec

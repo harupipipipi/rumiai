@@ -1,0 +1,12 @@
+policy_id: rumi_pack_suite.selection_policy
+local_first: true
+network_default: deny
+rules:
+  - id: bundle_is_advisory
+    decision: no_runtime_install
+  - id: prefer_narrow_bundle
+    decision: require
+  - id: promotion_requires_maintainer_review
+    decision: require
+  - id: overlap_matrix_does_not_override_pack_metadata
+    decision: require

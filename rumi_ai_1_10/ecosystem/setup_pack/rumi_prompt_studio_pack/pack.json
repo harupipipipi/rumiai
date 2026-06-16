@@ -1,0 +1,83 @@
+{
+  "pack_id": "rumi_prompt_studio_pack",
+  "display_name": "Rumi Prompt Studio Pack",
+  "description": "Declarative prompt library, prompt linting, custom instruction migration, and fixture dry-run contract pack.",
+  "target_pack_id": "rumi_prompt_studio_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "low",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "compatibility": {
+    "python": ">=3.9",
+    "platforms": [
+      "macos",
+      "linux",
+      "windows"
+    ]
+  },
+  "overlap_policy": {
+    "model_benchmarking": "handoff_to_rumi_model_evals_pack",
+    "model_routing": "handoff_to_defaultspack_or_model_catalog_owner",
+    "long_term_memory_storage": "handoff_to_rumi_memory_knowledge_pack",
+    "tool_or_api_creation": "handoff_to_rumi_api_toolsmith_pack",
+    "code_edits": "handoff_to_rumi_code_ide_pack",
+    "prompt_artifact_catalog": "owned_by_rumi_prompt_studio_pack",
+    "custom_instruction_migration": "owned_by_rumi_prompt_studio_pack",
+    "prompt_lint_rubric": "owned_by_rumi_prompt_studio_pack",
+    "fixture_dry_run_contract": "owned_by_rumi_prompt_studio_pack",
+    "prompt_version_ledger": "owned_by_rumi_prompt_studio_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Rumi Prompt Studio Pack is a declarative domain contract pack; promotion is blocked until runtime owners prove the adjacent execution and audit evidence outside this pack.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required",
+      "promotion_requires_real_world_success_cases"
+    ],
+    "promotion_blockers": [
+      "no_runtime_prompt_executor",
+      "prompt_preferences_are_user_specific",
+      "requires_fixture_import_export_contract",
+      "model_scoring_owned_by_rumi_model_evals_pack",
+      "no_model_router_owner",
+      "no_memory_store_owner",
+      "no_tool_api_or_code_owner"
+    ],
+    "promotion_evidence_required": [
+      "prompt_versioning_roundtrip_cases",
+      "custom_instruction_migration_cases",
+      "fixture_dry_run_cases"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.prompt_studio_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "prompt-customization",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools.",
+    "Prompt review artifacts cannot create tools, APIs, memory stores, code edits, model routes, or benchmark claims."
+  ]
+}

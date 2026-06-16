@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/progress_event.schema.json",
+  "title": "Progress Event",
+  "description": "Progress state separate from tool execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "progress_id",
+    "session_id",
+    "step_id",
+    "state",
+    "summary",
+    "evidence_ids",
+    "next_safe_action"
+  ],
+  "properties": {
+    "progress_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "step_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "started",
+        "advanced",
+        "waiting",
+        "blocked",
+        "completed"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "next_safe_action": {
+      "type": "string",
+      "enum": [
+        "continue_draft",
+        "ask_user",
+        "handoff_only",
+        "stop"
+      ]
+    }
+  }
+}

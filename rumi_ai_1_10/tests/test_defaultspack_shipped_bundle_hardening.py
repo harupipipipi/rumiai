@@ -54,6 +54,8 @@ def test_shipped_composer_bundle_rehydrates_catalog_actions():
     bundle = SHELL_APP.read_text(encoding="utf-8")
 
     assert _has_rehydrated_catalog_action(bundle)
+    assert "composer_catalog_drop" in bundle
+    assert "sourceItemId" in bundle
     assert _has_trusted_action_precedence(bundle)
 
     # Regression guard for the stale bundle vulnerability: the shipped composer
@@ -65,6 +67,8 @@ def test_shipped_composer_bundle_keeps_endpoint_allowlist():
     bundle = SHELL_APP.read_text(encoding="utf-8")
 
     assert "GET /api/coding/git/status" in bundle
+    assert "call_endpoint" in bundle
+    assert "requires_approval" in bundle
     assert "startsWith(`/api/`)" in bundle or 'startsWith("/api/")' in bundle
     assert "startsWith(`//`)" in bundle or 'startsWith("//")' in bundle
     assert "https?" in bundle

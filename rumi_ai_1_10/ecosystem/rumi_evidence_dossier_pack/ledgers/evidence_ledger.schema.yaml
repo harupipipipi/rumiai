@@ -1,0 +1,22 @@
+evidence_ledger_schema:
+  ledger_id: evidence_dossier_ledger
+  required_fields:
+  - record_id
+  - artifact_type
+  - evidence_ids
+  - approval_state
+  - review_state
+  - handoff_owner
+  - uncertainty
+  completion_rules:
+    every_record_has_evidence_or_approval: true
+    external_actions_are_handoffs: true
+    human_review_required_for_handoff: true
+    verified_export_requires_complete_citation_ledger: true
+    verified_export_requires_no_unresolved_contradictions: true
+    render_and_file_outputs_are_manifest_handoffs: true
+  review_states:
+  - draft
+  - ready
+  - blocked
+  - handed_off

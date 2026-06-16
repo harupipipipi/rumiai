@@ -1,0 +1,16 @@
+example_id: rumi_agent_services.examples.coding_service_change
+preset: claude_code_service
+title: Implement a small scoped repository change
+goal: Read the existing code, make the requested change, run focused verification, and summarize files changed.
+constraints:
+  allowed_paths: [src, tests]
+  preserve_unrelated_changes: true
+  network: deny
+  terminal: approval_required
+deliverable:
+  type: files_changed_tests_summary
+handoffs:
+  - target_role: coding_operator
+    objective: Inspect, patch, and test.
+  - target_role: quality_reviewer
+    objective: Review diff scope, tests, and residual risk.
