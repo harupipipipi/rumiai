@@ -64,6 +64,10 @@ domains:
     - domain/tool
     - domain/vision
     path: domain/chat
+  change_request:
+    may_import:
+    - domain/coding
+    path: domain/change_request
   coding:
     may_import: []
     path: domain/coding
@@ -235,6 +239,11 @@ domains:
   stream:
     may_import: []
     path: domain/stream
+  subagent_team:
+    may_import:
+    - domain/coding
+    - domain/company
+    path: domain/subagent_team
   template:
     may_import: []
     path: domain/template
