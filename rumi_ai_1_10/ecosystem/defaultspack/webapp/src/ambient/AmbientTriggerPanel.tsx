@@ -88,6 +88,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const [selectedCameraId, setSelectedCameraId] = useState(() => safeLocalStorageGet(CAMERA_DEVICE_STORAGE_KEY));
   const [micListening, setMicListening] = useState(false);
   const [pinchRecording, setPinchRecording] = useState(false);
+  const [pinchTranscriptPreview, setPinchTranscriptPreview] = useState("");
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [pinchDetectorStatus, setPinchDetectorStatus] = useState("idle");
@@ -115,6 +116,8 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const audioStopRef = useRef<(() => void) | null>(null);
   const gestureStopRef = useRef<(() => void) | null>(null);
   const pinchRecorderRef = useRef<ActiveAudioRecorder | null>(null);
+  const pinchSpeechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const pinchTranscriptRef = useRef("");
   const lastPinchStateRef = useRef<PinchState | null>(null);
   const lastFinalAnswerRef = useRef("");
   const choiceHandledAtRef = useRef(0);
@@ -314,6 +317,13 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     cameraStream?.getTracks().forEach((track) => track.stop());
     pinchRecorderRef.current?.cancel();
     pinchRecorderRef.current = null;
+    try {
+      pinchSpeechRecognitionRef.current?.abort();
+    } catch {
+      // Some webviews throw if recognition already stopped.
+    }
+    pinchSpeechRecognitionRef.current = null;
+    pinchTranscriptRef.current = "";
     audioStopRef.current?.();
   }, [cameraStream]);
 
@@ -361,12 +371,28 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     return window.setTimeout(() => setFrontFlash(false), 1600);
   }
 
+  function stopPinchSpeechRecognition(abort = false): string {
+    const recognition = pinchSpeechRecognitionRef.current;
+    pinchSpeechRecognitionRef.current = null;
+    if (recognition) {
+      try {
+        if (abort) recognition.abort();
+        else recognition.stop();
+      } catch {
+        // Some webviews throw if recognition already stopped.
+      }
+    }
+    return pinchTranscriptRef.current.trim();
+  }
+
   const finishPinchRecording = useCallback(async (state: PinchState) => {
     const recorder = pinchRecorderRef.current;
     if (!recorder) return;
     pinchRecorderRef.current = null;
     setPinchRecording(false);
     setRecordingStartedAt(null);
+    const transcript = stopPinchSpeechRecognition();
+    setPinchTranscriptPreview("");
     setPinchDetectorStatus("sending");
     try {
       const recording = await recorder.stop();
@@ -380,7 +406,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         trigger: "pinch",
         mode: "dispatch_audio",
         action_id: "chat.message",
-        input_text: "指をくっつけている間に録音した音声を入力として処理してください。",
+        input_text: transcript ? `音声入力の文字起こし:\n${transcript}` : "指をくっつけている間に録音した音声を入力として処理してください。",
         conversation_id: conversationIdRef.current || undefined,
         confidence: state.confidence,
         duration_ms: recording.durationMs,
@@ -389,6 +415,8 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           hand: state.hand,
           normalized_distance: state.normalizedDistance,
           hold_to_record: true,
+          transcript_available: Boolean(transcript),
+          ...(transcript ? { transcript_source: "web_speech_api" } : {}),
         },
         attachments: [
           {
@@ -401,6 +429,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             source: "ambient.camera_pinch_hold",
             ephemeral: true,
             do_not_persist: true,
+            ...(transcript ? { transcript, transcription: transcript, transcript_source: "web_speech_api" } : {}),
           },
         ],
       });
@@ -440,11 +469,17 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     if (pinchRecorderRef.current) return;
     lastPinchStateRef.current = state;
     stopSpeechReadout();
+    pinchTranscriptRef.current = "";
+    setPinchTranscriptPreview("");
     setPinchDetectorStatus("recording");
     setMessage("録音中。指を離すと送ります。");
     try {
       const recorder = await startPinchAudioRecorder(selectedMicId || undefined);
       pinchRecorderRef.current = recorder;
+      pinchSpeechRecognitionRef.current = startPinchSpeechRecognition((transcript) => {
+        pinchTranscriptRef.current = transcript;
+        setPinchTranscriptPreview(transcript);
+      });
       setPinchRecording(true);
       setRecordingStartedAt(performance.now());
       await ambientTriggerClient.grantPermission(AMBIENT_MIC_PERMISSION, "granted");
@@ -465,6 +500,8 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     } catch (error) {
       pinchRecorderRef.current?.cancel();
       pinchRecorderRef.current = null;
+      stopPinchSpeechRecognition(true);
+      setPinchTranscriptPreview("");
       setPinchRecording(false);
       setRecordingStartedAt(null);
       setPinchDetectorStatus("tracking");
@@ -485,6 +522,8 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       pinchRecorderRef.current = null;
       setPinchRecording(false);
       setRecordingStartedAt(null);
+      stopPinchSpeechRecognition(true);
+      setPinchTranscriptPreview("");
     }
     await submitApprovalGesture(approvalDecision, state, `choice_${choice}`);
   }, []);
@@ -939,6 +978,21 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           >
             {readoutPlaying ? <VolumeX size={15} /> : <Volume2 size={15} />}
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSettingsOpen((value) => !value);
+              if (!standalone) setExpanded(true);
+            }}
+            className={cn(
+              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
+              settingsOpen && "border-sky-300/35 bg-sky-400/10 text-sky-100",
+            )}
+            title="設定"
+            aria-label="指録音の設定"
+          >
+            <Settings size={15} />
+          </button>
           {!standalone && (
             <button
               type="button"
@@ -988,17 +1042,30 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             {busy ? <Loader2 size={15} className="animate-spin" /> : <PrimaryActionIcon uiState={uiState} />}
             {uiState === "recording" && recordingSeconds > 0 ? `${stateCopy.primary} ${formatRecordingTime(recordingSeconds)}` : stateCopy.primary}
           </button>
+          {pinchRecording && (
+            <div className="flex items-center gap-2 rounded-lg border border-red-300/25 bg-red-400/10 px-2 py-1.5 text-[11px] text-red-50">
+              <Mic size={13} className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate">
+                {pinchTranscriptPreview ? `文字起こし中: ${pinchTranscriptPreview}` : "録音中。文字起こしできる環境ではテキストも送ります。"}
+              </span>
+            </div>
+          )}
           <div className="grid grid-cols-[1fr_auto] items-center gap-2 rounded-lg border border-zinc-800/80 bg-zinc-900/35 px-2 py-1.5">
             <button
               type="button"
               onClick={() => setReadoutEnabled((value) => !value)}
               className={cn(
-                "inline-flex min-w-0 items-center gap-2 text-left text-[11px] font-medium",
+                "inline-flex min-w-0 items-center justify-between gap-2 rounded-md px-1 py-0.5 text-left text-[11px] font-medium",
                 readoutEnabled ? "text-emerald-100" : "text-zinc-400",
               )}
             >
-              {readoutEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
-              <span className="truncate">回答を自動で読み上げる: {readoutEnabled ? "使用中" : "停止中"}</span>
+              <span className="inline-flex min-w-0 items-center gap-2">
+                {readoutEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
+                <span className="truncate">読み上げ</span>
+              </span>
+              <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold", readoutEnabled ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100" : "border-zinc-700 bg-zinc-950 text-zinc-400")}>
+                {readoutEnabled ? "常にON" : "常にOFF"}
+              </span>
             </button>
             {readoutPlaying && (
               <button
@@ -1010,6 +1077,17 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
               </button>
             )}
           </div>
+          {allRumiPermissionsGranted && (
+            <div className="flex items-center gap-2 rounded-lg border border-zinc-800/70 bg-zinc-950/45 px-2 py-1.5 text-[11px] text-zinc-400">
+              <span className="shrink-0 text-zinc-500">送信先</span>
+              <span className="min-w-0 flex-1 truncate text-zinc-200">{routingSummary}</span>
+              {routingModel && (
+                <span className="max-w-[45%] truncate rounded border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-100" title={routingModel}>
+                  {modelLabelFromId(routingModel)}
+                </span>
+              )}
+            </div>
+          )}
           <div className="flex items-center justify-between gap-2 text-[11px] leading-4 text-zinc-500">
             <span className="min-w-0 flex-1">{stateCopy.body}</span>
             <button
@@ -1026,32 +1104,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             <div className="border-l border-emerald-400/35 pl-2 text-[11px] leading-5 text-zinc-400">
               音声と映像は保存しません。残るのは、使われた時刻と結果だけです。
             </div>
-          )}
-          {allRumiPermissionsGranted && (
-            <RoutingSettings
-              busy={busy}
-              mode={routingMode}
-              summary={routingSummary}
-              selectedConversationId={routingConversationId}
-              groupEnabled={routingGroupEnabled}
-              groupId={routingGroupId}
-              groupTitle={routingGroupTitle}
-              model={routingModel}
-              modelQuery={modelQuery}
-              modelResults={modelResults}
-              modelLoading={modelLoading}
-              needsNewChatSettings={routingNeedsNewChatSettings}
-              onModeChange={(mode) => void saveRouting({ mode })}
-              onPickChat={() => void openChatPicker()}
-              onGroupEnabledChange={(enabled) => void saveRouting({ group_enabled: enabled }, enabled ? "新しいチャットをグループ内に作ります。" : "新しいチャットを通常の履歴に作ります。")}
-              onGroupIdChange={setRoutingGroupId}
-              onGroupTitleChange={setRoutingGroupTitle}
-              onGroupCommit={() => void saveRouting({ group_id: routingGroupId, group_title: routingGroupTitle }, "新しいチャットのグループを保存しました。")}
-              onModelChange={setRoutingModel}
-              onModelCommit={(model) => void saveRouting({ model }, model ? "新しいチャットのモデルを保存しました。" : "モデル指定を外しました。")}
-              onModelQueryChange={setModelQuery}
-              onModelSearch={() => void searchRoutingModels()}
-            />
           )}
         </div>
 
@@ -1130,7 +1182,33 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
 
             {settingsOpen && (
               <section className="space-y-2 border-t border-zinc-800/80 pt-3">
-                <p className="text-[11px] font-semibold uppercase text-zinc-500">詳細設定</p>
+                <p className="text-[11px] font-semibold uppercase text-zinc-500">設定</p>
+                {allRumiPermissionsGranted && (
+                  <RoutingSettings
+                    busy={busy}
+                    mode={routingMode}
+                    summary={routingSummary}
+                    selectedConversationId={routingConversationId}
+                    groupEnabled={routingGroupEnabled}
+                    groupId={routingGroupId}
+                    groupTitle={routingGroupTitle}
+                    model={routingModel}
+                    modelQuery={modelQuery}
+                    modelResults={modelResults}
+                    modelLoading={modelLoading}
+                    needsNewChatSettings={routingNeedsNewChatSettings}
+                    onModeChange={(mode) => void saveRouting({ mode })}
+                    onPickChat={() => void openChatPicker()}
+                    onGroupEnabledChange={(enabled) => void saveRouting({ group_enabled: enabled }, enabled ? "新しいチャットをグループ内に作ります。" : "新しいチャットを通常の履歴に作ります。")}
+                    onGroupIdChange={setRoutingGroupId}
+                    onGroupTitleChange={setRoutingGroupTitle}
+                    onGroupCommit={() => void saveRouting({ group_id: routingGroupId, group_title: routingGroupTitle }, "新しいチャットのグループを保存しました。")}
+                    onModelChange={setRoutingModel}
+                    onModelCommit={(model) => void saveRouting({ model }, model ? "送信モデルを保存しました。" : "モデル指定を外しました。")}
+                    onModelQueryChange={setModelQuery}
+                    onModelSearch={() => void searchRoutingModels()}
+                  />
+                )}
                 <label className="block text-[11px] text-zinc-500">
                   マイク
                   <select
@@ -1255,11 +1333,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                 </div>
               </section>
             )}
-
-            <button type="button" onClick={() => setSettingsOpen((value) => !value)} className="ambient-mini-button w-full">
-              <Settings size={14} />
-              {settingsOpen ? "詳細設定を閉じる" : "詳細設定を開く"}
-            </button>
 
             {lastFinalAnswer && (
               <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 text-emerald-50">
@@ -1515,7 +1588,9 @@ function RoutingSettings({
               </label>
             </div>
           )}
-          <div className="space-y-1.5 rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
+        </div>
+      )}
+      <div className="space-y-1.5 rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] font-semibold text-zinc-500">送信モデル</span>
               {model && (
@@ -1602,8 +1677,6 @@ function RoutingSettings({
               </div>
             )}
           </div>
-        </div>
-      )}
     </section>
   );
 }
@@ -2029,6 +2102,73 @@ type AmbientAudioRecording = {
   size: number;
   durationMs: number;
 };
+
+type SpeechRecognitionAlternativeLike = {
+  transcript?: string;
+};
+
+type SpeechRecognitionResultLike = {
+  isFinal?: boolean;
+  length?: number;
+  0?: SpeechRecognitionAlternativeLike;
+};
+
+type SpeechRecognitionEventLike = {
+  resultIndex?: number;
+  results?: ArrayLike<SpeechRecognitionResultLike>;
+};
+
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+};
+
+type SpeechRecognitionConstructorLike = new () => SpeechRecognitionLike;
+
+type SpeechRecognitionWindow = Window & {
+  SpeechRecognition?: SpeechRecognitionConstructorLike;
+  webkitSpeechRecognition?: SpeechRecognitionConstructorLike;
+};
+
+function startPinchSpeechRecognition(onTranscript: (transcript: string) => void): SpeechRecognitionLike | null {
+  const SpeechRecognitionConstructor = (window as SpeechRecognitionWindow).SpeechRecognition ?? (window as SpeechRecognitionWindow).webkitSpeechRecognition;
+  if (!SpeechRecognitionConstructor) return null;
+  const recognition = new SpeechRecognitionConstructor();
+  let finalTranscript = "";
+  let interimTranscript = "";
+  recognition.lang = navigator.language || "ja-JP";
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.onerror = () => undefined;
+  recognition.onend = () => undefined;
+  recognition.onresult = (event) => {
+    const results = event.results;
+    if (!results) return;
+    interimTranscript = "";
+    const startIndex = Math.max(0, event.resultIndex ?? 0);
+    for (let index = startIndex; index < results.length; index += 1) {
+      const result = results[index];
+      const text = String(result?.[0]?.transcript ?? "").trim();
+      if (!text) continue;
+      if (result?.isFinal) finalTranscript = `${finalTranscript} ${text}`.trim();
+      else interimTranscript = `${interimTranscript} ${text}`.trim();
+    }
+    onTranscript(`${finalTranscript} ${interimTranscript}`.trim());
+  };
+  try {
+    recognition.start();
+    return recognition;
+  } catch {
+    return null;
+  }
+}
 
 async function startPinchAudioRecorder(deviceId?: string): Promise<ActiveAudioRecorder> {
   if (!navigator.mediaDevices?.getUserMedia) {

@@ -91,3 +91,52 @@ def test_ephemeral_audio_attachment_is_model_only_and_not_persisted(tmp_path, mo
     )
     assert not (store.conversation_workspace_dir(conv["id"]) / "attachments" / "pinch.webm").exists()
     ChatStore._instance = None
+
+
+def test_transcribed_audio_attachment_is_sent_as_text_for_non_multimodal_models(tmp_path, monkeypatch):
+    from domain.chat.modality_detector import detect_modalities
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "user_data" / "shared" / "chat" / "conversations.json"))
+    ChatStore._instance = None
+    store = ChatStore()
+    conv = store.create_conversation(model="stub/default")
+    data_url = "data:audio/webm;base64," + base64.b64encode(b"voice").decode()
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "",
+                "attachments": [
+                    {
+                        "id": "ambient-audio",
+                        "name": "pinch.webm",
+                        "type": "audio/webm",
+                        "size": 5,
+                        "dataUrl": data_url,
+                        "ephemeral": True,
+                        "do_not_persist": True,
+                        "transcript": "今日の予定を要約して",
+                        "transcript_source": "web_speech_api",
+                    }
+                ],
+            },
+        },
+        {},
+    )
+
+    assert "workspace_attachments" not in prepared.metadata
+    assert "dataUrl" not in prepared.metadata["attachments"][0]
+    assert prepared.metadata["attachments"][0]["transcribed"] is True
+    assert prepared.metadata["attachments"][0]["transcript_source"] == "web_speech_api"
+    assert any(block.get("type") == "text" and "今日の予定を要約して" in block.get("text", "") for block in prepared.content)
+    user_messages = [message for message in prepared.standard_messages if message.get("role") == "user"]
+    assert not any(
+        isinstance(block, dict) and block.get("type") == "input_audio"
+        for block in user_messages[-1]["content"]
+    )
+    assert detect_modalities(prepared.content, prepared.metadata)["has_audio"] is False
+    assert not (store.conversation_workspace_dir(conv["id"]) / "attachments" / "pinch.webm").exists()
+    ChatStore._instance = None

@@ -76,6 +76,8 @@ def _attachment_is_image(attachment: dict[str, Any]) -> bool:
 
 
 def _attachment_is_audio(attachment: dict[str, Any]) -> bool:
+    if attachment.get("transcribed") is True or attachment.get("transcript_available") is True:
+        return False
     mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
     return mime.startswith("audio/")
 

@@ -207,6 +207,9 @@ class AmbientTriggerRouter:
         target_conversation_id = self._target_conversation_id(event, context, state)
         routing = state.get("routing") if isinstance(state.get("routing"), dict) else {}
         model = str(routing.get("model") or "").strip()
+        params = dict(event.payload.get("params") if isinstance(event.payload.get("params"), dict) else {})
+        if model and not str(params.get("model") or params.get("profile_id") or "").strip():
+            params["model"] = model
         envelope = RumiInputEnvelope(
             role="user",
             input=input_text,
@@ -238,7 +241,7 @@ class AmbientTriggerRouter:
                     }
                 )
             },
-            params=dict(event.payload.get("params") if isinstance(event.payload.get("params"), dict) else {}),
+            params=params,
             attachments=attachments,
             tools=list(event.payload.get("tools") if isinstance(event.payload.get("tools"), list) else []),
         )

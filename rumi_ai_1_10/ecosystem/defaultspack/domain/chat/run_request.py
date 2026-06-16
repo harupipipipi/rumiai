@@ -732,6 +732,7 @@ def _prepared_user_content(
         if isinstance(content, list):
             content.extend(_attachment_text_blocks(attachments))
             content.extend(_attachment_image_blocks(attachments))
+            content.extend(_attachment_audio_transcript_blocks(attachments))
             audio_blocks = _attachment_audio_blocks(attachments)
             if audio_blocks:
                 runtime_content = list(content)
@@ -1250,6 +1251,8 @@ def _attachment_audio_blocks(attachments: list[dict[str, Any]]) -> list[dict[str
     for attachment in attachments:
         if not isinstance(attachment, dict):
             continue
+        if _attachment_audio_transcript(attachment):
+            continue
         mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
         data_url = attachment.get("dataUrl") or attachment.get("data_url")
         if not mime.startswith("audio/") or not isinstance(data_url, str) or not data_url.startswith("data:"):
@@ -1267,6 +1270,8 @@ def _attachment_audio_placeholders(attachments: list[dict[str, Any]]) -> list[di
     for attachment in attachments:
         if not isinstance(attachment, dict):
             continue
+        if _attachment_audio_transcript(attachment):
+            continue
         mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
         if not mime.startswith("audio/"):
             continue
@@ -1275,6 +1280,35 @@ def _attachment_audio_placeholders(attachments: list[dict[str, Any]]) -> list[di
         suffix = f" ({int(duration_ms)}ms)" if isinstance(duration_ms, (int, float)) else ""
         blocks.append({"type": "text", "text": f"\n\n音声入力: {name}{suffix}"})
     return blocks
+
+
+def _attachment_audio_transcript_blocks(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    blocks = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
+        if not mime.startswith("audio/"):
+            continue
+        transcript = _attachment_audio_transcript(attachment)
+        if not transcript:
+            continue
+        name = str(attachment.get("name") or "ambient-recording").strip()[:200] or "ambient-recording"
+        blocks.append({"type": "text", "text": f"\n\n音声入力の文字起こし: {name}\n{transcript}"})
+    return blocks
+
+
+def _attachment_audio_transcript(attachment: dict[str, Any]) -> str:
+    for key in ("transcript", "transcription", "text_transcript"):
+        value = attachment.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    metadata = attachment.get("metadata") if isinstance(attachment.get("metadata"), dict) else {}
+    for key in ("transcript", "transcription", "text_transcript"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 def _audio_format_from_mime(value: str) -> str:
@@ -1305,13 +1339,17 @@ def _sanitize_attachment_metadata(attachments: list[dict[str, Any]]) -> list[dic
     for attachment in attachments:
         if not isinstance(attachment, dict):
             continue
-        sanitized.append(
-            {
-                key: attachment.get(key)
-                for key in ("id", "name", "size", "type", "truncated", "source", "sourcePath")
-                if key in attachment
-            }
-        )
+        item = {
+            key: attachment.get(key)
+            for key in ("id", "name", "size", "type", "truncated", "source", "sourcePath")
+            if key in attachment
+        }
+        if _attachment_audio_transcript(attachment):
+            item["transcribed"] = True
+            source = attachment.get("transcript_source") or attachment.get("transcription_source")
+            if isinstance(source, str) and source.strip():
+                item["transcript_source"] = source.strip()[:80]
+        sanitized.append(item)
     return sanitized
 
 

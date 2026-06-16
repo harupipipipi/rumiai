@@ -264,6 +264,35 @@ def test_ambient_routing_can_create_session_or_per_trigger_chats(monkeypatch, tm
     assert "group_id" not in ungrouped.get("metadata", {})
 
 
+def test_selected_chat_routing_passes_saved_model_as_turn_param(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+    router.configure({
+        "routing": {
+            "mode": "selected_chat",
+            "conversation_id": "conv-selected",
+            "model": "opencode-go/kimi-k2.6",
+        }
+    })
+
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": ""}) as submit:
+        dispatched = router.submit_event(_pinch_audio_payload(), {"conversation_id": "conv-selected"})
+
+    assert dispatched["status"] == "ok"
+    envelope = submit.call_args.args[0]
+    assert envelope.target["conversation_id"] == "conv-selected"
+    assert envelope.chat["conversation_id"] == "conv-selected"
+    assert envelope.params["model"] == "opencode-go/kimi-k2.6"
+
+
 def test_approval_gesture_is_audited_without_dispatch(monkeypatch, tmp_path):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
