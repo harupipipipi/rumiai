@@ -1,0 +1,69 @@
+{
+  "pack_id": "rumi_model_evals_pack",
+  "display_name": "Rumi Model Evals Pack",
+  "description": "Optional declarative model evaluation and routing evidence pack for provider smoke tests, pass@k, flakiness, fit matrices, cost/latency evidence, and defaultspack promotion gates.",
+  "target_pack_id": "rumi_model_evals_pack",
+  "version": "1.0.0",
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    },
+    {
+      "pack_id": "rumi_local_agent_pack",
+      "version": ">=1.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "tool_aliases": "prefer_explicit_pack_namespace",
+    "profile_aliases": "prefer_pack_specific_profile_id",
+    "defaultspack_provider_catalog": "overlay_with_evidence_only",
+    "rumi_agent_services_pack": "feeds_service_routing_confidence",
+    "rumi_code_ide_pack": "feeds_coding_model_fit_and_smoke_results",
+    "rumi_data_analysis_pack": "feeds_analysis_model_fit_and_chart_or_sql_eval_results",
+    "defaultspack_core": "do_not_override",
+    "notes": [
+      "This pack records eval evidence and promotion gates but does not mutate defaultspack provider entries.",
+      "Agent, IDE, and data-analysis packs may consume fit matrix outputs for routing decisions.",
+      "Provider keys are runtime-only requirements and must not appear in pack files."
+    ]
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Domain-specific evaluation policy pack; promotion decisions are advisory gates for defaultspack maintainers.",
+    "gates": [
+      "contract_eval_pass_rate",
+      "provider_smoke_success",
+      "pass_at_k_threshold",
+      "flakiness_threshold",
+      "cost_latency_budget",
+      "safety_regression_check"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.model_evals_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "model-evaluation",
+    "optional": true
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": false,
+  "risk_level": "low",
+  "supports_all_ok": true,
+  "security_notes": [
+    "No provider keys, API tokens, OAuth clients, private endpoints, or credentials are embedded.",
+    "Network default is none; provider smoke recipes require explicit runtime approval and externally supplied credentials.",
+    "The pack contains declarative specs only and does not execute evals."
+  ]
+}

@@ -44,10 +44,10 @@ def test_click_executes_with_yolo(controller):
 
 
 def test_observe_requires_approval_without_yolo(controller):
-    """observe can return screenshots and requires approval."""
+    """observe can return screenshots, so local execution requires external approval."""
     result = controller.run("computer.observe", {"app": "Notes"})
     assert result.get("requires_approval") is True
-    assert "approval_token" in result
+    assert "approval_token" not in result
     controller._computer_seat.observe.assert_not_called()
 
 

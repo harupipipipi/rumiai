@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/export_package.schema.json",
+  "title": "Export Package",
+  "description": "Share/export package manifest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "export_id",
+    "artifact_id",
+    "version_id",
+    "included_files",
+    "excluded_capabilities",
+    "review_state",
+    "workspace_handoff",
+    "package_digest",
+    "package_contract_only",
+    "file_persistence_owner",
+    "zip_creation_owner",
+    "execution_effect"
+  ],
+  "properties": {
+    "export_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "included_files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "source_ref",
+          "version_id",
+          "checksum"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_ref": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "checksum": {
+            "type": "string",
+            "minLength": 8
+          }
+        }
+      }
+    },
+    "excluded_capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "review_state": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "ready",
+        "blocked"
+      ]
+    },
+    "workspace_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner_pack",
+        "artifact_path"
+      ],
+      "properties": {
+        "owner_pack": {
+          "type": "string",
+          "const": "defaultspack"
+        },
+        "artifact_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "package_digest": {
+      "type": "string",
+      "minLength": 8
+    },
+    "package_contract_only": {
+      "type": "boolean",
+      "const": true
+    },
+    "file_persistence_owner": {
+      "type": "string",
+      "const": "defaultspack"
+    },
+    "zip_creation_owner": {
+      "type": "string",
+      "const": "defaultspack"
+    },
+    "execution_effect": {
+      "type": "string",
+      "const": "none"
+    }
+  }
+}

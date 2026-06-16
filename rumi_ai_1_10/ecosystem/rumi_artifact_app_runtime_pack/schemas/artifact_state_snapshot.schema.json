@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/artifact_state_snapshot.schema.json",
+  "title": "Artifact State Snapshot",
+  "description": "State snapshot with workspace handoff.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "snapshot_id",
+    "artifact_id",
+    "version_id",
+    "state_digest",
+    "created_from_event_ids",
+    "storage_handoff"
+  ],
+  "properties": {
+    "snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state_digest": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_from_event_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "storage_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner_pack",
+        "artifact_path",
+        "human_review_required"
+      ],
+      "properties": {
+        "owner_pack": {
+          "type": "string",
+          "const": "defaultspack"
+        },
+        "artifact_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "human_review_required": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    }
+  }
+}

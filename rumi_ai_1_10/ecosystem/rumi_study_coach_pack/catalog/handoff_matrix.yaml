@@ -1,0 +1,18 @@
+handoff_matrix:
+  pack_boundary_rule: owner_surface_wins_then_explicit_handoff
+  items:
+  - surface: document_parsing
+    resolution: handoff_to_rumi_document_intelligence_pack
+    requires_human_review: true
+  - surface: web_research
+    resolution: handoff_to_rumi_research_pack
+    requires_human_review: true
+  - surface: long_term_memory
+    resolution: handoff_to_rumi_memory_knowledge_pack
+    requires_human_review: true
+  - surface: review_scheduling
+    resolution: handoff_to_rumi_workflow_scheduler_pack
+    requires_human_review: true
+  - surface: study_artifact_export
+    resolution: handoff_to_rumi_workspace_pack
+    requires_human_review: true

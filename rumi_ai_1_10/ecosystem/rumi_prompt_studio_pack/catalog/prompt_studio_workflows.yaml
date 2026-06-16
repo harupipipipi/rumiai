@@ -1,0 +1,24 @@
+workflows:
+  items:
+  - id: custom_instruction_migration
+    inputs:
+    - local_evidence
+    outputs:
+    - review_record
+    - handoff_packet
+    execution: declarative_only
+  - id: prompt_lint_review
+    inputs:
+    - local_evidence
+    outputs:
+    - review_record
+    - handoff_packet
+    execution: declarative_only
+  - id: fixture_dry_run_release
+    inputs:
+    - local_evidence
+    outputs:
+    - review_record
+    - handoff_packet
+    execution: declarative_only
+  default_execution: no_runtime_action

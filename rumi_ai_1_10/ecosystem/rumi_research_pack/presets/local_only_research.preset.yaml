@@ -1,0 +1,10 @@
+id: local_only_research
+name: Local-only Research
+profile: rumi_research_pack.local_research_synthesizer
+enabled_capabilities:
+  - research.plan.create
+  - research.evidence.extract
+  - research.synthesis.write
+ui_panels: [chat, evidence_table, synthesis]
+behavior: [provided_sources_only, no_network_by_default, compact_citations, limitations_visible]
+default_outputs: [local_synthesis, evidence_index, source_manifest]

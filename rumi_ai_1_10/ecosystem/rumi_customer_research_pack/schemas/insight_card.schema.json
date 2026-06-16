@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/insight_card.schema.json",
+  "title": "Insight Card",
+  "description": "Contract schema for Insight Card.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "insight_id",
+    "claim",
+    "opportunity_area",
+    "confidence",
+    "supporting_evidence_ids",
+    "source_quote_ids",
+    "counter_evidence_ids",
+    "redaction_state",
+    "recommended_handoff"
+  ],
+  "properties": {
+    "insight_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claim": {
+      "type": "string",
+      "minLength": 1
+    },
+    "opportunity_area": {
+      "type": "string",
+      "minLength": 1
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "supporting_evidence_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "source_quote_ids": {
+      "description": "Quote IDs that directly support the claim. These must resolve to redacted interview quotes with consent that allows synthesis.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "counter_evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": [
+        "redacted",
+        "aggregate_only"
+      ]
+    },
+    "recommended_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner_pack",
+        "reason",
+        "artifact_path"
+      ],
+      "properties": {
+        "owner_pack": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

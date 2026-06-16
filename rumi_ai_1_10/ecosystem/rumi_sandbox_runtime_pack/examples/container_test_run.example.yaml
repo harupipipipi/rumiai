@@ -1,0 +1,10 @@
+example_id: rumi_sandbox_runtime.container_test_run
+request: Classify an untrusted local test command for an ephemeral container run with no network and no secret mounts.
+boundary_classification: container_ephemeral
+secret_mount_request: no_secret
+approval_required: runtime_owner_approval_required
+expected_outputs:
+  - boundary_classification
+  - runtime_receipt_schema_ref
+  - reproducibility_checklist_ref
+  - handoff_to_defaultspack_tool_owner

@@ -1,0 +1,10 @@
+preset:
+  id: safe_default
+  pack_id: rumi_subagent_pr_manager_pack
+  mode: safe_default
+  purpose: Start every pack PR coordination task with explicit scope, subagent assignment, and no runtime edits.
+  require_evidence: true
+  require_overlap_check: true
+  required_assets:
+    - templates/subagent_assignment_brief.template.yaml
+    - policies/subagent_pr_governance.policy.yaml

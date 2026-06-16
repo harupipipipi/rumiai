@@ -1,0 +1,52 @@
+runbook_template:
+  id: rumi_sop_mining_pack.sop_mining_runbook
+  title: Trace-to-SOP Mining Runbook
+  mode: declarative_only
+  required_sections:
+  - intent
+  - evidence_inventory
+  - trace_schema_review
+  - redaction_review
+  - pattern_summary
+  - procedure_steps
+  - human_approval_gate
+  - owner_handoff
+  - rollback_notes
+  - ledger_update
+  workflow:
+  - id: confirm_existing_evidence
+    action: reference_local_or_adjacent_owner_evidence
+    execution: no_runtime_action
+  - id: normalize_trace_records
+    action: map_each_source_to_trace_evidence_record_schema
+    execution: no_runtime_action
+  - id: redact_and_summarize
+    action: apply_sop_mining_safety_policy
+    execution: no_runtime_action
+  - id: draft_repeatable_steps
+    action: convert_observed_pattern_to_manual_sop_steps
+    execution: no_runtime_action
+  - id: approval_gate
+    action: require_named_human_approval_before_recipe_promotion
+    execution: no_runtime_action
+  - id: handoff_adjacent_runtime_surface
+    action: name_owner_pack_for_any_execution_browser_scheduler_or_observability_need
+    execution: no_runtime_action
+  promotion_gate:
+    blocking_requirements:
+    - redaction_complete
+    - trace_schema_valid
+    - consent_basis_recorded
+    - human_owner_approved
+    - approver_identity_recorded
+    - approved_at_recorded
+    - non_execution_boundary_confirmed
+    - owner_handoff_named
+  blocked_actions:
+  - automation_execution
+  - browser_control
+  - computer_control
+  - schedule_creation
+  - live_trace_capture
+  - long_term_run_ledger_storage
+  - tool_creation_or_invocation

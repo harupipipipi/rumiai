@@ -1,0 +1,34 @@
+example_id: rumi_knowledge_marketplace.connector_card_review
+scenario: Review a connector capability card without granting connector access.
+request: Evaluate connector card docs-gdrive-summary for trust status and route execution details to the connector gateway pack.
+marketplace_card:
+  card_id: connector.docs_gdrive_summary.v2
+  capability_type: connector_card
+  source:
+    source_ref: local_catalog:connectors/docs-gdrive-summary
+    content_digest: sha256:0f82a6e3e3b13043a7eb7d41d6507f903b4f2109df3a55a2be717ed0a7ef25a0
+  publisher: rumi-connectors
+  trust_status: unreviewed
+  permission_summary:
+    required_permissions:
+      - read_drive_metadata
+      - read_document_content
+    network_requirement: connector_runtime_only
+    secret_requirement: connector_gateway_managed
+    host_execution_requirement: false
+install_review:
+  decision: needs_security_review
+  explicit_user_approval_required: true
+  reviewer: local-marketplace-curator
+  reason: connector reads document content and needs gateway-scoped permission review
+expected_handoff:
+  target_pack: rumi_connector_gateway_pack
+  status: needs_review
+  required_evidence:
+    - permission_summary
+    - source_ref
+    - content_digest
+    - trust_status
+security_handoff:
+  target_pack: rumi_security_review_pack
+  reason: document-content permission requires suspicious-scope review before install-ready status

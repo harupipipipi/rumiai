@@ -1,0 +1,77 @@
+{
+  "pack_id": "rumi_data_analysis_pack",
+  "display_name": "Rumi Data Analysis Pack",
+  "description": "Optional local-first data analysis pack for CSV, Sheets, SQL, notebooks, charts, audits, and reproducible recipes.",
+  "target_pack_id": "rumi_data_analysis_pack",
+  "version": "1.0.0",
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    },
+    {
+      "pack_id": "rumi_default_tools_pack",
+      "version": ">=1.0.0"
+    },
+    {
+      "pack_id": "rumi_local_agent_pack",
+      "version": ">=1.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "tool_aliases": "prefer_explicit_pack_namespace",
+    "profile_aliases": "prefer_pack_specific_profile_id",
+    "defaultspack_core": "do_not_override",
+    "workspace_pack": "complement_not_replace",
+    "workspace_boundary": {
+      "rumi_workspace_pack_owns": [
+        "final office documents",
+        "presentation and spreadsheet artifacts",
+        "artifact export packaging",
+        "workspace artifact lifecycle"
+      ],
+      "rumi_data_analysis_pack_owns": [
+        "analysis intent and method",
+        "data cleaning recipes",
+        "audit trail schemas",
+        "chart specifications",
+        "reproducible analysis notes"
+      ]
+    },
+    "notes": [
+      "This pack may hand final report or chart specs to rumi_workspace_pack when that pack is installed.",
+      "It does not duplicate workspace artifact generation, office export, or runtime tool implementations.",
+      "It remains useful without rumi_workspace_pack by producing analysis plans, recipes, and specs."
+    ]
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Optional domain pack; defaultspack remains the runtime core."
+  },
+  "marketplace": {
+    "id": "rumi.data_analysis_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "data-analysis",
+    "optional": true
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": false,
+  "risk_level": "low",
+  "supports_all_ok": true,
+  "security_notes": [
+    "No secrets, credentials, account tokens, external endpoints, or provider keys are embedded.",
+    "Network use is none by default; data sources are local files, pasted tables, local database descriptors, or user-provided exports.",
+    "Any runtime that executes SQL, notebooks, or file writes must apply its own approval and sandbox policy."
+  ]
+}

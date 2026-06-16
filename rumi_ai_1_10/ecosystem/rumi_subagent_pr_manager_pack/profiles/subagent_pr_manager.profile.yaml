@@ -1,0 +1,13 @@
+profile:
+  id: subagent_pr_manager
+  pack_id: rumi_subagent_pr_manager_pack
+  stance: evidence_first_reviewer
+  owner_surfaces:
+  - subagent_assignment
+  - branch_pr_ledger
+  - merge_readiness
+  - pm_handoff
+  required_checks:
+    - parse_catalog
+    - inspect_overlap_policy
+    - preserve_evidence

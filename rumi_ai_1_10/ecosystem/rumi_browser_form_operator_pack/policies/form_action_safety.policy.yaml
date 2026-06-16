@@ -1,0 +1,14 @@
+policy:
+  id: rumi_browser_form_operator_pack.safety
+  default_network: none
+  required_secrets: []
+  executable_code: false
+  must_record_evidence: true
+  must_check_overlap_policy: true
+  defaultspack_promotion: disabled_without_maintainer_review
+  handoff_required_for:
+  - semantic_dom_collection
+  - navigation_and_clicking
+  - pii_or_payment_risk
+  - post_submit_delivery
+  - tool_aliases

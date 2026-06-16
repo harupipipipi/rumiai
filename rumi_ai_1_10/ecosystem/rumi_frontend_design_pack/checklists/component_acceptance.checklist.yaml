@@ -1,0 +1,22 @@
+checklist_id: rumi_frontend_design.component_acceptance
+blocking_checks:
+  - id: goal_and_surface
+    question: Is the user goal tied to a concrete app surface and workflow?
+    evidence: component_brief
+  - id: design_system_fit
+    question: Did the component meet the design-system fit minimum score?
+    evidence: catalog/design_system_fit_rubric.yaml
+  - id: state_matrix
+    question: Are default, loading, empty, error, disabled, focused, and mobile states specified?
+    evidence: schemas/component_acceptance.schema.yaml
+  - id: responsive_qa
+    question: Are viewport rows and screenshot requirements named?
+    evidence: catalog/responsive_qa_matrix.yaml
+  - id: handoff_owner
+    question: Are code, browser, media, or workspace handoffs routed to owner packs?
+    evidence: setup_pack_overlap_policy
+reviewer_decisions:
+  - ready_for_implementation_handoff
+  - needs_design_system_fit_work
+  - needs_responsive_qa_evidence
+  - blocked_by_owner_pack

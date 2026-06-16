@@ -1,0 +1,15 @@
+preset:
+  id: safe_default
+  purpose: Use local evidence and no implicit external action.
+  required_assets:
+  - schemas
+  - policies
+  - checklists
+  - glossaries
+  - catalog
+  defaults:
+    network: none
+    grant_effect: none
+    human_review: true
+    require_source_segment_ids: true
+    require_protected_term_check: true

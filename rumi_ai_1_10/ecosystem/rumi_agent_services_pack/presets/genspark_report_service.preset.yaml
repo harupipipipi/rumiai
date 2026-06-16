@@ -1,0 +1,13 @@
+id: genspark_report_service
+name: Genspark Style Report Builder
+profile: rumi_agent_services.synthesis_writer
+workflow: deep_research_report
+enabled_capabilities: [deep_research, source_cards, artifact_delivery, safety_review]
+ui_panels: [chat, source_cards, outline, artifacts]
+behavior: [source_card_grid, structured_report, caveats_visible]
+policy:
+  network_default: deny
+  web_requires_approval: true
+task_defaults:
+  output:
+    type: report_with_source_cards

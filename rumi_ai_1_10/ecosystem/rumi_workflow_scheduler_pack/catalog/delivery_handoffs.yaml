@@ -1,0 +1,52 @@
+handoff_catalog_id: rumi_workflow_scheduler.delivery_handoffs
+version: 1
+pack_id: rumi_workflow_scheduler_pack
+purpose: Describe delivery handoffs without performing messaging or connector calls.
+default_posture:
+  network_default: deny
+  delivery_execution: owner_pack_only
+  external_audience_requires_review: true
+handoff_types:
+  - handoff_id: local_thread_wakeup
+    title: Local thread wakeup
+    target_kind: local_thread
+    owner_route: app_automation_tool
+    requires_external_network: false
+    required_fields:
+      - thread_ref
+      - wakeup_summary
+      - stop_conditions
+  - handoff_id: chat_digest
+    title: Chat digest
+    target_kind: rumi_chat
+    owner_route: defaultspack_scheduler
+    requires_external_network: false
+    required_fields:
+      - conversation_ref
+      - digest_scope
+      - evidence_summary
+  - handoff_id: connector_message
+    title: Connector message
+    target_kind: connector_gateway
+    owner_route: rumi_connector_gateway_pack
+    requires_external_network: owner_decides
+    required_fields:
+      - audience_policy
+      - channel_ref
+      - message_summary
+      - approval_status
+  - handoff_id: release_check
+    title: Release check wakeup
+    target_kind: release_workflow
+    owner_route: rumi_devops_release_pack
+    requires_external_network: false
+    required_fields:
+      - release_ref
+      - gate_name
+      - evidence_required
+safety_rules:
+  - do_not_deliver_without_owner_route
+  - do_not_include_secret_material
+  - summarize_evidence_before_external_delivery
+  - stop_when_audience_policy_is_missing
+  - stop_when_connector_owner_is_unavailable

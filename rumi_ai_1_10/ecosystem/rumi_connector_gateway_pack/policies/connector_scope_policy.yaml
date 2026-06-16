@@ -1,0 +1,14 @@
+policy_id: rumi_connector_gateway.scope_policy
+local_first: true
+network_default: deny
+rules:
+  - id: no_implicit_connector_execution
+    decision: require_installed_tool_owner
+  - id: classify_inbound_before_action
+    decision: require
+  - id: sensitive_scope_needs_review_card
+    decision: require
+  - id: recurring_connector_task_needs_schedule_owner
+    decision: handoff_to_defaultspack_scheduler
+  - id: unsupported_server_routes_to_mcp_gateway
+    decision: handoff_to_defaultspack_mcp_registry

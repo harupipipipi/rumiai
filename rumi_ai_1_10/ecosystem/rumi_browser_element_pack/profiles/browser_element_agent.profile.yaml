@@ -1,0 +1,14 @@
+profile_id: rumi_browser_element_pack.browser_element_agent
+name: Browser Element Agent
+base_pack: defaultspack
+packs:
+  - defaultspack
+  - rumi_default_tools_pack
+  - rumi_browser_element_pack
+prompt: prompts/browser_element_agent.system.md
+tools:
+  - rumi_default_tools_pack:browser_companion
+defaults:
+  snapshot_limit: 300
+  verify_after_action: true
+  highlight_before_destructive_action: true

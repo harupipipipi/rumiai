@@ -1,0 +1,7 @@
+example_id: rumi_browser_automation.data_collection
+request: Collect visible rows from a web table without changing page state.
+playbook: browser_data_collection
+expected_evidence:
+  - page_url
+  - extracted_rows
+  - screenshot_reference

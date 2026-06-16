@@ -1,0 +1,7 @@
+example_id: rumi_multimodal_media.ocr_notes
+request: Extract structured notes from scanned meeting pages.
+workflow: ocr_to_structured_notes
+expected_outputs:
+  - ocr_text
+  - uncertain_regions
+  - summary

@@ -1,0 +1,25 @@
+workflows:
+  capture_benchmark_plan:
+    owner: rumi_runtime_benchmark_pack
+    requires_evidence:
+      - benchmark_seed
+      - runtime_profile
+      - sample_count
+      - cost_latency_table
+    handoff_policy: setup_pack_overlap_policy
+  compare_runtime_profiles:
+    owner: rumi_runtime_benchmark_pack
+    requires_evidence:
+      - benchmark_seed
+      - runtime_profile
+      - sample_count
+      - cost_latency_table
+    handoff_policy: setup_pack_overlap_policy
+  publish_reproducibility_notes:
+    owner: rumi_runtime_benchmark_pack
+    requires_evidence:
+      - benchmark_seed
+      - runtime_profile
+      - sample_count
+      - cost_latency_table
+    handoff_policy: setup_pack_overlap_policy

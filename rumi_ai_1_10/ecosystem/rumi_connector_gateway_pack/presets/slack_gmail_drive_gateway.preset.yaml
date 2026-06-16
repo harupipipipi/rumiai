@@ -1,0 +1,7 @@
+preset_id: rumi_connector_gateway.slack_gmail_drive
+profile: rumi_connector_gateway.router
+connector_classes: [messaging, productivity]
+features:
+  scope_review_card: required
+  inbound_prompt_risk: classify
+  delivery_contract: required

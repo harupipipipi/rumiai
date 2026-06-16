@@ -97,7 +97,20 @@ class CapabilityCatalog:
         return None
 
     def profiles(self) -> List[Dict[str, Any]]:
-        return self._load_yaml_dir("profiles", ".profile.yaml")
+        return [self._normalize_profile(item) for item in self._load_yaml_dir("profiles", ".profile.yaml")]
+
+    @staticmethod
+    def _normalize_profile(item: Dict[str, Any]) -> Dict[str, Any]:
+        profile = dict(item)
+        nested = profile.get("profile")
+        if isinstance(nested, dict):
+            profile = {**profile, **nested}
+            profile.pop("profile", None)
+        profile_id = str(profile.get("profile_id") or profile.get("id") or "").strip()
+        if profile_id:
+            profile["profile_id"] = profile_id
+            profile.setdefault("id", profile_id)
+        return profile
 
     def presets(self) -> List[Dict[str, Any]]:
         return self._load_yaml_dir("presets", ".preset.yaml")

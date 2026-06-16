@@ -1,0 +1,5 @@
+preset:
+  id: quality_gate
+  mode: blocking_checks
+  minimum_pass: all_blocking_checks
+  on_fail: return_blocked_packet

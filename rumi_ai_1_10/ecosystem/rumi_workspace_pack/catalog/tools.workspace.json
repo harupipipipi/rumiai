@@ -1,0 +1,71 @@
+{
+  "catalog_id": "rumi_workspace_pack.tools",
+  "version": "1.0.0",
+  "description": "Implementation-neutral workspace tool surface catalog.",
+  "tools": [
+    {
+      "id": "workspace.doc.author",
+      "capability": "workspace.document.create",
+      "summary": "Create or revise structured editable documents.",
+      "input_schema_ref": "workspace.document_request.v1",
+      "output_schema_ref": "workspace.document_result.v1",
+      "implementation_status": "interface_only"
+    },
+    {
+      "id": "workspace.slides.author",
+      "capability": "workspace.slides.create",
+      "summary": "Create editable decks with speaker notes and asset manifests.",
+      "input_schema_ref": "workspace.slides_request.v1",
+      "output_schema_ref": "workspace.slides_result.v1",
+      "implementation_status": "interface_only"
+    },
+    {
+      "id": "workspace.sheet.author",
+      "capability": "workspace.sheet.create",
+      "summary": "Create workbooks with tables, formulas, validation, and charts.",
+      "input_schema_ref": "workspace.sheet_request.v1",
+      "output_schema_ref": "workspace.sheet_result.v1",
+      "implementation_status": "interface_only"
+    },
+    {
+      "id": "workspace.chart.author",
+      "capability": "workspace.chart.render",
+      "summary": "Render reusable charts from structured data and chart specs.",
+      "input_schema_ref": "workspace.chart_request.v1",
+      "output_schema_ref": "workspace.chart_result.v1",
+      "implementation_status": "interface_only"
+    },
+    {
+      "id": "workspace.pdf.export",
+      "capability": "workspace.pdf.compose",
+      "summary": "Export documents or decks to paginated PDF with render diagnostics.",
+      "input_schema_ref": "workspace.pdf_export_request.v1",
+      "output_schema_ref": "workspace.pdf_export_result.v1",
+      "implementation_status": "interface_only"
+    },
+    {
+      "id": "workspace.bundle.export",
+      "capability": "workspace.bundle.export",
+      "summary": "Collect workspace artifacts into a named export bundle.",
+      "input_schema_ref": "workspace.bundle_request.v1",
+      "output_schema_ref": "workspace.bundle_result.v1",
+      "implementation_status": "interface_only"
+    },
+    {
+      "id": "workspace.job.enqueue",
+      "capability": "workspace.job.enqueue",
+      "summary": "Create a background job from a declared recipe.",
+      "input_schema_ref": "workspace.job_enqueue_request.v1",
+      "output_schema_ref": "workspace.job_enqueue_result.v1",
+      "implementation_status": "interface_only"
+    },
+    {
+      "id": "workspace.job.inspect",
+      "capability": "workspace.job.status",
+      "summary": "Return job progress, logs, and artifact outputs.",
+      "input_schema_ref": "workspace.job_status_request.v1",
+      "output_schema_ref": "workspace.job_status_result.v1",
+      "implementation_status": "interface_only"
+    }
+  ]
+}

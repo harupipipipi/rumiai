@@ -1,0 +1,17 @@
+id: rumi_computer_control_pack.foreground_app_context
+name: Foreground App Context
+profile: rumi_computer_control_pack.macos_desktop_operator
+intent: Establish active app, window, target, and safety boundary before desktop operation.
+network_default: none
+evidence_inputs:
+  - active_app_name
+  - window_title
+  - screenshot
+  - visible_target
+outputs:
+  - app_context_record
+  - safe_read_only_actions
+  - state_changing_actions_requiring_approval
+behavior:
+  - no_blind_coordinates
+  - stop_on_unknown_foreground_app

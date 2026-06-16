@@ -1,0 +1,61 @@
+{
+  "pack_id": "rumi_business_ops_pack",
+  "display_name": "Rumi Business Ops Pack",
+  "description": "Declarative business operations pack for sales, support, marketing, procurement, and admin workflows.",
+  "target_pack_id": "rumi_business_ops_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "conflicts_with": [],
+  "overlap_policy": {
+    "connectors": "handoff_to_rumi_connector_gateway_pack",
+    "scheduled_followups": "handoff_to_rumi_workflow_scheduler_pack",
+    "final_artifacts": "handoff_to_rumi_workspace_pack",
+    "research_evidence": "handoff_to_rumi_research_pack",
+    "workflow_taxonomy": "owned_by_rumi_business_ops_pack",
+    "approval_risk_matrix": "owned_by_rumi_business_ops_pack",
+    "handoff_ledger": "owned_by_rumi_business_ops_pack"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Business Ops is a declarative planning, approval, and handoff pack; it must not replace defaultspack runtime startup or connector execution ownership.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required"
+    ],
+    "promotion_blockers": [
+      "no_executable_runtime",
+      "business_contract_only",
+      "requires_connector_pack_for_external_actions",
+      "requires_scheduler_pack_for_followups"
+    ],
+    "promotion_evidence_required": [
+      "maintainer_approved_runtime_owner",
+      "successful_approval_gated_business_workflows",
+      "connector_handoff_audit_evidence",
+      "documented_defaultspack_replacement_plan"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.business_ops_pack",
+    "channel": "experimental",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "business-ops"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools."
+  ]
+}

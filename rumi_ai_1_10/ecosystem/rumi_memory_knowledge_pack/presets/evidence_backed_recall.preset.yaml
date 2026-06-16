@@ -1,0 +1,9 @@
+id: evidence_backed_recall
+name: Evidence-backed Recall
+profile: rumi_memory_knowledge_pack.evidence_recall_reviewer
+enabled_capabilities:
+  - memory.recall.session
+  - memory.recall.verify_evidence
+ui_panels: [recall_panel, evidence_links, confidence_notes]
+behavior: [session_search, cite_memory_evidence, label_uncertainty, reject_unsupported_recall]
+default_outputs: [recall_summary, evidence_links, confidence_notes]

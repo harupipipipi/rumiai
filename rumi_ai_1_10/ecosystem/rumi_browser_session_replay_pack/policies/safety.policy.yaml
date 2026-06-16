@@ -1,0 +1,15 @@
+policy:
+  pack_id: rumi_browser_session_replay_pack
+  default_mode: replay_evidence_and_handoff_only
+  blocked_by_default:
+  - open pages directly
+  - click browser elements
+  - type into pages
+  - submit forms
+  - call browser companion tools
+  - store raw screenshots inline
+  - share private URLs without redaction
+  - trust unredacted DOM text
+  - own browser transport
+  external_effect: handoff_packet_only
+  network_policy: none_by_default

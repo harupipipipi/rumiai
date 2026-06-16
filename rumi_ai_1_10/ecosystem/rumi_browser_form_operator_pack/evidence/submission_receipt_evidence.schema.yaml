@@ -1,0 +1,30 @@
+schema_id: rumi.browser_form_operator.submission_receipt_evidence.v1
+owner: rumi_browser_form_operator_pack
+purpose: Evidence schema for staged, reviewed, and submitted browser form actions.
+network_default: none
+required_fields:
+  - evidence_id
+  - page_origin
+  - form_identifier
+  - semantic_dom_evidence_ref
+  - field_risk_map
+  - staged_values_summary
+  - pre_submit_review
+  - user_confirmation_ref
+  - submission_state
+submission_state_values:
+  - staged_only
+  - blocked_for_review
+  - submitted_with_confirmation
+  - submitted_by_user_manually
+  - aborted
+receipt_fields:
+  - before_screenshot_id
+  - after_screenshot_id
+  - receipt_url_or_state
+  - visible_confirmation_text
+  - rollback_or_contact_path
+redaction_policy:
+  redact_sensitive_values: true
+  preserve_field_labels: true
+  preserve_risk_level: true

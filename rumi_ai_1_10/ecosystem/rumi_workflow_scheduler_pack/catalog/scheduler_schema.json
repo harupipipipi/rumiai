@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rumi.workflow_scheduler.contract.v1",
+  "title": "Rumi Workflow Scheduler Contract",
+  "type": "object",
+  "required": [
+    "schedule_id",
+    "schedule_kind",
+    "owner_route",
+    "cadence",
+    "evidence_required",
+    "stop_conditions",
+    "retry_policy",
+    "delivery_handoff",
+    "status"
+  ],
+  "properties": {
+    "schedule_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,63}$"
+    },
+    "schedule_kind": {
+      "type": "string",
+      "enum": ["cron_like", "interval", "one_shot_wakeup", "recurring_followup", "monitor"]
+    },
+    "owner_route": {
+      "type": "string"
+    },
+    "cadence": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "evidence_required": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "stop_conditions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "retry_policy": {
+      "type": "string"
+    },
+    "delivery_handoff": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "ready_for_owner_approval", "blocked", "retired"]
+    },
+    "network_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "implements_automation": {
+      "type": "boolean",
+      "const": false
+    }
+  },
+  "additionalProperties": false
+}

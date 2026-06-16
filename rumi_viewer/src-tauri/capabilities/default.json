@@ -2,7 +2,15 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main"],
+  "windows": ["main", "defaultspack", "authority-approval"],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:8765/*",
+      "http://localhost:8765/*",
+      "http://127.0.0.1:8766/*",
+      "http://localhost:8766/*"
+    ]
+  },
   "permissions": [
     "core:default"
   ]

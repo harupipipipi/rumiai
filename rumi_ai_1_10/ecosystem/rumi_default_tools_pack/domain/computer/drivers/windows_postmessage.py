@@ -56,14 +56,23 @@ class WindowsPostMessageDriver(ComputerDriver):
         x: int = 0,
         y: int = 0,
         button: str = "left",
+        *,
+        coordinate_space: str | None = None,
     ) -> ActionResult:
-        from ..windows.messages import post_click
+        from ..windows.messages import post_click, resolve_client_point
 
         hwnd = self._resolve(target)
         if hwnd is None:
             return self._failure("click", target, "No HWND matched the target.")
-        ok = post_click(hwnd, x, y, button)
-        return self._result("click", target, hwnd, ok)
+        space = coordinate_space or target.coordinate_space
+        client_x, client_y, point_data = resolve_client_point(
+            hwnd,
+            x,
+            y,
+            coordinate_space=space,
+        )
+        ok = post_click(hwnd, client_x, client_y, button)
+        return self._result("click", target, hwnd, ok, data=point_data)
 
     def type_text(self, target: ComputerTarget, text: str = "") -> ActionResult:
         from ..windows.messages import post_text
@@ -90,14 +99,36 @@ class WindowsPostMessageDriver(ComputerDriver):
         y: int = 0,
         direction: str = "down",
         clicks: int = 3,
+        *,
+        coordinate_space: str | None = None,
     ) -> ActionResult:
-        from ..windows.messages import post_scroll
+        from ..windows.messages import post_scroll, resolve_screen_point
 
         hwnd = self._resolve(target)
         if hwnd is None:
             return self._failure("scroll", target, "No HWND matched the target.")
-        ok = post_scroll(hwnd, x, y, direction=direction, clicks=clicks)
-        return self._result("scroll", target, hwnd, ok, data={"direction": direction, "clicks": clicks})
+        space = coordinate_space or target.coordinate_space
+        _screen_x, _screen_y, point_data = resolve_screen_point(
+            hwnd,
+            x,
+            y,
+            coordinate_space=space,
+        )
+        ok = post_scroll(
+            hwnd,
+            x,
+            y,
+            direction=direction,
+            clicks=clicks,
+            coordinate_space=space,
+        )
+        return self._result(
+            "scroll",
+            target,
+            hwnd,
+            ok,
+            data={**point_data, "direction": direction, "clicks": clicks},
+        )
 
     def semantic_action(
         self,

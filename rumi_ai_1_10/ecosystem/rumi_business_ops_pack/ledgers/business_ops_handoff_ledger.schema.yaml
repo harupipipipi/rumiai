@@ -1,0 +1,30 @@
+ledger_id: rumi_business_ops.handoff_ledger
+schema_version: 1
+required_records:
+  - workflow_id
+  - workflow_class
+  - local_evidence
+  - risk_level
+  - approval_required
+  - approval_state
+  - owner_pack
+  - handoff_reason
+  - proposed_next_action
+  - blocked_actions
+record_shapes:
+  local_evidence:
+    required_fields:
+      - source_type
+      - locator
+      - summary
+  owner_handoff:
+    required_fields:
+      - owner_pack
+      - handoff_surface
+      - evidence_summary
+      - approval_state
+completion_rules:
+  risk_level_required: true
+  approval_state_required_when_approval_required: true
+  owner_pack_required_for_execution: true
+  blocked_actions_must_be_explicit: true

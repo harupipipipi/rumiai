@@ -421,6 +421,7 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
     def test_api_route_stream_keeps_named_key_until_generator_is_consumed(self):
         from domain.ai_client import client as client_module
         from domain.ai_client.client import AIClient
+        from core_runtime.authority.models import AuthorityDecision
 
         class StreamingProvider:
             def __init__(self):
@@ -434,6 +435,16 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
 
                 return chunks()
 
+        class AllowAuthority:
+            def check(self, **kwargs):
+                return AuthorityDecision(
+                    allowed=True,
+                    permission_id=kwargs["permission_id"],
+                    principal_id=kwargs["principal_id"],
+                    reason="allowed",
+                    resource=kwargs["resource"],
+                )
+
         provider = StreamingProvider()
         AIClient._instance = None
         with patch.dict(os.environ, {}, clear=True):
@@ -443,6 +454,15 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         try:
             with (
                 patch.object(client, "_api_routes", return_value={"google/gemini-test": ["google/backup"]}),
+                patch.object(
+                    client_module,
+                    "provider_named_api_keys",
+                    return_value=[{"provider_id": "google", "api_id": "backup", "configured": True}],
+                ),
+                patch(
+                    "core_runtime.authority.get_authority_service",
+                    return_value=AllowAuthority(),
+                ),
                 patch.object(client_module, "read_provider_api_key", return_value="named-route-secret"),
             ):
                 stream = client.stream("google/gemini-test", [{"role": "user", "content": "hello"}])
