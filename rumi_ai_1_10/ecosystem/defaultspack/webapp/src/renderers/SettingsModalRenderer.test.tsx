@@ -5,7 +5,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { buildVisibleModelOptions, SettingsModalRenderer } from "./SettingsModalRenderer";
 import { createSettingsFieldRendererRegistry, SettingsFieldRendererHost } from "./settings/fieldRendererRegistry";
+import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
 import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
+import type { SettingsSection } from "../lib/api";
 
 function makeModelOption(index: number) {
   return {
@@ -112,6 +114,117 @@ test("settings field renderer registry routes new field types and catalog bindin
   assert.match(apiKeyHtml, /provider_key/);
   assert.match(providerHtml, /data-renderer="provider"/);
   assert.match(providerHtml, /provider/);
+});
+
+test("builtin settings field renderer registry resolves template model_select renderer", () => {
+  const registry = createSettingsFieldRendererRegistry(builtinSettingsFieldRendererEntries);
+  const match = registry.resolve({
+    id: "preferred_model_template",
+    label: "Preferred Model",
+    type: "model_select",
+  } as TemplateSettingsField);
+
+  assert.equal(match?.entry.id, "builtin-settings-model-select");
+  assert.equal(match?.key, "model_select");
+});
+
+test("SettingsModalRenderer renders template model_select with searchable model selector surface", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "models",
+          label: "Models",
+          fields: [
+            {
+              id: "preferred_model_template",
+              label: "Preferred Model",
+              type: "model_select",
+              options: [
+                {
+                  value: "google/gemini-2.5-flash",
+                  label: "Gemini 2.5 Flash",
+                  provider_id: "google",
+                  model_id: "gemini-2.5-flash",
+                  configured: true,
+                },
+              ],
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        models: {
+          preferred_model: "google/gemini-2.5-flash",
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="model_select"/);
+  assert.match(html, /Gemini 2.5 Flash/);
+  assert.doesNotMatch(html, /type="text"[^>]*google\/gemini-2\.5-flash/);
+});
+
+test("SettingsModalRenderer renders template api_key_setup with setup control", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "apis",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "apis",
+          label: "APIs",
+          fields: [
+            {
+              id: "api_key_setup_template",
+              label: "API Key Setup",
+              type: "api_key_setup",
+              provider_id: "openai",
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        apis: {
+          api_keys: [
+            {
+              provider_id: "openai",
+              label: "OpenAI",
+              apis: [{ api_id: "main", name: "main", configured: true }],
+            },
+          ],
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="api_key_setup"/);
+  assert.match(html, /openai:main:\*\*\*/);
+  assert.match(html, /placeholder="openai API key"/);
+  assert.match(html, />Save</);
 });
 
 test("Settings > Tools contains detailed tool settings", () => {

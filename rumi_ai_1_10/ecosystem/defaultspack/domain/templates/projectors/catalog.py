@@ -84,7 +84,8 @@ def project_resolved_templates(resolved_templates: list[ResolvedTemplate]) -> di
         "test_contracts",
     ):
         catalog[key] = _dedupe_by_id(catalog[key])
-    catalog["settings_sections"] = _merge_settings_sections(catalog["settings_sections"])
+    catalog["settings_sections"], settings_diagnostics = _merge_settings_sections(catalog["settings_sections"])
+    catalog["template_diagnostics"].extend(settings_diagnostics)
     catalog["template_diagnostics"] = _dedupe_diagnostics(catalog["template_diagnostics"])
     return catalog
 
@@ -181,6 +182,8 @@ def _settings_section(template: RumiTemplate, piece: TemplatePiece) -> dict[str,
     item.setdefault("label", _titleize(str(item["id"])))
     item.setdefault("fields", [])
     item.setdefault("template_id", template.id)
+    item.setdefault("piece_id", piece.id)
+    item.setdefault("projected_id", _projected_id(template, piece))
     item.setdefault("origin", _origin(template, piece))
     item["_source"] = _source(template)
     return item
@@ -197,6 +200,8 @@ def _settings_section_for_field(template: RumiTemplate, piece: TemplatePiece) ->
     item.setdefault("component", piece.data.get("component") or "SettingsFieldRendererHost")
     item.setdefault("part_id", piece.data.get("part_id") or "settings")
     item.setdefault("template_id", template.id)
+    item.setdefault("piece_id", piece.id)
+    item.setdefault("projected_id", _projected_id(template, piece))
     item.setdefault("origin", _origin(template, piece))
     item["_source"] = _source(template)
     return {
@@ -239,6 +244,7 @@ def _metadata_item(template: RumiTemplate, piece: TemplatePiece, *, default_id: 
         item.setdefault("handler", piece.handler)
     item.setdefault("template_id", template.id)
     item.setdefault("piece_id", piece.id)
+    item.setdefault("projected_id", _projected_id(template, piece))
     item.setdefault("origin", _origin(template, piece))
     item["_source"] = _source(template)
     return item
@@ -267,9 +273,10 @@ def _template_summary(
     }
 
 
-def _merge_settings_sections(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _merge_settings_sections(sections: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     merged: dict[str, dict[str, Any]] = {}
     order: list[str] = []
+    diagnostics: list[dict[str, Any]] = []
     for section in sections:
         section_id = str(section.get("id") or "").strip()
         if not section_id:
@@ -277,9 +284,11 @@ def _merge_settings_sections(sections: list[dict[str, Any]]) -> list[dict[str, A
         if section_id not in merged:
             merged[section_id] = deepcopy(section)
             order.append(section_id)
-            merged[section_id]["fields"] = _dedupe_by_id(
-                [field for field in merged[section_id].get("fields", []) if isinstance(field, dict)]
+            merged[section_id]["fields"], field_diagnostics = _merge_settings_fields(
+                [field for field in merged[section_id].get("fields", []) if isinstance(field, dict)],
+                section_id=section_id,
             )
+            diagnostics.extend(field_diagnostics)
             continue
         current = merged[section_id]
         for key, value in section.items():
@@ -288,15 +297,72 @@ def _merge_settings_sections(sections: list[dict[str, Any]]) -> list[dict[str, A
             if value not in (None, "", [], {}):
                 current[key] = deepcopy(value)
         fields = [*current.get("fields", []), *(field for field in section.get("fields", []) if isinstance(field, dict))]
-        current["fields"] = _dedupe_by_id(fields)
-    return [merged[section_id] for section_id in order]
+        current["fields"], field_diagnostics = _merge_settings_fields(fields, section_id=section_id)
+        diagnostics.extend(field_diagnostics)
+    return [merged[section_id] for section_id in order], diagnostics
+
+
+def _merge_settings_fields(
+    fields: list[dict[str, Any]],
+    *,
+    section_id: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    by_projected_id: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    setting_key_owner: dict[str, dict[str, Any]] = {}
+    diagnostics: list[dict[str, Any]] = []
+    seen_collisions: set[tuple[str, str, str, str]] = set()
+    for index, field in enumerate(fields):
+        item = deepcopy(field)
+        projected_id = str(item.get("projected_id") or "").strip()
+        if not projected_id:
+            projected_id = str(item.get("id") or f"__index_{index}").strip()
+            item["projected_id"] = projected_id
+        if projected_id not in by_projected_id:
+            order.append(projected_id)
+        by_projected_id[projected_id] = item
+
+        field_id = str(item.get("id") or "").strip()
+        template_id = str(item.get("template_id") or "").strip()
+        if not field_id:
+            continue
+        previous = setting_key_owner.get(field_id)
+        if previous is None:
+            setting_key_owner[field_id] = item
+            continue
+        previous_template_id = str(previous.get("template_id") or "").strip()
+        previous_projected_id = str(previous.get("projected_id") or "").strip()
+        if previous_template_id == template_id or previous_projected_id == projected_id:
+            continue
+        collision_key = (section_id, field_id, previous_projected_id, projected_id)
+        if collision_key in seen_collisions:
+            continue
+        seen_collisions.add(collision_key)
+        diagnostics.append(
+            {
+                "level": "error",
+                "severity": "error",
+                "code": "template.catalog.settings_field_id_collision",
+                "message": f"settings field id collides across templates in section '{section_id}': {field_id}",
+                "template_id": template_id,
+                "piece_id": item.get("piece_id"),
+                "path": f"/settings_sections/{section_id}/fields/{field_id}",
+                "source_path": item.get("_source"),
+                "source": item.get("_source") or "template_catalog",
+                "section_id": section_id,
+                "field_id": field_id,
+                "projected_id": projected_id,
+                "conflicting_projected_id": previous_projected_id,
+            }
+        )
+    return [by_projected_id[item_id] for item_id in order], diagnostics
 
 
 def _dedupe_by_id(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     for item in items:
-        item_id = str(item.get("id") or item.get("permission_id") or item.get("path") or "").strip()
+        item_id = str(item.get("projected_id") or item.get("id") or item.get("permission_id") or item.get("path") or "").strip()
         if not item_id:
             item_id = f"__index_{len(order)}"
         if item_id not in deduped:
@@ -346,6 +412,10 @@ def _origin(template: RumiTemplate, piece: TemplatePiece) -> dict[str, str]:
         "piece_id": piece.id,
         "path": _source(template),
     }
+
+
+def _projected_id(template: RumiTemplate, piece: TemplatePiece) -> str:
+    return f"{template.id}:{piece.id}"
 
 
 def _source(template: RumiTemplate) -> str:

@@ -35,26 +35,24 @@ def test_builtin_templates_resolve_and_include_projector_contract_pieces():
     registry, diagnostics = build_template_registry(defaultspack_root=str(DEFAULTSPACK_ROOT))
 
     assert not any(diagnostic.is_error for diagnostic in diagnostics)
+    all_piece_kinds: set[str] = set()
+    all_piece_ids: set[str] = set()
     for template_id in BUILTIN_TEMPLATE_IDS:
         resolved = resolve_template(template_id, registry)
         assert resolved.ok
         assert resolved.template is not None
 
         pieces = {piece.id: piece for piece in resolved.template.pieces}
-        for piece_id in (
-            "model_select",
-            "provider_select",
-            "api_key_setup",
-        ):
-            assert piece_id in pieces
-            assert pieces[piece_id].kind == "settings_field"
-
         piece_kinds = {str(piece.kind.value if hasattr(piece.kind, "value") else piece.kind) for piece in pieces.values()}
-        assert "backend_service" in piece_kinds
-        assert "api_route" in piece_kinds
+        all_piece_kinds.update(piece_kinds)
+        all_piece_ids.update(pieces)
         assert "settings_section" in piece_kinds
         assert "field_renderer" in piece_kinds
         assert "permission" in piece_kinds
         assert "test_contract" in piece_kinds
         assert any(piece.data.get("role") == "action" for piece in pieces.values())
         assert any(piece.data.get("role") == "data_source" for piece in pieces.values())
+        assert "api_route" not in piece_kinds
+
+    assert {"model_select", "provider_select", "api_key_setup"}.issubset(all_piece_ids)
+    assert "backend_service" in all_piece_kinds

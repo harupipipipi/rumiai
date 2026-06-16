@@ -32,48 +32,6 @@
       "fields": []
     },
     {
-      "id": "model_select",
-      "kind": "settings_field",
-      "slot": "models",
-      "order": 31,
-      "section_id": "models",
-      "type": "model_select",
-      "renderer": "model_select",
-      "component": "SettingsFieldRendererHost",
-      "part_id": "settings",
-      "label": "Route Preview Model",
-      "default": "stub/default",
-      "data_source": "selectable_model_profiles"
-    },
-    {
-      "id": "provider_select",
-      "kind": "settings_field",
-      "slot": "models",
-      "order": 32,
-      "section_id": "models",
-      "type": "provider_select",
-      "renderer": "provider_select",
-      "component": "SettingsFieldRendererHost",
-      "part_id": "settings",
-      "label": "Route Provider Filter",
-      "default": "stub",
-      "data_source": "ai_providers"
-    },
-    {
-      "id": "api_key_setup",
-      "kind": "settings_field",
-      "slot": "apis",
-      "order": 33,
-      "section_id": "apis",
-      "type": "api_key_setup",
-      "renderer": "api_key_setup",
-      "component": "SettingsFieldRendererHost",
-      "part_id": "settings",
-      "label": "Route API Key",
-      "default": [],
-      "data_source": "provider_key_status"
-    },
-    {
       "id": "model_routing_field_renderer",
       "kind": "field_renderer",
       "order": 34,
@@ -116,14 +74,6 @@
       "lifecycle": "local"
     },
     {
-      "id": "model_route_api_route",
-      "kind": "api_route",
-      "order": 38,
-      "method": "POST",
-      "route_path": "/api/ai/models/route",
-      "block_module": "blocks.ai.route_model"
-    },
-    {
       "id": "model_route_permission",
       "kind": "permission",
       "order": 39,
@@ -132,13 +82,27 @@
       "reason": "Routing chooses the model used by a later invocation."
     },
     {
+      "id": "model_route_api_key_permission",
+      "kind": "permission",
+      "order": 39,
+      "permission_id": "api_key.use",
+      "scope": "ai_client",
+      "reason": "Routing may inspect local provider key availability without exposing secret values."
+    },
+    {
       "id": "model_routing_test_contract",
       "kind": "test_contract",
       "order": 40,
       "contract_id": "defaultspack.template.backend.model_routing.catalog",
+      "route_metadata": {
+        "method": "POST",
+        "path": "/api/ai/models/route",
+        "block_module": "blocks.ai.route_model",
+        "diagnostic": "Template route metadata is catalog/test-contract only and does not register a transport route."
+      },
       "assertions": [
         "catalog.backend_services includes model_router",
-        "catalog.api_routes includes /api/ai/models/route",
+        "catalog.test_contracts route_metadata includes /api/ai/models/route",
         "catalog.permissions includes model.invoke"
       ]
     }

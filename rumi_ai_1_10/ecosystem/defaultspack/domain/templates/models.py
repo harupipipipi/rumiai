@@ -149,6 +149,9 @@ class RumiTemplate:
         trust_level: TemplateTrustLevel | str | None = None,
     ) -> "RumiTemplate":
         explicit_trust = trust_level if trust_level is not None else raw.get("trust_level", TemplateTrustLevel.LOCAL)
+        metadata = dict(raw.get("metadata", {})) if isinstance(raw.get("metadata", {}), dict) else {}
+        if trust_level is not None and "trust_level" in raw:
+            metadata["declared_trust_level"] = str(raw.get("trust_level"))
         return cls(
             id=str(raw.get("id", "")),
             kind=_enum_or_raw(TemplateKind, raw.get("kind", "")),
@@ -160,7 +163,7 @@ class RumiTemplate:
             dependencies=_as_string_list(raw.get("dependencies")),
             capabilities=TemplateCapabilitySpec.from_dict(raw.get("capabilities")),
             patches=list(raw.get("patches", [])) if isinstance(raw.get("patches", []), list) else [],
-            metadata=dict(raw.get("metadata", {})) if isinstance(raw.get("metadata", {}), dict) else {},
+            metadata=metadata,
             source_path=Path(source_path) if source_path is not None else None,
         )
 

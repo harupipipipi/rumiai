@@ -31,20 +31,6 @@
       "fields": []
     },
     {
-      "id": "model_select",
-      "kind": "settings_field",
-      "slot": "models",
-      "order": 11,
-      "section_id": "models",
-      "type": "model_select",
-      "renderer": "model_select",
-      "component": "SettingsFieldRendererHost",
-      "part_id": "settings",
-      "label": "Model For New Key",
-      "default": "stub/default",
-      "data_source": "selectable_model_profiles"
-    },
-    {
       "id": "provider_select",
       "kind": "settings_field",
       "slot": "apis",
@@ -116,14 +102,6 @@
       "lifecycle": "local_secret_store"
     },
     {
-      "id": "provider_key_api_route",
-      "kind": "api_route",
-      "order": 18,
-      "method": "POST",
-      "route_path": "/api/ai/provider-key",
-      "block_module": "blocks.ai.provider_key"
-    },
-    {
       "id": "api_key_use_permission",
       "kind": "permission",
       "order": 19,
@@ -136,6 +114,12 @@
       "kind": "test_contract",
       "order": 20,
       "contract_id": "defaultspack.template.api_keys.catalog",
+      "route_metadata": {
+        "method": "POST",
+        "path": "/api/ai/provider-key",
+        "block_module": "blocks.ai.provider_key",
+        "diagnostic": "Template route metadata is catalog/test-contract only and does not register a transport route."
+      },
       "assertions": [
         "catalog.actions includes ai_set_provider_api_key",
         "catalog.data_sources includes provider_key_status",

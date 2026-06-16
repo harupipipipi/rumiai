@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .diagnostics import collect_template_diagnostics, diagnostics_have_errors
-from .discovery import TemplateDiscoveryResult, default_template_roots, discover_templates, load_template_file
+from .discovery import TemplateDiscoveryResult, TemplateRoot, default_template_roots, discover_templates, load_template_file
 from .migration import migrate_template_dict, register_template_migrations
 from .models import (
     ResolvedTemplate,
@@ -38,6 +38,7 @@ __all__ = [
     "TemplatePiece",
     "TemplatePieceKind",
     "TemplateRegistry",
+    "TemplateRoot",
     "TemplateStatus",
     "TemplateTrustLevel",
     "TemplateValidationResult",

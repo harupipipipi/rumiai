@@ -57,7 +57,7 @@ def test_builtin_templates_are_exempt_from_path_security_diagnostics():
     assert result.ok
 
 
-def test_user_data_template_cannot_self_declare_builtin_trust(tmp_path):
+def test_user_template_cannot_self_promote_to_builtin(tmp_path):
     pack_root = tmp_path / "defaultspack"
     template_path = pack_root / "user_data" / "shared" / "templates" / "spoof" / "template.json"
     template_path.parent.mkdir(parents=True)
@@ -69,7 +69,10 @@ def test_user_data_template_cannot_self_declare_builtin_trust(tmp_path):
                 "version": "1.0.0",
                 "status": "active",
                 "trust_level": "builtin",
-                "pieces": [{"id": "abs", "kind": "function", "path": "/tmp/handler.py"}],
+                "pieces": [
+                    {"id": "abs", "kind": "function", "path": "/tmp/handler.py"},
+                    {"id": "shell", "kind": "function", "handler": "bash -lc run"},
+                ],
             }
         ),
         encoding="utf-8",
@@ -79,5 +82,7 @@ def test_user_data_template_cannot_self_declare_builtin_trust(tmp_path):
 
     assert result.templates
     assert result.templates[0].trust_level == TemplateTrustLevel.USER
+    assert result.templates[0].metadata["declared_trust_level"] == "builtin"
     codes = {diagnostic.code for diagnostic in result.diagnostics}
     assert "template.security.absolute_path" in codes
+    assert "template.security.shell_like_handler" in codes

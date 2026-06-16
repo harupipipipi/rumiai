@@ -61,21 +61,6 @@
       "help": "Filter model choices by provider."
     },
     {
-      "id": "api_key_setup",
-      "kind": "settings_field",
-      "slot": "apis",
-      "order": 23,
-      "section_id": "apis",
-      "type": "api_key_setup",
-      "renderer": "api_key_setup",
-      "component": "SettingsFieldRendererHost",
-      "part_id": "settings",
-      "label": "Provider API Key",
-      "default": [],
-      "data_source": "provider_key_status",
-      "help": "Store provider keys through the existing settings API."
-    },
-    {
       "id": "model_selector_field_renderer",
       "kind": "field_renderer",
       "order": 24,
@@ -118,14 +103,6 @@
       "lifecycle": "local"
     },
     {
-      "id": "models_api_route",
-      "kind": "api_route",
-      "order": 28,
-      "method": "GET",
-      "route_path": "/api/ai/models",
-      "block_module": "blocks.ai.models"
-    },
-    {
       "id": "model_invoke_permission",
       "kind": "permission",
       "order": 29,
@@ -138,6 +115,12 @@
       "kind": "test_contract",
       "order": 30,
       "contract_id": "defaultspack.template.model_selector.catalog",
+      "route_metadata": {
+        "method": "GET",
+        "path": "/api/ai/models",
+        "block_module": "blocks.ai.models",
+        "diagnostic": "Template route metadata is catalog/test-contract only and does not register a transport route."
+      },
       "assertions": [
         "catalog.templates includes rumi.model_selector.default",
         "settings.sections includes model_select field",

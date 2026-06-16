@@ -19,8 +19,9 @@ import {
   SettingsFieldRendererHost,
   type SettingsFieldRendererProps,
 } from "./settings/fieldRendererRegistry";
+import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
 
-const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry();
+const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry(builtinSettingsFieldRendererEntries);
 
 function formatReadonlyValue(value: unknown, fallback: unknown): string {
   const resolved = value ?? fallback ?? "";
@@ -2827,7 +2828,7 @@ export function SettingsModalRenderer({
       key={`${activeSection?.id}.${field.id}`}
       className={cn(
         "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
-        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || field.type === "external_tokens" || field.type === "public_url" || field.type === "model_api_routes" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
+        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || String(field.type) === "api_key_setup" || field.type === "external_tokens" || field.type === "public_url" || field.type === "model_api_routes" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
       )}
     >
       <SettingsFieldRendererHost

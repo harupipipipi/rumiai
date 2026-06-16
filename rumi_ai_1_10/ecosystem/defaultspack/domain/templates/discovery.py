@@ -8,6 +8,12 @@ from .models import RumiTemplate, TemplateDiagnostic, TemplateTrustLevel
 from .validation import parse_template
 
 
+@dataclass(frozen=True)
+class TemplateRoot:
+    path: Path
+    trust_level: TemplateTrustLevel | str
+
+
 @dataclass
 class TemplateDiscoveryResult:
     templates: list[RumiTemplate] = field(default_factory=list)
@@ -18,22 +24,25 @@ class TemplateDiscoveryResult:
         return not any(diagnostic.is_error for diagnostic in self.diagnostics)
 
 
-def default_template_roots(defaultspack_root: str | Path | None = None) -> list[Path]:
+def default_template_roots(defaultspack_root: str | Path | None = None) -> list[TemplateRoot]:
     root = Path(defaultspack_root) if defaultspack_root is not None else Path(__file__).resolve().parents[2]
-    return [root / "templates", root / "user_data" / "shared" / "templates"]
+    return [
+        TemplateRoot(root / "templates", TemplateTrustLevel.BUILTIN),
+        TemplateRoot(root / "user_data" / "shared" / "templates", TemplateTrustLevel.USER),
+    ]
 
 
 def discover_templates(
-    roots: list[str | Path] | None = None,
+    roots: list[str | Path | TemplateRoot] | None = None,
     *,
     defaultspack_root: str | Path | None = None,
     trust_level: TemplateTrustLevel | str | None = None,
 ) -> TemplateDiscoveryResult:
-    search_roots = [Path(root) for root in roots] if roots is not None else default_template_roots(defaultspack_root)
+    search_roots = _normalize_roots(roots, defaultspack_root=defaultspack_root, trust_level=trust_level)
     result = TemplateDiscoveryResult()
-    for root in search_roots:
-        root_trust = _coerce_trust(trust_level) if trust_level is not None else _infer_root_trust(root, defaultspack_root)
-        for template_path in _iter_template_files(root):
+    for template_root in search_roots:
+        root_trust = _coerce_trust(template_root.trust_level)
+        for template_path in _iter_template_files(template_root.path):
             loaded = load_template_file(template_path, trust_level=root_trust)
             result.diagnostics.extend(loaded.diagnostics)
             result.templates.extend(loaded.templates)
@@ -92,6 +101,25 @@ def _iter_template_files(root: Path) -> list[Path]:
     if not root.exists():
         return []
     return sorted(path for path in root.rglob("template.json") if path.is_file())
+
+
+def _normalize_roots(
+    roots: list[str | Path | TemplateRoot] | None,
+    *,
+    defaultspack_root: str | Path | None,
+    trust_level: TemplateTrustLevel | str | None,
+) -> list[TemplateRoot]:
+    if roots is None:
+        configured_roots = default_template_roots(defaultspack_root)
+    else:
+        configured_roots = [
+            root if isinstance(root, TemplateRoot) else TemplateRoot(Path(root), _infer_root_trust(Path(root), defaultspack_root))
+            for root in roots
+        ]
+    if trust_level is None:
+        return configured_roots
+    forced_trust = _coerce_trust(trust_level)
+    return [TemplateRoot(root.path, forced_trust) for root in configured_roots]
 
 
 def _coerce_trust(value: TemplateTrustLevel | str) -> TemplateTrustLevel:

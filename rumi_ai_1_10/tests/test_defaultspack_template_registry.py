@@ -11,6 +11,8 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.templates import (  # noqa: E402
     TemplateRegistry,
+    TemplateRoot,
+    TemplateTrustLevel,
     default_template_roots,
     discover_templates,
     load_template_file,
@@ -74,5 +76,8 @@ def test_discovery_reads_template_json_and_keeps_json_parse_errors_as_diagnostic
 def test_default_roots_are_stable_and_missing_roots_are_ok(tmp_path):
     roots = default_template_roots(tmp_path)
 
-    assert roots == [tmp_path / "templates", tmp_path / "user_data" / "shared" / "templates"]
+    assert roots == [
+        TemplateRoot(tmp_path / "templates", TemplateTrustLevel.BUILTIN),
+        TemplateRoot(tmp_path / "user_data" / "shared" / "templates", TemplateTrustLevel.USER),
+    ]
     assert discover_templates(defaultspack_root=tmp_path).templates == []

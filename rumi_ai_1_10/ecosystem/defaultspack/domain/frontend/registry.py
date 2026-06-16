@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import importlib
 import json
 import re
 from copy import deepcopy
@@ -24,7 +25,6 @@ from domain.external.io_templates import external_io_template_catalog
 from domain.external.output_profile_registry import OutputProfileRegistry
 from domain.external.source_store import ExternalSourceStore, external_source_key
 from domain.external.token_store import external_token_status
-from domain.templates.projectors import build_template_catalog
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
 from transport.registry import component_http_route_specs, component_route_diagnostics
@@ -2080,6 +2080,7 @@ class FrontendRegistry:
 
     def _template_catalog_metadata(self) -> dict[str, Any]:
         try:
+            build_template_catalog = importlib.import_module("domain.templates.projectors").build_template_catalog
             catalog = build_template_catalog(defaultspack_root=self._pack_root)
         except Exception as exc:
             self._add_diagnostic(
