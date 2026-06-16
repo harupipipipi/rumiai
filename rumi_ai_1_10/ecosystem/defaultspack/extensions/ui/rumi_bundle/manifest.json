@@ -17,7 +17,7 @@
     },
     "app": {
       "id": "defaultspack",
-      "name": "Console",
+      "name": "rumi DP",
       "icon": "/static/assets/icons/defaultspack-icon.png"
     },
     "shell_layout": {

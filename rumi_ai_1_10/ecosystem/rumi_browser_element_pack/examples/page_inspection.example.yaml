@@ -1,0 +1,23 @@
+example_id: rumi_browser_element_pack.page_inspection
+task: "Find the pricing button, highlight it, and extract its link target."
+steps:
+  - tool: rumi_default_tools_pack:browser_companion
+    args:
+      action: page.snapshot
+      limit: 300
+  - select:
+      criteria:
+        accessible_name_contains: pricing
+        action_hints_contains: click
+  - tool: rumi_default_tools_pack:browser_companion
+    args:
+      action: page.highlight
+      element_id: "${selected.element_id}"
+      label: "Pricing"
+      duration_ms: 5000
+  - tool: rumi_default_tools_pack:browser_companion
+    args:
+      action: page.extract
+      element_id: "${selected.element_id}"
+      mode: attributes
+      attribute_names: ["href", "aria-label", "data-testid"]

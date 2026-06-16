@@ -50,6 +50,7 @@ ANTHROPIC_MESSAGES_MODELS = [
     "qwen3.7-max",
     "qwen3.6-plus",
 ]
+TOOL_CALL_MODELS = {"mimo-v2.5-pro", "mimo-v2.5"}
 LIVE_SMOKE_MODEL = os.environ.get("RUMI_OPENCODE_GO_LIVE_MODEL", "minimax-m3")
 
 
@@ -71,6 +72,20 @@ def _provider(monkeypatch):
     from domain.ai_client.providers.opencode_go_provider import OpencodeGoProvider
 
     return OpencodeGoProvider()
+
+
+class _FakeJsonResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        return self.payload
 
 
 def test_opencode_go_catalog_includes_all_models():
@@ -122,6 +137,15 @@ def test_opencode_go_catalog_includes_all_models():
     assert qwen36["metadata"]["transport"] == "anthropic_messages"
     assert qwen36["metadata"]["endpoint_path"] == "/messages"
 
+    for model_id in TOOL_CALL_MODELS:
+        model_entry = models[f"opencode-go/{model_id}"]
+        assert "tool_calls" in model_entry["capabilities"]
+        assert model_entry["metadata"]["capabilities"]["tool_calls"] is True
+        assert model_entry["metadata"]["tool_calls_verified"] is True
+        assert model_entry["supports_thinking"] is True
+        assert model_entry["metadata"]["capabilities"]["reasoning"] is True
+        assert model_entry["metadata"]["reasoning_effort_verified"] is True
+
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
 
     legacy_models = {item["id"]: item for item in list_model_catalog("opencode-go")}
@@ -130,12 +154,61 @@ def test_opencode_go_catalog_includes_all_models():
     assert legacy_qwen37["supports_image_input"] is True
 
 
+def test_opencode_go_openai_transport_respects_request_timeout(monkeypatch):
+    provider = _provider(monkeypatch)
+    seen = {}
+
+    def fake_urlopen(req, context=None, timeout=None):
+        del req, context
+        seen["timeout"] = timeout
+        return _FakeJsonResponse(
+            b'{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{}}'
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = provider.complete(
+        "deepseek-v4-pro",
+        [{"role": "user", "content": "hello"}],
+        [],
+        {"request_timeout": 4},
+    )
+
+    assert result["content"][0]["text"] == "ok"
+    assert seen["timeout"] == 4.0
+
+
+def test_opencode_go_messages_transport_respects_request_timeout(monkeypatch):
+    provider = _provider(monkeypatch)
+    seen = {}
+
+    def fake_urlopen(req, context=None, timeout=None):
+        del req, context
+        seen["timeout"] = timeout
+        return _FakeJsonResponse(
+            b'{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}'
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = provider.complete(
+        "qwen3.7-plus",
+        [{"role": "user", "content": "hello"}],
+        [],
+        {"request_timeout": 5},
+    )
+
+    assert result["content"][0]["text"] == "ok"
+    assert seen["timeout"] == 5.0
+
+
 @pytest.mark.parametrize("model", OPENAI_CHAT_MODELS)
 def test_opencode_go_uses_chat_completions_for_openai_compatible_models(monkeypatch, model):
     provider = _provider(monkeypatch)
     captured = {}
 
-    def fake_request_json(path, body):
+    def fake_request_json(path, body, **kwargs):
+        del kwargs
         captured["path"] = path
         captured["body"] = body
         return {
@@ -163,9 +236,14 @@ def test_opencode_go_uses_chat_completions_for_openai_compatible_models(monkeypa
     assert captured["body"]["model"] == model
     assert captured["body"]["max_tokens"] == 8
     assert captured["body"]["temperature"] == 0
-    assert "tools" not in captured["body"]
-    assert "tool_choice" not in captured["body"]
-    assert "reasoning_effort" not in captured["body"]
+    if model in TOOL_CALL_MODELS:
+        assert captured["body"]["tools"] == [{"type": "function", "function": {"name": "noop"}}]
+        assert captured["body"]["tool_choice"] == "auto"
+        assert captured["body"]["reasoning_effort"] == "high"
+    else:
+        assert "tools" not in captured["body"]
+        assert "tool_choice" not in captured["body"]
+        assert "reasoning_effort" not in captured["body"]
     assert "thinking" not in captured["body"]
     assert result["content"] == [{"type": "text", "text": "OK"}]
 
@@ -175,7 +253,8 @@ def test_opencode_go_uses_messages_for_anthropic_compatible_models(monkeypatch, 
     provider = _provider(monkeypatch)
     captured = {}
 
-    def fake_request_messages_json(path, body):
+    def fake_request_messages_json(path, body, **kwargs):
+        del kwargs
         captured["path"] = path
         captured["body"] = body
         return {
@@ -253,7 +332,8 @@ def test_opencode_go_stream_parses_openai_sse(monkeypatch):
         ]
     )
 
-    def fake_request_stream(path, body):
+    def fake_request_stream(path, body, **kwargs):
+        del kwargs
         captured["path"] = path
         captured["body"] = body
         return response
@@ -284,7 +364,8 @@ def test_opencode_go_stream_parses_anthropic_sse(monkeypatch):
         ]
     )
 
-    def fake_request_messages_stream(path, body):
+    def fake_request_messages_stream(path, body, **kwargs):
+        del kwargs
         captured["path"] = path
         captured["body"] = body
         return response

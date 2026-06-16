@@ -1,0 +1,10 @@
+id: citation_audit
+name: Citation Audit
+profile: rumi_research_pack.evidence_reviewer
+enabled_capabilities:
+  - research.source.triage
+  - research.contradiction.review
+  - research.handoff.package
+ui_panels: [source_cards, evidence_table, contradiction_table, review_notes]
+behavior: [unsupported_claim_detection, source_quality_review, citation_repair_notes]
+default_outputs: [audit_findings, unsupported_claims, citation_repairs]

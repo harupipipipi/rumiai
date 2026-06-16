@@ -1,0 +1,50 @@
+policy:
+  pack_id: rumi_browser_session_replay_pack
+  default: block_or_redact_before_share
+  states:
+  - raw
+  - partially_redacted
+  - redacted
+  - blocked_sensitive
+  sensitive_classes:
+  - private_url
+  - session_identifier
+  - credential_material
+  - form_value
+  - account_identifier
+  - email_address
+  - payment_field
+  - screenshot_region
+  - dom_text
+  - network_snippet
+  - console_log
+  - typed_input_evidence
+  rules:
+  - id: private_urls_are_not_shareable_raw
+    sensitive_classes:
+    - private_url
+    action: redact_query_path_and_account_context
+  - id: typed_input_values_are_never_replayed_raw
+    sensitive_classes:
+    - typed_input_evidence
+    - form_value
+    action: replace_value_with_field_purpose_and_hash_ref
+  - id: screenshots_require_overlay_receipts
+    sensitive_classes:
+    - screenshot_region
+    - payment_field
+    - credential_material
+    action: require_redaction_overlay_and_receipt
+  - id: dom_and_network_text_are_minimized
+    sensitive_classes:
+    - dom_text
+    - network_snippet
+    - console_log
+    action: retain_labels_status_codes_and_hash_refs_only
+  sharing_gate:
+    allowed_states:
+    - redacted
+    blocked_states:
+    - raw
+    - blocked_sensitive
+    partially_redacted_requires: reviewer_ref_and_blocked_fields

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/notification_preference.schema.json",
+  "title": "Notification Preference",
+  "description": "Notification preference contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "preference_id",
+    "identity_id",
+    "channels",
+    "quiet_hours",
+    "scheduler_handoff",
+    "state",
+    "notification_execution",
+    "remote_input_can_schedule",
+    "notification_owner"
+  ],
+  "properties": {
+    "preference_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "identity_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "channels": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "slack",
+          "gmail",
+          "sms",
+          "voice",
+          "web",
+          "discord"
+        ]
+      }
+    },
+    "quiet_hours": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timezone",
+        "windows"
+      ],
+      "properties": {
+        "timezone": {
+          "type": "string",
+          "minLength": 1
+        },
+        "windows": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "scheduler_handoff": {
+      "type": "string",
+      "const": "external_workflow_scheduler_owner"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "active",
+        "paused",
+        "unknown"
+      ]
+    },
+    "notification_execution": {
+      "type": "string",
+      "const": "handoff_only"
+    },
+    "remote_input_can_schedule": {
+      "type": "boolean",
+      "const": false
+    },
+    "notification_owner": {
+      "type": "string",
+      "const": "external_workflow_scheduler_owner"
+    }
+  }
+}

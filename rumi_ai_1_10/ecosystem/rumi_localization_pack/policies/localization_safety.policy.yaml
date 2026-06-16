@@ -1,0 +1,38 @@
+policy:
+  id: localization_safety_v1
+  purpose: Keep localization review local, evidence-backed, and scoped to language policy.
+  blocked_by_default:
+  - changing locked brand terms
+  - dropping source segment IDs
+  - publishing without locale review
+  - inventing product behavior not present in source
+  - using machine translation output as final evidence
+  - rewriting UI flows to solve translation length
+  - exporting translated workspace artifacts
+  - sending localized copy through connectors
+  allowed_without_network:
+  - draft_record
+  - review_checklist
+  - handoff_packet
+  - terminology_gap_note
+  - protected_term_exception_request
+  requires_human_review:
+  - external_action
+  - low_confidence_evidence
+  - adjacent_owner_execution
+  - legal_or_policy_copy
+  - protected_term_exception
+  - locale_sensitive_support_commitment
+  evidence_minimums:
+  - source_segment_id
+  - target_segment_id
+  - source_excerpt
+  - target_excerpt
+  - locale_pair
+  - reviewer
+  - confidence
+  non_overlap_boundaries:
+    document_intelligence: handoff_for_source_extraction_or_document_mutation
+    frontend_design: handoff_for_layout_or_component_changes
+    workspace_export: handoff_for_file_generation_or_export
+    connector_delivery: handoff_for_publish_send_or_sync

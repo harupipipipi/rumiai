@@ -69,7 +69,9 @@ _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECAS
 
 def _conversation_system_prompt(conv, manager):
     from blocks.chat._prompt_helpers import resolve_conversation_system_prompt
-    return resolve_conversation_system_prompt(conv, manager)
+    from domain.kanban.service import append_kanban_system_prompt_note
+
+    return append_kanban_system_prompt_note(resolve_conversation_system_prompt(conv, manager), conv)
 
 
 def _has_real_provider(gateway, model):
@@ -1758,6 +1760,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             "attached_tools": [tool_name_from_definition(tool) for tool in tools if tool_name_from_definition(tool)],
             "thinking": {"state": "completed"},
             "thinking_level": params.get("thinking_level"),
+            "deepthink_enabled": bool(params.get("deepthink_enabled")),
         }
     )
     if debug_logs:

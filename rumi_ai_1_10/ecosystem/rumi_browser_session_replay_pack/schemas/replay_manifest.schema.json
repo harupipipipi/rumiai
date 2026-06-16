@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/replay_manifest.schema.json",
+  "title": "Replay Manifest",
+  "description": "Browser session replay contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_id",
+    "trace_id",
+    "ordered_evidence_refs",
+    "preconditions",
+    "expected_page_states",
+    "redaction_policy_ref",
+    "selector_drift_report_refs",
+    "handoff_instructions",
+    "execution_owner",
+    "transport_owner",
+    "external_action"
+  ],
+  "properties": {
+    "manifest_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ordered_evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "preconditions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expected_page_states": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "redaction_policy_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "selector_drift_report_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "handoff_instructions": {
+      "type": "string",
+      "minLength": 1
+    },
+    "execution_owner": {
+      "const": "rumi_browser_automation_pack"
+    },
+    "transport_owner": {
+      "const": "rumi_default_tools_pack"
+    },
+    "external_action": {
+      "const": "handoff_only"
+    }
+  }
+}

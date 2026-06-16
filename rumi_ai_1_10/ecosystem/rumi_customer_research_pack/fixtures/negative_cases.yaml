@@ -1,0 +1,40 @@
+negative_cases:
+  cases:
+  - id: revoked_consent_negative
+    given: participant consent revoked
+    expected: do_not_use redaction decision and no insight card
+    input_refs:
+    - participant_revoked
+    - consent_revoked
+    - interview_revoked
+    must_block:
+    - insight_card_creation
+    - source_quote_reuse
+    - external_action
+    required_output:
+      decision: blocked
+      reason: revoked_consent
+      handoff_owner: rumi_customer_research_pack
+  - id: crm_write_boundary_negative
+    given: request to update a CRM opportunity
+    expected: handoff_to_rumi_business_ops_pack only
+    must_block:
+    - direct_crm_write
+    - outbound_email
+    - source_system_mutation
+    required_output:
+      decision: handoff_only
+      reason: outside_owner_surface
+      handoff_owner: rumi_business_ops_pack
+  - id: generic_web_research_boundary_negative
+    given: request to research competitors on the public web
+    expected: handoff_to_rumi_research_pack only
+    must_block:
+    - generic_web_research
+    - uncited_external_claim
+    - network_call
+    required_output:
+      decision: handoff_only
+      reason: outside_owner_surface
+      handoff_owner: rumi_research_pack
+  expected_behavior: block_or_handoff_without_external_action

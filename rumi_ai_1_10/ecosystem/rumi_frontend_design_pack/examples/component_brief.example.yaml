@@ -1,0 +1,7 @@
+example_id: rumi_frontend_design.component_brief
+request: Create a component brief for a dense settings table with filters, loading state, empty state, validation errors, and keyboard-accessible row actions.
+expected_outputs:
+  - component_acceptance_schema_completed
+  - design_system_fit_score
+  - implementation_handoff_to_rumi_code_ide_pack
+  - responsive_qa_requirements

@@ -1,0 +1,36 @@
+routing_id: rumi.agent_services.routing.v1
+default_director: service_director
+network_default: deny
+routes:
+  - when:
+      task_contains: [compare, research, investigate, report, cite, summarize_sources]
+    primary_role: research_analyst
+    support_roles: [synthesis_writer, quality_reviewer]
+    required_capabilities: [deep_research, artifact_delivery, safety_review]
+  - when:
+      task_contains: [code, implement, refactor, test, debug, patch, repository]
+    primary_role: coding_operator
+    support_roles: [quality_reviewer]
+    required_capabilities: [coding_workspace, safety_review]
+  - when:
+      task_contains: [browser, website, inspect_page, click, scrape, form]
+    primary_role: browser_operator
+    support_roles: [research_analyst, quality_reviewer]
+    required_capabilities: [browser_operator, safety_review]
+  - when:
+      task_contains: [deck, document, artifact, deliverable, brief]
+    primary_role: synthesis_writer
+    support_roles: [research_analyst, quality_reviewer]
+    required_capabilities: [artifact_delivery, safety_review]
+  - when:
+      task_contains: [multi_agent, delegate, parallel, long_running, service]
+    primary_role: service_director
+    support_roles: [research_analyst, coding_operator, browser_operator, synthesis_writer, quality_reviewer]
+    required_capabilities: [planning, subagent_coordination, safety_review]
+fallback:
+  primary_role: service_director
+  required_capabilities: [intake, planning, safety_review]
+selection_notes:
+  - Prefer a single role when the task is narrow.
+  - Use subagents only for separable work packages with clear done_when criteria.
+  - Ask for approval before network, terminal, file writes, authenticated browser actions, or external sends.

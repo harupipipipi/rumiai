@@ -1,0 +1,57 @@
+catalog_id: rumi_research_pack.evidence_schema
+version: 1.0.0
+evidence_card:
+  required:
+    - evidence_id
+    - claim
+    - source_id
+    - citation
+    - support_type
+    - confidence
+  recommended:
+    - quoted_excerpt
+    - paraphrase
+    - retrieval_context
+    - publication_date
+    - author_or_org
+    - limitations
+    - related_claims
+  support_type_values:
+    - supports
+    - weakly_supports
+    - contradicts
+    - contextualizes
+    - background
+confidence_values:
+  - high
+  - medium
+  - low
+  - unresolved
+source_manifest:
+  required:
+    - source_id
+    - title
+    - source_type
+    - locator
+    - access_context
+  recommended:
+    - author_or_org
+    - publication_date
+    - retrieved_at
+    - quality_score
+    - license_notes
+citation_map:
+  required:
+    - citation_id
+    - source_id
+    - locator
+    - display_text
+  recommended:
+    - quote_bounds
+    - section
+    - page
+    - url
+local_first_defaults:
+  allow_network_lookup: false
+  prefer_user_supplied_sources: true
+  preserve_source_manifest: true

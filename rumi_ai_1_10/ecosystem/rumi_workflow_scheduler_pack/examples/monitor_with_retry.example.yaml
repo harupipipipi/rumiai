@@ -1,0 +1,22 @@
+example_id: rumi_workflow_scheduler.monitor_with_retry
+pack_id: rumi_workflow_scheduler_pack
+title: Monitor with retry contract
+schedule:
+  schedule_id: monitor_build_note
+  schedule_kind: monitor
+  owner_route: defaultspack_scheduler
+  cadence:
+    every: owner_defined_interval
+    max_runs: 4
+  evidence_required:
+    - local_status_snapshot
+    - expected_condition
+  stop_conditions:
+    - objective_resolved
+    - repeated_failure
+    - owner_route_unavailable
+  retry_policy: escalating_retry
+  delivery_handoff: chat_digest
+  status: draft
+  network_required: false
+  implements_automation: false

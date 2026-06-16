@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/checkpoint.schema.json",
+  "title": "Checkpoint",
+  "description": "Sealed checkpoint that supports deterministic resume.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "checkpoint_id",
+    "session_id",
+    "event_sequence",
+    "state_digest",
+    "resume_policy",
+    "sealed"
+  ],
+  "properties": {
+    "checkpoint_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "state_digest": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resume_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed",
+        "requires_human_review",
+        "reason"
+      ],
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "requires_human_review": {
+          "type": "boolean",
+          "const": true
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "sealed": {
+      "type": "boolean",
+      "const": true
+    }
+  }
+}

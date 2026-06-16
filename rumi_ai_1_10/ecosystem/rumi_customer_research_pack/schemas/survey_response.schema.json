@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/survey_response.schema.json",
+  "title": "Survey Response",
+  "description": "Contract schema for Survey Response.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "response_id",
+    "survey_id",
+    "question_id",
+    "answer",
+    "consent_state",
+    "redaction_state",
+    "weighting_note"
+  ],
+  "properties": {
+    "response_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "survey_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "question_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "answer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "consent_state": {
+      "type": "string",
+      "enum": [
+        "granted",
+        "limited",
+        "revoked",
+        "unknown"
+      ]
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": [
+        "raw_blocked",
+        "redacted",
+        "aggregate_only"
+      ]
+    },
+    "weighting_note": {
+      "type": "string",
+      "enum": [
+        "unweighted",
+        "sample_weight_supplied",
+        "insufficient_data"
+      ]
+    }
+  }
+}

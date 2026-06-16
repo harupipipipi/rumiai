@@ -1,0 +1,10 @@
+example_id: rumi_model_evals.examples.defaultspack_promotion_gate
+preset: defaultspack_promotion_review
+title: Review model promotion evidence for defaultspack
+goal: Decide whether evidence supports recommend, allow, hold, quarantine, demote, or gather_more_evidence.
+constraints:
+  network: none
+  catalog_mutation: not_in_scope
+deliverable:
+  type: promotion_gate_decision
+  required_sections: [decision, evidence_refs, metric_summary, consumer_pack_impacts, caveats]

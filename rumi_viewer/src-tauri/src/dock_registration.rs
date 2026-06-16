@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Context, Result as AnyResult};
 use log::{error, info, warn};
 use serde_json::Value;
+use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
 use crate::config::AppConfig;
 use crate::process_utils;
@@ -19,6 +20,8 @@ use crate::process_utils;
 const DEFAULTSPACK_DEFAULT_PORT: u16 = 8766;
 const DEFAULTSPACK_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULTSPACK_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const DEFAULTSPACK_WINDOW_LABEL: &str = "defaultspack";
+const DEFAULTSPACK_WINDOW_TITLE: &str = "Rumi Defaultspack";
 
 #[derive(Debug, Clone)]
 struct DefaultspackDesktopMetadata {
@@ -555,16 +558,37 @@ pub(crate) fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<S
 }
 
 #[tauri::command]
-pub fn launch_defaultspack_desktop(config: tauri::State<'_, AppConfig>) -> Result<String, String> {
-    launch_defaultspack_desktop_impl(&config).map_err(|e| {
+pub fn launch_defaultspack_desktop(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+) -> Result<String, String> {
+    launch_defaultspack_desktop_window_impl(&app, config.inner()).map_err(|e| {
         error!("launch_defaultspack_desktop failed: {e:#}");
         format!("{e:#}")
     })
 }
 
-pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<String> {
+pub(crate) fn launch_defaultspack_desktop_window_impl(
+    app: &AppHandle,
+    config: &AppConfig,
+) -> AnyResult<String> {
     info!("launch_defaultspack_desktop_impl: starting");
+    let url = ensure_defaultspack_desktop_ready(config)?;
+    open_defaultspack_tauri_window(app, &url)?;
+    info!("launch_defaultspack_desktop_impl: opened Tauri window {url}");
+    Ok(format!("Opening Rumi Defaultspack at {url}"))
+}
 
+#[allow(dead_code)]
+pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<String> {
+    info!("launch_defaultspack_desktop_impl: starting external browser launch");
+    let url = ensure_defaultspack_desktop_ready(config)?;
+    open::that_detached(&url).with_context(|| format!("failed to open {url}"))?;
+    info!("launch_defaultspack_desktop_impl: opened browser URL {url}");
+    Ok(format!("Opening Rumi Defaultspack at {url}"))
+}
+
+fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
     let metadata = match read_defaultspack_desktop_metadata(config) {
         Ok(m) => {
             info!("launch_defaultspack_desktop_impl: metadata loaded (port={}, command={}, working_dir={})",
@@ -623,9 +647,41 @@ pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<
         );
     }
 
-    open::that_detached(&url).with_context(|| format!("failed to open {url}"))?;
-    info!("launch_defaultspack_desktop_impl: opened browser URL {url}");
-    Ok(format!("Opening Rumi Defaultspack at {url}"))
+    Ok(url)
+}
+
+fn focus_defaultspack_window(window: &tauri::WebviewWindow) -> AnyResult<()> {
+    window
+        .unminimize()
+        .context("failed to unminimize defaultspack window")?;
+    window
+        .show()
+        .context("failed to show defaultspack window")?;
+    window
+        .set_focus()
+        .context("failed to focus defaultspack window")
+}
+
+fn open_defaultspack_tauri_window(app: &AppHandle, url: &str) -> AnyResult<()> {
+    let url = Url::parse(url).with_context(|| format!("invalid defaultspack URL: {url}"))?;
+    if let Some(window) = app.get_webview_window(DEFAULTSPACK_WINDOW_LABEL) {
+        window
+            .navigate(url)
+            .context("failed to navigate defaultspack window")?;
+        return focus_defaultspack_window(&window);
+    }
+
+    let window =
+        WebviewWindowBuilder::new(app, DEFAULTSPACK_WINDOW_LABEL, WebviewUrl::External(url))
+            .title(DEFAULTSPACK_WINDOW_TITLE)
+            .inner_size(1280.0, 800.0)
+            .min_inner_size(800.0, 600.0)
+            .resizable(true)
+            .focused(true)
+            .visible(true)
+            .build()
+            .context("failed to open defaultspack window")?;
+    focus_defaultspack_window(&window)
 }
 
 fn read_defaultspack_desktop_metadata(

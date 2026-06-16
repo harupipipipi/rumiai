@@ -1,0 +1,6 @@
+preset_id: rumi_voice_mobile.handoff_review
+profile: rumi_voice_mobile.voice_mobile_operator
+features:
+  local_first: true
+  evidence_required: true
+  owner_boundary_check: true

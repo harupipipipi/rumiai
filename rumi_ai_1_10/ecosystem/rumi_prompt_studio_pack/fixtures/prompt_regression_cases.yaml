@@ -1,0 +1,86 @@
+prompt_regression_cases:
+  version: 0.1.0
+  network_default: none
+  cases:
+  - fixture_id: fixture_evidence_first
+    prompt_id: prompt_evidence_first
+    source_kind: rough_prompt
+    input_summary: Draft a reusable prompt from a rough request while naming missing evidence.
+    expected_lint_dimensions:
+    - deterministic_prompt_id
+    - instruction_hierarchy
+    - evidence_requirement
+    - risk_notes
+    - privacy_secret_boundary
+    must_emit:
+    - risk
+    - evidence_requirement
+    - customization_knobs
+    must_not_emit:
+    - benchmark_score
+    - stored_memory
+    - api_schema
+  - fixture_id: fixture_handoff
+    prompt_id: prompt_handoff_boundary
+    source_kind: boundary_request
+    input_summary: User asks the prompt to choose a model, remember a preference, and edit code.
+    expected_lint_dimensions:
+    - scope_boundary
+    - owner_handoff
+    - blocked_action_detection
+    expected_handoffs:
+    - rumi_model_evals_pack
+    - rumi_memory_knowledge_pack
+    - rumi_code_ide_pack
+    must_emit:
+    - handoff_owner
+    - review_gate
+    must_not_emit:
+    - selected_model
+    - saved_preference
+    - code_patch
+  - fixture_id: fixture_claude_migration
+    prompt_id: prompt_custom_instruction_migration
+    source_kind: claude_project_instructions
+    input_summary: Claude-style project instructions with tone rules and tool permission wording.
+    expected_lint_dimensions:
+    - custom_instruction_migration_fidelity
+    - platform_specific_filtering
+    - owner_handoff
+    must_emit:
+    - portable_instructions
+    - blocked_imports
+    - reviewer_questions
+    must_not_emit:
+    - tool_permission_grant
+    - model_quality_claim
+  - fixture_id: fixture_chatgpt_migration
+    prompt_id: prompt_custom_instruction_migration
+    source_kind: chatgpt_custom_instructions
+    input_summary: ChatGPT custom instructions with response style and user background preferences.
+    expected_lint_dimensions:
+    - custom_instruction_migration_fidelity
+    - privacy_secret_boundary
+    - style_persona_consistency
+    must_emit:
+    - portable_instructions
+    - platform_specific_notes
+    - blocked_imports
+    must_not_emit:
+    - persistent_user_profile
+    - hidden_memory
+  - fixture_id: fixture_gemini_migration
+    prompt_id: prompt_custom_instruction_migration
+    source_kind: gemini_gem_instruction
+    input_summary: Gemini Gem instructions that mention Workspace actions and concise style.
+    expected_lint_dimensions:
+    - custom_instruction_migration_fidelity
+    - scope_boundary
+    - style_persona_consistency
+    must_emit:
+    - portable_instructions
+    - handoff_owner
+    - blocked_imports
+    must_not_emit:
+    - workspace_api_call
+    - benchmark_score

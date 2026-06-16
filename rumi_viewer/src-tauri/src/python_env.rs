@@ -529,7 +529,6 @@ fn install_requirements(config: &AppConfig) -> Result<()> {
             "--require-hashes",
             "--only-binary",
             ":all:",
-            "--no-build",
             "--python",
             &venv_python.to_string_lossy(),
             "-r",

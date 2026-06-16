@@ -1,0 +1,13 @@
+example:
+  id: checkpoint_resume
+  user_request: Resume a paused agent run from a sealed checkpoint
+  input_state: local_records_supplied
+  expected_result: checkpoint_resume_handoff_packet
+  must_include:
+  - evidence_ids_or_approval_receipt
+  - review_state
+  - handoff_owner
+  must_not:
+  - external_action
+  - uncited_claim
+  - unapproved_tool_call

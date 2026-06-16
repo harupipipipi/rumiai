@@ -1,0 +1,87 @@
+{
+  "pack_id": "rumi_memory_knowledge_pack",
+  "display_name": "Rumi Memory Knowledge Pack",
+  "description": "Optional declarative local-first memory and knowledge pack for session recall, user profile memory, project knowledge, skill-learning proposals, hygiene, and evidence-backed recall.",
+  "target_pack_id": "rumi_memory_knowledge_pack",
+  "version": "1.0.0",
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "optional_dependencies": [
+    {
+      "pack_id": "rumi_agent_services_pack",
+      "reason": "Can schedule memory hygiene routines or background curation while this pack supplies policies and contracts."
+    },
+    {
+      "pack_id": "rumi_research_pack",
+      "reason": "Can provide evidence records that support memory recall and project knowledge claims."
+    },
+    {
+      "pack_id": "rumi_local_agent_pack",
+      "reason": "Can load local agent prompts/profiles that consume memory and project knowledge guidance."
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "tool_aliases": "prefer_explicit_pack_namespace",
+    "profiles": "allow_side_by_side",
+    "catalogs": "merge_by_catalog_id",
+    "runtime_memory_writes": "forbidden_by_this_pack",
+    "pack_notes": {
+      "defaultspack": {
+        "relationship": "depends_on",
+        "overlap": "defaultspack may include concrete memory runtime surfaces; this pack defines declarative contracts, policies, and review schemas only.",
+        "conflict": "none; defaultspack remains the runtime owner"
+      },
+      "rumi_agent_services_pack": {
+        "relationship": "complementary",
+        "overlap": "agent services may schedule routines, cron-like jobs, or background curation; this pack defines memory hygiene recipes and policies but does not execute jobs.",
+        "conflict": "none; service execution should reference memory policy ids explicitly"
+      },
+      "rumi_research_pack": {
+        "relationship": "complementary",
+        "overlap": "research owns source evidence collection and citation workflows; memory knowledge owns recall, profile, project knowledge, and hygiene contracts.",
+        "conflict": "none; use research evidence cards as optional memory evidence"
+      },
+      "rumi_local_agent_pack": {
+        "relationship": "complementary",
+        "overlap": "local agent prompts may mention memory and project context; this pack supplies memory policies and schemas without replacing local agent profiles.",
+        "conflict": "none; keep explicit pack namespaces"
+      },
+      "existing_memory_surfaces": {
+        "relationship": "contract_only",
+        "overlap": "existing runtime memory stores, session search, and user profile surfaces remain implementation-owned.",
+        "conflict": "none; this pack must not write runtime memory"
+      }
+    }
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Memory knowledge pack augments defaultspack with contracts and policies and must not become the default runtime pack."
+  },
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"],
+    "network": "none_by_default",
+    "runtime_memory_write_policy": "defines_contracts_only",
+    "notes": "No executable memory writer, scheduler, gateway, or search index is included."
+  },
+  "marketplace": {
+    "id": "rumi.memory_knowledge_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "memory"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": false,
+  "risk_level": "low",
+  "supports_all_ok": true
+}

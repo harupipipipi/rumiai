@@ -1,0 +1,29 @@
+assignment_brief_template:
+  id: rumi_subagent_pr_manager_pack.subagent_assignment_brief
+  required_fields:
+    - pack_id
+    - worktree_path
+    - branch_name
+    - owner_subagent
+    - reviewer_subagent
+    - fallback_subagent
+    - owned_paths
+    - forbidden_paths
+    - expected_assets
+    - verification_commands
+  sections:
+    mission:
+      prompt: State the one PR candidate and the reason it exists.
+    scope:
+      prompt: List owned paths and explicitly say what must not be touched.
+    asset_plan:
+      prompt: Name catalog, policy, template, checklist, example, and test assets to update.
+    evidence_plan:
+      prompt: Name the exact ledger entries expected before review.
+    handoff_plan:
+      prompt: Name owner packs for code edits, agent execution, observability, and suite integration.
+  quality_bar:
+    - At least three subagent roles are present.
+    - Contract tests assert semantic quality, not only file existence.
+    - No executable runtime code is introduced.
+    - No secrets or network defaults are introduced.

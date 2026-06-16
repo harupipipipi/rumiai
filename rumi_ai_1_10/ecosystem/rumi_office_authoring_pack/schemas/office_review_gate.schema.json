@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/office_review_gate.schema.json",
+  "title": "Office Review Gate",
+  "description": "Office authoring contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "review_gate_id",
+    "blocking_checks",
+    "citation_required",
+    "layout_required",
+    "formula_required",
+    "accessibility_required",
+    "export_allowed",
+    "minimum_pass"
+  ],
+  "properties": {
+    "review_gate_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "blocking_checks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "citation_required": {
+      "const": true
+    },
+    "layout_required": {
+      "const": true
+    },
+    "formula_required": {
+      "const": true
+    },
+    "accessibility_required": {
+      "const": true
+    },
+    "export_allowed": {
+      "const": false
+    },
+    "minimum_pass": {
+      "const": "all_blocking_checks"
+    }
+  }
+}

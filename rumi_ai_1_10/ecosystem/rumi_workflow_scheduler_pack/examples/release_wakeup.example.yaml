@@ -1,0 +1,21 @@
+example_id: rumi_workflow_scheduler.release_wakeup
+pack_id: rumi_workflow_scheduler_pack
+title: Release signoff wakeup contract
+schedule:
+  schedule_id: release_signoff_wakeup
+  schedule_kind: one_shot_wakeup
+  owner_route: rumi_devops_release_pack
+  cadence:
+    at: owner_selected_time
+    timezone: release_timezone
+  evidence_required:
+    - release_gate_status
+    - unresolved_blockers
+  stop_conditions:
+    - release_gate_complete
+    - owner_cancels
+  retry_policy: no_retry
+  delivery_handoff: release_check
+  status: draft
+  network_required: false
+  implements_automation: false

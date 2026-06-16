@@ -1,0 +1,27 @@
+example_id: rumi_security_review.pack_security_review
+pack_id: rumi_security_review_pack
+title: Example pack security review record
+review_scope:
+  target_pack_id: example_pack
+  change_type: declarative_pack_update
+  network_required: false
+  required_secrets: []
+checks:
+  threat_modeling: complete
+  secret_scanning_review: complete
+  permission_grant_review: complete
+  mcp_browser_risk: not_applicable
+  dependency_review: complete
+findings:
+  - finding_id: SEC-001
+    category_id: permissions_and_grants
+    severity: medium
+    summary: Example pack documents a new high-risk action but does not identify the owner approval path.
+    evidence:
+      - docs/interfaces.md mentions high-risk action
+    recommendation: Document the owner pack and runtime approval path before release.
+    status: open
+    defaultspack_decision_override: false
+signoff:
+  status: incomplete
+  reason: Open medium finding requires owner decision.

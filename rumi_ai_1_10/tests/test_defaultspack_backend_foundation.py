@@ -309,7 +309,7 @@ def test_permission_policy_defaults_to_ask_when_no_file_exists(tmp_path):
     assert policy["default_action"] == "ask"
 
 
-def test_shell_html_uses_external_luxe_shell_assets():
+def test_shell_html_uses_external_rumi_dp_assets():
     shell_path = (
         Path(__file__).resolve().parent.parent
         / "ecosystem"

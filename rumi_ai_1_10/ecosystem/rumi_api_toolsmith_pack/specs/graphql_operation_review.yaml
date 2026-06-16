@@ -1,0 +1,38 @@
+spec_id: rumi.api_toolsmith.graphql_operation_review.v1
+owner: rumi_api_toolsmith_pack
+purpose: Declarative GraphQL operation mapping review for query, mutation, variable, and response contracts.
+network_default: none
+required_inputs:
+  - schema_snapshot_or_sdl
+  - operation_document
+  - variable_examples
+  - mock_response_fixture
+review_dimensions:
+  operation_kind:
+    query:
+      risk: read_only
+      required_checks: [selection_set_minimized, pagination_policy_recorded, nullability_reviewed]
+    mutation:
+      risk: write_or_side_effect
+      required_checks: [explicit_user_confirmation, idempotency_policy, rollback_or_receipt_plan]
+    subscription:
+      risk: streaming_or_long_running
+      required_checks: [lifecycle_boundary, event_shape, cancellation_policy]
+  variables:
+    checks:
+      - required_variables_named
+      - scalar_types_preserved
+      - enum_values_preserved
+      - sensitive_variables_flagged
+  response_mapping:
+    checks:
+      - typename_handling_recorded
+      - nested_selection_depth_reviewed
+      - partial_error_policy_recorded
+      - mock_response_fixture_matches_selection
+outputs:
+  - operation_map
+  - variable_contract
+  - response_contract
+  - risk_notes
+  - handoff_recommendation

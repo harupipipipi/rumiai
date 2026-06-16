@@ -1,0 +1,17 @@
+example:
+  intent: sales call follow-up draft from an existing transcript export
+  inputs:
+  - source_type: transcript_text
+    source_id: transcript_sales_call_017
+    source_span: 00:12:08-00:23:41
+  expected_result: follow_up_draft_handoff_packet
+  required_outputs:
+  - decision_records
+  - action_items
+  - follow_up_drafts
+  - evidence_ledger_entries
+  draft_only: true
+  human_review_required: true
+  handoffs:
+  - rumi_connector_gateway_pack
+  - rumi_workflow_scheduler_pack

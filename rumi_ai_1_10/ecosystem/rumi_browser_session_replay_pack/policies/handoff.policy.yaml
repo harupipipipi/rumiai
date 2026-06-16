@@ -1,0 +1,13 @@
+handoff_policy:
+  pack_id: rumi_browser_session_replay_pack
+  default: do_not_execute_adjacent_runtime_action
+  overlap_policy:
+    browser_execution: handoff_to_rumi_browser_automation_pack
+    semantic_dom: handoff_to_rumi_browser_element_pack
+    browser_transport: handoff_to_rumi_default_tools_pack
+    audit_logs: handoff_to_defaultspack
+    form_submission: handoff_to_rumi_browser_form_operator_pack
+    session_replay_contract: owned_by_rumi_browser_session_replay_pack
+    redaction_review: owned_by_rumi_browser_session_replay_pack
+    tool_aliases: prefer_explicit_pack_namespace
+  owner_surface_rule: owner_surface_wins_then_explicit_handoff

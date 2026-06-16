@@ -1,0 +1,75 @@
+{
+  "pack_id": "rumi_research_pack",
+  "display_name": "Rumi Research Pack",
+  "description": "Optional declarative local-first deep research and evidence pack for plans, source quality, citation maps, evidence cards, and synthesis reports.",
+  "target_pack_id": "rumi_research_pack",
+  "version": "1.0.0",
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "optional_dependencies": [
+    {
+      "pack_id": "rumi_workspace_pack",
+      "reason": "Can turn research outputs into workspace documents, decks, PDFs, charts, sheets, and export bundles."
+    },
+    {
+      "pack_id": "rumi_agent_services_pack",
+      "reason": "Can orchestrate long-running research jobs while this pack provides research recipes and evidence contracts."
+    },
+    {
+      "pack_id": "rumi_default_tools_pack",
+      "reason": "Can provide concrete local file and preview implementations for research artifacts."
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "tool_aliases": "prefer_explicit_pack_namespace",
+    "profiles": "allow_side_by_side",
+    "catalogs": "merge_by_catalog_id",
+    "pack_notes": {
+      "defaultspack": {
+        "relationship": "depends_on",
+        "overlap": "Uses default runtime/profile conventions without replacing defaultspack.",
+        "conflict": "none"
+      },
+      "rumi_workspace_pack": {
+        "relationship": "complementary",
+        "overlap": "Both mention reports and artifacts; research owns evidence and citation contracts, workspace owns editable artifact/export contracts.",
+        "conflict": "none; compose through explicit rumi_research_pack and rumi_workspace_pack namespaces"
+      },
+      "rumi_agent_services_pack": {
+        "relationship": "complementary",
+        "overlap": "Both mention long-running work; research owns workflow recipes, agent services owns execution orchestration.",
+        "conflict": "none; service execution should reference research recipes by catalog id"
+      }
+    }
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Research pack augments defaultspack with evidence declarations and must not become the default runtime pack."
+  },
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"],
+    "network": "none_by_default",
+    "notes": "This pack is declarative and local-first. Concrete network retrieval, connector sync, or background execution must be supplied by another pack with its own grants."
+  },
+  "marketplace": {
+    "id": "rumi.research_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "research"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": false,
+  "risk_level": "low",
+  "supports_all_ok": true
+}

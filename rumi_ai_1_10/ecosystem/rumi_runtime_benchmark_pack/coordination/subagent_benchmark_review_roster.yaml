@@ -1,0 +1,41 @@
+version: rumi.runtime_benchmark.subagent_roster.v1
+pack_id: rumi_runtime_benchmark_pack
+description: Declarative roster for repeated specialist benchmark review passes. This is not executable routing.
+network_default: none
+
+review_passes:
+  - id: reproducibility_auditor
+    role: Verify fixtures, git refs, environment capture, cache policy, and network posture.
+    required_assets:
+      - catalog/environment_capture_schema.json
+      - policies/environment_capture.policy.yaml
+    outputs:
+      - reproducibility_gap_report
+      - fixture_version_notes
+  - id: sampling_reviewer
+    role: Check sample count, warmup, retry, p95 claims, and comparison validity.
+    required_assets:
+      - catalog/latency_cost_sampling_matrix.yaml
+    outputs:
+      - sampling_plan_assessment
+      - claim_scope_corrections
+  - id: latency_cost_analyst
+    role: Summarize latency, cost, token, and tool-call evidence with declared units.
+    required_assets:
+      - catalog/latency_cost_sampling_matrix.yaml
+    outputs:
+      - latency_cost_summary
+      - threshold_or_regression_notes
+  - id: final_benchmark_integrator
+    role: Combine environment, sampling, latency/cost, and reliability evidence into a final report.
+    required_assets:
+      - catalog/runtime_benchmark_matrix.yaml
+    outputs:
+      - benchmark_report
+      - residual_risk_and_handoff_notes
+
+governance:
+  repeated_specialist_passes_required: true
+  grant_effect: none
+  runtime_subagent_tool_required: false
+  defaultspack_approval_still_applies: true

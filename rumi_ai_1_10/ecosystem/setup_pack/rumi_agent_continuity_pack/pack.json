@@ -1,0 +1,73 @@
+{
+  "pack_id": "rumi_agent_continuity_pack",
+  "display_name": "Rumi Agent Continuity Pack",
+  "description": "Declarative continuity packets for long-running agent restarts, compaction handoffs, attention drift recovery, and resume evidence.",
+  "target_pack_id": "rumi_agent_continuity_pack",
+  "version": "1.0.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "run_board_events_checkpoints": "handoff_to_rumi_agent_workroom_pack",
+    "memory_storage_recall": "handoff_to_rumi_memory_knowledge_pack",
+    "metrics_telemetry_ledgers": "handoff_to_rumi_observability_pack",
+    "schedules_wakeups_retries": "handoff_to_rumi_workflow_scheduler_pack",
+    "artifact_persistence_export": "handoff_to_rumi_workspace_pack",
+    "git_branch_mutation": "handoff_to_defaultspack_or_coding_owner",
+    "continuity_packets": "owned_by_rumi_agent_continuity_pack",
+    "restart_evidence": "owned_by_rumi_agent_continuity_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Continuity packets need real restart success evidence and durable owner integrations before defaultspack promotion.",
+    "promotion_blockers": [
+      "declarative_only_no_runtime_resume_engine",
+      "no_durable_continuity_store",
+      "no_compaction_runtime_authority",
+      "workroom_owns_run_events_and_checkpoints",
+      "memory_pack_owns_persistent_knowledge",
+      "observability_pack_owns_metrics_and_ledgers",
+      "scheduler_pack_owns_wakeups_and_recurring_runs",
+      "workspace_pack_owns_artifact_persistence",
+      "branch_mutation_owned_elsewhere",
+      "requires_real_restart_success_cases"
+    ],
+    "promotion_evidence_required": [
+      "long_running_resume_cases",
+      "attention_drift_recovery_cases",
+      "compaction_handoff_cases",
+      "branch_resume_packet_cases",
+      "health_note_review_cases",
+      "real_restart_success_cases"
+    ]
+  },
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.9",
+    "platforms": [
+      "windows",
+      "linux",
+      "macos"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.agent_continuity_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "agent-continuity",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  }
+}

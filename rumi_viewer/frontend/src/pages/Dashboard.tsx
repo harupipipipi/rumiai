@@ -8,13 +8,9 @@ import {
   createStartupProfile,
   deleteStartupProfile,
   duplicateStartupProfile,
-  fetchDashboard,
   fetchStartupProfiles,
-  isDesktopShellAvailable,
-  launchDefaultspackDesktop,
   launchStartupProfile,
   removePackFromStartupProfile,
-  restartKernel,
   setStartupProfileNodeOverride,
   updateStartupProfile,
 } from '@/src/lib/api';
@@ -35,12 +31,10 @@ import {
   type StartupSortMode,
 } from '@/src/lib/startupProfiles';
 import { apiMapRoute, profileGraphRoute } from '@/src/lib/routes';
-import { transformDashboard } from '@/src/lib/transforms';
-import { useAppStore, type DashboardData } from '@/src/store';
+import { useAppStore } from '@/src/store';
 import {
   AlertCircle,
   ArrowLeft,
-  AppWindow,
   Box,
   CheckCircle2,
   Copy,
@@ -60,15 +54,8 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/src/components/ui/Pop
 import { Button } from '@/src/components/ui/Button';
 import { Badge } from '@/src/components/ui/Badge';
 
-type ActionState = 'activate' | 'create' | 'delete' | 'duplicate' | 'launch' | 'restart' | 'save';
+type ActionState = 'activate' | 'create' | 'delete' | 'duplicate' | 'launch' | 'save';
 
-const defaultDashboard: DashboardData = {
-  kernelStatus: 'stopped',
-  uptime: '--',
-  activePacks: 0,
-  registeredFlows: 0,
-  activities: [],
-};
 const INITIAL_PROFILE_LOAD_MAX_ATTEMPTS = 3;
 const INITIAL_PROFILE_LOAD_RETRY_DELAY_MS = 900;
 
@@ -103,18 +90,12 @@ export function Dashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [dashboard, setDashboard] = useState<DashboardData>(defaultDashboard);
-  const [dashboardLoading, setDashboardLoading] = useState(true);
-  const [dashboardError, setDashboardError] = useState<string | null>(null);
-
   const [payload, setPayload] = useState<StartupProfilesResponseData | null>(null);
   const [profilesLoading, setProfilesLoading] = useState(true);
   const [profilesError, setProfilesError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ message: string; tone: 'error' | 'success' } | null>(null);
   const [actionState, setActionState] = useState<{ profileId?: string; type: ActionState } | null>(null);
   const [draft, setDraft] = useState<ApiStartupProfile | null>(null);
-  const [launchingDefaultspack, setLaunchingDefaultspack] = useState(false);
-  const desktopShellAvailable = isDesktopShellAvailable();
 
   const editProfileId = searchParams.get('edit');
   const searchQuery = searchParams.get('q') ?? '';
@@ -138,19 +119,6 @@ export function Dashboard() {
   const translateActionError = (error: unknown, fallbackAction: string) => {
     const rawMessage = error instanceof Error ? error.message : '';
     return describeStartupActionError(rawMessage, fallbackAction);
-  };
-
-  const refreshDashboard = async () => {
-    setDashboardLoading(true);
-    try {
-      const response = await fetchDashboard();
-      setDashboard(transformDashboard(response));
-      setDashboardError(null);
-    } catch (error) {
-      setDashboardError(translateActionError(error, 'load your workspace summary'));
-    } finally {
-      setDashboardLoading(false);
-    }
   };
 
   const refreshProfiles = async (preferredProfileId?: string | null) => {
@@ -188,7 +156,6 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!runtimeReady) return;
-    void refreshDashboard();
     void refreshProfiles();
   }, [runtimeReady]);
 
@@ -352,7 +319,6 @@ export function Dashboard() {
       const response = await launchStartupProfile(profileId);
       if (!response.restart_requested) {
         await refreshProfiles(editProfileId);
-        await refreshDashboard();
       }
       setSuccessFeedback(response.restart_requested ? 'Profile launch requested. Keeping Viewer open while the runtime reconnects.' : 'Profile launched.');
     } catch (error) {
@@ -392,45 +358,6 @@ export function Dashboard() {
         } finally { setActionState(null); closeDialog(); }
       },
     });
-  };
-
-  const handleRestartKernel = () => {
-    showDialog({
-      title: 'Restart kernel?',
-      message: 'This refreshes the runtime and may interrupt in-flight work.',
-      confirmText: 'Restart',
-      onConfirm: async () => {
-        setActionState({ type: 'restart' });
-        setFeedback(null);
-        try {
-          await restartKernel();
-          setDashboard((current) => ({ ...current, kernelStatus: 'stopped' }));
-          setSuccessFeedback('Kernel restart requested.');
-          closeDialog();
-          window.setTimeout(() => { void refreshDashboard(); }, 3000);
-        } catch (error) {
-          setErrorFeedback(translateActionError(error, 'restart the kernel'));
-          closeDialog();
-        } finally { setActionState(null); }
-      },
-    });
-  };
-
-  const handleLaunchDefaultspack = async () => {
-    if (launchingDefaultspack) return;
-    setLaunchingDefaultspack(true);
-    setFeedback(null);
-    try {
-      const message = await launchDefaultspackDesktop();
-      console.log('[defaultspack-launch] success:', message);
-      setSuccessFeedback(message);
-    } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : String(error);
-      console.error('[defaultspack-launch] failed:', rawMessage);
-      setErrorFeedback(translateActionError(error, 'open Defaultspack v2'));
-    } finally {
-      setLaunchingDefaultspack(false);
-    }
   };
 
   // --- Loading / Error states ---
@@ -489,16 +416,6 @@ export function Dashboard() {
             <p className="mt-1 text-sm text-text-muted">Launch and manage your startup profiles.</p>
           </div>
           <div className="flex items-center gap-3">
-            {desktopShellAvailable && (
-              <Button
-                variant="outline"
-                onClick={() => void handleLaunchDefaultspack()}
-                disabled={!runtimeReady || launchingDefaultspack}
-                loading={launchingDefaultspack}
-              >
-                <AppWindow className="h-4 w-4" /> Open Defaultspack
-              </Button>
-            )}
             <label className="flex items-center gap-2 rounded-lg border border-border bg-bg-card px-3 py-2 text-sm">
               <Search className="h-4 w-4 text-text-muted" />
               <input
@@ -842,7 +759,7 @@ function EditPanel({
                       packs: draft.packs.includes(nextBasePack) ? draft.packs : [nextBasePack, ...draft.packs],
                     });
                   }}
-                  className="w-full rounded-lg border border-border bg-bg-hover px-3 py-2.5 text-sm text-text-main outline-none transition focus:border-accent focus:ring-2 focus:ring-[var(--ring-color)]"
+                  className="rumi-select w-full rounded-lg border border-border px-3 py-2.5 pr-9 text-sm outline-none transition"
                 >
                   {catalogPacks.map((pack: any) => (
                     <option key={pack.pack_id} value={pack.pack_id} disabled={!pack.available}>
@@ -893,7 +810,7 @@ function EditPanel({
                   value=""
                   onChange={(e) => void handleAddPack(e.target.value)}
                   disabled={availablePacksToAdd.length === 0 || actionState?.profileId === draft.profile_id}
-                  className="w-full rounded-lg border border-border bg-bg-hover px-3 py-2.5 text-sm text-text-main outline-none transition focus:border-accent disabled:opacity-60"
+                  className="rumi-select w-full rounded-lg border border-border px-3 py-2.5 pr-9 text-sm outline-none transition disabled:opacity-60"
                 >
                   <option value="">Select a pack</option>
                   {availablePacksToAdd.map((pack: any) => (
@@ -928,7 +845,7 @@ function EditPanel({
                       value={currentOverride}
                       onChange={(e) => void handleOverrideChange(graphPort.port_key, e.target.value)}
                       disabled={actionState?.profileId === draft.profile_id}
-                      className="mt-2 w-full rounded-lg border border-border bg-bg-hover px-3 py-2 text-sm text-text-main outline-none transition focus:border-accent"
+                      className="rumi-select mt-2 w-full rounded-lg border border-border px-3 py-2 pr-9 text-sm outline-none transition"
                     >
                       <option value="">Use graph default ({defaultNode})</option>
                       {compatibleNodes.map((node: any) => (

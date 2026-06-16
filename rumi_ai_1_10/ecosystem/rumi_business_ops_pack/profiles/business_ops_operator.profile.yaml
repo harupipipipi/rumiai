@@ -1,0 +1,8 @@
+profile_id: rumi_business_ops.business_ops_operator
+pack_id: rumi_business_ops_pack
+purpose: Operate within the Rumi Business Ops Pack declarative contract.
+policy:
+  local_first: true
+  network_default: deny
+  require_evidence: true
+  respect_owner_boundaries: true

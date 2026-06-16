@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/artifact_app_error.schema.json",
+  "title": "Artifact App Error",
+  "description": "Structured error envelope with redacted details.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "error_id",
+    "artifact_id",
+    "error_class",
+    "safe_message",
+    "stack_redacted",
+    "recovery_handoff",
+    "correlation_id",
+    "details_redacted",
+    "raw_stack_included",
+    "handoff_packet_required"
+  ],
+  "properties": {
+    "error_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "error_class": {
+      "type": "string",
+      "enum": [
+        "manifest_error",
+        "renderer_error",
+        "approval_error",
+        "export_error",
+        "storage_selector_error"
+      ]
+    },
+    "safe_message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stack_redacted": {
+      "type": "boolean",
+      "const": true
+    },
+    "recovery_handoff": {
+      "type": "string",
+      "minLength": 1
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "details_redacted": {
+      "type": "boolean",
+      "const": true
+    },
+    "raw_stack_included": {
+      "type": "boolean",
+      "const": false
+    },
+    "handoff_packet_required": {
+      "type": "boolean",
+      "const": true
+    }
+  }
+}

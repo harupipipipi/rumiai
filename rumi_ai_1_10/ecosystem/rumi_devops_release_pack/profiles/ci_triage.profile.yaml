@@ -1,0 +1,44 @@
+profile_id: rumi_devops_release_pack.ci_triage
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+
+display_name:
+  ja: CI Triage
+  en: CI Triage
+
+description:
+  ja: ローカル優先で CI 失敗、ログ、ワークフローを切り分けるプロファイル。
+  en: Local-first profile for CI failures, logs, and workflow triage.
+
+default_graph: defaultspack.coding_workspace
+default_flow: agent_chat
+
+surfaces:
+  preferred: cli
+  enabled:
+    - cli
+    - desktop
+
+prompt_layers:
+  system:
+    - prompts/ci_triage.system.md
+
+catalogs:
+  - catalog/release_gate_catalog.yaml
+  - catalog/devops_operations_catalog.json
+
+policy:
+  network_default: none
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  remote_ci_actions_require_approval: true
+  audit_level: detailed
+
+metadata:
+  pack_id: rumi_devops_release_pack
+  category: devops
+  owns:
+    - ci triage evidence
+    - log summaries
+    - rerun recommendations

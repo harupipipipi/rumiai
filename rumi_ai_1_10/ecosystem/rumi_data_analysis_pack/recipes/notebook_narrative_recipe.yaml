@@ -1,0 +1,26 @@
+recipe_id: rumi.data_analysis.recipes.notebook_narrative
+version: rumi.recipe.v1
+purpose: Structure notebook-style analysis as a reproducible narrative.
+inputs:
+  accepted_shapes: [csv, spreadsheet_export, local_database_snapshot, prior_result_tables]
+  required_context: [analysis_question, audience, expected_outputs]
+sections:
+  - id: objective
+    content: question, audience, decision to support
+  - id: data_inventory
+    content: sources, grain, schema, privacy boundary
+  - id: cleaning
+    content: reversible transformations and validation checks
+  - id: exploration
+    content: distributions, missingness, outliers, segment comparisons
+  - id: modeling_optional
+    content: assumptions, method choice, metrics, and limitations
+  - id: visualization
+    content: chart specs and alt text
+  - id: conclusion
+    content: findings, caveats, reproducibility status
+outputs:
+  - notebook_outline
+  - cell_plan
+  - audit_trail_update
+network: none

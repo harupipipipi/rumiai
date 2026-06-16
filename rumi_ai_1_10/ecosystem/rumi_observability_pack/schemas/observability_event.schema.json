@@ -1,0 +1,56 @@
+{
+  "version": "rumi.observability.event.schema.v1",
+  "pack_id": "rumi_observability_pack",
+  "type": "object",
+  "description": "Schema-like contract for local-first agent, tool, model, cost, latency, and incident events.",
+  "required": [
+    "event_id",
+    "event_class",
+    "occurred_at",
+    "owner_pack",
+    "run_id",
+    "privacy_class",
+    "redaction_state",
+    "evidence_refs"
+  ],
+  "properties": {
+    "event_id": {"type": "string"},
+    "event_class": {
+      "type": "string",
+      "enum": ["agent_run", "tool_call", "model_call", "cost_latency", "incident", "handoff"]
+    },
+    "occurred_at": {"type": "string"},
+    "owner_pack": {"type": "string"},
+    "run_id": {"type": "string"},
+    "privacy_class": {
+      "type": "string",
+      "enum": ["public", "internal", "sensitive", "secret_redacted", "unknown"]
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": ["not_needed", "redacted", "needs_review", "blocked"]
+    },
+    "cost": {
+      "type": "object",
+      "properties": {
+        "estimated_usd": {"type": "number"},
+        "tokens_in": {"type": "integer"},
+        "tokens_out": {"type": "integer"},
+        "pricing_source": {"type": "string"}
+      }
+    },
+    "latency": {
+      "type": "object",
+      "properties": {
+        "duration_ms": {"type": "number"},
+        "queue_ms": {"type": "number"},
+        "tool_wait_ms": {"type": "number"}
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "network_default": "none"
+}

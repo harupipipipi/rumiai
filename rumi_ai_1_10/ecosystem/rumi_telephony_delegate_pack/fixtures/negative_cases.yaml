@@ -1,0 +1,21 @@
+negative_cases:
+  cases:
+  - id: pending_approval_negative
+    given: approval_state pending_human
+    expected: abort before provider handoff
+  - id: never_call_negative
+    given: target alias in active never-call list
+    expected: blocked with no dialing
+  - id: consent_declined_negative
+    given: consent_state declined
+    expected: aborted session packet with takeover_required true
+  - id: disallowed_intent_negative
+    given: allowed_intent outside schema enum
+    expected: blocked with disallowed_intent evidence
+  - id: unredacted_transcript_negative
+    given: transcript PII class configured but no replacement segment
+    expected: blocked before transcript handoff
+  - id: takeover_abort_negative
+    given: safety-triggered escalation without abort_required true
+    expected: blocked until takeover owner reviews
+  expected_behavior: block_or_handoff_without_external_action

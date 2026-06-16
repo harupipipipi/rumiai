@@ -1,0 +1,17 @@
+example:
+  intent: weekly sync recap from existing notes with evidence-linked decisions and actions
+  inputs:
+  - source_type: meeting_notes
+    source_id: notes_weekly_sync_001
+    source_span: lines 4-37
+  expected_result: evidence_linked_recap_bundle
+  required_outputs:
+  - decision_records
+  - action_items
+  - follow_up_drafts
+  - evidence_ledger_entries
+  draft_only: true
+  human_review_required: true
+  handoffs:
+  - rumi_connector_gateway_pack
+  - rumi_workflow_scheduler_pack
