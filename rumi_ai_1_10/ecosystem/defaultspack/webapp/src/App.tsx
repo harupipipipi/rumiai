@@ -20,7 +20,7 @@ import {
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { authorityApprovalTitle, pendingAuthorityApproval } from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
@@ -2497,6 +2497,13 @@ function ChatApp() {
         enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
       }));
   }, [activeProfile, commandCatalog, deepthinkEnabled, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, ultraYoloMode, yoloMode]);
+  const composerInputMetadata = useMemo(() => {
+    const inputs = catalog?.composer_inputs ?? [];
+    return inputs.find((item) => (
+      item.enabled !== false
+      && (!item.modes?.length || item.modes.includes(mode as ComposerCommandMode))
+    )) ?? null;
+  }, [catalog?.composer_inputs, mode]);
   const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
@@ -2831,12 +2838,13 @@ function ChatApp() {
     } else {
       if (settingsResult.status === "rejected") console.error(settingsResult.reason);
     }
-    if (commandsResult.status === "fulfilled") {
-      setCommandCatalog(commandsResult.value.commands);
-    } else {
+    if (commandsResult.status === "rejected") {
       console.error(commandsResult.reason);
-      setCommandCatalog([]);
     }
+    setCommandCatalog(mergeComposerCommands(
+      commandsResult.status === "fulfilled" ? commandsResult.value.commands ?? [] : [],
+      nextCatalog?.commands ?? [],
+    ));
     const defaultMode = nextSettings?.values.preview?.default_mode;
     if (defaultMode === "auto" || defaultMode === "manual") {
       setPreviewMode(defaultMode);
@@ -3705,8 +3713,9 @@ function ChatApp() {
         conversation_id: activeConversationId,
         mode: mode as ComposerCommandMode,
       });
+      const feedbackMessage = composerCommandResultMessage(result);
       if (result.requires_approval) {
-        setError(result.message ?? `/${parsed.command.name} は approval center 経由で実行してください。`);
+        setError(feedbackMessage ?? `/${parsed.command.name} は approval center 経由で実行してください。`);
         return;
       }
       if (isModelCommand(parsed.command)) {
@@ -3716,20 +3725,20 @@ function ChatApp() {
             query: String(result.args?.query ?? commandArgs.query ?? "").trim(),
             candidates: Array.isArray(result.candidates) ? result.candidates : [],
           });
-          if (result.message) setError(result.message);
+          if (feedbackMessage) setError(feedbackMessage);
           return false;
         }
         if (result.action === "open_model_picker") {
           setComposerCandidateMenu(null);
           setModelPickerRequestId((value) => value + 1);
-          if (result.message) setError(result.message);
+          if (feedbackMessage) setError(feedbackMessage);
           return true;
         }
         if (result.executed) {
           const selectedProfileId = selectedModelProfileId(result.selected_model);
           setComposerCandidateMenu(null);
           setInput("");
-          if (result.message) setError(result.message);
+          if (feedbackMessage) setError(feedbackMessage);
           await refreshCatalog();
           if (activeConversationId && selectedProfileId) {
             const conversation = await api.updateConversation(activeConversationId, { model: selectedProfileId });
@@ -3753,8 +3762,8 @@ function ChatApp() {
       if (parsed.command.execution.type === "rumi_function") {
         await refreshCatalog();
       }
-      if (result.message) {
-        setError(result.message);
+      if (feedbackMessage) {
+        setError(feedbackMessage);
       }
     } catch (commandError) {
       setError(commandError instanceof Error ? commandError.message : "command execution に失敗しました。");
@@ -5032,6 +5041,7 @@ function ChatApp() {
       belowExtensions={[]}
       skillExtensions={composerSkills}
       commands={composerCommands}
+      composerInput={composerInputMetadata}
       modelCommandCandidates={modelCommandCandidates}
       modelPickerRequestId={modelPickerRequestId}
       yoloMode={yoloMode || ultraYoloMode}

@@ -45,7 +45,11 @@ class FrontendRegistry:
         extensions = self._load_extensions()
         ui_surfaces = self._load_ui_surfaces()
         selected_frontend_ids = self._profile_frontend_selection(profile_id)
-        shell = self._filter_shell(self._shell(ui_surfaces, extensions), selected_frontend_ids)
+        shell = self._merge_template_shell_catalog(
+            self._shell(ui_surfaces, extensions),
+            template_catalog,
+        )
+        shell = self._filter_shell(shell, selected_frontend_ids)
         parts = self._filter_frontend_items(self._parts(ui_surfaces, extensions), selected_frontend_ids)
         component_bindings = [
             *self._component_bindings(ui_surfaces, extensions),
@@ -94,7 +98,12 @@ class FrontendRegistry:
             "api_routes": template_catalog.get("api_routes", []),
             "permissions": template_catalog.get("permissions", []),
             "template_diagnostics": template_catalog.get("template_diagnostics", []),
+            "commands": template_catalog.get("commands", []),
+            "composer_inputs": template_catalog.get("composer_inputs", []),
             "composer_widgets": template_catalog.get("composer_widgets", []),
+            "context_policies": template_catalog.get("context_policies", []),
+            "shell_regions": template_catalog.get("shell_regions", []),
+            "shell_renderers": template_catalog.get("shell_renderers", []),
             "extension_points": self._extension_points(),
             "diagnostics": self._diagnostics(shell, parts, component_bindings),
         }
@@ -290,6 +299,68 @@ class FrontendRegistry:
                     "id",
                 )
         return shell
+
+    def _merge_template_shell_catalog(
+        self,
+        shell: dict[str, Any],
+        template_catalog: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged = deepcopy(shell)
+        layout = merged.get("layout")
+        if not isinstance(layout, dict):
+            layout = {}
+            merged["layout"] = layout
+
+        template_regions = template_catalog.get("shell_regions")
+        if isinstance(template_regions, list):
+            regions = layout.get("regions") if isinstance(layout.get("regions"), list) else []
+            layout["regions"] = self._merge_template_shell_items(
+                [item for item in regions if isinstance(item, dict)],
+                [item for item in template_regions if isinstance(item, dict)],
+            )
+
+        template_renderers = template_catalog.get("shell_renderers")
+        if isinstance(template_renderers, list):
+            renderers = merged.get("renderers") if isinstance(merged.get("renderers"), list) else []
+            merged["renderers"] = self._merge_template_shell_items(
+                [item for item in renderers if isinstance(item, dict)],
+                [item for item in template_renderers if isinstance(item, dict)],
+            )
+        return merged
+
+    def _merge_template_shell_items(
+        self,
+        base_items: list[dict[str, Any]],
+        template_items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        index_by_id: dict[str, int] = {}
+        for item in base_items:
+            current = deepcopy(item)
+            item_id = str(current.get("id") or "").strip()
+            if item_id and item_id in index_by_id:
+                merged[index_by_id[item_id]] = current
+                continue
+            if item_id:
+                index_by_id[item_id] = len(merged)
+            merged.append(current)
+
+        for item in template_items:
+            current = deepcopy(item)
+            item_id = str(current.get("id") or "").strip()
+            if not item_id or item_id not in index_by_id:
+                if item_id:
+                    index_by_id[item_id] = len(merged)
+                merged.append(current)
+                continue
+            self._copy_template_projection_metadata(merged[index_by_id[item_id]], current)
+        return merged
+
+    @staticmethod
+    def _copy_template_projection_metadata(target: dict[str, Any], source: dict[str, Any]) -> None:
+        for key in ("kind", "template_id", "piece_id", "projected_id", "origin", "trust_level", "_source"):
+            if key in source:
+                target[key] = deepcopy(source[key])
 
     def _parts(
         self,
@@ -2125,7 +2196,12 @@ class FrontendRegistry:
             "component_bindings": [],
             "sidebar_items": [],
             "chat_renderers": [],
+            "commands": [],
+            "composer_inputs": [],
             "composer_widgets": [],
+            "context_policies": [],
+            "shell_regions": [],
+            "shell_renderers": [],
         }
 
     def _merge_settings_sections(

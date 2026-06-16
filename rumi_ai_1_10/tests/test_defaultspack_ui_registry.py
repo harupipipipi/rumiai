@@ -189,6 +189,119 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(catalog["app"]["icon"], "/static/assets/icons/defaultspack-icon.png")
         self.assertEqual(catalog["diagnostics"], [])
 
+    def test_catalog_merges_template_shell_projection_and_catalog_buckets(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        template_meta = {
+            "template_id": "template.shell",
+            "trust_level": "builtin",
+            "origin": {"kind": "template", "template_id": "template.shell"},
+            "_source": "templates/shell/template.json",
+        }
+        template_catalog = FrontendRegistry._empty_template_catalog()
+        template_catalog.update(
+            {
+                "commands": [
+                    {
+                        **template_meta,
+                        "id": "context_txt",
+                        "piece_id": "context_txt_command",
+                        "projected_id": "template.shell:context_txt_command",
+                    }
+                ],
+                "composer_inputs": [
+                    {
+                        **template_meta,
+                        "id": "default_composer",
+                        "piece_id": "default_composer_input",
+                        "projected_id": "template.shell:default_composer_input",
+                        "region_id": "composer",
+                        "renderer": "composer",
+                    }
+                ],
+                "context_policies": [
+                    {
+                        **template_meta,
+                        "id": "materialize_txt",
+                        "piece_id": "materialize_txt_policy",
+                        "projected_id": "template.shell:materialize_txt_policy",
+                    }
+                ],
+                "shell_regions": [
+                    {
+                        **template_meta,
+                        "id": "template_sidecar",
+                        "piece_id": "template_sidecar_region",
+                        "projected_id": "template.shell:template_sidecar_region",
+                        "part_id": "ai_chat",
+                        "renderer": "template_sidecar",
+                        "slot": "main",
+                        "order": 45,
+                        "enabled": True,
+                    },
+                    {
+                        **template_meta,
+                        "id": "composer",
+                        "piece_id": "composer_shell_region",
+                        "projected_id": "template.shell:composer_shell_region",
+                        "part_id": "ai_chat",
+                        "renderer": "composer",
+                        "slot": "bottom",
+                        "order": 1,
+                        "enabled": False,
+                    },
+                ],
+                "shell_renderers": [
+                    {
+                        **template_meta,
+                        "id": "template_sidecar",
+                        "piece_id": "template_sidecar_renderer",
+                        "projected_id": "template.shell:template_sidecar_renderer",
+                        "component": "TemplateSidecar",
+                        "regions": ["template_sidecar"],
+                        "fallback": "hidden",
+                    },
+                    {
+                        **template_meta,
+                        "id": "composer",
+                        "piece_id": "composer_shell_renderer",
+                        "projected_id": "template.shell:composer_shell_renderer",
+                        "component": "TemplateComposer",
+                        "regions": ["composer"],
+                        "fallback": "plain_text",
+                    },
+                ],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            with (
+                patch("domain.frontend.registry.AIClient") as mock_client,
+                patch.object(FrontendRegistry, "_template_catalog_metadata", return_value=template_catalog),
+            ):
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                catalog = FrontendRegistry(pack_root=pack_root).build_catalog()
+
+        regions = {region["id"]: region for region in catalog["shell"]["layout"]["regions"]}
+        renderers = {renderer["id"]: renderer for renderer in catalog["shell"]["renderers"]}
+
+        self.assertEqual({item["id"] for item in catalog["commands"]}, {"context_txt"})
+        self.assertEqual({item["id"] for item in catalog["composer_inputs"]}, {"default_composer"})
+        self.assertEqual({item["id"] for item in catalog["context_policies"]}, {"materialize_txt"})
+        self.assertEqual({item["id"] for item in catalog["shell_regions"]}, {"composer", "template_sidecar"})
+        self.assertEqual({item["id"] for item in catalog["shell_renderers"]}, {"composer", "template_sidecar"})
+        self.assertEqual(regions["template_sidecar"]["renderer"], "template_sidecar")
+        self.assertEqual(regions["template_sidecar"]["template_id"], "template.shell")
+        self.assertEqual(renderers["template_sidecar"]["component"], "TemplateSidecar")
+        self.assertEqual(renderers["template_sidecar"]["trust_level"], "builtin")
+        self.assertEqual(regions["composer"]["order"], 50)
+        self.assertTrue(regions["composer"]["enabled"])
+        self.assertEqual(regions["composer"]["template_id"], "template.shell")
+        self.assertEqual(renderers["composer"]["component"], "Composer")
+        self.assertEqual(renderers["composer"]["fallback"], "hidden")
+        self.assertEqual(renderers["composer"]["projected_id"], "template.shell:composer_shell_renderer")
+
     def test_catalog_filters_profile_visibility_for_selected_frontend_ids(self):
         from core_runtime.profile_workspace import ProfileWorkspaceManager
         from domain.frontend.registry import FrontendRegistry
@@ -1577,6 +1690,139 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(user_result["error"]["code"], "INVALID_COMMAND")
         self.assertEqual(default_result["status"], "error")
         self.assertEqual(default_result["error"]["code"], "INVALID_COMMAND")
+
+    def test_slash_command_registry_loads_builtin_template_slash_command(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            defaults_path = pack_root / "commands" / "default_commands.json"
+            template_path = pack_root / "templates" / "context_txt" / "default" / "template.json"
+            defaults_path.parent.mkdir(parents=True, exist_ok=True)
+            template_path.parent.mkdir(parents=True, exist_ok=True)
+            defaults_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "context_txt",
+                            "name": "context_txt",
+                            "label": "Old Context",
+                            "modes": ["chat"],
+                            "execution": {"type": "frontend", "action": "old_context"},
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            template_path.write_text(
+                json.dumps(
+                    {
+                        "id": "rumi.test.context_txt",
+                        "kind": "frontend",
+                        "version": "1.0.0",
+                        "status": "active",
+                        "pieces": [
+                            {
+                                "id": "context_txt_action",
+                                "kind": "function",
+                                "role": "action",
+                                "action_id": "context_txt",
+                                "slash_command": {
+                                    "id": "context_txt",
+                                    "name": "context_txt",
+                                    "label": "Context TXT",
+                                    "category": "chat",
+                                    "modes": ["chat"],
+                                    "execution": {
+                                        "type": "pack_block",
+                                        "qualified_name": "defaultspack:chat.materialize_context",
+                                    },
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            registry = SlashCommandRegistry(pack_root)
+            command = next(item for item in registry.list_commands() if item["id"] == "context_txt")
+            duplicate = next(
+                item for item in registry.manifest_errors()
+                if item["code"] == "command_duplicate_id"
+            )
+
+        self.assertEqual(command["label"], "Context TXT")
+        self.assertEqual(command["execution"]["type"], "pack_block")
+        self.assertIn("rumi.test.context_txt/context_txt_action", duplicate["message"])
+        self.assertIn("template_id=rumi.test.context_txt", duplicate["source"])
+        self.assertIn("piece_id=context_txt_action", duplicate["source"])
+
+    def test_slash_command_registry_rejects_user_template_privileged_execution(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            template_path = pack_root / "user_data" / "shared" / "templates" / "user_commands" / "template.json"
+            template_path.parent.mkdir(parents=True, exist_ok=True)
+            template_path.write_text(
+                json.dumps(
+                    {
+                        "id": "rumi.test.user_commands",
+                        "kind": "frontend",
+                        "version": "1.0.0",
+                        "status": "active",
+                        "pieces": [
+                            {
+                                "id": "user_pack_action",
+                                "kind": "function",
+                                "role": "action",
+                                "action_id": "user_context_txt",
+                                "slash_command": {
+                                    "id": "user_context_txt",
+                                    "name": "user_context_txt",
+                                    "modes": ["chat"],
+                                    "execution": {
+                                        "type": "pack_block",
+                                        "qualified_name": "defaultspack:chat.materialize_context",
+                                    },
+                                },
+                            },
+                            {
+                                "id": "user_function_action",
+                                "kind": "function",
+                                "role": "action",
+                                "action_id": "user_think",
+                                "slash_command": {
+                                    "id": "user_think",
+                                    "name": "user_think",
+                                    "modes": ["chat"],
+                                    "execution": {
+                                        "type": "rumi_function",
+                                        "qualified_name": "defaultspack:ai_set_thinking_level",
+                                    },
+                                },
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            registry = SlashCommandRegistry(pack_root)
+            ids = {command["id"] for command in registry.list_commands()}
+            pack_result = registry.execute({"command": "user_context_txt", "mode": "chat"}, {})
+            function_result = registry.execute(
+                {"command": "user_think", "mode": "chat", "args": {"level": "low"}},
+                {},
+            )
+
+        self.assertIn("user_context_txt", ids)
+        self.assertIn("user_think", ids)
+        self.assertEqual(pack_result["status"], "error")
+        self.assertEqual(pack_result["error"]["code"], "INVALID_COMMAND")
+        self.assertEqual(function_result["status"], "error")
+        self.assertEqual(function_result["error"]["code"], "INVALID_COMMAND")
 
     def test_ui_commands_get_returns_duplicate_manifest_warnings(self):
         from blocks.ui import commands as commands_block

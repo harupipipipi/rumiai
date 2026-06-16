@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ChatStreamInterruptedError, api, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
@@ -58,6 +58,78 @@ test("slash command parsing supports multi-word aliases without treating them as
 
   const explicitOff = parseSlashCommandInput("/ultra yolo off", commands);
   assert.deepEqual(explicitOff?.args, { enabled: "off" });
+});
+
+test("composer command merge keeps backend execution shape while adding catalog commands", () => {
+  const backendCommands: ComposerCommandItem[] = [
+    {
+      id: "goal",
+      name: "goal",
+      label: "Goal",
+      category: "tools",
+      visibility: "default",
+      risk: "medium",
+      execution: { type: "pack_block", qualified_name: "defaultspack:goal.run" },
+    },
+  ];
+  const catalogCommands: ComposerCommandItem[] = [
+    {
+      id: "goal_template",
+      name: "goal",
+      label: "Goal Template",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "frontend", action: "template_goal_placeholder" },
+    },
+    {
+      id: "context_txt",
+      name: "context-txt",
+      label: "Context TXT",
+      description: "Write a context handoff file.",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+    },
+  ];
+
+  const merged = mergeComposerCommands(backendCommands, catalogCommands);
+  assert.deepEqual(merged.map((command) => command.id), ["goal", "context_txt"]);
+  assert.deepEqual(merged[0].execution, backendCommands[0].execution);
+  assert.equal(parseSlashCommandInput("/context-txt frontend handoff", merged)?.command.id, "context_txt");
+});
+
+test("composer command feedback surfaces pack block result messages and paths", () => {
+  const command: ComposerCommandItem = {
+    id: "context_txt",
+    name: "context-txt",
+    label: "Context TXT",
+    category: "tools",
+    visibility: "default",
+    risk: "low",
+    execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+  };
+
+  assert.equal(
+    composerCommandResultMessage({
+      command,
+      executed: true,
+      result: {
+        message: "context.txt updated",
+        path: "/tmp/rumi/context.txt",
+      },
+    }),
+    "context.txt updated\n/tmp/rumi/context.txt",
+  );
+  assert.equal(
+    composerCommandResultMessage({
+      command,
+      executed: true,
+      result: { path: "/tmp/rumi/context.txt" },
+    }),
+    "Command wrote /tmp/rumi/context.txt",
+  );
 });
 
 test("ultra yolo restore state returns to the previous yolo mode", () => {

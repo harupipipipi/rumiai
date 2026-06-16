@@ -27,6 +27,62 @@ def test_parse_template_accepts_allowed_piece_kinds():
     assert result.template.pieces[0].kind == TemplatePieceKind.FUNCTION
 
 
+def test_parse_template_accepts_composer_shell_and_context_piece_kinds():
+    raw = {
+        "id": "composer.template",
+        "kind": "frontend",
+        "version": "1.0.0",
+        "status": "active",
+        "pieces": [
+            {
+                "id": "context_txt_command",
+                "kind": "composer_command",
+                "command": {
+                    "id": "context_txt",
+                    "name": "context_txt",
+                    "execution": {
+                        "type": "pack_block",
+                        "qualified_name": "defaultspack:chat.materialize_context",
+                    },
+                },
+            },
+            {
+                "id": "composer_input",
+                "kind": "composer_input",
+                "region_id": "composer",
+                "renderer": "composer",
+            },
+            {
+                "id": "composer_region",
+                "kind": "shell_region",
+                "region": {"id": "composer", "renderer": "composer"},
+            },
+            {
+                "id": "composer_renderer",
+                "kind": "shell_renderer",
+                "renderer": {"id": "composer", "component": "Composer", "regions": ["composer"]},
+            },
+            {
+                "id": "materialize_txt_policy",
+                "kind": "context_policy",
+                "mode": "materialize_txt",
+            },
+        ],
+    }
+
+    result = parse_template(raw)
+
+    assert result.ok
+    assert result.template is not None
+    assert {piece.kind for piece in result.template.pieces} >= {
+        TemplatePieceKind.COMPOSER_COMMAND,
+        TemplatePieceKind.COMPOSER_INPUT,
+        TemplatePieceKind.SHELL_REGION,
+        TemplatePieceKind.SHELL_RENDERER,
+        TemplatePieceKind.CONTEXT_POLICY,
+    }
+
+
 def test_parse_template_reports_required_and_enum_errors():
     result = parse_template(
         {
@@ -86,6 +142,50 @@ def test_reference_validation_reports_missing_renderers_permissions_and_route_me
     assert "template.reference.field_renderer_missing_field_types" in codes
     assert "template.reference.permission_missing_piece" in codes
     assert "template.reference.route_metadata_missing_method_path" in codes
+    assert not result.ok
+
+
+def test_reference_validation_reports_composer_shell_and_context_errors():
+    result = parse_template(
+        {
+            "id": "bad.surface.refs",
+            "kind": "frontend",
+            "version": "1.0.0",
+            "status": "active",
+            "trust_level": "user",
+            "pieces": [
+                {"id": "bad_command", "kind": "composer_command"},
+                {"id": "bad_pack_block", "kind": "composer_command", "execution": {"type": "pack_block"}},
+                {"id": "bad_input", "kind": "composer_input"},
+                {
+                    "id": "bad_renderer",
+                    "kind": "shell_renderer",
+                    "renderer": {
+                        "id": "remote_renderer",
+                        "component": "Remote",
+                        "regions": ["composer"],
+                        "module": "https://example.com/remote.js",
+                    },
+                },
+                {
+                    "id": "bad_region",
+                    "kind": "shell_region",
+                    "region": {"id": "bad_region", "renderer": "missing_renderer"},
+                },
+                {"id": "bad_policy", "kind": "context_policy"},
+            ],
+        }
+    )
+
+    codes = {diagnostic.code for diagnostic in result.diagnostics}
+    assert "template.reference.command_missing_execution" in codes
+    assert "template.reference.command_execution_missing_qualified_name" in codes
+    assert "template.reference.composer_input_missing_reference" in codes
+    assert "template.reference.shell_renderer_module_requires_builtin" in codes
+    assert "template.reference.shell_renderer_untrusted_module" in codes
+    assert "template.reference.shell_renderer_missing_local_trust" in codes
+    assert "template.reference.shell_region_unknown_renderer" in codes
+    assert "template.reference.context_policy_missing_mode" in codes
     assert not result.ok
 
 

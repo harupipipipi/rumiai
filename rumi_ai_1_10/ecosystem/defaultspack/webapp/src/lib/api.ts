@@ -1140,7 +1140,8 @@ export type ComposerCommandExecution =
   | { type: "model_command"; action: string }
   | { type: "settings_patch"; section: string; field: string }
   | { type: "rumi_function"; qualified_name: string }
-  | { type: "chat_action"; action: string };
+  | { type: "chat_action"; action: string }
+  | { type: "pack_block"; qualified_name: string };
 
 export type ComposerCommandItem = {
   id: string;
@@ -1168,6 +1169,48 @@ export type ComposerCommandExecuteResult = {
   message?: string;
   candidates?: ModelCommandCandidate[];
   selected_model?: string | ModelCommandCandidate | null;
+};
+
+export type TemplateComposerInput = {
+  id: string;
+  label?: string;
+  description?: string;
+  placeholder?: string;
+  help?: string;
+  accepted_modalities?: string[];
+  feature_flags?: Record<string, boolean | string | number | null | undefined>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  component?: string;
+  renderer?: string;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateContextPolicy = {
+  id: string;
+  label?: string;
+  description?: string;
+  policy?: Record<string, unknown>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateCatalogMetadataItem = {
+  id?: string;
+  label?: string;
+  description?: string;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type ShellRegion = {
@@ -1264,6 +1307,10 @@ export type UICatalog = {
     }>;
   };
   skills?: SkillCatalogItem[];
+  commands?: ComposerCommandItem[];
+  composer_inputs?: TemplateComposerInput[];
+  context_policies?: TemplateContextPolicy[];
+  composer_widgets?: TemplateCatalogMetadataItem[];
   extension_points: Array<{
     id: string;
     path: string;
@@ -1276,6 +1323,64 @@ export type UICatalog = {
     source: string;
   }>;
 };
+
+function normalizedCommandIdentity(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function commandIdentityKeys(command: ComposerCommandItem): string[] {
+  const keys = [
+    normalizedCommandIdentity(command.id),
+    normalizedCommandIdentity(command.name),
+  ].filter(Boolean);
+  return [...new Set(keys)];
+}
+
+export function mergeComposerCommands(
+  backendCommands: ComposerCommandItem[] = [],
+  catalogCommands: ComposerCommandItem[] = [],
+): ComposerCommandItem[] {
+  const merged: ComposerCommandItem[] = [];
+  const seen = new Set<string>();
+
+  const append = (command: ComposerCommandItem) => {
+    const keys = commandIdentityKeys(command);
+    if (keys.some((key) => seen.has(key))) return;
+    merged.push(command);
+    keys.forEach((key) => seen.add(key));
+  };
+
+  backendCommands.forEach(append);
+  catalogCommands.forEach(append);
+  return merged;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function nonEmptyString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function composerCommandResultMessage(result: ComposerCommandExecuteResult): string | null {
+  const directMessage = nonEmptyString(result.message);
+  if (directMessage) return directMessage;
+
+  const resultPayload = objectRecord(result.result);
+  if (!resultPayload) return null;
+
+  const payloadMessage = nonEmptyString(resultPayload.message);
+  const path = nonEmptyString(resultPayload.path)
+    || nonEmptyString(resultPayload.file_path)
+    || nonEmptyString(resultPayload.artifact_path);
+  if (payloadMessage && path) return `${payloadMessage}\n${path}`;
+  if (payloadMessage) return payloadMessage;
+  if (path) return `Command wrote ${path}`;
+  return null;
+}
 
 type ApiOk<T> = {
   status: "ok";

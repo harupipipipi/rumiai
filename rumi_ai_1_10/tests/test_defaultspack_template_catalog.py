@@ -29,6 +29,7 @@ def test_template_projector_builds_stable_catalog_metadata():
     assert "rumi.model_selector.default" in template_ids
     assert "rumi.api_keys.default" in template_ids
     assert "rumi.backend.model_routing.default" in template_ids
+    assert "rumi.composer.default" in template_ids
 
     assert _field_types(catalog["settings_sections"]) >= {"model_select", "provider_select", "api_key_setup"}
     assert any("model_select" in renderer.get("field_types", []) for renderer in catalog["field_renderers"])
@@ -56,6 +57,44 @@ def test_template_projector_builds_stable_catalog_metadata():
     assert model_field["piece_id"] == "model_select"
     assert model_field["template_id"] == "rumi.model_selector.default"
     assert model_field["projected_id"] == "rumi.model_selector.default:model_select"
+
+
+def test_template_catalog_projects_composer_surface_pieces():
+    catalog = build_template_catalog(defaultspack_root=DEFAULTSPACK_ROOT)
+
+    for key in (
+        "commands",
+        "composer_inputs",
+        "shell_regions",
+        "shell_renderers",
+        "context_policies",
+    ):
+        assert key in catalog
+
+    command = next(item for item in catalog["commands"] if item.get("id") == "context_txt")
+    composer_input = next(item for item in catalog["composer_inputs"] if item.get("id") == "default_composer")
+    shell_region = next(item for item in catalog["shell_regions"] if item.get("id") == "composer")
+    shell_renderer = next(item for item in catalog["shell_renderers"] if item.get("id") == "composer")
+    context_policy = next(item for item in catalog["context_policies"] if item.get("id") == "materialize_txt")
+
+    assert command["execution"] == {
+        "type": "pack_block",
+        "qualified_name": "defaultspack:chat.materialize_context",
+        "mode": "materialize_txt",
+    }
+    assert composer_input["region_id"] == "composer"
+    assert composer_input["renderer"] == "composer"
+    assert shell_region["renderer"] == "composer"
+    assert shell_renderer["component"] == "Composer"
+    assert shell_renderer["regions"] == ["composer"]
+    assert context_policy["mode"] == "materialize_txt"
+
+    projected = [command, composer_input, shell_region, shell_renderer, context_policy]
+    assert {item["template_id"] for item in projected} == {"rumi.composer.default"}
+    assert {item["trust_level"] for item in projected} == {"builtin"}
+    assert all(item["projected_id"].startswith("rumi.composer.default:") for item in projected)
+    assert all(item["origin"]["template_id"] == "rumi.composer.default" for item in projected)
+    assert all(item["_source"].endswith("templates/composer/default/template.json") for item in projected)
 
 
 def test_frontend_catalog_merges_template_metadata_without_dropping_existing_keys():
@@ -89,8 +128,22 @@ def test_frontend_catalog_merges_template_metadata_without_dropping_existing_key
     assert "api_routes" in catalog
     assert "permissions" in catalog
     assert "template_diagnostics" in catalog
+    assert "commands" in catalog
+    assert "composer_inputs" in catalog
+    assert "context_policies" in catalog
+    assert "shell_regions" in catalog
+    assert "shell_renderers" in catalog
 
     assert any(template["id"] == "rumi.model_selector.default" for template in catalog["templates"])
+    composer_input = next(item for item in catalog["composer_inputs"] if item["id"] == "default_composer")
+    assert composer_input["template_id"] == "rumi.composer.default"
+    assert composer_input["region_id"] == "composer"
+    assert any(item["id"] == "context_txt" for item in catalog["commands"])
+    assert any(item["id"] == "materialize_txt" for item in catalog["context_policies"])
+    composer_region = next(item for item in catalog["shell"]["layout"]["regions"] if item["id"] == "composer")
+    composer_renderer = next(item for item in catalog["shell"]["renderers"] if item["id"] == "composer")
+    assert composer_region["template_id"] == "rumi.composer.default"
+    assert composer_renderer["template_id"] == "rumi.composer.default"
     assert "model_select" in _field_types(catalog["settings"]["sections"])
     assert "api_key_setup" in _field_types(settings["sections"])
     assert any("model_select" in renderer.get("field_types", []) for renderer in catalog["field_renderers"])

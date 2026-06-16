@@ -22,7 +22,12 @@ CATALOG_KEYS = (
     "component_bindings",
     "sidebar_items",
     "chat_renderers",
+    "commands",
+    "composer_inputs",
     "composer_widgets",
+    "shell_regions",
+    "shell_renderers",
+    "context_policies",
     "test_contracts",
 )
 
@@ -80,7 +85,12 @@ def project_resolved_templates(resolved_templates: list[ResolvedTemplate]) -> di
         "component_bindings",
         "sidebar_items",
         "chat_renderers",
+        "commands",
+        "composer_inputs",
         "composer_widgets",
+        "shell_regions",
+        "shell_renderers",
+        "context_policies",
         "test_contracts",
     ):
         catalog[key] = _dedupe_by_id(catalog[key])
@@ -135,8 +145,18 @@ def _project_piece(catalog: dict[str, Any], template: RumiTemplate, piece: Templ
         catalog["sidebar_items"].append(_metadata_item(template, piece, default_id=piece.id))
     elif kind == "chat_renderer":
         catalog["chat_renderers"].append(_metadata_item(template, piece, default_id=piece.id))
+    elif kind == "composer_command":
+        catalog["commands"].append(_command(template, piece))
+    elif kind == "composer_input":
+        catalog["composer_inputs"].append(_composer_input(template, piece))
     elif kind == "composer_widget":
         catalog["composer_widgets"].append(_metadata_item(template, piece, default_id=piece.id))
+    elif kind == "shell_region":
+        catalog["shell_regions"].append(_shell_region(template, piece))
+    elif kind == "shell_renderer":
+        catalog["shell_renderers"].append(_shell_renderer(template, piece))
+    elif kind == "context_policy":
+        catalog["context_policies"].append(_context_policy(template, piece))
     elif kind == "backend_service":
         catalog["backend_services"].append(_metadata_item(template, piece, default_id=piece.id))
     elif kind == "api_route":
@@ -175,6 +195,48 @@ def _component_binding(template: RumiTemplate, piece: TemplatePiece) -> dict[str
     return item
 
 
+def _command(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
+    data = _piece_payload(piece, "command")
+    item = _metadata_item_from_data(template, piece, data, default_id=_payload_id(data, piece, "command_id"))
+    item.setdefault("name", str(item.get("id") or piece.id).strip().lower().lstrip("/"))
+    return item
+
+
+def _composer_input(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
+    data = _piece_payload(piece, "input")
+    return _metadata_item_from_data(template, piece, data, default_id=_payload_id(data, piece, "input_id"))
+
+
+def _shell_region(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
+    data = _piece_payload(piece, "region")
+    return _metadata_item_from_data(
+        template,
+        piece,
+        data,
+        default_id=_payload_id(data, piece, "region_id", "shell_region_id"),
+    )
+
+
+def _shell_renderer(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
+    data = _piece_payload(piece, "renderer")
+    item = _metadata_item_from_data(
+        template,
+        piece,
+        data,
+        default_id=_payload_id(data, piece, "renderer_id", "shell_renderer_id"),
+    )
+    if "regions" not in item:
+        region_id = item.get("region_id") or item.get("shell_region_id")
+        if region_id:
+            item["regions"] = [str(region_id)]
+    return item
+
+
+def _context_policy(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
+    data = _piece_payload(piece, "policy")
+    return _metadata_item_from_data(template, piece, data, default_id=_payload_id(data, piece, "policy_id", "mode"))
+
+
 def _settings_section(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
     section = piece.data.get("section") if isinstance(piece.data.get("section"), dict) else piece.data
     item = deepcopy(section) if isinstance(section, dict) else {}
@@ -185,6 +247,7 @@ def _settings_section(template: RumiTemplate, piece: TemplatePiece) -> dict[str,
     item.setdefault("piece_id", piece.id)
     item.setdefault("projected_id", _projected_id(template, piece))
     item.setdefault("origin", _origin(template, piece))
+    item.setdefault("trust_level", _value(template.trust_level))
     item["_source"] = _source(template)
     return item
 
@@ -203,6 +266,7 @@ def _settings_section_for_field(template: RumiTemplate, piece: TemplatePiece) ->
     item.setdefault("piece_id", piece.id)
     item.setdefault("projected_id", _projected_id(template, piece))
     item.setdefault("origin", _origin(template, piece))
+    item.setdefault("trust_level", _value(template.trust_level))
     item["_source"] = _source(template)
     return {
         "id": section_id,
@@ -210,6 +274,7 @@ def _settings_section_for_field(template: RumiTemplate, piece: TemplatePiece) ->
         "fields": [item],
         "template_id": template.id,
         "origin": _origin(template, piece),
+        "trust_level": _value(template.trust_level),
         "_source": _source(template),
     }
 
@@ -229,7 +294,17 @@ def _api_route(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
 
 
 def _metadata_item(template: RumiTemplate, piece: TemplatePiece, *, default_id: str) -> dict[str, Any]:
-    item = deepcopy(piece.data)
+    return _metadata_item_from_data(template, piece, piece.data, default_id=default_id)
+
+
+def _metadata_item_from_data(
+    template: RumiTemplate,
+    piece: TemplatePiece,
+    data: dict[str, Any],
+    *,
+    default_id: str,
+) -> dict[str, Any]:
+    item = deepcopy(data)
     item.setdefault("id", item.get("name") or default_id)
     item.setdefault("kind", _value(piece.kind))
     if piece.slot is not None:
@@ -246,6 +321,7 @@ def _metadata_item(template: RumiTemplate, piece: TemplatePiece, *, default_id: 
     item.setdefault("piece_id", piece.id)
     item.setdefault("projected_id", _projected_id(template, piece))
     item.setdefault("origin", _origin(template, piece))
+    item.setdefault("trust_level", _value(template.trust_level))
     item["_source"] = _source(template)
     return item
 
@@ -428,6 +504,21 @@ def _value(value: object) -> str:
 
 def _has_any(data: dict[str, Any], keys: tuple[str, ...]) -> bool:
     return any(key in data for key in keys)
+
+
+def _piece_payload(piece: TemplatePiece, nested_key: str) -> dict[str, Any]:
+    nested = piece.data.get(nested_key)
+    if isinstance(nested, dict):
+        return deepcopy(nested)
+    return deepcopy(piece.data)
+
+
+def _payload_id(data: dict[str, Any], piece: TemplatePiece, *aliases: str) -> str:
+    for key in (*aliases, "id", "name"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            return value
+    return piece.id
 
 
 def _titleize(value: str) -> str:
