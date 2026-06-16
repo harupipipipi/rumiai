@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Rumi Localization Review Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "record_id",
+    "locale_pair",
+    "surface",
+    "review_state",
+    "issues",
+    "evidence_refs",
+    "handoff_owner"
+  ],
+  "properties": {
+    "record_id": {
+      "type": "string"
+    },
+    "locale_pair": {
+      "type": "string"
+    },
+    "surface": {
+      "type": "string",
+      "enum": [
+        "app_string",
+        "documentation",
+        "support_copy",
+        "release_note",
+        "policy_copy",
+        "connector_message"
+      ]
+    },
+    "review_state": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "needs_revision",
+        "blocked",
+        "handoff_ready",
+        "accepted_with_notes"
+      ]
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "handoff_owner": {
+      "type": "string"
+    },
+    "review_notes": {
+      "type": "string"
+    }
+  }
+}

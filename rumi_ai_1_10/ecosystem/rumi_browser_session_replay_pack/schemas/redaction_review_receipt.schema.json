@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/redaction_review_receipt.schema.json",
+  "title": "Redaction Review Receipt",
+  "description": "Browser session replay contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "receipt_id",
+    "trace_id",
+    "redaction_state",
+    "reviewer_ref",
+    "sensitive_classes",
+    "share_allowed",
+    "blocked_fields",
+    "evidence_refs"
+  ],
+  "properties": {
+    "receipt_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": [
+        "partially_redacted",
+        "redacted",
+        "blocked_sensitive"
+      ]
+    },
+    "reviewer_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sensitive_classes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "private_url",
+          "session_identifier",
+          "credential_material",
+          "form_value",
+          "account_identifier",
+          "email_address",
+          "payment_field",
+          "screenshot_region",
+          "dom_text",
+          "network_snippet",
+          "console_log",
+          "typed_input_evidence"
+        ]
+      },
+      "minItems": 1
+    },
+    "share_allowed": {
+      "type": "boolean"
+    },
+    "blocked_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

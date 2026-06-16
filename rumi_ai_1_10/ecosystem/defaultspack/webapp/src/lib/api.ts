@@ -1,6 +1,7 @@
 import type { ToolPreviewItem } from "../components/ToolPreview";
 import type { AuthorityApprovalScope } from "./authorityApproval";
 
+const PANEL_CSRF_STORAGE_KEY = "rumi-panel-csrf";
 const DEFAULTSPACK_CSRF_STORAGE_KEY = "rumi-defaultspack-csrf";
 
 export type ChatContentBlock = {
@@ -38,6 +39,27 @@ export type ChatAttachment = {
   source?: "local_file" | "workspace";
   sourcePath?: string;
 };
+
+export class ChatStreamInterruptedError extends Error {
+  partialText: string;
+  thinkingText: string;
+  sawActivity: boolean;
+
+  constructor(
+    message: string,
+    details: {
+      partialText?: string;
+      thinkingText?: string;
+      sawActivity?: boolean;
+    } = {},
+  ) {
+    super(message);
+    this.name = "ChatStreamInterruptedError";
+    this.partialText = details.partialText ?? "";
+    this.thinkingText = details.thinkingText ?? "";
+    this.sawActivity = details.sawActivity === true;
+  }
+}
 
 export type BrowserScreenshot = {
   id: string;
@@ -153,6 +175,8 @@ export type AuthorityApprovalDecision = {
   principal_id?: string;
   permission_id?: string;
   config?: Record<string, unknown>;
+  resource?: Record<string, unknown>;
+  related_approvals?: AuthorityApprovalDecision[];
 };
 
 export type AuthorityUiOperator = {
@@ -171,11 +195,20 @@ export type AuthorityRequestDisplayMetadata = {
   title?: string;
   summary?: string;
   permission_id?: string;
+  permission_label?: string;
   provider_id?: string | null;
   api_id?: string | null;
   model_id?: string | null;
   function_id?: string | null;
   pack_id?: string | null;
+  app_display_name?: string | null;
+  provider_display_name?: string | null;
+  model_display_name?: string | null;
+  endpoint_url?: string | null;
+  endpoint_host?: string | null;
+  endpoint_path?: string | null;
+  credential_label?: string | null;
+  access_summary?: string | null;
   risk_level?: string;
   audit_text?: string;
 };
@@ -421,6 +454,113 @@ export type CompanyRunConversationMessage = {
   label?: string;
   content: string;
   is_error?: boolean;
+};
+
+export type KanbanBoardScopeType = "conversation" | "workspace" | "company" | "group" | "global";
+
+export type KanbanBoardScope = {
+  type: KanbanBoardScopeType;
+  id: string;
+};
+
+export type KanbanPriority = "low" | "normal" | "high" | "urgent" | string;
+
+export type KanbanChecklistItem = {
+  id: string;
+  title: string;
+  done: boolean;
+};
+
+export type KanbanBoard = {
+  board_id: string;
+  scope_type: KanbanBoardScopeType;
+  scope_id: string;
+  title: string;
+  metadata?: Record<string, unknown>;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type KanbanColumn = {
+  column_id: string;
+  board_id: string;
+  title: string;
+  position: number;
+  done?: boolean | number;
+  wip_limit?: number | null;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type KanbanCard = {
+  card_id: string;
+  board_id: string;
+  column_id: string;
+  position: number;
+  title: string;
+  description?: string | null;
+  priority?: KanbanPriority;
+  assignee?: string | null;
+  due_at?: string | null;
+  labels?: string[];
+  checklist?: KanbanChecklistItem[];
+  depends_on?: string[];
+  blocked_by?: string[];
+  source_type?: string;
+  source_id?: string | null;
+  conversation_id?: string | null;
+  workspace_id?: string | null;
+  company_id?: string | null;
+  agent_run_id?: string | null;
+  agent_session_id?: string | null;
+  agent_status?: string | null;
+  branch?: string | null;
+  pr_url?: string | null;
+  metadata?: Record<string, unknown>;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type KanbanEvent = {
+  event_id?: string;
+  board_id?: string;
+  card_id?: string | null;
+  event_type?: string;
+  actor_type?: string;
+  actor_id?: string | null;
+  payload?: Record<string, unknown>;
+  created_at?: number;
+  [key: string]: unknown;
+};
+
+export type KanbanBoardResponse = {
+  board: KanbanBoard;
+  columns: KanbanColumn[];
+  cards: KanbanCard[];
+  events?: KanbanEvent[];
+  imported?: {
+    conversation_id?: string;
+    card_ids?: string[];
+    conversation?: Record<string, unknown>;
+    extraction?: Record<string, unknown>;
+  };
+};
+
+export type KanbanMovePayload = {
+  column_id: string;
+  before_card_id?: string | null;
+  after_card_id?: string | null;
+  position?: number;
+};
+
+export type KanbanImportConversationPayload = {
+  conversation_id: string;
+  column_id?: string | null;
+  title?: string;
+  model?: string;
+  workspace_id?: string | null;
+  company_id?: string | null;
+  use_ai?: boolean;
 };
 
 export type CompanyInboxItem = {
@@ -1216,6 +1356,7 @@ type ApiEnvelope<T> = ApiOk<T> | ApiError;
 
 type SendMessageOptions = {
   thinking_level?: string | null;
+  deepthink_enabled?: boolean;
   tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
   parallel_tool_calls?: boolean;
   tool_policy?: Record<string, unknown>;
@@ -1403,6 +1544,8 @@ function generateCsrfToken(): string {
 
 function getDefaultspackCsrfToken(): string {
   const storage = sessionStorageOrNull();
+  const panelToken = storage?.getItem(PANEL_CSRF_STORAGE_KEY);
+  if (panelToken?.trim()) return panelToken;
   const stored = storage?.getItem(DEFAULTSPACK_CSRF_STORAGE_KEY);
   if (stored) return stored;
   const token = generateCsrfToken();
@@ -1562,6 +1705,7 @@ function messageRequestBody(
     tools: Array.isArray(options?.tools) ? options.tools : undefined,
     params: {
       thinking_level: options?.thinking_level ?? undefined,
+      deepthink_enabled: options?.deepthink_enabled ?? undefined,
       tool_choice: options?.tool_choice ?? undefined,
       parallel_tool_calls: options?.parallel_tool_calls ?? undefined,
       tool_policy: options?.tool_policy ?? undefined,
@@ -1580,6 +1724,9 @@ async function readStreamEvents(
   const decoder = new TextDecoder();
   let buffer = "";
   let finalMessage: ChatMessage | null = null;
+  let partialText = "";
+  let thinkingText = "";
+  let sawActivity = false;
 
   const streamErrorMessage = (value: ChatStreamError | undefined): string => {
     if (typeof value === "string" && value.trim()) return value;
@@ -1610,8 +1757,10 @@ async function readStreamEvents(
     }
     handlers.onEvent?.(event);
     if (event.type === "delta") {
+      partialText += event.delta;
       handlers.onDelta?.(event.delta);
     } else if (event.type === "thinking_delta") {
+      thinkingText += event.delta;
       handlers.onThinkingDelta?.(event.delta);
     } else if (event.type === "user_message" && event.message) {
       handlers.onUserMessage?.(event.message);
@@ -1620,24 +1769,43 @@ async function readStreamEvents(
       handlers.onMessage?.(event.message);
     } else if (event.type === "error") {
       throw new Error(streamErrorMessage(event.error));
+    } else {
+      sawActivity = true;
     }
   };
 
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-    const packets = buffer.split(/\r?\n\r?\n/);
-    buffer = packets.pop() ?? "";
-    for (const packet of packets) {
-      consumePacket(packet);
+  const interruptionError = (message: string): Error => {
+    if (partialText.trim() || thinkingText.trim() || sawActivity) {
+      return new ChatStreamInterruptedError(message, {
+        partialText,
+        thinkingText,
+        sawActivity,
+      });
     }
-    if (done) break;
+    return new Error(message);
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      const packets = buffer.split(/\r?\n\r?\n/);
+      buffer = packets.pop() ?? "";
+      for (const packet of packets) {
+        consumePacket(packet);
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) {
+      consumePacket(buffer);
+    }
+  } catch (errorValue) {
+    if (errorValue instanceof ChatStreamInterruptedError) throw errorValue;
+    throw interruptionError(errorValue instanceof Error ? errorValue.message : "defaultspack stream failed");
   }
-  if (buffer.trim()) {
-    consumePacket(buffer);
-  }
+
   if (!finalMessage) {
-    throw new Error("defaultspack stream ended before a final response arrived");
+    throw interruptionError("defaultspack stream ended before a final response arrived");
   }
   return finalMessage;
 }
@@ -1816,6 +1984,21 @@ export const api = {
     return request<{ written: boolean }>("/api/ui/clipboard", {
       method: "POST",
       body: JSON.stringify({ content }),
+    });
+  },
+
+  reportClientEvent(payload: {
+    source?: string;
+    category?: string;
+    level?: string;
+    message: string;
+    fingerprint?: string;
+    conversation_id?: string;
+    detail?: unknown;
+  }) {
+    return request<{ recorded: boolean; diagnostic_id?: string }>("/api/ui/client-events", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 
@@ -2314,6 +2497,120 @@ export const api = {
     );
   },
 
+  kanbanGetOrCreateBoard(scope: KanbanBoardScope) {
+    return request<KanbanBoardResponse>(
+      withQuery("/api/kanban/boards", {
+        scope_type: scope.type,
+        scope_id: scope.id,
+        bootstrap: true,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  kanbanGetBoard(boardId: string) {
+    return request<KanbanBoardResponse>(
+      `/api/kanban/boards/${encodeURIComponent(boardId)}`,
+      { cache: "no-store" },
+    );
+  },
+
+  kanbanCreateCard(boardId: string, payload: Partial<KanbanCard>) {
+    return request<KanbanCard>(`/api/kanban/boards/${encodeURIComponent(boardId)}/cards`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  kanbanUpdateCard(cardId: string, updates: Partial<KanbanCard>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ updates }),
+    });
+  },
+
+  kanbanMoveCard(cardId: string, payload: KanbanMovePayload) {
+    return request<KanbanBoardResponse>(`/api/kanban/cards/${encodeURIComponent(cardId)}/move`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  kanbanDeleteCard(cardId: string) {
+    return request<{ deleted: boolean; card_id?: string }>(`/api/kanban/cards/${encodeURIComponent(cardId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  kanbanCreateColumn(boardId: string, payload: Partial<KanbanColumn>) {
+    return request<KanbanColumn>(`/api/kanban/boards/${encodeURIComponent(boardId)}/columns`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  kanbanUpdateColumn(columnId: string, updates: Partial<KanbanColumn>) {
+    return request<KanbanColumn>(`/api/kanban/columns/${encodeURIComponent(columnId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ updates }),
+    });
+  },
+
+  kanbanDeleteColumn(columnId: string) {
+    return request<{ deleted: boolean; column_id?: string }>(`/api/kanban/columns/${encodeURIComponent(columnId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  kanbanStartAgent(cardId: string, payload?: Record<string, unknown>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}/agent/start`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  kanbanGetAgentStatus(cardId: string) {
+    return request<KanbanCard>(
+      `/api/kanban/cards/${encodeURIComponent(cardId)}/agent/status`,
+      { cache: "no-store" },
+    );
+  },
+
+  kanbanMarkAgentReady(cardId: string, payload?: Record<string, unknown>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}/agent/ready`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  kanbanApplyAgent(cardId: string, payload?: Record<string, unknown>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}/agent/apply`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  kanbanDismissAgent(cardId: string, payload?: Record<string, unknown>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}/agent/dismiss`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  kanbanSyncRuns(boardId: string) {
+    return request<KanbanBoardResponse>(`/api/kanban/boards/${encodeURIComponent(boardId)}/sync-runs`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  kanbanImportConversation(boardId: string, payload: KanbanImportConversationPayload) {
+    return request<KanbanBoardResponse>(`/api/kanban/boards/${encodeURIComponent(boardId)}/import-conversation`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
   listCompanyAgentInbox(companyId: string, agentId: string, options?: { status?: string; kind?: string; limit?: number }) {
     return request<{ inbox: CompanyInboxItem[]; total: number }>(
       withQuery(`/api/company/${encodeURIComponent(companyId)}/agents/${encodeURIComponent(agentId)}/inbox`, {
@@ -2691,6 +2988,7 @@ export const api = {
       scope?: AuthorityApprovalScope;
       config?: Record<string, unknown>;
       expires_in_seconds?: number;
+      related_permissions?: string[];
       ui_operator?: AuthorityUiOperator;
     },
   ) {
@@ -2700,6 +2998,7 @@ export const api = {
         scope: options?.scope ?? "once",
         config: options?.config,
         expires_in_seconds: options?.expires_in_seconds,
+        related_permissions: options?.related_permissions,
         ui_operator: options?.ui_operator,
       }),
     });

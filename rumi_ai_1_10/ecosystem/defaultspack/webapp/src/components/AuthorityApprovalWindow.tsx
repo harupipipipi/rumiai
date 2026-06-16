@@ -60,6 +60,21 @@ function formattedDate(value: string | null | undefined): string {
   return date.toLocaleString();
 }
 
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function relatedPermissionsForApproval(approval: AuthorityApproval): string[] {
+  const resource = approval.resource ?? {};
+  const permissions: string[] = [];
+  const hasProviderModel = Boolean(stringValue(resource.provider_id) && (stringValue(resource.model_id) || stringValue(resource.model_ref)));
+  const hasEndpoint = Boolean(stringValue(resource.endpoint_url) || stringValue(resource.domain));
+  if (approval.permissionId !== "model.invoke" && hasProviderModel) permissions.push("model.invoke");
+  if (approval.permissionId !== "api_key.use" && stringValue(resource.provider_id)) permissions.push("api_key.use");
+  if (approval.permissionId !== "network.egress" && hasEndpoint) permissions.push("network.egress");
+  return permissions;
+}
+
 function windowTitle(request: AuthorityRequest | null): string {
   if (!request) return "Authority approval";
   return request.display_metadata?.title || authorityApprovalTitle(requestToApproval(request));
@@ -78,6 +93,19 @@ export function AuthorityApprovalWindow() {
 
   const approval = useMemo(() => request ? requestToApproval(request) : null, [request]);
   const title = request ? windowTitle(request) : "Authority approval";
+  const detailRows = useMemo(() => {
+    if (!request) return [];
+    const resource = request.resource ?? {};
+    const metadata = request.display_metadata ?? {};
+    return [
+      { label: "app", value: metadata.app_display_name || metadata.pack_id || stringValue(resource.app_display_name) || stringValue(resource.pack_id) },
+      { label: "provider", value: metadata.provider_display_name || metadata.provider_id || stringValue(resource.provider_display_name) || stringValue(resource.provider_id) },
+      { label: "model", value: metadata.model_display_name || metadata.model_id || stringValue(resource.model_display_name) || stringValue(resource.model_id) },
+      { label: "API key", value: metadata.credential_label || stringValue(resource.credential_label) || "secret value is never shown" },
+      { label: "endpoint", value: metadata.endpoint_url || stringValue(resource.endpoint_url) || metadata.endpoint_host || stringValue(resource.domain) },
+      { label: "expires", value: formattedDate(request.expires_at) },
+    ].filter((row) => row.value);
+  }, [request]);
   const allowedScopes = useMemo<AuthorityApprovalScope[]>(() => {
     const scopes = request?.allowed_scopes?.filter((scope): scope is AuthorityApprovalScope => (
       scope === "once" || scope === "conversation" || scope === "profile" || scope === "node"
@@ -147,12 +175,27 @@ export function AuthorityApprovalWindow() {
       const decision = await authorityApprovalResources.approveAuthorityApproval(request.request_id, {
         scope: selectedScope,
         config: authorityApprovalConfig(approval),
+        related_permissions: relatedPermissionsForApproval(approval),
         ui_operator: context.ui_operator,
       });
       if (!decision.approved) throw new Error("authority approval failed");
 
       let resumed = false;
       if (request.conversation_id) {
+        const approvalFollowups = [
+          ...(decision.token ? [{
+            approval_token: decision.token,
+            request_id: request.request_id,
+            permission_id: request.permission_id,
+          }] : []),
+          ...((decision.related_approvals ?? [])
+            .filter((item) => item.token && item.request_id && item.permission_id)
+            .map((item) => ({
+              approval_token: item.token,
+              request_id: item.request_id,
+              permission_id: item.permission_id,
+            }))),
+        ];
         await authorityApprovalResources.sendAuthorityResume(
           request.conversation_id,
           "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。",
@@ -161,6 +204,12 @@ export function AuthorityApprovalWindow() {
               ...(decision.token ? { approval_token: decision.token } : {}),
               request_id: request.request_id,
               permission_id: request.permission_id,
+              approvals: approvalFollowups,
+              hidden: true,
+            },
+            chat_display: {
+              hidden: true,
+              reason: "authority_followup",
             },
             runtime_content: authorityApprovalRuntimeContent(approval, decision.token),
           },
@@ -217,8 +266,8 @@ export function AuthorityApprovalWindow() {
               <ShieldAlert size={14} />
               Authority
             </div>
-            <h1 className="mt-2 truncate text-xl font-semibold text-zinc-50">{title}</h1>
-            <p className="mt-1 text-xs text-zinc-500">{request?.display_metadata?.summary || request?.reason || "pending request"}</p>
+            <h1 className="mt-2 break-words text-xl font-semibold text-zinc-50">{title}</h1>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">{request?.display_metadata?.summary || request?.reason || "pending request"}</p>
           </div>
           <button
             type="button"
@@ -280,23 +329,13 @@ export function AuthorityApprovalWindow() {
                   </span>
                 </div>
 
-                <dl className="mt-4 grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <dt className="text-zinc-600">provider</dt>
-                    <dd className="mt-1 truncate text-zinc-200">{request.display_metadata?.provider_id || "-"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-zinc-600">api</dt>
-                    <dd className="mt-1 truncate text-zinc-200">{request.display_metadata?.api_id || "-"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-zinc-600">model</dt>
-                    <dd className="mt-1 truncate text-zinc-200">{request.display_metadata?.model_id || "-"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-zinc-600">expires</dt>
-                    <dd className="mt-1 truncate text-zinc-200">{formattedDate(request.expires_at)}</dd>
-                  </div>
+                <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2">
+                  {detailRows.map((row) => (
+                    <div key={row.label} className={row.label === "endpoint" ? "sm:col-span-2" : undefined}>
+                      <dt className="text-zinc-600">{row.label}</dt>
+                      <dd className="mt-1 break-words text-zinc-200">{row.value}</dd>
+                    </div>
+                  ))}
                 </dl>
 
                 <div className="mt-4 rounded-lg border border-zinc-800 bg-black/30 p-3">

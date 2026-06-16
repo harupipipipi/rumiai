@@ -38,9 +38,9 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="flex min-h-screen items-center justify-center bg-bg-main p-8">
           <div className="max-w-md text-center">
-            <h1 className="text-2xl font-bold text-text-main mb-4">Something went wrong</h1>
+            <h1 className="mb-4 text-2xl font-bold text-text-main">描画を安全に立て直しています</h1>
             <p className="text-sm text-text-muted mb-6">
-              {this.state.error?.message || 'An unexpected error occurred.'}
+              {this.state.error?.message || '想定外の状態を検知しました。設定や作業内容をできるだけ保ったまま、再読み込みで復帰を試せます。'}
             </p>
             <button
               onClick={() => {
@@ -49,7 +49,7 @@ export class ErrorBoundary extends Component<Props, State> {
               }}
               className="px-4 py-2 bg-accent text-accent-fg rounded-md hover:opacity-90 transition-opacity text-sm font-medium"
             >
-              Reload Application
+              もう一度ひらく
             </button>
           </div>
         </div>

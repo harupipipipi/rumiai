@@ -1,0 +1,25 @@
+taxonomy:
+  pack_id: rumi_agent_continuity_pack
+  owner_surfaces:
+  - continuity_packet_contract
+  - restart_evidence_packet
+  - compaction_handoff_packet
+  - attention_drift_recovery_note
+  - run_summary_for_resume
+  - continuity_artifact_manifest
+  - branch_resume_packet
+  - agent_health_note
+  non_owner_surfaces:
+  - run boards live run events checkpoints interventions replay indexes
+  - memory objects recall storage knowledge updates skill learning
+  - metrics telemetry run ledgers cost latency postmortems
+  - schedules monitors wakeups retries recurring follow-ups
+  - file artifact persistence and export
+  - git branch creation switching push
+  handoff_targets:
+  - defaultspack_or_coding_owner
+  - rumi_agent_workroom_pack
+  - rumi_memory_knowledge_pack
+  - rumi_observability_pack
+  - rumi_workflow_scheduler_pack
+  - rumi_workspace_pack

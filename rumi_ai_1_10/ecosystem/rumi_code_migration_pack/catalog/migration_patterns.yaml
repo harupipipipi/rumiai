@@ -1,0 +1,8 @@
+migration_patterns:
+  pack_id: rumi_code_migration_pack
+  patterns:
+  - framework_upgrade
+  - api_deprecation
+  - monorepo_sharded
+  - dependency_major_upgrade
+  default_effect: handoff_only

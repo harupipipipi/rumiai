@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/assignment_plan.schema.json",
+  "title": "Assignment Plan",
+  "description": "Contract schema for Assignment Plan.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "assignment_id",
+    "unit_of_assignment",
+    "randomization_method",
+    "bias_risks",
+    "exposure_rules",
+    "owner_pack"
+  ],
+  "properties": {
+    "assignment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "unit_of_assignment": {
+      "type": "string",
+      "enum": [
+        "user",
+        "account",
+        "session",
+        "cluster",
+        "time_window"
+      ]
+    },
+    "randomization_method": {
+      "type": "string",
+      "enum": [
+        "simple",
+        "blocked",
+        "clustered",
+        "quasi_experiment",
+        "not_randomized"
+      ]
+    },
+    "bias_risks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "risk",
+          "mitigation",
+          "residual_state"
+        ],
+        "properties": {
+          "risk": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mitigation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "residual_state": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "exposure_rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "owner_pack": {
+      "type": "string",
+      "const": "rumi_experiment_design_pack"
+    }
+  }
+}

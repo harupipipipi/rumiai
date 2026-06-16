@@ -1,0 +1,47 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://rumi.local/schemas/pr_shard_plan.schema.json
+title: Pr Shard Plan
+description: Code migration planning contract schema.
+type: object
+additionalProperties: false
+required:
+- shard_id
+- scope
+- dependencies
+- max_blast_radius
+- ordering
+- owner_handoff
+- reviewer_notes
+- merge_sequencing
+- conflict_risk
+properties:
+  shard_id:
+    type: string
+    minLength: 1
+  scope:
+    type: string
+    minLength: 1
+  dependencies:
+    type: array
+    items:
+      type: string
+  max_blast_radius:
+    type: array
+    items:
+      type: string
+  ordering:
+    type: string
+    minLength: 1
+  owner_handoff:
+    type: string
+    minLength: 1
+  reviewer_notes:
+    type: array
+    items:
+      type: string
+  merge_sequencing:
+    type: string
+    minLength: 1
+  conflict_risk:
+    type: string
+    minLength: 1

@@ -1,0 +1,12 @@
+example:
+  id: graphql_action_map
+  pack_id: rumi_api_toolsmith_pack
+  workflow: create_mocked_contract_tests
+  intent: Map a GraphQL customer lookup query and account-update mutation into separate tool contracts with mutation confirmation and idempotency notes.
+  evidence:
+    - spec_url_or_path
+    - operation_ids
+    - mock_response_fixture
+    - auth_boundary
+  handoff: handoff_to_rumi_mcp_gateway_pack
+  expected_result: graphql_operation_map_with_variable_contract_partial_error_policy_and_mutation_confirmation

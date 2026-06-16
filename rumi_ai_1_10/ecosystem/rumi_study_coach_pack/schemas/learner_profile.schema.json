@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/learner_profile.schema.json",
+  "title": "Learner Profile",
+  "description": "Contract schema for Learner Profile.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "learner_id",
+    "goals",
+    "constraints",
+    "preferred_explanation_style",
+    "source_scope",
+    "accommodations"
+  ],
+  "properties": {
+    "learner_id": {
+      "type": "string",
+      "pattern": "^learner_[a-z0-9_]+$"
+    },
+    "goals": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "goal_id",
+          "target_skill",
+          "deadline_state"
+        ],
+        "properties": {
+          "goal_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target_skill": {
+            "type": "string",
+            "minLength": 1
+          },
+          "deadline_state": {
+            "type": "string",
+            "enum": [
+              "explicit",
+              "none",
+              "unknown"
+            ]
+          }
+        }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "constraint_id",
+          "kind",
+          "description"
+        ],
+        "properties": {
+          "constraint_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "time",
+              "format",
+              "accessibility",
+              "language",
+              "focus"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "preferred_explanation_style": {
+      "type": "string",
+      "enum": [
+        "socratic",
+        "worked_example",
+        "concise",
+        "visual_outline",
+        "drill_first"
+      ]
+    },
+    "source_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "local_note_ids",
+        "external_sources_allowed"
+      ],
+      "properties": {
+        "local_note_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "external_sources_allowed": {
+          "type": "boolean",
+          "const": false
+        }
+      }
+    },
+    "accommodations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "need",
+          "response_contract"
+        ],
+        "properties": {
+          "need": {
+            "type": "string",
+            "minLength": 1
+          },
+          "response_contract": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

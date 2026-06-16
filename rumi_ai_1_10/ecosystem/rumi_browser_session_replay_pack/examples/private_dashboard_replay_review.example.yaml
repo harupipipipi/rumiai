@@ -1,0 +1,48 @@
+example:
+  id: private_dashboard_replay_review
+  pack_id: rumi_browser_session_replay_pack
+  scenario: A private analytics dashboard trace is blocked until URL, account, and
+    DOM text redaction receipts are attached.
+  input_refs:
+  - workspace_ref:case-file
+  evidence_refs:
+  - dom:snapshot:dashboard-redacted
+  - screenshot:artifact:dashboard-kpi-redacted
+  - receipt:redaction:dashboard-private-context
+  handoff_owner: defaultspack
+  trace_contract:
+    trace_id: trace_private_dashboard_review_2026_06_04
+    redaction_state: blocked_sensitive
+    evidence_bundle_refs:
+    - bundle:dashboard-private-review
+  redaction:
+    state: blocked_sensitive
+    sensitive_classes:
+    - private_url
+    - account_identifier
+    - dom_text
+    - screenshot_region
+  redaction_receipt:
+    share_allowed: false
+    blocked_fields:
+    - private_url.path
+    - dashboard.account_name
+    - kpi_table.customer_rows
+  review_gate: all_blocking_checks
+  expected_result: reviewed_handoff_packet
+  must_not:
+  - external_action
+  - runtime_execution
+  - secret_material
+  status: ready_for_owner_handoff
+  redaction:
+    state: redacted
+    sensitive_classes:
+    - private_url
+    - typed_input_evidence
+    - dom_text
+    receipt_ref: redaction:private_dashboard_replay_review
+  replay_manifest:
+    external_action: handoff_only
+    execution_owner: rumi_browser_automation_pack
+    transport_owner: rumi_default_tools_pack

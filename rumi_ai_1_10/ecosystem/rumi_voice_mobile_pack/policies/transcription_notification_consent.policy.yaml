@@ -1,0 +1,25 @@
+policy_id: rumi_voice_mobile.transcription_notification_consent.v1
+owner: rumi_voice_mobile_pack
+purpose: Consent policy for transcription, retention, notification delivery, and mobile channel handoff.
+network_default: none
+consent_surfaces:
+  transcription:
+    required: true
+    evidence: [speaker_confirmation, recording_scope, retention_policy]
+  transcript_storage:
+    required: true
+    evidence: [retention_window, redaction_policy, deletion_request_path]
+  notification_delivery:
+    required: true
+    evidence: [channel, recipient, delivery_window, quiet_hours]
+  repeated_followup:
+    required: true
+    evidence: [frequency, stop_condition, owner_pack]
+redaction_policy:
+  redact_sensitive_audio_content: true
+  keep_intent_summary: true
+  keep_consent_refs: true
+handoff_policy:
+  audio_capture_or_transcription: rumi_multimodal_media_pack
+  notification_send: rumi_connector_gateway_pack
+  scheduled_notification: rumi_workflow_scheduler_pack

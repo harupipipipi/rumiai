@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WorkflowRecipeDraft",
+  "type": "object",
+  "required": [
+    "recipe_id",
+    "source_sop_id",
+    "steps",
+    "approval_state",
+    "handoff_owner",
+    "evidence_links"
+  ],
+  "properties": {
+    "recipe_id": {
+      "type": "string"
+    },
+    "source_sop_id": {
+      "type": "string"
+    },
+    "steps": {
+      "type": "array"
+    },
+    "approval_state": {
+      "enum": [
+        "drafted",
+        "redaction_reviewed",
+        "human_approved",
+        "rejected"
+      ]
+    },
+    "handoff_owner": {
+      "type": "string"
+    },
+    "evidence_links": {
+      "type": "array"
+    }
+  }
+}

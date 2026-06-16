@@ -1,0 +1,36 @@
+schema_id: rumi.api_toolsmith.mock_test_evidence.v1
+owner: rumi_api_toolsmith_pack
+purpose: Evidence record for mocked API, GraphQL, and webhook contract tests.
+network_default: none
+required_fields:
+  - evidence_id
+  - source_spec_ref
+  - operation_or_event_ref
+  - fixture_refs
+  - test_cases
+  - assertions
+  - reviewer_decision
+test_case_types:
+  - happy_path_mock
+  - required_field_missing
+  - invalid_enum
+  - auth_boundary_no_secret
+  - rate_limit_or_retry
+  - malformed_payload
+  - partial_error
+assertion_fields:
+  - request_shape
+  - response_shape
+  - error_shape
+  - side_effect_boundary
+  - redaction_check
+reviewer_decisions:
+  - accept
+  - accept_with_handoff
+  - needs_more_fixture_evidence
+  - reject_until_security_review
+handoff_targets:
+  - rumi_mcp_gateway_pack
+  - rumi_connector_gateway_pack
+  - rumi_security_review_pack
+  - rumi_sandbox_runtime_pack

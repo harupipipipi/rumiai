@@ -1,0 +1,13 @@
+id: rumi_code_ide_pack.examples.review_session
+profile: rumi_code_ide_pack.code_review_terminal
+task: Review a local branch before a pull request.
+recipe: review_diff
+expected_agent_steps:
+  - inspect git status and diff
+  - map changed files to likely risk areas
+  - run or recommend focused checks
+  - list findings first with file references
+  - summarize residual risk and missing tests
+safety_notes:
+  - separate confirmed bugs from questions
+  - do not rewrite code unless asked

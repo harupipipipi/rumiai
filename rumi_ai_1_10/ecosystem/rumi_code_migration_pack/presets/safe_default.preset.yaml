@@ -1,0 +1,5 @@
+preset:
+  id: safe_default
+  pack_id: rumi_code_migration_pack
+  mode: declarative_contract
+  external_action: handoff_only

@@ -350,11 +350,32 @@ class SetupPackManager:
             return []
 
         manifests: Dict[str, Dict[str, Any]] = {}
+        referenced_dependencies: set[str] = set()
         for definition in definitions:
             target_manifest = self._read_target_manifest(locations.get(definition.target_pack_id))
             manifests[definition.pack_id] = {
                 "version": self._definition_version(definition, target_manifest),
                 "depends_on": list(definition.depends_on),
+            }
+            if definition.target_pack_id and definition.target_pack_id != definition.pack_id:
+                manifests.setdefault(
+                    definition.target_pack_id,
+                    {"version": str(target_manifest.get("version", ""))},
+                )
+            for dependency in definition.depends_on:
+                dependency_pack_id = str(dependency.get("pack_id") or "").strip()
+                if dependency_pack_id:
+                    referenced_dependencies.add(dependency_pack_id)
+
+        for dependency_pack_id in sorted(referenced_dependencies):
+            if dependency_pack_id in manifests:
+                continue
+            location = locations.get(dependency_pack_id)
+            if location is None:
+                continue
+            dependency_manifest = self._read_target_manifest(location)
+            manifests[dependency_pack_id] = {
+                "version": str(dependency_manifest.get("version", "")),
             }
 
         issues: List[Dict[str, Any]] = []

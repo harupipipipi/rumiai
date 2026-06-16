@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/source_registry.schema.json",
+  "title": "Source Registry",
+  "description": "Registry entry for dossier sources.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source_id",
+    "source_type",
+    "title",
+    "provenance",
+    "quality_label_id",
+    "access_owner",
+    "retrieval_mode",
+    "content_storage_policy",
+    "raw_secret_material_allowed"
+  ],
+  "properties": {
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "web",
+        "document",
+        "dataset",
+        "connector",
+        "transcript",
+        "manual_note"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "retrieved_by",
+        "retrieved_at_state",
+        "anchor_format"
+      ],
+      "properties": {
+        "origin": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retrieved_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retrieved_at_state": {
+          "type": "string",
+          "enum": [
+            "known",
+            "unknown"
+          ]
+        },
+        "anchor_format": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "quality_label_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "access_owner": {
+      "type": "string",
+      "enum": [
+        "defaultspack",
+        "user_supplied"
+      ]
+    },
+    "retrieval_mode": {
+      "type": "string",
+      "enum": [
+        "pre_supplied_reference",
+        "owner_pack_handoff"
+      ]
+    },
+    "content_storage_policy": {
+      "type": "string",
+      "enum": [
+        "reference_only",
+        "redacted_excerpt_only"
+      ]
+    },
+    "raw_secret_material_allowed": {
+      "type": "boolean",
+      "const": false
+    }
+  }
+}

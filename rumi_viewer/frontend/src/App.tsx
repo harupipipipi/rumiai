@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { Layout } from '@/src/components/layout/Layout';
@@ -18,6 +18,8 @@ import { Settings } from '@/src/pages/Settings';
 import { ToastContainer } from '@/src/components/ui/ToastContainer';
 import { DialogContainer } from '@/src/components/ui/DialogContainer';
 import { bootstrapPanelSession, hasPendingPanelBootstrapCode } from '@/src/lib/api';
+import { applyAppearanceToRoot } from '@/src/lib/appearance';
+import { runtimeMonitorDelay } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
 
 export default function App() {
@@ -26,23 +28,10 @@ export default function App() {
   const isSetupDone = useAppStore(state => state.isSetupDone);
   const addToast = useAppStore(state => state.addToast);
   const refreshRuntimeHealth = useAppStore(state => state.refreshRuntimeHealth);
-  const runtimeReady = useAppStore(state => state.runtimeReady);
-  const runtimeStatus = useAppStore(state => state.runtimeStatus);
 
-  useEffect(() => {
-    const root = document.documentElement;
-    root.classList.remove('theme-rumi', 'theme-minimal', 'theme-standard', 'theme-rounded');
-    root.classList.add(`theme-${theme.toLowerCase()}`);
-  }, [theme]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (colorMode === 'dark') {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-  }, [colorMode]);
+  useLayoutEffect(() => {
+    applyAppearanceToRoot(document.documentElement, { theme, colorMode });
+  }, [theme, colorMode]);
 
   useEffect(() => {
     if (!hasPendingPanelBootstrapCode()) {
@@ -59,31 +48,46 @@ export default function App() {
     let cancelled = false;
     let timer: number | undefined;
 
-    const pollRuntimeReadiness = async () => {
+    const pollRuntimeHealth = async () => {
       while (!cancelled) {
         await refreshRuntimeHealth();
         if (cancelled) {
           return;
         }
         const currentState = useAppStore.getState();
-        if (currentState.runtimeReady || currentState.runtimeStatus === 'error') {
-          return;
-        }
         await new Promise<void>((resolve) => {
-          timer = window.setTimeout(resolve, 250);
+          timer = window.setTimeout(resolve, runtimeMonitorDelay({
+            runtimeReady: currentState.runtimeReady,
+            runtimeStatus: currentState.runtimeStatus,
+            runtimeError: currentState.runtimeError,
+            runtimeDisconnected: currentState.runtimeDisconnected,
+            lastRuntimeHealthyAt: currentState.lastRuntimeHealthyAt,
+          }));
         });
       }
     };
 
-    void pollRuntimeReadiness();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshRuntimeHealth();
+      }
+    };
+
+    window.addEventListener('focus', refreshWhenVisible);
+    window.addEventListener('online', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    void pollRuntimeHealth();
 
     return () => {
       cancelled = true;
       if (timer !== undefined) {
         window.clearTimeout(timer);
       }
+      window.removeEventListener('focus', refreshWhenVisible);
+      window.removeEventListener('online', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [refreshRuntimeHealth, runtimeReady, runtimeStatus]);
+  }, [refreshRuntimeHealth]);
 
   return (
     <BrowserRouter basename="/panel">

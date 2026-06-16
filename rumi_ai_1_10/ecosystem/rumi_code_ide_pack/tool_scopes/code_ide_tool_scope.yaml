@@ -1,0 +1,75 @@
+version: rumi.tool_scope.v1
+scope_id: rumi_code_ide_pack.code_ide_tool_scope
+pack_id: rumi_code_ide_pack
+description: Tool scope metadata for advanced local code, CLI, and IDE workflows.
+
+dependencies:
+  required:
+    - pack_id: defaultspack
+      version: ">=2.0.0"
+      owns:
+        - coding graph
+        - agent chat flow
+        - approval and audit policy
+    - pack_id: rumi_default_tools_pack
+      version: ">=1.0.0"
+      owns:
+        - concrete file tools
+        - concrete terminal tools
+        - concrete git tools
+        - todo and subagent tools
+
+allowed_tool_families:
+  read_only:
+    - coding_file_read
+    - coding_file_list
+    - coding_file_search
+    - coding_git_status
+    - coding_git_diff
+  write_scoped:
+    - coding_file_create
+    - coding_file_write
+    - coding_file_patch
+    - coding_file_restore
+  terminal_scoped:
+    - coding_terminal_exec
+  collaboration:
+    - todo
+    - subagent
+  optional_preview:
+    - browser_companion
+    - browser_use
+
+approval_policy:
+  no_approval_expected:
+    - read-only repository inspection
+    - local diff inspection
+  approval_required:
+    - file creation, deletion, patch, restore, or overwrite
+    - terminal commands that execute project code
+    - package installation or dependency update
+    - network access
+    - git commit or push
+  blocked_by_default:
+    - destructive shell commands
+    - deleting user files outside the requested scope
+    - credential store reads
+    - secret exfiltration
+    - production deployment
+
+path_policy:
+  workspace_first: true
+  allow_outside_workspace_only_with_explicit_user_request: true
+  preserve_unrelated_dirty_changes: true
+
+network_policy:
+  default: disabled
+  allow_when:
+    - user explicitly asks for current external information
+    - package manager operation is required and approved
+    - browser preview requires localhost inspection
+
+overlap_notes:
+  defaultspack: This scope references defaultspack capabilities and does not redefine runtime enforcement.
+  rumi_default_tools_pack: Concrete tools are supplied by the default tools pack; this file only narrows intended use.
+  rumi_local_agent_pack: Broader local-agent profiles can coexist; choose this scope for code/CLI/IDE sessions.

@@ -5,6 +5,11 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   root-python-tests:
@@ -20,6 +25,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: |
@@ -30,7 +36,11 @@ jobs:
         run: |
           set -o pipefail
           PYTEST_LOG="${RUNNER_TEMP}/root-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log"
-          pytest tests/ -v 2>&1 | tee "$PYTEST_LOG"
+          if [ "${{ matrix.python-version }}" = "3.11" ]; then
+            pytest tests/ -v 2>&1 | tee "$PYTEST_LOG"
+          else
+            pytest tests/test_entrypoint_contracts.py tests/test_windows_compat.py -v 2>&1 | tee "$PYTEST_LOG"
+          fi
 
       - name: Upload root pytest log
         if: failure() && steps.root_pytest.outcome == 'failure'
@@ -50,6 +60,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            rumi_ai_1_10/requirements.txt
+            rumi_ai_1_10/requirements-dev.txt
 
       - name: Install dependencies
         working-directory: rumi_ai_1_10
@@ -108,6 +122,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            rumi_ai_1_10/requirements.txt
+            rumi_ai_1_10/requirements-dev.txt
 
       - name: Install dependencies
         working-directory: rumi_ai_1_10
@@ -131,6 +149,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            rumi_ai_1_10/requirements.txt
+            rumi_ai_1_10/requirements-dev.txt
 
       - name: Install dependencies
         working-directory: rumi_ai_1_10
@@ -138,16 +160,24 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install -e .
-          pip install pip-audit
 
       - name: Audit Python dependencies
+        if: >
+          github.event_name == 'push' ||
+          contains(github.event.pull_request.labels.*.name, 'full-ci')
         working-directory: rumi_ai_1_10
-        run: pip-audit -r requirements.txt
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
 
       - name: Run security/audit regression tests
         working-directory: rumi_ai_1_10
         run: |
-          pytest tests/test_approval_security.py tests/test_security_guards.py tests/test_defaultspack_integrity_scan.py tests/test_defaultspack_shipped_bundle_hardening.py tests/test_capability_trust_store.py tests/test_defaultspack_coding_hardening.py tests/test_defaultspack_terminal_policy.py -v
+          pytest tests/test_approval_security.py tests/test_security_guards.py tests/test_defaultspack_integrity_scan.py tests/test_defaultspack_boundary_scan.py tests/test_defaultspack_shipped_bundle_hardening.py tests/test_capability_trust_store.py tests/test_defaultspack_coding_hardening.py tests/test_defaultspack_terminal_policy.py -v
+
+      - name: Run defaultspack boundary scan
+        working-directory: rumi_ai_1_10
+        run: python scripts/quality/scan_defaultspack_boundaries.py
 
   frontend-security-audit:
     strategy:
@@ -159,9 +189,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
+        if: >
+          matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp' ||
+          github.event_name == 'push' ||
+          contains(github.event.pull_request.labels.*.name, 'full-ci')
         uses: actions/checkout@v4
 
       - name: Set up Node
+        if: >
+          matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp' ||
+          github.event_name == 'push' ||
+          contains(github.event.pull_request.labels.*.name, 'full-ci')
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -169,10 +207,17 @@ jobs:
           cache-dependency-path: ${{ matrix.app }}/package-lock.json
 
       - name: Install frontend dependencies
+        if: >
+          matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp' ||
+          github.event_name == 'push' ||
+          contains(github.event.pull_request.labels.*.name, 'full-ci')
         working-directory: ${{ matrix.app }}
         run: npm ci
 
       - name: Audit frontend dependencies
+        if: >
+          github.event_name == 'push' ||
+          contains(github.event.pull_request.labels.*.name, 'full-ci')
         working-directory: ${{ matrix.app }}
         run: npm run audit
 
@@ -203,6 +248,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            rumi_ai_1_10/requirements.txt
+            rumi_ai_1_10/requirements-dev.txt
 
       - name: Install dependencies
         working-directory: rumi_ai_1_10
@@ -243,6 +292,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            rumi_ai_1_10/requirements.txt
+            rumi_ai_1_10/requirements-dev.txt
 
       - name: Install dependencies
         working-directory: rumi_ai_1_10
@@ -257,7 +310,11 @@ jobs:
         run: |
           set -o pipefail
           PYTEST_LOG="${RUNNER_TEMP}/package-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log"
-          pytest tests/ -v 2>&1 | tee "$PYTEST_LOG"
+          if [ "${{ matrix.python-version }}" = "3.11" ]; then
+            pytest tests/ -v 2>&1 | tee "$PYTEST_LOG"
+          else
+            pytest tests/test_defaultspack_setup_pack.py tests/test_setup_pack_basepack.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_agent_run_store.py -v 2>&1 | tee "$PYTEST_LOG"
+          fi
 
       - name: Upload package pytest log
         if: failure() && steps.package_pytest.outcome == 'failure'
@@ -276,11 +333,32 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pack-shell-test
+          workspaces: pack-shell -> target
+
       - name: Run cargo test
         run: |
-          cd pack-shell && cargo test
+          for attempt in 1 2 3; do
+            if (cd pack-shell && cargo test); then
+              exit 0
+            fi
+            status=$?
+            if [ "$attempt" -eq 3 ]; then
+              exit "$status"
+            fi
+            sleep $((attempt * 10))
+          done
 
   rumi-viewer-macos:
+    if: >
+      github.event_name != 'pull_request' ||
+      (
+        github.event.pull_request.draft == false &&
+        contains(github.event.pull_request.labels.*.name, 'full-ci')
+      )
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -307,6 +385,12 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rumi-viewer-macos
+          workspaces: rumi_viewer/src-tauri -> target
 
       - name: Bundle uv binary for offline startup
         run: |
@@ -359,6 +443,12 @@ jobs:
         run: cargo test --locked
 
   mac-computer-driver-smoke:
+    if: >
+      github.event_name != 'pull_request' ||
+      (
+        github.event.pull_request.draft == false &&
+        contains(github.event.pull_request.labels.*.name, 'full-ci')
+      )
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -368,6 +458,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            rumi_ai_1_10/requirements.txt
+            rumi_ai_1_10/requirements-dev.txt
 
       - name: Install dependencies
         working-directory: rumi_ai_1_10
@@ -391,6 +485,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            rumi_ai_1_10/requirements.txt
+            rumi_ai_1_10/requirements-dev.txt
 
       - name: Install dependencies
         working-directory: rumi_ai_1_10

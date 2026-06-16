@@ -1,0 +1,18 @@
+catalog_id: rumi_multimodal_media.capabilities
+schema_version: 1
+capabilities:
+  - capability_id: screenshot_understanding
+    inputs: [png, jpg, web_capture]
+    outputs: [layout_notes, visible_text, issue_list]
+  - capability_id: ocr_review
+    inputs: [image, pdf_page, scan]
+    outputs: [ocr_text, confidence_notes, manual_review_flags]
+  - capability_id: image_generation_brief
+    inputs: [creative_goal, references, dimensions]
+    outputs: [prompt_plan, negative_constraints, review_rubric]
+  - capability_id: audio_video_summary
+    inputs: [transcript, storyboard, clip_notes]
+    outputs: [segments, highlights, accessibility_notes]
+  - capability_id: visual_quality_gate
+    inputs: [asset, target_surface, rubric]
+    outputs: [pass_fail, defects, handoff_notes]

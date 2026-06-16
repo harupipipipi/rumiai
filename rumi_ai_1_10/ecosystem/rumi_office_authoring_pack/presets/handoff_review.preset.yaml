@@ -1,0 +1,5 @@
+preset:
+  id: handoff_review
+  pack_id: rumi_office_authoring_pack
+  mode: declarative_contract
+  external_action: handoff_only

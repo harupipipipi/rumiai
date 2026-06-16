@@ -1,0 +1,39 @@
+spec_id: rumi.api_toolsmith.webhook_contract_review.v1
+owner: rumi_api_toolsmith_pack
+purpose: Declarative webhook contract review for inbound and outbound webhook payloads.
+network_default: none
+required_inputs:
+  - event_catalog
+  - payload_examples
+  - signature_policy_description
+  - replay_policy
+review_dimensions:
+  event_selection:
+    checks:
+      - event_names_are_stable
+      - event_versions_recorded
+      - deprecated_events_flagged
+      - delivery_semantics_recorded
+  payload_schema:
+    checks:
+      - required_fields_listed
+      - optional_fields_listed
+      - pii_fields_flagged
+      - timestamp_and_id_fields_recorded
+  security_boundary:
+    checks:
+      - signature_header_names_recorded_without_secrets
+      - replay_window_recorded
+      - secret_rotation_handoff_recorded
+      - failure_status_policy_recorded
+  mock_delivery:
+    checks:
+      - fixture_payload_matches_schema
+      - duplicate_delivery_case_included
+      - malformed_payload_case_included
+      - retry_case_included
+outputs:
+  - webhook_contract_summary
+  - mock_delivery_cases
+  - risk_notes
+  - handoff_recommendation

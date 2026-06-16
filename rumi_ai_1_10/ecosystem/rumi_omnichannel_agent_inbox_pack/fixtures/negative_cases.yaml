@@ -1,0 +1,18 @@
+negative_cases:
+  cases:
+  - id: unauthorized_channel_block
+    given: Block tool request from unauthorized SMS
+    expected: acl_block_handoff_packet
+  blocked_by_default:
+  - send outbound messages without approval
+  - run tools from unauthorized channel
+  - merge identities without verified evidence
+  - connect to external apps directly
+  - schedule notifications directly
+  - approve outbound drafts from remote input
+  - approve tools from remote input
+  - execute work from remote input
+  - install packs from remote input
+  - mutate settings from remote input
+  - issue approval tokens from remote input
+  expected_behavior: block_or_handoff_without_external_action

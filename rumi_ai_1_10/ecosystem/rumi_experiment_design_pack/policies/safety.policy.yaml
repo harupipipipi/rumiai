@@ -1,0 +1,29 @@
+policy:
+  id: experiment_design_safety_policy
+  default_mode: draft_and_handoff_only
+  blocked_by_default:
+  - declare a winner without supplied data
+  - claim statistical significance or lift without supplied results
+  - ignore guardrail metrics
+  - run analytics queries
+  - mutate feature flags or production rollout
+  - hide sample-size assumptions
+  allowed_outputs:
+  - validated_schema_packet
+  - evidence_linked_draft
+  - review_checklist
+  - handoff_packet
+  requires_human_review_before:
+  - external_connector_action
+  - message_send
+  - calendar_write
+  - production_change
+  - real_world_action
+  evidence_rules:
+  - cite source IDs for claims
+  - record uncertainty when evidence is thin
+  - name owner pack for adjacent runtime actions
+  claim_rules:
+  - design-only decision records must set result_claim.status to not_claimed
+  - supplied result claims must come from user-supplied artifacts, not pack-executed queries
+  - SQL, analytics queries, and statistical calculations hand off to defaultspack runtime tooling

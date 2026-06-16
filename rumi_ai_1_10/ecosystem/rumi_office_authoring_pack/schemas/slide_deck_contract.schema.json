@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/slide_deck_contract.schema.json",
+  "title": "Slide Deck Contract",
+  "description": "Office authoring contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "deck_id",
+    "audience",
+    "goal",
+    "story_arc",
+    "slides",
+    "speaker_notes_policy",
+    "visual_asset_refs",
+    "review_gate",
+    "export_plan_id",
+    "render_owner",
+    "file_creation_owner",
+    "layout_review_required"
+  ],
+  "properties": {
+    "deck_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "audience": {
+      "type": "string",
+      "minLength": 1
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "story_arc": {
+      "type": "string",
+      "minLength": 1
+    },
+    "slides": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "speaker_notes_policy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "visual_asset_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "review_gate": {
+      "type": "string",
+      "minLength": 1
+    },
+    "export_plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "render_owner": {
+      "const": "rumi_workspace_pack"
+    },
+    "file_creation_owner": {
+      "const": "rumi_workspace_pack"
+    },
+    "layout_review_required": {
+      "const": true
+    }
+  }
+}

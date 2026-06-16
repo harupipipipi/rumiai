@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/run_summary.schema.json",
+  "title": "Run Summary",
+  "description": "Agent continuity contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary_id",
+    "run_ref",
+    "objective",
+    "status_snapshot",
+    "decision_log",
+    "files_or_artifacts_touched_refs",
+    "tests_or_checks_refs",
+    "known_gaps",
+    "next_actions"
+  ],
+  "properties": {
+    "summary_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status_snapshot": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_log": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "files_or_artifacts_touched_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tests_or_checks_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "known_gaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

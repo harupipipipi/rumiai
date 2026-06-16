@@ -1,0 +1,30 @@
+version: rumi.runtime_benchmark.reproducibility_ledger.v1
+pack_id: rumi_runtime_benchmark_pack
+network_default: none
+
+ledger_fields:
+  - benchmark_id
+  - environment_descriptor_id
+  - metric_record_id
+  - seed
+  - fixture_id
+  - prompt_hash
+  - tool_trace_id
+  - sample_count
+  - replay_command_or_manual_steps
+  - cache_policy
+  - network_policy
+  - redaction_notes
+
+replay_evidence_required:
+  - seed
+  - fixture_id
+  - prompt_hash
+  - tool_trace_id
+  - environment_descriptor_id
+
+quality_gates:
+  - replay_evidence_complete
+  - no_secret_values_recorded
+  - sample_count_matches_sampling_plan
+  - environment_descriptor_linked

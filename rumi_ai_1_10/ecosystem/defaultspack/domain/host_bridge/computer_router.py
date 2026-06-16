@@ -161,7 +161,7 @@ def _context_has_verified_server_approval_token(context: dict[str, Any]) -> bool
     pack_id = str(context.get("_tool_server_approval_pack_id") or "").strip()
     conversation_id = str(context.get("_tool_server_approval_conversation_id") or "").strip()
     try:
-        from domain.safety import approval
+        from ..safety import approval
 
         verification = approval.verify_execution_token(
             token,

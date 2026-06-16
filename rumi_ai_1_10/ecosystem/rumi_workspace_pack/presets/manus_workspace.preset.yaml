@@ -1,0 +1,13 @@
+id: manus_workspace
+name: Manus-like Workspace Job
+profile: rumi_workspace_pack.workspace_background_operator
+enabled_capabilities:
+  - workspace.job.enqueue
+  - workspace.job.status
+  - workspace.document.create
+  - workspace.slides.create
+  - workspace.sheet.create
+  - workspace.bundle.export
+ui_panels: [chat, plan, job_timeline, tool_calls, artifact_tree]
+behavior: [step_log, async_execution, resumable_jobs, deliverable_oriented, export_review]
+default_outputs: [job_plan, progress_log, artifact_manifest, export_bundle]

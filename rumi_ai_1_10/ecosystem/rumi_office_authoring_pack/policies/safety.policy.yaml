@@ -1,0 +1,17 @@
+policy:
+  pack_id: rumi_office_authoring_pack
+  default_mode: draft_and_handoff_only
+  blocked_by_default:
+  - direct PPTX DOCX XLSX PDF render
+  - direct file persistence
+  - direct ZIP export bundle creation
+  - direct connector source retrieval
+  - direct web research retrieval
+  - direct statistical data analysis
+  - direct workbook recalculation
+  - direct document parsing redline extraction
+  - direct artifact app runtime approval
+  - verified export with missing citations
+  - verified export with unresolved layout formula accessibility review failures
+  external_effect: handoff_packet_only
+  network_policy: none_by_default

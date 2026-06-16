@@ -1,0 +1,32 @@
+version: rumi.knowledge_marketplace.provenance_ledger.v1
+pack_id: rumi_knowledge_marketplace_pack
+network_default: none
+
+ledger_fields:
+  - card_id
+  - source_ref
+  - content_digest
+  - publisher
+  - reviewer
+  - reviewed_at
+  - trust_status
+  - permission_summary
+  - install_decision
+  - blacklist_status
+
+quality_gates:
+  - content_digest_recorded
+  - permission_summary_complete
+  - reviewer_recorded
+  - trust_status_matches_rubric
+  - blocked_cards_have_reason
+
+redaction_policy:
+  disallowed:
+    - secret_values
+    - private_tokens
+    - personal_data_not_needed_for_review
+  allowed:
+    - source_ref
+    - content_digest
+    - publisher_label

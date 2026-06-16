@@ -58,11 +58,13 @@ class AuthorityHandlersMixin:
     def _authority_approve(self, request_id: str, body: dict) -> dict:
         try:
             config = body.get("config") if isinstance(body.get("config"), dict) else None
+            related_permissions = body.get("related_permissions")
             return _authority_service().approve_request(
                 request_id,
                 scope=str(body.get("scope") or "once"),
                 config=config,
                 expires_in_seconds=body.get("expires_in_seconds"),
+                related_permissions=related_permissions if isinstance(related_permissions, (list, tuple)) else None,
                 ui_operator=body.get("ui_operator") if isinstance(body.get("ui_operator"), dict) else None,
             )
         except Exception as exc:

@@ -1,0 +1,7 @@
+profile:
+  id: office_authoring_reviewer
+  pack_id: rumi_office_authoring_pack
+  mode: review_and_handoff
+  review_contract:
+    external_actions: handoff_only
+    secrets: none

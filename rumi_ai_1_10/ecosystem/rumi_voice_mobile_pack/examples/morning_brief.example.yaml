@@ -1,0 +1,12 @@
+example_id: rumi_voice_mobile.morning_brief
+request: Prepare a mobile morning briefing handoff with quiet-hours, recipient, and notification channel consent recorded before delivery.
+intent_class: scheduled_briefing
+notification_channel: user_approved_channel_required
+consent_required:
+  - notification_delivery
+  - repeated_followup
+expected_outputs:
+  - briefing_scope
+  - delivery_window
+  - handoff_to_rumi_workflow_scheduler_pack
+  - handoff_receipt

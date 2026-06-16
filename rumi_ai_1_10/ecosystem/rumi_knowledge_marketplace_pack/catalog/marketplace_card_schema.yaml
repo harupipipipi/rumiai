@@ -1,0 +1,29 @@
+schema_id: rumi_knowledge_marketplace.card
+version: 1
+required_fields:
+  - card_id
+  - capability_type
+  - source
+  - publisher
+  - trust_status
+  - permission_summary
+  - provenance
+  - install_review
+capability_types: [skill, template, playbook, connector_card, pack_bundle]
+trust_statuses: [unreviewed, repository_reviewed, trusted, blocked]
+permission_summary_fields:
+  - required_permissions
+  - network_requirement
+  - secret_requirement
+  - host_execution_requirement
+install_review_decisions:
+  - allow_install
+  - allow_with_warning
+  - needs_security_review
+  - block_install
+provenance_fields:
+  - source_ref
+  - content_digest
+  - publisher
+  - reviewer
+  - reviewed_at

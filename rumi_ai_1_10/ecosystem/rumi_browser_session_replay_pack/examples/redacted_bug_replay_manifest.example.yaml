@@ -1,0 +1,55 @@
+example:
+  id: redacted_bug_replay_manifest
+  pack_id: rumi_browser_session_replay_pack
+  scenario: A bug report replay manifest orders observed events without containing
+    executable browser commands.
+  input_refs:
+  - workspace_ref:case-file
+  evidence_refs:
+  - event:navigation_observed:redacted_bug_page
+  - dom:snapshot:bug-page-redacted
+  - screenshot:artifact:bug-state-redacted
+  handoff_owner: rumi_browser_automation_pack
+  replay_manifest:
+    manifest_id: manifest_redacted_bug_report
+    trace_id: trace_bug_report_replay_2026_06_04
+    ordered_evidence_refs:
+    - event:navigation_observed:redacted_bug_page
+    - dom:snapshot:bug-page-redacted
+    - screenshot:artifact:bug-state-redacted
+    preconditions:
+    - user_auth_state_supplied_by_runtime_owner
+    - private_url_redacted
+    expected_page_states:
+    - error_banner_visible
+    - save_button_disabled
+    redaction_policy_ref: policies/session_replay_redaction.policy.yaml
+    selector_drift_report_refs: []
+    handoff_instructions: Review only; runtime owner decides whether to execute live browser reproduction.
+    execution_owner: rumi_browser_automation_pack
+    transport_owner: rumi_default_tools_pack
+    external_action: handoff_only
+  redaction:
+    state: redacted
+    sensitive_classes:
+    - private_url
+    - dom_text
+    - screenshot_region
+  review_gate: all_blocking_checks
+  expected_result: reviewed_handoff_packet
+  must_not:
+  - external_action
+  - runtime_execution
+  - secret_material
+  status: ready_for_owner_handoff
+  redaction:
+    state: redacted
+    sensitive_classes:
+    - private_url
+    - typed_input_evidence
+    - dom_text
+    receipt_ref: redaction:redacted_bug_replay_manifest
+  replay_manifest:
+    external_action: handoff_only
+    execution_owner: rumi_browser_automation_pack
+    transport_owner: rumi_default_tools_pack

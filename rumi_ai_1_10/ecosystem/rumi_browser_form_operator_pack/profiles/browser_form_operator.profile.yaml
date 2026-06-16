@@ -1,0 +1,13 @@
+profile:
+  id: browser_form_operator
+  pack_id: rumi_browser_form_operator_pack
+  stance: evidence_first_reviewer
+  owner_surfaces:
+  - semantic_form_fields
+  - safe_field_filling
+  - submission_review
+  - action_replay_receipts
+  required_checks:
+    - parse_catalog
+    - inspect_overlap_policy
+    - preserve_evidence

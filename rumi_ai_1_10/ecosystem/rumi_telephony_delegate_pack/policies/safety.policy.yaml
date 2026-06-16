@@ -1,0 +1,28 @@
+policy:
+  id: telephony_delegation_safety_policy
+  default_mode: draft_and_handoff_only
+  blocked_by_default:
+  - dial without human approval
+  - call numbers on the never-call list
+  - continue after consent is declined
+  - continue after disallowed intent is detected
+  - perform payment or purchase execution
+  - handle emergency services
+  - mask actual dialing as a mock handoff
+  - store unredacted transcript PII in a handoff packet
+  - use raw phone numbers instead of target aliases
+  allowed_outputs:
+  - validated_schema_packet
+  - evidence_linked_draft
+  - review_checklist
+  - handoff_packet
+  requires_human_review_before:
+  - external_connector_action
+  - message_send
+  - calendar_write
+  - production_change
+  - real_world_action
+  evidence_rules:
+  - cite source IDs for claims
+  - record uncertainty when evidence is thin
+  - name owner pack for adjacent runtime actions

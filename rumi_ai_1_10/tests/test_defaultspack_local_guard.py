@@ -56,9 +56,15 @@ def test_sensitive_coding_http_path_requires_csrf_for_local_origin():
         "CSRF header required for sensitive local mutation",
         "CSRF_REQUIRED",
     )
+    assert handler._sensitive_request_error("POST", "/api/authority/requests/auth_1/approve") == (
+        403,
+        "CSRF header required for sensitive local mutation",
+        "CSRF_REQUIRED",
+    )
 
     handler.headers = {"Origin": "http://localhost:8766", "X-Rumi-CSRF": "1"}
     assert handler._sensitive_request_error("POST", "/api/coding/terminal/exec") is None
+    assert handler._sensitive_request_error("POST", "/api/authority/requests/auth_1/approve") is None
 
     handler.headers = {"origin": "http://localhost:8766", "x-rumi-csrf": "1"}
     assert handler._sensitive_request_error("POST", "/api/coding/terminal/exec") is None

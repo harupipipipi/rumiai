@@ -1,0 +1,17 @@
+negative_cases:
+  cases:
+  - id: boundary_negative
+    given: execute artifact code directly
+    expected: blocked_handoff_packet
+  blocked_by_default:
+  - execute artifact code directly
+  - call MCP tools before approval
+  - allow network by default
+  - persist files without workspace handoff
+  - bypass sandbox runtime owner
+  - trust client supplied approved flag
+  - create share links directly
+  - zip/export files directly
+  - run media transforms
+  - mutate defaultspack stores
+  expected_behavior: block_or_handoff_without_external_action
