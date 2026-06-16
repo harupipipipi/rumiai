@@ -354,9 +354,13 @@ export function GraphEditor() {
               JSON
             </button>
           </div>
-          <Button onClick={saveGraph} disabled={busy || !parsedGraph}>
+          <Button
+            onClick={saveGraph}
+            disabled={busy || !parsedGraph || viewMode !== 'json'}
+            title={viewMode === 'json' ? 'Save JSON graph' : 'Switch to JSON to edit and save'}
+          >
             <Save className="w-4 h-4 mr-2" />
-            Save
+            Save JSON
           </Button>
         </div>
       </div>

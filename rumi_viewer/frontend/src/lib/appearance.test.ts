@@ -79,3 +79,15 @@ test('appearance application keeps one theme class and toggles dark before paint
   assert.equal(root.element.dataset.colorMode, 'light');
   assert.equal(root.element.style.colorScheme, 'light');
 });
+
+test('appearance application clears preboot inline colors after React takes over', () => {
+  const root = fakeRoot();
+  root.element.style.backgroundColor = '#ffffff';
+  root.element.style.color = '#111827';
+
+  applyAppearanceToRoot(root.element, { theme: 'Rumi', colorMode: 'dark' });
+
+  assert.equal(root.element.style.backgroundColor, '');
+  assert.equal(root.element.style.color, '');
+  assert.equal(root.element.style.colorScheme, 'dark');
+});

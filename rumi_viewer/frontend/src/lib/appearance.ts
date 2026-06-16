@@ -59,6 +59,8 @@ export function applyAppearanceToRoot(root: Pick<HTMLElement, 'classList' | 'dat
   root.dataset.theme = appearance.theme;
   root.dataset.colorMode = appearance.colorMode;
   root.style.colorScheme = appearance.colorMode;
+  root.style.backgroundColor = '';
+  root.style.color = '';
 }
 
 export function bootstrapDocumentAppearance(
