@@ -9,6 +9,7 @@ import { subscribeAuthorityApprovalSettlements } from "../lib/authorityApprovalE
 import { openDefaultsConsoleWindow, openFingerRecordingWindow, openAuthorityApprovalWindow, openHostPermissionsPageWindow } from "../lib/desktopApproval";
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { ambientTriggerClient, type AmbientPermissionId, type AmbientRoutingConfig, type AmbientRoutingMode, type AmbientStatus } from "./ambientTriggerClient";
+import { AMBIENT_FINAL_ANSWER_CHANNEL, AMBIENT_FINAL_ANSWER_STORAGE_KEY, parseAmbientFinalAnswerPayload, type AmbientFinalAnswerPayload } from "./finalAnswerBridge";
 import {
   AMBIENT_AUTHORITY_REQUEST_ID,
   AMBIENT_CAMERA_PERMISSION,
@@ -115,6 +116,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const gestureStopRef = useRef<(() => void) | null>(null);
   const pinchRecorderRef = useRef<ActiveAudioRecorder | null>(null);
   const lastPinchStateRef = useRef<PinchState | null>(null);
+  const lastFinalAnswerRef = useRef("");
   const choiceHandledAtRef = useRef(0);
   const approvalGestureBusyRef = useRef(false);
   const rumiApprovalAutoOpenRef = useRef(false);
@@ -216,6 +218,10 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   }, []);
 
   useEffect(() => {
+    lastFinalAnswerRef.current = lastFinalAnswer;
+  }, [lastFinalAnswer]);
+
+  useEffect(() => {
     if (!pinchRecording || !recordingStartedAt) {
       setRecordingSeconds(0);
       return;
@@ -227,20 +233,47 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   }, [pinchRecording, recordingStartedAt]);
 
   useEffect(() => {
-    const text = String(finalAnswerText ?? "").trim();
-    if (!text || text === lastFinalAnswer) return;
-    setLastFinalAnswer(text);
-    setMessage("AIの回答が届きました。");
-    if (readoutEnabled && !pinchRecording) {
-      speakFinalAnswer(text);
+    const timer = applyFinalAnswerText(String(finalAnswerText ?? ""));
+    return () => {
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [finalAnswerText, frontOnFinal, pinchRecording, readoutEnabled]);
+
+  useEffect(() => {
+    if (!standalone) return;
+    const timers = new Set<number>();
+    const applyPayload = (payload: AmbientFinalAnswerPayload | null) => {
+      if (!payload) return;
+      const timer = applyFinalAnswerText(payload.text);
+      if (timer) timers.add(timer);
+    };
+    try {
+      applyPayload(parseAmbientFinalAnswerPayload(window.localStorage.getItem(AMBIENT_FINAL_ANSWER_STORAGE_KEY)));
+    } catch {
+      // Local storage may be blocked; live BroadcastChannel updates still work when available.
     }
-    if (!frontOnFinal) return;
-    setExpanded(true);
-    setFrontFlash(true);
-    window.focus();
-    const timer = window.setTimeout(() => setFrontFlash(false), 1600);
-    return () => window.clearTimeout(timer);
-  }, [finalAnswerText, frontOnFinal, lastFinalAnswer, pinchRecording, readoutEnabled]);
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === AMBIENT_FINAL_ANSWER_STORAGE_KEY) {
+        applyPayload(parseAmbientFinalAnswerPayload(event.newValue));
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel(AMBIENT_FINAL_ANSWER_CHANNEL);
+      channel.onmessage = (event) => {
+        const data = event.data as AmbientFinalAnswerPayload | undefined;
+        applyPayload(data ? parseAmbientFinalAnswerPayload(JSON.stringify(data)) : null);
+      };
+    } catch {
+      channel = null;
+    }
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      channel?.close();
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [frontOnFinal, pinchRecording, readoutEnabled, standalone]);
 
   useEffect(() => subscribeAuthorityApprovalSettlements((event) => {
     if (event.requestId !== AMBIENT_AUTHORITY_REQUEST_ID) return;
@@ -310,6 +343,22 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     utterance.onend = () => setReadoutPlaying(false);
     utterance.onerror = () => setReadoutPlaying(false);
     window.speechSynthesis.speak(utterance);
+  }
+
+  function applyFinalAnswerText(value: string): number | null {
+    const text = value.trim();
+    if (!text || text === lastFinalAnswerRef.current) return null;
+    lastFinalAnswerRef.current = text;
+    setLastFinalAnswer(text);
+    setMessage("AIの回答が届きました。");
+    if (readoutEnabled && !pinchRecording) {
+      speakFinalAnswer(text);
+    }
+    if (!frontOnFinal) return null;
+    setExpanded(true);
+    setFrontFlash(true);
+    window.focus();
+    return window.setTimeout(() => setFrontFlash(false), 1600);
   }
 
   const finishPinchRecording = useCallback(async (state: PinchState) => {

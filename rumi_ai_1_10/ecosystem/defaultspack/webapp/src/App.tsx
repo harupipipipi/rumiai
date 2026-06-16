@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { Hand, Loader2 } from "lucide-react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
-import { AmbientTriggerPanel, type AmbientApprovalTarget } from "./ambient/AmbientTriggerPanel";
+import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
 import { DefaultsConsoleWindow } from "./ambient/DefaultsConsoleWindow";
+import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
@@ -33,7 +35,7 @@ import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
-import { openAuthorityApprovalWindow } from "./lib/desktopApproval";
+import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/desktopApproval";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
@@ -46,6 +48,7 @@ import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspa
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
+import { LayerPortal } from "./ui/layers/LayerPortal";
 
 type ComposerCandidateMenuState = {
   mode: "model";
@@ -2386,6 +2389,11 @@ function ChatApp() {
   }, [isConversationPending, isGenerating, messages]);
 
   useEffect(() => {
+    if (!latestAssistantFinalText) return;
+    publishAmbientFinalAnswer(latestAssistantFinalText, activeConversationId);
+  }, [activeConversationId, latestAssistantFinalText]);
+
+  useEffect(() => {
     if (!authorityApproval) {
       authorityApprovalWindowRequestRef.current = null;
       return;
@@ -4208,51 +4216,6 @@ function ChatApp() {
     }
   };
 
-  const ambientApprovalTarget = useMemo<AmbientApprovalTarget | null>(() => {
-    if (visibleBrowserApproval) {
-      return {
-        kind: "browser",
-        approveLabel: "許可",
-        canApprove: true,
-        canReject: false,
-      };
-    }
-    if (runtimeApproval) {
-      return {
-        kind: "runtime",
-        approveLabel: "許可",
-        rejectLabel: "拒否",
-        canApprove: true,
-        canReject: true,
-      };
-    }
-    if (authorityApproval) {
-      return {
-        kind: "authority",
-        approveLabel: "承認",
-        rejectLabel: "拒否",
-        canApprove: true,
-        canReject: true,
-      };
-    }
-    return null;
-  }, [authorityApproval, runtimeApproval, visibleBrowserApproval]);
-
-  const handleAmbientApprovalGesture = useCallback(async (decision: "approve" | "reject") => {
-    if (visibleBrowserApproval) {
-      if (decision === "approve") await approveBrowserAction();
-      return;
-    }
-    if (runtimeApproval) {
-      if (decision === "approve") await approveCodingAction();
-      else await denyCodingAction();
-      return;
-    }
-    if (authorityApproval) {
-      await openAuthorityApprovalWindowAction();
-    }
-  }, [authorityApproval, runtimeApproval, visibleBrowserApproval]);
-
   const pushActionPreview = (action: SidebarAction, title: string, data: unknown) => {
     const preview = previewFromAction(action, title, data);
     setPreviews((current) => [preview, ...current].slice(0, 30));
@@ -5575,19 +5538,54 @@ function ChatApp() {
         />
       )}
 
-      <AmbientTriggerPanel
-        conversationId={activeConversationId}
-        approvalTarget={ambientApprovalTarget}
-        finalAnswerText={latestAssistantFinalText}
-        onApprovalGesture={handleAmbientApprovalGesture}
-        onOpenInput={(text) => {
-          const chatTab = workspaceTabs.find((tab) => tab.kind === "chat") ?? workspaceTabs[0];
-          if (chatTab && activeWorkspaceTabId !== chatTab.id) activateWorkspaceTab(chatTab);
-          if (typeof text === "string" && text.trim()) setInput(text);
-        }}
-      />
+      <AmbientWindowLauncher />
     </div>
     </RendererBoundary>
+  );
+}
+
+function AmbientWindowLauncher() {
+  const [opening, setOpening] = useState(false);
+  const [fallbackVisible, setFallbackVisible] = useState(false);
+
+  const openWindow = async () => {
+    if (opening) return;
+    setOpening(true);
+    setFallbackVisible(false);
+    try {
+      const opened = await openFingerRecordingWindow();
+      if (opened) return;
+      const popup = window.open("/finger-recording", "rumi-finger-recording", "width=380,height=520");
+      if (popup) popup.focus();
+      else setFallbackVisible(true);
+    } catch {
+      setFallbackVisible(true);
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <LayerPortal layer="globalOverlay">
+      <div className="fixed bottom-4 right-4 flex flex-col items-end gap-2">
+        {fallbackVisible && (
+          <div className="max-w-64 rounded-lg border border-amber-300/25 bg-zinc-950/95 px-3 py-2 text-xs leading-5 text-amber-50 shadow-xl shadow-black/40">
+            Rumi Viewerから開くと、指録音は専用ウィンドウで表示されます。
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => void openWindow()}
+          disabled={opening}
+          className="inline-flex h-10 items-center gap-2 rounded-lg border border-zinc-700/80 bg-zinc-950/92 px-3 text-sm font-semibold text-zinc-100 shadow-xl shadow-black/40 backdrop-blur hover:border-zinc-500 hover:bg-zinc-900 disabled:cursor-wait disabled:opacity-70"
+          title="指で録音ウィンドウを開く"
+          aria-label="指で録音ウィンドウを開く"
+        >
+          {opening ? <Loader2 size={16} className="animate-spin" /> : <Hand size={16} />}
+          指録音
+        </button>
+      </div>
+    </LayerPortal>
   );
 }
 
