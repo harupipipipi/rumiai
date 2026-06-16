@@ -29,6 +29,14 @@ Only an explicit create/register action may make durable changes. Write-like
 Creator actions still pass through the normal local approval, tool policy, and
 audit paths.
 
+Provider-facing action ids use safe snake_case names:
+`subagent_request`, `subagent_status`, `subagent_create`,
+`subagent_dm_send`, `subagent_channel_join`, `subagent_goal_propose`,
+`subagent_goal_approve`, `subagent_task_complete`, and `channel_check`.
+The dotted names such as `subagent.request` remain display aliases only.
+The same safe ids are registered as defaultspack function manifests under
+`functions/{safe_id}/manifest.json`; dotted names are kept in `vocab_aliases`.
+
 ## PM Gate
 
 Client and president messages that target specialist agents pass through the
@@ -58,3 +66,20 @@ It returns normalized context for one team channel: team id, channel id,
 request trace, recent messages, dirty summaries, open tasks, active runs, and
 unresolved mentions. A check is read-only and must not create messages, tasks,
 or run dispatches by itself.
+
+Every delegate, channel message, goal, and DM route records the channel.check
+result in result and metadata before routing, including actor membership,
+target membership, PM gate state, rich policy, and task completion conditions.
+
+## Files / History
+
+The file tree API includes a virtual `team-workspace` hierarchy when a
+`company_id` is provided:
+
+- `channels/{channel}/conversation.md`
+- `channels/{channel}/messages.jsonl`
+- `channels/{channel}/tasks`
+- `channels/{channel}/approvals`
+- `channels/{channel}/artifacts`
+- `agents/{short_id}/runs`
+- `dms/{short_id}`

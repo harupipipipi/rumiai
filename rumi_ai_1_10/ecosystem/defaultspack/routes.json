@@ -338,6 +338,84 @@
     },
     {
       "method": "GET",
+      "path": "/api/change-requests/{id}/comments",
+      "flow_id": "transport_direct",
+      "description": "List Rumi Review comments and threads"
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id}/comments",
+      "flow_id": "transport_direct",
+      "description": "Create a Rumi Review comment or suggestion"
+    },
+    {
+      "method": "GET",
+      "path": "/api/change-requests/{id}/comments/{comment_id}",
+      "flow_id": "transport_direct",
+      "description": "Get a Rumi Review comment"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/change-requests/{id}/comments/{comment_id}",
+      "flow_id": "transport_direct",
+      "description": "Update or resolve a Rumi Review comment"
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id}/decision",
+      "flow_id": "transport_direct",
+      "description": "Submit a Rumi Review decision"
+    },
+    {
+      "method": "GET",
+      "path": "/api/change-requests/{id}/viewed-files",
+      "flow_id": "transport_direct",
+      "description": "List viewed files for a Rumi Review"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/change-requests/{id}/viewed-files",
+      "flow_id": "transport_direct",
+      "description": "Update viewed files for a Rumi Review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/change-requests/{id}/checks",
+      "flow_id": "transport_direct",
+      "description": "List Rumi Review checks"
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id}/checks/run",
+      "flow_id": "transport_direct",
+      "description": "Run an allowlisted Rumi Review check"
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id}/run-check",
+      "flow_id": "transport_direct",
+      "description": "Run an allowlisted Rumi Review check"
+    },
+    {
+      "method": "GET",
+      "path": "/api/change-requests/{id}/checks/{check_id}",
+      "flow_id": "transport_direct",
+      "description": "Get a Rumi Review check"
+    },
+    {
+      "method": "GET",
+      "path": "/api/change-requests/{id}/seal",
+      "flow_id": "transport_direct",
+      "description": "Recalculate the Rumi Review Seal"
+    },
+    {
+      "method": "POST",
+      "path": "/api/change-requests/{id}/commit",
+      "flow_id": "transport_direct",
+      "description": "Commit a sealed Rumi Review snapshot without pushing"
+    },
+    {
+      "method": "GET",
       "path": "/api/coding/git/branch",
       "flow_id": "transport_direct",
       "description": "Read git branch information"
@@ -530,6 +608,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/subagent-team/channels/{channel_id}",
+      "flow_id": "subagent_team_workspace",
+      "description": "Get a Subagents / Teams channel"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/subagent-team/channels/{channel_id}",
+      "flow_id": "subagent_team_workspace",
+      "description": "Patch a Creator-managed subagent channel"
+    },
+    {
+      "method": "GET",
       "path": "/api/subagent-team/channels/{channel_id}/messages",
       "flow_id": "subagent_team_workspace",
       "description": "List messages for a Subagents / Teams channel"
@@ -547,6 +637,18 @@
       "description": "Join a subagent to a team channel through Creator"
     },
     {
+      "method": "POST",
+      "path": "/api/subagent-team/channels/{channel_id}/leave",
+      "flow_id": "subagent_team_workspace",
+      "description": "Leave a Subagents / Teams channel through Creator"
+    },
+    {
+      "method": "POST",
+      "path": "/api/subagent-team/channels/{channel_id}/archive",
+      "flow_id": "subagent_team_workspace",
+      "description": "Archive a Subagents / Teams channel through Creator"
+    },
+    {
       "method": "GET",
       "path": "/api/subagent-team/agents",
       "flow_id": "subagent_team_workspace",
@@ -557,6 +659,36 @@
       "path": "/api/subagent-team/agents",
       "flow_id": "subagent_team_workspace",
       "description": "Create a subagent through Creator"
+    },
+    {
+      "method": "GET",
+      "path": "/api/subagent-team/agents/{short_id}",
+      "flow_id": "subagent_team_workspace",
+      "description": "Get a Creator-managed subagent"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/subagent-team/agents/{short_id}",
+      "flow_id": "subagent_team_workspace",
+      "description": "Patch a Creator-managed subagent"
+    },
+    {
+      "method": "POST",
+      "path": "/api/subagent-team/agents/{short_id}/pause",
+      "flow_id": "subagent_team_workspace",
+      "description": "Pause a Creator-managed subagent"
+    },
+    {
+      "method": "POST",
+      "path": "/api/subagent-team/agents/{short_id}/resume",
+      "flow_id": "subagent_team_workspace",
+      "description": "Resume a Creator-managed subagent"
+    },
+    {
+      "method": "POST",
+      "path": "/api/subagent-team/creator",
+      "flow_id": "subagent_team_workspace",
+      "description": "Run a provider-safe subagent action through Creator"
     },
     {
       "method": "POST",
@@ -595,16 +727,52 @@
       "description": "Update /rich state"
     },
     {
+      "method": "GET",
+      "path": "/api/subagent-team/dms",
+      "flow_id": "subagent_team_workspace",
+      "description": "List Subagents / Teams DM threads"
+    },
+    {
       "method": "POST",
       "path": "/api/subagent-team/dms",
       "flow_id": "subagent_team_workspace",
       "description": "Send a DM to a subagent short id"
     },
     {
+      "method": "GET",
+      "path": "/api/subagent-team/dms/{thread_id}/messages",
+      "flow_id": "subagent_team_workspace",
+      "description": "List messages for a Subagents / Teams DM thread"
+    },
+    {
+      "method": "POST",
+      "path": "/api/subagent-team/dms/{thread_id}/messages",
+      "flow_id": "subagent_team_workspace",
+      "description": "Post a message to a Subagents / Teams DM thread"
+    },
+    {
+      "method": "GET",
+      "path": "/api/subagent-team/goals",
+      "flow_id": "subagent_team_workspace",
+      "description": "List PM-gated subagent goals"
+    },
+    {
       "method": "POST",
       "path": "/api/subagent-team/goals",
       "flow_id": "subagent_team_workspace",
       "description": "Propose a PM-gated subagent goal"
+    },
+    {
+      "method": "GET",
+      "path": "/api/subagent-team/goals/{goal_id}",
+      "flow_id": "subagent_team_workspace",
+      "description": "Get a PM-gated subagent goal"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/subagent-team/goals/{goal_id}",
+      "flow_id": "subagent_team_workspace",
+      "description": "Patch a PM-gated subagent goal"
     },
     {
       "method": "POST",

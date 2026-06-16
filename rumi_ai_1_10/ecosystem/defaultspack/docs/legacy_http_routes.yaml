@@ -994,6 +994,20 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
+  pattern: /api/subagent-team/channels/{channel_id}
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PATCH
+  pattern: /api/subagent-team/channels/{channel_id}
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
   pattern: /api/subagent-team/channels/{channel_id}/messages
   legacy_block_module: blocks.subagent_team.messages
   replacement_function_id: ''
@@ -1014,6 +1028,20 @@ legacy_routes:
   owner: subagent_team
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/channels/{channel_id}/leave
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/channels/{channel_id}/archive
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
 - method: GET
   pattern: /api/subagent-team/agents
   legacy_block_module: blocks.subagent_team.agents
@@ -1023,6 +1051,20 @@ legacy_routes:
   remove_after: v2.4
 - method: POST
   pattern: /api/subagent-team/agents
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/agents/{short_id}
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PATCH
+  pattern: /api/subagent-team/agents/{short_id}
   legacy_block_module: blocks.subagent_team.agents
   replacement_function_id: ''
   owner: subagent_team
@@ -1084,7 +1126,7 @@ legacy_routes:
   owner: subagent_team
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
-- method: POST
+- method: GET
   pattern: /api/subagent-team/dms
   legacy_block_module: blocks.subagent_team.dms
   replacement_function_id: ''
@@ -1092,7 +1134,49 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: POST
+  pattern: /api/subagent-team/dms
+  legacy_block_module: blocks.subagent_team.dms
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/dms/{thread_id}/messages
+  legacy_block_module: blocks.subagent_team.dms
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/dms/{thread_id}/messages
+  legacy_block_module: blocks.subagent_team.dms
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
   pattern: /api/subagent-team/goals
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/goals
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/goals/{goal_id}
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PATCH
+  pattern: /api/subagent-team/goals/{goal_id}
   legacy_block_module: blocks.subagent_team.goals
   replacement_function_id: ''
   owner: subagent_team

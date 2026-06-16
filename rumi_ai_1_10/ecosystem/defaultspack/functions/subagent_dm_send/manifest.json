@@ -1,0 +1,47 @@
+{
+  "function_id": "subagent_dm_send",
+  "description": "Send a Creator-mediated DM inside the subagent team workspace.",
+  "tags": [
+    "subagent_team",
+    "dm"
+  ],
+  "risk": "medium",
+  "requires": [
+    "subagent.dm.send"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.subagent.dm_send",
+    "defaultspack.subagent.dm_send",
+    "defaults.subagent.dm.send",
+    "defaultspack.subagent.dm.send",
+    "subagent.dm.send"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.subagent_team.creator",
+      "default_args": {
+        "action": "subagent_dm_send"
+      }
+    }
+  }
+}

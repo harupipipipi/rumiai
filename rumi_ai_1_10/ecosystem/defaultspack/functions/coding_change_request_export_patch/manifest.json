@@ -1,0 +1,44 @@
+{
+  "function_id": "coding_change_request_export_patch",
+  "description": "Export a Rumi Review patch.",
+  "tags": [
+    "coding",
+    "change_request"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.change_request_export_patch",
+    "defaultspack.coding.change_request_export_patch",
+    "defaults.coding.change.request.export.patch",
+    "defaultspack.coding.change.request.export.patch"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.change_request.export_patch",
+      "default_args": {
+        "_method": "POST"
+      }
+    }
+  }
+}

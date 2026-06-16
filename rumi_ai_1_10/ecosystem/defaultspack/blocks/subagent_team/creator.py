@@ -2,13 +2,14 @@ from blocks._common import ok, error
 from domain.company.store import CompanyStore
 from domain.subagent_team.service import SubagentTeamService
 
-from ._helpers import company_id_from, denied, invalid, is_denied, missing_team, require_dict
+from ._helpers import company_id_from, denied, direct_lifecycle_denied, invalid, is_denied, missing_team, normalize_action, require_dict
 
 
 def run(input_data, context):
     if require_dict(input_data) is None:
         return invalid("input_data must be a dict")
-    action = str(input_data.get("action") or "preview").lower()
+    raw_action = input_data.get("action") or input_data.get("tool_id")
+    action = _creator_action(raw_action)
     service = SubagentTeamService()
     try:
         if action in {"status", "bootstrap", "ensure"}:
@@ -28,6 +29,9 @@ def run(input_data, context):
                 return missing_team(company_id)
             return ok({"settings": settings.get("subagent_team", {}) if isinstance(settings, dict) else {}})
         if action == "update_settings":
+            blocked = direct_lifecycle_denied(input_data, context if isinstance(context, dict) else {})
+            if blocked is not None:
+                return blocked
             settings = input_data.get("settings")
             if not isinstance(settings, dict):
                 return invalid("settings must be a dict")
@@ -63,8 +67,17 @@ def run(input_data, context):
             if preview is None:
                 return missing_team(company_id)
             return ok(preview)
-        if action in {"request", "submit", "send", "create_goal", "goal"}:
-            result = service.creator_request(company_id, input_data, context=context if isinstance(context, dict) else {})
+        if action in {"request", "submit", "send", "create_goal", "goal", "creator_status", "create", "dm_send", "channel_join", "goal_approve", "task_complete", "channel_check"}:
+            payload = dict(input_data)
+            if action == "create":
+                payload["action"] = "create_agent"
+            elif action == "creator_status":
+                payload["action"] = "status"
+            elif action == "request":
+                payload["action"] = action
+            else:
+                payload["action"] = action
+            result = service.creator_request(company_id, payload, context=context if isinstance(context, dict) else {})
             if is_denied(result):
                 return denied(result)
             if result is None:
@@ -73,3 +86,28 @@ def run(input_data, context):
         return invalid("unsupported creator action: " + action)
     except Exception as exc:
         return error("subagent team creator failed: " + str(exc), "SUBAGENT_TEAM_CREATOR_ERROR")
+
+
+def _creator_action(value):
+    raw = str(value or "preview").strip().lower()
+    aliases = {
+        "subagent_request": "request",
+        "subagent.request": "request",
+        "subagent_status": "creator_status",
+        "subagent.status": "creator_status",
+        "subagent_create": "create",
+        "subagent.create": "create",
+        "subagent_dm_send": "dm_send",
+        "subagent.dm.send": "dm_send",
+        "subagent_channel_join": "channel_join",
+        "subagent.channel.join": "channel_join",
+        "subagent_goal_propose": "create_goal",
+        "subagent.goal.propose": "create_goal",
+        "subagent_goal_approve": "goal_approve",
+        "subagent.goal.approve": "goal_approve",
+        "subagent_task_complete": "task_complete",
+        "subagent.task.complete": "task_complete",
+        "channel_check": "channel_check",
+        "channel.check": "channel_check",
+    }
+    return aliases.get(raw, normalize_action(raw, "preview"))

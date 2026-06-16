@@ -1,13 +1,27 @@
-import { AlertTriangle, CheckCircle2, FileSearch, RefreshCw, RotateCw, SplitSquareHorizontal } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Circle, Download, FileSearch, GitCommit, MessageSquare, Play, RefreshCw, RotateCw, ShieldCheck, SplitSquareHorizontal, XCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { CodingDiffResponse, CodingGitStatus } from "../../lib/api";
 import type { ChangeRequestRecord } from "../../lib/changeRequests";
-import { createChangeRequest, getChangeRequest, listChangeRequests, refreshChangeRequest } from "../../lib/changeRequests";
+import {
+  addChangeRequestComment,
+  commitChangeRequest,
+  createChangeRequest,
+  exportChangeRequestPatch,
+  getChangeRequest,
+  getChangeRequestSeal,
+  listChangeRequestChecks,
+  listChangeRequests,
+  refreshChangeRequest,
+  runChangeRequestCheck,
+  setChangeRequestViewedFile,
+  submitChangeRequestDecision,
+  updateChangeRequestComment,
+} from "../../lib/changeRequests";
 import { codingResources } from "../../features/coding/resources/codingResources";
 import { FilesChangedPane, filesFromStatusAndDiff } from "./FilesChangedPane";
 
-type DetailTab = "summary" | "files" | "checks" | "review" | "seal";
+type DetailTab = "summary" | "files" | "checks" | "review" | "commit";
 type ReviewFilter = "open" | "closed";
 
 function checkLabel(review: ChangeRequestRecord): string {
@@ -56,13 +70,13 @@ function ReviewListItem({
   );
 }
 
-function Placeholder({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-md border border-zinc-800 bg-black/20 p-3">
-      <p className="text-xs font-semibold text-zinc-300">{title}</p>
-      <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">{text}</p>
-    </div>
-  );
+function shortHash(value?: string): string {
+  if (!value) return "";
+  return value.length > 12 ? value.slice(0, 12) : value;
+}
+
+function failedChecks(review: ChangeRequestRecord | null): number {
+  return review?.check_summary?.failed ?? (review?.checks ?? []).filter((check) => ["failed", "timed_out"].includes(String(check.status))).length;
 }
 
 function reviewIsStale(review: ChangeRequestRecord | null): boolean {
@@ -81,7 +95,13 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
   const [detailTab, setDetailTab] = useState<DetailTab>("summary");
   const [apiAvailable, setApiAvailable] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [commentBody, setCommentBody] = useState("");
+  const [suggestionPatch, setSuggestionPatch] = useState("");
+  const [checkCommand, setCheckCommand] = useState("");
+  const [commitMessage, setCommitMessage] = useState("Rumi Review commit");
 
   const changedFiles = useMemo(() => filesFromStatusAndDiff(status, diff), [status, diff]);
   const selectedReview = reviews.find((review) => review.id === selectedReviewId) ?? null;
@@ -91,6 +111,16 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
   const untrackedCount = changedFiles.filter((file) => file.untracked).length;
   const highRiskCount = changedFiles.filter((file) => file.highRisk).length;
   const stale = reviewIsStale(selectedReview);
+  const viewedPaths = useMemo(() => new Set(
+    Object.values(selectedReview?.viewed_files ?? {})
+      .filter((item) => item.viewed)
+      .map((item) => item.path),
+  ), [selectedReview?.viewed_files]);
+  const allFilesViewed = selectedReview ? displayFiles.length > 0 && displayFiles.every((file) => viewedPaths.has(file.path)) : false;
+  const unresolvedCount = selectedReview?.unresolved_count ?? selectedReview?.unresolved_comment_count ?? 0;
+  const failingChecks = failedChecks(selectedReview);
+  const sealValid = selectedReview?.commit_seal?.valid !== false && !stale;
+  const commitReady = Boolean(selectedReview && selectedReview.status === "approved" && sealValid && allFilesViewed && unresolvedCount === 0 && failingChecks === 0);
   const visibleReviews = reviews.filter((review) => {
     const closed = String(review.status).toLowerCase().includes("closed");
     return filter === "closed" ? closed : !closed;
@@ -172,6 +202,149 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
     }
   };
 
+  const replaceReview = useCallback((review: ChangeRequestRecord | null) => {
+    if (!review) return;
+    setReviews((items) => items.map((item) => item.id === review.id ? review : item));
+  }, []);
+
+  const runReviewAction = useCallback(async (key: string, action: () => Promise<void>) => {
+    setActionBusy(key);
+    setError(null);
+    setNotice(null);
+    try {
+      await action();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActionBusy(null);
+    }
+  }, []);
+
+  const handleViewedChange = useCallback((path: string, nextViewed: boolean) => {
+    if (!selectedReview) return;
+    const reviewId = selectedReview.id;
+    setReviews((items) => items.map((item) => {
+      if (item.id !== reviewId) return item;
+      return {
+        ...item,
+        viewed_files: {
+          ...(item.viewed_files ?? {}),
+          [path]: { path, viewed: nextViewed, updated_at: new Date().toISOString() },
+        },
+      };
+    }));
+    void runReviewAction("viewed", async () => {
+      const updated = await setChangeRequestViewedFile(reviewId, path, nextViewed);
+      replaceReview(updated);
+    });
+  }, [replaceReview, runReviewAction, selectedReview]);
+
+  const handleAddComment = (kind: "comment" | "suggestion") => {
+    if (!selectedReview) return;
+    const body = commentBody.trim();
+    const patch = suggestionPatch.trim();
+    if (!body && !patch) {
+      setError("Comment text or suggested patch is required.");
+      return;
+    }
+    void runReviewAction("comment", async () => {
+      const updated = await addChangeRequestComment(selectedReview.id, {
+        kind,
+        body,
+        suggested_patch: kind === "suggestion" ? patch : undefined,
+        path: displayFiles[0]?.path,
+      });
+      replaceReview(updated);
+      setCommentBody("");
+      setSuggestionPatch("");
+    });
+  };
+
+  const handleResolveComment = (commentId: string, resolved: boolean) => {
+    if (!selectedReview) return;
+    void runReviewAction(`resolve-${commentId}`, async () => {
+      const updated = await updateChangeRequestComment(selectedReview.id, commentId, { resolved });
+      replaceReview(updated);
+    });
+  };
+
+  const handleDecision = (decision: "approve" | "request_changes" | "comment") => {
+    if (!selectedReview) return;
+    void runReviewAction(`decision-${decision}`, async () => {
+      const updated = await submitChangeRequestDecision(selectedReview.id, {
+        decision,
+        body: decision === "comment" ? commentBody.trim() : undefined,
+      });
+      replaceReview(updated);
+      if (decision === "comment") setCommentBody("");
+    });
+  };
+
+  const handleRunCheck = (command: string) => {
+    if (!selectedReview || !command.trim()) return;
+    void runReviewAction(`check-${command}`, async () => {
+      const result = await runChangeRequestCheck(selectedReview.id, command.trim());
+      replaceReview(result.review);
+      setCheckCommand("");
+      setNotice(result.check ? `Check ${result.check.status ?? "finished"}: ${result.check.command ?? command}` : "Check finished");
+    });
+  };
+
+  const handleReloadChecks = () => {
+    if (!selectedReview) return;
+    void runReviewAction("checks", async () => {
+      const result = await listChangeRequestChecks(selectedReview.id);
+      replaceReview(result.review);
+    });
+  };
+
+  const handleSeal = () => {
+    if (!selectedReview) return;
+    void runReviewAction("seal", async () => {
+      const seal = await getChangeRequestSeal(selectedReview.id);
+      if (!seal) return;
+      replaceReview({ ...selectedReview, commit_seal: seal });
+      setNotice(seal.valid ? "Review Seal matches the current working tree." : "Review Seal mismatch blocks commit.");
+    });
+  };
+
+  const handleCommit = () => {
+    if (!selectedReview) return;
+    void runReviewAction("commit", async () => {
+      const result = await commitChangeRequest(selectedReview.id, commitMessage);
+      if (!result) return;
+      replaceReview(result.review ?? null);
+      if (result.approval_required) {
+        setNotice(result.display_summary || "Commit requires approval before it can run.");
+        return;
+      }
+      if (result.blocked) {
+        setNotice(`Commit blocked: ${result.reason ?? "not ready"}`);
+        return;
+      }
+      setNotice(result.committed ? "Committed sealed snapshot locally." : "Commit did not run.");
+    });
+  };
+
+  const handleExportPatch = () => {
+    if (!selectedReview) return;
+    void runReviewAction("export", async () => {
+      const exported = await exportChangeRequestPatch(selectedReview.id);
+      if (!exported?.patch) {
+        setNotice("No patch is available for this review.");
+        return;
+      }
+      const blob = new Blob([exported.patch], { type: "text/x-patch;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = exported.filename || `${selectedReview.id}.patch`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setNotice(`Exported ${exported.patch_bytes ?? exported.patch.length} bytes.`);
+    });
+  };
+
   return (
     <section className="border-b border-zinc-800/60 p-3" aria-label="Rumi Review">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -192,6 +365,7 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
       </div>
 
       {error && <p className="mb-2 rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-200">{error}</p>}
+      {notice && <p className="mb-2 rounded border border-teal-500/30 bg-teal-500/10 px-2 py-1 text-[11px] text-teal-100">{notice}</p>}
       {!apiAvailable && (
         <p className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-100">
           Change request API is not enabled yet; working tree review remains local.
@@ -292,7 +466,7 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
           )}
 
           <div className="flex flex-wrap gap-1">
-            {(["summary", "files", "checks", "review", "seal"] as const).map((tab) => (
+            {(["summary", "files", "checks", "review", "commit"] as const).map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -317,14 +491,184 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
               </p>
               <div className="mt-2 flex flex-wrap gap-1">
                 {selectedReview?.created_at && <span className="rounded border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">created {compactDate(selectedReview.created_at)}</span>}
+                {selectedReview?.decision && <span className="rounded border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">decision {selectedReview.decision}</span>}
+                {selectedReview?.unresolved_count !== undefined && <span className="rounded border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">{selectedReview.unresolved_count} unresolved</span>}
+                {selectedReview?.viewed_file_count !== undefined && <span className="rounded border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">{selectedReview.viewed_file_count} viewed</span>}
                 <span className="rounded border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">{checkLabel(selectedReview ?? { id: "working-tree", status: "open" })}</span>
+              </div>
+              {selectedReview && (
+                <div className="mt-3 grid gap-2 min-[1440px]:grid-cols-3">
+                  <div className={`rounded border px-2 py-1.5 ${stale ? "border-amber-500/30 bg-amber-500/10" : "border-zinc-800 bg-black/20"}`}>
+                    <p className="text-[10px] text-zinc-500">Seal</p>
+                    <p className={`mt-0.5 text-[11px] ${stale ? "text-amber-100" : "text-zinc-200"}`}>{stale ? "stale" : "current"}</p>
+                  </div>
+                  <div className={`rounded border px-2 py-1.5 ${unresolvedCount ? "border-amber-500/30 bg-amber-500/10" : "border-zinc-800 bg-black/20"}`}>
+                    <p className="text-[10px] text-zinc-500">Review</p>
+                    <p className={`mt-0.5 text-[11px] ${unresolvedCount ? "text-amber-100" : "text-zinc-200"}`}>{unresolvedCount ? `${unresolvedCount} unresolved` : "clear"}</p>
+                  </div>
+                  <div className={`rounded border px-2 py-1.5 ${commitReady ? "border-emerald-500/30 bg-emerald-500/10" : "border-zinc-800 bg-black/20"}`}>
+                    <p className="text-[10px] text-zinc-500">Commit</p>
+                    <p className={`mt-0.5 text-[11px] ${commitReady ? "text-emerald-100" : "text-zinc-200"}`}>{commitReady ? "ready" : "blocked"}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {detailTab === "files" && (
+            <FilesChangedPane
+              files={displayFiles}
+              diff={displayDiff}
+              viewed={selectedReview ? viewedPaths : undefined}
+              onViewedChange={selectedReview ? handleViewedChange : undefined}
+            />
+          )}
+          {detailTab === "checks" && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button type="button" onClick={handleReloadChecks} disabled={!selectedReview || actionBusy === "checks"} className="flex h-7 items-center gap-1 rounded-md border border-zinc-800 px-2 text-[11px] text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">
+                  <RefreshCw size={12} /> Reload
+                </button>
+                <input
+                  value={checkCommand}
+                  onChange={(event) => setCheckCommand(event.target.value)}
+                  placeholder="python -m pytest"
+                  className="h-7 min-w-0 flex-1 rounded-md border border-zinc-800 bg-black/30 px-2 font-mono text-[11px] text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
+                />
+                <button type="button" onClick={() => handleRunCheck(checkCommand)} disabled={!selectedReview || !checkCommand.trim() || actionBusy?.startsWith("check-")} className="flex h-7 items-center gap-1 rounded-md bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-600">
+                  <Play size={12} /> Run
+                </button>
+              </div>
+              {(selectedReview?.suggested_checks ?? []).length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {(selectedReview?.suggested_checks ?? []).map((check) => (
+                    <button key={check.id} type="button" onClick={() => handleRunCheck(check.command)} disabled={actionBusy?.startsWith("check-")} className="rounded-md border border-zinc-800 px-2 py-1 text-left text-[11px] text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">
+                      <span className="font-mono">{check.command}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="space-y-1.5">
+                {(selectedReview?.checks ?? []).map((check) => {
+                  const passed = check.status === "passed";
+                  const failed = check.status === "failed" || check.status === "timed_out";
+                  return (
+                    <div key={check.id} className="rounded-md border border-zinc-800 bg-black/20 p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          {passed ? <CheckCircle2 size={13} className="text-emerald-300" /> : failed ? <XCircle size={13} className="text-red-300" /> : <Circle size={13} className="text-zinc-500" />}
+                          <span className="truncate font-mono text-[11px] text-zinc-200">{check.command || check.name || check.id}</span>
+                        </div>
+                        <span className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">{check.status ?? "queued"}</span>
+                      </div>
+                      {(check.log_tail || check.stderr_tail || check.stdout_tail) && <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 text-[10px] text-zinc-500">{check.log_tail || check.stderr_tail || check.stdout_tail}</pre>}
+                    </div>
+                  );
+                })}
+                {selectedReview && (selectedReview.checks ?? []).length === 0 && <p className="rounded-md border border-zinc-800 bg-black/20 px-2 py-4 text-center text-[11px] text-zinc-600">No checks have run</p>}
+                {!selectedReview && <p className="rounded-md border border-zinc-800 bg-black/20 px-2 py-4 text-center text-[11px] text-zinc-600">Create or select a review to run checks</p>}
               </div>
             </div>
           )}
-          {detailTab === "files" && <FilesChangedPane files={displayFiles} diff={displayDiff} />}
-          {detailTab === "checks" && <Placeholder title="Checks not enabled" text="Check execution will attach to change_request records in a later phase. This view is read-only for now." />}
-          {detailTab === "review" && <Placeholder title="AI review not enabled" text="Reviewer findings and threaded notes are not active yet. No remote review or external service is called from this panel." />}
-          {detailTab === "seal" && <Placeholder title="Seal actions not enabled" text="This phase intentionally does not commit, push, or publish changes." />}
+          {detailTab === "review" && (
+            <div className="space-y-2">
+              <div className="rounded-md border border-zinc-800 bg-black/20 p-2">
+                <div className="flex items-center gap-2">
+                  <MessageSquare size={13} className="text-teal-300" />
+                  <p className="text-xs font-semibold text-zinc-200">Review comments</p>
+                </div>
+                <textarea
+                  value={commentBody}
+                  onChange={(event) => setCommentBody(event.target.value)}
+                  placeholder="Leave a review comment"
+                  className="mt-2 min-h-20 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
+                />
+                <textarea
+                  value={suggestionPatch}
+                  onChange={(event) => setSuggestionPatch(event.target.value)}
+                  placeholder="Suggested patch"
+                  className="mt-2 min-h-16 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[10px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
+                />
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button type="button" onClick={() => handleAddComment("comment")} disabled={!selectedReview || actionBusy === "comment"} className="h-7 rounded-md border border-zinc-800 px-2 text-[11px] text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">Comment</button>
+                  <button type="button" onClick={() => handleAddComment("suggestion")} disabled={!selectedReview || actionBusy === "comment"} className="h-7 rounded-md border border-zinc-800 px-2 text-[11px] text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">Suggest</button>
+                  <button type="button" onClick={() => handleDecision("comment")} disabled={!selectedReview || actionBusy?.startsWith("decision-")} className="h-7 rounded-md border border-zinc-800 px-2 text-[11px] text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">Submit comment decision</button>
+                  <button type="button" onClick={() => handleDecision("request_changes")} disabled={!selectedReview || actionBusy?.startsWith("decision-")} className="h-7 rounded-md border border-red-500/30 px-2 text-[11px] text-red-200 hover:bg-red-500/10 disabled:opacity-40">Request changes</button>
+                  <button type="button" onClick={() => handleDecision("approve")} disabled={!selectedReview || actionBusy?.startsWith("decision-")} className="h-7 rounded-md border border-emerald-500/30 px-2 text-[11px] text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-40">Approve</button>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {(selectedReview?.comments ?? []).map((comment) => (
+                  <div key={comment.id} className="rounded-md border border-zinc-800 bg-black/20 p-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold text-zinc-200">{comment.kind ?? "comment"} {comment.path ? <span className="font-mono text-zinc-500">{comment.path}</span> : null}</p>
+                        <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-zinc-400">{comment.body || "No comment body"}</p>
+                      </div>
+                      <button type="button" onClick={() => handleResolveComment(comment.id, !comment.resolved)} disabled={actionBusy === `resolve-${comment.id}`} className={`h-7 shrink-0 rounded-md border px-2 text-[11px] ${comment.resolved ? "border-zinc-800 text-zinc-500" : "border-emerald-500/30 text-emerald-200 hover:bg-emerald-500/10"} disabled:opacity-40`}>
+                        {comment.resolved ? "Resolved" : "Resolve"}
+                      </button>
+                    </div>
+                    {comment.suggested_patch && <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 font-mono text-[10px] text-zinc-500">{comment.suggested_patch}</pre>}
+                  </div>
+                ))}
+                {selectedReview && (selectedReview.comments ?? []).length === 0 && <p className="rounded-md border border-zinc-800 bg-black/20 px-2 py-4 text-center text-[11px] text-zinc-600">No review comments</p>}
+                {!selectedReview && <p className="rounded-md border border-zinc-800 bg-black/20 px-2 py-4 text-center text-[11px] text-zinc-600">Create or select a review to comment</p>}
+              </div>
+            </div>
+          )}
+          {detailTab === "commit" && (
+            <div className="space-y-2">
+              <div className="rounded-md border border-zinc-800 bg-black/20 p-3">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck size={14} className={sealValid ? "text-emerald-300" : "text-amber-300"} />
+                  <p className="text-xs font-semibold text-zinc-200">Review Seal</p>
+                </div>
+                <div className="mt-2 grid gap-2 text-[11px] min-[1440px]:grid-cols-2">
+                  <div className="rounded border border-zinc-800 bg-zinc-950 px-2 py-1">
+                    <p className="text-zinc-600">snapshot</p>
+                    <p className="font-mono text-zinc-300">{shortHash(selectedReview?.snapshot_working_tree_hash || selectedReview?.snapshot?.signature || selectedReview?.commit_seal?.snapshot_working_tree_hash) || "none"}</p>
+                  </div>
+                  <div className="rounded border border-zinc-800 bg-zinc-950 px-2 py-1">
+                    <p className="text-zinc-600">current</p>
+                    <p className="font-mono text-zinc-300">{shortHash(selectedReview?.current_working_tree_hash || selectedReview?.commit_seal?.current_working_tree_hash) || "not checked"}</p>
+                  </div>
+                </div>
+                {(selectedReview?.commit_seal?.mismatch_paths ?? []).length > 0 && (
+                  <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-100">
+                    {(selectedReview?.commit_seal?.mismatch_paths ?? []).join(", ")}
+                  </div>
+                )}
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button type="button" onClick={handleSeal} disabled={!selectedReview || actionBusy === "seal"} className="flex h-7 items-center gap-1 rounded-md border border-zinc-800 px-2 text-[11px] text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">
+                    <RotateCw size={12} /> Recalculate
+                  </button>
+                  <button type="button" onClick={handleExportPatch} disabled={!selectedReview || !["approved", "committed"].includes(String(selectedReview.status)) || actionBusy === "export"} className="flex h-7 items-center gap-1 rounded-md border border-zinc-800 px-2 text-[11px] text-zinc-300 hover:bg-zinc-900 disabled:opacity-40">
+                    <Download size={12} /> Export patch
+                  </button>
+                </div>
+              </div>
+              <div className="rounded-md border border-zinc-800 bg-black/20 p-3">
+                <div className="flex items-center gap-2">
+                  <GitCommit size={14} className={commitReady ? "text-emerald-300" : "text-zinc-500"} />
+                  <p className="text-xs font-semibold text-zinc-200">{commitReady ? "Commit ready" : "Commit blocked"}</p>
+                </div>
+                <div className="mt-2 grid gap-1.5 text-[11px] text-zinc-500">
+                  <p>{selectedReview ? `status ${selectedReview.status}` : "select a review"}</p>
+                  <p>{allFilesViewed ? "all files viewed" : "not all files are viewed"}</p>
+                  <p>{unresolvedCount === 0 ? "no unresolved comments" : `${unresolvedCount} unresolved comments`}</p>
+                  <p>{failingChecks === 0 ? "checks are not failing" : `${failingChecks} failing checks`}</p>
+                </div>
+                <input
+                  value={commitMessage}
+                  onChange={(event) => setCommitMessage(event.target.value)}
+                  className="mt-2 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-[11px] text-zinc-200 outline-none focus:border-zinc-600"
+                />
+                <button type="button" onClick={handleCommit} disabled={!selectedReview || !commitMessage.trim() || actionBusy === "commit"} className="mt-2 flex h-8 items-center gap-1 rounded-md bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-600">
+                  <GitCommit size={12} /> Commit sealed snapshot
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </section>

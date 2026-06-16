@@ -38,6 +38,15 @@ def test_change_request_api_routes_are_registered_when_backend_exists():
     assert ("GET", "/api/change-requests") in routes
     assert ("POST", "/api/change-requests") in routes
     assert ("GET", "/api/change-requests/{id}") in routes
+    assert ("POST", "/api/change-requests/{id}/comments") in routes
+    assert ("PATCH", "/api/change-requests/{id}/comments/{comment_id}") in routes
+    assert ("POST", "/api/change-requests/{id}/decision") in routes
+    assert ("PATCH", "/api/change-requests/{id}/viewed-files") in routes
+    assert ("GET", "/api/change-requests/{id}/checks") in routes
+    assert ("POST", "/api/change-requests/{id}/checks/run") in routes
+    assert ("GET", "/api/change-requests/{id}/seal") in routes
+    assert ("POST", "/api/change-requests/{id}/commit") in routes
+    assert ("POST", "/api/change-requests/{id}/export-patch") in routes
 
     for method, pattern in routes:
         if "/api/change-requests" not in pattern:
@@ -62,3 +71,16 @@ def test_change_request_api_routes_are_registered_when_backend_exists():
         )
         for forbidden_term in forbidden_terms:
             assert forbidden_term not in target_text
+
+
+def test_change_request_function_ids_are_registered_when_backend_exists():
+    if not _has_change_request_backend():
+        pytest.skip("change_request backend implementation is not present yet")
+
+    from domain.function_runtime.registry import block_module_for
+
+    assert block_module_for("coding_change_request_list") == "blocks.change_request.collection"
+    assert block_module_for("coding_change_request_comment") == "blocks.change_request.comments"
+    assert block_module_for("coding_change_request_run_check") == "blocks.change_request.checks"
+    assert block_module_for("coding_change_request_commit") == "blocks.change_request.commit"
+    assert block_module_for("coding_change_request_export_patch") == "blocks.change_request.export_patch"

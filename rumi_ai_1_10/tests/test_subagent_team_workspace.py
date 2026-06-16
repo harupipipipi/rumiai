@@ -248,6 +248,44 @@ def test_file_tree_open_returns_sanitized_file_preview_and_channel_history(tmp_p
     assert "/Users/" not in json.dumps(opened_history["data"], sort_keys=True)
 
 
+def test_file_tree_includes_team_workspace_virtual_history(tmp_path, monkeypatch):
+    _configure_temp_runtime(tmp_path, monkeypatch)
+    store, runtime_store, company = _create_workspace()
+    workspace = tmp_path / "team-workspace"
+    workspace.mkdir()
+    (workspace / "notes.txt").write_text("hello\n", encoding="utf-8")
+
+    from domain.subagent_team.service import SubagentTeamService
+    from domain.subagent_team.file_tree import build_file_tree
+
+    service = SubagentTeamService(company_store=store, runtime_store=runtime_store)
+    created = service.creator_request(
+        company["id"],
+        {"action": "create_team", "team_size": 2, "channel_name": "History Room"},
+    )
+    service.ensure_dm(
+        company["id"],
+        {
+            "sender_id": created["agents"][0]["agent_id"],
+            "agent_id": created["agents"][1]["agent_id"],
+        },
+    )
+
+    tree = build_file_tree(
+        {"workspace_root": str(workspace), "company_id": company["id"], "include_git": False},
+        {},
+    )
+
+    encoded = json.dumps(tree["team_workspace"], sort_keys=True)
+    assert "channels/{channel}/conversation.md" in tree["team_workspace"]["paths"]
+    assert "messages.jsonl" in encoded
+    assert "approvals" in encoded
+    assert "artifacts" in encoded
+    assert "team-workspace/agents/" in encoded
+    assert "runs" in encoded
+    assert "dms" in encoded
+
+
 def test_channel_check_context_includes_membership_pm_gate_and_rich_policy(tmp_path, monkeypatch):
     _configure_temp_runtime(tmp_path, monkeypatch)
     store, runtime_store, company = _create_workspace()
@@ -287,8 +325,11 @@ def test_channel_check_context_includes_membership_pm_gate_and_rich_policy(tmp_p
     assert "Use PM gates for direct specialist work from non-PM senders." in context["instructions"]
     assert context["allowed"] is True
     assert context["agent_is_member"] is False
+    assert context["membership"]["is_member"] is False
+    assert context["target_membership"]["all_targets_are_members"] is True
     assert context["pm_required"] is False
     assert context["rich_allowed"] is True
+    assert context["task_completion_condition"]["pm_receipt_grants_user_approval"] is False
 
 
 def test_pm_decision_requires_stored_manager_actor_and_ignores_client_approval_flags(tmp_path, monkeypatch):
@@ -420,8 +461,17 @@ def test_rich_state_persists_and_creator_cannot_self_enable_or_exceed_cap(tmp_pa
         metadata = agent["metadata"]
         nested = metadata["subagent_team"]
         assert nested["uuid"] == agent["agent_id"]
+        assert nested["short_id"].startswith("sa-")
+        assert nested["legacy_short_id"].startswith("ag_")
         assert nested["short_id"] in agent["aliases"]
+        assert nested["legacy_short_id"] in agent["aliases"]
         assert UUIDISH_ID_RE.search(nested["short_id"]) is None
+        assert "channel_check" in agent["allowed_tools"]
+        assert all("." not in tool for tool in agent["allowed_tools"] if tool.startswith(("subagent", "channel")))
+        assert nested["tool_aliases"]["channel_check"] == "channel.check"
+        assert "Internal uuid:" in agent["system_prompt"]
+        assert "Human-facing short id:" in agent["system_prompt"]
+        assert "PM gate:" in agent["system_prompt"]
 
     persisted = rich_block.run({"company_id": company["id"], "action": "get"}, {})
     assert persisted["status"] == "ok"
@@ -518,6 +568,99 @@ def test_channel_check_enforced_before_message_goal_and_dm_routing(tmp_path, mon
     )
     assert dm["denied"] is True
     assert dm["code"] == "TARGET_NOT_FOUND"
+
+
+def test_dm_send_resolves_human_short_id_to_internal_uuid(tmp_path, monkeypatch):
+    _configure_temp_runtime(tmp_path, monkeypatch)
+    store, runtime_store, company = _create_workspace(settings={"subagent_team": {"rich_enabled": True}})
+
+    def fake_dispatch_task(self, company_id, task_id, **kwargs):
+        task = self.runtime_store.get_task(task_id, company_id=company_id)
+        return {
+            "task": task,
+            "dispatch": {"status": "queued", "requested_by": kwargs.get("requested_by")},
+            "results": [{"status": "queued"}],
+            "run_links": [],
+        }
+
+    monkeypatch.setattr(
+        "domain.company.run_dispatcher.CompanyRunDispatcher.dispatch_task",
+        fake_dispatch_task,
+    )
+
+    from domain.subagent_team.service import SubagentTeamService
+
+    service = SubagentTeamService(company_store=store, runtime_store=runtime_store)
+    created = service.creator_request(
+        company["id"],
+        {"action": "create_team", "team_size": 2, "channel_name": "DM Short IDs"},
+    )
+    pm = next(agent for agent in created["agents"] if agent["metadata"]["subagent_team"]["role"] == "pm")
+    worker = next(agent for agent in created["agents"] if agent["metadata"]["subagent_team"]["role"] != "pm")
+    worker_uuid = worker["agent_id"]
+    worker_short = worker["metadata"]["subagent_team"]["short_id"]
+
+    routed = service.send_dm(
+        company["id"],
+        {
+            "sender_id": pm["agent_id"],
+            "agent_id": "@" + worker_short,
+            "content": "Please inspect the latest change.",
+        },
+    )
+
+    assert routed["channel_check"]["kind"] == "channel.check"
+    assert routed["resolution"]["resolved_agent_ids"] == [worker_uuid]
+    assert routed["tasks"][0]["target_agent_ids"] == [worker_uuid]
+    assert routed["tasks"][0]["metadata"]["channel_check"]["target_agent_ids"] == [worker_uuid]
+    assert UUIDISH_ID_RE.search(worker_short) is None
+    assert worker_short.startswith("sa-")
+
+
+def test_creator_safe_actions_record_channel_check_and_guard_main_lifecycle(tmp_path, monkeypatch):
+    _configure_temp_runtime(tmp_path, monkeypatch)
+    store, runtime_store, company = _create_workspace()
+
+    from blocks.subagent_team import agents as agents_block
+    from blocks.subagent_team import creator as creator_block
+    from domain.subagent_team.service import SubagentTeamService
+
+    service = SubagentTeamService(company_store=store, runtime_store=runtime_store)
+    created = service.creator_request(
+        company["id"],
+        {"action": "create_team", "team_size": 2, "channel_name": "Safe Actions"},
+    )
+    channel_id = created["channel"]["id"]
+    pm = next(agent for agent in created["agents"] if agent["metadata"]["subagent_team"]["role"] == "pm")
+    worker = next(agent for agent in created["agents"] if agent["metadata"]["subagent_team"]["role"] != "pm")
+    worker_short = worker["metadata"]["subagent_team"]["short_id"]
+
+    status = creator_block.run(
+        {"company_id": company["id"], "tool_id": "subagent_status", "channel_id": channel_id},
+        {},
+    )
+    assert status["status"] == "ok"
+    assert status["data"]["preview"]["provider_safe_action"] == "status"
+    assert status["data"]["preview"]["channel_check"]["kind"] == "channel.check"
+
+    routed = service.send_message(
+        company["id"],
+        {
+            "channel_id": channel_id,
+            "sender_id": pm["agent_id"],
+            "content": "@" + worker_short + " please inspect",
+        },
+    )
+    assert routed["channel_check"]["kind"] == "channel.check"
+    assert routed["message"]["metadata"]["subagent_team"]["channel_check"]["kind"] == "channel.check"
+    assert routed["tasks"][0]["metadata"]["channel_check"]["kind"] == "channel.check"
+
+    blocked = agents_block.run(
+        {"company_id": company["id"], "action": "create", "agent": {"display_name": "Direct Main", "role": "coder"}},
+        {"actor_id": "main_agent"},
+    )
+    assert blocked["status"] == "error"
+    assert blocked["error"]["code"] == "CREATOR_REQUIRED"
 
 
 def test_channels_with_five_members_require_pm_unless_creator_supplies_one(tmp_path, monkeypatch):
@@ -656,14 +799,27 @@ def test_subagent_team_routes_are_registered_in_runtime_and_api_map():
         ("GET", "/api/subagent-team/status"),
         ("GET", "/api/subagent-team/channels"),
         ("POST", "/api/subagent-team/channels"),
+        ("GET", "/api/subagent-team/channels/{channel_id}"),
+        ("PATCH", "/api/subagent-team/channels/{channel_id}"),
         ("POST", "/api/subagent-team/channels/{channel_id}/messages"),
+        ("POST", "/api/subagent-team/channels/{channel_id}/leave"),
+        ("POST", "/api/subagent-team/channels/{channel_id}/archive"),
         ("POST", "/api/subagent-team/creator/test"),
         ("GET", "/api/subagent-team/creator/settings"),
         ("PATCH", "/api/subagent-team/creator/settings"),
         ("GET", "/api/subagent-team/rich"),
         ("POST", "/api/subagent-team/rich"),
         ("POST", "/api/subagent-team/channel-check"),
+        ("GET", "/api/subagent-team/agents/{short_id}"),
+        ("PATCH", "/api/subagent-team/agents/{short_id}"),
+        ("POST", "/api/subagent-team/agents/{short_id}/pause"),
+        ("POST", "/api/subagent-team/agents/{short_id}/resume"),
+        ("GET", "/api/subagent-team/dms"),
+        ("POST", "/api/subagent-team/dms/{thread_id}/messages"),
+        ("GET", "/api/subagent-team/goals"),
         ("POST", "/api/subagent-team/goals"),
+        ("GET", "/api/subagent-team/goals/{goal_id}"),
+        ("PATCH", "/api/subagent-team/goals/{goal_id}"),
         ("POST", "/api/subagent-team/goals/{goal_id}/approve"),
         ("POST", "/api/subagent-team/tasks/{task_id}/complete"),
     }
@@ -678,6 +834,32 @@ def test_subagent_team_routes_are_registered_in_runtime_and_api_map():
         if isinstance(route, dict)
     }
     assert expected_routes <= api_map_routes
+
+
+def test_subagent_team_provider_safe_function_manifests_are_registered():
+    from domain.function_runtime.manifest_factory import FUNCTION_SPECS_BY_ID
+
+    expected = {
+        "subagent_request": ("subagent.request", "blocks.subagent_team.creator"),
+        "subagent_status": ("subagent.status", "blocks.subagent_team.creator"),
+        "subagent_create": ("subagent.create", "blocks.subagent_team.creator"),
+        "subagent_dm_send": ("subagent.dm.send", "blocks.subagent_team.creator"),
+        "subagent_channel_join": ("subagent.channel.join", "blocks.subagent_team.creator"),
+        "subagent_goal_propose": ("subagent.goal.propose", "blocks.subagent_team.creator"),
+        "subagent_goal_approve": ("subagent.goal.approve", "blocks.subagent_team.creator"),
+        "subagent_task_complete": ("subagent.task.complete", "blocks.subagent_team.creator"),
+        "channel_check": ("channel.check", "blocks.subagent_team.channel_check"),
+    }
+
+    for function_id, (display_alias, block_module) in expected.items():
+        assert function_id in FUNCTION_SPECS_BY_ID
+        assert "." not in function_id
+        manifest_path = DEFAULTSPACK_ROOT / "functions" / function_id / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert manifest["function_id"] == function_id
+        assert display_alias in manifest["vocab_aliases"]
+        assert manifest["extensions"]["defaultspack"]["block_module"] == block_module
+        assert manifest["extensions"]["defaultspack"]["default_args"]["action"] == function_id
 
 
 def test_subagent_team_http_route_defaults_execute_blocks(tmp_path, monkeypatch):

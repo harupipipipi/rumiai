@@ -109,6 +109,7 @@ export const previewAgents: CompanyAgent[] = [
     allowed_tools: ["approve_plan", "request_revision"],
     status: "reviewing",
     aliases: ["owner", "decision"],
+    metadata: { short_id: "sa-creator-001" },
   },
   {
     agent_id: "pm",
@@ -119,36 +120,40 @@ export const previewAgents: CompanyAgent[] = [
     allowed_tools: ["tasks", "routing", "history"],
     status: "routing",
     aliases: ["producer", "handoff"],
+    metadata: { short_id: "sa-pm-orion-042" },
   },
   {
     agent_id: "frontend",
-    role_key: "frontend",
+    role_key: "coder",
     agent_name: "Frontend",
-    display_name: "Frontend",
+    display_name: "coder_kai",
     model: "stub/default",
     allowed_tools: ["file_read", "file_write", "browser"],
     status: "active",
     aliases: ["ui", "react"],
+    metadata: { short_id: "sa-kai-184" },
   },
   {
     agent_id: "backend",
-    role_key: "backend",
+    role_key: "coder",
     agent_name: "Backend",
-    display_name: "Backend",
+    display_name: "coder_mira",
     model: "stub/default",
     allowed_tools: ["file_read", "pytest", "api"],
     status: "idle",
     aliases: ["runtime"],
+    metadata: { short_id: "sa-mira-212" },
   },
   {
     agent_id: "qa",
     role_key: "qa",
     agent_name: "QA",
-    display_name: "QA",
+    display_name: "qa_sen",
     model: "stub/default",
     allowed_tools: ["browser", "lint", "build"],
     status: "watching",
     aliases: ["review"],
+    metadata: { short_id: "sa-sen-319" },
   },
 ];
 
@@ -348,8 +353,44 @@ export function shortId(value: string | undefined | null): string {
   return (compact || normalized).slice(-6).padStart(4, "0");
 }
 
+function metadataString(metadata: Record<string, unknown> | undefined, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = metadata?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+export function agentShortId(agent: CompanyAgent | undefined | null, fallbackId?: string | null): string {
+  const explicit = metadataString(agent?.metadata, "short_id", "shortId", "human_id", "humanId", "alias");
+  if (explicit) return explicit;
+  const id = agent?.agent_id || agent?.id || fallbackId;
+  if (!id) return "sa-unknown";
+  const normalized = String(id).trim();
+  if (/^sa[-_]/i.test(normalized)) return normalized;
+  return `sa-${shortId(normalized)}`;
+}
+
 export function agentName(agent: CompanyAgent | undefined | null, fallbackId?: string | null): string {
   return agent?.display_name || agent?.agent_name || agent?.role_key || agent?.agent_id || fallbackId || "Agent";
+}
+
+export function agentRoleKey(agent: CompanyAgent | undefined | null, fallbackId?: string | null): string {
+  const text = [
+    agent?.role_key,
+    agent?.agent_name,
+    agent?.display_name,
+    ...(agent?.aliases ?? []),
+    fallbackId,
+  ].map((value) => String(value ?? "").toLowerCase()).join(" ");
+  if (/(^|\s)(pm|producer|manager|lead|orion)(\s|$)/.test(text)) return "pm";
+  if (/creator|decision|owner|lifecycle/.test(text)) return "creator";
+  if (/qa|test|tester|sen|quality/.test(text)) return "qa";
+  if (/review|reviewer|checker|check|audit/.test(text)) return "reviewer";
+  if (/research|researcher|book|source/.test(text)) return "researcher";
+  if (/design|designer|artifact|creator/.test(text)) return "creator";
+  if (/code|coder|frontend|backend|engineer|dev|kai|mira/.test(text)) return "coder";
+  return "agent";
 }
 
 export function agentInitials(agent: CompanyAgent | undefined | null, fallbackId?: string | null): string {

@@ -2,11 +2,26 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import subprocess
 from pathlib import Path
 from typing import Any
 
-from .models import STATUS_VALUES, new_change_request_id, utc_now
-from .snapshot import ChangeRequestSnapshotter
+from domain.coding.git_ops import GitOps
+
+from .checks import run_allowed_check, suggested_checks_for, validate_check_command
+from .models import (
+    COMMENT_KIND_VALUES,
+    DECISION_VALUES,
+    STATUS_VALUES,
+    check_summary,
+    new_change_request_id,
+    new_review_check_id,
+    new_review_comment_id,
+    new_review_thread_id,
+    refresh_review_counts,
+    utc_now,
+)
+from .snapshot import ChangeRequestSnapshotter, _porcelain_paths
 from .store import ChangeRequestStore
 
 
@@ -31,7 +46,7 @@ class ChangeRequestService:
         record = self.store.get(change_request_id)
         if not record:
             return None
-        public = public_record(record)
+        public = self._public_record(record)
         drift = drift_status(record)
         if drift is not None:
             public["drift"] = drift
@@ -56,6 +71,7 @@ class ChangeRequestService:
             "title": str(title or "").strip() or default_title(snapshot),
             "description": str(description or ""),
             "status": "open",
+            "decision": "none",
             "workspace_root": snapshot["workspace_root"],
             "workspace_id": workspace_id,
             "created_at": now,
@@ -64,8 +80,19 @@ class ChangeRequestService:
             "latest_snapshot": snapshot,
             "snapshot_history": [snapshot_summary(snapshot)],
             "metadata": safe_metadata(metadata),
+            "comments": [],
+            "review_threads": [],
+            "viewed_files": {},
+            "checks": [],
+            "review_decisions": [],
+            "commit": {},
+            "commit_seal": {
+                "snapshot_working_tree_hash": snapshot.get("working_tree_hash"),
+                "valid": True,
+                "checked_at": now,
+            },
         }
-        return public_record(self.store.create(record))
+        return self._public_record(self.store.create(record))
 
     def update_metadata(self, change_request_id: str, updates: dict[str, Any]) -> dict[str, Any]:
         allowed: dict[str, Any] = {}
@@ -80,12 +107,25 @@ class ChangeRequestService:
             if status not in STATUS_VALUES:
                 raise ValueError("unsupported change request status: " + status)
             allowed["status"] = status
+        if "decision" in updates:
+            decision = normalize_decision(updates.get("decision"))
+            allowed["decision"] = decision
+            if decision == "approved":
+                allowed["status"] = "approved"
+            elif decision == "changes_requested":
+                allowed["status"] = "changes_requested"
+            elif decision == "commented" and not allowed.get("status"):
+                current = self.store.get(change_request_id)
+                if current is None:
+                    raise KeyError(change_request_id)
+                if current.get("status") in {"draft", "open"}:
+                    allowed["status"] = "open"
         if not allowed:
             current = self.store.get(change_request_id)
             if current is None:
                 raise KeyError(change_request_id)
-            return public_record(current)
-        return public_record(self.store.update(change_request_id, allowed))
+            return self._public_record(current)
+        return self._public_record(self.store.update(change_request_id, allowed))
 
     def refresh(self, change_request_id: str) -> dict[str, Any]:
         record = self.store.get(change_request_id)
@@ -104,7 +144,7 @@ class ChangeRequestService:
                 "last_drift": drift,
             },
         )
-        return {"change_request": public_record(updated), "snapshot": public_snapshot(snapshot, updated), "drift": drift}
+        return {"change_request": self._public_record(updated), "snapshot": public_snapshot(snapshot, updated), "drift": drift}
 
     def export_patch(self, change_request_id: str) -> dict[str, Any]:
         record = self.store.get(change_request_id)
@@ -121,6 +161,300 @@ class ChangeRequestService:
             "patch_bytes": len(patch.encode("utf-8")),
         }
 
+    def add_comment(self, change_request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        record = self._record_or_raise(change_request_id)
+        now = utc_now()
+        kind = str(payload.get("kind") or "comment").strip()
+        if kind not in COMMENT_KIND_VALUES:
+            raise ValueError("unsupported review comment kind: " + kind)
+        body = str(payload.get("body") or payload.get("text") or "")
+        suggested_patch = str(payload.get("suggested_patch") or "")
+        if not body.strip() and not suggested_patch.strip():
+            raise ValueError("comment body or suggested_patch is required")
+        thread_id = str(payload.get("thread_id") or new_review_thread_id())
+        path = str(payload.get("path") or payload.get("file_path") or "")
+        line = payload.get("line")
+        line_value = line if isinstance(line, int) and line > 0 else None
+        comment = {
+            "id": new_review_comment_id(),
+            "thread_id": thread_id,
+            "kind": kind,
+            "body": body,
+            "path": path,
+            "line": line_value,
+            "side": str(payload.get("side") or "new"),
+            "author": str(payload.get("author") or "local"),
+            "suggested_patch": suggested_patch,
+            "resolved": bool(payload.get("resolved")) or kind == "change_request",
+            "created_at": now,
+            "updated_at": now,
+        }
+        comments = [*self._comments(record), comment]
+        threads = ensure_thread(self._threads(record), thread_id, path=path, line=line_value, now=now)
+        updates = {"comments": comments, "review_threads": threads}
+        if record.get("decision") == "none" and kind == "change_request":
+            updates["decision"] = "commented"
+        updated = self._update_with_counts(change_request_id, updates)
+        return {"change_request": self._public_record(updated), "comment": comment}
+
+    def update_comment(self, change_request_id: str, comment_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        record = self._record_or_raise(change_request_id)
+        now = utc_now()
+        comments = self._comments(record)
+        matched = None
+        for comment in comments:
+            if comment.get("id") == comment_id:
+                matched = comment
+                break
+        threads = self._threads(record)
+        if matched is None:
+            for thread in threads:
+                if thread.get("id") == comment_id:
+                    next_resolved = bool(payload.get("resolved", thread.get("resolved")))
+                    thread["resolved"] = next_resolved
+                    thread["updated_at"] = now
+                    for comment in comments:
+                        if comment.get("thread_id") == comment_id:
+                            comment["resolved"] = next_resolved
+                            comment["updated_at"] = now
+                    updated = self._update_with_counts(change_request_id, {"comments": comments, "review_threads": threads})
+                    return {"change_request": self._public_record(updated), "thread": thread}
+            raise KeyError(comment_id)
+        if "body" in payload or "text" in payload:
+            matched["body"] = str(payload.get("body") or payload.get("text") or "")
+        if "suggested_patch" in payload:
+            matched["suggested_patch"] = str(payload.get("suggested_patch") or "")
+        if "kind" in payload:
+            kind = str(payload.get("kind") or "").strip()
+            if kind not in COMMENT_KIND_VALUES:
+                raise ValueError("unsupported review comment kind: " + kind)
+            matched["kind"] = kind
+        if "resolved" in payload:
+            matched["resolved"] = bool(payload.get("resolved"))
+        matched["updated_at"] = now
+        threads = update_thread_resolution_from_comments(threads, comments, str(matched.get("thread_id") or ""), now)
+        updated = self._update_with_counts(change_request_id, {"comments": comments, "review_threads": threads})
+        return {"change_request": self._public_record(updated), "comment": matched}
+
+    def submit_decision(self, change_request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        record = self._record_or_raise(change_request_id)
+        decision = normalize_decision(payload.get("decision") or payload.get("action") or payload.get("status"))
+        status = status_for_decision(decision, current_status=str(record.get("status") or "open"))
+        now = utc_now()
+        event = {
+            "decision": decision,
+            "status": status,
+            "body": str(payload.get("body") or payload.get("comment") or ""),
+            "author": str(payload.get("author") or "local"),
+            "created_at": now,
+        }
+        decisions = [*self._decisions(record), event]
+        updates = {"decision": decision, "status": status, "review_decisions": decisions}
+        if event["body"]:
+            comment_result = self.add_comment(
+                change_request_id,
+                {
+                    "kind": "change_request",
+                    "body": event["body"],
+                    "author": event["author"],
+                    "resolved": True,
+                },
+            )
+            record = self.store.get(change_request_id) or record
+            decisions = [*self._decisions(record), event]
+            updates = {"decision": decision, "status": status, "review_decisions": decisions}
+            updated = self._update_with_counts(change_request_id, updates)
+            return {
+                "change_request": self._public_record(updated),
+                "decision": event,
+                "comment": comment_result.get("comment"),
+            }
+        updated = self._update_with_counts(change_request_id, updates)
+        return {"change_request": self._public_record(updated), "decision": event}
+
+    def set_viewed_file(self, change_request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        record = self._record_or_raise(change_request_id)
+        viewed_files = dict(record.get("viewed_files") or {})
+        now = utc_now()
+        if isinstance(payload.get("viewed_files"), dict):
+            for path, viewed in payload["viewed_files"].items():
+                text = str(path or "").strip()
+                if text:
+                    viewed_files[text] = {"path": text, "viewed": bool(viewed), "updated_at": now}
+        else:
+            path = str(payload.get("path") or payload.get("file_path") or "").strip()
+            if not path:
+                raise ValueError("path is required")
+            viewed_files[path] = {"path": path, "viewed": bool(payload.get("viewed", True)), "updated_at": now}
+        updated = self._update_with_counts(change_request_id, {"viewed_files": viewed_files})
+        return {"change_request": self._public_record(updated), "viewed_files": updated.get("viewed_files") or {}}
+
+    def list_checks(self, change_request_id: str) -> dict[str, Any]:
+        record = self._record_or_raise(change_request_id)
+        return {
+            "change_request": self._public_record(record),
+            "checks": self._checks(record),
+            "check_summary": check_summary(self._checks(record)),
+            "suggested_checks": self._suggested_checks(record),
+        }
+
+    def get_check(self, change_request_id: str, check_id: str) -> dict[str, Any]:
+        record = self._record_or_raise(change_request_id)
+        for check in self._checks(record):
+            if check.get("id") == check_id:
+                return {"check": check, "change_request": self._public_record(record)}
+        raise KeyError(check_id)
+
+    def run_check(self, change_request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        record = self._record_or_raise(change_request_id)
+        command = payload.get("command")
+        if not command and payload.get("suggested_check_id"):
+            command = self._command_for_suggestion(record, str(payload.get("suggested_check_id") or ""))
+        validate_check_command(command)
+        result = run_allowed_check(record["workspace_root"], command, cwd=payload.get("cwd"))
+        check = {
+            "id": new_review_check_id(),
+            "log_ref": f"store://change_request/{change_request_id}/checks",
+            **result,
+        }
+        check["log_ref"] = f"store://change_request/{change_request_id}/checks/{check['id']}/log"
+        checks = [*self._checks(record), check]
+        updated = self._update_with_counts(change_request_id, {"checks": checks})
+        return {
+            "change_request": self._public_record(updated),
+            "check": check,
+            "checks": self._checks(updated),
+            "check_summary": check_summary(self._checks(updated)),
+            "suggested_checks": self._suggested_checks(updated),
+        }
+
+    def commit(self, change_request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        record = self._record_or_raise(change_request_id)
+        message = str(payload.get("message") or "").strip()
+        if not message:
+            raise ValueError("message is required")
+        seal = self.commit_seal(change_request_id)
+        if not seal.get("valid"):
+            return {
+                "committed": False,
+                "blocked": True,
+                "reason": "seal_mismatch",
+                "seal": seal,
+                "change_request": self._public_record(record),
+            }
+        snapshot = record.get("latest_snapshot") if isinstance(record.get("latest_snapshot"), dict) else {}
+        paths = selected_snapshot_paths(snapshot)
+        if not paths:
+            return {
+                "committed": False,
+                "blocked": True,
+                "reason": "no_snapshot_files",
+                "seal": seal,
+                "change_request": self._public_record(record),
+            }
+        outside_staged = staged_paths_outside_snapshot(record, paths)
+        if outside_staged:
+            return {
+                "committed": False,
+                "blocked": True,
+                "reason": "existing_staged_outside_snapshot",
+                "existing_staged_paths": outside_staged,
+                "seal": seal,
+                "change_request": self._public_record(record),
+            }
+        git = GitOps(record["workspace_root"])
+        result = git.commit(
+            message,
+            paths=paths,
+            actor_id=payload.get("actor_id") or payload.get("agent_id"),
+            agent_role=payload.get("agent_role"),
+            session_id=payload.get("session_id"),
+            metadata={"change_request_id": change_request_id, "snapshot_working_tree_hash": seal.get("snapshot_working_tree_hash")},
+        )
+        now = utc_now()
+        updated = self._update_with_counts(
+            change_request_id,
+            {
+                "status": "committed",
+                "commit": {**result, "committed_at": now, "seal": seal},
+                "commit_seal": {**seal, "committed_at": now},
+            },
+        )
+        return {"committed": True, "commit": result, "change_request": self._public_record(updated), "seal": seal}
+
+    def commit_seal(self, change_request_id: str) -> dict[str, Any]:
+        record = self._record_or_raise(change_request_id)
+        previous = record.get("latest_snapshot") if isinstance(record.get("latest_snapshot"), dict) else {}
+        if not previous:
+            return {"valid": False, "reason": "missing_snapshot"}
+        try:
+            current = ChangeRequestSnapshotter(record["workspace_root"]).snapshot()
+        except Exception as exc:
+            return {"valid": False, "reason": "snapshot_error", "error": str(exc)}
+        drift = compare_snapshots(previous, current)
+        valid = previous.get("working_tree_hash") == current.get("working_tree_hash")
+        return {
+            "valid": valid,
+            "checked_at": utc_now(),
+            "snapshot_working_tree_hash": previous.get("working_tree_hash"),
+            "current_working_tree_hash": current.get("working_tree_hash"),
+            "base_sha": previous.get("base_sha"),
+            "current_base_sha": current.get("base_sha"),
+            "mismatch_paths": sorted(set(drift.get("added_paths", []) + drift.get("removed_paths", []) + drift.get("changed_paths", []))),
+            "drift": drift,
+        }
+
+    def _public_record(self, record: dict[str, Any]) -> dict[str, Any]:
+        public = public_record(record)
+        public["check_summary"] = check_summary(self._checks(record))
+        public["suggested_checks"] = self._suggested_checks(record)
+        public["unresolved_count"] = int(record.get("unresolved_count") or 0)
+        public["unresolved_comment_count"] = int(record.get("unresolved_comment_count") or 0)
+        public["suggestion_count"] = int(record.get("suggestion_count") or 0)
+        public["viewed_file_count"] = int(record.get("viewed_file_count") or 0)
+        public.setdefault("decision", record.get("decision") or "none")
+        return public
+
+    def _record_or_raise(self, change_request_id: str) -> dict[str, Any]:
+        record = self.store.get(change_request_id)
+        if record is None:
+            raise KeyError(change_request_id)
+        return record
+
+    def _update_with_counts(self, change_request_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+        record = self._record_or_raise(change_request_id)
+        next_record = {**record, **updates}
+        refresh_review_counts(next_record)
+        counted_updates = dict(updates)
+        for key in ("unresolved_count", "unresolved_comment_count", "suggestion_count", "viewed_file_count", "check_summary"):
+            counted_updates[key] = next_record.get(key)
+        return self.store.update(change_request_id, counted_updates)
+
+    def _comments(self, record: dict[str, Any]) -> list[dict[str, Any]]:
+        return [copy.deepcopy(item) for item in record.get("comments", []) if isinstance(item, dict)]
+
+    def _threads(self, record: dict[str, Any]) -> list[dict[str, Any]]:
+        return [copy.deepcopy(item) for item in record.get("review_threads", []) if isinstance(item, dict)]
+
+    def _checks(self, record: dict[str, Any]) -> list[dict[str, Any]]:
+        return [copy.deepcopy(item) for item in record.get("checks", []) if isinstance(item, dict)]
+
+    def _decisions(self, record: dict[str, Any]) -> list[dict[str, Any]]:
+        return [copy.deepcopy(item) for item in record.get("review_decisions", []) if isinstance(item, dict)]
+
+    def _suggested_checks(self, record: dict[str, Any]) -> list[dict[str, Any]]:
+        snapshot = record.get("latest_snapshot") if isinstance(record.get("latest_snapshot"), dict) else {}
+        try:
+            return suggested_checks_for(str(record.get("workspace_root") or ""), snapshot)
+        except Exception:
+            return []
+
+    def _command_for_suggestion(self, record: dict[str, Any], suggestion_id: str) -> str:
+        for item in self._suggested_checks(record):
+            if item.get("id") == suggestion_id:
+                return str(item.get("command") or "")
+        raise KeyError(suggestion_id)
+
     @staticmethod
     def _summary(record: dict[str, Any]) -> dict[str, Any]:
         latest = record.get("latest_snapshot") if isinstance(record.get("latest_snapshot"), dict) else {}
@@ -130,6 +464,7 @@ class ChangeRequestService:
             "title": record.get("title"),
             "description": record.get("description"),
             "status": record.get("status"),
+            "decision": record.get("decision") or "none",
             "workspace_id": record.get("workspace_id") or f"ws_{workspace_hash}",
             "workspace_hash": workspace_hash,
             "created_at": record.get("created_at"),
@@ -140,12 +475,147 @@ class ChangeRequestService:
             "riskTags": latest.get("riskTags") or [],
             "file_stats": latest.get("file_stats") or [],
             "latest_snapshot": public_snapshot(latest, record) if latest else {},
+            "check_summary": check_summary(record.get("checks") if isinstance(record.get("checks"), list) else []),
+            "unresolved_count": int(record.get("unresolved_count") or 0),
+            "unresolved_comment_count": int(record.get("unresolved_comment_count") or 0),
+            "suggestion_count": int(record.get("suggestion_count") or 0),
+            "viewed_file_count": int(record.get("viewed_file_count") or 0),
         }
 
 
 def default_title(snapshot: dict[str, Any]) -> str:
     branch = str(snapshot.get("branch") or "").strip()
     return f"Review {branch}" if branch else "Review"
+
+
+def normalize_decision(value: Any) -> str:
+    text = str(value or "none").strip().lower().replace("-", "_")
+    aliases = {
+        "approve": "approved",
+        "request_changes": "changes_requested",
+        "changes_requested": "changes_requested",
+        "requestchanges": "changes_requested",
+        "comment": "commented",
+        "commented": "commented",
+        "none": "none",
+        "approved": "approved",
+    }
+    decision = aliases.get(text, text)
+    if decision not in DECISION_VALUES:
+        raise ValueError("unsupported review decision: " + text)
+    return decision
+
+
+def status_for_decision(decision: str, *, current_status: str = "open") -> str:
+    if decision == "approved":
+        return "approved"
+    if decision == "changes_requested":
+        return "changes_requested"
+    if decision == "commented":
+        return "open" if current_status in {"draft", "open"} else current_status
+    return "open" if current_status in {"draft", "open"} else current_status
+
+
+def ensure_thread(
+    threads: list[dict[str, Any]],
+    thread_id: str,
+    *,
+    path: str,
+    line: int | None,
+    now: str,
+) -> list[dict[str, Any]]:
+    for thread in threads:
+        if thread.get("id") == thread_id:
+            return threads
+    return [
+        *threads,
+        {
+            "id": thread_id,
+            "path": path,
+            "line": line,
+            "resolved": False,
+            "created_at": now,
+            "updated_at": now,
+        },
+    ]
+
+
+def update_thread_resolution_from_comments(
+    threads: list[dict[str, Any]],
+    comments: list[dict[str, Any]],
+    thread_id: str,
+    now: str,
+) -> list[dict[str, Any]]:
+    if not thread_id:
+        return threads
+    thread_comments = [item for item in comments if item.get("thread_id") == thread_id]
+    resolved = bool(thread_comments) and all(bool(item.get("resolved")) for item in thread_comments)
+    for thread in threads:
+        if thread.get("id") == thread_id:
+            thread["resolved"] = resolved
+            thread["updated_at"] = now
+            break
+    return threads
+
+
+def selected_snapshot_paths(snapshot: dict[str, Any]) -> list[str]:
+    stats = snapshot.get("file_stats") if isinstance(snapshot, dict) else []
+    paths = [
+        str(item.get("path") or "").strip()
+        for item in (stats if isinstance(stats, list) else [])
+        if isinstance(item, dict) and str(item.get("path") or "").strip()
+    ]
+    return list(dict.fromkeys(paths))
+
+
+def staged_paths_outside_snapshot(record: dict[str, Any], selected_paths: list[str]) -> list[str]:
+    workspace_root = Path(str(record.get("workspace_root") or "")).expanduser().resolve()
+    snapshotter = ChangeRequestSnapshotter(workspace_root)
+    selected_git_paths = {
+        git_relative_path(snapshotter.git_root, workspace_root / path)
+        for path in selected_paths
+    }
+    selected_git_paths.discard("")
+    completed = subprocess.run(
+        ["git", "--no-pager", "status", "--porcelain=v1"],
+        cwd=str(snapshotter.git_root),
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=30,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError((completed.stderr or completed.stdout or "git status failed").strip())
+    outside: list[str] = []
+    for line in completed.stdout.splitlines():
+        if len(line) < 4 or line.startswith("?? "):
+            continue
+        if line[0] == " ":
+            continue
+        paths = _porcelain_paths(line[3:])
+        if not paths:
+            continue
+        git_path = paths[-1]
+        if git_path in selected_git_paths:
+            continue
+        outside.append(display_git_path(snapshotter.git_root, workspace_root, git_path))
+    return sorted(dict.fromkeys(outside))
+
+
+def git_relative_path(git_root: Path, absolute_path: Path) -> str:
+    try:
+        return absolute_path.resolve(strict=False).relative_to(git_root).as_posix()
+    except ValueError:
+        return ""
+
+
+def display_git_path(git_root: Path, workspace_root: Path, git_path: str) -> str:
+    absolute = (git_root / git_path).resolve(strict=False)
+    try:
+        return absolute.relative_to(workspace_root).as_posix()
+    except ValueError:
+        return git_path
 
 
 def snapshot_summary(snapshot: dict[str, Any]) -> dict[str, Any]:

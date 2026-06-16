@@ -1,7 +1,7 @@
 from blocks._common import ok, error
 from domain.subagent_team.service import SubagentTeamService
 
-from ._helpers import company_id_from, denied, invalid, is_denied, missing_team, require_dict
+from ._helpers import company_id_from, denied, invalid, is_denied, lifecycle_actor, missing_team, normalize_action, require_dict
 
 
 def run(input_data, context):
@@ -10,7 +10,7 @@ def run(input_data, context):
     company_id = company_id_from(input_data)
     if not company_id:
         return invalid("company_id is required")
-    action = str(input_data.get("action") or "list").lower()
+    action = normalize_action(input_data.get("action"), "list")
     service = SubagentTeamService()
     try:
         if action == "list":
@@ -22,7 +22,7 @@ def run(input_data, context):
             dm = service.ensure_dm(
                 company_id,
                 input_data,
-                actor_id=str(input_data.get("actor_id") or input_data.get("sender_id") or "creator"),
+                actor_id=lifecycle_actor(input_data, context if isinstance(context, dict) else {}),
             )
             if is_denied(dm):
                 return denied(dm)

@@ -50,13 +50,18 @@ export function filesFromStatusAndDiff(status?: CodingGitStatus | null, diff?: C
 export function FilesChangedPane({
   files,
   diff,
+  viewed,
+  onViewedChange,
 }: {
   files: ChangeRequestFile[];
   diff?: string | null;
+  viewed?: Set<string>;
+  onViewedChange?: (path: string, nextViewed: boolean) => void;
 }) {
   const decoratedFiles = useMemo(() => uniqueFiles(files.map(decorateFile)), [files]);
   const [selectedPath, setSelectedPath] = useState<string | null>(decoratedFiles[0]?.path ?? null);
-  const [viewedPaths, setViewedPaths] = useState<Set<string>>(() => new Set());
+  const [localViewedPaths, setLocalViewedPaths] = useState<Set<string>>(() => new Set());
+  const viewedPaths = viewed ?? localViewedPaths;
   const selected = selectedPath && decoratedFiles.some((file) => file.path === selectedPath) ? selectedPath : decoratedFiles[0]?.path ?? null;
   const highRiskCount = decoratedFiles.filter((file) => file.highRisk).length;
   const untrackedCount = decoratedFiles.filter((file) => file.untracked).length;
@@ -76,7 +81,11 @@ export function FilesChangedPane({
           viewed={viewedPaths}
           onSelect={setSelectedPath}
           onViewedChange={(path, nextViewed) => {
-            setViewedPaths((current) => {
+            if (onViewedChange) {
+              onViewedChange(path, nextViewed);
+              return;
+            }
+            setLocalViewedPaths((current) => {
               const next = new Set(current);
               if (nextViewed) next.add(path);
               else next.delete(path);

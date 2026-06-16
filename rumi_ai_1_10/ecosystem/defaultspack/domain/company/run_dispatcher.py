@@ -93,6 +93,7 @@ class CompanyRunDispatcher:
                         "dispatch_id": dispatch_id,
                         "requested_by": requested_by,
                         "route": "agent.delegate",
+                        "channel_check": task.get("metadata", {}).get("channel_check") if isinstance(task.get("metadata"), dict) else None,
                     },
                 )
                 run_links.append(link)

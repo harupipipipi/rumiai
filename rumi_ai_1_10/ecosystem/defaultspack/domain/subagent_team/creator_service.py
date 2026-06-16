@@ -28,7 +28,7 @@ class CreatorService:
     def preview(self, company_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
         if self.company_store.get_company(company_id) is None:
             return None
-        action = str(data.get("action") or "message").lower()
+        action = _normalize_action(str(data.get("action") or data.get("tool_id") or "message"))
         message = normalize_message_request(data)
         rich = evaluate_rich_payload({**data, "content": message["content"]})
         team_plan = self._team_plan(company_id, data, action=action)
@@ -46,8 +46,25 @@ class CreatorService:
             action=action,
         )
         route_content = gated_content(content=rich["content"], sender_id=message["sender_id"], gate=gate)
+        channel_check = _preview_channel_check(
+            company_store=self.company_store,
+            runtime_store=self.runtime_store,
+            company_id=company_id,
+            data={
+                **data,
+                "channel_id": message["channel_id"],
+                "sender_id": message["sender_id"],
+                "agent_id": message["sender_id"],
+                "target_agent_ids": gate["target_agent_ids"],
+                "content": message["content"],
+                "rich_requested": rich["requested"],
+                "requested_new_agents": int(team_plan.get("team_size") or 0),
+                "action": action,
+            },
+        )
         return {
             "action": action,
+            "provider_safe_action": _provider_safe_action(action),
             "company_id": str(company_id),
             "will_execute_tools": False,
             "routing": {
@@ -57,6 +74,7 @@ class CreatorService:
                 "target_agent_ids": gate["target_agent_ids"],
             },
             "pm_gate": gate,
+            "channel_check": channel_check,
             "rich": rich,
             "rich_policy": rich_policy,
             "team_plan": team_plan,
@@ -79,6 +97,16 @@ class CreatorService:
         if preview is None:
             return None
         action = str(preview["action"])
+        if action == "status":
+            from .service import SubagentTeamService
+
+            return {
+                "preview": preview,
+                "result": SubagentTeamService(
+                    company_store=self.company_store,
+                    runtime_store=self.runtime_store,
+                ).status(company_id),
+            }
         if action in {"create_agent", "create_agents", "agent", "agents", "create_team", "team"}:
             return self._request_team_create(company_id, data, preview=preview)
         if action in {"message", "request", "delegate", "route"}:
@@ -91,6 +119,26 @@ class CreatorService:
                     runtime_store=self.runtime_store,
                 ).send_message(company_id, data, context=context or {}),
             }
+        if action == "dm_send":
+            from .service import SubagentTeamService
+
+            return {
+                "preview": preview,
+                "result": SubagentTeamService(
+                    company_store=self.company_store,
+                    runtime_store=self.runtime_store,
+                ).send_dm(company_id, data, context=context or {}),
+            }
+        if action == "channel_join":
+            from .service import SubagentTeamService, is_denial
+
+            service = SubagentTeamService(company_store=self.company_store, runtime_store=self.runtime_store)
+            channel_id = str(data.get("channel_id") or data.get("id") or "")
+            agent_id = str(data.get("agent_id") or data.get("member_id") or data.get("short_id") or "")
+            result = service.join_channel(company_id, channel_id, agent_id, actor_id="subagent_creator")
+            if is_denial(result):
+                return {"preview": preview, **result}
+            return {"preview": preview, "result": result}
         if action in {"create_goal", "goal"}:
             from .service import SubagentTeamService, is_denial
 
@@ -101,6 +149,28 @@ class CreatorService:
             if is_denial(task):
                 return {"preview": preview, **task}
             return {"preview": preview, "goal": task}
+        if action in {"goal_approve", "task_complete"}:
+            from .service import SubagentTeamService, is_denial
+
+            goal_id = str(data.get("goal_id") or data.get("task_id") or data.get("id") or "")
+            decision = "approve" if action == "goal_approve" else "task_complete"
+            task = SubagentTeamService(
+                company_store=self.company_store,
+                runtime_store=self.runtime_store,
+            ).decide_goal(company_id, goal_id, decision, data, context=context or {})
+            if is_denial(task):
+                return {"preview": preview, **task}
+            return {"preview": preview, "goal": task}
+        if action == "channel_check":
+            from .service import SubagentTeamService
+
+            return {
+                "preview": preview,
+                "result": SubagentTeamService(
+                    company_store=self.company_store,
+                    runtime_store=self.runtime_store,
+                ).channel_check(company_id, data),
+            }
         return {"preview": preview, "result": {"status": "preview_only", "action": action}}
 
     def _request_team_create(self, company_id: str, data: dict[str, Any], *, preview: dict[str, Any]) -> dict[str, Any]:
@@ -265,3 +335,51 @@ def _first_pm_agent_id(agents: list[dict[str, Any]]) -> str | None:
         if role == "pm" or str(nested.get("role") or "").strip().lower() == "pm":
             return str(agent.get("agent_id") or agent.get("id") or "")
     return None
+
+
+_ACTION_ALIASES = {
+    "subagent_request": "request",
+    "subagent.request": "request",
+    "subagent_status": "status",
+    "subagent.status": "status",
+    "subagent_create": "create_agent",
+    "subagent.create": "create_agent",
+    "subagent_dm_send": "dm_send",
+    "subagent.dm.send": "dm_send",
+    "subagent_channel_join": "channel_join",
+    "subagent.channel.join": "channel_join",
+    "subagent_goal_propose": "create_goal",
+    "subagent.goal.propose": "create_goal",
+    "subagent_goal_approve": "goal_approve",
+    "subagent.goal.approve": "goal_approve",
+    "subagent_task_complete": "task_complete",
+    "subagent.task.complete": "task_complete",
+    "channel.check": "channel_check",
+}
+
+
+def _normalize_action(action: str) -> str:
+    key = str(action or "").strip().lower()
+    return _ACTION_ALIASES.get(key, key or "message")
+
+
+def _provider_safe_action(action: str) -> str:
+    return str(action or "").strip().lower().replace(".", "_").replace("-", "_")
+
+
+def _preview_channel_check(
+    *,
+    company_store: CompanyStore,
+    runtime_store: CompanyRuntimeStore,
+    company_id: str,
+    data: dict[str, Any],
+) -> dict[str, Any] | None:
+    try:
+        from .service import SubagentTeamService
+
+        return SubagentTeamService(
+            company_store=company_store,
+            runtime_store=runtime_store,
+        ).channel_check(company_id, data)
+    except Exception:
+        return None

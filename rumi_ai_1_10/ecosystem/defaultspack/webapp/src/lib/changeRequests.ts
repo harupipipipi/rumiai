@@ -1,6 +1,7 @@
 import { defaultspackApiFetch, explainDefaultspackApiError } from "./api";
 
-export type ChangeRequestStatus = "open" | "closed" | "draft" | "stale" | string;
+export type ChangeRequestStatus = "draft" | "open" | "changes_requested" | "approved" | "committed" | "closed" | "stale" | string;
+export type ChangeRequestDecision = "none" | "commented" | "changes_requested" | "approved" | string;
 
 export type ChangeRequestCheckSummary = {
   total?: number;
@@ -23,6 +24,68 @@ export type ChangeRequestFile = {
   test?: boolean;
   highRisk?: boolean;
   large?: boolean;
+};
+
+export type ChangeRequestComment = {
+  id: string;
+  thread_id?: string;
+  kind?: "comment" | "change_request" | "suggestion" | string;
+  body?: string;
+  path?: string;
+  line?: number | null;
+  side?: string;
+  author?: string;
+  suggested_patch?: string;
+  resolved?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ChangeRequestThread = {
+  id: string;
+  path?: string;
+  line?: number | null;
+  resolved?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ChangeRequestViewedFile = {
+  path: string;
+  viewed: boolean;
+  updated_at?: string;
+};
+
+export type ChangeRequestCheck = {
+  id: string;
+  name?: string;
+  command?: string;
+  status?: string;
+  exit_code?: number | null;
+  stdout_tail?: string;
+  stderr_tail?: string;
+  log_tail?: string;
+  full_log?: string;
+  log_ref?: string;
+  started_at?: string;
+  completed_at?: string;
+  duration_ms?: number | null;
+};
+
+export type ChangeRequestSuggestedCheck = {
+  id: string;
+  name?: string;
+  command: string;
+  reason?: string;
+};
+
+export type ChangeRequestSeal = {
+  valid?: boolean;
+  reason?: string;
+  checked_at?: string;
+  snapshot_working_tree_hash?: string;
+  current_working_tree_hash?: string;
+  mismatch_paths?: string[];
 };
 
 export type ChangeRequestSnapshot = {
@@ -51,12 +114,24 @@ export type ChangeRequestDrift = {
 export type ChangeRequestRecord = {
   id: string;
   status: ChangeRequestStatus;
+  decision?: ChangeRequestDecision;
   title?: string;
   summary?: string;
   created_at?: string;
   updated_at?: string;
   workspace_id?: string | null;
   check_summary?: ChangeRequestCheckSummary;
+  checks?: ChangeRequestCheck[];
+  suggested_checks?: ChangeRequestSuggestedCheck[];
+  comments?: ChangeRequestComment[];
+  review_threads?: ChangeRequestThread[];
+  viewed_files?: Record<string, ChangeRequestViewedFile>;
+  unresolved_count?: number;
+  unresolved_comment_count?: number;
+  suggestion_count?: number;
+  viewed_file_count?: number;
+  commit_seal?: ChangeRequestSeal;
+  commit?: Record<string, unknown>;
   snapshot?: ChangeRequestSnapshot;
   drift?: ChangeRequestDrift;
   is_stale?: boolean;
@@ -147,6 +222,117 @@ function normalizeFile(value: unknown): ChangeRequestFile | null {
   };
 }
 
+function normalizeComment(value: unknown): ChangeRequestComment | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const id = readString(record, ["id", "comment_id"]);
+  if (!id) return null;
+  return {
+    id,
+    thread_id: readString(record, ["thread_id", "threadId"]),
+    kind: readString(record, ["kind", "type"]),
+    body: readString(record, ["body", "text"]),
+    path: readString(record, ["path", "file_path"]),
+    line: readNumber(record, ["line"]) ?? null,
+    side: readString(record, ["side"]),
+    author: readString(record, ["author"]),
+    suggested_patch: readString(record, ["suggested_patch", "suggestedPatch"]),
+    resolved: readBoolean(record, ["resolved"]),
+    created_at: readString(record, ["created_at", "createdAt"]),
+    updated_at: readString(record, ["updated_at", "updatedAt"]),
+  };
+}
+
+function normalizeThread(value: unknown): ChangeRequestThread | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const id = readString(record, ["id", "thread_id"]);
+  if (!id) return null;
+  return {
+    id,
+    path: readString(record, ["path", "file_path"]),
+    line: readNumber(record, ["line"]) ?? null,
+    resolved: readBoolean(record, ["resolved"]),
+    created_at: readString(record, ["created_at", "createdAt"]),
+    updated_at: readString(record, ["updated_at", "updatedAt"]),
+  };
+}
+
+function normalizeCheck(value: unknown): ChangeRequestCheck | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const id = readString(record, ["id", "check_id"]);
+  if (!id) return null;
+  return {
+    id,
+    name: readString(record, ["name", "label"]),
+    command: readString(record, ["command"]),
+    status: readString(record, ["status"]),
+    exit_code: readNumber(record, ["exit_code", "exitCode"]) ?? null,
+    stdout_tail: readString(record, ["stdout_tail", "stdoutTail"]),
+    stderr_tail: readString(record, ["stderr_tail", "stderrTail"]),
+    log_tail: readString(record, ["log_tail", "logTail"]),
+    full_log: readString(record, ["full_log", "fullLog"]),
+    log_ref: readString(record, ["log_ref", "logRef"]),
+    started_at: readString(record, ["started_at", "startedAt"]),
+    completed_at: readString(record, ["completed_at", "completedAt"]),
+    duration_ms: readNumber(record, ["duration_ms", "durationMs"]) ?? null,
+  };
+}
+
+function normalizeSuggestedCheck(value: unknown): ChangeRequestSuggestedCheck | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const command = readString(record, ["command"]);
+  if (!command) return null;
+  return {
+    id: readString(record, ["id", "check_id"]) ?? command,
+    name: readString(record, ["name", "label"]),
+    command,
+    reason: readString(record, ["reason", "description"]),
+  };
+}
+
+function normalizeViewedFiles(value: unknown): Record<string, ChangeRequestViewedFile> | undefined {
+  if (Array.isArray(value)) {
+    const result: Record<string, ChangeRequestViewedFile> = {};
+    for (const raw of value) {
+      const item = asRecord(raw);
+      if (!item) continue;
+      const path = readString(item, ["path", "file_path"]);
+      if (!path) continue;
+      result[path] = { path, viewed: readBoolean(item, ["viewed"]) === true, updated_at: readString(item, ["updated_at", "updatedAt"]) };
+    }
+    return result;
+  }
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const result: Record<string, ChangeRequestViewedFile> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    const item = asRecord(raw);
+    if (item) {
+      const path = readString(item, ["path", "file_path"]) ?? key;
+      result[path] = { path, viewed: readBoolean(item, ["viewed"]) === true, updated_at: readString(item, ["updated_at", "updatedAt"]) };
+    } else {
+      result[key] = { path: key, viewed: raw === true };
+    }
+  }
+  return result;
+}
+
+function normalizeSeal(value: unknown): ChangeRequestSeal | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return {
+    valid: readBoolean(record, ["valid"]),
+    reason: readString(record, ["reason"]),
+    checked_at: readString(record, ["checked_at", "checkedAt"]),
+    snapshot_working_tree_hash: readString(record, ["snapshot_working_tree_hash", "snapshot_worktree_hash"]),
+    current_working_tree_hash: readString(record, ["current_working_tree_hash", "current_worktree_hash"]),
+    mismatch_paths: normalizeStringList(record.mismatch_paths ?? record.changed_paths),
+  };
+}
+
 function normalizeFiles(value: unknown): ChangeRequestFile[] {
   return Array.isArray(value) ? value.map(normalizeFile).filter((file): file is ChangeRequestFile => file !== null) : [];
 }
@@ -214,12 +400,24 @@ function normalizeReview(value: unknown): ChangeRequestRecord | null {
   return {
     id,
     status,
+    decision: readString(record, ["decision"]),
     title: readString(record, ["title", "name"]),
     summary: readString(record, ["summary", "description"]),
     created_at: readString(record, ["created_at", "createdAt"]),
     updated_at: readString(record, ["updated_at", "updatedAt"]),
     workspace_id: readString(record, ["workspace_id"]) ?? null,
     check_summary: normalizeCheckSummary(record.check_summary ?? record.checks),
+    checks: Array.isArray(record.checks) ? record.checks.map(normalizeCheck).filter((check): check is ChangeRequestCheck => check !== null) : undefined,
+    suggested_checks: Array.isArray(record.suggested_checks) ? record.suggested_checks.map(normalizeSuggestedCheck).filter((check): check is ChangeRequestSuggestedCheck => check !== null) : undefined,
+    comments: Array.isArray(record.comments) ? record.comments.map(normalizeComment).filter((comment): comment is ChangeRequestComment => comment !== null) : undefined,
+    review_threads: Array.isArray(record.review_threads) ? record.review_threads.map(normalizeThread).filter((thread): thread is ChangeRequestThread => thread !== null) : undefined,
+    viewed_files: normalizeViewedFiles(record.viewed_files),
+    unresolved_count: readNumber(record, ["unresolved_count"]),
+    unresolved_comment_count: readNumber(record, ["unresolved_comment_count"]),
+    suggestion_count: readNumber(record, ["suggestion_count"]),
+    viewed_file_count: readNumber(record, ["viewed_file_count"]),
+    commit_seal: normalizeSeal(record.commit_seal),
+    commit: asRecord(record.commit) ?? undefined,
     snapshot,
     drift,
     is_stale: readBoolean(record, ["is_stale", "stale"]),
@@ -306,5 +504,125 @@ export async function refreshChangeRequest(reviewId: string, payload: { workspac
     ...review,
     drift: normalizeDrift(record?.drift) ?? review.drift,
     is_stale: false,
+  };
+}
+
+export async function addChangeRequestComment(reviewId: string, payload: {
+  kind?: string;
+  body?: string;
+  path?: string;
+  line?: number | null;
+  suggested_patch?: string;
+}): Promise<ChangeRequestRecord | null> {
+  const result = await requestChangeRequest<unknown>(`/api/change-requests/${encodeURIComponent(reviewId)}/comments`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  const record = asRecord(result);
+  return normalizeReview(record?.change_request ?? record?.review ?? result);
+}
+
+export async function updateChangeRequestComment(reviewId: string, commentId: string, payload: {
+  body?: string;
+  resolved?: boolean;
+  suggested_patch?: string;
+}): Promise<ChangeRequestRecord | null> {
+  const result = await requestChangeRequest<unknown>(`/api/change-requests/${encodeURIComponent(reviewId)}/comments/${encodeURIComponent(commentId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  const record = asRecord(result);
+  return normalizeReview(record?.change_request ?? record?.review ?? result);
+}
+
+export async function submitChangeRequestDecision(reviewId: string, payload: { decision: "approve" | "request_changes" | "comment" | "approved" | "changes_requested" | "commented"; body?: string }): Promise<ChangeRequestRecord | null> {
+  const result = await requestChangeRequest<unknown>(`/api/change-requests/${encodeURIComponent(reviewId)}/decision`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  const record = asRecord(result);
+  return normalizeReview(record?.change_request ?? record?.review ?? result);
+}
+
+export async function setChangeRequestViewedFile(reviewId: string, path: string, viewed: boolean): Promise<ChangeRequestRecord | null> {
+  const result = await requestChangeRequest<unknown>(`/api/change-requests/${encodeURIComponent(reviewId)}/viewed-files`, {
+    method: "PATCH",
+    body: JSON.stringify({ path, viewed }),
+  });
+  const record = asRecord(result);
+  return normalizeReview(record?.change_request ?? record?.review ?? result);
+}
+
+export async function listChangeRequestChecks(reviewId: string): Promise<{ review: ChangeRequestRecord | null; checks: ChangeRequestCheck[]; suggested_checks: ChangeRequestSuggestedCheck[] }> {
+  const result = await requestChangeRequest<unknown>(`/api/change-requests/${encodeURIComponent(reviewId)}/checks`);
+  const record = asRecord(result);
+  const review = normalizeReview(record?.change_request ?? record?.review ?? result);
+  return {
+    review,
+    checks: Array.isArray(record?.checks) ? record.checks.map(normalizeCheck).filter((check): check is ChangeRequestCheck => check !== null) : review?.checks ?? [],
+    suggested_checks: Array.isArray(record?.suggested_checks) ? record.suggested_checks.map(normalizeSuggestedCheck).filter((check): check is ChangeRequestSuggestedCheck => check !== null) : review?.suggested_checks ?? [],
+  };
+}
+
+export async function runChangeRequestCheck(reviewId: string, command: string): Promise<{ review: ChangeRequestRecord | null; check: ChangeRequestCheck | null }> {
+  const result = await requestChangeRequest<unknown>(`/api/change-requests/${encodeURIComponent(reviewId)}/checks/run`, {
+    method: "POST",
+    body: JSON.stringify({ command }),
+  });
+  const record = asRecord(result);
+  return {
+    review: normalizeReview(record?.change_request ?? record?.review ?? result),
+    check: normalizeCheck(record?.check),
+  };
+}
+
+export async function getChangeRequestSeal(reviewId: string): Promise<ChangeRequestSeal | null> {
+  const result = await requestChangeRequest<unknown>(`/api/change-requests/${encodeURIComponent(reviewId)}/seal`);
+  const record = asRecord(result);
+  return normalizeSeal(record?.seal ?? result) ?? null;
+}
+
+export type ChangeRequestCommitResult = {
+  committed?: boolean;
+  blocked?: boolean;
+  reason?: string;
+  approval_required?: boolean;
+  approval_request_id?: string;
+  display_summary?: string;
+  commit?: Record<string, unknown>;
+  seal?: ChangeRequestSeal;
+  review?: ChangeRequestRecord | null;
+};
+
+export async function commitChangeRequest(reviewId: string, message: string): Promise<ChangeRequestCommitResult | null> {
+  const result = await requestChangeRequest<unknown>(`/api/change-requests/${encodeURIComponent(reviewId)}/commit`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+  const record = asRecord(result);
+  if (!record) return null;
+  return {
+    committed: readBoolean(record, ["committed"]),
+    blocked: readBoolean(record, ["blocked"]),
+    reason: readString(record, ["reason"]),
+    approval_required: readBoolean(record, ["approval_required"]),
+    approval_request_id: readString(record, ["approval_request_id"]),
+    display_summary: readString(record, ["display_summary"]),
+    commit: asRecord(record.commit) ?? undefined,
+    seal: normalizeSeal(record.seal),
+    review: normalizeReview(record.change_request ?? record.review),
+  };
+}
+
+export async function exportChangeRequestPatch(reviewId: string): Promise<{ filename?: string; patch?: string; patch_bytes?: number } | null> {
+  const result = await requestChangeRequest<unknown>(`/api/change-requests/${encodeURIComponent(reviewId)}/export-patch`, {
+    method: "POST",
+  });
+  const record = asRecord(result);
+  if (!record) return null;
+  return {
+    filename: readString(record, ["filename"]),
+    patch: readString(record, ["patch"]),
+    patch_bytes: readNumber(record, ["patch_bytes", "patchBytes"]),
   };
 }

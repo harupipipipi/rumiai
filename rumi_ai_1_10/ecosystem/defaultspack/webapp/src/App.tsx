@@ -2297,6 +2297,7 @@ function ChatApp() {
   const activeWorkspaceKind = activeWorkspaceTab?.kind ?? "chat";
   const isChatWorkspace = activeWorkspaceKind === "chat";
   const isCodingWorkspace = activeWorkspaceKind === "coding";
+  const isSubagentWorkspace = activeWorkspaceKind === "subagents";
   const isCanvasWorkspace = activeWorkspaceKind === "canvas";
   const isToolsWorkspace = activeWorkspaceKind === "tools";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
@@ -2503,7 +2504,7 @@ function ChatApp() {
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
-  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace;
+  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace && !isSubagentWorkspace;
   const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
   const mimoCodingProfileAvailable = hasMimoCodingProfile(catalog);
@@ -5246,6 +5247,10 @@ function ChatApp() {
                   onWorkspacesRefresh={() => void loadCodingWorkspaces()}
                 />
               </div>
+            ) : isSubagentWorkspace ? (
+              <div className="flex min-h-0 flex-1">
+                <SubagentTeamWorkspace activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />
+              </div>
             ) : isCanvasWorkspace ? (
               <div className="flex min-h-0 flex-1 p-1.5">
                 <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-800/70 bg-[#0a0a0c]">
@@ -5457,9 +5462,7 @@ function ChatApp() {
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
-            companyPanel={activeConversationId
-              ? <SubagentTeamWorkspace activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />
-              : <CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />}
+            companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />}
             codingPanel={codingSidebarPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
             selectedProfile={activeProfile}

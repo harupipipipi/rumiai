@@ -51,7 +51,11 @@ def build_channel_check_context(
         "summary_total": summary_total,
         "instructions": [
             "Inspect channel state before routing work.",
+            "Record this channel.check result before delegate, message, goal, or DM routing.",
+            "Confirm actor membership and target membership before acting.",
             "Use PM gates for direct specialist work from non-PM senders.",
+            "Respect /rich policy; Creator cannot enable /rich.",
+            "Worker/checker completion is not final when a PM exists or channel size is 5+; PM task_complete with evidence is required.",
             "Route execution through CompanySlackRuntime and agent.delegate only.",
         ],
     }

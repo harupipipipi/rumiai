@@ -1,7 +1,7 @@
 from blocks._common import ok, error
 from domain.subagent_team.service import SubagentTeamService
 
-from ._helpers import company_id_from, denied, invalid, is_denied, missing_team, require_dict
+from ._helpers import company_id_from, denied, invalid, is_denied, missing_team, normalize_action, require_dict
 
 
 def run(input_data, context):
@@ -10,7 +10,7 @@ def run(input_data, context):
     company_id = company_id_from(input_data)
     if not company_id:
         return invalid("company_id is required")
-    action = str(input_data.get("action") or "list").lower()
+    action = normalize_action(input_data.get("action"), "list")
     service = SubagentTeamService()
     try:
         if action == "list":
@@ -51,7 +51,11 @@ def run(input_data, context):
                 if goal is None:
                     return error("goal not found: " + str(goal_id), "NOT_FOUND")
                 return ok(goal)
-            updates = input_data.get("updates") if isinstance(input_data.get("updates"), dict) else {}
+            updates = input_data.get("updates") if isinstance(input_data.get("updates"), dict) else {
+                key: value
+                for key, value in input_data.items()
+                if key not in {"company_id", "action", "goal_id", "task_id", "id"}
+            }
             goal = service.update_goal(company_id, str(goal_id), updates)
             if goal is None:
                 return error("goal not found: " + str(goal_id), "NOT_FOUND")

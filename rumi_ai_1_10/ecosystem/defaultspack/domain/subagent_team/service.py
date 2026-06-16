@@ -13,7 +13,7 @@ from domain.company.store import CompanyStore
 from .creator_service import CreatorService
 from .ids import slug_id, stable_short_id
 from .mention_parser import parse_mentions
-from .models import PM_THRESHOLD, team_metadata
+from .models import PM_THRESHOLD, TOOL_ID_ALIASES, team_metadata
 from .normalizers import (
     enrich_short_ids,
     lifecycle_update,
@@ -82,6 +82,18 @@ class SubagentTeamService:
                 "client_approved_flags_trusted": False,
                 "rich": self.rich_status(company_id, requested_new_agents=0),
             },
+            "actions": [
+                {
+                    "id": safe_id,
+                    "provider_safe_id": safe_id,
+                    "display_name": dotted,
+                    "legacy_dot_name": dotted,
+                    "direct_tool_execution": False,
+                    "creator_managed": safe_id
+                    in {"subagent_request", "subagent_status", "subagent_create", "subagent_dm_send", "subagent_channel_join"},
+                }
+                for safe_id, dotted in TOOL_ID_ALIASES.items()
+            ],
         }
 
     def rich_status(self, company_id: str, *, requested_new_agents: int = 0) -> dict[str, Any] | None:
@@ -163,6 +175,23 @@ class SubagentTeamService:
         channel["metadata"] = lifecycle_update(channel.get("metadata"), state="active", actor_id=actor_id)
         return self.company_store.upsert_channel(company_id, channel)
 
+    def patch_channel(self, company_id: str, channel_id: str, updates: dict[str, Any], *, actor_id: str = "creator") -> dict[str, Any] | None:
+        current = self.company_store.get_channel(company_id, str(channel_id))
+        if current is None:
+            return None
+        patch = dict(updates or {})
+        patch.pop("id", None)
+        patch.pop("channel_id", None)
+        merged = {**current, **patch, "id": str(channel_id)}
+        if "members" not in patch:
+            merged["members"] = list(current.get("members") or [])
+        if isinstance(current.get("metadata"), dict) or isinstance(patch.get("metadata"), dict):
+            merged["metadata"] = {
+                **(current.get("metadata") if isinstance(current.get("metadata"), dict) else {}),
+                **(patch.get("metadata") if isinstance(patch.get("metadata"), dict) else {}),
+            }
+        return self.upsert_channel(company_id, merged, actor_id=actor_id)
+
     def archive_channel(self, company_id: str, channel_id: str, *, actor_id: str = "creator") -> dict[str, Any] | None:
         channel = self.company_store.get_channel(company_id, channel_id)
         if channel is None:
@@ -170,6 +199,38 @@ class SubagentTeamService:
         channel["metadata"] = lifecycle_update(channel.get("metadata"), state="archived", actor_id=actor_id)
         channel["visibility"] = "archived"
         return self.company_store.upsert_channel(company_id, channel)
+
+    def join_channel(self, company_id: str, channel_id: str, agent_id: str, *, actor_id: str = "creator") -> dict[str, Any] | None:
+        channel = self.company_store.get_channel(company_id, str(channel_id))
+        if channel is None:
+            return None
+        resolved = self.resolve_agent_id(company_id, agent_id) or str(agent_id or "").strip().lstrip("@")
+        if not resolved:
+            return _deny("agent_id is required", "INVALID_INPUT")
+        members = self._resolved_channel_members(company_id, channel)
+        if resolved not in members:
+            members.append(resolved)
+        return self.patch_channel(
+            company_id,
+            str(channel_id),
+            {"members": members},
+            actor_id=actor_id or resolved,
+        )
+
+    def leave_channel(self, company_id: str, channel_id: str, agent_id: str, *, actor_id: str = "creator") -> dict[str, Any] | None:
+        channel = self.company_store.get_channel(company_id, str(channel_id))
+        if channel is None:
+            return None
+        resolved = self.resolve_agent_id(company_id, agent_id) or str(agent_id or "").strip().lstrip("@")
+        if not resolved:
+            return _deny("agent_id is required", "INVALID_INPUT")
+        members = [member for member in self._resolved_channel_members(company_id, channel) if member != resolved]
+        return self.patch_channel(
+            company_id,
+            str(channel_id),
+            {"members": members},
+            actor_id=actor_id or resolved,
+        )
 
     def channel_check(self, company_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
         context = build_channel_check_context(
@@ -203,6 +264,27 @@ class SubagentTeamService:
         agent["metadata"] = lifecycle_update(agent.get("metadata"), state="active", actor_id=actor_id)
         return self.company_store.upsert_agent(company_id, agent)
 
+    def patch_agent(self, company_id: str, agent_id: str, updates: dict[str, Any], *, actor_id: str = "creator") -> dict[str, Any] | None:
+        resolved = self.resolve_agent_id(company_id, agent_id) or str(agent_id or "").strip().lstrip("@")
+        current = self.company_store.get_agent(company_id, resolved)
+        if current is None:
+            return None
+        patch = dict(updates or {})
+        patch.pop("id", None)
+        patch.pop("agent_id", None)
+        merged = {**current, **patch, "agent_id": resolved, "id": resolved}
+        if isinstance(current.get("metadata"), dict) or isinstance(patch.get("metadata"), dict):
+            merged["metadata"] = {
+                **(current.get("metadata") if isinstance(current.get("metadata"), dict) else {}),
+                **(patch.get("metadata") if isinstance(patch.get("metadata"), dict) else {}),
+            }
+        if "aliases" not in patch:
+            merged["aliases"] = list(current.get("aliases") or [])
+        return self.upsert_agent(company_id, merged, actor_id=actor_id)
+
+    def set_agent_status(self, company_id: str, agent_id: str, status: str, *, actor_id: str = "creator") -> dict[str, Any] | None:
+        return self.patch_agent(company_id, agent_id, {"status": str(status or "idle")}, actor_id=actor_id)
+
     def archive_agent(self, company_id: str, agent_id: str, *, actor_id: str = "creator") -> dict[str, Any] | None:
         agent = self.company_store.get_agent(company_id, agent_id)
         if agent is None:
@@ -233,6 +315,7 @@ class SubagentTeamService:
             company_id,
             explicit=message["target_agent_ids"],
             content=message["content"],
+            channel_id=message["channel_id"],
         )
         unresolved_targets = self._unresolved_target_ids(company_id, message["target_agent_ids"])
         if unresolved_targets:
@@ -255,12 +338,25 @@ class SubagentTeamService:
         )
         if not check["allowed"]:
             return _deny(str(check["deny_reason"]), str(check["deny_code"]), channel_check=check)
+        recorded_check = self.channel_check(
+            company_id,
+            {
+                **data,
+                "channel_id": message["channel_id"],
+                "agent_id": message["sender_id"],
+                "sender_id": message["sender_id"],
+                "target_agent_ids": target_agent_ids,
+                "rich_requested": rich["requested"],
+                "action": str(data.get("action") or "message"),
+            },
+        ) or check
         gate = pm_gate_decision(
             sender_id=message["sender_id"],
             content=message["content"],
             target_agent_ids=target_agent_ids,
             rich_requested=rich["requested"],
             action=str(data.get("action") or "message"),
+            project_manager_id=str(recorded_check.get("pm_agent_id") or "project_manager"),
         )
         routed_content = gated_content(content=rich["content"], sender_id=message["sender_id"], gate=gate)
         metadata = {
@@ -269,6 +365,8 @@ class SubagentTeamService:
                 "parsed": message["parsed"],
                 "rich": rich,
                 "pm_gate": gate,
+                "channel_check": recorded_check,
+                "task_completion_condition": recorded_check.get("task_completion_condition"),
                 "original_content": message["content"],
                 "client_approved_ignored": "approved" in data,
             },
@@ -277,7 +375,7 @@ class SubagentTeamService:
             metadata["rich_payload"] = rich["rich_payload"]
         if rich["attachments"]:
             metadata["attachments"] = rich["attachments"]
-        return CompanySlackRuntime(company_store=self.company_store, runtime_store=self.runtime_store).post_message(
+        result = CompanySlackRuntime(company_store=self.company_store, runtime_store=self.runtime_store).post_message(
             company_id,
             content=routed_content,
             sender_id=message["sender_id"],
@@ -287,13 +385,22 @@ class SubagentTeamService:
             metadata=metadata,
             context=context or {},
         )
+        if isinstance(result, dict):
+            result["channel_check"] = recorded_check
+        return result
 
-    def _resolve_target_agent_ids(self, company_id: str, *, explicit: list[str], content: str) -> list[str]:
+    def _resolve_target_agent_ids(self, company_id: str, *, explicit: list[str], content: str, channel_id: str | None = None) -> list[str]:
         resolved: list[str] = []
         mention_service = CompanyMentionService(self.company_store)
         if explicit:
             explicit_resolution = mention_service.resolve(company_id, explicit) or {}
             resolved.extend(str(item) for item in explicit_resolution.get("resolved_agent_ids") or [])
+        parsed = parse_mentions(content)
+        special_mentions = {str(item).strip().lower() for item in parsed.get("agent_mentions", [])}
+        if special_mentions.intersection({"team", "channel"}):
+            channel = self.company_store.get_channel(company_id, str(channel_id or DEFAULT_CHANNEL_ID))
+            if channel is not None:
+                resolved.extend(self._resolved_channel_members(company_id, channel))
         content_resolution = mention_service.resolve(company_id, content) or {}
         resolved.extend(str(item) for item in content_resolution.get("resolved_agent_ids") or [])
         return _dedupe(resolved)
@@ -334,7 +441,12 @@ class SubagentTeamService:
             return None
         goal = normalize_goal_request(data)
         sender_id = str(data.get("sender_id") or data.get("actor_id") or "user")
-        targets = self._resolve_target_agent_ids(company_id, explicit=goal["target_agent_ids"], content=goal["description"] or goal["title"])
+        targets = self._resolve_target_agent_ids(
+            company_id,
+            explicit=goal["target_agent_ids"],
+            content=goal["description"] or goal["title"],
+            channel_id=goal["channel_id"] or DEFAULT_CHANNEL_ID,
+        )
         unresolved_targets = self._unresolved_target_ids(company_id, goal["target_agent_ids"])
         if unresolved_targets:
             return _deny(
@@ -355,16 +467,46 @@ class SubagentTeamService:
         )
         if not check["allowed"]:
             return _deny(str(check["deny_reason"]), str(check["deny_code"]), channel_check=check)
+        recorded_check = self.channel_check(
+            company_id,
+            {
+                **data,
+                "channel_id": goal["channel_id"] or DEFAULT_CHANNEL_ID,
+                "agent_id": sender_id,
+                "sender_id": sender_id,
+                "target_agent_ids": targets,
+                "action": "create_goal",
+            },
+        ) or check
         gate = pm_gate_decision(
             sender_id=sender_id,
             content=goal["description"] or goal["title"],
             target_agent_ids=targets,
             action="create_goal",
+            project_manager_id=str(check.get("pm_agent_id") or "project_manager"),
         )
+        channel_policy = check.get("channel_policy") if isinstance(check.get("channel_policy"), dict) else {}
+        pm_agent_id = str(channel_policy.get("pm_agent_id") or "")
+        actor_auth = self.authorize_pm_actor(company_id, sender_id, channel_id=goal["channel_id"] or DEFAULT_CHANNEL_ID)
+        pm_goal_approval_required = bool(pm_agent_id and not actor_auth.get("allowed"))
         description = goal["description"]
-        if gate["requires_pm"]:
+        if pm_goal_approval_required:
+            gate = {
+                **gate,
+                "requires_pm": True,
+                "reason": "/goal requires channel PM approval",
+                "requested_target_agent_ids": targets,
+                "target_agent_ids": [pm_agent_id],
+                "route": "pm_gate",
+                "project_manager_id": pm_agent_id,
+            }
+            description = gated_content(content=description or goal["title"], sender_id=sender_id, gate=gate)
+            targets = [pm_agent_id]
+            goal["status"] = "waiting_approval"
+        elif gate["requires_pm"]:
             description = gated_content(content=description or goal["title"], sender_id=sender_id, gate=gate)
             targets = gate["target_agent_ids"]
+            goal["status"] = "waiting_approval"
         return self.runtime_store.create_task(
             company_id,
             title=goal["title"],
@@ -375,7 +517,12 @@ class SubagentTeamService:
             priority=goal["priority"],
             channel_id=goal["channel_id"] or DEFAULT_CHANNEL_ID,
             thread_id=goal["thread_id"],
-            metadata={**goal["metadata"], "pm_gate": gate},
+            metadata={
+                **goal["metadata"],
+                "pm_gate": gate,
+                "channel_check": recorded_check,
+                "task_completion_condition": recorded_check.get("task_completion_condition"),
+            },
         )
 
     def update_goal(self, company_id: str, goal_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -413,6 +560,31 @@ class SubagentTeamService:
                 "FORBIDDEN",
                 auth=auth,
             )
+        check = self._channel_turn_policy(
+            company_id,
+            {
+                **data,
+                "channel_id": channel_id,
+                "agent_id": actor_id,
+                "sender_id": actor_id,
+                "target_agent_ids": list(task.get("target_agent_ids") or []),
+                "action": str(action or "update_goal"),
+            },
+        )
+        recorded_check = self.channel_check(
+            company_id,
+            {
+                **data,
+                "channel_id": channel_id,
+                "agent_id": actor_id,
+                "sender_id": actor_id,
+                "target_agent_ids": list(task.get("target_agent_ids") or []),
+                "action": str(action or "update_goal"),
+            },
+        ) or check
+        channel_policy = check.get("channel_policy") if isinstance(check.get("channel_policy"), dict) else {}
+        if str(action or "").lower() in {"task_complete", "complete", "close"} and channel_policy.get("pm_required") and not channel_policy.get("pm_agent_id"):
+            return _deny("channels with 5 or more members require a PM task_complete owner", "PM_REQUIRED", channel_check=recorded_check)
         updates = data.get("updates") if isinstance(data.get("updates"), dict) else {}
         normalized_action = str(action or "").lower()
         status = updates.get("status")
@@ -437,6 +609,7 @@ class SubagentTeamService:
             "task_id": str(goal_id),
             "decision": approval or str(status or "updated"),
             "grants_user_approval": False,
+            "channel_check": recorded_check,
             "created_at": timestamp(),
         }
         current_metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
@@ -451,6 +624,8 @@ class SubagentTeamService:
                 "approval_receipt_id": receipt_id,
                 "approval_receipt": receipt,
                 "approval_receipts": [*receipts, receipt],
+                "channel_check": recorded_check,
+                "task_completion_condition": recorded_check.get("task_completion_condition"),
             },
         }
         return self.runtime_store.update_task(goal_id, clean, company_id=company_id)
@@ -466,6 +641,13 @@ class SubagentTeamService:
         if len(participants) < 2 and data.get("agent_id"):
             participants.append(str(data["agent_id"]))
         channel_id = str(data.get("dm_id") or data.get("channel_id") or _dm_channel_id(company_id, participants))
+        existing = self.company_store.get_channel(company_id, channel_id)
+        if existing is not None:
+            existing_members = self._resolved_channel_members(company_id, existing)
+            if len(participants) < 2:
+                participants = existing_members
+            else:
+                participants = _dedupe([*existing_members, *participants])
         channel = {
             "id": channel_id,
             "name": str(data.get("name") or "dm-" + "-".join(participants[:3])),
@@ -490,7 +672,15 @@ class SubagentTeamService:
         dm = self.ensure_dm(company_id, data, actor_id=str(data.get("sender_id") or data.get("actor_id") or "creator"))
         if dm is None:
             return None
-        targets = self._resolve_target_agent_ids(company_id, explicit=explicit_targets, content=str(data.get("content") or data.get("message") or ""))
+        if not explicit_targets:
+            sender = self.resolve_agent_id(company_id, str(data.get("sender_id") or data.get("actor_id") or "user"))
+            explicit_targets = [member for member in self._resolved_channel_members(company_id, dm) if member != sender]
+        targets = self._resolve_target_agent_ids(
+            company_id,
+            explicit=explicit_targets,
+            content=str(data.get("content") or data.get("message") or ""),
+            channel_id=str(dm["id"]),
+        )
         check = self._channel_turn_policy(
             company_id,
             {
@@ -600,6 +790,7 @@ class SubagentTeamService:
             company_id,
             explicit=list(data.get("target_agent_ids") or []),
             content=str(data.get("content") or data.get("message") or data.get("text") or ""),
+            channel_id=channel_id,
         )
         missing_members = [agent_id for agent_id in target_agent_ids if agent_id not in members]
         if missing_members:
@@ -611,6 +802,7 @@ class SubagentTeamService:
                 agent_id=actor_id,
                 agent_is_member=agent_is_member,
                 target_agent_ids=target_agent_ids,
+                missing_target_agent_ids=missing_members,
                 channel_policy=channel_policy,
             )
         if not channel_policy["allowed"]:
@@ -643,6 +835,7 @@ class SubagentTeamService:
             target_agent_ids=target_agent_ids,
             rich_requested=bool(data.get("rich_requested") or data.get("rich")),
             action=str(data.get("action") or "message"),
+            project_manager_id=str(channel_policy.get("pm_agent_id") or "project_manager"),
         )
         if gate.get("requires_pm") and str(gate.get("project_manager_id") or "project_manager") not in members:
             return _channel_decision(
@@ -783,6 +976,7 @@ def _channel_decision(
     agent_id: str | None = None,
     agent_is_member: bool | None = None,
     target_agent_ids: list[str] | None = None,
+    missing_target_agent_ids: list[str] | None = None,
     channel_policy: dict[str, Any] | None = None,
     rich_status: dict[str, Any] | None = None,
     pm_gate: dict[str, Any] | None = None,
@@ -790,6 +984,10 @@ def _channel_decision(
     channel_policy = channel_policy if isinstance(channel_policy, dict) else {}
     rich_status = rich_status if isinstance(rich_status, dict) else {}
     pm_gate = pm_gate if isinstance(pm_gate, dict) else {}
+    targets = list(target_agent_ids or [])
+    missing_targets = list(missing_target_agent_ids or [])
+    pm_required = bool(channel_policy.get("pm_required") or pm_gate.get("requires_pm"))
+    pm_agent_id = channel_policy.get("pm_agent_id")
     return {
         "allowed": bool(allowed),
         "deny_code": deny_code,
@@ -797,13 +995,35 @@ def _channel_decision(
         "channel_id": channel_id,
         "agent_id": agent_id,
         "agent_is_member": bool(agent_is_member) if agent_is_member is not None else False,
-        "target_agent_ids": list(target_agent_ids or []),
-        "pm_required": bool(channel_policy.get("pm_required") or pm_gate.get("requires_pm")),
-        "pm_agent_id": channel_policy.get("pm_agent_id"),
+        "membership": {
+            "agent_id": agent_id,
+            "is_member": bool(agent_is_member) if agent_is_member is not None else False,
+            "required": bool(agent_id),
+        },
+        "target_agent_ids": targets,
+        "target_membership": {
+            "target_agent_ids": targets,
+            "missing_target_agent_ids": missing_targets,
+            "all_targets_are_members": not missing_targets,
+        },
+        "pm_required": pm_required,
+        "pm_agent_id": pm_agent_id,
         "rich_allowed": bool(rich_status.get("allowed", True)),
         "rich_policy": rich_status,
         "channel_policy": channel_policy,
         "pm_gate": pm_gate,
+        "task_completion_condition": {
+            "requires_pm_task_complete": bool(pm_required or pm_agent_id),
+            "pm_agent_id": pm_agent_id,
+            "worker_completion_is_final": not bool(pm_required or pm_agent_id),
+            "pm_receipt_grants_user_approval": False,
+        },
+        "context_contract": {
+            "channel_check_required": True,
+            "must_precede": ["delegate", "message", "goal", "dm"],
+            "direct_tool_execution": False,
+            "client_approved_flags_trusted": False,
+        },
     }
 
 

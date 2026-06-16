@@ -21,7 +21,7 @@ def pm_gate_decision(
     sender = str(sender_id or "user").strip().lower()
     targets = _dedupe(target_agent_ids or [])
     direct_targets = [target for target in targets if target not in PM_AGENT_IDS]
-    sender_is_pm = sender in PM_AGENT_IDS
+    sender_is_pm = sender in PM_AGENT_IDS or sender == str(project_manager_id or "").strip().lower()
     lifecycle_action = str(action or "").lower() in {
         "create_agent",
         "update_agent",

@@ -34,6 +34,55 @@ def denied(result: dict[str, Any]):
     return error(str(result.get("message") or "denied"), str(result.get("code") or "FORBIDDEN"))
 
 
+def normalize_action(value: Any, default: str = "list") -> str:
+    action = str(value or default).strip().lower()
+    aliases = {
+        "subagent_request": "request",
+        "subagent.request": "request",
+        "subagent_status": "status",
+        "subagent.status": "status",
+        "subagent_create": "create",
+        "subagent.create": "create",
+        "subagent_dm_send": "send",
+        "subagent.dm.send": "send",
+        "subagent_channel_join": "join",
+        "subagent.channel.join": "join",
+        "subagent_goal_propose": "propose",
+        "subagent.goal.propose": "propose",
+        "subagent_goal_approve": "approve",
+        "subagent.goal.approve": "approve",
+        "subagent_task_complete": "task_complete",
+        "subagent.task.complete": "task_complete",
+        "channel.check": "check",
+    }
+    return aliases.get(action, action)
+
+
+def lifecycle_actor(input_data: dict[str, Any], context: dict[str, Any] | None = None) -> str:
+    del context
+    supplied = str(input_data.get("actor_id") or input_data.get("sender_id") or "").strip().lower()
+    if supplied in {"main", "main_agent", "user", "human", "client_manager", "president"}:
+        return "subagent_creator"
+    return "subagent_creator"
+
+
+def direct_lifecycle_denied(input_data: dict[str, Any], context: dict[str, Any] | None = None):
+    context = context if isinstance(context, dict) else {}
+    actor = str(
+        context.get("trusted_actor_id")
+        or context.get("server_actor_id")
+        or context.get("actor_id")
+        or context.get("current_actor_id")
+        or ""
+    ).strip().lower()
+    if actor in {"main", "main_agent", "user", "human", "client_manager", "president"}:
+        return error(
+            "main/user context cannot directly manage subagent lifecycle; use Subagent Creator",
+            "CREATOR_REQUIRED",
+        )
+    return None
+
+
 def limit_offset(input_data: dict[str, Any]) -> tuple[int, int]:
     limit = input_data.get("limit", 50)
     offset = input_data.get("offset", 0)

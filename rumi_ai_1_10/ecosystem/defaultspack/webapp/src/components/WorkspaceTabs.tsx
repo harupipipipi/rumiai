@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   MessageSquareText,
   Plus,
+  UsersRound,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -16,7 +17,7 @@ import {
 import type { KanbanBoardScope, SidebarItem } from "../lib/api";
 import { cn } from "../lib/cn";
 
-export type WorkspaceTabKind = "chat" | "coding" | "calendar" | "kanban" | "canvas" | "tools" | "browser";
+export type WorkspaceTabKind = "chat" | "coding" | "calendar" | "kanban" | "subagents" | "canvas" | "tools" | "browser";
 
 export type WorkspaceTab = {
   id: string;
@@ -63,6 +64,12 @@ export const WORKSPACE_TAB_CREATE_OPTIONS: WorkspaceTabCreateOption[] = [
     label: "Kanban",
     description: "Task and agent board",
     icon: KanbanSquare,
+  },
+  {
+    kind: "subagents",
+    label: "Subagents / Teams",
+    description: "Channels, DMs, approvals",
+    icon: UsersRound,
   },
   {
     kind: "canvas",

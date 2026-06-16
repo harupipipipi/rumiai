@@ -2,10 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  addChangeRequestComment,
+  commitChangeRequest,
   createChangeRequest,
+  exportChangeRequestPatch,
   getChangeRequest,
   listChangeRequests,
+  runChangeRequestCheck,
   refreshChangeRequest,
+  setChangeRequestViewedFile,
+  submitChangeRequestDecision,
+  updateChangeRequestComment,
 } from "./changeRequests";
 
 test("listChangeRequests uses canonical endpoint and normalizes backend snapshots", async () => {
@@ -165,6 +172,107 @@ test("create and refresh change requests use read-only canonical routes", async 
         body: { workspace_id: "ws_1" },
       },
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("change request review actions use canonical mutation routes", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; method?: string; body?: unknown }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      url: String(input),
+      method: init?.method,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        change_request: {
+          id: "cr_review",
+          status: calls.length === 3 ? "approved" : "open",
+          decision: calls.length === 3 ? "approved" : "none",
+          comments: [{ id: "crc_1", kind: "suggestion", body: "tighten", suggested_patch: "diff --git a/a b/a\n" }],
+          viewed_files: { "src/app.ts": { path: "src/app.ts", viewed: true } },
+          checks: [{ id: "chk_1", command: "python -m pytest", status: "passed" }],
+          suggested_checks: [{ id: "python__m_pytest", command: "python -m pytest" }],
+        },
+        check: { id: "chk_1", command: "python -m pytest", status: "passed" },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await addChangeRequestComment("cr review", { kind: "suggestion", body: "tighten", suggested_patch: "patch" });
+    await updateChangeRequestComment("cr review", "crc 1", { resolved: true });
+    const decided = await submitChangeRequestDecision("cr review", { decision: "approve" });
+    await setChangeRequestViewedFile("cr review", "src/app.ts", true);
+    const check = await runChangeRequestCheck("cr review", "python -m pytest");
+
+    assert.equal(decided?.decision, "approved");
+    assert.equal(check.check?.status, "passed");
+    assert.deepEqual(calls.map((call) => [call.method, call.url]), [
+      ["POST", "/api/change-requests/cr%20review/comments"],
+      ["PATCH", "/api/change-requests/cr%20review/comments/crc%201"],
+      ["POST", "/api/change-requests/cr%20review/decision"],
+      ["PATCH", "/api/change-requests/cr%20review/viewed-files"],
+      ["POST", "/api/change-requests/cr%20review/checks/run"],
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("commitChangeRequest preserves approval-required and blocked responses", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    assert.equal(init?.method, "POST");
+    assert.deepEqual(JSON.parse(String(init?.body)), { message: "seal commit" });
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        approval_required: true,
+        approval_request_id: "approval_1",
+        display_summary: "Commit requires approval",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await commitChangeRequest("cr review", "seal commit");
+    assert.equal(requestUrl, "/api/change-requests/cr%20review/commit");
+    assert.equal(result?.approval_required, true);
+    assert.equal(result?.approval_request_id, "approval_1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("exportChangeRequestPatch uses canonical export route", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    assert.equal(init?.method, "POST");
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        filename: "cr_review.patch",
+        patch: "diff --git a/app.ts b/app.ts\n",
+        patch_bytes: 31,
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await exportChangeRequestPatch("cr review");
+    assert.equal(requestUrl, "/api/change-requests/cr%20review/export-patch");
+    assert.equal(result?.filename, "cr_review.patch");
+    assert.match(result?.patch ?? "", /diff --git/);
+    assert.equal(result?.patch_bytes, 31);
   } finally {
     globalThis.fetch = originalFetch;
   }

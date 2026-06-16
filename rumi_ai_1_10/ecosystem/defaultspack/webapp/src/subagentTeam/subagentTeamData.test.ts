@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { ChannelButton } from "./SubagentTeamWorkspace";
 import {
+  agentShortId,
   buildAgentActivity,
   channelCount,
   channelMemberCount,
@@ -26,6 +27,12 @@ test("shortId returns compact readable ids without separators", () => {
   assert.equal(shortId("msg-preview-frontend-1"), "ntend1");
   assert.equal(shortId(""), "----");
   assert.equal(shortId("a"), "000a");
+});
+
+test("agentShortId prefers stable human aliases for DM and detail labels", () => {
+  const frontend = previewAgents.find((agent) => agent.agent_id === "frontend");
+  assert.equal(agentShortId(frontend), "sa-kai-184");
+  assert.equal(agentShortId(undefined, "7e3ef4b5-2a4d-4f1f-b1f2-3ac983"), "sa-3ac983");
 });
 
 test("preview data includes Creator, PM, and a rich channel lane", () => {

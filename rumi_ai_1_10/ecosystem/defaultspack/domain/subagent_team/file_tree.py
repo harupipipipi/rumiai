@@ -11,6 +11,8 @@ from domain.coding.file_ops import FileOps
 from domain.coding.git_ops import GitOps
 from domain.coding.workspace_resolver import WorkspaceResolver
 
+from .models import team_metadata
+
 
 def build_file_tree(input_data: dict[str, Any] | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
     data = input_data if isinstance(input_data, dict) else {}
@@ -31,7 +33,7 @@ def build_file_tree(input_data: dict[str, Any] | None = None, context: dict[str,
         except Exception as exc:
             git_error = str(exc)
     workspace_hash = hashlib.sha256(str(resolution.root_path or "").encode("utf-8")).hexdigest()[:16]
-    return {
+    payload = {
         "workspace_id": resolution.workspace_id or f"ws_{workspace_hash}",
         "workspace_hash": workspace_hash,
         "workspace_root": f"workspace:{workspace_hash}",
@@ -52,6 +54,10 @@ def build_file_tree(input_data: dict[str, Any] | None = None, context: dict[str,
             "trusted": resolution.trusted,
         },
     }
+    company_id = str(data.get("company_id") or "").strip()
+    if company_id:
+        payload["team_workspace"] = _virtual_team_workspace_tree(company_id)
+    return payload
 
 
 def open_file_tree_node(input_data: dict[str, Any] | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -193,3 +199,82 @@ def _public_history_message(message: dict[str, Any]) -> dict[str, Any]:
         "task_ids": list(message.get("task_ids") or []),
         "created_at": message.get("created_at"),
     }
+
+
+def _virtual_team_workspace_tree(company_id: str) -> dict[str, Any]:
+    store = CompanyStore()
+    if store.get_company(company_id) is None:
+        return {"company_id": company_id, "nodes": [], "missing": True}
+    channels = store.list_channels(company_id) or []
+    agents = store.list_agents(company_id) or []
+    runtime = CompanyRuntimeStore()
+    runs = runtime.list_run_links(company_id, limit=500)
+    root = _folder("team-workspace", "team-workspace", "Team Workspace")
+    channels_root = _folder("channels", "team-workspace/channels", "channels")
+    for channel in channels:
+        channel_id = str(channel.get("id") or channel.get("channel_id") or "")
+        if not channel_id:
+            continue
+        channel_path = "team-workspace/channels/" + channel_id
+        channel_node = _folder("channel:" + channel_id, channel_path, channel_id)
+        channel_node["children"] = [
+            _file("conversation:" + channel_id, channel_path + "/conversation.md", "conversation.md"),
+            _file("messages:" + channel_id, channel_path + "/messages.jsonl", "messages.jsonl"),
+            _folder("tasks:" + channel_id, channel_path + "/tasks", "tasks"),
+            _folder("approvals:" + channel_id, channel_path + "/approvals", "approvals"),
+            _folder("artifacts:" + channel_id, channel_path + "/artifacts", "artifacts"),
+        ]
+        channels_root.setdefault("children", []).append(channel_node)
+    agents_root = _folder("agents", "team-workspace/agents", "agents")
+    for agent in agents:
+        team = team_metadata(agent)
+        short_id = str(team.get("short_id") or agent.get("short_id") or agent.get("agent_id") or "")
+        if not short_id:
+            continue
+        agent_path = "team-workspace/agents/" + short_id
+        agent_runs = [run for run in runs if str(run.get("agent_id") or "") == str(agent.get("agent_id") or agent.get("id") or "")]
+        agents_root.setdefault("children", []).append(
+            {
+                **_folder("agent:" + short_id, agent_path, short_id),
+                "agent_id": str(agent.get("agent_id") or agent.get("id") or ""),
+                "children": [
+                    {
+                        **_folder("agent-runs:" + short_id, agent_path + "/runs", "runs"),
+                        "run_count": len(agent_runs),
+                    },
+                    _folder("agent-memory:" + short_id, agent_path + "/memory_notes", "memory_notes"),
+                ],
+            }
+        )
+    dms_root = _folder("dms", "team-workspace/dms", "dms")
+    for channel in channels:
+        metadata = channel.get("metadata") if isinstance(channel.get("metadata"), dict) else {}
+        if str(channel.get("visibility") or "") != "dm" and not metadata.get("dm"):
+            continue
+        members = [str(member) for member in channel.get("members", [])]
+        label = "-".join(members) or str(channel.get("id") or "dm")
+        dms_root.setdefault("children", []).append(
+            _folder("dm:" + str(channel.get("id") or label), "team-workspace/dms/" + label, label)
+        )
+    root["children"] = [channels_root, agents_root, dms_root]
+    return {
+        "company_id": company_id,
+        "root": root,
+        "paths": [
+            "channels/{channel}/conversation.md",
+            "channels/{channel}/messages.jsonl",
+            "channels/{channel}/tasks",
+            "channels/{channel}/approvals",
+            "channels/{channel}/artifacts",
+            "agents/{short_id}/runs",
+            "dms/{short_id}",
+        ],
+    }
+
+
+def _folder(node_id: str, path: str, name: str) -> dict[str, Any]:
+    return {"id": node_id, "kind": "folder", "path": path, "name": name, "children": []}
+
+
+def _file(node_id: str, path: str, name: str) -> dict[str, Any]:
+    return {"id": node_id, "kind": "file", "path": path, "name": name}
