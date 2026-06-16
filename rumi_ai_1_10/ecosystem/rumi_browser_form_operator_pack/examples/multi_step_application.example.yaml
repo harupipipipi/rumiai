@@ -1,0 +1,12 @@
+example:
+  id: multi_step_application
+  pack_id: rumi_browser_form_operator_pack
+  workflow: record_submission_receipt
+  intent: Review a multi-step application form, require explicit confirmation at each irreversible submit step, and record receipt evidence after user-approved submission.
+  evidence:
+    - field_selector_map
+    - before_after_screenshot_ids
+    - submit_intent
+    - receipt_url
+  handoff: handoff_to_rumi_browser_element_pack
+  expected_result: pre_submit_review_with_confirmation_refs_and_submission_receipt_schema

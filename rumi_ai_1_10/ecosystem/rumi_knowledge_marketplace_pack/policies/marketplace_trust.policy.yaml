@@ -1,0 +1,12 @@
+policy_id: rumi_knowledge_marketplace.trust
+local_first: true
+network_default: deny
+rules:
+  - id: unreviewed_content_cannot_auto_install
+    decision: require
+  - id: permission_changes_need_scope_card
+    decision: require
+  - id: suspicious_skill_routes_to_security_review
+    decision: handoff_to_rumi_security_review_pack
+  - id: learned_skill_requires_memory_policy
+    decision: handoff_to_rumi_memory_knowledge_pack

@@ -1,0 +1,17 @@
+preset:
+  id: handoff_review
+  pack_id: rumi_runtime_benchmark_pack
+  mode: benchmark_handoff_readiness
+  description: Route benchmark evidence to owner packs only after environment, sample-size, and replay evidence are complete.
+  require_evidence: true
+  require_overlap_check: true
+  handoff_targets:
+    model_quality_metrics: rumi_model_evals_pack
+    run_event_logging: rumi_observability_pack
+    isolated_execution: rumi_sandbox_runtime_pack
+    release_gate_reporting: rumi_devops_release_pack
+  output_contract:
+    - handoff_target_pack
+    - acceptance_notes
+    - benchmark_report
+    - reproducibility_ledger_entry

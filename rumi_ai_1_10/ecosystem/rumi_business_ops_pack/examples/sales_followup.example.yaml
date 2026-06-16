@@ -1,0 +1,7 @@
+example_id: rumi_business_ops.sales_followup
+request: Draft a sales follow-up plan from local account notes, classify approval risk, and route any send or scheduling action to the owner pack.
+expected_outputs:
+  - account_context_summary
+  - approval_required_message_draft
+  - connector_gateway_handoff
+  - scheduler_followup_handoff

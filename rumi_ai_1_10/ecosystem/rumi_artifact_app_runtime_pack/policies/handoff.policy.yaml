@@ -1,0 +1,22 @@
+handoff_policy:
+  default: do_not_execute_adjacent_runtime_action
+  overlap_policy:
+    frontend_design_generation: handoff_to_rumi_reference_ui_pack
+    file_persistence: handoff_to_defaultspack
+    sandbox_isolation_runtime: handoff_to_defaultspack
+    mcp_execution: handoff_to_defaultspack
+    api_execution: handoff_to_defaultspack
+    media_transform: handoff_to_defaultspack
+    browser_automation: handoff_to_rumi_default_tools_pack
+    defaultspack_artifact_store: do_not_override
+    defaultspack_chat_artifact_file: read_only_selector_only
+    defaultspack_share_links: do_not_override
+    defaultspack_tool_execution: do_not_override
+    defaultspack_mcp_execution: do_not_override
+    artifact_manifest_contract: owned_by_rumi_artifact_app_runtime_pack
+    tool_approval_prompt: owned_by_rumi_artifact_app_runtime_pack
+    tool_aliases: prefer_explicit_pack_namespace
+  conflict_resolution:
+  - Prefer the most specific owner surface.
+  - Emit Handoff packets for adjacent runtime actions.
+  - Require human review when approval, identity, citation, or safety state is uncertain.

@@ -256,6 +256,57 @@ def _validate_single_pack(
                 )
                 logger.warning(msg)
                 warnings.append(msg)
+    elif isinstance(connectivity, dict):
+        requires = connectivity.get("requires", [])
+        provides = connectivity.get("provides", [])
+
+        if not isinstance(requires, list):
+            msg = (
+                f"[{pid}] 'connectivity.requires' field is not a list: "
+                f"{type(requires).__name__}"
+            )
+            logger.warning(msg)
+            warnings.append(msg)
+        if not isinstance(provides, list):
+            msg = (
+                f"[{pid}] 'connectivity.provides' field is not a list: "
+                f"{type(provides).__name__}"
+            )
+            logger.warning(msg)
+            warnings.append(msg)
+
+        if isinstance(requires, list):
+            connectivity_list = [
+                str(c) for c in requires if isinstance(c, str)
+            ]
+            non_str_requires = [c for c in requires if not isinstance(c, str)]
+            if non_str_requires:
+                msg = (
+                    f"[{pid}] 'connectivity.requires' contains non-string elements "
+                    f"that were ignored: {non_str_requires}"
+                )
+                logger.warning(msg)
+                warnings.append(msg)
+
+        if isinstance(provides, list):
+            non_str_provides = [c for c in provides if not isinstance(c, str)]
+            if non_str_provides:
+                msg = (
+                    f"[{pid}] 'connectivity.provides' contains non-string elements "
+                    f"that were ignored: {non_str_provides}"
+                )
+                logger.warning(msg)
+                warnings.append(msg)
+
+        if (
+            isinstance(requires, list)
+            and isinstance(provides, list)
+            and len(requires) == 0
+            and len(provides) == 0
+        ):
+            msg = f"[{pid}] 'connectivity' is declared but empty ({'{'}{'}'})"
+            logger.warning(msg)
+            warnings.append(msg)
     else:
         msg = (
             f"[{pid}] 'connectivity' field is not a list: "

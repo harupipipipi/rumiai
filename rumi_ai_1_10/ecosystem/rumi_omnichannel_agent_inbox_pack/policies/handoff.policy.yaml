@@ -1,0 +1,22 @@
+handoff_policy:
+  default: do_not_execute_adjacent_runtime_action
+  overlap_policy:
+    actual_app_connectors: handoff_to_external_connector_gateway_owner
+    slack_gmail_mobile_clients: handoff_to_connector_or_channel_owner
+    work_execution: handoff_to_external_agent_services_owner
+    schedule_execution: handoff_to_external_workflow_scheduler_owner
+    security_policy_review: handoff_to_external_security_review_owner
+    message_sending: handoff_to_external_connector_gateway_owner
+    identity_mapping: owned_by_rumi_omnichannel_agent_inbox_pack
+    outbound_draft_approval: owned_by_rumi_omnichannel_agent_inbox_pack
+    tool_aliases: prefer_explicit_pack_namespace
+  conflict_resolution:
+  - Prefer the most specific owner surface.
+  - Emit Handoff packets for adjacent runtime actions.
+  - Require human review when approval, identity, citation, or safety state is uncertain.
+  remote_input_authority:
+    approve: false
+    execute: false
+    install_pack: false
+    mutate_settings: false
+    issue_tokens: false

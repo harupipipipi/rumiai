@@ -1,0 +1,14 @@
+id: manus_project_service
+name: Manus Style Autonomous Project Service
+profile: rumi_agent_services.service_director
+workflow: autonomous_project_service
+enabled_capabilities: [intake, planning, subagent_coordination, browser_operator, artifact_delivery, safety_review]
+ui_panels: [chat, plan, workers, browser, artifacts]
+behavior: [mission_brief, delegated_tracks, progress_log, final_review]
+policy:
+  network_default: deny
+  subagents_require_approval: true
+  browser_requires_approval: true
+task_defaults:
+  output:
+    type: project_deliverable

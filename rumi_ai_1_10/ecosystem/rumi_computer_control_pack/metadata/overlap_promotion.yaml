@@ -1,0 +1,38 @@
+version: rumi.pack_overlap.v1
+pack_id: rumi_computer_control_pack
+
+defaultspack_promotion:
+  eligible: false
+  reason: Optional computer-control playbook pack; defaultspack remains the grant, approval, audit, and routing authority.
+  promoted_capabilities: []
+
+overlap_policy:
+  default: prefer_explicit_pack_namespace
+  complements:
+    - pack_id: defaultspack
+      boundary: grants, approval, audit, profile loading, and tool routing
+    - pack_id: rumi_browser_automation_pack
+      boundary: browser navigation, DOM automation, page QA, and browser-specific playbooks
+    - pack_id: rumi_security_review_pack
+      boundary: grant, permission, privacy, and security risk review
+    - pack_id: rumi_agent_services_pack
+      boundary: multi-agent service routing, directors, and handoffs
+  owned_by_this_pack:
+    - computer-control evidence contracts
+    - foreground app context playbooks
+    - screenshot keyboard mouse safety checklists
+    - terminal backend observation vocabulary
+    - sandbox host boundary policy
+
+conflict_policy:
+  conflicts_with: []
+  resolution: This pack is opt-in and namespaced; it must not override actual Computer Use, Chrome, browser automation, security review, or defaultspack enforcement.
+
+network_policy:
+  default: none
+  live_or_remote_access: requires explicit user request and runtime approval
+
+grant_policy:
+  supports_all_ok: false
+  grant_override: false
+  unrestricted_local_testing_grant: false

@@ -1,0 +1,36 @@
+prompt_version_ledger:
+  version: 0.1.0
+  owner_surface: prompt_version_ledger
+  entries:
+  - prompt_id: prompt_evidence_first
+    version: 0.1.0
+    status: approved_local_only
+    source_record: catalog/prompt_studio_prompt_library.yaml
+    fixture_ids:
+    - fixture_evidence_first
+    change_summary: Initial evidence-first prompt artifact contract.
+    compatibility_notes:
+    - No runtime execution is introduced.
+    - No model benchmark, memory, API, tool, or code ownership is introduced.
+  - prompt_id: prompt_handoff_boundary
+    version: 0.1.0
+    status: approved_with_handoff
+    source_record: catalog/prompt_studio_prompt_library.yaml
+    fixture_ids:
+    - fixture_handoff
+    change_summary: Initial owner-boundary prompt artifact contract.
+    compatibility_notes:
+    - Model routing remains outside Prompt Studio.
+    - Memory, tool/API, and code requests require owner handoff.
+  - prompt_id: prompt_custom_instruction_migration
+    version: 0.1.0
+    status: approved_with_handoff
+    source_record: catalog/prompt_studio_prompt_library.yaml
+    fixture_ids:
+    - fixture_claude_migration
+    - fixture_chatgpt_migration
+    - fixture_gemini_migration
+    change_summary: Initial Claude, ChatGPT, and Gemini instruction migration contract.
+    compatibility_notes:
+    - Platform-specific permissions are blocked unless an adjacent owner accepts them.
+    - Persistent user preferences are not stored in this pack.

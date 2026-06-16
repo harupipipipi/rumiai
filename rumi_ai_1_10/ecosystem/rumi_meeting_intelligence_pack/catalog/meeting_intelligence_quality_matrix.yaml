@@ -1,0 +1,57 @@
+quality_matrix:
+  checks:
+  - id: source_spans
+    blocking: true
+    evidence_required: true
+    applies_to:
+    - decision_records
+    - action_items
+    - recap_claims
+  - id: participant_consent
+    blocking: true
+    evidence_required: true
+    applies_to:
+    - follow_up_drafts
+    - external_handoff
+  - id: owner_for_each_action
+    blocking: true
+    evidence_required: true
+    applies_to:
+    - action_items
+  - id: open_questions
+    blocking: false
+    evidence_required: true
+    applies_to:
+    - unresolved_decisions
+    - unknown_owners
+  - id: connector_handoff
+    blocking: false
+    evidence_required: true
+    applies_to:
+    - remote_context_request
+    - message_delivery_request
+  - id: draft_only_followups
+    blocking: true
+    evidence_required: true
+    applies_to:
+    - follow_up_drafts
+  - id: no_external_execution
+    blocking: true
+    evidence_required: false
+    applies_to:
+    - calendar_booking
+    - connector_delivery
+    - business_ops_workflow
+  - id: recap_bundle_integrity
+    blocking: true
+    evidence_required: true
+    applies_to:
+    - evidence_linked_recap_bundle
+  minimum_pass: all_blocking_checks
+  pass_states:
+  - pass
+  - pass_with_review_notes
+  fail_states:
+  - fail_missing_evidence
+  - fail_boundary_violation
+  - fail_unreviewed_external_action

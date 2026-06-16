@@ -1,0 +1,14 @@
+id: rumi_computer_control_pack.examples.macos_app_navigation
+profile: rumi_computer_control_pack.macos_desktop_operator
+preset: rumi_computer_control_pack.macos_app_workflow
+task: Navigate a macOS app preference screen and verify the visible state.
+expected_agent_steps:
+  - observe screenshot and foreground app
+  - describe target control and expected state change
+  - classify action risk
+  - request approval if the action changes settings
+  - verify the post-action screenshot or app state
+safety_notes:
+  - do not click blind coordinates
+  - do not change system settings without approval
+  - no network by default

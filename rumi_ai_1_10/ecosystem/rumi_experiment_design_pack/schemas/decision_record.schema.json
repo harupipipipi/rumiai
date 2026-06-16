@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/decision_record.schema.json",
+  "title": "Decision Record",
+  "description": "Contract schema for Decision Record.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision_id",
+    "hypothesis_id",
+    "available_data_state",
+    "decision",
+    "result_claim",
+    "analysis_boundary",
+    "limitations",
+    "source_evidence_ids",
+    "next_owner_pack"
+  ],
+  "properties": {
+    "decision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hypothesis_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "available_data_state": {
+      "type": "string",
+      "enum": [
+        "design_only",
+        "supplied_results",
+        "insufficient_data"
+      ]
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "do_not_decide",
+        "ready_to_run",
+        "needs_instrumentation",
+        "needs_analysis",
+        "stop_or_roll_back"
+      ]
+    },
+    "result_claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "statement",
+        "requires_supplied_results"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_claimed",
+            "supplied_results_claim"
+          ]
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requires_supplied_results": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "analysis_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "queries_executed_by_pack",
+        "allowed_source_state",
+        "handoff_owner_pack"
+      ],
+      "properties": {
+        "queries_executed_by_pack": {
+          "type": "boolean",
+          "const": false
+        },
+        "allowed_source_state": {
+          "type": "string",
+          "enum": [
+            "design_artifacts_only",
+            "user_supplied_results_only",
+            "insufficient_data"
+          ]
+        },
+        "handoff_owner_pack": {
+          "type": "string",
+          "const": "defaultspack"
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "source_evidence_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_owner_pack": {
+      "type": "string",
+      "enum": [
+        "defaultspack",
+        "rumi_operations_company_pack",
+        "none"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "available_data_state": {
+            "const": "design_only"
+          }
+        },
+        "required": [
+          "available_data_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "result_claim": {
+            "properties": {
+              "status": {
+                "const": "not_claimed"
+              }
+            }
+          },
+          "analysis_boundary": {
+            "properties": {
+              "allowed_source_state": {
+                "const": "design_artifacts_only"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "available_data_state": {
+            "const": "insufficient_data"
+          }
+        },
+        "required": [
+          "available_data_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "result_claim": {
+            "properties": {
+              "status": {
+                "const": "not_claimed"
+              }
+            }
+          },
+          "analysis_boundary": {
+            "properties": {
+              "allowed_source_state": {
+                "const": "insufficient_data"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "available_data_state": {
+            "const": "supplied_results"
+          }
+        },
+        "required": [
+          "available_data_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "analysis_boundary": {
+            "properties": {
+              "allowed_source_state": {
+                "const": "user_supplied_results_only"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

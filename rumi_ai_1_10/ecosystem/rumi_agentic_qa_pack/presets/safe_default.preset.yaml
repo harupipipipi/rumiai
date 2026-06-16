@@ -1,0 +1,10 @@
+preset:
+  id: safe_default
+  pack_id: rumi_agentic_qa_pack
+  mode: safe_default
+  purpose: Start every agentic QA review with local-only evidence, explicit scenario ownership, and no runtime execution by this pack.
+  require_evidence: true
+  require_overlap_check: true
+  required_assets:
+    - catalog/scenario_catalog.yaml
+    - catalog/qa_routing_matrix.yaml

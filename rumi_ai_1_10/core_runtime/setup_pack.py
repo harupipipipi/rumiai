@@ -13,6 +13,13 @@ from typing import Any, Dict, List, Optional
 
 from .dependency_resolver import validate_dependencies, version_satisfies
 from .paths import BASE_DIR, discover_pack_locations
+from .setup_pack_metadata import (
+    as_dict as _as_dict,
+    normalize_dependency_specs as _normalize_dependency_specs,
+    normalize_pack_ref_specs as _normalize_pack_ref_specs,
+    validate_setup_pack_metadata,
+    validate_setup_pack_schema,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,50 +35,6 @@ SETUP_PACK_ALL_OK_PERMISSIONS = [
     "pack.migrate",
     "setup_pack.module.manage",
 ]
-
-_MARKETPLACE_STATUSES = {"verified", "unverified", "blacklisted", "bundled", "local"}
-_SIGNING_MODES = {
-    "none",
-    "repository_reviewed",
-    "repository_trusted",
-    "marketplace",
-    "sha256",
-    "hmac",
-    "ed25519",
-}
-
-
-def _as_dict(value: Any) -> Dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _normalize_dependency_specs(value: Any) -> List[Dict[str, str]]:
-    raw_items = value if isinstance(value, list) else []
-    if isinstance(value, dict):
-        raw_items = [
-            {"pack_id": key, **spec} if isinstance(spec, dict) else {"pack_id": key}
-            for key, spec in value.items()
-        ]
-    result: List[Dict[str, str]] = []
-    seen: set[str] = set()
-    for item in raw_items:
-        if isinstance(item, str):
-            spec = {"pack_id": item}
-        elif isinstance(item, dict):
-            pack_id = item.get("pack_id") or item.get("id") or item.get("name")
-            if not pack_id:
-                continue
-            spec = {"pack_id": str(pack_id)}
-            version = item.get("version") or item.get("constraint") or item.get("version_constraint")
-            if version:
-                spec["version"] = str(version)
-        else:
-            continue
-        if spec["pack_id"] not in seen:
-            seen.add(spec["pack_id"])
-            result.append(spec)
-    return result
-
 
 def _current_python_version() -> str:
     return "{}.{}.{}".format(sys.version_info.major, sys.version_info.minor, sys.version_info.micro)
@@ -103,9 +66,13 @@ class SetupPackDefinition:
     # source in that fork rather than crossing a runtime trust boundary.
     supports_all_ok: bool = False
     depends_on: List[Dict[str, str]] = field(default_factory=list)
+    conflicts_with: List[Dict[str, str]] = field(default_factory=list)
+    overlap_policy: Dict[str, Any] = field(default_factory=dict)
+    defaultspack_promotion: Dict[str, Any] = field(default_factory=dict)
     compatibility: Dict[str, Any] = field(default_factory=dict)
     marketplace: Dict[str, Any] = field(default_factory=dict)
     signing: Dict[str, Any] = field(default_factory=dict)
+    schema_issues: List[Dict[str, Any]] = field(default_factory=list)
     source_path: str = ""
 
 
@@ -129,11 +96,24 @@ class SetupPackManager:
         result: Dict[str, SetupPackDefinition] = {}
         for path in self._definition_files():
             try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
+                loaded = json.loads(path.read_text(encoding="utf-8"))
             except Exception as exc:
                 logger.warning("Failed to parse setup_pack file %s: %s", path, exc)
                 continue
-            pack_id = str(raw.get("pack_id") or path.parent.name)
+            if isinstance(loaded, dict):
+                raw = loaded
+                fallback_pack_id = path.parent.name
+                pack_id = str(raw.get("pack_id") or fallback_pack_id)
+                target_pack_id = str(raw.get("target_pack_id") or pack_id)
+            else:
+                raw = {}
+                pack_id = path.parent.name
+                target_pack_id = pack_id
+            schema_issues = validate_setup_pack_schema(
+                loaded,
+                fallback_pack_id=pack_id,
+                fallback_target_pack_id=target_pack_id,
+            )
             compatibility = _as_dict(raw.get("compatibility"))
             for source_key, compatibility_key in (
                 ("target_pack_version", "target_pack_version"),
@@ -147,7 +127,7 @@ class SetupPackManager:
                 pack_id=pack_id,
                 display_name=str(raw.get("display_name", pack_id)),
                 description=str(raw.get("description", "")),
-                target_pack_id=str(raw.get("target_pack_id", pack_id)),
+                target_pack_id=target_pack_id,
                 version=str(raw.get("version", "")),
                 recommended=bool(raw.get("recommended", False)),
                 risk_level=str(raw.get("risk_level", "medium")),
@@ -155,9 +135,13 @@ class SetupPackManager:
                 depends_on=_normalize_dependency_specs(
                     raw.get("depends_on", raw.get("dependencies", []))
                 ),
+                conflicts_with=_normalize_pack_ref_specs(raw.get("conflicts_with", [])),
+                overlap_policy=_as_dict(raw.get("overlap_policy")),
+                defaultspack_promotion=_as_dict(raw.get("defaultspack_promotion")),
                 compatibility=compatibility,
                 marketplace=_as_dict(raw.get("marketplace")),
                 signing=_as_dict(raw.get("signing")),
+                schema_issues=schema_issues,
                 source_path=str(path.parent.resolve()),
             )
         return result
@@ -190,6 +174,9 @@ class SetupPackManager:
                 "risk_level": item.risk_level,
                 "supports_all_ok": item.supports_all_ok,
                 "depends_on": list(item.depends_on),
+                "conflicts_with": list(item.conflicts_with),
+                "overlap_policy": dict(item.overlap_policy),
+                "defaultspack_promotion": dict(item.defaultspack_promotion),
                 "compatibility": dict(item.compatibility),
                 "marketplace": dict(item.marketplace),
                 "signing": dict(item.signing),
@@ -290,54 +277,12 @@ class SetupPackManager:
         return definition.version or str(target_manifest.get("version", ""))
 
     def _validate_metadata_contract(self, definition: SetupPackDefinition) -> List[Dict[str, Any]]:
-        issues: List[Dict[str, Any]] = []
-        marketplace = definition.marketplace or {}
-        if marketplace:
-            status = str(marketplace.get("status") or "unverified").strip().lower()
-            if status not in _MARKETPLACE_STATUSES:
-                issues.append(
-                    {
-                        "setup_pack_id": definition.pack_id,
-                        "target_pack_id": definition.target_pack_id,
-                        "reason": "invalid_marketplace_status",
-                        "error": "Unsupported marketplace status: " + status,
-                    }
-                )
-            elif status == "blacklisted":
-                issues.append(
-                    {
-                        "setup_pack_id": definition.pack_id,
-                        "target_pack_id": definition.target_pack_id,
-                        "reason": "marketplace_blacklisted",
-                        "error": "Setup pack is blacklisted by marketplace metadata",
-                    }
-                )
-        signing = definition.signing or {}
-        if signing:
-            mode = str(signing.get("mode") or "none").strip().lower()
-            if mode not in _SIGNING_MODES:
-                issues.append(
-                    {
-                        "setup_pack_id": definition.pack_id,
-                        "target_pack_id": definition.target_pack_id,
-                        "reason": "invalid_signing_mode",
-                        "error": "Unsupported signing mode: " + mode,
-                    }
-                )
-            if bool(signing.get("required")) and not (
-                signing.get("verified") is True
-                or str(signing.get("signature") or "").strip()
-                or str(signing.get("sha256") or "").strip()
-            ):
-                issues.append(
-                    {
-                        "setup_pack_id": definition.pack_id,
-                        "target_pack_id": definition.target_pack_id,
-                        "reason": "missing_required_signature",
-                        "error": "Setup pack requires signing metadata but no signature/hash is present",
-                    }
-                )
-        return issues
+        return validate_setup_pack_metadata(
+            pack_id=definition.pack_id,
+            target_pack_id=definition.target_pack_id,
+            marketplace=definition.marketplace,
+            signing=definition.signing,
+        )
 
     def _validate_compatibility_contract(
         self,
@@ -405,14 +350,37 @@ class SetupPackManager:
             return []
 
         manifests: Dict[str, Dict[str, Any]] = {}
+        referenced_dependencies: set[str] = set()
         for definition in definitions:
             target_manifest = self._read_target_manifest(locations.get(definition.target_pack_id))
             manifests[definition.pack_id] = {
                 "version": self._definition_version(definition, target_manifest),
                 "depends_on": list(definition.depends_on),
             }
+            if definition.target_pack_id and definition.target_pack_id != definition.pack_id:
+                manifests.setdefault(
+                    definition.target_pack_id,
+                    {"version": str(target_manifest.get("version", ""))},
+                )
+            for dependency in definition.depends_on:
+                dependency_pack_id = str(dependency.get("pack_id") or "").strip()
+                if dependency_pack_id:
+                    referenced_dependencies.add(dependency_pack_id)
+
+        for dependency_pack_id in sorted(referenced_dependencies):
+            if dependency_pack_id in manifests:
+                continue
+            location = locations.get(dependency_pack_id)
+            if location is None:
+                continue
+            dependency_manifest = self._read_target_manifest(location)
+            manifests[dependency_pack_id] = {
+                "version": str(dependency_manifest.get("version", "")),
+            }
 
         issues: List[Dict[str, Any]] = []
+        for definition in definitions:
+            issues.extend(definition.schema_issues)
         for issue in validate_dependencies(manifests):
             setup_pack_id = str(issue.get("pack_id") or "")
             issues.append(
@@ -437,6 +405,24 @@ class SetupPackManager:
             location = locations.get(definition.target_pack_id)
             if location is not None:
                 issues.extend(self._validate_compatibility_contract(definition, location))
+        selected_ids = {definition.pack_id for definition in definitions}
+        selected_target_ids = {definition.target_pack_id for definition in definitions}
+        for definition in definitions:
+            for conflict in definition.conflicts_with:
+                conflict_id = str(conflict.get("pack_id") or "")
+                if conflict_id not in selected_ids and conflict_id not in selected_target_ids:
+                    continue
+                issues.append(
+                    {
+                        "setup_pack_id": definition.pack_id,
+                        "target_pack_id": definition.target_pack_id,
+                        "reason": "setup_pack_conflict",
+                        "conflicts_with": conflict_id,
+                        "conflict": conflict,
+                        "resolution": conflict.get("resolution") or "choose_one_pack",
+                        "error": "Selected setup packs declare overlapping responsibility",
+                    }
+                )
         return issues
 
     @staticmethod
@@ -531,6 +517,34 @@ class SetupPackManager:
             logger.debug("Failed to switch active_pack_identity during setup_pack install", exc_info=True)
             return None
 
+    def _expand_requested_setup_pack_ids(
+        self,
+        requested_ids: List[str],
+        definitions: Dict[str, SetupPackDefinition],
+    ) -> List[str]:
+        expanded_ids: List[str] = []
+        seen: set[str] = set()
+        visiting: set[str] = set()
+
+        def visit(setup_pack_id: str) -> None:
+            if setup_pack_id in seen or setup_pack_id in visiting:
+                return
+            definition = definitions.get(setup_pack_id)
+            if definition is None:
+                return
+            visiting.add(setup_pack_id)
+            for dependency in definition.depends_on:
+                dependency_id = str(dependency.get("pack_id") or "").strip()
+                if dependency_id and dependency_id in definitions:
+                    visit(dependency_id)
+            visiting.remove(setup_pack_id)
+            seen.add(setup_pack_id)
+            expanded_ids.append(setup_pack_id)
+
+        for setup_pack_id in requested_ids:
+            visit(setup_pack_id)
+        return expanded_ids
+
     def install(self, setup_pack_ids: str | List[str]) -> Dict[str, Any]:
         definitions = self._load_definitions()
         requested_ids = self._normalize_setup_pack_ids(setup_pack_ids)
@@ -544,10 +558,14 @@ class SetupPackManager:
         locations = {
             loc.pack_id: loc for loc in discover_pack_locations(str(self.ecosystem_dir))
         }
+        expanded_requested_ids = self._expand_requested_setup_pack_ids(
+            requested_ids,
+            definitions,
+        )
 
         ordered_definitions = [
             definitions[pack_id]
-            for pack_id in requested_ids
+            for pack_id in expanded_requested_ids
             if pack_id in definitions
         ]
         errors: List[Dict[str, Any]] = []

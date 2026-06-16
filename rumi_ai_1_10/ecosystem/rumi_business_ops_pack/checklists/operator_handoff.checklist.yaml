@@ -1,0 +1,22 @@
+checklist_id: rumi_business_ops.operator_handoff
+blocking_checks:
+  - id: workflow_classified
+    question: Is the request classified by workflow taxonomy?
+    evidence: catalog/workflow_taxonomy.yaml
+  - id: evidence_present
+    question: Is local evidence recorded for every business claim or proposed action?
+    evidence: business_ops_handoff_ledger
+  - id: approval_risk_scored
+    question: Has the approval risk matrix been applied?
+    evidence: policies/approval_risk_matrix.policy.yaml
+  - id: execution_owner_named
+    question: Are connector, scheduler, workspace, or research handoffs routed to owner packs?
+    evidence: setup_pack_overlap_policy
+  - id: blocked_actions_checked
+    question: Are contract, payment, legal, HR, and credential actions blocked without explicit instruction?
+    evidence: approval_risk_matrix
+reviewer_decisions:
+  - ready_for_owner_handoff
+  - needs_more_evidence
+  - needs_human_approval
+  - blocked_sensitive_business_action

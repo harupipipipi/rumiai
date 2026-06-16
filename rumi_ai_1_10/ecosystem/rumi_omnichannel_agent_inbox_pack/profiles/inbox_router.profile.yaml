@@ -1,0 +1,30 @@
+profile:
+  id: omnichannel_agent_inbox
+  pack_id: rumi_omnichannel_agent_inbox_pack
+  mode: local_first_declarative
+  default_presets:
+  - safe_default
+  - handoff_review
+  - quality_gate
+  owned_surfaces:
+  - channel_payload_contract
+  - identity_mapping
+  - channel_acl
+  - thread_to_agent_routing
+  - outbound_draft_approval
+  - notification_preferences
+  - inbox_thread_state
+  - inbox_ui_contract
+  handoff_surfaces:
+  - actual app connectors
+  - Slack client
+  - Gmail client
+  - mobile client
+  - work execution
+  - schedule execution
+  - security policy review
+  - message sending
+  review_contract:
+    external_actions: handoff_only
+    evidence_required: true
+    human_review_required: true

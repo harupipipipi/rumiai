@@ -1,0 +1,18 @@
+policy_id: rumi_browser_automation.safety
+local_first: true
+network_default: deny
+execution_owner: rumi_default_tools_pack
+semantic_owner: rumi_browser_element_pack
+rules:
+  - id: observe_before_act
+    decision: require
+    rationale: Browser state can drift between turns.
+  - id: prefer_semantic_ids
+    decision: prefer_when_available
+    rationale: Semantic IDs survive layout churn better than coordinates.
+  - id: pause_on_destructive_submit
+    decision: require_confirmation
+    rationale: State-changing browser actions need explicit evidence and intent.
+  - id: record_evidence
+    decision: require
+    rationale: Completion must be proven by page state, not assumed from tool success.

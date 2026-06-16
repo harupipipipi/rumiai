@@ -1,0 +1,64 @@
+version: rumi.document_intelligence.document_types.v1
+pack_id: rumi_document_intelligence_pack
+network_default: none
+
+document_types:
+  - id: contract
+    page_span_required: true
+    quote_digest_required: true
+    privacy_default: confidential_contract
+    review_flags:
+      - party_name
+      - effective_date
+      - payment_amount
+      - termination
+      - liability
+      - confidentiality
+  - id: policy
+    page_span_required: true
+    quote_digest_required: true
+    privacy_default: internal_business
+    review_flags:
+      - scope_change
+      - approval_authority
+      - compliance_claim
+  - id: research_pdf
+    page_span_required: true
+    quote_digest_required: true
+    privacy_default: public_or_user_approved
+    review_flags:
+      - claim_without_source
+      - statistical_claim
+      - limitation_or_caveat
+  - id: redline
+    page_span_required: true
+    quote_digest_required: true
+    privacy_default: unknown_needs_review
+    review_flags:
+      - insertion
+      - deletion
+      - substitution
+      - formatting_only
+  - id: personal_record
+    page_span_required: true
+    quote_digest_required: false
+    privacy_default: regulated_sensitive
+    review_flags:
+      - personal_data
+      - health_or_financial_detail
+      - signature_or_identifier
+
+privacy_classes:
+  - public_or_user_approved
+  - internal_business
+  - personal_data
+  - confidential_contract
+  - regulated_sensitive
+  - unknown_needs_review
+
+output_requirements:
+  - document_type
+  - privacy_class
+  - page_span_policy
+  - quote_digest_policy
+  - human_review_flags

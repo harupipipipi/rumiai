@@ -1,0 +1,16 @@
+preset_id: rumi_security_review.permission_grant_review
+pack_id: rumi_security_review_pack
+title: Permission And Grant Review
+profile: rumi_security_review.security_reviewer
+focus:
+  - defaultspack_grants
+  - approval_boundaries
+  - high_risk_tools
+  - client_supplied_approval
+rules:
+  override_defaultspack_decisions: false
+  mutate_grants: false
+  require_owner_pack_for_enforcement: true
+output:
+  finding_schema: catalog/finding_schema.json
+  signoff_required: false

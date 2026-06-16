@@ -1,0 +1,26 @@
+id: rumi_code_ide_pack.cline_style_ide_pairing
+name: Cline Style IDE Pairing
+profile: rumi_code_ide_pack.local_first_pair_programmer
+inspiration:
+  - Cline
+intent: IDE-visible plan, patch, terminal, and browser-preview loop
+enabled_capabilities:
+  - local_file
+  - terminal
+  - git
+  - browser_optional
+  - project
+  - safety
+ui_panels:
+  - chat
+  - plan
+  - file_tree
+  - terminal
+  - preview
+behavior:
+  - explain_next_action
+  - approval_gated_terminal
+  - preview_after_frontend_change
+  - preserve_user_edits
+overlap_notes:
+  rumi_default_tools_pack: uses browser companion and file tools when present

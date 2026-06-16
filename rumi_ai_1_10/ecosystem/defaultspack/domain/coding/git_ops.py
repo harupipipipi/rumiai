@@ -178,6 +178,13 @@ class GitOps:
                 chunks.append(output)
         return "".join(chunks)
 
+    def _record_rumi_event(self, recorder, *args, **kwargs):
+        try:
+            recorder(*args, **kwargs)
+        except Exception:
+            return None
+        return True
+
     def status(self):
         """リポジトリのステータスを返す。"""
         git_root = self.git_root()
@@ -283,7 +290,17 @@ class GitOps:
             "files_changed": len([line for line in diff.splitlines() if line.startswith("diff --git ")]),
         }
 
-    def commit(self, message, all_tracked=False, paths=None, files=None):
+    def commit(
+        self,
+        message,
+        all_tracked=False,
+        paths=None,
+        files=None,
+        actor_id=None,
+        agent_role=None,
+        session_id=None,
+        metadata=None,
+    ):
         """コミットを実行する。
 
         paths / files: list[str] — 指定ファイルだけstageしてcommitする。
@@ -316,6 +333,23 @@ class GitOps:
             raise RuntimeError("nothing to commit")
         output = self._run(["commit", "-m", message])
         commit_hash = self._run(["rev-parse", "--short", "HEAD"]).strip()
+        branch = self._run(["rev-parse", "--abbrev-ref", "HEAD"]).strip()
+        try:
+            from .rumi_log import RumiLogStore
+
+            self._record_rumi_event(
+                RumiLogStore(self._root).record_commit,
+                commit_hash=commit_hash,
+                message=message,
+                branch=branch,
+                paths=list(selected) if selected else None,
+                actor_id=actor_id,
+                agent_role=agent_role,
+                session_id=session_id,
+                metadata=metadata if isinstance(metadata, dict) else None,
+            )
+        except Exception:
+            pass
         return {
             "commit_hash": commit_hash,
             "message": message,
@@ -323,7 +357,16 @@ class GitOps:
             "paths": list(selected) if selected else None,
         }
 
-    def push(self, remote="origin", branch=None, dry_run=False):
+    def push(
+        self,
+        remote="origin",
+        branch=None,
+        dry_run=False,
+        actor_id=None,
+        agent_role=None,
+        session_id=None,
+        metadata=None,
+    ):
         """プッシュを実行する。"""
         args = ["push", remote]
         if branch:
@@ -331,6 +374,21 @@ class GitOps:
         if dry_run:
             args.append("--dry-run")
         output = self._run(args, timeout=120)
+        try:
+            from .rumi_log import RumiLogStore
+
+            self._record_rumi_event(
+                RumiLogStore(self._root).record_push,
+                remote=remote,
+                branch=branch,
+                dry_run=bool(dry_run),
+                actor_id=actor_id,
+                agent_role=agent_role,
+                session_id=session_id,
+                metadata=metadata if isinstance(metadata, dict) else None,
+            )
+        except Exception:
+            pass
         return {
             "remote": remote,
             "branch": branch,

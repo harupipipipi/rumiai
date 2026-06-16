@@ -1,0 +1,90 @@
+workflow_spec_id: rumi.agent_services.workflow_templates.v1
+workflows:
+  deep_research_report:
+    inspired_by: [ChatGPT Deep Research, Genspark]
+    director: service_director
+    stages:
+      - id: intake
+        owner: service_director
+        output: research_question_and_success_criteria
+      - id: source_plan
+        owner: research_analyst
+        output: source_strategy
+      - id: evidence_collection
+        owner: research_analyst
+        output: source_cards
+        network: optional_with_approval
+      - id: synthesis
+        owner: synthesis_writer
+        output: report_draft
+      - id: review
+        owner: quality_reviewer
+        output: evidence_and_claims_review
+      - id: delivery
+        owner: service_director
+        output: final_report
+  coding_service_loop:
+    inspired_by: [Claude Code, Gemini CLI, Cline]
+    director: service_director
+    stages:
+      - id: inspect
+        owner: coding_operator
+        output: repository_map
+      - id: plan_patch
+        owner: coding_operator
+        output: scoped_change_plan
+      - id: edit
+        owner: coding_operator
+        output: local_patch
+        writes: approval_required
+      - id: verify
+        owner: coding_operator
+        output: test_results
+        terminal: approval_required
+      - id: review
+        owner: quality_reviewer
+        output: findings
+      - id: delivery
+        owner: service_director
+        output: files_changed_tests_run_summary
+  browser_task_service:
+    inspired_by: [ChatGPT Agent, Manus]
+    director: service_director
+    stages:
+      - id: consent_check
+        owner: service_director
+        output: approved_browser_scope
+      - id: observe
+        owner: browser_operator
+        output: page_state
+        browser: approval_required
+      - id: act_or_collect
+        owner: browser_operator
+        output: observation_log
+        browser: approval_required
+      - id: reconcile
+        owner: synthesis_writer
+        output: structured_findings
+      - id: safety_review
+        owner: quality_reviewer
+        output: consent_and_claims_review
+  autonomous_project_service:
+    inspired_by: [Manus, OpenClaw, Hermes]
+    director: service_director
+    stages:
+      - id: mission_brief
+        owner: service_director
+        output: bounded_project_spec
+      - id: parallel_tracks
+        owner: service_director
+        output: work_package_set
+        subagents: optional_with_approval
+      - id: worker_execution
+        owner: delegated_roles
+        output: role_completion_payloads
+      - id: integration
+        owner: synthesis_writer
+        output: integrated_artifact
+      - id: final_review
+        owner: quality_reviewer
+        output: launch_or_delivery_readiness

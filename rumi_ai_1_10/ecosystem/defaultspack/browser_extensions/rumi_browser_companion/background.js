@@ -11,6 +11,8 @@ const LAST_STATUS_KEY = "rumiBrowserCompanionLastStatus";
 const ALARM_NAME = "rumi-browser-companion-poll";
 const BRIDGE_POLL_PATH = "/api/tools/browser-companion/bridge/poll";
 const BRIDGE_RESULT_PATH = "/api/tools/browser-companion/bridge/result";
+const SEARCH_HOME_ROUTE_STATE_KEY = "rumiSearchHomeRouteStateByTab";
+const SEARCH_HOME_ROUTE_MAX_AGE_MS = 1000 * 60 * 60 * 6;
 
 chrome.runtime.onInstalled.addListener(async () => {
   const settings = await ensureSettings();
@@ -33,8 +35,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void clearSearchHomeRouteState(tabId);
+});
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "sync" || !changes[STORAGE_KEY]) {
+  if (areaName !== "local" || !changes[STORAGE_KEY]) {
     return;
   }
   void ensureSettings().then((settings) => {
@@ -59,6 +65,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "rumi:list-tabs":
         sendResponse({ ok: true, tabs: await getTabsSummary() });
         return;
+      case "rumi:search-home:set-route-state":
+        sendResponse(await setSearchHomeRouteState(sender?.tab?.id, message.payload));
+        return;
+      case "rumi:search-home:get-route-state":
+        sendResponse(await getSearchHomeRouteState(sender?.tab?.id));
+        return;
+      case "rumi:search-home:advance-candidate":
+        sendResponse(await advanceSearchHomeRouteState(sender?.tab?.id, message.action));
+        return;
       default:
         sendResponse({ ok: false, error: `Unknown message type: ${message.type}` });
     }
@@ -70,25 +85,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function ensureSettings() {
-  const stored = await chrome.storage.sync.get(STORAGE_KEY);
+  const stored = await readLocalSettingsWithSyncMigration();
   const merged = {
     ...DEFAULT_SETTINGS,
-    ...(stored[STORAGE_KEY] || {})
+    ...(stored || {})
   };
   merged.pollIntervalMinutes = normalizePollInterval(merged.pollIntervalMinutes);
-  await chrome.storage.sync.set({ [STORAGE_KEY]: merged });
+  await chrome.storage.local.set({ [STORAGE_KEY]: merged });
   return merged;
 }
 
 async function getSettings() {
-  const stored = await chrome.storage.sync.get(STORAGE_KEY);
+  const stored = await readLocalSettingsWithSyncMigration();
   return {
     ...DEFAULT_SETTINGS,
-    ...(stored[STORAGE_KEY] || {}),
+    ...(stored || {}),
     pollIntervalMinutes: normalizePollInterval(
-      stored[STORAGE_KEY]?.pollIntervalMinutes ?? DEFAULT_SETTINGS.pollIntervalMinutes
+      stored?.pollIntervalMinutes ?? DEFAULT_SETTINGS.pollIntervalMinutes
     )
   };
+}
+
+async function readLocalSettingsWithSyncMigration() {
+  const localStored = await chrome.storage.local.get(STORAGE_KEY);
+  if (localStored[STORAGE_KEY]) {
+    return localStored[STORAGE_KEY];
+  }
+  const syncStored = await chrome.storage.sync.get(STORAGE_KEY);
+  if (syncStored[STORAGE_KEY]) {
+    await chrome.storage.local.set({ [STORAGE_KEY]: syncStored[STORAGE_KEY] });
+    await chrome.storage.sync.remove(STORAGE_KEY);
+    return syncStored[STORAGE_KEY];
+  }
+  return null;
 }
 
 async function ensureClientId() {
@@ -208,7 +237,9 @@ async function buildClientMetadata(settings, clientId) {
       navigate: true,
       capture_visible_tab: true,
       dom_snapshot: true,
-      element_actions: ["click", "type", "press", "scroll", "extract"]
+      semantic_dom: true,
+      accessible_labels: true,
+      element_actions: ["click", "type", "press", "scroll", "extract", "highlight", "clear_highlight"]
     },
     generated_at: new Date().toISOString()
   };
@@ -319,7 +350,9 @@ function actionResultSemantics(action, result) {
     action === "page.type" ||
     action === "page.press" ||
     action === "page.scroll" ||
-    action === "page.extract"
+    action === "page.extract" ||
+    action === "page.highlight" ||
+    action === "page.clear_highlight"
   ) {
     return { requires_foreground: false, can_parallel_user_work: true };
   }
@@ -345,6 +378,8 @@ async function dispatchCommand(command) {
     case "page.press":
     case "page.scroll":
     case "page.extract":
+    case "page.highlight":
+    case "page.clear_highlight":
       return sendElementCommand(action, payload);
     default:
       throw new Error(`Unsupported command action: ${action}`);
@@ -417,10 +452,42 @@ async function captureVisibleTab(payload) {
 
 async function captureDomSnapshot(payload) {
   const tabId = await resolveTabId(payload.tab_id);
-  const snapshot = await sendToTab(tabId, {
+  const snapshotOptions = {};
+  if (payload.include_hidden !== undefined) {
+    snapshotOptions.includeHidden = Boolean(payload.include_hidden);
+  } else if (payload.includeHidden !== undefined) {
+    snapshotOptions.includeHidden = Boolean(payload.includeHidden);
+  }
+  if (payload.include_html !== undefined) {
+    snapshotOptions.includeHtml = Boolean(payload.include_html);
+  } else if (payload.includeHtml !== undefined) {
+    snapshotOptions.includeHtml = Boolean(payload.includeHtml);
+  }
+  if (payload.include_attributes !== undefined) {
+    snapshotOptions.includeAttributes = Boolean(payload.include_attributes);
+  } else if (payload.includeAttributes !== undefined) {
+    snapshotOptions.includeAttributes = Boolean(payload.includeAttributes);
+  }
+  if (Array.isArray(payload.attribute_names)) {
+    snapshotOptions.attributeNames = payload.attribute_names;
+  } else if (Array.isArray(payload.attributeNames)) {
+    snapshotOptions.attributeNames = payload.attributeNames;
+  }
+  if (payload.include_semantics !== undefined) {
+    snapshotOptions.includeSemantics = Boolean(payload.include_semantics);
+  } else if (payload.includeSemantics !== undefined) {
+    snapshotOptions.includeSemantics = Boolean(payload.includeSemantics);
+  }
+
+  const snapshotRequest = {
     type: "rumi:dom-snapshot",
     maxNodes: payload.limit
-  });
+  };
+  if (Object.keys(snapshotOptions).length > 0) {
+    snapshotRequest.options = snapshotOptions;
+  }
+
+  const snapshot = await sendToTab(tabId, snapshotRequest);
   const tab = await chrome.tabs.get(tabId);
   const result = {
     tab: tabSummary(tab),
@@ -516,6 +583,206 @@ function normalizeCommands(payload) {
     return [payload.command];
   }
   return [];
+}
+
+async function loadSearchHomeRouteStates() {
+  const stored = await chrome.storage.local.get(SEARCH_HOME_ROUTE_STATE_KEY);
+  const value = stored[SEARCH_HOME_ROUTE_STATE_KEY];
+  return value && typeof value === "object" ? value : {};
+}
+
+async function saveSearchHomeRouteStates(states) {
+  await chrome.storage.local.set({ [SEARCH_HOME_ROUTE_STATE_KEY]: states });
+}
+
+async function clearSearchHomeRouteState(tabId) {
+  if (!Number.isInteger(tabId)) {
+    return;
+  }
+  const states = await loadSearchHomeRouteStates();
+  if (!(String(tabId) in states)) {
+    return;
+  }
+  delete states[String(tabId)];
+  await saveSearchHomeRouteStates(states);
+}
+
+async function setSearchHomeRouteState(tabId, payload) {
+  if (!Number.isInteger(tabId)) {
+    return { ok: false, error: "Active tab is required for Search Home route state." };
+  }
+  const normalized = normalizeSearchHomeRouteState(payload);
+  if (!normalized) {
+    return { ok: false, error: "Invalid Search Home route payload." };
+  }
+  const states = await loadSearchHomeRouteStates();
+  states[String(tabId)] = normalized;
+  await saveSearchHomeRouteStates(states);
+  return {
+    ok: true,
+    active: true,
+    tab_id: tabId,
+    selected_index: normalized.selected_index,
+    expires_at: searchHomeRouteStateExpiresAt(normalized)
+  };
+}
+
+async function getSearchHomeRouteState(tabId) {
+  if (!Number.isInteger(tabId)) {
+    return { ok: true, active: false };
+  }
+  const states = await loadSearchHomeRouteStates();
+  const current = normalizeSearchHomeRouteState(states[String(tabId)]);
+  if (!current || !isFreshSearchHomeRouteState(current)) {
+    if (current) {
+      delete states[String(tabId)];
+      await saveSearchHomeRouteStates(states);
+    }
+    return { ok: true, active: false, tab_id: tabId };
+  }
+  return {
+    ok: true,
+    active: true,
+    tab_id: tabId,
+    selected_index: current.selected_index,
+    expires_at: searchHomeRouteStateExpiresAt(current)
+  };
+}
+
+async function advanceSearchHomeRouteState(tabId, action) {
+  if (!Number.isInteger(tabId)) {
+    return { ok: false, error: "Active tab is required for Search Home navigation." };
+  }
+  const states = await loadSearchHomeRouteStates();
+  const current = normalizeSearchHomeRouteState(states[String(tabId)]);
+  if (!current || !isFreshSearchHomeRouteState(current)) {
+    return { ok: false, error: "No fresh Search Home route state was found for this tab." };
+  }
+  let url = "";
+  let nextIndex = normalizeSearchHomeIndex(current, current.selected_index);
+  const normalizedAction = normalizeSearchHomeRouteAction(action);
+  if (normalizedAction === "fallback") {
+    url = normalizeSearchHomeCandidateUrl(current.fallback_url);
+  } else if (normalizedAction === "open") {
+    const selectedCandidate = current.target_candidates[nextIndex];
+    url = normalizeSearchHomeCandidateUrl(selectedCandidate?.final_url || selectedCandidate?.url || current.target_url);
+  } else {
+    const delta = normalizedAction === "prev" ? -1 : 1;
+    nextIndex = nextSearchHomeIndex(current, delta);
+    const nextCandidate = current.target_candidates[nextIndex];
+    url = normalizeSearchHomeCandidateUrl(nextCandidate?.final_url || nextCandidate?.url);
+  }
+  if (!url) {
+    return { ok: false, error: "No destination URL was available for the requested Search Home action." };
+  }
+  states[String(tabId)] = {
+    ...current,
+    target_url: url,
+    selected_index: nextIndex,
+    updated_at: new Date().toISOString()
+  };
+  await saveSearchHomeRouteStates(states);
+  await chrome.tabs.update(tabId, { url });
+  return { ok: true, tab_id: tabId, url, selected_index: nextIndex };
+}
+
+function normalizeSearchHomeRouteAction(action) {
+  const value = String(action || "").trim().toLowerCase();
+  if (value === "previous" || value === "prev" || value === "left") {
+    return "prev";
+  }
+  if (value === "open" || value === "enter") {
+    return "open";
+  }
+  if (value === "fallback") {
+    return "fallback";
+  }
+  return "next";
+}
+
+function normalizeSearchHomeRouteState(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidates = Array.isArray(value.target_candidates)
+    ? value.target_candidates
+        .map((candidate) => normalizeSearchHomeCandidate(candidate))
+        .filter(Boolean)
+    : [];
+  const fallbackUrl = normalizeSearchHomeCandidateUrl(value.fallback_url);
+  const selectedIndex = normalizeSearchHomeIndex({ target_candidates: candidates }, Number(value.selected_index));
+  return {
+    query: String(value.query || ""),
+    target_url: normalizeSearchHomeCandidateUrl(value.target_url) || fallbackUrl || (candidates[0]?.final_url || candidates[0]?.url || ""),
+    fallback_url: fallbackUrl,
+    selected_index: selectedIndex,
+    target_candidates: candidates,
+    updated_at: typeof value.updated_at === "string" && value.updated_at ? value.updated_at : new Date().toISOString()
+  };
+}
+
+function normalizeSearchHomeCandidate(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const finalUrl = normalizeSearchHomeCandidateUrl(value.final_url || value.url);
+  if (!finalUrl) {
+    return null;
+  }
+  return {
+    url: normalizeSearchHomeCandidateUrl(value.url) || finalUrl,
+    final_url: finalUrl,
+    title: String(value.title || ""),
+    domain: String(value.domain || "")
+  };
+}
+
+function normalizeSearchHomeCandidateUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return "";
+    }
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeSearchHomeIndex(state, value) {
+  const total = Array.isArray(state?.target_candidates) ? state.target_candidates.length : 0;
+  if (total <= 0) {
+    return -1;
+  }
+  return Number.isInteger(value) && value >= 0 && value < total ? value : 0;
+}
+
+function nextSearchHomeIndex(state, delta) {
+  const total = Array.isArray(state?.target_candidates) ? state.target_candidates.length : 0;
+  if (total <= 0) {
+    return -1;
+  }
+  const base = normalizeSearchHomeIndex(state, state.selected_index);
+  return (base + delta + total) % total;
+}
+
+function isFreshSearchHomeRouteState(state) {
+  if (!state || typeof state.updated_at !== "string" || !state.updated_at) {
+    return false;
+  }
+  const updatedAt = Date.parse(state.updated_at);
+  if (!Number.isFinite(updatedAt)) {
+    return false;
+  }
+  return Date.now() - updatedAt <= SEARCH_HOME_ROUTE_MAX_AGE_MS;
+}
+
+function searchHomeRouteStateExpiresAt(state) {
+  const updatedAt = Date.parse(state?.updated_at || "");
+  if (!Number.isFinite(updatedAt)) {
+    return 0;
+  }
+  return updatedAt + SEARCH_HOME_ROUTE_MAX_AGE_MS;
 }
 
 function tabSummary(tab) {

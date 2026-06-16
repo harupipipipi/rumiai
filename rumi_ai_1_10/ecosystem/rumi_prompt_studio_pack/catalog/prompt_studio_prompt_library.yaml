@@ -1,0 +1,82 @@
+prompt_library:
+  version: 0.1.0
+  owner_surface: prompt_artifact_catalog
+  records:
+  - prompt_id: prompt_evidence_first
+    version: 0.1.0
+    purpose: Convert a rough prompt idea into a reviewed prompt artifact with explicit evidence.
+    source_platforms:
+    - rumi
+    persona_presets:
+    - safe_default
+    lint_dimensions:
+    - deterministic_prompt_id
+    - instruction_hierarchy
+    - evidence_requirement
+    - risk_notes
+    - privacy_secret_boundary
+    fixture_ids:
+    - fixture_evidence_first
+    required_output_sections:
+    - purpose
+    - risk
+    - evidence_requirement
+    - customization_knobs
+    non_overlap:
+      model_benchmarking: handoff_to_rumi_model_evals_pack
+      long_term_memory_storage: handoff_to_rumi_memory_knowledge_pack
+      tool_or_api_creation: handoff_to_rumi_api_toolsmith_pack
+      code_edits: handoff_to_rumi_code_ide_pack
+  - prompt_id: prompt_handoff_boundary
+    version: 0.1.0
+    purpose: Identify when a prompt request crosses from prompt design into runtime, memory, model eval, tool/API, or code ownership.
+    source_platforms:
+    - claude
+    - chatgpt
+    - gemini
+    persona_presets:
+    - handoff_review
+    lint_dimensions:
+    - scope_boundary
+    - owner_handoff
+    - blocked_action_detection
+    - fixture_dry_run
+    fixture_ids:
+    - fixture_handoff
+    required_output_sections:
+    - handoff_owner
+    - review_gate
+    - blocked_surfaces
+    non_overlap:
+      model_benchmarking: handoff_to_rumi_model_evals_pack
+      model_routing: handoff_to_defaultspack_or_model_catalog_owner
+      long_term_memory_storage: handoff_to_rumi_memory_knowledge_pack
+      tool_or_api_creation: handoff_to_rumi_api_toolsmith_pack
+      code_edits: handoff_to_rumi_code_ide_pack
+  - prompt_id: prompt_custom_instruction_migration
+    version: 0.1.0
+    purpose: Normalize Claude, ChatGPT, or Gemini custom instructions into portable prompt-studio records.
+    source_platforms:
+    - claude
+    - chatgpt
+    - gemini
+    persona_presets:
+    - quality_gate
+    lint_dimensions:
+    - custom_instruction_migration_fidelity
+    - platform_specific_filtering
+    - style_persona_consistency
+    - evidence_requirement
+    fixture_ids:
+    - fixture_claude_migration
+    - fixture_chatgpt_migration
+    - fixture_gemini_migration
+    required_output_sections:
+    - portable_instructions
+    - platform_specific_notes
+    - blocked_imports
+    - reviewer_questions
+    non_overlap:
+      persistent_preferences: handoff_to_rumi_memory_knowledge_pack
+      model_specific_quality_claims: handoff_to_rumi_model_evals_pack
+      action_execution: handoff_to_defaultspack

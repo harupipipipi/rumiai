@@ -1,0 +1,25 @@
+workflows:
+  define_agent_scenario:
+    owner: rumi_agentic_qa_pack
+    requires_evidence:
+      - scenario_id
+      - expected_observation
+      - actual_observation
+      - triage_owner_pack
+    handoff_policy: setup_pack_overlap_policy
+  replay_acceptance_matrix:
+    owner: rumi_agentic_qa_pack
+    requires_evidence:
+      - scenario_id
+      - expected_observation
+      - actual_observation
+      - triage_owner_pack
+    handoff_policy: setup_pack_overlap_policy
+  triage_regression_evidence:
+    owner: rumi_agentic_qa_pack
+    requires_evidence:
+      - scenario_id
+      - expected_observation
+      - actual_observation
+      - triage_owner_pack
+    handoff_policy: setup_pack_overlap_policy

@@ -1,0 +1,91 @@
+workflows:
+  default_execution: no_runtime_action
+  ownership:
+    owned:
+    - hypothesis_contract
+    - metric_plan
+    - sample_size_plan
+    - assignment_plan
+    - guardrail_plan
+    - instrumentation_requirements
+    - decision_record
+    - experiment_readiness_packet
+    handoff:
+    - analytics query execution
+    - production rollout
+    - runtime telemetry collection
+    - model benchmark execution
+    - business decision execution
+    - feature flag mutation
+  items:
+  - id: ab_test_design
+    purpose: Produce a ready-to-review A/B design packet with hypothesis, metrics, sample assumptions,
+      assignment, and guardrails.
+    inputs:
+    - hypothesis
+    - metric_plan
+    produces:
+    - sample_size_plan
+    - assignment_plan
+    - guardrail_plan
+    blocking_gates:
+    - hypothesis_metric_alignment
+    - sample_size_assumptions
+    handoffs:
+    - defaultspack
+    execution: declarative_only
+  - id: quasi_experiment_design
+    purpose: Design non-randomized comparison while naming bias risks and limitations.
+    inputs:
+    - hypothesis
+    - available_observational_data_description
+    produces:
+    - assignment_plan
+    - decision_record
+    blocking_gates:
+    - assignment_bias_risk
+    - limitations_present
+    handoffs:
+    - defaultspack
+    execution: declarative_only
+  - id: rollout_guardrail_plan
+    purpose: Define monitoring, stop rules, and rollback thresholds without mutating production.
+    inputs:
+    - metric_plan
+    - guardrail_plan
+    produces:
+    - guardrail_plan
+    - handoff_packet
+    blocking_gates:
+    - guardrail_metric_present
+    - rollback_owner_named
+    handoffs:
+    - defaultspack
+    execution: declarative_only
+  - id: instrumentation_requirements
+    purpose: Create an event and metric request for observability and analysis owners.
+    inputs:
+    - metric_plan
+    produces:
+    - instrumentation_request
+    blocking_gates:
+    - data_source_state_declared
+    - privacy_review_state_declared
+    handoffs:
+    - defaultspack
+    execution: declarative_only
+  - id: decision_ready_packet
+    purpose: Record whether a design can run, needs instrumentation, needs analysis, or must not decide.
+    inputs:
+    - hypothesis
+    - guardrail_plan
+    - supplied_results_optional
+    produces:
+    - decision_record
+    blocking_gates:
+    - no_result_claim_without_data
+    - limitations_present
+    handoffs:
+    - defaultspack
+    - rumi_operations_company_pack
+    execution: declarative_only

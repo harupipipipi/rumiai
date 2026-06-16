@@ -1,0 +1,13 @@
+example:
+  id: export_package
+  user_request: Build reviewed export bundle
+  input_state: local_records_supplied
+  expected_result: export_manifest_handoff_packet
+  must_include:
+  - evidence_ids_or_approval_receipt
+  - review_state
+  - handoff_owner
+  must_not:
+  - external_action
+  - uncited_claim
+  - unapproved_tool_call

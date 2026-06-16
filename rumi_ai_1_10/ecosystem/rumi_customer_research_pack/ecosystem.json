@@ -1,0 +1,153 @@
+{
+  "pack_id": "rumi_customer_research_pack",
+  "pack_identity": "rumi:ecosystem/rumi_customer_research_pack",
+  "display_name": "Rumi Customer Research Pack",
+  "version": "0.1.0",
+  "description": "Declarative customer interview, survey, feedback evidence, consent/redaction, insight-card, and opportunity mapping pack.",
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "schema",
+      "policy",
+      "checklist",
+      "ledger",
+      "template",
+      "fixture",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "connectivity": {
+    "requires": [
+      "defaultspack"
+    ],
+    "provides": []
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "host_execution": false,
+  "metadata": {
+    "runtime_type": "declarative_setup_pack",
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "declarative_only": true,
+    "consumes_existing_sources_only": true,
+    "output_effect": "draft_and_handoff_only",
+    "defaultspack_promotion_eligible": false,
+    "owner_surfaces": [
+      "participant_consent_record",
+      "research_redaction_policy",
+      "interview_evidence",
+      "survey_synthesis",
+      "feedback_to_insight_card",
+      "opportunity_map",
+      "evidence_linked_research_brief"
+    ],
+    "non_owner_surfaces": [
+      "live recruiting",
+      "email or CRM writes",
+      "generic web research",
+      "product roadmap decisions",
+      "analytics query execution",
+      "contact enrichment",
+      "message sending"
+    ],
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_connector_gateway_pack",
+        "reason": "Recruiting, calendar, and source system retrieval are connector-owned."
+      },
+      {
+        "pack_id": "rumi_business_ops_pack",
+        "reason": "CRM writes, outbound email, and business workflow execution remain outside this pack."
+      },
+      {
+        "pack_id": "rumi_research_pack",
+        "reason": "General web research and market scans remain research-owned."
+      },
+      {
+        "pack_id": "rumi_data_analysis_pack",
+        "reason": "Large survey statistics and analytics queries are data-analysis-owned."
+      },
+      {
+        "pack_id": "rumi_meeting_intelligence_pack",
+        "reason": "Raw call or meeting transcript normalization is meeting-intelligence-owned."
+      }
+    ],
+    "asset_index": {
+      "index": [
+        "asset_index.yaml"
+      ],
+      "readme": [
+        "README.md"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "catalog": [
+        "catalog/workflows.yaml",
+        "catalog/quality_matrix.yaml",
+        "catalog/taxonomy.yaml",
+        "catalog/handoff_matrix.yaml"
+      ],
+      "schema": [
+        "schemas/consent_record.schema.json",
+        "schemas/insight_card.schema.json",
+        "schemas/interview_evidence.schema.json",
+        "schemas/opportunity_map.schema.json",
+        "schemas/participant.schema.json",
+        "schemas/survey_response.schema.json"
+      ],
+      "policy": [
+        "policies/safety.policy.yaml",
+        "policies/handoff.policy.yaml"
+      ],
+      "checklist": [
+        "checklists/review.checklist.yaml"
+      ],
+      "ledger": [
+        "ledgers/evidence_ledger.schema.yaml"
+      ],
+      "template": [
+        "templates/handoff.template.md",
+        "templates/review_report.template.md",
+        "templates/artifact_card.template.md"
+      ],
+      "fixtures": [
+        "fixtures/contract_fixture.yaml",
+        "fixtures/negative_cases.yaml"
+      ],
+      "profiles": [
+        "profiles/customer_researcher.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/insight_synthesizer.system.md"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "example": [
+        "examples/feedback_opportunity_card.example.yaml",
+        "examples/interview_synthesis.example.yaml",
+        "examples/revoked_consent_filter.example.yaml",
+        "examples/survey_theme_map.example.yaml"
+      ]
+    }
+  }
+}

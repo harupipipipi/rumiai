@@ -1,0 +1,68 @@
+version: rumi.runtime_benchmark.latency_cost_sampling.v1
+pack_id: rumi_runtime_benchmark_pack
+network_default: none
+
+metric_families:
+  - id: latency
+    units:
+      - milliseconds
+      - seconds
+    required_statistics:
+      - min
+      - median
+      - p95
+      - max
+    notes:
+      - separate cold_start and warm_path samples
+      - label queue_time separately when known
+  - id: cost
+    units:
+      - estimated_usd
+      - tokens_in
+      - tokens_out
+      - tool_calls
+    required_statistics:
+      - mean
+      - total
+      - per_successful_run
+    notes:
+      - cost snapshots are estimates unless billed evidence is user-provided
+      - do not record credentials or account identifiers
+  - id: reliability
+    units:
+      - success_rate
+      - retry_count
+      - failure_count
+    required_statistics:
+      - numerator
+      - denominator
+      - failure_modes
+
+sampling_plans:
+  - id: smoke_three_run
+    sample_count: 3
+    use_when: quick local sanity check
+    limitations:
+      - not enough for p95 claims
+      - compare only coarse regressions
+  - id: comparison_ten_run
+    sample_count: 10
+    use_when: compare two runtime surfaces or profiles
+    limitations:
+      - p95 is directional
+      - note warmup and cache effects
+  - id: release_gate_thirty_run
+    sample_count: 30
+    use_when: release gate or regression threshold review
+    limitations:
+      - still local evidence unless externally validated
+      - cost estimate requires declared pricing source
+
+report_sections:
+  - environment_capture
+  - sampling_plan
+  - latency_summary
+  - cost_summary
+  - reliability_summary
+  - reproducibility_notes
+  - residual_risk

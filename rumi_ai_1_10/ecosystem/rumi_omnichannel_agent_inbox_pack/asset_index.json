@@ -1,0 +1,90 @@
+{
+  "asset_index": {
+    "pack_id": "rumi_omnichannel_agent_inbox_pack",
+    "categories": {
+      "index": [
+        "asset_index.json",
+        "asset_index.yaml"
+      ],
+      "readme": [
+        "README.md"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/migration.md",
+        "docs/operations.md",
+        "docs/overlap_policy.md"
+      ],
+      "catalog": [
+        "catalog/handoff_matrix.yaml",
+        "catalog/quality_matrix.yaml",
+        "catalog/taxonomy.yaml",
+        "catalog/workflows.yaml"
+      ],
+      "policy": [
+        "policies/handoff.policy.yaml",
+        "policies/safety.policy.yaml"
+      ],
+      "checklist": [
+        "checklists/review.checklist.yaml"
+      ],
+      "ledger": [
+        "ledgers/evidence_ledger.schema.yaml"
+      ],
+      "template": [
+        "templates/handoff.template.md",
+        "templates/review_report.template.md",
+        "templates/ui_contract.template.md"
+      ],
+      "fixtures": [
+        "fixtures/contract_fixture.yaml",
+        "fixtures/negative_cases.yaml"
+      ],
+      "presets": [
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml",
+        "presets/safe_default.preset.yaml"
+      ],
+      "schema": [
+        "schemas/channel_acl.schema.json",
+        "schemas/channel_message.schema.json",
+        "schemas/channel_payload.schema.json",
+        "schemas/connector_handoff.schema.json",
+        "schemas/draft_approval.schema.json",
+        "schemas/identity_map.schema.json",
+        "schemas/inbox_item.schema.json",
+        "schemas/inbox_thread.schema.json",
+        "schemas/inbox_ui_view.schema.json",
+        "schemas/notification_preference.schema.json",
+        "schemas/outbound_draft.schema.json",
+        "schemas/routing_rule.schema.json",
+        "schemas/thread_route.schema.json"
+      ],
+      "profiles": [
+        "profiles/inbox_router.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/inbox_router.system.md"
+      ],
+      "frontend": [
+        "frontend_extensions/omnichannel_inbox.ui.json"
+      ],
+      "example": [
+        "examples/notification_preference.example.yaml",
+        "examples/outbound_draft_approval.example.yaml",
+        "examples/slack_gmail_identity.example.yaml",
+        "examples/unauthorized_channel_block.example.yaml"
+      ]
+    },
+    "invariants": {
+      "required_secrets": [],
+      "required_network": [],
+      "executable_code": false,
+      "supports_all_ok": false,
+      "external_actions_are_handoffs": true,
+      "defaultspack_promotion_eligible": false
+    }
+  }
+}

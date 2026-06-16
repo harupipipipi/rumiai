@@ -1,0 +1,72 @@
+{
+  "version": "rumi.knowledge_marketplace.card.schema.v1",
+  "pack_id": "rumi_knowledge_marketplace_pack",
+  "type": "object",
+  "description": "Schema-like contract for reviewed skills, templates, playbooks, connector cards, and bundle entries.",
+  "required": [
+    "card_id",
+    "capability_type",
+    "source",
+    "publisher",
+    "trust_status",
+    "permission_summary",
+    "provenance",
+    "install_review"
+  ],
+  "properties": {
+    "card_id": {"type": "string"},
+    "capability_type": {
+      "type": "string",
+      "enum": ["skill", "template", "playbook", "connector_card", "pack_bundle"]
+    },
+    "source": {
+      "type": "object",
+      "required": ["source_ref", "content_digest"],
+      "properties": {
+        "source_ref": {"type": "string"},
+        "content_digest": {"type": "string"},
+        "repository_ref": {"type": "string"}
+      }
+    },
+    "publisher": {"type": "string"},
+    "trust_status": {
+      "type": "string",
+      "enum": ["unreviewed", "repository_reviewed", "trusted", "blocked"]
+    },
+    "permission_summary": {
+      "type": "object",
+      "required": ["required_permissions", "network_requirement", "secret_requirement", "host_execution_requirement"],
+      "properties": {
+        "required_permissions": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "network_requirement": {"type": "string"},
+        "secret_requirement": {"type": "string"},
+        "host_execution_requirement": {"type": "boolean"}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["source_ref", "content_digest", "publisher", "reviewer", "reviewed_at"]
+    },
+    "install_review": {
+      "type": "object",
+      "required": ["decision", "explicit_user_approval_required", "reviewer", "reason"],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": ["allow_install", "allow_with_warning", "needs_security_review", "block_install"]
+        },
+        "explicit_user_approval_required": {"type": "boolean"},
+        "reviewer": {"type": "string"},
+        "reason": {"type": "string"},
+        "required_followups": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    }
+  },
+  "network_default": "none"
+}

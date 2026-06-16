@@ -1,0 +1,49 @@
+{
+  "id": "tool_names",
+  "description": "Return only the names of the tools currently registered in Rumi.",
+  "loading": "always",
+  "config": {
+    "tool_id": "tool_names",
+    "name": "tool_names",
+    "summary": "List the currently registered tool names without loading full schemas.",
+    "tool_category": "tool",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "loading": "always",
+    "tags": [
+      "tool",
+      "discovery",
+      "introspection"
+    ],
+    "ui": {
+      "group_id": "tool",
+      "group_label": "Tools",
+      "group_icon": "list",
+      "item_icon": "list",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Tool Names",
+      "composer_description": "List currently registered tool names only.",
+      "composer_icon": "list"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "filter": {
+            "type": "object",
+            "description": "Optional ToolRegistry filter, for example tags.",
+            "additionalProperties": true
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.introspection:tool_names"
+    }
+  }
+}

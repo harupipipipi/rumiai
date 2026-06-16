@@ -1,0 +1,31 @@
+version: rumi.knowledge_marketplace.promotion_blacklist_policy.v1
+policy_id: rumi_knowledge_marketplace.promotion_blacklist
+pack_id: rumi_knowledge_marketplace_pack
+network_default: none
+
+promotion_requirements:
+  - repository_reviewed_or_trusted_status
+  - provenance_ledger_entry
+  - no_open_security_review_flags
+  - permission_summary_complete
+  - maintainer_approval_recorded
+
+promotion_blockers:
+  - missing_source_ref
+  - missing_content_digest
+  - excessive_permissions_without_justification
+  - requires_secrets_without_install_notes
+  - suspicious_network_endpoint
+  - unreviewed_publisher
+
+blacklist_reasons:
+  - malicious_or_deceptive_content
+  - secret_exfiltration_risk
+  - permission_misrepresentation
+  - abandoned_or_unmaintained_critical_capability
+  - unresolved_security_review
+
+recheck_policy:
+  blocked_cards_can_be_rechecked: true
+  requires_new_evidence: true
+  security_review_handoff: rumi_security_review_pack

@@ -1,0 +1,18 @@
+id: rumi_document_intelligence_pack.examples.redline_privacy_review
+profile: rumi_document_intelligence_pack.document_intelligence_reviewer
+task: Review a contract redline for high-risk semantic changes and sensitive content.
+expected_passes:
+  - redline_delta_reviewer
+  - citation_mapper
+  - privacy_reviewer
+  - final_evidence_integrator
+required_outputs:
+  - high_risk_delta_table
+  - semantic_delta_summary
+  - page_span_evidence_map
+  - redaction_or_exclusion_notes
+  - human_review_questions
+safety_notes:
+  - redline analysis is not legal advice
+  - confidential clauses require privacy classification
+  - external sharing requires explicit approval

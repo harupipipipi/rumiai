@@ -1,0 +1,91 @@
+workflows:
+  items:
+  - id: prebrief_from_local_context
+    purpose: Prepare a meeting brief from agenda, notes, or transcript fragments already supplied locally.
+    inputs:
+    - local_evidence
+    required_source_types:
+    - agenda_text
+    - prior_notes
+    - supplied_context
+    outputs:
+    - meeting_prebrief
+    - open_questions
+    - evidence_ledger_entries
+    execution: declarative_only
+    quality_gate:
+    - cite_source_spans
+    - mark_missing_context
+    - no_connector_fetch
+  - id: transcript_to_decision_log
+    purpose: Convert an existing transcript into decisions, unresolved questions, and evidence-linked rationale.
+    inputs:
+    - local_evidence
+    required_source_types:
+    - transcript_text
+    - speaker_labeled_notes
+    outputs:
+    - decision_records
+    - unresolved_questions
+    - evidence_ledger_entries
+    execution: declarative_only
+    quality_gate:
+    - decision_requires_source_span
+    - contradiction_requires_open_question
+    - no_invented_attendee_decisions
+  - id: action_extraction_register
+    purpose: Extract owner, due date, dependency, and confidence from existing meeting evidence.
+    inputs:
+    - local_evidence
+    required_source_types:
+    - transcript_text
+    - meeting_notes
+    outputs:
+    - action_items
+    - owner_resolution_queue
+    - evidence_ledger_entries
+    execution: declarative_only
+    quality_gate:
+    - owner_required_or_unknown
+    - due_date_confidence_required
+    - handoff_owner_for_execution
+  - id: followup_packet
+    purpose: Draft follow-up messages and task handoffs without sending or scheduling them.
+    inputs:
+    - local_evidence
+    outputs:
+    - follow_up_drafts
+    - handoff_packet
+    - human_review_queue
+    execution: declarative_only
+    quality_gate:
+    - draft_only_flag_required
+    - participant_consent_required
+    - adjacent_owner_execution_handoff
+  - id: evidence_recap_bundle
+    purpose: Package recap, decisions, actions, open questions, and evidence ledger into one reviewable bundle.
+    inputs:
+    - local_evidence
+    outputs:
+    - evidence_linked_recap_bundle
+    - quality_gate_report
+    - handoff_queue
+    execution: declarative_only
+    quality_gate:
+    - every_claim_has_evidence
+    - no_runtime_grant_created
+    - human_review_before_external_action
+  default_execution: no_runtime_action
+  ownership:
+    owned:
+    - meeting_prebrief
+    - transcript_to_decisions
+    - action_item_extraction
+    - followup_draft_contract
+    - evidence_linked_recap_bundle
+    handoff:
+    - connectors
+    - scheduler
+    - voice_capture
+    - business_ops_workflows
+    - document_parsing
