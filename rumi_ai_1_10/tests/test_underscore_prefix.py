@@ -306,3 +306,18 @@ class TestMixedScenario:
 
         # 非直列化可能: 除外
         assert "non_serial" not in rd
+
+
+class TestReservedFlowInputsRejected:
+    """Caller inputs cannot inject kernel-owned flow context keys."""
+
+    def test_run_flow_rejects_reserved_principal_input(self):
+        kernel = _make_kernel(flow_ids=["f"], execute_return={"output": "ok"})
+        handler = StubHandler(kernel=kernel)
+
+        result = handler._run_flow("f", {"_principal_id": "victim", "x": 1}, 30)
+
+        assert result["success"] is False
+        assert result["status_code"] == 400
+        assert "Reserved flow input key(s)" in result["error"]
+        kernel.execute_flow_sync.assert_not_called()

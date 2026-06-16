@@ -10,7 +10,7 @@ export const PROFILE_GRAPH_CATEGORY_LABELS = {
   tools: '+ Tool',
   webhooks: '+ Webhook',
   api_routes: '+ API',
-  prompts: '+ Prompt',
+  prompts: '+ Rule',
   frontend: '+ Frontend',
   flows: '+ Flow',
   nodes: '+ Node',
@@ -167,7 +167,7 @@ export function graphNodeKindLabel(node: Pick<ApiProfileGraphNode, 'id' | 'kind'
   if (prefix === 'api') return 'API Route';
   if (prefix === 'tool') return 'Tool';
   if (prefix === 'webhook') return 'Webhook';
-  if (prefix === 'prompt') return 'Prompt';
+  if (prefix === 'prompt') return 'Rule';
   if (prefix === 'frontend') return 'Frontend';
   if (prefix === 'flow') return node.kind === 'capability_graph' ? 'Capability Graph' : 'Flow';
   if (prefix === 'profile') return 'Profile';

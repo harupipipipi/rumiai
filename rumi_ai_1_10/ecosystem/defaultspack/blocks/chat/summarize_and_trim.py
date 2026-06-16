@@ -6,50 +6,20 @@ from blocks._common import ok, error, gen_id, timestamp
 from domain.chat.store import ChatStore
 from domain.chat.message_converter import convert_to_standard
 from blocks.chat.send import _ai_direct_complete
+from blocks.chat._prompt_helpers import (
+    build_summarize_prompt,
+    extract_text,
+)
 
 
 def _extract_text_from_response(response):
-    """AI応答からテキストを抽出する。call_handler が ok ラッパー付き/なし両対応。"""
-    if isinstance(response, dict) and "data" in response:
-        response = response["data"]
-    content = response.get("content", [])
-    if isinstance(content, str):
-        return content
-    parts = []
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "text":
-            parts.append(block.get("text", ""))
-        elif isinstance(block, str):
-            parts.append(block)
-    return "\n".join(parts)
+    """Backwards-compatible alias for the shared extract_text helper."""
+    return extract_text(response)
 
 
 def _build_summarize_prompt(standard_messages, instruction=None):
     """要約用のシステムプロンプトとメッセージリストを構築する。"""
-    system_text = (
-        "You are a conversation summarizer. "
-        "The user will provide a segment of conversation messages. "
-        "Summarize the key information, decisions, and results from these messages. "
-        "Be concise but preserve all important details, outcomes, and conclusions. "
-        "Output ONLY the summary text, no extra formatting."
-    )
-    if instruction:
-        system_text += "\n\nAdditional instruction: " + instruction
-
-    conversation_text_parts = []
-    for msg in standard_messages:
-        role = msg.get("role", "unknown")
-        content = msg.get("content", "")
-        if content:
-            conversation_text_parts.append("[" + role + "]: " + content)
-
-    conversation_text = "\n".join(conversation_text_parts)
-
-    messages = [
-        {"role": "system", "content": system_text},
-        {"role": "user", "content": "Please summarize the following conversation segment:\n\n" + conversation_text},
-    ]
-    return messages
+    return build_summarize_prompt(standard_messages, instruction, persona="summarizer")
 
 
 def _unavailable_summary_response(standard_messages):

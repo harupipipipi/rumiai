@@ -20,7 +20,7 @@ import re
 import shutil
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Dict, List, Optional
 
 _SAFE_ID_RE = re.compile("^[a-zA-Z0-9_.-]+$")
@@ -77,12 +77,10 @@ def execute(context: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         content = change.get("content")
         sha256_before = change.get("sha256_before")
 
-        if not file_path:
-            return _error("changes[" + str(i) + "]: missing file_path", "validation_error")
-        if ".." in file_path:
-            return _error(
-                "changes[" + str(i) + "]: path traversal in file_path", "validation_error"
-            )
+        validated_path_error = _validate_relative_file_path(file_path)
+        if validated_path_error:
+            return _error("changes[" + str(i) + "]: " + validated_path_error, "validation_error")
+
         if allowed_path_globs:
             if not any(fnmatch.fnmatch(file_path, g) for g in allowed_path_globs):
                 return _error(
@@ -118,9 +116,10 @@ def execute(context: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
 
         changed_paths: List[str] = []
         total_bytes = 0
+        resolved_payload_dir = payload_dir.resolve()
         for change in validated_changes:
             fp = change["file_path"]
-            target_file = payload_dir / fp
+            target_file = _safe_payload_target(resolved_payload_dir, fp)
             target_file.parent.mkdir(parents=True, exist_ok=True)
             content = change["content"]
             if isinstance(content, (dict, list)):
@@ -176,6 +175,26 @@ def execute(context: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
 
 def _error(message: str, error_type: str) -> Dict[str, Any]:
     return {"success": False, "error": message, "error_type": error_type}
+
+
+def _validate_relative_file_path(file_path: Any) -> Optional[str]:
+    if not file_path or not isinstance(file_path, str):
+        return "missing file_path"
+    if Path(file_path).is_absolute() or PureWindowsPath(file_path).is_absolute():
+        return "absolute file_path is not allowed"
+    if ".." in file_path:
+        return "path traversal in file_path"
+    return None
+
+
+def _safe_payload_target(payload_dir: Path, file_path: str) -> Path:
+    resolved_payload_dir = payload_dir.resolve(strict=False)
+    target_file = (resolved_payload_dir / file_path).resolve(strict=False)
+    try:
+        target_file.relative_to(resolved_payload_dir)
+    except ValueError as exc:
+        raise ValueError("file_path escapes staging payload directory") from exc
+    return target_file
 
 
 def _safe_pack_id(pack_id: str) -> bool:

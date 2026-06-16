@@ -169,6 +169,16 @@ class TestDockerExecution(unittest.TestCase):
     """Docker実行のテスト（Dockerが利用可能な環境でのみ実行）"""
     
     docker_available = False
+    docker_image_unavailable_markers = (
+        "Client.Timeout exceeded while awaiting headers",
+        "context deadline exceeded",
+        "docker.io",
+        "registry-1.docker.io",
+        "Unable to find image",
+        "pull access denied",
+        "TLS handshake timeout",
+        "i/o timeout",
+    )
     
     @classmethod
     def setUpClass(cls):
@@ -191,6 +201,14 @@ class TestDockerExecution(unittest.TestCase):
         elif "RUMI_SECURITY_MODE" in os.environ:
             del os.environ["RUMI_SECURITY_MODE"]
         reset_python_file_executor()
+
+    @classmethod
+    def _is_docker_image_unavailable(cls, result: ExecutionResult) -> bool:
+        if result.success or result.error_type != "container_execution_error":
+            return False
+
+        error = result.error or ""
+        return any(marker in error for marker in cls.docker_image_unavailable_markers)
     
     def test_docker_execution_succeeds(self):
         """Docker実行が成功すること"""
@@ -234,6 +252,9 @@ class TestDockerExecution(unittest.TestCase):
                             context=context,
                             timeout_seconds=30.0
                         )
+
+                        if self._is_docker_image_unavailable(result):
+                            self.skipTest(f"Docker executor image unavailable: {result.error}")
 
                         self.assertTrue(
                             result.success,

@@ -40,8 +40,23 @@ class TestSourceCleanup(unittest.TestCase):
         self.assertIn("_handler_registry", self.src)
     def test_unified_execute_exists(self):
         self.assertIn("def _unified_execute", self.src)
-    def test_compute_sha256_exists(self):
-        self.assertIn("def compute_file_sha256", self.src)
+    def test_compute_sha256_reexport_exists(self):
+        tree = ast.parse(self.src)
+        imports_compute = any(
+            isinstance(n, ast.ImportFrom)
+            and any(alias.name == "compute_file_sha256" for alias in n.names)
+            and (
+                n.module == "core_runtime.crypto_utils"
+                or (n.level == 1 and n.module == "crypto_utils")
+            )
+            for n in ast.walk(tree)
+        )
+        defines_compute = any(
+            isinstance(n, ast.FunctionDef) and n.name == "compute_file_sha256"
+            for n in ast.walk(tree)
+        )
+        self.assertTrue(imports_compute)
+        self.assertFalse(defines_compute)
     def test_manifest_registry_alias(self):
         self.assertIn("ManifestRegistry = FunctionRegistry", self.fr_src)
 

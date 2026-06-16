@@ -1,0 +1,43 @@
+{
+  "function_id": "tool_kanban",
+  "description": "Run the default Kanban task-board tool.",
+  "tags": [
+    "tool",
+    "planning",
+    "kanban"
+  ],
+  "risk": "medium",
+  "requires": [
+    "tool.kanban"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.tool.kanban",
+    "defaultspack.tool.kanban"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}
