@@ -1,0 +1,28 @@
+preset_id: rumi_knowledge_marketplace.safe_default
+profile: rumi_knowledge_marketplace.marketplace_curator
+features:
+  local_first: true
+  evidence_required: true
+  owner_boundary_check: true
+  network_default: none
+  auto_install_allowed: false
+required_assets:
+  - schemas/marketplace_card.schema.json
+  - catalog/trust_rubric.yaml
+  - workflows/install_review_workflow.yaml
+  - ledgers/provenance_ledger.yaml
+workflow:
+  - classify the candidate as skill, template, playbook, connector_card, or pack_bundle
+  - capture source_ref, publisher, content_digest, permission_summary, and required grants before any install decision
+  - score the candidate against trust_rubric levels and promotion_blacklist blockers
+  - require explicit user approval before install-ready status
+blocked_defaults:
+  - auto_install_unreviewed_content
+  - network_fetch_for_missing_metadata
+  - accepting_missing_content_digest
+  - granting_connector_secrets_from_card_metadata
+outputs:
+  - marketplace_card_review
+  - provenance_ledger_entry
+  - install_decision
+  - owner_pack_handoff_status

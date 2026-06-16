@@ -1,0 +1,7 @@
+preset_id: rumi_browser_automation.visual_regression_browser
+profile: rumi_browser_automation.operator
+playbook: visual_regression_review
+features:
+  baseline_capture: required
+  viewport_matrix: [desktop, mobile]
+  classify_layout_overlap: true

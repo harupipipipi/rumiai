@@ -1,0 +1,6 @@
+preset:
+  id: safe_default
+  pack_id: rumi_api_toolsmith_pack
+  mode: safe_default
+  require_evidence: true
+  require_overlap_check: true

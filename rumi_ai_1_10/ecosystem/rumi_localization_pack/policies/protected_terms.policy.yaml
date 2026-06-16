@@ -1,0 +1,65 @@
+protected_terms_policy:
+  id: protected_terms_v1
+  purpose: Preserve brand, product, code, placeholder, legal, and support terms during localization review.
+  default_action: block_until_reviewed
+  enforcement_levels:
+  - id: locked
+    rule: target must match the glossary approved target exactly
+    exception_requires:
+    - glossary_owner_approval
+    - issue_record
+    - evidence_excerpt
+  - id: protected
+    rule: term may be localized only when an approved locale-specific target exists
+    exception_requires:
+    - locale_owner_approval
+    - rationale
+    - regression_note
+  - id: advisory
+    rule: reviewer may adapt wording while preserving intent and tone
+    exception_requires:
+    - reviewer_note
+  protected_categories:
+  - id: brand
+    examples:
+    - Rumi
+    enforcement: locked
+  - id: product
+    examples:
+    - defaultspack
+    - setup pack
+    enforcement: locked
+  - id: code
+    examples:
+    - all-ok
+    - pack_id
+    enforcement: locked
+  - id: placeholder
+    examples:
+    - "{{user_name}}"
+    - "%{count}"
+    enforcement: locked
+  - id: legal
+    examples:
+    - Terms of Service
+    - privacy policy
+    enforcement: protected
+  blocked_by_default:
+  - translating locked brand or code identifiers
+  - deleting placeholders or ICU variables
+  - changing source segment IDs
+  - normalizing locale-specific legal text without owner review
+  - resolving layout truncation by rewriting UI design
+  required_evidence:
+  - source_segment_id
+  - target_segment_id
+  - term_id
+  - source_excerpt
+  - target_excerpt
+  - locale_pair
+  - reviewer_decision
+  handoff_required_when:
+  - document source extraction is incomplete
+  - UI layout expansion or truncation needs implementation
+  - workspace export files must be generated
+  - connector delivery or publishing is requested

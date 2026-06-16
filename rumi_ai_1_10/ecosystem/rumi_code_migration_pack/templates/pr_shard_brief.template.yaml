@@ -1,0 +1,4 @@
+template:
+  shard_id: '{{shard_id}}'
+  scope: '{{scope}}'
+  owner_handoff: rumi_subagent_pr_manager_pack

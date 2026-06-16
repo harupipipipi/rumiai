@@ -32,6 +32,9 @@ def test_line_default_profile_maps_text_message_to_user_input():
     assert envelope.input == "hello"
     assert envelope.source["provider"] == "line"
     assert envelope.metadata["line"]["reply_token"] == "reply"
+    assert envelope.params["request_timeout"] == 55
+    assert envelope.params["line_reply_deadline_seconds"] == 60
+    assert envelope.tools == ["web_search"]
 
 
 def test_line_default_profile_fallbacks_non_text_message():
@@ -65,10 +68,13 @@ def test_line_computer_use_profile_attaches_browser_tools_and_prompt_policy():
     envelope = InputProfileEngine(profile).to_envelope(event)
 
     assert envelope.input == "open chrome"
+    assert envelope.chat["model"] == "google/gemma-4-31b-it"
+    assert envelope.params["model"] == "google/gemma-4-31b-it"
     assert envelope.params["thinking_level"] == "high"
     assert envelope.params["request_timeout"] == 45
+    assert envelope.params["line_reply_deadline_seconds"] == 60
     assert envelope.params["retry"]["max_attempts"] == 5
     assert envelope.params["retry"]["delays"] == [5, 15, 30, 60]
-    assert envelope.tools == ["computer_use", "browser_computer"]
+    assert envelope.tools == ["computer_use", "browser_computer", "web_search"]
     assert profile.spec["policy"]["max_tool_calls"] == 30
     assert profile.spec["response_prompt"]["enabled"] is True

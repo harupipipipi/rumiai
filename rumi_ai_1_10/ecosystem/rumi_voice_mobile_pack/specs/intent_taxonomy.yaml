@@ -1,0 +1,37 @@
+spec_id: rumi_voice_mobile.intent_taxonomy.v1
+owner: rumi_voice_mobile_pack
+purpose: Classify voice and mobile intents before handoff to scheduler, connector, media, or device-action owners.
+network_default: none
+intent_classes:
+  voice_memo_to_task:
+    risk: low_to_medium
+    required_evidence: [transcript_ref, speaker_confirmation, extracted_task_summary]
+    handoff: defaultspack_or_task_owner
+  notification_brief:
+    risk: medium
+    required_evidence: [recipient_channel, delivery_window, notification_consent_ref]
+    handoff: rumi_connector_gateway_pack
+  scheduled_briefing:
+    risk: medium
+    required_evidence: [schedule_scope, source_refs, notification_consent_ref]
+    handoff: rumi_workflow_scheduler_pack
+  speech_device_action:
+    risk: high
+    required_evidence: [transcript_ref, action_target, explicit_confirmation_ref]
+    handoff: rumi_computer_control_pack
+  sensitive_audio_review:
+    risk: high
+    required_evidence: [transcription_consent_ref, retention_policy, redaction_notes]
+    handoff: rumi_multimodal_media_pack
+classification_rules:
+  - id: destructive_or_external_send_is_high
+    rule: Any voice request that sends, posts, purchases, deletes, or changes device state is high risk.
+  - id: transcript_required_for_voice_commands
+    rule: Voice commands need transcript evidence before interpretation.
+  - id: notification_requires_channel_consent
+    rule: Mobile delivery requires consent for channel, recipient, and timing.
+outputs:
+  - intent_class
+  - risk_level
+  - required_consent_refs
+  - handoff_target

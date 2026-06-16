@@ -1,0 +1,12 @@
+negative_cases:
+  cases:
+  - id: replay_divergence
+    given: Detect replay divergence after missing event
+    expected: replay_review_handoff_packet
+  blocked_by_default:
+  - execute tools from a workroom event
+  - mutate browser or desktop state
+  - schedule future work directly
+  - write run files directly
+  - rewrite replay history after checkpoint
+  expected_behavior: block_or_handoff_without_external_action

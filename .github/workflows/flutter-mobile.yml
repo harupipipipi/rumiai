@@ -12,6 +12,10 @@ on:
       - "rumi_mobile/**"
       - ".github/workflows/flutter-mobile.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   analyze-and-test:
     runs-on: ubuntu-latest

@@ -48,6 +48,10 @@ export function trustedComposerActionForWidget(widget: DroppedWidget, toolItems:
   return item.ui?.composer_action;
 }
 
+(trustedComposerActionForWidget as typeof trustedComposerActionForWidget & {
+  __rumiBundleHardeningMarker?: string;
+}).__rumiBundleHardeningMarker = "trustedComposerActionForWidget";
+
 export function resolveComposerWidgetDrop(widget: DroppedWidget, toolItems: ComposerExtensionItem[]): ComposerDropAction {
   if (widget.type === "model") return { type: "select_model", profileId: widget.id };
 

@@ -639,7 +639,6 @@ def test_model_pack_review_chain_quarantines_unmarked_generator_scratch(monkeypa
     assert "scratch text that must never ship" not in text
     assert [call["model"] for call in provider.calls] == ["generator"]
 
-
 def test_model_pack_stream_uses_canonical_events_with_metadata(monkeypatch, tmp_path):
     settings_path = tmp_path / "frontend_settings.json"
     settings_path.write_text(
@@ -890,7 +889,6 @@ def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_to
     assert any(event["phase"] == "deepthink_notes" and "harness tool selection" in event["metadata"]["label"] for event in process["events"])
     assert provider.calls[-1]["model"] == "reviewer"
     assert provider.calls[-1]["tools"] == []
-
 
 def test_deepthink_reviewer_failure_quarantines_current_answer(monkeypatch, tmp_path):
     settings_path = tmp_path / "frontend_settings.json"

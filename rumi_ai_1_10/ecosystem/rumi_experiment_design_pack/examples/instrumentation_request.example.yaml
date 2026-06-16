@@ -1,0 +1,15 @@
+example:
+  id: instrumentation_request
+  user_request: Ask observability for missing events
+  input_state: local_artifacts_supplied
+  expected_result: instrumentation_handoff_packet
+  must_include:
+  - evidence_ids
+  - uncertainty_or_limitations
+  - handoff_owner
+  must_not:
+  - external_action
+  - analytics_query_execution
+  - result_claim_without_supplied_data
+  - uncited_claim
+  - credential_requirement

@@ -1,0 +1,52 @@
+catalog_id: rumi_memory_knowledge_pack.recall_workflows
+version: 1.0.0
+workflows:
+  session_recall_with_evidence:
+    title: Session recall with evidence
+    intent: Retrieve relevant past session context and return evidence-backed summaries.
+    mode: local_first
+    inputs: [query, session_scope, recency_window]
+    steps:
+      - id: search_sessions
+        capability: memory.recall.session
+      - id: verify_evidence
+        capability: memory.recall.verify_evidence
+    outputs: [recall_summary, evidence_links, unsupported_recall]
+  user_profile_update_review:
+    title: User profile update review
+    intent: Convert observed stable preferences into reviewable profile-memory proposals.
+    mode: approval_required
+    inputs: [observation, session_evidence, sensitivity_label]
+    steps:
+      - id: propose_update
+        capability: memory.profile.propose_update
+      - id: hygiene_review
+        capability: memory.hygiene.review
+    outputs: [profile_update_proposal, approval_prompt, retention_hint]
+  project_knowledge_refresh:
+    title: Project knowledge refresh
+    intent: Refresh project facts, conventions, and decisions without mutating runtime memory directly.
+    mode: local_first
+    inputs: [project_id, source_context, existing_project_knowledge]
+    steps:
+      - id: propose_project_update
+        capability: knowledge.project.propose_update
+      - id: verify_evidence
+        capability: memory.recall.verify_evidence
+      - id: hygiene_review
+        capability: memory.hygiene.review
+    outputs: [project_knowledge_proposals, conflict_notes, stale_candidates]
+  skill_learning_proposal:
+    title: Skill learning proposal
+    intent: Propose a new or improved skill after repeated successful or painful task patterns.
+    mode: review_required
+    inputs: [task_trace, repeated_pattern, user_value]
+    steps:
+      - id: propose_skill
+        capability: memory.skill.propose
+    outputs: [skill_learning_proposal, safety_notes, review_checklist]
+review_policy:
+  actual_memory_writes_allowed: false
+  user_approval_before_profile_change: true
+  evidence_required_for_recall: true
+  skill_installation_out_of_scope: true

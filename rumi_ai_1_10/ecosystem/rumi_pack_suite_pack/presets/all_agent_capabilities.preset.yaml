@@ -1,0 +1,4 @@
+preset_id: rumi_pack_suite.all_agent_capabilities
+profile: rumi_pack_suite.curator
+bundle: personal_agent_os
+include_optional_bundles: [coding_operator, research_workspace, browser_operator, integration_gateway]

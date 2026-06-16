@@ -41,7 +41,7 @@ export function ProfileGraphPalette({
 
   return (
     <section className="rounded-2xl border border-border bg-bg-card p-4">
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 grid grid-cols-2 gap-2">
         {(Object.keys(PROFILE_GRAPH_CATEGORY_LABELS) as ProfileGraphCategory[]).map((category) => (
           <Button
             key={category}
@@ -49,6 +49,7 @@ export function ProfileGraphPalette({
             size="sm"
             variant={category === activeCategory ? 'default' : 'outline'}
             onClick={() => onCategoryChange(category)}
+            className="w-full justify-start"
           >
             {PROFILE_GRAPH_CATEGORY_LABELS[category]}
           </Button>

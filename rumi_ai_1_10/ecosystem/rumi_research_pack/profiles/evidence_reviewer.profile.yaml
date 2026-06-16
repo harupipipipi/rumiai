@@ -1,0 +1,19 @@
+profile_id: rumi_research_pack.evidence_reviewer
+version: rumi.profile.v1
+kind: runtime_profile
+locale: en
+display_name:
+  en: Evidence Reviewer
+enabled_capabilities:
+  - research.source.triage
+  - research.evidence.extract
+  - research.contradiction.review
+  - research.handoff.package
+prompt_set: evidence_review
+policy:
+  local_first: true
+  focus: source_quality_and_claim_support
+  unsupported_claims_block_final: true
+  contradiction_table_required: true
+  preserve_review_notes: true
+ui_panels: [source_cards, evidence_table, contradiction_table, review_notes]

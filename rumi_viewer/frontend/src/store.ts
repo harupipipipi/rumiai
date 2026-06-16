@@ -20,6 +20,7 @@ import {
   openExternalUrl,
   startOAuth,
 } from './lib/api';
+import type { ApiSupervisorDashboard } from './lib/apiTypes';
 import {
   transformDashboard,
   transformPacks,
@@ -28,11 +29,15 @@ import {
   transformVersion,
 } from './lib/transforms';
 import { RUMI_DISPLAY_VERSION } from './lib/version';
+import {
+  COLOR_MODE_STORAGE_KEY,
+  THEME_STORAGE_KEY,
+  normalizeColorMode,
+  normalizeTheme,
+} from './lib/appearance';
+import type { ColorMode, Theme } from './lib/appearance';
 
-export type Theme = 'Rumi' | 'Minimal' | 'Standard' | 'Rounded';
-const VALID_THEMES: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
-
-export type ColorMode = 'light' | 'dark';
+export type { ColorMode, Theme } from './lib/appearance';
 
 function readLocalStorage(key: string): string | null {
   try {
@@ -109,6 +114,7 @@ export interface DashboardData {
   activePacks: number;
   registeredFlows: number;
   activities: Activity[];
+  supervisor: ApiSupervisorDashboard | null;
 }
 
 export interface Profile {
@@ -171,6 +177,8 @@ interface AppState {
   runtimeReady: boolean;
   runtimeStatus: RuntimeStatus;
   runtimeError: string | null;
+  runtimeDisconnected: boolean;
+  lastRuntimeHealthyAt: number | null;
   setRuntimeHealth: (health: { status?: 'ok' | 'error'; panel_ready?: boolean; runtime_ready?: boolean; runtime_status?: RuntimeStatus; runtime_error?: string | null }) => void;
   refreshRuntimeHealth: () => Promise<void>;
 
@@ -213,6 +221,7 @@ const defaultDashboard: DashboardData = {
   activePacks: 0,
   registeredFlows: 0,
   activities: [],
+  supervisor: null,
 };
 
 const defaultProfile: Profile = {
@@ -254,15 +263,15 @@ function transformUpdateInfo(update: {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  theme: (readLocalStorage('rumi-theme') as Theme) || 'Rumi',
+  theme: normalizeTheme(readLocalStorage(THEME_STORAGE_KEY)),
   setTheme: (theme) => {
-    writeLocalStorage('rumi-theme', theme);
+    writeLocalStorage(THEME_STORAGE_KEY, theme);
     set({ theme });
   },
 
-  colorMode: (readLocalStorage('rumi-color-mode') as ColorMode) || 'dark',
+  colorMode: normalizeColorMode(readLocalStorage(COLOR_MODE_STORAGE_KEY)),
   setColorMode: (mode) => {
-    writeLocalStorage('rumi-color-mode', mode);
+    writeLocalStorage(COLOR_MODE_STORAGE_KEY, mode);
     set({ colorMode: mode });
   },
 
@@ -295,6 +304,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   runtimeReady: false,
   runtimeStatus: 'starting',
   runtimeError: null,
+  runtimeDisconnected: false,
+  lastRuntimeHealthyAt: null,
   setRuntimeHealth: (health) =>
     set((state) => ({
       runtimeReady: Boolean(health.runtime_ready),
@@ -308,6 +319,8 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? 'panel_ready'
               : state.runtimeStatus),
       runtimeError: health.runtime_error ?? null,
+      runtimeDisconnected: false,
+      lastRuntimeHealthyAt: health.runtime_ready ? Date.now() : state.lastRuntimeHealthyAt,
     })),
   refreshRuntimeHealth: async () => {
     try {
@@ -315,11 +328,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().setRuntimeHealth(health);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to read runtime health';
-      get().setRuntimeHealth({
-        status: 'error',
-        runtime_status: 'error',
-        runtime_error: msg,
-      });
+      set((state) => ({
+        runtimeReady: false,
+        runtimeStatus: 'error',
+        runtimeError: msg,
+        runtimeDisconnected: state.lastRuntimeHealthyAt !== null,
+      }));
     }
   },
 

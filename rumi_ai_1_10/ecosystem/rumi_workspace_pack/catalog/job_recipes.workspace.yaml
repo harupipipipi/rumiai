@@ -1,0 +1,61 @@
+catalog_id: rumi_workspace_pack.job_recipes
+version: 1.0.0
+recipes:
+  research_to_report_bundle:
+    title: Research to report bundle
+    mode: background
+    intent: Turn source notes into an editable report, charts, and PDF export.
+    inputs: [brief, source_material, output_folder]
+    steps:
+      - id: outline
+        capability: workspace.document.create
+      - id: chart_specs
+        capability: workspace.chart.render
+      - id: report_pdf
+        capability: workspace.pdf.compose
+      - id: bundle
+        capability: workspace.bundle.export
+    outputs: [report_docx, report_pdf, chart_assets, manifest]
+  deck_from_brief:
+    title: Deck from brief
+    mode: background
+    intent: Create an editable slide deck with speaker notes and optional PDF export.
+    inputs: [brief, audience, brand_constraints, output_folder]
+    steps:
+      - id: storyboard
+        capability: workspace.slides.create
+      - id: export_pdf
+        capability: workspace.pdf.compose
+      - id: bundle
+        capability: workspace.bundle.export
+    outputs: [deck_pptx, deck_pdf, speaker_notes, manifest]
+  spreadsheet_dashboard:
+    title: Spreadsheet dashboard
+    mode: background
+    intent: Build a workbook from tabular inputs, charts, and data quality notes.
+    inputs: [tables, schema, metrics, output_folder]
+    steps:
+      - id: workbook
+        capability: workspace.sheet.create
+      - id: charts
+        capability: workspace.chart.render
+      - id: bundle
+        capability: workspace.bundle.export
+    outputs: [workbook_xlsx, chart_assets, data_quality_notes, manifest]
+  export_review_queue:
+    title: Export review queue
+    mode: background
+    intent: Re-export selected workspace artifacts and collect fidelity diagnostics.
+    inputs: [artifact_manifest, export_targets, review_rules]
+    steps:
+      - id: exports
+        capability: workspace.bundle.export
+      - id: status
+        capability: workspace.job.status
+    outputs: [export_bundle, render_reports, review_summary]
+retry_policy:
+  max_attempts: 2
+  retryable_failures: [renderer_busy, transient_file_lock]
+approval_policy:
+  destructive_changes: require_user_approval
+  overwrite_existing_exports: require_user_approval

@@ -129,7 +129,7 @@ class FrontendRegistry:
     def _app_metadata(self, ui_surfaces: list[dict[str, Any]]) -> dict[str, Any]:
         app: dict[str, Any] = {
             "id": "defaultspack",
-            "name": "Console",
+            "name": "rumi DP",
             "icon": "/static/assets/icons/defaultspack-icon.png",
             "account": self._rumi_account_metadata(),
         }
@@ -509,7 +509,39 @@ class FrontendRegistry:
                             "Concrete UI entries are supplied by frontend extension packs.",
                         ],
                     },
-                }
+                },
+                {
+                    "id": "runtime-management",
+                    "label": "Runtime Management",
+                    "category": "system",
+                    "description": "Pack modules, pack requests, and migration state.",
+                    "tags": ["pack", "management", "runtime"],
+                    "origin": {"kind": "builtin", "path": "ecosystem/defaultspack/api_routes"},
+                    "panel": {
+                        "kind": "actions",
+                        "title": "Runtime Management",
+                        "actions": [
+                            {
+                                "id": "list_modules",
+                                "label": "Modules",
+                                "method": "GET",
+                                "endpoint": "/api/defaultspack/modules",
+                            },
+                            {
+                                "id": "list_pack_requests",
+                                "label": "Pack Requests",
+                                "method": "GET",
+                                "endpoint": "/api/defaultspack/pack-requests",
+                            },
+                            {
+                                "id": "migration_status",
+                                "label": "Migration Status",
+                                "method": "GET",
+                                "endpoint": "/api/defaultspack/migration/status",
+                            },
+                        ],
+                    },
+                },
             ]
         )
 
@@ -635,6 +667,27 @@ class FrontendRegistry:
                         "type": "toggle",
                         "default": False,
                         "help": "Tab/Enterでcomposerや右サイドバーのボタンへ移動・実行できるようにします。Offでもslash候補のTab選択は使えます。",
+                    },
+                    {
+                        "id": "spotlight_shortcut_enabled",
+                        "label": "Spotlight Shortcut",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "Enable the global conversation Spotlight shortcut.",
+                    },
+                    {
+                        "id": "spotlight_shortcut",
+                        "label": "Spotlight Keys",
+                        "type": "text",
+                        "default": "Ctrl+K",
+                        "help": "Use combinations such as Ctrl+K, Ctrl+Alt+K, or Win+K where the browser receives Win-key events.",
+                    },
+                    {
+                        "id": "spotlight_shortcut_text_input",
+                        "label": "Shortcut In Text Inputs",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "Allow the Spotlight shortcut while an input or textarea is focused.",
                     },
                     {
                         "id": "language",
@@ -1375,10 +1428,11 @@ class FrontendRegistry:
                         "default": "all",
                         "options": [
                             {"value": "all", "label": "All tools: expose every tool"},
+                            {"value": "auto", "label": "Auto: always tools plus relevant vector matches"},
                             {"value": "vector", "label": "Vector: recommend relevant tools"},
                             {"value": "off", "label": "Off: only manually selected tools"},
                         ],
-                        "help": "既定ではすべての tool を AI に渡します。Vector は入力文と tool の名前・説明・タグを照合し、関連度が高い tool だけを推薦します。",
+                        "help": "既定ではすべての tool を AI に渡します。Auto は常時読み込み宣言の tool と、入力文に関連する vector tool だけを渡します。",
                     },
                     {
                         "id": "tool_assist_limit",
@@ -2140,6 +2194,9 @@ class FrontendRegistry:
                 "composer_placeholder": "メッセージを入力...",
                 "show_activity_in_messages": True,
                 "keyboard_button_navigation": False,
+                "spotlight_shortcut_enabled": True,
+                "spotlight_shortcut": "Ctrl+K",
+                "spotlight_shortcut_text_input": True,
                 "language": "ja",
             },
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
@@ -2516,6 +2573,24 @@ class FrontendRegistry:
         return default
 
     @staticmethod
+    def _setting_bool(value: Any, default: bool) -> bool:
+        if value is None or value == "":
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if not normalized:
+                return default
+            if normalized in {"false", "0", "off", "no", "n", "disable", "disabled"}:
+                return False
+            if normalized in {"true", "1", "on", "yes", "y", "enable", "enabled"}:
+                return True
+        return bool(value)
+
+    @staticmethod
     def _clamped_float(value: Any, default: float, minimum: float, maximum: float) -> float:
         try:
             return max(minimum, min(maximum, float(value)))
@@ -2598,6 +2673,16 @@ class FrontendRegistry:
             refreshed["general"] = general
         language = str(general.get("language") or "ja").strip().lower()
         general["language"] = language if language in {"ja", "en", "auto"} else "ja"
+        general["spotlight_shortcut_enabled"] = self._setting_bool(
+            general.get("spotlight_shortcut_enabled"),
+            True,
+        )
+        shortcut = str(general.get("spotlight_shortcut") or "Ctrl+K").strip()
+        general["spotlight_shortcut"] = shortcut or "Ctrl+K"
+        general["spotlight_shortcut_text_input"] = self._setting_bool(
+            general.get("spotlight_shortcut_text_input"),
+            True,
+        )
 
         tools = refreshed.setdefault("tools", {})
         if not isinstance(tools, dict):
@@ -2621,9 +2706,7 @@ class FrontendRegistry:
             )
         )
         tool_assist_mode = str(tools.get("tool_assist_mode") or "all").strip().lower()
-        if tool_assist_mode == "auto":
-            tool_assist_mode = "vector"
-        tools["tool_assist_mode"] = tool_assist_mode if tool_assist_mode in {"all", "vector", "off"} else "all"
+        tools["tool_assist_mode"] = tool_assist_mode if tool_assist_mode in {"all", "auto", "vector", "off"} else "all"
         try:
             tools["tool_assist_limit"] = max(1, min(24, int(tools.get("tool_assist_limit", 8))))
         except (TypeError, ValueError):

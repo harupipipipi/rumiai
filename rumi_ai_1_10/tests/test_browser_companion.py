@@ -19,6 +19,17 @@ _PNG_DATA_URL = (
 )
 
 
+def _browser_companion_extension_root() -> Path:
+    candidates = [
+        DEFAULTSPACK_ROOT / "browser_extensions" / "rumi_browser_companion",
+        ROOT.parent / "browser_extensions" / "rumi_browser_companion",
+    ]
+    for candidate in candidates:
+        if (candidate / "content_script.js").is_file() and (candidate / "background.js").is_file():
+            return candidate
+    return candidates[0]
+
+
 def test_browser_companion_candidate_urls_match_defaultspack_default_port():
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import candidate_base_urls
 
@@ -322,6 +333,75 @@ def test_browser_companion_extension_focus_semantics_are_explicit():
     assert "chrome.windows.update" not in send_element_body
     assert "requires_foreground: true" in capture_body
     assert "can_parallel_user_work: false" in capture_body
+
+
+def test_browser_companion_extension_semantic_dom_and_highlight_contract():
+    extension_root = _browser_companion_extension_root()
+    content = (extension_root / "content_script.js").read_text(encoding="utf-8")
+    background = (extension_root / "background.js").read_text(encoding="utf-8")
+    tool_manifest = (
+        ROOT
+        / "ecosystem"
+        / "rumi_default_tools_pack"
+        / "tools"
+        / "browser_companion"
+        / "manifest.json"
+    ).read_text(encoding="utf-8")
+
+    for needle in (
+        'schema_version: "semantic_dom_v2"',
+        "semantic_id:",
+        "accessible_name:",
+        "labels,",
+        "nearby_text:",
+        "action_hints:",
+        "recognition_confidence:",
+        "xpath_hint:",
+        "function highlightElement",
+        "function clearHighlights",
+    ):
+        assert needle in content
+
+    for needle in (
+        "semantic_dom: true",
+        "accessible_labels: true",
+        '"highlight"',
+        '"clear_highlight"',
+        'case "page.highlight"',
+        'case "page.clear_highlight"',
+    ):
+        assert needle in background or needle in tool_manifest
+
+
+def test_browser_companion_snapshot_forwards_snapshot_options_to_content_script():
+    background = (_browser_companion_extension_root() / "background.js").read_text(encoding="utf-8")
+    capture_body = background[
+        background.index("async function captureDomSnapshot") : background.index("async function sendElementCommand")
+    ]
+
+    for needle in (
+        "snapshotRequest.options = snapshotOptions",
+        "snapshotOptions.includeHidden",
+        "snapshotOptions.includeHtml",
+        "snapshotOptions.includeAttributes",
+        "snapshotOptions.attributeNames",
+        "snapshotOptions.includeSemantics",
+    ):
+        assert needle in capture_body
+
+
+def test_browser_companion_extension_keeps_pairing_token_in_local_storage():
+    extension_root = _browser_companion_extension_root()
+    background = (extension_root / "background.js").read_text(encoding="utf-8")
+    options = (extension_root / "options.js").read_text(encoding="utf-8")
+
+    assert "readLocalSettingsWithSyncMigration" in background
+    assert "chrome.storage.local.set({ [STORAGE_KEY]: merged })" in background
+    assert "chrome.storage.sync.remove(STORAGE_KEY)" in background
+    assert 'areaName !== "local"' in background
+    assert "chrome.storage.local.get(STORAGE_KEY)" in options
+    assert "chrome.storage.local.set({ [STORAGE_KEY]: settings })" in options
+    assert "chrome.storage.sync.set({ [STORAGE_KEY]: settings })" not in options
 
 
 def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeypatch):

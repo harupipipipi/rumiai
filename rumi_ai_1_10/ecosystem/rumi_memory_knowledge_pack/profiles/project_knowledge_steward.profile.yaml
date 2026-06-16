@@ -1,0 +1,19 @@
+profile_id: rumi_memory_knowledge_pack.project_knowledge_steward
+version: rumi.profile.v1
+kind: runtime_profile
+locale: en
+display_name:
+  en: Project Knowledge Steward
+enabled_capabilities:
+  - knowledge.project.propose_update
+  - memory.recall.session
+  - memory.recall.verify_evidence
+  - memory.skill.propose
+prompt_set: project_knowledge
+policy:
+  local_first: true
+  project_scope_required: true
+  propose_not_mutate: true
+  stale_review_default_days: 90
+  skill_learning_proposals_only: true
+ui_panels: [project_knowledge_board, recall_panel, skill_proposal_queue]

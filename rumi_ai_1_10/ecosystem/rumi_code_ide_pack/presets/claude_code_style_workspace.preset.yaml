@@ -1,0 +1,29 @@
+id: rumi_code_ide_pack.claude_code_style_workspace
+name: Claude Code Style Workspace
+profile: rumi_code_ide_pack.code_cli_ide
+inspiration:
+  - Claude Code
+intent: terminal-native project editing with todo tracking and compact context
+enabled_capabilities:
+  - local_file
+  - terminal
+  - git
+  - project
+  - memory
+  - compact
+  - safety
+ui_panels:
+  - chat
+  - plan
+  - file_tree
+  - terminal
+  - diff
+behavior:
+  - read_before_edit
+  - todo_tracking
+  - project_instructions
+  - compact_context
+  - approval_gated_writes
+overlap_notes:
+  defaultspack: uses graph and flow primitives
+  rumi_local_agent_pack: narrower than the starter local-agent preset of similar inspiration

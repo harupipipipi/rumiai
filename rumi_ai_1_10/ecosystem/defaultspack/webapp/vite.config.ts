@@ -5,6 +5,9 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  esbuild: {
+    keepNames: true,
+  },
   server: {
     proxy: {
       "/api": {

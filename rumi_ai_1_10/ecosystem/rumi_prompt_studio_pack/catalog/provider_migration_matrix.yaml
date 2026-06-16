@@ -1,0 +1,44 @@
+provider_migration_matrix:
+  version: 0.1.0
+  migration_default: declarative_only
+  sources:
+  - id: claude_project_instructions
+    preserve:
+    - role
+    - project_context
+    - tool_boundaries
+    blocked_imports:
+    - tool_permission_grants
+    - hidden_system_instructions
+    handoff_triggers:
+    - tool_or_api_creation
+    - code_edits
+  - id: chatgpt_custom_instructions
+    preserve:
+    - audience
+    - format
+    - style
+    blocked_imports:
+    - hidden_profile_memory
+    - model_choice
+    handoff_triggers:
+    - long_term_memory_storage
+    - model_routing
+  - id: gemini_gem_prompt
+    preserve:
+    - persona
+    - examples
+    - constraints
+    blocked_imports:
+    - workspace_action_permissions
+    - model_benchmark_claims
+    handoff_triggers:
+    - tool_or_api_creation
+    - model_benchmarking
+  required_outputs:
+  - deterministic_prompt_id
+  - migration_notes
+  - fixture_ids
+  - blocked_imports
+  - handoff_owner
+  - review_state

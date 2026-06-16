@@ -12,6 +12,10 @@ on:
         required: false
         default: "3"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -56,6 +60,26 @@ jobs:
           workspace.mkdir(exist_ok=True)
           report_path.mkdir(exist_ok=True)
 
+          api_key = os.environ.get('XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY', '').strip()
+          if not api_key:
+              final_report = {
+                  'status': 'failed',
+                  'error': 'XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY is not configured',
+                  'duration_hours': 0,
+                  'cycles': 0,
+                  'total_improvement_tasks': 0,
+                  'total_successful': 0,
+                  'total_failed': 0,
+              }
+              (report_path / 'final_report.json').write_text(json.dumps(final_report, indent=2, ensure_ascii=False))
+              (report_path / 'final_report.md').write_text(
+                  '# Defaultspack v2 Soak Test Report\n\n'
+                  'Status: failed\n'
+                  'Reason: XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY is not configured.\n'
+              )
+              print((report_path / 'final_report.md').read_text())
+              raise SystemExit(2)
+
           # Init workspace
           subprocess.run(['git', 'init'], cwd=workspace, check=True, capture_output=True)
           subprocess.run(['git', 'config', 'user.email', 'soak@mimo.dev'], cwd=workspace, check=True, capture_output=True)
@@ -77,12 +101,31 @@ jobs:
 
           runtime = create_mimo_profile(workspace_root=workspace)
           runner = SoakTestRunner(runtime, state_path=report_path / 'soak_state.json')
+          runner.start_run(duration_hours=duration_hours, metadata={'task_count': task_count})
+          runner.record_competitor_comparison(
+              name='OpenClaw',
+              version='2026.5.28',
+              verified_with=[
+                  'npm view openclaw version dist-tags.latest bin engines --json',
+                  'npm pack openclaw@latest',
+              ],
+              strengths=[
+                  'workspace HEARTBEAT.md model for recurring checks',
+                  'sub-agent liveness and stale-run recovery documentation',
+                  'always-on gateway status and health commands',
+              ],
+              gaps_for_rumi=[
+                  'record durable heartbeat health in 24h soak reports',
+                  'lease long-running tasks so crash/restart resume is explicit',
+              ],
+          )
           runner.save_task_queue(runner.load_task_queue())
 
           all_results = []
           hourly_summaries = []
           start = time.time()
           cycle = 0
+          exit_code = 0
 
           while (time.time() - start) / 3600 < duration_hours:
               cycle += 1
@@ -99,8 +142,6 @@ jobs:
                   'results': result['results'],
                   'elapsed_hours': round((time.time() - start) / 3600, 2),
               }
-              hourly_summaries.append(summary)
-              runner.record_hourly_summary(summary)
 
               for r in result['results']:
                   runner.record_task_result(
@@ -114,7 +155,15 @@ jobs:
                       failures=[r['error']] if r.get('error') else [],
                   )
 
+              health = runner.health_status()
+              summary['health'] = health
+              hourly_summaries.append(summary)
+              runner.record_hourly_summary(summary)
               print(f'Cycle {cycle}: {result[\"successful\"]}/{result[\"total_tasks\"]} successful', flush=True)
+              if result['successful'] == 0:
+                  exit_code = 3
+                  print('No successful improvement tasks in this cycle; stopping soak early.', flush=True)
+                  break
               time.sleep(5)
 
           final_report = runner.generate_final_report()
@@ -123,10 +172,11 @@ jobs:
           final_report['total_successful'] = sum(r['successful'] for r in all_results)
           final_report['total_failed'] = sum(r['failed'] for r in all_results)
           final_report['duration_hours'] = round((time.time() - start) / 3600, 2)
+          final_report['status'] = 'failed' if exit_code else 'completed'
 
           (report_path / 'final_report.json').write_text(json.dumps(final_report, indent=2, ensure_ascii=False, default=str))
 
-          md_lines = ['# Defaultspack v2 Soak Test Report', '', f'Duration: {final_report[\"duration_hours\"]}h', f'Cycles: {final_report[\"cycles\"]}', f'Total tasks: {final_report[\"total_improvement_tasks\"]}', f'Successful: {final_report[\"total_successful\"]}', f'Failed: {final_report[\"total_failed\"]}', '', '## Friction Points', '']
+          md_lines = ['# Defaultspack v2 Soak Test Report', '', f'Status: {final_report[\"status\"]}', f'Duration: {final_report[\"duration_hours\"]}h', f'Cycles: {final_report[\"cycles\"]}', f'Total tasks: {final_report[\"total_improvement_tasks\"]}', f'Successful: {final_report[\"total_successful\"]}', f'Failed: {final_report[\"total_failed\"]}', '', '## Health', '', f'- Status: {final_report.get(\"health\", {}).get(\"status\", \"unknown\")}', '', '## Friction Points', '']
           for fp in final_report.get('friction_points', []):
               md_lines.append(f'- {fp[\"task_id\"]}: {fp.get(\"friction\", \"no detail\")}')
           if not final_report.get('friction_points'):
@@ -138,6 +188,8 @@ jobs:
           (report_path / 'final_report.md').write_text('\n'.join(md_lines))
           print('\n=== FINAL REPORT ===')
           print((report_path / 'final_report.md').read_text())
+          if exit_code:
+              raise SystemExit(exit_code)
           "
 
       - name: Upload soak report

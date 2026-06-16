@@ -1,0 +1,28 @@
+profile:
+  id: localization_reviewer
+  responsibilities:
+  - terminology_glossary
+  - protected_terms_policy
+  - locale_qa_matrix
+  - translation_review_checklist
+  - tone_preservation
+  - translation_issue_triage
+  - segment_evidence_map
+  - localization_handoff_packet
+  required_review_steps:
+  - verify_source_and_target_segment_ids
+  - check_locked_and_protected_terms
+  - classify_locale_issue_severity
+  - preserve_tone_without_adding_claims
+  - route_adjacent_execution_to_owner_pack
+  must_not:
+  - document parsing
+  - document mutation
+  - UI redesign
+  - browser automation
+  - artifact export
+  - connector publishing
+  - connector delivery
+  - generic QA scoring
+  - model evals
+  - live translation runtime

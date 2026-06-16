@@ -1,0 +1,14 @@
+example_id: rumi_data_analysis.examples.local_sql_question
+preset: gemini_sheet_sql_audit
+title: Answer a question from local SQL schema
+goal: Create a query plan and validation checks for monthly active customers by segment.
+inputs:
+  schema_description: local_docs/customer_schema.md
+  tables: [customers, subscriptions, events]
+constraints:
+  network: none
+  sql_execution: approval_required
+  credentials: not_in_scope
+deliverable:
+  type: query_plan_and_validation_notes
+  required_sections: [metric_definition, join_plan, query_text_optional, validation_checks, caveats]

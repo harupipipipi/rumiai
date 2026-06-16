@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/inbox_item.schema.json",
+  "title": "Inbox Item",
+  "description": "Inbox item contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "item_id",
+    "thread_id",
+    "identity_id",
+    "severity",
+    "state",
+    "source_message_ids",
+    "audit_ref"
+  ],
+  "properties": {
+    "item_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "thread_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "identity_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "low",
+        "normal",
+        "high",
+        "urgent"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "new",
+        "triaged",
+        "waiting",
+        "blocked",
+        "closed"
+      ]
+    },
+    "source_message_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "audit_ref": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

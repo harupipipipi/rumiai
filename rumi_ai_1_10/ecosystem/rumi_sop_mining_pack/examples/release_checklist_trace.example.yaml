@@ -1,0 +1,23 @@
+example:
+  intent: release checklist trace
+  inputs:
+  - local_evidence
+  expected_result: sop_mining_handoff_packet
+  trace_record:
+    trace_id: release-checklist-redacted-001
+    source_type: test_output
+    redaction_state: no_sensitive_data
+    consent_basis: maintainer_review_fixture
+    raw_payload_included: false
+  approval_state: approved
+  human_approval:
+    approver_role: release_owner
+    approval_record_ref: local-release-approval-note-001
+  non_execution_boundary:
+  - automation_execution
+  - browser_control
+  - schedule_creation
+  - run_ledger_storage
+  handoffs:
+  - rumi_observability_pack
+  - rumi_agentic_qa_pack

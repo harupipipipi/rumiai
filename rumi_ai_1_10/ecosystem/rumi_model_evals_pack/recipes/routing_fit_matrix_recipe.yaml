@@ -1,0 +1,19 @@
+recipe_id: rumi.model_evals.recipes.routing_fit_matrix
+version: rumi.recipe.v1
+purpose: Build model fit matrix rows from eval and provider evidence.
+network: none
+inputs:
+  required: [metric_sets, task_families, provider_catalog_refs]
+steps:
+  - id: group_by_task_family
+    action: collect evidence for coding, agent_service, data_analysis, research, and tool_calling
+  - id: assign_fit_rating
+    action: map pass metrics, flakiness, cost, latency, and safety into fit ratings
+  - id: record_consumer_impacts
+    action: note agent-services, code-IDE, and data-analysis routing implications
+  - id: mark_caveats
+    action: record missing evidence, stale results, and provider incidents
+outputs:
+  - model_fit_matrix
+  - consumer_pack_notes
+  - defaultspack_promotion_gate_input

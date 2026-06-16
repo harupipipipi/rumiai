@@ -1,0 +1,12 @@
+policy_id: rumi_voice_mobile.safety
+local_first: true
+network_default: deny
+rules:
+  - id: speech_commands_need_transcript
+    decision: require
+  - id: destructive_voice_actions_need_confirmation
+    decision: require
+  - id: mobile_delivery_uses_connector_owner
+    decision: handoff_to_rumi_connector_gateway_pack
+  - id: voice_audio_privacy_review
+    decision: handoff_to_rumi_multimodal_media_pack

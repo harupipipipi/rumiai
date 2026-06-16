@@ -1,0 +1,19 @@
+id: rumi_computer_control_pack.terminal_observation
+name: Terminal Observation
+profile: rumi_computer_control_pack.terminal_session_monitor
+intent: Observe terminal sessions and classify local, Docker, SSH, Modal, Daytona, or unknown backends.
+network_default: none
+evidence_inputs:
+  - prompt_text
+  - working_directory
+  - recent_command_output
+  - backend_hint
+outputs:
+  - backend_classification
+  - command_risk
+  - read_only_next_checks
+  - approval_boundary
+approval_required_for:
+  - remote_command
+  - install_or_delete_command
+  - command_affecting_host_or_production

@@ -1,0 +1,22 @@
+example:
+  intent: Review Japanese to English documentation product copy while preserving Rumi and defaultspack terminology.
+  surface: documentation
+  locale_pair: ja-en
+  inputs:
+  - source_segment_id: docs.ja.install.004
+    target_segment_id: docs.en.install.004
+    source_excerpt: local evidence supplied by document owner
+    target_excerpt: local draft translation supplied for review
+    glossary_terms:
+    - term_rumi
+    - term_defaultspack
+  expected_result: localization_handoff_packet
+  expected_issue_categories:
+  - terminology
+  - protected_term
+  - evidence_gap
+  handoffs:
+  - rumi_document_intelligence_pack
+  protected_terms_expected:
+  - Rumi
+  - defaultspack

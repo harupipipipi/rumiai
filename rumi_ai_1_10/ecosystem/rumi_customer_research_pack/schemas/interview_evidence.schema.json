@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/interview_evidence.schema.json",
+  "title": "Interview Evidence",
+  "description": "Contract schema for Interview Evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "interview_id",
+    "participant_id",
+    "quotes",
+    "source_span_ids",
+    "consent_state",
+    "redaction_state",
+    "themes"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "consent_state": {
+            "const": "revoked"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "redaction_state": {
+            "const": "raw_blocked"
+          },
+          "quotes": {
+            "items": {
+              "properties": {
+                "allowed_for_insight": {
+                  "const": false
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "interview_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "participant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "quotes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "quote_id",
+          "redacted_quote",
+          "source_span_id",
+          "allowed_for_insight"
+        ],
+        "properties": {
+          "quote_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "redacted_quote": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_span_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "allowed_for_insight": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "source_span_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "consent_state": {
+      "type": "string",
+      "enum": [
+        "granted",
+        "limited",
+        "revoked",
+        "unknown"
+      ]
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": [
+        "raw_blocked",
+        "redacted",
+        "aggregate_only"
+      ]
+    },
+    "themes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
