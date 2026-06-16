@@ -57,6 +57,22 @@
         "part_id": "ai_chat",
         "surface": "chat",
         "enabled": true,
+        "placeholder": "メッセージを入力... /context text で会話をTXT化",
+        "help": "Template-composed composer: slash commands, mentions, files, voice, and optional context TXT materialization.",
+        "accepted_modalities": [
+          "text",
+          "files",
+          "images",
+          "voice"
+        ],
+        "feature_flags": {
+          "slash_commands": true,
+          "at_mentions": true,
+          "tool_mentions": true,
+          "file_attachments": true,
+          "voice_input": true,
+          "context_preview": true
+        },
         "commands": [
           "context_txt"
         ],
