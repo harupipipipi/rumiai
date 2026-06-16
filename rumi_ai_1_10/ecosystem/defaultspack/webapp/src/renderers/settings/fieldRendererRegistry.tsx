@@ -70,6 +70,45 @@ export function createSettingsFieldRendererRegistry(
   return registry;
 }
 
+function legacyFallbackProps(props: SettingsFieldRendererProps): SettingsFieldRendererProps {
+  if (props.field.type === "model_select") {
+    const preferredValue = props.sectionValues?.preferred_model ?? props.value;
+    return {
+      ...props,
+      value: preferredValue,
+      field: {
+        ...props.field,
+        id: "preferred_model",
+        type: "select",
+        label: props.field.label || "Preferred Model",
+      },
+    };
+  }
+  if (props.field.type === "provider_select") {
+    return {
+      ...props,
+      field: {
+        ...props.field,
+        type: "select",
+      },
+    };
+  }
+  if (props.field.type === "api_key_setup") {
+    const apiKeysValue = props.sectionValues?.api_keys ?? props.value;
+    return {
+      ...props,
+      value: apiKeysValue,
+      field: {
+        ...props.field,
+        id: "api_keys",
+        type: "api_keys",
+        label: props.field.label || "API Keys / Tokens",
+      },
+    };
+  }
+  return props;
+}
+
 export function SettingsFieldRendererHost({
   registry,
   componentBindings,
@@ -81,7 +120,7 @@ export function SettingsFieldRendererHost({
   fallbackRenderer: SettingsFieldRenderer;
 }): ReactElement {
   const match = registry.resolve(props.field, componentBindings);
-  if (!match) return <FallbackRenderer {...props} />;
+  if (!match) return <FallbackRenderer {...legacyFallbackProps(props)} />;
 
   const Renderer = match.entry.render;
   return <Renderer {...props} />;
