@@ -1728,6 +1728,8 @@ class CapabilityExecutor:
     ) -> CapabilityResponse:
         if not resp.success:
             return resp
+        if not self._looks_like_host_intent_output(resp.output):
+            return resp
         try:
             from .host_intent import maybe_handle_host_intent_output
 
@@ -1755,6 +1757,13 @@ class CapabilityExecutor:
             error_type=None if handled.get("success") else str(handled.get("error_type") or "host_intent_approval_required"),
             latency_ms=(time.time() - start_time) * 1000,
         )
+
+    @staticmethod
+    def _looks_like_host_intent_output(output: Any) -> bool:
+        return isinstance(output, dict) and str(output.get("type") or "").strip() in {
+            "host_intent",
+            "host_stream_intent",
+        }
 
     def _host_intent_caller_ids(self, entry, request_context: dict[str, Any] | None) -> tuple[str, str]:
         entry_pack_id = str(getattr(entry, "pack_id", "") or "").strip()

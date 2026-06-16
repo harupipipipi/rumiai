@@ -39,8 +39,18 @@ _ensure_stub("core_runtime.audit_logger")
 _ensure_stub("core_runtime.di_container")
 _ensure_stub("core_runtime.paths")
 
-# Provide CORE_PACK_ID_PREFIX
-sys.modules["core_runtime.paths"].CORE_PACK_ID_PREFIX = "core_"
+# Provide minimal paths surface needed by capability_executor imports.
+_paths_stub = sys.modules["core_runtime.paths"]
+_paths_stub.CORE_PACK_ID_PREFIX = "core_"
+_paths_stub.CORE_PACK_DIR = str(_Path(_project_root) / "core_runtime" / "core_pack")
+_paths_stub.USER_DATA_DIR = _Path(_project_root) / "user_data"
+_paths_stub.LOCAL_PACK_ID = "local_pack"
+_paths_stub.LOCAL_PACK_DIR = str(_Path(_project_root) / "ecosystem" / "flows")
+_paths_stub.ECOSYSTEM_DIR = str(_Path(_project_root) / "ecosystem")
+_paths_stub.GRANTS_DIR = str(_Path(_project_root) / "user_data" / "permissions")
+_paths_stub.PackLocation = object
+_paths_stub.discover_pack_locations = lambda *args, **kwargs: []
+_paths_stub.check_pack_id_mismatch = lambda *args, **kwargs: None
 
 # Provide minimal get_container
 _mock_container = MagicMock()
@@ -49,6 +59,8 @@ sys.modules["core_runtime.di_container"].get_container = lambda: _mock_container
 # Provide get_audit_logger
 _mock_audit_logger = MagicMock()
 sys.modules["core_runtime.audit_logger"].get_audit_logger = lambda: _mock_audit_logger
+sys.modules["core_runtime.capability_grant_manager"].get_capability_grant_manager = MagicMock
+sys.modules["core_runtime.capability_trust_store"].get_capability_trust_store = MagicMock
 
 # ---------------------------------------------------------------------------
 # FunctionEntry stub
@@ -551,7 +563,7 @@ class TestHostExecution:
             "type": "function.call",
             "qualified_name": "my_pack:process",
         })
-        assert resp.error_type == "not_implemented"
+        assert resp.error_type == "critical_host_confirmation_required"
 
 
 # ===========================================================================

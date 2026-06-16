@@ -2529,6 +2529,11 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.ambient.event_submit
+  defaults.ambient.event.submit:
+    owner: ambient
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.ambient.event_submit
   defaults.ambient.events.submit:
     owner: ambient
     reason: legacy caller compatibility
@@ -2579,7 +2584,7 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.ambient.permission_grant
-  defaults.ambient.permissions.grant:
+  defaults.ambient.permission.grant:
     owner: ambient
     reason: legacy caller compatibility
     remove_after: v2.3
@@ -2589,7 +2594,7 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.ambient.permission_revoke
-  defaults.ambient.permissions.revoke:
+  defaults.ambient.permission.revoke:
     owner: ambient
     reason: legacy caller compatibility
     remove_after: v2.3
