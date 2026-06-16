@@ -1,3 +1,6 @@
+const LINE_WEBHOOK_PATH = "/api/integrations/line/webhook";
+const ORIGIN_HEALTH_PATH = "/api/health";
+
 function originBase(env) {
   const raw = String(env.ORIGIN_BASE_URL || "").trim();
   if (!raw) {
@@ -14,7 +17,7 @@ function targetUrl(request, origin) {
   return `${origin}${incoming.pathname}${incoming.search}`;
 }
 
-async function forwardedRequest(request, origin) {
+async function forwardedRequest(request, origin, body = null) {
   const headers = new Headers(request.headers);
   const incoming = new URL(request.url);
 
@@ -33,7 +36,7 @@ async function forwardedRequest(request, origin) {
   };
 
   if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = await request.arrayBuffer();
+    init.body = body === null ? await request.arrayBuffer() : body;
   }
 
   return new Request(targetUrl(request, origin), init);
@@ -64,8 +67,107 @@ function missingOriginResponse() {
   );
 }
 
+function routeNotFoundResponse() {
+  return Response.json(
+    {
+      status: "error",
+      code: "ROUTE_NOT_FOUND",
+      message: "This relay only exposes the LINE webhook and health endpoints."
+    },
+    { status: 404 }
+  );
+}
+
+function methodNotAllowedResponse() {
+  return Response.json(
+    {
+      status: "error",
+      code: "METHOD_NOT_ALLOWED",
+      message: "LINE webhook relay accepts POST requests only."
+    },
+    {
+      status: 405,
+      headers: { allow: "POST" }
+    }
+  );
+}
+
+function missingLineSecretResponse() {
+  return Response.json(
+    {
+      status: "error",
+      code: "LINE_SECRET_NOT_CONFIGURED",
+      message: "Set LINE_CHANNEL_SECRET on the Cloudflare Pages project before using this relay."
+    },
+    { status: 503 }
+  );
+}
+
+function invalidLineSignatureResponse(reason) {
+  return Response.json(
+    {
+      status: "error",
+      code: "SIGNATURE_INVALID",
+      message: reason
+    },
+    { status: 401 }
+  );
+}
+
+function base64FromArrayBuffer(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function timingSafeEqual(left, right) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  let result = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    result |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return result === 0;
+}
+
+async function expectedLineSignature(secret, body) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const digest = await crypto.subtle.sign("HMAC", key, body);
+  return base64FromArrayBuffer(digest);
+}
+
+async function verifyLineSignature(request, env, body) {
+  const secret = String(env.LINE_CHANNEL_SECRET || "").trim();
+  if (!secret) {
+    return { ok: false, response: missingLineSecretResponse() };
+  }
+
+  const signature = String(request.headers.get("x-line-signature") || "").trim();
+  if (!signature) {
+    return { ok: false, response: invalidLineSignatureResponse("missing LINE signature header") };
+  }
+
+  const expected = await expectedLineSignature(secret, body);
+  if (!timingSafeEqual(expected, signature)) {
+    return { ok: false, response: invalidLineSignatureResponse("LINE signature mismatch") };
+  }
+
+  return { ok: true, response: null };
+}
+
 export async function onRequest(context) {
-  const { request, env } = context;
+  const { request, env = {} } = context;
   const url = new URL(request.url);
   const origin = originBase(env);
 
@@ -74,8 +176,8 @@ export async function onRequest(context) {
       status: "ok",
       relay: "cloudflare-pages",
       origin_configured: Boolean(origin),
-      origin_base_url: origin || "",
-      origin_health_url: origin ? `${origin}/api/health` : ""
+      line_signature_secret_configured: Boolean(String(env.LINE_CHANNEL_SECRET || "").trim()),
+      forwarded_paths: [LINE_WEBHOOK_PATH, ORIGIN_HEALTH_PATH]
     });
   }
 
@@ -83,8 +185,39 @@ export async function onRequest(context) {
     return missingOriginResponse();
   }
 
+  if (request.method === "GET" && url.pathname === ORIGIN_HEALTH_PATH) {
+    try {
+      const response = await fetch(await forwardedRequest(request, origin));
+      return relayResponse(response);
+    } catch (error) {
+      return Response.json(
+        {
+          status: "error",
+          code: "ORIGIN_UNREACHABLE",
+          message: "Cloudflare Pages relay could not reach the local defaultspack origin.",
+          detail: error instanceof Error ? error.message : String(error)
+        },
+        { status: 502 }
+      );
+    }
+  }
+
+  if (url.pathname !== LINE_WEBHOOK_PATH) {
+    return routeNotFoundResponse();
+  }
+
+  if (request.method !== "POST") {
+    return methodNotAllowedResponse();
+  }
+
+  const body = await request.arrayBuffer();
+  const verification = await verifyLineSignature(request, env, body);
+  if (!verification.ok) {
+    return verification.response;
+  }
+
   try {
-    const response = await fetch(await forwardedRequest(request, origin));
+    const response = await fetch(await forwardedRequest(request, origin, body));
     return relayResponse(response);
   } catch (error) {
     return Response.json(

@@ -151,7 +151,7 @@ def verify_origin(origin: str) -> None:
     print(f"Origin health ok: {origin}")
 
 
-def set_pages_origin(project: str, origin: str) -> None:
+def set_pages_secret(project: str, name: str, value: str) -> None:
     run(
         [
             "npx",
@@ -160,13 +160,32 @@ def set_pages_origin(project: str, origin: str) -> None:
             "pages",
             "secret",
             "put",
-            "ORIGIN_BASE_URL",
+            name,
             "--project-name",
             project,
             "--install-skills=false",
         ],
-        input_text=f"{origin}\n",
+        input_text=f"{value}\n",
     )
+
+
+def set_pages_origin(project: str, origin: str) -> None:
+    set_pages_secret(project, "ORIGIN_BASE_URL", origin)
+
+
+def line_secret_value(key: str) -> str:
+    sys.path.insert(0, str(RUMI_ROOT))
+    sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+    from domain.integrations.secrets import get_integration_secret
+
+    value = get_integration_secret("line", key, pack_root=DEFAULTSPACK_ROOT)
+    if not value:
+        raise SystemExit(f"{key} is not configured in defaultspack secrets.")
+    return value
+
+
+def set_pages_line_secret(project: str) -> None:
+    set_pages_secret(project, "LINE_CHANNEL_SECRET", line_secret_value("LINE_CHANNEL_SECRET"))
 
 
 def deploy_pages(project: str, branch: str) -> str:
@@ -190,14 +209,7 @@ def deploy_pages(project: str, branch: str) -> str:
 
 
 def line_token() -> str:
-    sys.path.insert(0, str(RUMI_ROOT))
-    sys.path.insert(0, str(DEFAULTSPACK_ROOT))
-    from domain.integrations.secrets import get_integration_secret
-
-    token = get_integration_secret("line", "LINE_CHANNEL_ACCESS_TOKEN", pack_root=DEFAULTSPACK_ROOT)
-    if not token:
-        raise SystemExit("LINE_CHANNEL_ACCESS_TOKEN is not configured in defaultspack secrets.")
-    return token
+    return line_secret_value("LINE_CHANNEL_ACCESS_TOKEN")
 
 
 def set_line_webhook(endpoint: str) -> None:
@@ -276,6 +288,7 @@ def main() -> int:
     if not args.skip_deploy:
         ensure_project(args.project_name, args.production_branch, args.compatibility_date)
         set_pages_origin(args.project_name, origin)
+        set_pages_line_secret(args.project_name)
         pages_url = deploy_pages(args.project_name, args.production_branch)
     else:
         pages_url = f"https://{args.project_name}.pages.dev"
