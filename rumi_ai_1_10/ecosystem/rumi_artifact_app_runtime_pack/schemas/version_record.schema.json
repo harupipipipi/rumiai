@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/version_record.schema.json",
+  "title": "Version Record",
+  "description": "Artifact version and rollback selector.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version_id",
+    "artifact_id",
+    "parent_version_id",
+    "change_summary",
+    "rollback_allowed",
+    "source_snapshot_id"
+  ],
+  "properties": {
+    "version_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parent_version_id": {
+      "type": "string"
+    },
+    "change_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rollback_allowed": {
+      "type": "boolean"
+    },
+    "source_snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

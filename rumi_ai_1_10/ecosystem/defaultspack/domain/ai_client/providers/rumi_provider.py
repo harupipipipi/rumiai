@@ -13,6 +13,7 @@ Pipeline 経由でデフォルトパイプラインを実行する。
 """
 
 from domain.ai_client.base_provider import BaseProvider
+from domain.ai_client.rumi_process import RUMI_BASE_MODEL, RUMI_MODEL_PACK_REF, rumi_base_model_metadata
 
 
 class RumiProvider(BaseProvider):
@@ -25,6 +26,68 @@ class RumiProvider(BaseProvider):
     """
 
     KNOWN_MODELS = [
+        {
+            "id": "rumi/rumi",
+            "model_id": "rumi",
+            "name": "Rumi Auto",
+            "display_name": "Rumi Auto",
+            "provider": "rumi",
+            "provider_id": "rumi",
+            "type": "chat",
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "capabilities": ["chat", "routing", "review_chain", "tool_calls", "thinking"],
+            "metadata": {
+                "model_pack_ref": RUMI_MODEL_PACK_REF,
+                "process_model": True,
+                "fallback_policy": "active_provider_fallback",
+                "compatibility_alias_for": "rumi/auto",
+                "intended_base_model": RUMI_BASE_MODEL,
+                "resolved_base_model": "runtime-selected",
+                "fallback_reason": "rumi/auto uses active provider fallback when the intended base model is unavailable",
+            },
+        },
+        {
+            "id": "rumi/auto",
+            "model_id": "auto",
+            "name": "Rumi Auto",
+            "display_name": "Rumi Auto",
+            "provider": "rumi",
+            "provider_id": "rumi",
+            "type": "chat",
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "capabilities": ["chat", "routing", "review_chain", "tool_calls", "thinking"],
+            "metadata": {
+                "model_pack_ref": RUMI_MODEL_PACK_REF,
+                "process_model": True,
+                "fallback_policy": "active_provider_fallback",
+                "intended_base_model": RUMI_BASE_MODEL,
+                "resolved_base_model": "runtime-selected",
+                "fallback_reason": "rumi/auto uses active provider fallback when the intended base model is unavailable",
+            },
+        },
+        {
+            "id": "rumi/mimo",
+            "model_id": "mimo",
+            "name": "Rumi MiMo V2.5 Pro",
+            "display_name": "Rumi MiMo",
+            "provider": "rumi",
+            "provider_id": "rumi",
+            "type": "chat",
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "capabilities": ["chat", "routing", "review_chain", "tool_calls", "thinking"],
+            "metadata": {
+                "model_pack_ref": RUMI_MODEL_PACK_REF,
+                "process_model": True,
+                "fallback_policy": "requires_intended_base_model",
+                **rumi_base_model_metadata(RUMI_BASE_MODEL),
+            },
+        },
         {"id": "rumi/default", "name": "Rumi Default", "provider": "rumi", "type": "chat"},
         {"id": "rumi/fast", "name": "Rumi Fast", "provider": "rumi", "type": "chat"},
         {"id": "rumi/quality", "name": "Rumi Quality", "provider": "rumi", "type": "chat"},
@@ -80,6 +143,8 @@ class RumiProvider(BaseProvider):
         パイプライン定義があれば Pipeline 経由で実行。
         なければフォールバックプロバイダーに委譲。
         """
+        if self._is_rumi_process_model(model):
+            return self._client.complete(RUMI_MODEL_PACK_REF, messages, tools, self._process_params(model, params))
         if self._has_pipeline():
             return self._pipeline.execute(
                 self._pipeline_name, messages, tools, params
@@ -94,6 +159,8 @@ class RumiProvider(BaseProvider):
         パイプライン定義があれば Pipeline.stream() 経由で実行。
         なければフォールバックプロバイダーに委譲。
         """
+        if self._is_rumi_process_model(model):
+            return self._client.stream(RUMI_MODEL_PACK_REF, messages, tools, self._process_params(model, params))
         if self._has_pipeline():
             return self._pipeline.stream(
                 self._pipeline_name, messages, tools, params
@@ -101,6 +168,24 @@ class RumiProvider(BaseProvider):
 
         fallback_model = self._resolve_fallback_model()
         return self._client.stream(fallback_model, messages, tools, params)
+
+    @staticmethod
+    def _is_rumi_process_model(model):
+        model_id = str(model or "").strip()
+        if "/" in model_id:
+            model_id = model_id.split("/", 1)[1]
+        return model_id in {"rumi", "auto", "mimo", "rumi-mimo-v2.5-pro"}
+
+    @staticmethod
+    def _process_params(model, params):
+        next_params = dict(params or {})
+        model_id = str(model or "").strip()
+        if "/" in model_id:
+            model_id = model_id.split("/", 1)[1]
+        if model_id in {"mimo", "rumi-mimo-v2.5-pro"}:
+            next_params["rumi_base_model_override"] = RUMI_BASE_MODEL
+            next_params["rumi_require_intended_base_model"] = True
+        return next_params
 
     def embed(self, model, input_text):
         """フォールバック: 利用可能な embed 対応プロバイダーに委譲。"""

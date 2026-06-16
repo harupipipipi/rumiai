@@ -1,0 +1,87 @@
+workflows:
+  default_execution: no_runtime_action
+  ownership:
+    owned:
+    - participant_consent_record
+    - research_redaction_policy
+    - interview_evidence
+    - survey_synthesis
+    - feedback_to_insight_card
+    - opportunity_map
+    - evidence_linked_research_brief
+    handoff:
+    - live recruiting
+    - email or CRM writes
+    - generic web research
+    - product roadmap decisions
+    - analytics query execution
+    - contact enrichment
+    - message sending
+  items:
+  - id: consent_redaction_review
+    purpose: Verify participant consent and decide redaction level before synthesis.
+    inputs:
+    - participant
+    - consent_record
+    produces:
+    - redaction_decision
+    - evidence_ledger
+    blocking_gates:
+    - consent_state_present
+    - revoked_consent_excluded
+    - raw_identifiers_blocked
+    handoffs:
+    - rumi_connector_gateway_pack
+    execution: declarative_only
+  - id: interview_synthesis
+    purpose: Convert redacted interview evidence into evidence-linked themes.
+    inputs:
+    - interview_evidence
+    produces:
+    - insight_card
+    blocking_gates:
+    - source_quote_ids
+    - source_quote_coverage
+    - counter_evidence_checked
+    handoffs:
+    - rumi_meeting_intelligence_pack
+    execution: declarative_only
+  - id: survey_synthesis
+    purpose: Map survey responses to themes while preserving weighting and consent limits.
+    inputs:
+    - survey_response
+    produces:
+    - insight_card
+    blocking_gates:
+    - consent_state_present
+    - sample_limit_noted
+    handoffs:
+    - rumi_data_analysis_pack
+    execution: declarative_only
+  - id: feedback_to_opportunity_mapping
+    purpose: Cluster feedback into opportunities without making roadmap commitments.
+    inputs:
+    - insight_card
+    produces:
+    - opportunity_map
+    blocking_gates:
+    - supporting_evidence_ids_present
+    - source_quote_coverage
+    - decision_boundary_present
+    handoffs:
+    - future_product_strategy_owner
+    execution: declarative_only
+  - id: research_brief_handoff
+    purpose: Package source-linked findings for product, support, or sales owners.
+    inputs:
+    - opportunity_map
+    - insight_card
+    produces:
+    - handoff_packet
+    blocking_gates:
+    - redaction_state_safe
+    - revoked_consent_excluded
+    - human_review_before_external_share
+    handoffs:
+    - rumi_business_ops_pack
+    execution: declarative_only

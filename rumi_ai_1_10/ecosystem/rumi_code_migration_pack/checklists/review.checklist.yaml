@@ -1,0 +1,18 @@
+review_checklist:
+  pack_id: rumi_code_migration_pack
+  minimum_pass: all_blocking_items
+  items:
+  - id: inventory_complete
+    blocking: true
+  - id: codemod_dry_run_required
+    blocking: true
+  - id: generated_files_excluded
+    blocking: true
+  - id: pr_shards_blast_radius_limited
+    blocking: true
+  - id: compatibility_matrix_reviewed
+    blocking: true
+  - id: rollback_plan_linked
+    blocking: true
+  - id: owner_handoff_named
+    blocking: true

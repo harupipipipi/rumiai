@@ -1,0 +1,15 @@
+id: rumi_code_ide_pack.examples.bugfix_session
+profile: rumi_code_ide_pack.code_cli_ide
+preset: rumi_code_ide_pack.codex_patch_loop
+task: Fix a failing unit test in a local repository.
+recipe: bugfix_loop
+expected_agent_steps:
+  - inspect repository status and failing test output
+  - search for the failing symbol or behavior
+  - make a minimal patch
+  - rerun the focused test
+  - summarize files changed and verification
+safety_notes:
+  - preserve unrelated user changes
+  - do not run destructive git commands
+  - do not collect credentials

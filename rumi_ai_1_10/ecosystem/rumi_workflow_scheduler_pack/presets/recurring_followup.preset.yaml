@@ -1,0 +1,15 @@
+preset_id: rumi_workflow_scheduler.recurring_followup
+pack_id: rumi_workflow_scheduler_pack
+title: Recurring Follow-up
+profile: rumi_workflow_scheduler.scheduler_designer
+schedule_kind: recurring_followup
+default_owner_route: app_automation_tool
+required_fields:
+  - objective
+  - cadence
+  - max_runs
+  - evidence_required
+  - stop_conditions
+  - delivery_handoff
+retry_policy: conservative_retry
+status: draft_until_owner_approval

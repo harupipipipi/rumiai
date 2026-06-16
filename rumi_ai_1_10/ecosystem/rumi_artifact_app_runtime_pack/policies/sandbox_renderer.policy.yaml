@@ -1,0 +1,22 @@
+policy:
+  id: sandbox_renderer_policy
+  safe_default_tokens:
+  - allow-same-origin
+  allowed_tokens:
+  - allow-downloads
+  - allow-forms
+  - allow-modals
+  - allow-popups
+  - allow-same-origin
+  - allow-scripts
+  untrusted_forbidden_sandbox_pairs:
+  - allow-scripts + allow-same-origin
+  remote_renderer_modules: blocked
+  remote_modules_allowed: false
+  same_origin_required: true
+  trusted_renderer_prefixes:
+  - /static/renderers/
+  - /static/assets/renderers/
+  - /static/user_renderers/
+  path_policy: trusted_workspace_only
+  host_execution: false

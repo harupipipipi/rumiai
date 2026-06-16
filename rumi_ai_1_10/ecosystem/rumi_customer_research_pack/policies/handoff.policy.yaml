@@ -1,0 +1,17 @@
+handoff_policy:
+  default: do_not_execute_adjacent_runtime_action
+  overlap_policy:
+    live_recruiting: handoff_to_rumi_connector_gateway_pack
+    email_or_crm_writes: handoff_to_rumi_business_ops_pack
+    generic_web_research: handoff_to_rumi_research_pack
+    analytics_query_execution: handoff_to_rumi_data_analysis_pack
+    transcript_normalization: handoff_to_rumi_meeting_intelligence_pack
+    customer_insight_cards: owned_by_rumi_customer_research_pack
+    consent_redaction_contract: owned_by_rumi_customer_research_pack
+    tool_aliases: prefer_explicit_pack_namespace
+  conflict_resolution:
+  - If an action mutates external state, stop and emit a handoff packet.
+  - If a request asks for public web research, stop and emit a handoff packet for rumi_research_pack.
+  - If consent is revoked or allowed_use is do_not_use, block synthesis and do not reuse source quotes.
+  - If evidence is missing, mark uncertainty instead of fabricating details.
+  - If pack ownership is ambiguous, prefer the narrower owner surface and require human review.

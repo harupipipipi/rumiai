@@ -1,0 +1,13 @@
+schema_id: rumi_multimodal_media.asset_ledger
+version: 1
+required_fields:
+  - asset_id
+  - source
+  - media_type
+  - rights_context
+  - privacy_context
+  - transformations
+  - review_status
+  - handoff_target
+review_status_values: [draft, needs_review, approved, rejected]
+privacy_flags: [none, personal_data, credentials, face, location, private_ui, regulated]

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/formula_map.schema.json",
+  "title": "Formula Map",
+  "description": "Office authoring contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "formula_map_id",
+    "cell_refs",
+    "formula_intents",
+    "dependencies",
+    "recalc_policy",
+    "execution_owner",
+    "calculation_allowed"
+  ],
+  "properties": {
+    "formula_map_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cell_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "formula_intents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "recalc_policy": {
+      "const": "owner_pack_recalculates"
+    },
+    "execution_owner": {
+      "const": "rumi_workspace_pack"
+    },
+    "calculation_allowed": {
+      "const": false
+    }
+  }
+}

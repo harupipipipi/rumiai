@@ -1,0 +1,104 @@
+workflows:
+  default_execution: no_runtime_action
+  ownership:
+    owned:
+    - learner_profile
+    - study_goal_contract
+    - diagnostic_assessment
+    - study_plan
+    - practice_session
+    - quiz_item_contract
+    - spaced_review_queue
+    - progress_report
+    - evidence_bound_explanation
+    handoff:
+    - document parsing
+    - web research
+    - long term memory storage
+    - calendar scheduling
+    - workspace export
+    - medical or therapeutic advice
+    - graded credential issuance
+  items:
+  - id: local_note_intake_contract
+    purpose: Declare the local notes and learning goal boundaries before any study output is produced.
+    inputs:
+    - learner_profile
+    - study_goal
+    - local_note_ids
+    produces:
+    - source_scope
+    - evidence_ledger
+    blocking_gates:
+    - external_sources_allowed_false
+    - goal_has_success_criteria
+    handoffs:
+    - rumi_document_intelligence_pack
+    execution: declarative_only
+  - id: skill_gap_diagnosis
+    purpose: Map notes to target skills, mark missing evidence, and create diagnostic prompts.
+    inputs:
+    - learner_profile
+    - study_goal
+    - note_spans
+    produces:
+    - diagnostic_assessment
+    blocking_gates:
+    - source_note_ids_present
+    - uncertainty_recorded
+    handoffs: []
+    execution: declarative_only
+  - id: study_plan_generation
+    purpose: Produce a time-boxed plan with review windows and explicit scheduler handoff.
+    inputs:
+    - diagnostic_assessment
+    - constraints
+    produces:
+    - study_plan
+    blocking_gates:
+    - learner_constraints_respected
+    - review_windows_have_reason
+    handoffs:
+    - rumi_workflow_scheduler_pack
+    - rumi_workspace_pack
+    execution: declarative_only
+  - id: practice_session_quiz_builder
+    purpose: Build quiz items that cite note IDs and carry uncertainty if notes are thin.
+    inputs:
+    - study_plan
+    - note_spans
+    produces:
+    - practice_session
+    blocking_gates:
+    - answer_has_source_note_ids
+    - no_uncited_facts
+    handoffs: []
+    execution: declarative_only
+  - id: spaced_review_practice_loop
+    purpose: Update review queue reasons without writing to a calendar or memory store.
+    inputs:
+    - practice_session
+    - attempt_summary
+    produces:
+    - review_queue
+    blocking_gates:
+    - handoff_owner_named
+    - decay_reason_present
+    handoffs:
+    - rumi_workflow_scheduler_pack
+    - rumi_memory_knowledge_pack
+    execution: declarative_only
+  - id: progress_report_handoff
+    purpose: Summarize evidence-linked progress and create a draft handoff packet.
+    inputs:
+    - review_queue
+    - attempt_summary
+    produces:
+    - progress_report
+    - handoff_packet
+    blocking_gates:
+    - uncertainty_notes_present
+    - human_review_before_export
+    handoffs:
+    - rumi_workspace_pack
+    execution: declarative_only

@@ -1,0 +1,19 @@
+preset_id: rumi_security_review.mcp_browser_risk_review
+pack_id: rumi_security_review_pack
+title: MCP And Browser Risk Review
+profile: rumi_security_review.security_reviewer
+focus:
+  - unsupported_mcp_server_namespace
+  - mcp_requested_scopes
+  - browser_origin_scope
+  - browser_action_approval
+  - page_data_exposure
+complements:
+  - rumi_mcp_gateway_pack
+  - browser_companion_pack
+rules:
+  connect_mcp_servers: false
+  operate_browser_sessions: false
+  override_owner_pack_routing: false
+output:
+  finding_schema: catalog/finding_schema.json

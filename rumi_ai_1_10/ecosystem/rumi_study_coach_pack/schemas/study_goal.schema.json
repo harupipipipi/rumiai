@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/study_goal.schema.json",
+  "title": "Study Goal",
+  "description": "Contract schema for Study Goal.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "study_goal_id",
+    "learner_id",
+    "target_outcome",
+    "success_criteria",
+    "deadline_state",
+    "evidence_basis",
+    "handoff_owner"
+  ],
+  "properties": {
+    "study_goal_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "learner_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_outcome": {
+      "type": "string",
+      "minLength": 1
+    },
+    "success_criteria": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "criterion_id",
+          "observable_behavior",
+          "minimum_pass"
+        ],
+        "properties": {
+          "criterion_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observable_behavior": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minimum_pass": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "deadline_state": {
+      "type": "string",
+      "enum": [
+        "explicit",
+        "relative",
+        "none",
+        "unknown"
+      ]
+    },
+    "evidence_basis": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_note_id",
+          "span_id",
+          "summary"
+        ],
+        "properties": {
+          "source_note_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "span_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "handoff_owner": {
+      "type": "string",
+      "const": "rumi_study_coach_pack"
+    }
+  }
+}

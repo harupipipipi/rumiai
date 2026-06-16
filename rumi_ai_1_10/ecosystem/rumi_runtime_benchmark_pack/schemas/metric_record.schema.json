@@ -1,0 +1,40 @@
+{
+  "version": "rumi.runtime_benchmark.metric_record.schema.v1",
+  "pack_id": "rumi_runtime_benchmark_pack",
+  "type": "object",
+  "required": [
+    "benchmark_id",
+    "seed",
+    "sample_count",
+    "units",
+    "latency",
+    "cost",
+    "replay_evidence"
+  ],
+  "properties": {
+    "benchmark_id": {"type": "string"},
+    "seed": {"type": "integer"},
+    "sample_count": {"type": "integer", "minimum": 1},
+    "units": {
+      "type": "object",
+      "required": ["latency", "cost", "tokens"],
+      "properties": {
+        "latency": {"type": "string", "enum": ["milliseconds", "seconds"]},
+        "cost": {"type": "string", "enum": ["estimated_usd", "none"]},
+        "tokens": {"type": "string", "enum": ["count", "not_applicable"]}
+      }
+    },
+    "latency": {
+      "type": "object",
+      "required": ["median", "p95_policy"]
+    },
+    "cost": {
+      "type": "object",
+      "required": ["estimate", "pricing_source"]
+    },
+    "replay_evidence": {
+      "type": "object",
+      "required": ["fixture_id", "prompt_hash", "tool_trace_id", "environment_descriptor_id"]
+    }
+  }
+}

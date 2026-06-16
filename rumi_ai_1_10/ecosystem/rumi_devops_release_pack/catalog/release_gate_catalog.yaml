@@ -1,0 +1,101 @@
+version: rumi.devops_release.catalog.v1
+pack_id: rumi_devops_release_pack
+network_default: none
+
+release_gates:
+  - id: source_status
+    title: Source status
+    evidence:
+      - git status summary
+      - changed files list
+      - branch and base reference
+    owner_boundary: rumi_code_ide_pack owns source edits when changes are required.
+
+  - id: ci_health
+    title: CI health
+    evidence:
+      - failing job name
+      - failing step name
+      - first relevant error
+      - last successful comparable run when available
+    remote_access: requires explicit user request or approved connector
+
+  - id: test_evidence
+    title: Test evidence
+    evidence:
+      - focused test command
+      - integration or smoke test command
+      - skipped test reason
+
+  - id: release_notes
+    title: Release notes
+    evidence:
+      - user-visible changes
+      - operational changes
+      - migration or rollback notes
+      - known risks
+
+  - id: deploy_readiness
+    title: Deploy readiness
+    evidence:
+      - runbook link or local runbook draft
+      - owner and approver names as roles, not personal secrets
+      - rollback trigger
+      - monitoring checks
+
+runbook_sections:
+  - id: preflight
+    required_items:
+      - scope
+      - environment
+      - dependencies
+      - approval record
+      - expected user impact
+  - id: deploy_steps
+    required_items:
+      - command or platform action description
+      - validation after each step
+      - stop condition
+  - id: verification
+    required_items:
+      - health checks
+      - log checks
+      - user journey smoke checks
+  - id: rollback
+    required_items:
+      - rollback trigger
+      - rollback owner role
+      - rollback command description
+      - post-rollback verification
+
+rollback_phases:
+  - detect
+  - decide
+  - freeze_changes
+  - restore_previous_version
+  - verify_recovery
+  - communicate_status
+  - write_followup
+
+platform_notes:
+  github_actions:
+    local_first_inputs:
+      - workflow file path
+      - exported job log
+      - local reproduction command
+    live_inputs_require_approval:
+      - repository Actions page
+      - authenticated CI logs
+      - rerun failed job
+
+  cloudflare_workers:
+    local_first_inputs:
+      - wrangler configuration
+      - worker entrypoint path
+      - local build command
+      - deployment runbook draft
+    live_inputs_require_approval:
+      - production deployment status
+      - route or domain configuration
+      - tail logs
+      - rollback deployment action

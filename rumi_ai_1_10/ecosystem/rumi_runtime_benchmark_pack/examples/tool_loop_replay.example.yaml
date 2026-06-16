@@ -1,0 +1,22 @@
+example:
+  id: tool_loop_replay
+  pack_id: rumi_runtime_benchmark_pack
+  workflow: compare_runtime_profiles
+  intent: Replay a deterministic tool-loop fixture and verify that latency differences are reproducible.
+  sampling_plan: comparison_ten_run
+  seed: 1337
+  evidence:
+    - fixture_id
+    - prompt_hash
+    - tool_trace_id
+    - environment_descriptor_id
+    - cache_policy
+    - replay_evidence
+  handoff: handoff_to_rumi_sandbox_runtime_pack_if_isolated_execution_is_needed
+  expected_result:
+    decision: replayable_or_blocked_on_missing_evidence
+    deliverables:
+      - replay_evidence_table
+      - latency_variance_notes
+      - missing_replay_fields
+      - rerun_recommendation

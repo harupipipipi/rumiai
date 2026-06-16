@@ -1,0 +1,72 @@
+quality_matrix:
+  minimum_pass: all_blocking_checks
+  fail_states:
+  - missing_evidence
+  - boundary_violation
+  - unsafe_external_action
+  - unreviewed_handoff
+  checks:
+  - id: source_provenance_present
+    blocking: true
+    description: Every source has provenance and retrieval owner.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: claim_has_evidence
+    blocking: true
+    description: Every supported claim has evidence IDs.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: source_anchor_present
+    blocking: true
+    description: Every evidence link has an anchor.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: contradiction_blocks_export
+    blocking: true
+    description: Unresolved contradictions block verified export.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: citation_ledger_complete
+    blocking: true
+    description: Missing claim IDs force blocked state.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: no_retrieval_execution
+    blocking: true
+    description: Retrieval is handed to research or connector packs.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: reviewer_queue_blocking
+    blocking: true
+    description: Blocking issues appear in reviewer queue.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: quality_label_present
+    blocking: true
+    description: Sources have credibility and recency labels.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test

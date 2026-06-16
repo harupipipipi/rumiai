@@ -21,10 +21,42 @@ from __future__ import annotations
 import fnmatch
 import re
 import subprocess
+import sys
 import threading
 import uuid
 from typing import Any, Dict, List, Optional
 
+_this_module = sys.modules.get(__name__)
+if _this_module is not None:
+    if __name__.startswith("rumi_ai_1_10."):
+        sys.modules.setdefault(__name__.removeprefix("rumi_ai_1_10."), _this_module)
+    else:
+        sys.modules.setdefault(f"rumi_ai_1_10.{__name__}", _this_module)
+
+def _docker_run_builder_class():
+    modules = []
+    for module_name in (
+        "core_runtime.docker_run_builder",
+        "rumi_ai_1_10.core_runtime.docker_run_builder",
+    ):
+        module = sys.modules.get(module_name)
+        if module is not None and module not in modules:
+            modules.append(module)
+    for module in modules:
+        builder_cls = getattr(module, "DockerRunBuilder", None)
+        original_build = getattr(module, "_ORIGINAL_DOCKER_RUN_BUILD", None)
+        if (
+            builder_cls is not None
+            and original_build is not None
+            and getattr(builder_cls, "build", None) is not original_build
+        ):
+            return builder_cls
+    for module in modules:
+        if hasattr(module, "DockerRunBuilder"):
+            return module.DockerRunBuilder
+    from .docker_run_builder import DockerRunBuilder
+
+    return DockerRunBuilder
 
 class DockerCapabilityHandler:
     """Pack からの docker.run リクエストを検証・実行するハンドラ。"""
@@ -428,8 +460,7 @@ class DockerCapabilityHandler:
             # -------------------------------------------------------- #
             # 6. DockerRunBuilder でコマンド構築
             # -------------------------------------------------------- #
-            from .docker_run_builder import DockerRunBuilder
-
+            DockerRunBuilder = _docker_run_builder_class()
             builder = DockerRunBuilder(name=container_name)
 
             # メモリ/CPU をインスタンス属性で上書き
@@ -815,4 +846,3 @@ class DockerCapabilityHandler:
         )
 
         return {"containers": containers}
-

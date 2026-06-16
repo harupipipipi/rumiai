@@ -1,0 +1,15 @@
+id: rumi_code_ide_pack.examples.refactor_session
+profile: rumi_code_ide_pack.local_first_pair_programmer
+preset: rumi_code_ide_pack.local_first_strict
+task: Refactor a small duplicated code path without changing behavior.
+recipe: safe_refactor
+expected_agent_steps:
+  - identify local duplication and nearby tests
+  - propose the smallest shared helper or local simplification
+  - patch only the touched module and focused tests
+  - run targeted verification
+  - report behavioral compatibility
+safety_notes:
+  - avoid broad formatting churn
+  - keep public interfaces stable
+  - request approval for any package or network operation

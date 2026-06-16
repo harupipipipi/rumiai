@@ -48,6 +48,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function isAuthorityApprovalCandidate(candidate: Record<string, unknown> | undefined): boolean {
+  return Boolean(
+    candidate
+    && (
+      candidate.authority
+      || candidate.approval_kind === "authority"
+      || candidate.permission_id === "model.invoke"
+      || candidate.permission_id === "api_key.use"
+      || candidate.permission_id === "network.egress"
+    ),
+  );
+}
+
 function numericTimestamp(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value > 10_000_000_000 ? value : value * 1000;
@@ -81,6 +94,7 @@ function approvalFromCandidate(
   observedAt: unknown,
   now: number,
 ): BrowserApproval | null {
+  if (!candidate || isAuthorityApprovalCandidate(candidate)) return null;
   if (!candidate?.requires_approval && !candidate?.approval_required) return null;
   const requestId = requestIdFromCandidate(candidate);
   const rawToken = typeof candidate.approval_token === "string" ? candidate.approval_token.trim() : "";
@@ -125,6 +139,7 @@ function runtimeApprovalFromCandidate(
 ): RuntimeApproval | null {
   const requestId = requestIdFromCandidate(candidate);
   if (!candidate || !requestId) return null;
+  if (isAuthorityApprovalCandidate(candidate)) return null;
   if (!candidate.requires_approval && !candidate.approval_required) return null;
   if (approvalExpired(candidate, observedAt, now)) return null;
   const toolName = String(candidate.tool_name ?? fallbackToolName).trim() || fallbackToolName;
@@ -159,7 +174,8 @@ function staleRuntimeApprovalFromCandidate(
   observedAt?: unknown,
   now = Date.now(),
 ): StaleRuntimeApproval | null {
-  if (!candidate?.requires_approval && !candidate?.approval_required) return null;
+  if (!candidate || isAuthorityApprovalCandidate(candidate)) return null;
+  if (!candidate.requires_approval && !candidate.approval_required) return null;
   if (requestIdFromCandidate(candidate)) return null;
   if (approvalExpired(candidate, observedAt, now)) return null;
   const toolName = String(candidate.tool_name ?? fallbackToolName).trim() || fallbackToolName;

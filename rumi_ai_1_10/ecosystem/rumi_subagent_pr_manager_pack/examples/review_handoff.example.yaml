@@ -1,0 +1,12 @@
+example:
+  id: review_handoff
+  pack_id: rumi_subagent_pr_manager_pack
+  workflow: coordinate_review_handoffs
+  intent: Prepare a maintainer handoff packet after a subagent completes a pack PR quality pass.
+  evidence:
+    - branch_name
+    - pr_url
+    - assigned_subagent_id
+    - validation_commands
+  handoff: handoff_to_named_owner_pack_for_any_out_of_scope_fix
+  expected_result: evidence_ledger_acceptance_rubric_result_and_handoff_checklist

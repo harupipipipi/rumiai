@@ -1,0 +1,13 @@
+catalog_id: rumi_business_ops.workflows
+schema_version: 1
+workflows:
+  - workflow_id: support_triage
+    phases: [inbox_scope, priority_classification, draft_response, followup]
+  - workflow_id: sales_followup
+    phases: [account_context, next_action, draft, schedule]
+  - workflow_id: marketing_campaign_brief
+    phases: [audience, offer, channels, assets, launch_check]
+  - workflow_id: procurement_comparison
+    phases: [requirements, vendor_research, scoring, recommendation]
+  - workflow_id: crm_hygiene
+    phases: [field_audit, duplicates, stale_items, safe_update_plan]

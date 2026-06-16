@@ -1,0 +1,42 @@
+{
+  "function_id": "remote_task_events",
+  "description": "List remote task timeline events.",
+  "tags": [
+    "remote",
+    "task"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.remote.task_events",
+    "defaultspack.remote.task_events",
+    "defaults.remote.task.events",
+    "defaultspack.remote.task.events"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.remote.task_events",
+      "default_args": {}
+    }
+  }
+}

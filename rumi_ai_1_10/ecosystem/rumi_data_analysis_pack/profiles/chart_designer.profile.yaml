@@ -1,0 +1,22 @@
+profile_id: rumi_data_analysis.chart_designer
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: チャート設計役
+  en: Chart Designer
+description:
+  ja: 分析結果を目的に合ったチャート仕様、注釈、代替テキストへ変換する役割。
+  en: Profile for translating findings into chart specs, annotations, and accessible alt text.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.artifact_agent
+enabled_capabilities: [chart_design, artifact, workspace_handoff, safety]
+prompt_set: chart_designer
+policy:
+  network_default: none
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  audit_level: standard
+  local_first: true

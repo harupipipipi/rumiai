@@ -1,0 +1,13 @@
+example:
+  id: replay_divergence
+  user_request: Detect replay divergence after missing event
+  input_state: local_records_supplied
+  expected_result: replay_review_handoff_packet
+  must_include:
+  - evidence_ids_or_approval_receipt
+  - review_state
+  - handoff_owner
+  must_not:
+  - external_action
+  - uncited_claim
+  - unapproved_tool_call

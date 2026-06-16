@@ -1,0 +1,41 @@
+version: rumi.document_intelligence.subagent_roster.v1
+pack_id: rumi_document_intelligence_pack
+description: Declarative roster for repeated specialist review passes. This is not executable routing.
+network_default: none
+
+review_passes:
+  - id: citation_mapper
+    role: Map claims to citation records and page spans.
+    required_assets:
+      - catalog/citation_page_span_schema.json
+    outputs:
+      - claim_to_page_span_map
+      - missing_citation_questions
+  - id: redline_delta_reviewer
+    role: Review insertions, deletions, substitutions, and formatting-only changes.
+    required_assets:
+      - catalog/redline_review_matrix.yaml
+    outputs:
+      - high_risk_delta_table
+      - semantic_delta_summary
+  - id: privacy_reviewer
+    role: Classify sensitive document content before handoff or sharing.
+    required_assets:
+      - policies/citation_privacy_review.policy.yaml
+      - policies/document_privacy.policy.yaml
+    outputs:
+      - privacy_classification_summary
+      - redaction_or_exclusion_notes
+  - id: final_evidence_integrator
+    role: Combine citation, redline, and privacy findings into one user-facing answer.
+    required_assets:
+      - catalog/document_intelligence_workflows.yaml
+    outputs:
+      - evidence_first_answer
+      - residual_risk_and_human_review_notes
+
+governance:
+  repeated_specialist_passes_required: true
+  grant_effect: none
+  runtime_subagent_tool_required: false
+  defaultspack_approval_still_applies: true

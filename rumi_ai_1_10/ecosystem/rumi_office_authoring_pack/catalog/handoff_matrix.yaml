@@ -1,0 +1,26 @@
+handoff_matrix:
+  pack_id: rumi_office_authoring_pack
+  pack_boundary_rule: owner_surface_wins_then_explicit_handoff
+  items:
+  - surface: workspace_artifact_catalog
+    resolution: handoff_to_rumi_workspace_pack
+  - surface: office_file_rendering
+    resolution: handoff_to_rumi_workspace_pack
+  - surface: pdf_rendering
+    resolution: handoff_to_rumi_workspace_pack
+  - surface: document_understanding
+    resolution: handoff_to_rumi_document_intelligence_pack
+  - surface: data_analysis
+    resolution: handoff_to_rumi_data_analysis_pack
+  - surface: citation_ledger
+    resolution: handoff_to_rumi_evidence_dossier_pack
+  - surface: artifact_app_runtime
+    resolution: handoff_to_rumi_artifact_app_runtime_pack
+  - surface: external_retrieval
+    resolution: handoff_to_rumi_research_pack
+  - surface: connector_access
+    resolution: handoff_to_rumi_connector_gateway_pack
+  - surface: office_authoring_contract
+    resolution: owned_by_rumi_office_authoring_pack
+  - surface: tool_aliases
+    resolution: prefer_explicit_pack_namespace

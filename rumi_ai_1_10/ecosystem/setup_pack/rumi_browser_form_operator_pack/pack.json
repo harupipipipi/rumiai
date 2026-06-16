@@ -1,0 +1,66 @@
+{
+  "pack_id": "rumi_browser_form_operator_pack",
+  "display_name": "Rumi Browser Form Operator Pack",
+  "description": "Declarative browser form recognition, field mapping, action replay, and submission safety pack.",
+  "target_pack_id": "rumi_browser_form_operator_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "high",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "semantic_dom_collection": "handoff_to_rumi_browser_element_pack",
+    "navigation_and_clicking": "handoff_to_rumi_browser_automation_pack",
+    "pii_or_payment_risk": "handoff_to_rumi_security_review_pack",
+    "post_submit_delivery": "handoff_to_rumi_connector_gateway_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Browser Form Operator is a high-risk declarative review pack for staged form actions; it must not be promoted into defaultspack until semantic DOM, explicit approval, and receipt evidence are proven by runtime owners.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required",
+      "promotion_requires_real_world_success_cases"
+    ],
+    "promotion_blockers": [
+      "no_browser_execution_runtime",
+      "semantic_dom_collection_owned_by_browser_element_pack",
+      "navigation_and_clicking_owned_by_browser_automation_pack",
+      "high_risk_submission_requires_security_review"
+    ],
+    "promotion_evidence_required": [
+      "field_risk_classification_cases",
+      "semantic_dom_dependency_cases",
+      "explicit_submission_approval_cases",
+      "submission_receipt_evidence_cases"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.browser_form_operator_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "browser-safety",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools."
+  ]
+}

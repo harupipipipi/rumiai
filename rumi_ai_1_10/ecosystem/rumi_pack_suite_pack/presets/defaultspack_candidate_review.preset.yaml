@@ -1,0 +1,4 @@
+preset_id: rumi_pack_suite.defaultspack_candidate_review
+profile: rumi_pack_suite.curator
+review_catalog: rumi_pack_suite.defaultspack_promotion
+required_evidence: [contract_tests, overlap_policy, security_notes, integration_check]
