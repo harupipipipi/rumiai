@@ -14,6 +14,13 @@ import { settingsApiResources } from "../features/settings/resources/settingsApi
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../features/settings/resources/useModelAvailability";
 import type { SettingsModalRendererProps } from "./types";
 import type { DesktopPermissionStatus, DesktopSystemInfo } from "../lib/desktopSystemInfo";
+import {
+  createSettingsFieldRendererRegistry,
+  SettingsFieldRendererHost,
+  type SettingsFieldRendererProps,
+} from "./settings/fieldRendererRegistry";
+
+const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry();
 
 function formatReadonlyValue(value: unknown, fallback: unknown): string {
   const resolved = value ?? fallback ?? "";
@@ -2713,6 +2720,10 @@ function SettingsField({
   );
 }
 
+function SettingsFieldFallback(props: SettingsFieldRendererProps) {
+  return <SettingsField {...props} field={props.field as SettingsSection["fields"][number]} />;
+}
+
 export function SettingsModalRenderer({
   isOpen,
   activeSectionId: requestedSectionId,
@@ -2819,9 +2830,12 @@ export function SettingsModalRenderer({
         field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || field.type === "external_tokens" || field.type === "public_url" || field.type === "model_api_routes" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
       )}
     >
-      <SettingsField
+      <SettingsFieldRendererHost
+        registry={settingsModalFieldRendererRegistry}
+        componentBindings={catalog?.component_bindings ?? []}
+        fallbackRenderer={SettingsFieldFallback}
         sectionId={activeSection?.id ?? ""}
-        field={field}
+        field={field as SettingsFieldRendererProps["field"]}
         value={
           field.type === "secret" && field.configured_field
             ? settingsValues[activeSection?.id ?? ""]?.[field.configured_field]

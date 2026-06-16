@@ -24,6 +24,7 @@ from domain.external.io_templates import external_io_template_catalog
 from domain.external.output_profile_registry import OutputProfileRegistry
 from domain.external.source_store import ExternalSourceStore, external_source_key
 from domain.external.token_store import external_token_status
+from domain.templates.projectors import build_template_catalog
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
 from transport.registry import component_http_route_specs, component_route_diagnostics
@@ -40,15 +41,32 @@ class FrontendRegistry:
 
     def build_catalog(self, profile_id: str | None = None) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
+        template_catalog = self._template_catalog_metadata()
         extensions = self._load_extensions()
         ui_surfaces = self._load_ui_surfaces()
         selected_frontend_ids = self._profile_frontend_selection(profile_id)
         shell = self._filter_shell(self._shell(ui_surfaces, extensions), selected_frontend_ids)
         parts = self._filter_frontend_items(self._parts(ui_surfaces, extensions), selected_frontend_ids)
-        component_bindings = self._filter_frontend_items(self._component_bindings(ui_surfaces, extensions), selected_frontend_ids)
-        sidebar_items = self._filter_frontend_items(self._sidebar_items(ui_surfaces, extensions), selected_frontend_ids)
-        settings_sections = self._filter_frontend_items(self._settings_sections(ui_surfaces, extensions), selected_frontend_ids)
-        chat_renderers = self._filter_frontend_items(self._chat_renderers(ui_surfaces, extensions), selected_frontend_ids)
+        component_bindings = [
+            *self._component_bindings(ui_surfaces, extensions),
+            *template_catalog.get("component_bindings", []),
+        ]
+        component_bindings = self._filter_frontend_items(component_bindings, selected_frontend_ids)
+        sidebar_items = [
+            *self._sidebar_items(ui_surfaces, extensions),
+            *template_catalog.get("sidebar_items", []),
+        ]
+        sidebar_items = self._filter_frontend_items(sidebar_items, selected_frontend_ids)
+        settings_sections = self._merge_settings_sections(
+            self._settings_sections(ui_surfaces, extensions),
+            template_catalog.get("settings_sections", []),
+        )
+        settings_sections = self._filter_frontend_items(settings_sections, selected_frontend_ids)
+        chat_renderers = [
+            *self._chat_renderers(ui_surfaces, extensions),
+            *template_catalog.get("chat_renderers", []),
+        ]
+        chat_renderers = self._filter_frontend_items(chat_renderers, selected_frontend_ids)
         return {
             "app": self._app_metadata(ui_surfaces),
             "agent_service": CapabilityCatalog(self._pack_root).manifest(),
@@ -68,14 +86,28 @@ class FrontendRegistry:
             },
             "skills": self._skill_items(),
             "routes": self._route_metadata(),
+            "templates": template_catalog.get("templates", []),
+            "field_renderers": template_catalog.get("field_renderers", []),
+            "data_sources": template_catalog.get("data_sources", []),
+            "actions": template_catalog.get("actions", []),
+            "backend_services": template_catalog.get("backend_services", []),
+            "api_routes": template_catalog.get("api_routes", []),
+            "permissions": template_catalog.get("permissions", []),
+            "template_diagnostics": template_catalog.get("template_diagnostics", []),
+            "composer_widgets": template_catalog.get("composer_widgets", []),
             "extension_points": self._extension_points(),
             "diagnostics": self._diagnostics(shell, parts, component_bindings),
         }
 
     def get_settings(self) -> dict[str, Any]:
+        self._load_diagnostics: list[dict[str, Any]] = []
+        template_catalog = self._template_catalog_metadata()
         ui_surfaces = self._load_ui_surfaces()
         return {
-            "sections": self._settings_sections(ui_surfaces, self._load_extensions()),
+            "sections": self._merge_settings_sections(
+                self._settings_sections(ui_surfaces, self._load_extensions()),
+                template_catalog.get("settings_sections", []),
+            ),
             "values": self._read_settings(),
         }
 
@@ -2045,6 +2077,94 @@ class FrontendRegistry:
             self._add_diagnostic("warning", "frontend_shell_not_object", "frontend_shell.json must contain a JSON object.", str(self._shell_path))
             return {}
         return config
+
+    def _template_catalog_metadata(self) -> dict[str, Any]:
+        try:
+            catalog = build_template_catalog(defaultspack_root=self._pack_root)
+        except Exception as exc:
+            self._add_diagnostic(
+                "warning",
+                "template_catalog_build_failed",
+                f"failed to build template catalog: {exc}",
+                str(self._pack_root / "templates"),
+            )
+            return self._empty_template_catalog()
+        if not isinstance(catalog, dict):
+            self._add_diagnostic(
+                "warning",
+                "template_catalog_invalid",
+                "template catalog projector returned a non-object result.",
+                "domain/templates/projectors",
+            )
+            return self._empty_template_catalog()
+
+        for diagnostic in catalog.get("template_diagnostics", []):
+            if not isinstance(diagnostic, dict):
+                continue
+            self._add_diagnostic(
+                str(diagnostic.get("level") or diagnostic.get("severity") or "warning"),
+                str(diagnostic.get("code") or "template_catalog_diagnostic"),
+                str(diagnostic.get("message") or ""),
+                str(diagnostic.get("source") or diagnostic.get("source_path") or "template_catalog"),
+            )
+        return catalog
+
+    @staticmethod
+    def _empty_template_catalog() -> dict[str, Any]:
+        return {
+            "templates": [],
+            "field_renderers": [],
+            "data_sources": [],
+            "actions": [],
+            "backend_services": [],
+            "api_routes": [],
+            "permissions": [],
+            "template_diagnostics": [],
+            "settings_sections": [],
+            "component_bindings": [],
+            "sidebar_items": [],
+            "chat_renderers": [],
+            "composer_widgets": [],
+        }
+
+    def _merge_settings_sections(
+        self,
+        base_sections: list[dict[str, Any]],
+        extra_sections: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        for section in [*base_sections, *extra_sections]:
+            if not isinstance(section, dict):
+                continue
+            section_id = str(section.get("id") or "").strip()
+            if not section_id:
+                continue
+            if section_id not in merged:
+                current = deepcopy(section)
+                current["fields"] = self._dedupe_by_key(
+                    [field for field in current.get("fields", []) if isinstance(field, dict)],
+                    "id",
+                )
+                merged[section_id] = current
+                order.append(section_id)
+                continue
+            current = merged[section_id]
+            for key, value in section.items():
+                if key == "fields":
+                    continue
+                if key in current and current.get(key) not in (None, "", [], {}):
+                    continue
+                if value not in (None, "", [], {}):
+                    current[key] = deepcopy(value)
+            current["fields"] = self._dedupe_by_key(
+                [
+                    *[field for field in current.get("fields", []) if isinstance(field, dict)],
+                    *[field for field in section.get("fields", []) if isinstance(field, dict)],
+                ],
+                "id",
+            )
+        return [merged[section_id] for section_id in order]
 
     def _diagnostics(
         self,

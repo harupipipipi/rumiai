@@ -4,6 +4,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { buildVisibleModelOptions, SettingsModalRenderer } from "./SettingsModalRenderer";
+import { createSettingsFieldRendererRegistry, SettingsFieldRendererHost } from "./settings/fieldRendererRegistry";
+import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
 
 function makeModelOption(index: number) {
   return {
@@ -14,6 +16,103 @@ function makeModelOption(index: number) {
     model_id: `model-${index}`,
   };
 }
+
+test("settings field renderer host falls back for unknown fields", () => {
+  const registry = createSettingsFieldRendererRegistry();
+  const field = {
+    id: "future_field",
+    label: "Future Field",
+    type: "future_field",
+    default: "default value",
+  } as TemplateSettingsField;
+
+  const html = renderToStaticMarkup(
+    createElement(SettingsFieldRendererHost, {
+      registry,
+      field,
+      sectionId: "demo",
+      value: "fallback value",
+      onChange: () => undefined,
+      fallbackRenderer: ({ value }) => createElement("span", { "data-fallback": "settings" }, String(value)),
+    }),
+  );
+
+  assert.match(html, /data-fallback="settings"/);
+  assert.match(html, /fallback value/);
+});
+
+test("settings field renderer registry routes new field types and catalog bindings", () => {
+  const registry = createSettingsFieldRendererRegistry([
+    {
+      id: "builtin-model-select",
+      types: ["model_select"],
+      render: ({ field, value }) => createElement("output", { "data-renderer": "model" }, `${field.id}:${String(value)}`),
+    },
+    {
+      id: "api-key-setup-binding",
+      component: "ApiKeySetupField",
+      render: ({ field }) => createElement("output", { "data-renderer": "api-key" }, field.id),
+    },
+    {
+      id: "provider-select-renderer",
+      renderers: ["provider_select.compact"],
+      render: ({ field }) => createElement("output", { "data-renderer": "provider" }, field.id),
+    },
+  ]);
+
+  const modelHtml = renderToStaticMarkup(
+    createElement(SettingsFieldRendererHost, {
+      registry,
+      field: {
+        id: "preferred_model",
+        label: "Preferred Model",
+        type: "model_select",
+      } as TemplateSettingsField,
+      sectionId: "models",
+      value: "google/gemini",
+      onChange: () => undefined,
+      fallbackRenderer: () => createElement("span", null, "fallback"),
+    }),
+  );
+  const apiKeyHtml = renderToStaticMarkup(
+    createElement(SettingsFieldRendererHost, {
+      registry,
+      componentBindings: [{ part_id: "api_key_setup", component: "ApiKeySetupField" }],
+      field: {
+        id: "provider_key",
+        label: "Provider Key",
+        type: "api_key_setup",
+        part_id: "api_key_setup",
+      } as TemplateSettingsField,
+      sectionId: "providers",
+      value: null,
+      onChange: () => undefined,
+      fallbackRenderer: () => createElement("span", null, "fallback"),
+    }),
+  );
+  const providerHtml = renderToStaticMarkup(
+    createElement(SettingsFieldRendererHost, {
+      registry,
+      field: {
+        id: "provider",
+        label: "Provider",
+        type: "provider_select",
+        renderer: "provider_select.compact",
+      } as TemplateSettingsField,
+      sectionId: "providers",
+      value: "google",
+      onChange: () => undefined,
+      fallbackRenderer: () => createElement("span", null, "fallback"),
+    }),
+  );
+
+  assert.match(modelHtml, /data-renderer="model"/);
+  assert.match(modelHtml, /preferred_model:google\/gemini/);
+  assert.match(apiKeyHtml, /data-renderer="api-key"/);
+  assert.match(apiKeyHtml, /provider_key/);
+  assert.match(providerHtml, /data-renderer="provider"/);
+  assert.match(providerHtml, /provider/);
+});
 
 test("Settings > Tools contains detailed tool settings", () => {
   const html = renderToStaticMarkup(

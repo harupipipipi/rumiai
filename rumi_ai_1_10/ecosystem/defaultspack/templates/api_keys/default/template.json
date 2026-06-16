@@ -1,0 +1,146 @@
+{
+  "id": "rumi.api_keys.default",
+  "kind": "integration",
+  "version": "1.0.0",
+  "status": "active",
+  "trust_level": "builtin",
+  "capabilities": {
+    "provides": [
+      "rumi.api_keys",
+      "rumi.provider_credentials"
+    ],
+    "requires": [],
+    "permissions": [
+      "api_key.use"
+    ]
+  },
+  "metadata": {
+    "title": "Default API Key Setup",
+    "template_kind": "setup_template",
+    "local_first": true,
+    "description": "Declarative metadata for provider API key setup without exposing secrets."
+  },
+  "pieces": [
+    {
+      "id": "api_key_settings_section",
+      "kind": "settings_section",
+      "order": 10,
+      "section_id": "apis",
+      "label": "APIs / Tokens",
+      "description": "Provider credentials are saved through the existing local secret-aware settings flow.",
+      "fields": []
+    },
+    {
+      "id": "model_select",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 11,
+      "section_id": "models",
+      "type": "model_select",
+      "renderer": "model_select",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Model For New Key",
+      "default": "stub/default",
+      "data_source": "selectable_model_profiles"
+    },
+    {
+      "id": "provider_select",
+      "kind": "settings_field",
+      "slot": "apis",
+      "order": 12,
+      "section_id": "apis",
+      "type": "provider_select",
+      "renderer": "provider_select",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Provider",
+      "default": "openrouter",
+      "data_source": "ai_providers"
+    },
+    {
+      "id": "api_key_setup",
+      "kind": "settings_field",
+      "slot": "apis",
+      "order": 13,
+      "section_id": "apis",
+      "type": "api_key_setup",
+      "renderer": "api_key_setup",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "API Key Setup",
+      "default": [],
+      "data_source": "provider_key_status",
+      "write_route": "/api/ui/settings"
+    },
+    {
+      "id": "api_key_field_renderer",
+      "kind": "field_renderer",
+      "order": 14,
+      "renderer": "api_key_setup",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "field_types": [
+        "api_key_setup",
+        "provider_select",
+        "model_select"
+      ]
+    },
+    {
+      "id": "provider_key_status_data_source",
+      "kind": "function",
+      "order": 15,
+      "role": "data_source",
+      "data_source": "provider_key_status",
+      "function_id": "ai_get_provider_key_status",
+      "route_path": "/api/ai/provider-key",
+      "method": "GET",
+      "returns": "configured provider key summaries only"
+    },
+    {
+      "id": "save_provider_key_action",
+      "kind": "function",
+      "order": 16,
+      "role": "action",
+      "action_id": "ai_set_provider_api_key",
+      "function_id": "ai_set_provider_api_key",
+      "handler_ref": "domain.ai_client.api_key_store:set_provider_api_key",
+      "requires_approval": true
+    },
+    {
+      "id": "provider_key_store_service",
+      "kind": "backend_service",
+      "order": 17,
+      "service_id": "provider_api_key_store",
+      "entrypoint": "domain.ai_client.api_key_store",
+      "lifecycle": "local_secret_store"
+    },
+    {
+      "id": "provider_key_api_route",
+      "kind": "api_route",
+      "order": 18,
+      "method": "POST",
+      "route_path": "/api/ai/provider-key",
+      "block_module": "blocks.ai.provider_key"
+    },
+    {
+      "id": "api_key_use_permission",
+      "kind": "permission",
+      "order": 19,
+      "permission_id": "api_key.use",
+      "scope": "ai_client",
+      "reason": "Provider keys are secret material and must stay approval-aware."
+    },
+    {
+      "id": "api_key_setup_test_contract",
+      "kind": "test_contract",
+      "order": 20,
+      "contract_id": "defaultspack.template.api_keys.catalog",
+      "assertions": [
+        "catalog.actions includes ai_set_provider_api_key",
+        "catalog.data_sources includes provider_key_status",
+        "settings.sections includes api_key_setup field"
+      ]
+    }
+  ]
+}

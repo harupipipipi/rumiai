@@ -1,0 +1,148 @@
+{
+  "id": "rumi.model_selector.default",
+  "kind": "composite",
+  "version": "1.0.0",
+  "status": "active",
+  "trust_level": "builtin",
+  "capabilities": {
+    "provides": [
+      "rumi.model_selector",
+      "rumi.settings.models"
+    ],
+    "requires": [],
+    "permissions": [
+      "model.invoke"
+    ]
+  },
+  "metadata": {
+    "title": "Default Model Selector",
+    "template_kind": "fullstack_template",
+    "local_first": true,
+    "description": "Declarative metadata for selecting and routing chat models."
+  },
+  "pieces": [
+    {
+      "id": "model_selector_settings_section",
+      "kind": "settings_section",
+      "order": 20,
+      "section_id": "models",
+      "label": "Models",
+      "description": "Model selection and routing metadata from RumiTemplate.",
+      "fields": []
+    },
+    {
+      "id": "model_select",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 21,
+      "section_id": "models",
+      "type": "model_select",
+      "renderer": "model_select",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Model Selector",
+      "default": "stub/default",
+      "data_source": "selectable_model_profiles",
+      "help": "Select the default chat model profile."
+    },
+    {
+      "id": "provider_select",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 22,
+      "section_id": "models",
+      "type": "provider_select",
+      "renderer": "provider_select",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Provider",
+      "default": "stub",
+      "data_source": "ai_providers",
+      "help": "Filter model choices by provider."
+    },
+    {
+      "id": "api_key_setup",
+      "kind": "settings_field",
+      "slot": "apis",
+      "order": 23,
+      "section_id": "apis",
+      "type": "api_key_setup",
+      "renderer": "api_key_setup",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Provider API Key",
+      "default": [],
+      "data_source": "provider_key_status",
+      "help": "Store provider keys through the existing settings API."
+    },
+    {
+      "id": "model_selector_field_renderer",
+      "kind": "field_renderer",
+      "order": 24,
+      "renderer": "model_select",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "field_types": [
+        "model_select",
+        "provider_select",
+        "api_key_setup"
+      ]
+    },
+    {
+      "id": "model_profile_data_source",
+      "kind": "function",
+      "order": 25,
+      "role": "data_source",
+      "data_source": "selectable_model_profiles",
+      "function_id": "ai_models_catalog",
+      "route_path": "/api/ai/models",
+      "method": "GET",
+      "returns": "model profile options"
+    },
+    {
+      "id": "select_model_action",
+      "kind": "function",
+      "order": 26,
+      "role": "action",
+      "action_id": "ai_set_preferred_model",
+      "function_id": "ai_set_preferred_model",
+      "handler_ref": "domain.frontend.command_registry:ai_set_preferred_model",
+      "requires_approval": false
+    },
+    {
+      "id": "model_runtime_settings_service",
+      "kind": "backend_service",
+      "order": 27,
+      "service_id": "model_runtime_settings",
+      "entrypoint": "domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService",
+      "lifecycle": "local"
+    },
+    {
+      "id": "models_api_route",
+      "kind": "api_route",
+      "order": 28,
+      "method": "GET",
+      "route_path": "/api/ai/models",
+      "block_module": "blocks.ai.models"
+    },
+    {
+      "id": "model_invoke_permission",
+      "kind": "permission",
+      "order": 29,
+      "permission_id": "model.invoke",
+      "scope": "ai_client",
+      "reason": "Selecting a model can lead to local model invocation later."
+    },
+    {
+      "id": "model_selector_test_contract",
+      "kind": "test_contract",
+      "order": 30,
+      "contract_id": "defaultspack.template.model_selector.catalog",
+      "assertions": [
+        "catalog.templates includes rumi.model_selector.default",
+        "settings.sections includes model_select field",
+        "field_renderers includes model_select"
+      ]
+    }
+  ]
+}

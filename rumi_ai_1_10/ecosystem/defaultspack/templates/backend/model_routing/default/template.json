@@ -1,0 +1,146 @@
+{
+  "id": "rumi.backend.model_routing.default",
+  "kind": "backend",
+  "version": "1.0.0",
+  "status": "active",
+  "trust_level": "builtin",
+  "capabilities": {
+    "provides": [
+      "rumi.backend.model_routing",
+      "rumi.model_router"
+    ],
+    "requires": [],
+    "permissions": [
+      "model.invoke",
+      "api_key.use"
+    ]
+  },
+  "metadata": {
+    "title": "Default Backend Model Routing",
+    "template_kind": "backend_template",
+    "local_first": true,
+    "description": "Declarative metadata for backend model routing and route diagnostics."
+  },
+  "pieces": [
+    {
+      "id": "model_routing_settings_section",
+      "kind": "settings_section",
+      "order": 30,
+      "section_id": "models",
+      "label": "Models",
+      "description": "Backend routing controls projected from RumiTemplate.",
+      "fields": []
+    },
+    {
+      "id": "model_select",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 31,
+      "section_id": "models",
+      "type": "model_select",
+      "renderer": "model_select",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Route Preview Model",
+      "default": "stub/default",
+      "data_source": "selectable_model_profiles"
+    },
+    {
+      "id": "provider_select",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 32,
+      "section_id": "models",
+      "type": "provider_select",
+      "renderer": "provider_select",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Route Provider Filter",
+      "default": "stub",
+      "data_source": "ai_providers"
+    },
+    {
+      "id": "api_key_setup",
+      "kind": "settings_field",
+      "slot": "apis",
+      "order": 33,
+      "section_id": "apis",
+      "type": "api_key_setup",
+      "renderer": "api_key_setup",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Route API Key",
+      "default": [],
+      "data_source": "provider_key_status"
+    },
+    {
+      "id": "model_routing_field_renderer",
+      "kind": "field_renderer",
+      "order": 34,
+      "renderer": "model_routing",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "field_types": [
+        "model_select",
+        "provider_select",
+        "api_key_setup"
+      ]
+    },
+    {
+      "id": "model_route_data_source",
+      "kind": "function",
+      "order": 35,
+      "role": "data_source",
+      "data_source": "model_route_options",
+      "function_id": "ai_get_preferred_model",
+      "route_path": "/api/ai/models/route",
+      "method": "POST",
+      "returns": "model routing candidates and reason codes"
+    },
+    {
+      "id": "route_model_action",
+      "kind": "function",
+      "order": 36,
+      "role": "action",
+      "action_id": "ai_route_model",
+      "function_id": "ai_route_model",
+      "handler_ref": "domain.ai_client.model_router:route_model",
+      "requires_approval": false
+    },
+    {
+      "id": "model_router_service",
+      "kind": "backend_service",
+      "order": 37,
+      "service_id": "model_router",
+      "entrypoint": "domain.ai_client.model_router",
+      "lifecycle": "local"
+    },
+    {
+      "id": "model_route_api_route",
+      "kind": "api_route",
+      "order": 38,
+      "method": "POST",
+      "route_path": "/api/ai/models/route",
+      "block_module": "blocks.ai.route_model"
+    },
+    {
+      "id": "model_route_permission",
+      "kind": "permission",
+      "order": 39,
+      "permission_id": "model.invoke",
+      "scope": "ai_client",
+      "reason": "Routing chooses the model used by a later invocation."
+    },
+    {
+      "id": "model_routing_test_contract",
+      "kind": "test_contract",
+      "order": 40,
+      "contract_id": "defaultspack.template.backend.model_routing.catalog",
+      "assertions": [
+        "catalog.backend_services includes model_router",
+        "catalog.api_routes includes /api/ai/models/route",
+        "catalog.permissions includes model.invoke"
+      ]
+    }
+  ]
+}
