@@ -28,13 +28,16 @@ def run(context):
         return handler
 
     routes = [
-        # --- 既存ルート ---
+        # --- existing routes ---
         ("PUT", "/api/prompts/{name}", _lazy("blocks.prompt.update"), {"name": "name"}),
         ("DELETE", "/api/prompts/{name}", _lazy("blocks.prompt.delete"), {"name": "name"}),
         ("POST", "/api/prompts/convert", _lazy("blocks.prompt.convert"), {}),
         ("POST", "/api/prompts/lint", _lazy("blocks.prompt.lint_prompt"), {}),
         ("POST", "/api/prompts/compact", _lazy("blocks.prompt.compact_prompt"), {}),
-        # --- advanced ルート ---
+        # --- prompt control/editor routes ---
+        ("POST", "/api/prompts/control", _lazy("blocks.prompt.control"), {}),
+        ("POST", "/api/prompts/editor", _lazy("blocks.prompt.control"), {}),
+        # --- advanced routes ---
         ("POST", "/api/prompts/build", _lazy("blocks.prompt.advanced.build"), {}),
         ("GET", "/api/prompts/context-vars", _lazy("blocks.prompt.advanced.context_vars"), {}),
         ("POST", "/api/prompts/{name}/conditional", _lazy("blocks.prompt.advanced.conditional"), {"name": "name"}),
