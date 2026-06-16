@@ -4,6 +4,7 @@ from typing import Any, Callable
 
 from domain.input.dispatcher import dispatch_input
 from domain.input.envelope import RumiInputEnvelope
+from domain.ai_client.model_search import get_model_capabilities
 
 from .models import DEFAULT_CHANNEL_ID, gen_id, timestamp
 from .runtime_store import CompanyRuntimeStore
@@ -140,9 +141,10 @@ class CompanyRunDispatcher:
         context: dict[str, Any],
     ) -> dict[str, Any]:
         agent_id = str(agent.get("agent_id") or agent.get("id") or "operations_manager")
+        agent_tools = _agent_tools_for_dispatch(agent)
         payload = {
             "task": _task_prompt(company, task, agent),
-            "tools": list(agent.get("allowed_tools") or []),
+            "tools": agent_tools,
             "model": str(agent.get("model") or "default"),
             "system_prompt": agent.get("system_prompt"),
             "runtime_profile_key": task.get("metadata", {}).get("runtime_profile_key") if isinstance(task.get("metadata"), dict) else None,
@@ -179,7 +181,7 @@ class CompanyRunDispatcher:
                 "route": "agent.delegate",
             },
             params=payload,
-            tools=list(agent.get("allowed_tools") or []),
+            tools=agent_tools,
         )
         dispatch_context = {
             **(context or {}),
@@ -210,20 +212,48 @@ class CompanyRunDispatcher:
         }
 
 
+def _agent_tools_for_dispatch(agent: dict[str, Any]) -> list[Any]:
+    tools = list(agent.get("allowed_tools") or [])
+    if not tools:
+        return []
+    model = str(agent.get("model") or "").strip()
+    if not model or model == "default":
+        return tools
+    try:
+        capabilities = get_model_capabilities(model) or {}
+    except Exception:
+        capabilities = {}
+    if capabilities and not capabilities.get("supports_tool_calling"):
+        return []
+    return tools
+
+
 def _task_prompt(company: dict[str, Any], task: dict[str, Any], agent: dict[str, Any]) -> str:
+    metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+    conversation_id = str(metadata.get("conversation_id") or "").strip()
+    source_message = str(metadata.get("source_message") or "").strip()
     parts = [
-        "Company workspace task for " + str(agent.get("display_name") or agent.get("agent_id") or "agent") + ".",
+        "You are receiving a delegated task from the president in the main Rumi chat.",
+        "The president manages employees and does not perform specialist work directly.",
+        "This is a local internal team workspace and does not claim external employment, identity, credential, or authorization.",
+        "Handle the task as a normal user instruction for "
+        + str(agent.get("display_name") or agent.get("agent_id") or "agent")
+        + ".",
         "",
-        "Company: " + str(company.get("name") or company.get("id") or ""),
+        "Team: " + str(company.get("name") or company.get("id") or ""),
         "Task: " + str(task.get("title") or ""),
     ]
+    if conversation_id:
+        parts.append("Parent chat id: " + conversation_id)
     description = str(task.get("description") or "").strip()
     if description:
         parts.extend(["", description])
+    if source_message and source_message != description:
+        parts.extend(["", "Original president request:", source_message])
     parts.extend(
         [
             "",
-            "Reply with progress and use approved tools only. Treat any company mention as a user instruction, not as a speaker turn.",
+            "Reply with the requested result or progress update. Use only the tools provided by this run.",
         ]
     )
     return "\n".join(parts)

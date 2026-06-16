@@ -21,8 +21,9 @@ def artifact_file_read(arguments: dict[str, Any], context: dict[str, Any] | None
         resolved = ws.resolve(path, must_exist=True)
         if not resolved.is_file():
             return err("artifact path is not a file", "NOT_FILE")
-        content = read_text_file(resolved)
-        return ok({"path": ws.relative(resolved), "content": content, "size": len(content.encode("utf-8"))})
+        rel_path = ws.relative(resolved)
+        content = _file_ops(ws.root).read_file(rel_path)
+        return ok({"path": rel_path, "content": content, "size": len(content.encode("utf-8"))})
     except Exception as exc:
         return err(str(exc), "READ_FAILED")
 

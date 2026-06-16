@@ -29,17 +29,6 @@ LOW_RISK_PREFIXES = {
     "tail",
     "rg",
     "rg --files",
-    "pytest",
-    "python -m pytest",
-    "python3 -m pytest",
-    "npm test",
-    "npm run test",
-    "npm run lint",
-    "ruff check",
-    "mypy",
-    "cargo check",
-    "cargo test",
-    "cargo nextest run",
 }
 
 INSTALL_COMMANDS = {

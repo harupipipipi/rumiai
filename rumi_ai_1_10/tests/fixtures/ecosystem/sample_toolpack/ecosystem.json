@@ -7,5 +7,6 @@
   },
   "capability_bindings": {
     "register": "sample_toolpack.capability_bindings.register_sample_toolpack_binding_handlers"
-  }
+  },
+  "host_execution": true
 }

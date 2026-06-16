@@ -33,6 +33,8 @@ from core_runtime.capability_executor import (
     _HandlerDefAdapter,
 )
 
+_CE_MODULE = CapabilityExecutor.__module__
+
 
 # =====================================================================
 # Mock helpers (following existing test_capability_executor.py patterns)
@@ -161,7 +163,7 @@ class TestResolveEntryRegistryUnavailable(unittest.TestCase):
 class TestUnifiedExecuteBuiltinTrustBypass(unittest.TestCase):
     """test 4: core pack の entry で Trust チェックがバイパスされること"""
 
-    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
     def test_unified_execute_builtin_trust_bypass(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
@@ -183,7 +185,7 @@ class TestUnifiedExecuteBuiltinTrustBypass(unittest.TestCase):
         mock_proc.stdout = '{"result": "ok"}'
         mock_proc.stderr = ""
 
-        with patch("subprocess.run", return_value=mock_proc):
+        with patch(f"{_CE_MODULE}.subprocess.run", return_value=mock_proc):
             with patch("tempfile.NamedTemporaryFile") as mock_tmpfile:
                 mock_tmpfile.return_value.__enter__ = MagicMock(
                     return_value=MagicMock(name="/tmp/fake_runner.py")
@@ -203,9 +205,8 @@ class TestUnifiedExecuteBuiltinTrustBypass(unittest.TestCase):
 class TestUnifiedExecuteNonBuiltinTrustCheck(unittest.TestCase):
     """test 5: 非 core pack の entry で sha256 検証が実行されること"""
 
-    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
-    @patch("core_runtime.capability_executor.compute_file_sha256", return_value="sha256_abc")
-    def test_unified_execute_non_builtin_trust_check(self, mock_sha, mock_audit_module):
+    @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
+    def test_unified_execute_non_builtin_trust_check(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
         entry = _MockFunctionEntry(
@@ -219,24 +220,26 @@ class TestUnifiedExecuteNonBuiltinTrustCheck(unittest.TestCase):
         trust_store.is_trusted.return_value = _MockTrustResult(trusted=False, reason="not in allowlist")
 
         executor = _make_executor(trust_store=trust_store)
+        mock_sha = MagicMock(return_value="sha256_abc")
 
-        with patch("pathlib.Path.is_file", return_value=True):
-            resp = executor._unified_execute(
-                entry, "principal_a",
-                {"permission_id": "test.perm", "args": {}},
-                start_time=time.time(),
-            )
+        with patch.dict(CapabilityExecutor._unified_execute.__globals__, {"compute_file_sha256": mock_sha}):
+            with patch("pathlib.Path.is_file", return_value=True):
+                resp = executor._unified_execute(
+                    entry, "principal_a",
+                    {"permission_id": "test.perm", "args": {}},
+                    start_time=time.time(),
+                )
 
         self.assertFalse(resp.success)
         self.assertEqual(resp.error_type, "trust_denied")
         trust_store.is_trusted.assert_called_once_with("user_pack:test_func", "sha256_abc")
 
 
-class TestUnifiedExecuteGrantCheckOptIn(unittest.TestCase):
+class TestUnifiedExecuteGrantCheckWithConfig(unittest.TestCase):
     """test 6: grant_config がある entry で Grant チェックが実行されること"""
 
-    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
-    def test_unified_execute_grant_check_opt_in(self, mock_audit_module):
+    @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
+    def test_unified_execute_grant_check_with_config(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
         entry = _MockFunctionEntry(
@@ -262,11 +265,11 @@ class TestUnifiedExecuteGrantCheckOptIn(unittest.TestCase):
         grant_manager.check.assert_called_once_with("principal_a", "test.perm")
 
 
-class TestUnifiedExecuteGrantCheckSkip(unittest.TestCase):
-    """test 7: grant_config が None の entry で Grant チェックがスキップされること"""
+class TestUnifiedExecuteGrantCheckRequired(unittest.TestCase):
+    """test 7: grant_config が None の entry でも Grant チェックが必須であること"""
 
-    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
-    def test_unified_execute_grant_check_skip(self, mock_audit_module):
+    @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
+    def test_unified_execute_grant_check_required_without_manifest_grant_config(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
         entry = _MockFunctionEntry(
@@ -279,43 +282,40 @@ class TestUnifiedExecuteGrantCheckSkip(unittest.TestCase):
         )
 
         grant_manager = MagicMock()
+        grant_manager.check.return_value = _MockGrantResult(allowed=False, reason="No grant")
         executor = _make_executor(grant_manager=grant_manager)
 
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = '{"result": "ok"}'
-        mock_proc.stderr = ""
+        resp = executor._unified_execute(
+            entry, "principal_a",
+            {"permission_id": "test.perm", "args": {}},
+            start_time=time.time(),
+        )
 
-        with patch("subprocess.run", return_value=mock_proc):
-            with patch("tempfile.NamedTemporaryFile") as mock_tmpfile:
-                mock_tmpfile.return_value.__enter__ = MagicMock(
-                    return_value=MagicMock(name="/tmp/fake_runner.py")
-                )
-                mock_tmpfile.return_value.__exit__ = MagicMock(return_value=False)
-                resp = executor._unified_execute(
-                    entry, "principal_a",
-                    {"permission_id": "test.perm", "args": {}},
-                    start_time=time.time(),
-                )
-
-        # Grant manager should NOT be called (grant_config is None)
-        grant_manager.check.assert_not_called()
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, "grant_denied")
+        grant_manager.check.assert_called_once_with("principal_a", "test.perm")
 
 
 class TestUnifiedExecuteFlowRunDispatch(unittest.TestCase):
     """test 8: vocab_aliases に "flow.run" を含む entry で _execute_flow_run が呼ばれること"""
 
-    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
     def test_unified_execute_flow_run_dispatch(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
         entry = _MockFunctionEntry(
             pack_id="core_flow",
             qualified_name="core_flow:run",
+            grant_config={},
             vocab_aliases=["flow.run"],
         )
 
-        executor = _make_executor()
+        grant_manager = MagicMock()
+        grant_manager.check.return_value = _MockGrantResult(
+            allowed=True,
+            config={"allowed_flow_ids": ["my_flow"]},
+        )
+        executor = _make_executor(grant_manager=grant_manager)
         executor._kernel = MagicMock()
         executor._kernel.execute_flow_sync.return_value = {"status": "done"}
 
@@ -332,7 +332,7 @@ class TestUnifiedExecuteFlowRunDispatch(unittest.TestCase):
 class TestUnifiedExecuteSubprocessDispatch(unittest.TestCase):
     """test 9: 通常の entry で _execute_handler_subprocess が呼ばれること"""
 
-    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
     def test_unified_execute_subprocess_dispatch(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
@@ -344,14 +344,16 @@ class TestUnifiedExecuteSubprocessDispatch(unittest.TestCase):
             function_dir="/fake/dir",
         )
 
-        executor = _make_executor()
+        grant_manager = MagicMock()
+        grant_manager.check.return_value = _MockGrantResult(allowed=True)
+        executor = _make_executor(grant_manager=grant_manager)
 
         mock_proc = MagicMock()
         mock_proc.returncode = 0
         mock_proc.stdout = '{"result": "ok"}'
         mock_proc.stderr = ""
 
-        with patch("subprocess.run", return_value=mock_proc):
+        with patch(f"{_CE_MODULE}.subprocess.run", return_value=mock_proc):
             with patch("tempfile.NamedTemporaryFile") as mock_tmpfile:
                 mock_tmpfile.return_value.__enter__ = MagicMock(
                     return_value=MagicMock(name="/tmp/fake_runner.py")
@@ -375,8 +377,8 @@ class TestUnifiedExecuteSubprocessDispatch(unittest.TestCase):
 class TestLegacyExecuteWarningLog(unittest.TestCase):
     """test 10: _legacy_execute が警告ログを出力すること"""
 
-    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
-    @patch("core_runtime.capability_executor.logger")
+    @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
+    @patch(f"{_CE_MODULE}.logger")
     def test_legacy_execute_warning_log(self, mock_logger, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
@@ -401,7 +403,7 @@ class TestLegacyExecuteWarningLog(unittest.TestCase):
 class TestLegacyExecuteStrictModeRejects(unittest.TestCase):
     """test 11: RUMI_STRICT_LEGACY=1 でエラーが返ること"""
 
-    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
     @patch.dict(os.environ, {"RUMI_STRICT_LEGACY": "1"})
     def test_legacy_execute_strict_mode_rejects(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
@@ -422,7 +424,7 @@ class TestLegacyExecuteStrictModeRejects(unittest.TestCase):
 class TestLegacyExecuteNormalModePasses(unittest.TestCase):
     """test 12: RUMI_STRICT_LEGACY=0（デフォルト）で既存処理が実行されること"""
 
-    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
     @patch.dict(os.environ, {"RUMI_STRICT_LEGACY": "0"}, clear=False)
     def test_legacy_execute_normal_mode_passes(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
@@ -450,7 +452,7 @@ class TestLegacyExecuteNormalModePasses(unittest.TestCase):
 class TestExecuteFunctionCallUnchanged(unittest.TestCase):
     """test 13: function.call リクエストが既存パスを通ること"""
 
-    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
     def test_execute_function_call_unchanged(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
@@ -473,7 +475,7 @@ class TestExecuteFunctionCallUnchanged(unittest.TestCase):
 class TestExecuteResolvedEntryUsesUnified(unittest.TestCase):
     """test 14: permission_id が FunctionRegistry で解決される場合に _unified_execute が使われること"""
 
-    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
     def test_execute_resolved_entry_uses_unified(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
@@ -505,7 +507,7 @@ class TestExecuteResolvedEntryUsesUnified(unittest.TestCase):
 class TestExecuteUnresolvedFallsBackToLegacy(unittest.TestCase):
     """test 15: permission_id が解決できない場合に handler_not_found が返ること"""
 
-    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
     def test_execute_unresolved_falls_back_to_legacy(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 

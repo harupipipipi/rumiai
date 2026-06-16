@@ -1,0 +1,101 @@
+{
+  "id": "linear_issue_sync",
+  "description": "Plan or execute a Linear issue sync update with local CLI approval.",
+  "config": {
+    "tool_id": "linear_issue_sync",
+    "name": "Linear Issue Sync",
+    "summary": "Plan or execute a Linear issue sync update with local CLI approval.",
+    "tool_category": "connector",
+    "action_type": "network",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": [
+      "connector",
+      "agent_os",
+      "artifact_workspace",
+      "issue_sync"
+    ],
+    "ui": {
+      "group_id": "connectors",
+      "group_label": "Connectors",
+      "group_icon": "plug",
+      "item_icon": "plug",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Linear Issue Sync",
+      "composer_description": "Sync issue fields or comments into Linear.",
+      "composer_icon": "plug"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "issue": {
+            "type": "string"
+          },
+          "issue_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "assignee": {
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "execute": {
+            "type": "boolean"
+          },
+          "timeout": {
+            "type": "integer"
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "issue"
+            ]
+          },
+          {
+            "required": [
+              "issue_id"
+            ]
+          },
+          {
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "required": [
+              "key"
+            ]
+          }
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.external_connector_tools:linear_issue_sync"
+    }
+  }
+}

@@ -2,9 +2,6 @@
 test_kernel_resolver.py - VariableResolver のユニットテスト
 """
 
-import os
-import pytest
-
 from core_runtime.kernel_variable_resolver import VariableResolver, MAX_RESOLVE_DEPTH
 
 
@@ -83,22 +80,28 @@ class TestFlowResolution:
 
 
 class TestEnvResolution:
-    """$env.* 解決のテスト"""
+    """$env.* is intentionally unsupported to avoid host secret disclosure."""
 
     def setup_method(self):
         self.resolver = VariableResolver()
 
-    def test_env_existing(self, monkeypatch):
+    def test_env_existing_returns_original(self, monkeypatch):
         monkeypatch.setenv("RUMI_TEST_VAR", "test_value")
         ctx = {}
-        assert self.resolver.resolve_value("$env.RUMI_TEST_VAR", ctx) == "test_value"
+        assert self.resolver.resolve_value("$env.RUMI_TEST_VAR", ctx) == "$env.RUMI_TEST_VAR"
 
-    def test_env_missing_returns_original(self):
+    def test_env_partial_reference_returns_original(self, monkeypatch):
+        monkeypatch.setenv("RUMI_TEST_VAR", "test_value")
         ctx = {}
-        key = "RUMI_NONEXISTENT_VAR_12345"
-        if key in os.environ:
-            del os.environ[key]
-        assert self.resolver.resolve_value(f"$env.{key}", ctx) == f"$env.{key}"
+        assert (
+            self.resolver.resolve_value("value=$env.RUMI_TEST_VAR", ctx)
+            == "value=$env.RUMI_TEST_VAR"
+        )
+
+    def test_recursive_ctx_to_env_returns_unexpanded_env_reference(self, monkeypatch):
+        monkeypatch.setenv("RUMI_TEST_VAR", "test_value")
+        ctx = {"user_input": "$env.RUMI_TEST_VAR"}
+        assert self.resolver.resolve_value("$ctx.user_input", ctx) == "$env.RUMI_TEST_VAR"
 
 
 class TestDictResolution:

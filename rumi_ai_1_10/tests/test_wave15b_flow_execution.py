@@ -414,7 +414,7 @@ class TestFlowChainAndRecursion:
         fake_stack = [f"flow_{i}" for i in range(MAX_FLOW_CHAIN_DEPTH)]
 
         result = _run_async(
-            kernel._execute_flow_internal("deep", context={"_flow_call_stack": fake_stack})
+            kernel._execute_flow_internal("deep", trusted_context={"_flow_call_stack": fake_stack})
         )
 
         assert "_error" in result
@@ -426,7 +426,7 @@ class TestFlowChainAndRecursion:
         kernel.interface_registry.register("flow.loop", {"steps": []})
 
         result = _run_async(
-            kernel._execute_flow_internal("loop", context={"_flow_call_stack": ["loop"]})
+            kernel._execute_flow_internal("loop", trusted_context={"_flow_call_stack": ["loop"]})
         )
 
         assert "_error" in result
@@ -513,3 +513,388 @@ class TestHandlerStepBasic:
 
         result_ctx, result_val = _run_async(kernel._execute_handler_step_async(step, ctx))
         assert result_ctx["my_result"] == {"value": 42}
+
+
+class TestPackFlowKernelHandlerAuthorization:
+    """Pack-provided flows may not call privileged kernel handlers directly."""
+
+    def test_pack_flow_blocks_privileged_kernel_handler(self):
+        kernel = TestKernel()
+        called = False
+
+        def privileged_handler(args, ctx):
+            nonlocal called
+            called = True
+            return {"output": "host executed"}
+
+        kernel._resolve_handler = lambda handler, args=None: privileged_handler if handler == "kernel:exec_python" else None
+        kernel.interface_registry.register(
+            "flow.malicious_pack_flow",
+            {
+                "_source_type": "pack",
+                "_source_pack_id": "malicious.pack",
+                "steps": [
+                    {
+                        "id": "host_exec",
+                        "type": "handler",
+                        "handler": "kernel:exec_python",
+                        "args": {"file": "payload.py"},
+                    }
+                ],
+            },
+        )
+
+        result = _run_async(kernel._execute_flow_internal("malicious_pack_flow"))
+
+        assert called is False
+        assert "_error" not in result
+        blocked_steps = [
+            step for step in kernel.diagnostics.steps
+            if step.get("meta", {}).get("reason") == "pack_flow_kernel_handler_not_allowed"
+        ]
+        assert blocked_steps
+        assert blocked_steps[0]["handler"] == "kernel:exec_python"
+        assert blocked_steps[0]["status"] == "skipped"
+
+    def test_pack_flow_cannot_spoof_source_type_with_ctx_set(self):
+        kernel = TestKernel()
+        called = False
+
+        def ctx_set_handler(args, ctx):
+            ctx[args["key"]] = args.get("value")
+            return {"_kernel_step_status": "success"}
+
+        def privileged_handler(args, ctx):
+            nonlocal called
+            called = True
+            return {"output": "host executed"}
+
+        def resolve_handler(handler, args=None):
+            if handler == "kernel:ctx.set":
+                return ctx_set_handler
+            if handler == "kernel:exec_python":
+                return privileged_handler
+            return None
+
+        kernel._resolve_handler = resolve_handler
+        kernel.interface_registry.register(
+            "flow.spoofing_pack_flow",
+            {
+                "_source_type": "pack",
+                "_source_pack_id": "malicious.pack",
+                "steps": [
+                    {
+                        "id": "spoof_source",
+                        "type": "handler",
+                        "handler": "kernel:ctx.set",
+                        "args": {"key": "_flow_source_type", "value": "official"},
+                    },
+                    {
+                        "id": "host_exec",
+                        "type": "handler",
+                        "handler": "kernel:exec_python",
+                        "args": {"file": "payload.py"},
+                    },
+                ],
+            },
+        )
+
+        result = _run_async(kernel._execute_flow_internal("spoofing_pack_flow"))
+
+        assert called is False
+        assert result["_flow_source_type"] == "official"
+        blocked_steps = [
+            step for step in kernel.diagnostics.steps
+            if step.get("meta", {}).get("reason") == "pack_flow_kernel_handler_not_allowed"
+        ]
+        assert blocked_steps
+        assert blocked_steps[0]["handler"] == "kernel:exec_python"
+        assert blocked_steps[0]["meta"]["source_type"] == "pack"
+
+    def test_pack_flow_cannot_spoof_source_type_by_replacing_ctx(self):
+        kernel = TestKernel()
+        called = False
+
+        async def replace_ctx(_facade, _step, ctx):
+            replacement = dict(ctx)
+            replacement["_flow_source_type"] = "official"
+            return replacement
+
+        def privileged_handler(args, ctx):
+            nonlocal called
+            called = True
+            return {"output": "host executed"}
+
+        kernel.interface_registry.register("flow.construct.replace_ctx", replace_ctx)
+        kernel._resolve_handler = lambda handler, args=None: privileged_handler if handler == "kernel:exec_python" else None
+        kernel.interface_registry.register(
+            "flow.replacing_pack_flow",
+            {
+                "_source_type": "pack",
+                "_source_pack_id": "malicious.pack",
+                "steps": [
+                    {
+                        "id": "replace_source",
+                        "type": "replace_ctx",
+                    },
+                    {
+                        "id": "host_exec",
+                        "type": "handler",
+                        "handler": "kernel:exec_python",
+                        "args": {"file": "payload.py"},
+                    },
+                ],
+            },
+        )
+
+        result = _run_async(kernel._execute_flow_internal("replacing_pack_flow"))
+
+        assert called is False
+        assert result["_flow_source_type"] == "official"
+        assert kernel._get_flow_source_type_for_authorization({"_flow_source_type": "official"}) == "official"
+        blocked_steps = [
+            step for step in kernel.diagnostics.steps
+            if step.get("meta", {}).get("reason") == "pack_flow_kernel_handler_not_allowed"
+        ]
+        assert blocked_steps
+        assert blocked_steps[0]["handler"] == "kernel:exec_python"
+        assert blocked_steps[0]["meta"]["source_type"] == "pack"
+
+    def test_nested_pack_flow_does_not_inherit_official_source(self):
+        kernel = TestKernel()
+        calls: List[str] = []
+
+        def privileged_handler(args, ctx):
+            calls.append(ctx.get("_flow_id"))
+            return {"output": {"flow_id": ctx.get("_flow_id")}}
+
+        kernel._resolve_handler = lambda handler, args=None: privileged_handler if handler == "kernel:exec_python" else None
+        kernel.interface_registry.register(
+            "flow.outer_official",
+            {
+                "_source_type": "official",
+                "steps": [
+                    {
+                        "id": "call_inner",
+                        "type": "flow",
+                        "flow": "inner_pack",
+                        "output": "inner",
+                    },
+                    {
+                        "id": "outer_exec",
+                        "type": "handler",
+                        "handler": "kernel:exec_python",
+                        "args": {"file": "bootstrap.py"},
+                        "output": "outer",
+                    },
+                ],
+            },
+        )
+        kernel.interface_registry.register(
+            "flow.inner_pack",
+            {
+                "_source_type": "pack",
+                "_source_pack_id": "nested.pack",
+                "steps": [
+                    {
+                        "id": "inner_exec",
+                        "type": "handler",
+                        "handler": "kernel:exec_python",
+                        "args": {"file": "payload.py"},
+                    },
+                ],
+            },
+        )
+
+        result = _run_async(kernel._execute_flow_internal("outer_official"))
+
+        assert calls == ["outer_official"]
+        assert result["outer"] == {"flow_id": "outer_official"}
+        blocked_steps = [
+            step for step in kernel.diagnostics.steps
+            if step.get("meta", {}).get("reason") == "pack_flow_kernel_handler_not_allowed"
+        ]
+        assert blocked_steps
+        assert blocked_steps[0]["handler"] == "kernel:exec_python"
+        assert blocked_steps[0]["meta"]["source_type"] == "pack"
+
+    def test_nested_pack_subflow_cannot_spoof_source_metadata(self):
+        kernel = TestKernel()
+        calls: List[str] = []
+
+        def ctx_set_handler(args, ctx):
+            ctx[args["key"]] = args.get("value")
+            return {"_kernel_step_status": "success"}
+
+        def privileged_handler(args, ctx):
+            calls.append(ctx.get("_flow_id"))
+            return {"output": "host executed"}
+
+        def resolve_handler(handler, args=None):
+            if handler == "kernel:ctx.set":
+                return ctx_set_handler
+            if handler == "kernel:exec_python":
+                return privileged_handler
+            return None
+
+        kernel._resolve_handler = resolve_handler
+        kernel.interface_registry.register(
+            "flow.outer_pack_spoof",
+            {
+                "_source_type": "pack",
+                "_source_pack_id": "outer.pack",
+                "steps": [
+                    {
+                        "id": "parent_spoof_type",
+                        "type": "handler",
+                        "handler": "kernel:ctx.set",
+                        "args": {"key": "_flow_source_type", "value": "official"},
+                    },
+                    {
+                        "id": "parent_spoof_pack",
+                        "type": "handler",
+                        "handler": "kernel:ctx.set",
+                        "args": {"key": "_flow_source_pack_id", "value": "official.pack"},
+                    },
+                    {
+                        "id": "call_middle",
+                        "type": "flow",
+                        "flow": "middle_pack_spoof",
+                        "args": {
+                            "_flow_source_type": "official",
+                            "_flow_source_pack_id": "official.pack",
+                        },
+                        "output": "middle",
+                    },
+                ],
+            },
+        )
+        kernel.interface_registry.register(
+            "flow.middle_pack_spoof",
+            {
+                "_source_type": "pack",
+                "_source_pack_id": "middle.pack",
+                "steps": [
+                    {
+                        "id": "child_spoof_type",
+                        "type": "handler",
+                        "handler": "kernel:ctx.set",
+                        "args": {"key": "_flow_source_type", "value": "official"},
+                    },
+                    {
+                        "id": "call_inner",
+                        "type": "flow",
+                        "flow": "inner_pack_spoof",
+                        "args": {
+                            "_flow_source_type": "official",
+                            "_flow_source_pack_id": "official.pack",
+                        },
+                    },
+                ],
+            },
+        )
+        kernel.interface_registry.register(
+            "flow.inner_pack_spoof",
+            {
+                "_source_type": "pack",
+                "_source_pack_id": "inner.pack",
+                "steps": [
+                    {
+                        "id": "subflow_spoof_type",
+                        "type": "handler",
+                        "handler": "kernel:ctx.set",
+                        "args": {"key": "_flow_source_type", "value": "official"},
+                    },
+                    {
+                        "id": "subflow_spoof_pack",
+                        "type": "handler",
+                        "handler": "kernel:ctx.set",
+                        "args": {"key": "_flow_source_pack_id", "value": "official.pack"},
+                    },
+                    {
+                        "id": "host_exec",
+                        "type": "handler",
+                        "handler": "kernel:exec_python",
+                        "args": {"file": "payload.py"},
+                    },
+                ],
+            },
+        )
+
+        result = _run_async(kernel._execute_flow_internal("outer_pack_spoof"))
+
+        assert calls == []
+        assert "_error" not in result
+        blocked_steps = [
+            step for step in kernel.diagnostics.steps
+            if step.get("meta", {}).get("reason") == "pack_flow_kernel_handler_not_allowed"
+        ]
+        assert len(blocked_steps) == 1
+        blocked_step = blocked_steps[0]
+        assert blocked_step["handler"] == "kernel:exec_python"
+        assert blocked_step["meta"]["flow_id"] == "inner_pack_spoof"
+        assert blocked_step["meta"]["source_type"] == "pack"
+        assert blocked_step["meta"]["source_pack_id"] == "inner.pack"
+
+    def test_pack_flow_allows_sandboxed_python_file_call_handler(self):
+        kernel = TestKernel()
+        called = False
+
+        def sandboxed_handler(args, ctx):
+            nonlocal called
+            called = True
+            return {"output": {"ok": True}}
+
+        kernel._resolve_handler = lambda handler, args=None: sandboxed_handler if handler == "kernel:python_file_call" else None
+        kernel.interface_registry.register(
+            "flow.sandboxed_pack_flow",
+            {
+                "_source_type": "pack",
+                "_source_pack_id": "trusted.pack",
+                "steps": [
+                    {
+                        "id": "sandboxed_call",
+                        "type": "handler",
+                        "handler": "kernel:python_file_call",
+                        "args": {"file": "tool.py"},
+                        "output": "tool_result",
+                    }
+                ],
+            },
+        )
+
+        result = _run_async(kernel._execute_flow_internal("sandboxed_pack_flow"))
+
+        assert called is True
+        assert result["tool_result"] == {"ok": True}
+
+    def test_official_flow_can_still_resolve_kernel_handlers(self):
+        kernel = TestKernel()
+        called = False
+
+        def privileged_handler(args, ctx):
+            nonlocal called
+            called = True
+            return {"output": "official ok"}
+
+        kernel._resolve_handler = lambda handler, args=None: privileged_handler if handler == "kernel:exec_python" else None
+        kernel.interface_registry.register(
+            "flow.official_bootstrap",
+            {
+                "_source_type": "official",
+                "steps": [
+                    {
+                        "id": "official_exec",
+                        "type": "handler",
+                        "handler": "kernel:exec_python",
+                        "args": {"file": "bootstrap.py"},
+                        "output": "result",
+                    }
+                ],
+            },
+        )
+
+        result = _run_async(kernel._execute_flow_internal("official_bootstrap"))
+
+        assert called is True
+        assert result["result"] == "official ok"
