@@ -28,6 +28,19 @@ def run(context):
         return handler
 
     routes = [
+        # --- prompt workspace routes ---
+        ("GET", "/api/prompts", _lazy("blocks.prompt.editor"), {}),
+        ("GET", "/api/prompts/active", _lazy("blocks.prompt.active"), {}),
+        ("GET", "/api/prompts/traces", _lazy("blocks.prompt.trace"), {}),
+        ("GET", "/api/prompts/traces/{trace_id}", _lazy("blocks.prompt.trace"), {"trace_id": "trace_id"}),
+        ("POST", "/api/prompts/toggle", _lazy("blocks.prompt.toggle"), {}),
+        ("POST", "/api/prompts/preview-toggle", _lazy("blocks.prompt.toggle"), {"_preview": "_preview"}),
+        ("GET", "/api/prompts/editor", _lazy("blocks.prompt.editor"), {}),
+        ("POST", "/api/prompts/editor/save", _lazy("blocks.prompt.editor"), {}),
+        ("POST", "/api/prompts/override", _lazy("blocks.prompt.editor"), {}),
+        ("POST", "/api/prompts/diff", _lazy("blocks.prompt.diff"), {}),
+        ("POST", "/api/prompts/test", _lazy("blocks.prompt.test"), {}),
+        ("POST", "/api/prompts/{name}/rollback", _lazy("blocks.prompt.rollback"), {"name": "name"}),
         # --- existing routes ---
         ("PUT", "/api/prompts/{name}", _lazy("blocks.prompt.update"), {"name": "name"}),
         ("DELETE", "/api/prompts/{name}", _lazy("blocks.prompt.delete"), {"name": "name"}),

@@ -6,6 +6,7 @@ import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
+import { PromptCommandCenter } from "./components/prompts/PromptCommandCenter";
 import { WarmActionIcon } from "./components/WarmActionIcon";
 import {
   DEFAULT_WORKSPACE_TAB_ID,
@@ -17,6 +18,7 @@ import {
   type WorkspaceTab,
   type WorkspaceTabKind,
 } from "./components/WorkspaceTabs";
+import { PromptStudio } from "./pages/PromptStudio";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
@@ -40,6 +42,7 @@ import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upser
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
+import { promptResources } from "./features/prompts/resources/promptResources";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
@@ -50,7 +53,6 @@ type ComposerCandidateMenuState = {
   candidates: ModelCommandCandidate[];
 } | null;
 
-type WorkspacePanelMode = "composer" | "calendar";
 type BackendConnectionState = "online" | "degraded" | "offline";
 
 type PendingNewTaskContext = {
@@ -1355,6 +1357,9 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
   const pendingAuthorityApproval = chatMessageMetadataRecord(metadata.pendingAuthorityApproval ?? metadata.pending_authority_approval);
   const authorityFollowup = chatMessageMetadataRecord(metadata.authority_followup ?? metadata.authorityFollowup);
   const chatDisplay = chatMessageMetadataRecord(metadata.chat_display ?? metadata.chatDisplay);
+  const promptUsage = metadata.prompt_usage && typeof metadata.prompt_usage === "object" && !Array.isArray(metadata.prompt_usage)
+    ? metadata.prompt_usage as NonNullable<ChatUiMessage["metadata"]>["promptUsage"]
+    : undefined;
   const attachedToolCount = Number(metadata.attached_tool_count ?? 0);
   const thinkingDuration = String(timing?.thinking_duration_label ?? "")
     || boundedDurationLabel(timing?.thinking_started_at, timing?.completed_at);
@@ -1387,6 +1392,7 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
             : undefined,
           pendingAuthorityApproval,
           ...displayMetadata,
+          promptUsage,
         },
   };
 }
@@ -2311,6 +2317,10 @@ function ChatApp() {
       };
     }));
   }, [activeChatTitle, activeConversationId, activeWorkspaceTabId]);
+  const activePromptUsage = latestActiveMetadata.prompt_usage && typeof latestActiveMetadata.prompt_usage === "object" && !Array.isArray(latestActiveMetadata.prompt_usage)
+    ? latestActiveMetadata.prompt_usage as { profile_id?: unknown }
+    : null;
+  const activePromptProfileId = String(activeConversation?.metadata?.profile_id ?? activePromptUsage?.profile_id ?? "").trim() || undefined;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const locale = normalizeLocale(settingsValues.general?.language);
   const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
@@ -5017,6 +5027,16 @@ function ChatApp() {
   const handleHistoryGroupKanbanOpen = (group: ChatGroup) => {
     openKanbanScope({ type: "group", id: group.id }, group.title);
   };
+
+  const openPromptStudio = (promptId?: string) => {
+    const url = new URL(window.location.href);
+    url.pathname = "/prompts";
+    url.search = "";
+    if (activePromptProfileId) url.searchParams.set("profile_id", activePromptProfileId);
+    if (activeConversationId) url.searchParams.set("conversation_id", activeConversationId);
+    if (promptId) url.searchParams.set("prompt_id", promptId);
+    window.location.href = `${url.pathname}${url.search}${url.hash}`;
+  };
   const renderComposer = (isCentered = false) => (
     <Renderers.composer
       input={input}
@@ -5302,6 +5322,7 @@ function ChatApp() {
                   setActivePreviewId(previewId);
                   setShowPreview(true);
                 }}
+                onLoadPromptTrace={promptResources.getTraceUsage}
               />
             )}
 
@@ -5417,6 +5438,13 @@ function ChatApp() {
                     </div>
                   </div>
                 )}
+                <PromptCommandCenter
+                  profileId={activePromptProfileId}
+                  conversationId={activeConversationId}
+                  loadPromptActive={promptResources.getActiveSummary}
+                  togglePromptEdge={promptResources.toggleEdge}
+                  onOpenStudio={openPromptStudio}
+                />
                 {renderComposer(false)}
               </div>
             )}
@@ -5527,6 +5555,9 @@ function ChatApp() {
 export default function App() {
   if (window.location.pathname === "/approval") {
     return <AuthorityApprovalWindow />;
+  }
+  if (window.location.pathname === "/prompts") {
+    return <PromptStudio />;
   }
   return <ChatApp />;
 }

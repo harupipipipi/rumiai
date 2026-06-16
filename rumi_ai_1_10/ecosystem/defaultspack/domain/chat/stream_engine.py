@@ -2069,6 +2069,9 @@ class ChatRunEngine:
             metadata["tool_calling_unavailable_reason"] = "selected_model_does_not_support_tool_calling"
         if prepared.matched_skills:
             metadata["matched_skill_instructions"] = list(prepared.matched_skills)
+        prompt_usage = prepared.request_context.get("prompt_usage") if isinstance(prepared.request_context, dict) else None
+        if isinstance(prompt_usage, dict):
+            metadata["prompt_usage"] = prompt_usage
         finalized["metadata"] = metadata
         finalized["events"] = list(self._activity_events)
         finalized["tool_logs"] = list(self._tool_logs)

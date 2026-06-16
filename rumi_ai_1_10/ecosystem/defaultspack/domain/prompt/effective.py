@@ -229,7 +229,15 @@ def resolve_effective_prompt(input_data: dict[str, Any] | None) -> dict[str, Any
                     prompt_id=prompt_id,
                 )
             )
-            return _effective_payload(data, prompt_id, "pack_default", source, content, source_chain)
+            return _effective_payload(
+                data,
+                prompt_id,
+                "pack_default",
+                source,
+                content,
+                source_chain,
+                metadata=_prompt_manifest_metadata(resolver.get_manifest(prompt_id)),
+            )
 
     source_chain.append(
         _chain_entry(
@@ -249,6 +257,8 @@ def _effective_payload(
     source: str,
     content: str,
     source_chain: list[dict[str, Any]],
+    *,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "profile_id": data.get("profile_id"),
@@ -259,7 +269,24 @@ def _effective_payload(
         "source_chain": list(source_chain),
         "content": content,
         "final_content": content,
+        "metadata": dict(metadata or {}),
     }
+
+
+def _prompt_manifest_metadata(manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(manifest, dict):
+        return {}
+    config = manifest.get("config") if isinstance(manifest.get("config"), dict) else {}
+    metadata = manifest.get("metadata") if isinstance(manifest.get("metadata"), dict) else {}
+    output = dict(metadata)
+    for key in ("allow_disable", "safety_boundary", "owner", "source_path"):
+        if key in manifest:
+            output[key] = manifest.get(key)
+        if key in config:
+            output[key] = config.get(key)
+    if "allow_disable" not in output and manifest.get("read_only") is True:
+        output["allow_disable"] = False
+    return output
 
 
 def resolve_prompt_for_conversation(

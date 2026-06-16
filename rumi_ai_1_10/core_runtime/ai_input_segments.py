@@ -82,6 +82,9 @@ def collect_tool_schema_segments(profile: dict[str, Any], available_tools: list[
         if not schema:
             schema = tool.get("schema") if isinstance(tool.get("schema"), dict) else {}
         enabled = not allowlist or tool_id in allowlist or name in allowlist
+        metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+        skill_ids = _string_list(tool.get("skills") or metadata.get("skills"))
+        skill_triggers = _string_list(metadata.get("skill_triggers"))
         segments.append(
             ToolSchemaSegment(
                 id=f"tool_schema:{tool_id or name}",
@@ -95,6 +98,13 @@ def collect_tool_schema_segments(profile: dict[str, Any], available_tools: list[
                     "allow_disable": True,
                     "source": _tool_source(tool),
                     "provider_name": tool_name_from_definition(tool),
+                    "tool_id": tool_id or name,
+                    "tool_name": name or tool_id,
+                    "display_name": str(tool.get("display_name") or metadata.get("display_name") or name or tool_id),
+                    "description": str(tool.get("description") or metadata.get("description") or ""),
+                    "source_pack_id": str(tool.get("source_pack_id") or metadata.get("source_pack_id") or ""),
+                    "skills": skill_ids,
+                    "skill_triggers": skill_triggers,
                 },
             )
         )
@@ -256,6 +266,7 @@ def _resolve_prompt_text(
         str(effective.get("source") or f"profile.prompt:{prompt_id}"),
         str(effective.get("source_type") or "profile_prompt"),
         {
+            **(effective.get("metadata") if isinstance(effective.get("metadata"), dict) else {}),
             "resolved_prompt_id": effective.get("prompt_id"),
             "source_chain": effective.get("source_chain") if isinstance(effective.get("source_chain"), list) else [],
         },
@@ -273,6 +284,19 @@ def _string_set(value: Any) -> set[str]:
     if not isinstance(value, list):
         return set()
     return {str(item).strip() for item in value if str(item).strip()}
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        value = [part.strip() for part in value.replace("\n", ",").split(",")]
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
 
 
 def _result_count(value: Any) -> int:

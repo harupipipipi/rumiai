@@ -1,6 +1,6 @@
 import type { FormEvent, MutableRefObject, ReactNode } from "react";
 
-import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ConversationSteerItem, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ConversationSteerItem, ModelCommandCandidate, ModelProfile, PromptUsageSummary, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import type { ComposerCommandItem } from "../lib/api";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "../components/HistoryBoard";
@@ -35,6 +35,7 @@ export type ChatUiMessage = {
       reason?: string;
       [key: string]: unknown;
     };
+    promptUsage?: PromptUsageSummary;
   };
   events?: ChatActivityEvent[];
   toolLogs?: ToolLogEntry[];
@@ -139,6 +140,7 @@ export type ChatMessagesRendererProps = {
   showWidgets: boolean;
   onSuggestionClick: (text: string) => void;
   onOpenToolPreview?: (previewId: string) => void;
+  onLoadPromptTrace?: (traceId: string, profileId?: string) => Promise<PromptUsageSummary>;
 };
 
 export type ComposerRendererProps = {

@@ -47,3 +47,7 @@ If a tool is needed, author a `rumi_function` or `capability` tool facade.
 Prompt files are data. Python prompt hooks that read files, call providers, or
 touch host capabilities do not belong in prompt authoring; that logic must live
 behind trusted functions and explicit capability grants.
+
+Prompt visibility, active graph toggles, editor overrides, diffs, versions, and
+chat response trace inspection are documented in
+[prompt-workspace.md](prompt-workspace.md).

@@ -29,6 +29,156 @@ export type ChatMessage = {
   model?: string | null;
 };
 
+export type PromptUsageSegment = {
+  id: string;
+  edge_id?: string;
+  prompt_id?: string;
+  label?: string;
+  kind?: string;
+  port?: string;
+  status?: "active" | "disabled" | "gated" | "budget-dropped" | string;
+  enabled?: boolean;
+  source?: string;
+  source_type?: string;
+  source_chain?: Record<string, unknown>[];
+  tokens?: number;
+  reason?: string;
+  allow_disable?: boolean;
+  editable?: boolean;
+  readonly_reason?: string;
+  preview?: string;
+  text?: string;
+  explanation?: string;
+  input_role?: string;
+  source_priority?: string;
+  activation_detail?: Record<string, unknown>;
+  safety_boundary?: Record<string, unknown>;
+  tool_signal?: Record<string, unknown>;
+  skill_signal?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type PromptUsageSummary = {
+  trace_id?: string;
+  profile_id?: string;
+  conversation_id?: string;
+  run_id?: string;
+  active_count?: number;
+  disabled_count?: number;
+  token_estimate?: {
+    total?: number;
+    by_port?: Record<string, number>;
+    by_node?: Record<string, number>;
+  };
+  segments?: PromptUsageSegment[];
+  active_segments?: PromptUsageSegment[];
+  disabled_segments?: PromptUsageSegment[];
+  source_counts?: Record<string, number>;
+};
+
+export type PromptStudioPrompt = {
+  id: string;
+  name: string;
+  prompt_id?: string;
+  description?: string;
+  body?: string;
+  content?: string;
+  variables?: Record<string, unknown>[];
+  metadata?: Record<string, unknown>;
+  source_type?: string;
+  source?: string;
+  effective_source?: string;
+  effective_source_type?: string;
+  read_only?: boolean;
+  editable?: boolean;
+  tokens?: number;
+  preview?: string;
+  activation_state?: string;
+  active_edge_id?: string;
+  active_reason?: string;
+  allow_disable?: boolean;
+  override_allowed?: boolean;
+  source_chain?: Record<string, unknown>[];
+  validation?: Record<string, unknown>;
+  lint?: Record<string, unknown>;
+  versions?: PromptVersionRecord[];
+  safety?: Record<string, unknown>;
+  input_role?: string;
+  source_priority?: string;
+  activation_detail?: Record<string, unknown>;
+  tool_signal?: Record<string, unknown>;
+  skill_signal?: Record<string, unknown>;
+};
+
+export type PromptVersionRecord = {
+  version_id: string;
+  profile_id?: string;
+  prompt_id?: string;
+  scope?: string;
+  created_at?: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type PromptStudioData = {
+  profile_id: string;
+  profile_workspace?: Record<string, string>;
+  prompts: PromptStudioPrompt[];
+  selected_prompt?: PromptStudioPrompt | null;
+  active_summary?: PromptUsageSummary;
+};
+
+export type PromptStudioTestResult = {
+  profile_id: string;
+  prompt_id?: string;
+  conversation_id?: string;
+  input?: {
+    user_text?: string;
+    selected_tools?: string[];
+  };
+  summary?: PromptUsageSummary;
+  segments?: PromptUsageSegment[];
+  matched_skills?: Record<string, unknown>[];
+  skill_instructions?: string;
+  selected_tool_records?: Record<string, unknown>[];
+  selected_tool_segments?: PromptUsageSegment[];
+  candidate_tool_segments?: PromptUsageSegment[];
+  tool_candidates?: {
+    combined?: Record<string, unknown>[];
+    from_prompt?: Record<string, unknown>[];
+    from_input?: Record<string, unknown>[];
+  };
+  prompt_tool_analysis?: Record<string, unknown>;
+  safety_boundary?: Record<string, unknown>;
+  verdicts?: Record<string, string>[];
+};
+
+export type PromptTraceSummary = {
+  trace_id?: string;
+  created_at?: number;
+  conversation_id?: string;
+  run_id?: string;
+  profile_id?: string;
+  token_estimate?: PromptUsageSummary["token_estimate"];
+  provider_payload_summary?: Record<string, unknown>;
+  blocked_count?: number;
+};
+
+export type PromptTraceDetail = {
+  profile_id: string;
+  trace: Record<string, unknown>;
+  prompt_usage: PromptUsageSummary;
+};
+
+export type PromptToggleResponse = {
+  profile_id: string;
+  edge_id: string;
+  enabled: boolean;
+  preview?: boolean;
+  ai_input?: Record<string, unknown>;
+  summary: PromptUsageSummary;
+};
+
 export type ChatAttachment = {
   name: string;
   content?: string;
@@ -1801,6 +1951,113 @@ export const api = {
   deleteConversation(id: string) {
     return request<{ deleted: boolean }>(`/api/chat/conversations/${id}`, {
       method: "DELETE",
+    });
+  },
+
+  getPromptActive(params?: { profile_id?: string; conversation_id?: string; include_text?: boolean }) {
+    return request<{
+      profile_id: string;
+      conversation_id?: string;
+      summary: PromptUsageSummary;
+      segments: PromptUsageSegment[];
+      active_segments: PromptUsageSegment[];
+      disabled_segments: PromptUsageSegment[];
+      token_estimate?: PromptUsageSummary["token_estimate"];
+    }>(withQuery("/api/prompts/active", params));
+  },
+
+  listPromptTraces(params?: { profile_id?: string; conversation_id?: string; limit?: number }) {
+    return request<{ profile_id: string; traces: PromptTraceSummary[]; count: number }>(
+      withQuery("/api/prompts/traces", params),
+    );
+  },
+
+  getPromptTrace(traceId: string, params?: { profile_id?: string; include_text?: boolean }) {
+    return request<PromptTraceDetail>(
+      withQuery(`/api/prompts/traces/${encodeURIComponent(traceId)}`, params),
+    );
+  },
+
+  getPromptStudio(params?: { profile_id?: string; prompt_id?: string; conversation_id?: string }) {
+    return request<PromptStudioData>(withQuery("/api/prompts/editor", params));
+  },
+
+  testPromptStudio(payload: {
+    profile_id?: string;
+    prompt_id?: string;
+    conversation_id?: string;
+    draft?: string;
+    user_text?: string;
+    selected_tools?: string[];
+  }) {
+    return request<PromptStudioTestResult>("/api/prompts/test", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  savePrompt(payload: {
+    profile_id?: string;
+    prompt_id: string;
+    body: string;
+    description?: string;
+    variables?: Record<string, unknown>[];
+    metadata?: Record<string, unknown>;
+    create_override?: boolean;
+    reason?: string;
+  }) {
+    return request<Record<string, unknown>>("/api/prompts/editor/save", {
+      method: "POST",
+      body: JSON.stringify({ action: "save", ...payload }),
+    });
+  },
+
+  createPromptOverride(payload: { profile_id?: string; prompt_id: string; body?: string; reason?: string }) {
+    return request<Record<string, unknown>>("/api/prompts/override", {
+      method: "POST",
+      body: JSON.stringify({ action: "override", ...payload }),
+    });
+  },
+
+  togglePromptEdge(payload: { profile_id?: string; edge_id: string; enabled: boolean; conversation_id?: string }) {
+    return request<PromptToggleResponse>("/api/prompts/toggle", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  previewPromptToggle(payload: { profile_id?: string; edge_id: string; enabled: boolean; conversation_id?: string }) {
+    return request<PromptToggleResponse>("/api/prompts/preview-toggle", {
+      method: "POST",
+      body: JSON.stringify({ preview: true, ...payload }),
+    });
+  },
+
+  diffPrompt(payload: { profile_id?: string; prompt_id: string; base?: string; draft?: string }) {
+    return request<{ profile_id: string; prompt_id: string; diff: string; changed: boolean }>("/api/prompts/diff", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  lintPrompt(payload: { prompt?: string; text?: string; body?: string; token_budget?: number }) {
+    return request<Record<string, unknown>>("/api/prompts/lint", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  compactPrompt(payload: { prompt?: string; text?: string; body?: string; target_chars?: number }) {
+    return request<Record<string, unknown>>("/api/prompts/compact", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  rollbackPrompt(payload: { profile_id?: string; prompt_id: string; version_id: string }) {
+    return request<Record<string, unknown>>(`/api/prompts/${encodeURIComponent(payload.prompt_id)}/rollback`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 

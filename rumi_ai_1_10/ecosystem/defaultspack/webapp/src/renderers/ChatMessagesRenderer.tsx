@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ArtifactPreviewDialog, type ArtifactPreviewDialogItem } from "../components/ArtifactPreviewDialog";
+import { PromptUsageDisclosure } from "../components/prompts/PromptUsageDisclosure";
 import { cn } from "../lib/cn";
 import { elapsedDurationLabel, formatCompactDuration, timestampMs } from "../lib/duration";
 import { buildToolActivityGroups, toolFolderFor, type ToolActivityGroup } from "../lib/toolActivity";
@@ -1141,6 +1142,7 @@ export function ChatMessagesRenderer({
   showActivityInMessages,
   showWidgets,
   onOpenToolPreview,
+  onLoadPromptTrace,
 }: ChatMessagesRendererProps) {
   const [imagePreview, setImagePreview] = useState<ImagePreviewRequest | null>(null);
   const [openToolActivityByMessageId, setOpenToolActivityByMessageId] = useState<Record<string, boolean | undefined>>({});
@@ -1254,6 +1256,7 @@ export function ChatMessagesRenderer({
                       </div>
 
                       {showWidgets && message.widget && <WidgetCard widget={message.widget} />}
+                      {message.role === "agent" && <PromptUsageDisclosure usage={message.metadata?.promptUsage} loadPromptTrace={onLoadPromptTrace} />}
                     </div>
                       );
                     })()}
