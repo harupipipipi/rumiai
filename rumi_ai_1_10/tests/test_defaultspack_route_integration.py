@@ -97,6 +97,36 @@ def test_always_available_routes_include_ambient_shell():
     assert ("GET", "/ambient", "_handle_static") in routes
 
 
+def test_routes_json_ambient_entries_match_canonical_registry():
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    routes_json = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))
+    committed_ambient_routes = {
+        (str(route["method"]).upper(), route["path"])
+        for route in routes_json["routes"]
+        if str(route.get("path") or "").startswith("/api/ambient")
+    }
+    canonical_ambient_routes = {
+        (spec.method, spec.pattern)
+        for spec in canonical_http_route_specs(include_always_available=False)
+        if spec.pattern.startswith("/api/ambient")
+    }
+
+    assert committed_ambient_routes == canonical_ambient_routes
+
+
+def test_mediapipe_wasm_mirror_matches_webapp_public_canonical():
+    canonical_dir = DEFAULTSPACK_ROOT / "webapp" / "public" / "mediapipe" / "wasm"
+    mirror_dir = DEFAULTSPACK_ROOT / "ui" / "mediapipe" / "wasm"
+
+    canonical_files = sorted(path.name for path in canonical_dir.iterdir() if path.is_file())
+    mirror_files = sorted(path.name for path in mirror_dir.iterdir() if path.is_file())
+
+    assert mirror_files == canonical_files
+    for name in canonical_files:
+        assert (mirror_dir / name).read_bytes() == (canonical_dir / name).read_bytes(), name
+
+
 def test_pack_api_dispatches_defaultspack_interface_routes(monkeypatch):
     from core_runtime.pack_api_server import PackAPIHandler
 

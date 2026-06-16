@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ExternalLink, Loader2, RefreshCw, ShieldAlert, ShieldCheck, ShieldX, X } from "lucide-react";
 
-import { AmbientTriggerPanel } from "../ambient/AmbientTriggerPanel";
 import { ambientTriggerClient, type AmbientStatus } from "../ambient/ambientTriggerClient";
 import {
   AMBIENT_AUTHORITY_REQUEST_ID,
@@ -518,20 +517,6 @@ export function AuthorityApprovalWindow() {
           </section>
         )}
       </div>
-      <AmbientTriggerPanel
-        approvalTarget={request && request.status === "pending" ? {
-          kind: "authority",
-          approveLabel: "承認",
-          rejectLabel: "拒否",
-          canApprove: !typedConfirmationRequired || typedConfirmationSatisfied,
-          canReject: true,
-        } : null}
-        onApprovalGesture={(decision) => {
-          if (controlsDisabled) return;
-          if (decision === "approve") void approve();
-          else void reject();
-        }}
-      />
     </main>
   );
 }
@@ -543,6 +528,8 @@ function AmbientPackAuthorityApprovalWindow() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const closingAfterApprovalRef = useRef(false);
+  const settlementBroadcastedRef = useRef(false);
+  const rumiReadyRef = useRef(false);
   const rumiPermissionCount = grantedPermissionCount(status, AMBIENT_REQUIRED_PERMISSIONS, "rumi");
   const osPermissionCount = grantedPermissionCount(status, AMBIENT_OS_PERMISSIONS, "os");
   const rumiReady = hasAllRumiPermissions(status);
@@ -564,10 +551,24 @@ function AmbientPackAuthorityApprovalWindow() {
     void reloadStatus();
   }, []);
 
+  useEffect(() => {
+    rumiReadyRef.current = rumiReady;
+  }, [rumiReady]);
+
+  const broadcastAmbientApprovalCancelled = useCallback(() => {
+    if (settlementBroadcastedRef.current || closingAfterApprovalRef.current || rumiReadyRef.current) return;
+    settlementBroadcastedRef.current = true;
+    broadcastAuthorityApprovalSettlement({
+      requestId: AMBIENT_AUTHORITY_REQUEST_ID,
+      status: "denied",
+    });
+  }, []);
+
   const finishAmbientApproval = useCallback((nextStatus?: AmbientStatus | null) => {
     if (nextStatus) setStatus(nextStatus);
     if (closingAfterApprovalRef.current) return;
     closingAfterApprovalRef.current = true;
+    settlementBroadcastedRef.current = true;
     setError(null);
     setMessage("使えるようになりました。");
     broadcastAuthorityApprovalSettlement({
@@ -576,6 +577,16 @@ function AmbientPackAuthorityApprovalWindow() {
     });
     window.setTimeout(() => void returnToFingerRecordingAfterApproval(), 700);
   }, []);
+
+  useEffect(() => {
+    const settleOnClose = () => broadcastAmbientApprovalCancelled();
+    window.addEventListener("pagehide", settleOnClose);
+    window.addEventListener("beforeunload", settleOnClose);
+    return () => {
+      window.removeEventListener("pagehide", settleOnClose);
+      window.removeEventListener("beforeunload", settleOnClose);
+    };
+  }, [broadcastAmbientApprovalCancelled]);
 
   useEffect(() => {
     if (loading || !rumiReady) return;
@@ -587,9 +598,12 @@ function AmbientPackAuthorityApprovalWindow() {
     setError(null);
     setMessage(null);
     try {
+      const context = await getAuthorityApprovalContext(AMBIENT_AUTHORITY_REQUEST_ID);
       let next: AmbientStatus | null = null;
       for (const permissionId of AMBIENT_REQUIRED_PERMISSIONS) {
-        next = await ambientTriggerClient.grantPermission(permissionId);
+        next = await ambientTriggerClient.grantPermission(permissionId, {
+          uiOperator: context.ui_operator,
+        });
       }
       finishAmbientApproval(next ?? await ambientTriggerClient.status());
     } catch (approvalError) {
@@ -599,8 +613,14 @@ function AmbientPackAuthorityApprovalWindow() {
     }
   };
 
-  const closeWindow = () => {
+  const closeWindow = async () => {
     setAction("close");
+    broadcastAmbientApprovalCancelled();
+    try {
+      if (await closeCurrentWindow()) return;
+    } catch {
+      // Fall back to the browser close path below.
+    }
     window.close();
     window.setTimeout(() => setAction(null), 300);
   };
@@ -721,7 +741,7 @@ function AmbientPackAuthorityApprovalWindow() {
           <div className="flex items-center justify-end gap-2 px-3 py-2">
             <button
               type="button"
-              onClick={closeWindow}
+              onClick={() => void closeWindow()}
               disabled={action !== null}
               className="flex h-9 min-w-24 items-center justify-center gap-2 rounded-md border border-zinc-800 px-3 text-sm font-semibold text-zinc-300 hover:border-zinc-700 hover:text-zinc-100 disabled:opacity-50"
             >

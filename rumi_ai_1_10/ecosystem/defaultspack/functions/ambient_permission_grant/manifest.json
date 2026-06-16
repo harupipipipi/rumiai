@@ -1,6 +1,6 @@
 {
   "function_id": "ambient_permission_grant",
-  "description": "Grant a Rumi ambient permission while tracking OS permission separately.",
+  "description": "Grant a Rumi-side ambient permission and optionally record OS permission state.",
   "tags": ["ambient", "permission"],
   "risk": "high",
   "requires": ["ambient.permission.grant"],
@@ -11,7 +11,8 @@
   "vocab_aliases": [
     "defaults.ambient.permission_grant",
     "defaultspack.ambient.permission_grant",
-    "defaults.ambient.permissions.grant"
+    "defaults.ambient.permission.grant",
+    "defaultspack.ambient.permission.grant"
   ],
   "input_schema": {
     "type": "object",

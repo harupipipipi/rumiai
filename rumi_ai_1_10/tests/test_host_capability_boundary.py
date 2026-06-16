@@ -11,31 +11,51 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-EXPECTED_HOST_MEDIATOR_FUNCTIONS = {
-    "host_permission_status": "host.permission.status",
-    "host_permission_open_settings": "host.permission.open_settings",
-    "host_intent_execute": "host.intent.execute",
-    "host_stream_start": "host.stream.start",
-    "host_stream_stop": "host.stream.stop",
-    "host_screen_capture": "host.screen.capture",
-    "host_accessibility_snapshot": "host.accessibility.read",
-    "host_accessibility_action": "host.accessibility.mutate",
-    "host_input_pointer": "host.input.pointer",
-    "host_input_keyboard": "host.input.keyboard",
-    "host_clipboard_read": "host.clipboard.read",
-    "host_clipboard_write": "host.clipboard.write",
-    "host_microphone_capture": "host.microphone.capture",
-    "host_audio_output": "host.audio.output",
-    "host_speech_transcribe": "host.speech.transcribe",
-    "host_speech_synthesize": "host.speech.synthesize",
-    "host_camera_capture": "host.camera.capture",
-    "host_file_open_dialog": "host.file.open_dialog",
-    "host_file_read_selected": "host.file.read_user_selected",
-    "host_file_write_selected": "host.file.write_user_selected",
-    "host_process_open_url": "host.process.open_url",
-    "host_process_launch_app": "host.process.launch_app",
-    "host_process_exec_guarded": "host.process.exec_guarded",
+HOST_FUNCTION_ID_OVERRIDES = {
+    "host.accessibility.read": "host_accessibility_snapshot",
+    "host.accessibility.mutate": "host_accessibility_action",
+    "host.file.read_user_selected": "host_file_read_selected",
+    "host.file.write_user_selected": "host_file_write_selected",
 }
+
+HOST_CAPABILITY_PACK_DEFAULT_GRANT_EXCLUSIONS = frozenset(
+    {
+        "host.intent.execute",
+        "host.stream.start",
+        "host.stream.stop",
+        "host.process.exec_guarded",
+    }
+)
+
+
+def _host_permission_registry() -> dict[str, dict]:
+    return json.loads((ROOT / "core_runtime" / "host_permissions" / "default_registry.json").read_text())
+
+
+def _host_function_id_for_operation(operation: str) -> str:
+    return HOST_FUNCTION_ID_OVERRIDES.get(operation, operation.replace(".", "_"))
+
+
+def _expected_host_mediator_functions() -> dict[str, str]:
+    return {
+        _host_function_id_for_operation(operation): operation
+        for operation in _host_permission_registry()
+    }
+
+
+def _host_mediator_main_template(function_id: str, operation: str, stream_allowed: bool) -> str:
+    return f'''from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _host_mediator import run_host_mediator
+
+
+def run(context, args):
+    return run_host_mediator(context, args, function_id="{function_id}", operation="{operation}", stream_allowed={stream_allowed})
+'''
 
 
 def test_host_permission_registry_normalizes_ambient_aliases():
@@ -138,28 +158,61 @@ def test_host_capabilities_pack_contract_names_boundary_and_privacy():
     assert setup["overlap_policy"]["defaultspack_host_execution"] == "forbidden"
 
 
+def test_host_capabilities_pack_registry_grants_follow_canonical_host_registry():
+    from core_runtime.bootstrap import default_builtin_grants
+
+    registry = _host_permission_registry()
+    ecosystem = json.loads((ROOT / "ecosystem" / "rumi_host_capabilities_pack" / "ecosystem.json").read_text())
+
+    assert ecosystem["capabilities"] == list(registry)
+    assert ecosystem["default_grants"]["include"] == "standard_host_permissions"
+    assert ecosystem["default_grants"]["exclude"] == ["host.process.exec_guarded"]
+    assert default_builtin_grants.HOST_CAPABILITIES_PACK_PERMISSIONS == (
+        "function.call",
+        *(
+            permission_id
+            for permission_id in registry
+            if permission_id not in HOST_CAPABILITY_PACK_DEFAULT_GRANT_EXCLUSIONS
+        ),
+    )
+
+
 def test_host_capabilities_pack_defines_standard_mediator_functions():
     pack_root = ROOT / "ecosystem" / "rumi_host_capabilities_pack"
+    registry = _host_permission_registry()
     ecosystem = json.loads((pack_root / "ecosystem.json").read_text())
+    expected_functions = _expected_host_mediator_functions()
+
     assert ecosystem["host_functions"] == {
         function_id: {
             "operation": operation,
-            "stream": operation in {"host.stream.start", "host.microphone.capture", "host.speech.transcribe", "host.camera.capture", "host.process.exec_guarded"},
+            "stream": bool(registry[operation].get("stream_allowed")),
             "executor_owner": "rumi_viewer_host_broker",
         }
-        for function_id, operation in sorted(EXPECTED_HOST_MEDIATOR_FUNCTIONS.items())
+        for function_id, operation in sorted(expected_functions.items())
     }
-    for function_id, operation in EXPECTED_HOST_MEDIATOR_FUNCTIONS.items():
+    for function_id, operation in expected_functions.items():
         function_dir = pack_root / "functions" / function_id
         manifest = json.loads((function_dir / "manifest.json").read_text())
-        assert (function_dir / "main.py").is_file()
+        main_path = function_dir / "main.py"
+        assert main_path.is_file()
+        assert main_path.read_text() == _host_mediator_main_template(
+            function_id,
+            operation,
+            bool(registry[operation].get("stream_allowed")),
+        )
         assert manifest["function_id"] == function_id
         assert manifest["host_execution"] is False
         assert manifest["calling_convention"] == "subprocess"
         assert manifest["requires_approval"] is True
         assert manifest["caller_requires"] == ["user.approved.high_risk"]
         assert operation in manifest["requires"]
+        assert manifest["risk"] == registry[operation]["risk_level"]
+        assert manifest["risk_level"] == registry[operation]["risk_level"]
         assert manifest["host_operation"]["operation"] == operation
+        assert manifest["host_operation"]["stream_allowed"] is bool(
+            registry[operation].get("stream_allowed")
+        )
         if operation == "host.process.exec_guarded":
             assert manifest["risk_level"] == "critical"
             assert manifest["host_operation"]["typed_confirmation_required"] is True

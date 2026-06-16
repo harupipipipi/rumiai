@@ -1,7 +1,7 @@
 {
   "function_id": "ambient_status",
   "description": "Read ambient trigger monitor, permission, OS permission, and privacy status.",
-  "tags": ["ambient", "defaultspack", "permission"],
+  "tags": ["ambient", "permission"],
   "risk": "low",
   "requires": [],
   "caller_requires": [],

@@ -1,4 +1,5 @@
 import { defaultspackApiFetch } from "../lib/api";
+import type { AuthorityUiOperator } from "../lib/api";
 
 export type AmbientPermissionId = "host.microphone.capture" | "host.camera.capture" | "ambient.trigger.dispatch" | string;
 
@@ -119,17 +120,21 @@ export const ambientTriggerClient = {
     });
   },
 
-  grantPermission(permissionId: AmbientPermissionId, osStatus?: string) {
+  grantPermission(permissionId: AmbientPermissionId, options?: { osStatus?: string; uiOperator?: AuthorityUiOperator }) {
     return requestJson<AmbientStatus>("/api/ambient/permissions/grant", {
       method: "POST",
-      body: JSON.stringify({ permission_id: permissionId, os_status: osStatus }),
+      body: JSON.stringify({
+        permission_id: permissionId,
+        os_status: options?.osStatus,
+        ui_operator: options?.uiOperator,
+      }),
     });
   },
 
-  revokePermission(permissionId: AmbientPermissionId) {
+  revokePermission(permissionId: AmbientPermissionId, options?: { uiOperator?: AuthorityUiOperator }) {
     return requestJson<AmbientStatus>("/api/ambient/permissions/revoke", {
       method: "POST",
-      body: JSON.stringify({ permission_id: permissionId }),
+      body: JSON.stringify({ permission_id: permissionId, ui_operator: options?.uiOperator }),
     });
   },
 

@@ -1,6 +1,6 @@
 {
   "function_id": "ambient_monitor_start",
-  "description": "Request an approved host microphone stream for ambient wake monitoring.",
+  "description": "Enable the ambient microphone and camera trigger monitor.",
   "tags": ["ambient", "monitor"],
   "risk": "high",
   "requires": ["host.microphone.capture", "host.camera.capture", "ambient.trigger.dispatch"],
@@ -11,7 +11,8 @@
   "vocab_aliases": [
     "defaults.ambient.monitor_start",
     "defaultspack.ambient.monitor_start",
-    "defaults.ambient.monitor.start"
+    "defaults.ambient.monitor.start",
+    "defaultspack.ambient.monitor.start"
   ],
   "input_schema": {
     "type": "object",

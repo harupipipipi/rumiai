@@ -494,6 +494,12 @@
     },
     {
       "method": "POST",
+      "path": "/api/ambient/config",
+      "flow_id": "transport_direct",
+      "description": "Configure ambient trigger chat routing and new-chat defaults"
+    },
+    {
+      "method": "POST",
       "path": "/api/ambient/events",
       "flow_id": "transport_direct",
       "description": "Submit a voice wake, camera pinch, or external hook ambient trigger event through ambient_trigger_router"

@@ -149,6 +149,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   );
   const allRumiPermissionsGranted = useMemo(() => hasAllRumiPermissions(status), [status]);
   const allOsPermissionsGranted = useMemo(() => hasAllOsPermissions(status), [status]);
+  const rumiApprovalPending = rumiApprovalOpen && !allRumiPermissionsGranted;
   const routingNeedsNewChatSettings = routingMode === "startup_new_chat" || routingMode === "always_new_chat";
   const routingSelectedConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === routingConversationId) ?? null,
@@ -280,6 +281,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
 
   useEffect(() => subscribeAuthorityApprovalSettlements((event) => {
     if (event.requestId !== AMBIENT_AUTHORITY_REQUEST_ID) return;
+    setRumiApprovalOpen(false);
     setMessage(event.status === "approved" ? "使えるようになりました。次にMacのマイク/カメラを確認します。" : "許可しませんでした。必要になったらもう一度許可できます。");
     void refresh({ probeOs: true });
   }), []);
@@ -287,6 +289,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("authority_approved") !== "1") return;
+    setRumiApprovalOpen(false);
     setMessage("使えるようになりました。次にMacのマイク/カメラを確認します。");
     params.delete("authority_approved");
     const nextSearch = params.toString();
@@ -294,6 +297,20 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     window.history.replaceState(null, "", nextUrl);
     void refresh({ probeOs: true });
   }, []);
+
+  useEffect(() => {
+    if (!rumiApprovalPending) return;
+    pinchRecorderRef.current?.cancel();
+    pinchRecorderRef.current = null;
+    stopPinchSpeechRecognition(true);
+    setPinchTranscriptPreview("");
+    setPinchRecording(false);
+    setRecordingStartedAt(null);
+    setPinchDetectorStatus("approval_pending");
+    audioStopRef.current?.();
+    audioStopRef.current = null;
+    setMicListening(false);
+  }, [rumiApprovalPending]);
 
   useEffect(() => {
     if (!status || allRumiPermissionsGranted || rumiApprovalAutoOpenRef.current) return;
@@ -467,6 +484,10 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
 
   const beginPinchRecording = useCallback(async (state: PinchState) => {
     if (pinchRecorderRef.current) return;
+    if (!allRumiPermissionsGranted || !allOsPermissionsGranted || rumiApprovalPending) {
+      setMessage("Rumiの許可と端末のマイク・カメラ許可がそろってから録音できます。");
+      return;
+    }
     lastPinchStateRef.current = state;
     stopSpeechReadout();
     pinchTranscriptRef.current = "";
@@ -482,7 +503,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       });
       setPinchRecording(true);
       setRecordingStartedAt(performance.now());
-      await ambientTriggerClient.grantPermission(AMBIENT_MIC_PERMISSION, "granted");
       await ambientTriggerClient.submitEvent({
         source: "camera",
         trigger: "pinch",
@@ -507,7 +527,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       setPinchDetectorStatus("tracking");
       setMessage(error instanceof Error ? error.message : "録音を開始できませんでした。");
     }
-  }, [selectedMicId]);
+  }, [allOsPermissionsGranted, allRumiPermissionsGranted, rumiApprovalPending, selectedMicId]);
 
   const submitFingerChoice = useCallback(async (state: PinchState) => {
     const choice = state.fingerChoice;
@@ -560,7 +580,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     let cancelled = false;
     gestureStopRef.current?.();
     gestureStopRef.current = null;
-    if (!monitorEnabled || !cameraStream || !videoRef.current) {
+    if (rumiApprovalPending || !monitorEnabled || !cameraStream || !videoRef.current) {
       setPinchDetectorStatus(cameraStream ? "paused" : "idle");
       setTrackingFrame(null);
       return;
@@ -592,7 +612,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       gestureStopRef.current = null;
       setTrackingFrame(null);
     };
-  }, [Boolean(approvalTarget), cameraStream, handlePinchState, monitorEnabled]);
+  }, [Boolean(approvalTarget), cameraStream, handlePinchState, monitorEnabled, rumiApprovalPending]);
 
   async function refresh(options?: { probeOs?: boolean }) {
     const next = await ambientTriggerClient.status();
@@ -716,13 +736,16 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     try {
       const opened = await openAuthorityApprovalWindow(AMBIENT_AUTHORITY_REQUEST_ID);
       if (opened) {
+        setRumiApprovalOpen(true);
         setMessage("Rumiの承認ウィンドウを開きました。そこで許可してください。");
         return;
       }
     } catch (error) {
       console.info("[ambient] authority approval window unavailable", error);
     }
-    setRumiApprovalOpen(true);
+    setRumiApprovalOpen(false);
+    setManualRumiFallbackOpen(true);
+    setMessage("Rumi Viewerの承認ウィンドウを開けませんでした。Viewerから開き直して許可してください。");
   }
 
   async function openAmbientWindow() {
@@ -736,30 +759,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     setMessage("Rumi Viewerから開くと、指録音は小さな別ウィンドウで表示されます。");
   }
 
-  async function grantAllPermissions() {
-    setManualRumiFallbackOpen(false);
-    await runAction(async () => {
-      let next: AmbientStatus | null = null;
-      for (const permissionId of AMBIENT_REQUIRED_PERMISSIONS) {
-        next = await ambientTriggerClient.grantPermission(permissionId);
-      }
-      return next ?? ambientTriggerClient.status();
-    }, "Rumi内の許可を保存しました。次に端末のマイク・カメラを許可してください。");
-    const next = await ambientTriggerClient.status().catch(() => null);
-    if (next) {
-      setStatus(next);
-      setManualRumiFallbackOpen(!hasAllRumiPermissions(next));
-    } else {
-      setManualRumiFallbackOpen(true);
-    }
-  }
-
-  async function approveRumiPermissionsFromDialog() {
-    setRumiApprovalOpen(false);
-    await grantAllPermissions();
-  }
-
   async function requestMediaPermissions() {
+    if (!allRumiPermissionsGranted || rumiApprovalPending) {
+      setExpanded(true);
+      await openRumiPermissionApproval();
+      return;
+    }
     await runAction(async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("このブラウザではマイク・カメラを使用できません。");
@@ -780,6 +785,11 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   }
 
   async function startMonitoring() {
+    if (!allRumiPermissionsGranted || !allOsPermissionsGranted || rumiApprovalPending) {
+      setExpanded(true);
+      setMessage("Rumiの許可と端末のマイク・カメラ許可がそろってから合図待ちを開始できます。");
+      return;
+    }
     await runAction(async () => {
       if (!cameraStream) {
         if (!navigator.mediaDevices?.getUserMedia) {
@@ -812,6 +822,10 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   }
 
   async function enrollWakeVoice() {
+    if (!allRumiPermissionsGranted || !allOsPermissionsGranted || rumiApprovalPending) {
+      setMessage("Rumiの許可と端末のマイク許可がそろってから声で起動を登録できます。");
+      return;
+    }
     setBusy(true);
     setMessage("声で起動するための音声を短く録音しています。");
     try {
@@ -840,6 +854,10 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       return;
     }
     try {
+      if (!allRumiPermissionsGranted || !allOsPermissionsGranted || rumiApprovalPending) {
+        setMessage("Rumiの許可と端末のマイク許可がそろってから音声待機を開始できます。");
+        return;
+      }
       const stop = await startWakeListening(async (embedding) => {
         const result = await ambientTriggerClient.submitEvent({
           source: "microphone",
@@ -855,7 +873,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       }, selectedMicId || undefined);
       audioStopRef.current = stop;
       setMicListening(true);
-      await ambientTriggerClient.grantPermission(AMBIENT_MIC_PERMISSION, "granted");
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "マイクを開始できませんでした。");
@@ -968,7 +985,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           <button
             type="button"
             onClick={() => readoutPlaying ? stopSpeechReadout() : speakFinalAnswer()}
-            disabled={!lastFinalAnswer || pinchRecording}
+            disabled={!lastFinalAnswer || pinchRecording || rumiApprovalPending}
             className={cn(
               "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-35",
               readoutPlaying && "border-emerald-400/35 bg-emerald-400/10 text-emerald-100",
@@ -984,8 +1001,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
               setSettingsOpen((value) => !value);
               if (!standalone) setExpanded(true);
             }}
+            disabled={rumiApprovalPending}
             className={cn(
-              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
+              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-35",
               settingsOpen && "border-sky-300/35 bg-sky-400/10 text-sky-100",
             )}
             title="設定"
@@ -1033,7 +1051,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           <button
             type="button"
             onClick={() => void handlePrimaryAction()}
-            disabled={busy || uiState === "sending"}
+            disabled={busy || uiState === "sending" || rumiApprovalPending}
             className={cn(
               "inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold transition",
               primaryButtonClass(uiState),
@@ -1042,6 +1060,11 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             {busy ? <Loader2 size={15} className="animate-spin" /> : <PrimaryActionIcon uiState={uiState} />}
             {uiState === "recording" && recordingSeconds > 0 ? `${stateCopy.primary} ${formatRecordingTime(recordingSeconds)}` : stateCopy.primary}
           </button>
+          {rumiApprovalPending && (
+            <div className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-2 py-2 text-[11px] leading-5 text-amber-50">
+              Rumiの承認ウィンドウで確認中です。合図待ち、録音、音声待機は承認が終わるまで停止します。
+            </div>
+          )}
           {pinchRecording && (
             <div className="flex items-center gap-2 rounded-lg border border-red-300/25 bg-red-400/10 px-2 py-1.5 text-[11px] text-red-50">
               <Mic size={13} className="shrink-0" />
@@ -1132,7 +1155,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                     />
                   ))}
                 </div>
-                <button type="button" onClick={() => void openRumiPermissionApproval()} disabled={busy} className="ambient-mini-button mt-2 w-full">
+                <button type="button" onClick={() => void openRumiPermissionApproval()} disabled={busy || rumiApprovalPending} className="ambient-mini-button mt-2 w-full">
                   {busy ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />}
                   Rumiで許可
                 </button>
@@ -1154,7 +1177,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                     />
                   ))}
                 </div>
-                <button type="button" onClick={() => void requestMediaPermissions()} disabled={busy} className="ambient-mini-button mt-2 w-full">
+                <button type="button" onClick={() => void requestMediaPermissions()} disabled={busy || rumiApprovalPending} className="ambient-mini-button mt-2 w-full">
                   {busy ? <Loader2 size={14} className="animate-spin" /> : <Video size={14} />}
                   マイク・カメラを許可
                 </button>
@@ -1170,7 +1193,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                 <button
                   type="button"
                   onClick={() => void (monitorEnabled ? stopMonitoring() : startMonitoring())}
-                  disabled={busy}
+                  disabled={busy || rumiApprovalPending}
                   className="ambient-mini-button mt-2 w-full"
                 >
                   {monitorEnabled ? <Square size={14} /> : <Play size={14} />}
@@ -1240,11 +1263,11 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                   </select>
                 </label>
                 <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => void refreshDevices()} className="ambient-mini-button">
+                  <button type="button" onClick={() => void refreshDevices()} disabled={rumiApprovalPending} className="ambient-mini-button">
                     <Settings size={14} />
                     デバイス更新
                   </button>
-                  <button type="button" onClick={() => void refresh({ probeOs: true })} className="ambient-mini-button">
+                  <button type="button" onClick={() => void refresh({ probeOs: true })} disabled={rumiApprovalPending} className="ambient-mini-button">
                     <Shield size={14} />
                     許可を再確認
                   </button>
@@ -1252,6 +1275,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                 <button
                   type="button"
                   onClick={() => setCameraDebugOpen((value) => !value)}
+                  disabled={rumiApprovalPending}
                   className={cn("ambient-mini-button w-full", cameraDebugOpen && "border-amber-400/30 text-amber-100")}
                 >
                   <Video size={14} />
@@ -1276,11 +1300,11 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                   詳細ログを開く
                 </button>
                 <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => void enrollWakeVoice()} className="ambient-mini-button">
+                  <button type="button" onClick={() => void enrollWakeVoice()} disabled={rumiApprovalPending} className="ambient-mini-button">
                     <Mic size={14} />
                     声で起動を登録
                   </button>
-                  <button type="button" onClick={() => void toggleMicListening()} className="ambient-mini-button">
+                  <button type="button" onClick={() => void toggleMicListening()} disabled={rumiApprovalPending} className="ambient-mini-button">
                     <Radio size={14} />
                     {micListening ? "音声待機を停止" : "音声待機を開始"}
                   </button>
@@ -1304,7 +1328,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                     <p className="mt-1 text-red-100/75">
                       {manualFallbackIsOsPermission
                         ? "Rumi側の許可は済んでいます。ブラウザまたはOS設定で、マイクとカメラをこのアプリに許可してください。"
-                        : "Rumi設定から「指で録音」を選び、マイク入力・カメラ・AI送信を許可してください。許可後に「再確認」を押します。"}
+                        : "この画面ではRumi許可を保存できません。Rumi Viewerの承認ウィンドウから許可してから「再確認」を押してください。"}
                     </p>
                   </div>
                 </div>
@@ -1319,12 +1343,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                         }
                         return;
                       }
-                      setSettingsOpen(true);
+                      await openRumiPermissionApproval();
                     })()}
                     className="ambient-mini-button"
                   >
-                    {manualFallbackIsOsPermission ? <ExternalLink size={14} /> : <Settings size={14} />}
-                    {manualFallbackIsOsPermission ? "権限一覧を開く" : "手動で許可する"}
+                    {manualFallbackIsOsPermission ? <ExternalLink size={14} /> : <Shield size={14} />}
+                    {manualFallbackIsOsPermission ? "権限一覧を開く" : "承認画面を開く"}
                   </button>
                   <button type="button" onClick={() => void refresh({ probeOs: true })} className="ambient-mini-button">
                     <RefreshCcw size={14} />
@@ -1363,13 +1387,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         )}
         </div>
       </section>
-      {rumiApprovalOpen && (
-        <RumiPermissionApprovalDialog
-          busy={busy}
-          onApprove={() => void approveRumiPermissionsFromDialog()}
-          onCancel={() => setRumiApprovalOpen(false)}
-        />
-      )}
       {chatPickerOpen && (
         <ChatPickerDialog
           activeChatId={conversationId ?? null}
@@ -1385,99 +1402,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   );
   if (standalone) return content;
   return <LayerPortal layer="globalOverlay">{content}</LayerPortal>;
-}
-
-function RumiPermissionApprovalDialog({
-  busy,
-  onApprove,
-  onCancel,
-}: {
-  busy: boolean;
-  onApprove: () => void;
-  onCancel: () => void;
-}) {
-  const [privacyOpen, setPrivacyOpen] = useState(false);
-  return (
-    <div className="fixed inset-0 rumi-layer-modal flex items-end justify-center bg-black/55 px-3 py-4 backdrop-blur-sm sm:items-center">
-      <section
-        className="flex max-h-[calc(100vh-2rem)] w-[min(380px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border border-sky-300/30 bg-zinc-950 text-zinc-100 shadow-2xl shadow-black/50"
-        aria-label="Rumi ambient permission approval"
-      >
-        <header className="flex items-start gap-3 border-b border-zinc-800 px-3 py-2.5">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-sky-300/35 bg-sky-400/10 text-sky-100">
-            <Hand size={18} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-zinc-50">指録音をRumiで許可</p>
-            <p className="mt-0.5 text-xs leading-5 text-zinc-400">Rumi内の入口を許可します。端末のマイク・カメラ許可は次に確認します。</p>
-          </div>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
-            aria-label="閉じる"
-          >
-            <X size={14} />
-          </button>
-        </header>
-
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2.5 text-xs leading-5">
-          <section className="space-y-2">
-            <p className="text-[11px] font-semibold text-sky-200">Rumiが受け取る入口</p>
-            <div className="space-y-1.5">
-              {AMBIENT_REQUIRED_PERMISSIONS.map((permissionId) => (
-                <div key={permissionId} className="flex items-center gap-2 border-l border-sky-400/35 pl-2">
-                  <Check size={13} className="shrink-0 text-emerald-200" />
-                  <span className={cn(
-                    "text-zinc-200",
-                    permissionId === "ambient.trigger.dispatch" && "text-sky-200",
-                  )}>
-                    {ambientPermissionLabels[permissionId] ?? permissionId}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="space-y-2">
-            <div className="border-l border-zinc-700 pl-2 text-zinc-400">
-              <span className="text-zinc-200">OS許可とは別。</span>
-              この許可だけでは、まだマイク・カメラは動きません。
-            </div>
-            <button
-              type="button"
-              onClick={() => setPrivacyOpen((value) => !value)}
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-emerald-400/25 text-[11px] font-semibold text-emerald-200 hover:border-emerald-300/45"
-              aria-label="プライバシー"
-              title="プライバシー"
-            >
-              i
-            </button>
-            {privacyOpen && (
-              <div className="border-l border-emerald-400/35 pl-2 text-emerald-50/85">
-                録音データやカメラ映像は保存しません。残るのは、指録音が使われた時刻と結果だけです。
-              </div>
-            )}
-          </section>
-        </div>
-
-        <footer className="flex items-center justify-end gap-2 border-t border-zinc-800 px-3 py-2.5">
-          <button type="button" onClick={onCancel} disabled={busy} className="ambient-mini-button min-w-24">
-            あとで
-          </button>
-          <button
-            type="button"
-            onClick={onApprove}
-            disabled={busy}
-            className="inline-flex h-9 min-w-32 items-center justify-center gap-2 rounded-lg bg-sky-300 px-3 text-sm font-semibold text-zinc-950 hover:bg-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {busy ? <Loader2 size={15} className="animate-spin" /> : <Hand size={15} />}
-            許可する
-          </button>
-        </footer>
-      </section>
-    </div>
-  );
 }
 
 function RoutingSettings({

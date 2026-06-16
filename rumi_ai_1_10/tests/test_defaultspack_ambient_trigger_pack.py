@@ -340,6 +340,103 @@ def test_os_permission_check_updates_status_without_granting_rumi_permissions(mo
     assert audit_records[-1]["trigger"] == "permission_check"
 
 
+def test_ambient_permission_function_requires_signed_viewer_operator(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "test-ambient-secret")
+
+    from blocks.ambient import permissions
+    from core_runtime.authority.ui_operator import sign_ui_operator
+
+    unsigned = permissions.run({"action": "grant", "permission_id": MIC_PERMISSION})
+
+    assert unsigned["status"] == "error"
+    assert unsigned["error"]["code"] == "AMBIENT_PERMISSION_UI_OPERATOR_REQUIRED"
+
+    signed = permissions.run(
+        {
+            "action": "grant",
+            "permission_id": MIC_PERMISSION,
+            "ui_operator": sign_ui_operator("rumi_ambient_trigger_pack", nonce="ambient-grant"),
+        }
+    )
+
+    assert signed["status"] == "ok"
+    assert signed["data"]["permissions"]["rumi"][MIC_PERMISSION]["granted"] is True
+    assert signed["data"]["authority"]["request_id"] == "rumi_ambient_trigger_pack"
+    assert signed["data"]["authority"]["ui_operator"] is True
+
+
+def test_ambient_permission_function_rejects_wrong_operator_request(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "test-ambient-secret")
+
+    from blocks.ambient import permissions
+    from core_runtime.authority.ui_operator import sign_ui_operator
+
+    result = permissions.run(
+        {
+            "action": "grant",
+            "permission_id": MIC_PERMISSION,
+            "ui_operator": sign_ui_operator("different-request", nonce="ambient-wrong"),
+        }
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "AMBIENT_PERMISSION_UI_OPERATOR_REQUIRED"
+    assert "request mismatch" in result["error"]["message"]
+
+
+def test_ambient_permission_check_function_updates_only_os_state_without_operator(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "test-ambient-secret")
+
+    from blocks.ambient import permissions
+
+    checked = permissions.run(
+        {
+            "action": "check_os",
+            "statuses": {MIC_PERMISSION: "granted", CAMERA_PERMISSION: "denied"},
+        }
+    )
+
+    assert checked["status"] == "ok"
+    assert checked["data"]["permissions"]["os"][MIC_PERMISSION]["status"] == "granted"
+    assert checked["data"]["permissions"]["os"][CAMERA_PERMISSION]["status"] == "denied"
+    assert checked["data"]["permissions"]["rumi"][MIC_PERMISSION]["granted"] is False
+    assert checked["data"]["permissions"]["rumi"][CAMERA_PERMISSION]["granted"] is False
+
+
+def test_ambient_permission_revoke_function_requires_signed_viewer_operator(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "test-ambient-secret")
+
+    from blocks.ambient import permissions
+    from core_runtime.authority.ui_operator import sign_ui_operator
+
+    grant_operator = sign_ui_operator("rumi_ambient_trigger_pack", nonce="ambient-grant")
+    assert permissions.run({"action": "grant", "permission_id": MIC_PERMISSION, "ui_operator": grant_operator})["status"] == "ok"
+
+    unsigned = permissions.run({"action": "revoke", "permission_id": MIC_PERMISSION})
+
+    assert unsigned["status"] == "error"
+    assert unsigned["error"]["code"] == "AMBIENT_PERMISSION_UI_OPERATOR_REQUIRED"
+
+    revoked = permissions.run(
+        {
+            "action": "revoke",
+            "permission_id": MIC_PERMISSION,
+            "ui_operator": sign_ui_operator("rumi_ambient_trigger_pack", nonce="ambient-revoke"),
+        }
+    )
+
+    assert revoked["status"] == "ok"
+    assert revoked["data"]["permissions"]["rumi"][MIC_PERMISSION]["granted"] is False
+
+
 def test_ambient_store_migrates_legacy_gesture_release_threshold(monkeypatch, tmp_path):
     state_path = tmp_path / "ambient-state.json"
     state_path.write_text(

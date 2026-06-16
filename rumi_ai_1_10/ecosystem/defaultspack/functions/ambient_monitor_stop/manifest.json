@@ -1,8 +1,8 @@
 {
   "function_id": "ambient_monitor_stop",
-  "description": "Disable ambient_monitor.enabled and pause ambient input monitoring.",
+  "description": "Pause the ambient trigger monitor.",
   "tags": ["ambient", "monitor"],
-  "risk": "medium",
+  "risk": "low",
   "requires": [],
   "caller_requires": [],
   "host_execution": false,
@@ -11,7 +11,8 @@
   "vocab_aliases": [
     "defaults.ambient.monitor_stop",
     "defaultspack.ambient.monitor_stop",
-    "defaults.ambient.monitor.stop"
+    "defaults.ambient.monitor.stop",
+    "defaultspack.ambient.monitor.stop"
   ],
   "input_schema": {
     "type": "object",

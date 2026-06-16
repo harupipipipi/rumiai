@@ -1,9 +1,9 @@
 {
   "function_id": "ambient_permission_revoke",
-  "description": "Revoke a Rumi ambient permission without changing OS permission state.",
+  "description": "Revoke a Rumi-side ambient permission without changing OS permission state.",
   "tags": ["ambient", "permission"],
   "risk": "medium",
-  "requires": [],
+  "requires": ["ambient.permission.revoke"],
   "caller_requires": [],
   "host_execution": false,
   "calling_convention": "subprocess",
@@ -11,7 +11,8 @@
   "vocab_aliases": [
     "defaults.ambient.permission_revoke",
     "defaultspack.ambient.permission_revoke",
-    "defaults.ambient.permissions.revoke"
+    "defaults.ambient.permission.revoke",
+    "defaultspack.ambient.permission.revoke"
   ],
   "input_schema": {
     "type": "object",

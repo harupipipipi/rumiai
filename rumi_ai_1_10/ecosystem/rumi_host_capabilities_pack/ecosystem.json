@@ -72,6 +72,11 @@
       "stream": false,
       "executor_owner": "rumi_viewer_host_broker"
     },
+    "host_audio_capture": {
+      "operation": "host.audio.capture",
+      "stream": true,
+      "executor_owner": "rumi_viewer_host_broker"
+    },
     "host_audio_output": {
       "operation": "host.audio.output",
       "stream": false,

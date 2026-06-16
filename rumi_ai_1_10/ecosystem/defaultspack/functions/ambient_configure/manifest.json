@@ -1,7 +1,7 @@
 {
   "function_id": "ambient_configure",
   "description": "Configure ambient trigger chat routing and new-chat defaults.",
-  "tags": ["ambient", "defaultspack", "settings"],
+  "tags": ["ambient", "settings"],
   "risk": "low",
   "requires": [],
   "caller_requires": [],

@@ -1,7 +1,7 @@
 {
   "function_id": "ambient_event_submit",
-  "description": "Submit a voice wake, camera pinch, or hook trigger through ambient_trigger_router.",
-  "tags": ["ambient", "input", "dispatch"],
+  "description": "Submit a sanitized ambient trigger event to the ambient trigger router.",
+  "tags": ["ambient", "input"],
   "risk": "high",
   "requires": ["ambient.trigger.dispatch"],
   "caller_requires": ["user.approved.high_risk"],
@@ -11,7 +11,10 @@
   "vocab_aliases": [
     "defaults.ambient.event_submit",
     "defaultspack.ambient.event_submit",
-    "defaults.ambient.events.submit"
+    "defaults.ambient.event.submit",
+    "defaultspack.ambient.event.submit",
+    "defaults.ambient.events.submit",
+    "defaultspack.ambient.events.submit"
   ],
   "input_schema": {
     "type": "object",
