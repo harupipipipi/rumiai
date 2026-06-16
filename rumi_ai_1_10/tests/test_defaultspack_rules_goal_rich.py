@@ -92,7 +92,8 @@ def test_rule_records_are_injected_by_context_enrichment(tmp_path, monkeypatch):
     assert messages[1]["role"] == "user"
 
 
-def test_goal_rich_mode_loops_past_default_hard_cap_until_achieved():
+def test_goal_rich_mode_loops_past_default_hard_cap_until_achieved(monkeypatch):
+    from blocks.goal import run as goal_module
     from blocks.goal.run import HARD_MAX_ITERATIONS
     from blocks.goal.run import run as goal_run
 
@@ -111,6 +112,24 @@ def test_goal_rich_mode_loops_past_default_hard_cap_until_achieved():
         )
 
     handler = _ScriptedCallHandler(scripted)
+
+    def fake_call_model(input_data, _context, *, call_handler=None):
+        response = call_handler(
+            "defaults.ai.complete",
+            {
+                "model": input_data.get("model_hint") or "stub/default",
+                "messages": input_data.get("messages", []),
+                "params": {},
+            },
+        )
+        data = response.get("data") if isinstance(response, dict) and response.get("status") == "ok" else response
+        text = data.get("content", "") if isinstance(data, dict) else ""
+        if input_data.get("output_schema"):
+            return {"status": "ok", "output": json.loads(text)}
+        return {"status": "ok", "output": text}
+
+    monkeypatch.setattr(goal_module, "call_model", fake_call_model)
+
     result = goal_run(
         {
             "goal": "/rich Solve the long goal",

@@ -9,7 +9,7 @@
     "risk": "medium",
     "modes": ["chat", "coding"],
     "args": [
-      { "name": "goal", "type": "string", "required": true },
+      { "name": "goal", "type": "string", "required": true, "greedy": true },
       { "name": "max_iterations", "type": "string", "required": false },
       { "name": "model", "type": "string", "required": false },
       { "name": "rich", "type": "string", "required": false },

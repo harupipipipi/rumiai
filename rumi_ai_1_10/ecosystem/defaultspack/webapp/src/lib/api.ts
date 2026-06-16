@@ -1133,6 +1133,7 @@ export type ComposerCommandArg = {
   type: "string" | "enum" | "boolean";
   required?: boolean;
   values?: string[];
+  greedy?: boolean;
 };
 
 export type ComposerCommandExecution =
@@ -1140,7 +1141,8 @@ export type ComposerCommandExecution =
   | { type: "model_command"; action: string }
   | { type: "settings_patch"; section: string; field: string }
   | { type: "rumi_function"; qualified_name: string }
-  | { type: "chat_action"; action: string };
+  | { type: "chat_action"; action: string }
+  | { type: "pack_block"; qualified_name: string };
 
 export type ComposerCommandItem = {
   id: string;

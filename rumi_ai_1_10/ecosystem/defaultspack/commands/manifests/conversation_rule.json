@@ -9,7 +9,7 @@
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
     "args": [
-      { "name": "rule", "type": "string", "required": false },
+      { "name": "rule", "type": "string", "required": false, "greedy": true },
       { "name": "action", "type": "string", "required": false },
       { "name": "rule_id", "type": "string", "required": false },
       { "name": "priority", "type": "string", "required": false }

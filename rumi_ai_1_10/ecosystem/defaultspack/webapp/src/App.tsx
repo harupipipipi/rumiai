@@ -2008,6 +2008,55 @@ function matchCommandName(body: string, candidate: string): string | null {
   return flexibleMatch ? flexibleMatch[0].trimEnd() : null;
 }
 
+function normalizeCommandText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function parseCommandRest(rest: string, specs: ComposerCommandItem["args"] = []): Record<string, unknown> {
+  if (!rest) return {};
+  const args: Record<string, unknown> = {};
+  let remaining = rest;
+
+  for (const spec of specs) {
+    const name = spec.name.trim();
+    if (!name) continue;
+    const optionPattern = new RegExp(`(^|\\s)${escapeRegExp(name)}=([^\\s]+)`, "gi");
+    remaining = remaining.replace(optionPattern, (_match, prefix: string, value: string) => {
+      args[name] = value;
+      return prefix ? " " : "";
+    });
+    const slashFlagPattern = new RegExp(`(^|\\s)/${escapeRegExp(name)}(?=\\s|$)`, "gi");
+    remaining = remaining.replace(slashFlagPattern, (_match, prefix: string) => {
+      args[name] = true;
+      return prefix ? " " : "";
+    });
+  }
+
+  const greedySpec = specs.find((spec) => spec.greedy === true);
+  const remainder = normalizeCommandText(remaining);
+  if (greedySpec) {
+    if (remainder) args[greedySpec.name] = remainder;
+    return args;
+  }
+
+  const positionalSpecs = specs.filter((spec) => args[spec.name] === undefined);
+  if (positionalSpecs.length === 1 && remainder) {
+    args[positionalSpecs[0].name] = remainder;
+  } else if (positionalSpecs.length > 1 && remainder) {
+    const tokens = remainder.split(/\s+/);
+    positionalSpecs.forEach((spec, index) => {
+      if (index === positionalSpecs.length - 1) {
+        const trailing = tokens.slice(index).join(" ");
+        if (trailing) args[spec.name] = trailing;
+      } else if (tokens[index]) {
+        args[spec.name] = tokens[index];
+      }
+    });
+  }
+
+  return args;
+}
+
 type ParsedSlashCommandInput = {
   command: ComposerCommandItem;
   args: Record<string, unknown>;
@@ -2034,21 +2083,7 @@ export function parseSlashCommandInput(input: string, commands: ComposerCommandI
   if (!matchedCommand) return null;
 
   const rest = body.slice(matchedName.length).trim();
-  const args: Record<string, unknown> = {};
-  const specs = matchedCommand.args ?? [];
-  if (specs.length === 1 && rest) {
-    args[specs[0].name] = rest;
-  } else if (specs.length > 1 && rest) {
-    const tokens = rest.split(/\s+/);
-    specs.forEach((spec, index) => {
-      if (index === specs.length - 1) {
-        const remainder = tokens.slice(index).join(" ");
-        if (remainder) args[spec.name] = remainder;
-      } else if (tokens[index]) {
-        args[spec.name] = tokens[index];
-      }
-    });
-  }
+  const args = parseCommandRest(rest, matchedCommand.args ?? []);
   return { command: matchedCommand, args, raw: trimmed };
 }
 
