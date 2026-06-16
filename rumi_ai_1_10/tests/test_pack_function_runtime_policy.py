@@ -171,7 +171,7 @@ def test_python_host_function_is_rejected_without_env(tmp_path, monkeypatch):
         assert_pack_function_executable(entry)
 
 
-def test_function_entrypoint_outside_pack_boundary_is_rejected(tmp_path, monkeypatch):
+def test_function_entrypoint_path_traversal_is_rejected(tmp_path, monkeypatch):
     root = tmp_path / "root"
     function_dir = root / "pack" / "functions" / "demo"
     function_dir.mkdir(parents=True)
@@ -180,6 +180,26 @@ def test_function_entrypoint_outside_pack_boundary_is_rejected(tmp_path, monkeyp
     entry = _make_entry(function_dir, entrypoint="../../outside.py:run")
     monkeypatch.setattr("core_runtime.pack_function_runtime.BASE_DIR", root)
 
+    monkeypatch.setattr(
+        "core_runtime.pack_function_policy.get_approval_manager",
+        lambda: _make_approval_manager(is_core=True),
+    )
+
+    with pytest.raises(PermissionError, match="Path traversal detected in entrypoint"):
+        assert_pack_function_executable(entry)
+
+
+def test_command_executable_outside_function_boundary_is_rejected(tmp_path, monkeypatch):
+    function_dir = tmp_path / "fn"
+    function_dir.mkdir()
+    outside_bin = tmp_path / "outside-bin"
+    outside_bin.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+    entry = _make_entry(
+        function_dir,
+        calling_convention="command",
+    )
+    entry.command = [str(outside_bin)]
+    monkeypatch.setattr("core_runtime.pack_function_runtime.BASE_DIR", tmp_path)
     monkeypatch.setattr(
         "core_runtime.pack_function_policy.get_approval_manager",
         lambda: _make_approval_manager(is_core=True),

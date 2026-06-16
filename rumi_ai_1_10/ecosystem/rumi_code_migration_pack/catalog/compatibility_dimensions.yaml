@@ -1,0 +1,9 @@
+compatibility_dimensions:
+  pack_id: rumi_code_migration_pack
+  dimensions:
+  - runtime_version
+  - framework_version
+  - os_platform
+  - package_manager
+  - api_behavior
+  - data_config

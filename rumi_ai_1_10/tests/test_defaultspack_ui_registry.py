@@ -142,7 +142,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("tool_assist_mode", tools_field_ids)
         tool_assist_field = next(field for field in tools_section["fields"] if field["id"] == "tool_assist_mode")
         self.assertEqual(catalog["settings"]["values"]["tools"]["tool_assist_mode"], "all")
-        self.assertIn("vector", {option["value"] for option in tool_assist_field["options"]})
+        tool_assist_options = {option["value"] for option in tool_assist_field["options"]}
+        self.assertIn("auto", tool_assist_options)
+        self.assertIn("vector", tool_assist_options)
         general_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "general")
         general_field_ids = {field["id"] for field in general_section["fields"]}
         self.assertIn("language", general_field_ids)
@@ -991,6 +993,11 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from transport.registry import build_fallback_http_routes
 
         class FakeServer:
+            def __getattr__(self, name):
+                if str(name).startswith("_handle_authority_"):
+                    return lambda *_args, **_kwargs: {"status": "ok"}
+                raise AttributeError(name)
+
             def _invoke_fallback_block(self, block_module, request_data, path_params, inject=None):
                 return {"block_module": block_module, "request_data": request_data}
 
@@ -1255,6 +1262,11 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         registered_patterns = {route["pattern"] for route in registry.routes}
 
         class FakeServer:
+            def __getattr__(self, name):
+                if str(name).startswith("_handle_authority_"):
+                    return lambda *_args, **_kwargs: {"status": "ok"}
+                raise AttributeError(name)
+
             def _invoke_fallback_block(self, module_name, request_data, path_params, inject=None):
                 return {"module_name": module_name}
 
@@ -1333,6 +1345,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         self.assertIn("model", ids)
         self.assertIn("think", ids)
+        self.assertIn("deepthink", ids)
         self.assertIn("compact", ids)
         self.assertIn("commit", ids)
         self.assertEqual(next(command for command in commands if command["id"] == "commit")["risk"], "high")
@@ -1358,6 +1371,26 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             "google/gemma-4-31b-it",
             "conv-1",
         )
+
+    def test_slash_command_registry_executes_deepthink_toggle_with_warning(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        registry = SlashCommandRegistry(DEFAULTSPACK_ROOT)
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            service = service_cls.return_value
+            service.set_deepthink_enabled.return_value = {
+                "enabled": True,
+                "message": "DeepThinkをONにしました。タスクには数時間かかる可能性があります。",
+            }
+            result = registry.execute(
+                {"command": "deepthink", "mode": "chat", "args": {"enabled": "on"}},
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["data"]["executed"])
+        self.assertIn("数時間", result["data"]["message"])
+        service.set_deepthink_enabled.assert_called_once_with(True)
 
     def test_slash_command_registry_model_command_opens_picker_without_query(self):
         from domain.frontend.command_registry import SlashCommandRegistry

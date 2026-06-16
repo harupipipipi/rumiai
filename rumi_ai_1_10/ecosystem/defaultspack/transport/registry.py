@@ -244,12 +244,51 @@ def _defaultspack_root() -> Path:
 
 def _read_yaml(path: Path) -> dict[str, Any]:
     try:
-        import yaml
-
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
     except Exception:
         return {}
+    try:
+        import yaml
+
+        data = yaml.safe_load(text)
+    except Exception:
+        if path.name == "legacy_http_routes.yaml":
+            return _read_legacy_routes_yaml_without_pyyaml(text)
+        return {}
     return data if isinstance(data, dict) else {}
+
+
+def _read_legacy_routes_yaml_without_pyyaml(text: str) -> dict[str, Any]:
+    """Parse the simple legacy route allowlist when PyYAML is unavailable."""
+    routes: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    in_legacy_routes = False
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].rstrip()
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("- "):
+            if not in_legacy_routes:
+                continue
+            if current:
+                routes.append(current)
+            current = {}
+            stripped = stripped[2:].strip()
+            if not stripped:
+                continue
+        elif not line.startswith(" "):
+            in_legacy_routes = stripped == "legacy_routes:"
+            continue
+        if not in_legacy_routes:
+            continue
+        if current is None or ":" not in stripped:
+            continue
+        key, value = stripped.split(":", 1)
+        current[key.strip()] = value.strip().strip("\"'")
+    if current:
+        routes.append(current)
+    return {"legacy_routes": routes} if routes else {}
 
 
 def _read_flow_yaml(path: Path) -> dict[str, Any]:
@@ -461,6 +500,26 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/integrations/discord/interactions", block_module="blocks.integrations.discord"),
     HttpRouteSpec("POST", "/api/integrations/discord/events", block_module="blocks.integrations.discord"),
     HttpRouteSpec("POST", "/api/integrations/p2p/events", block_module="blocks.integrations.p2p"),
+    HttpRouteSpec("POST", "/api/remote/tasks", block_module="blocks.remote.task_create"),
+    HttpRouteSpec(
+        "GET",
+        "/api/remote/tasks/{task_id}",
+        block_module="blocks.remote.task_get",
+        path_inject={"task_id": "task_id"},
+    ),
+    HttpRouteSpec(
+        "GET",
+        "/api/remote/tasks/{task_id}/events",
+        block_module="blocks.remote.task_events",
+        path_inject={"task_id": "task_id"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/remote/tasks/{task_id}/cancel",
+        block_module="blocks.remote.task_cancel",
+        path_inject={"task_id": "task_id"},
+    ),
+    HttpRouteSpec("GET", "/api/remote/host/status", block_module="blocks.remote.host_status"),
     HttpRouteSpec("GET", "/api/external/tokens", block_module="blocks.external.tokens"),
     HttpRouteSpec("POST", "/api/external/tokens", block_module="blocks.external.tokens"),
     HttpRouteSpec("GET", "/api/external/sources", block_module="blocks.external.sources"),
@@ -601,6 +660,24 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/agent/org/{id}/instruct", block_module="blocks.agent.org.instruct", path_inject={"id": "id"}),
     HttpRouteSpec("POST", "/api/agent/org/{id}/report", block_module="blocks.agent.org.report", path_inject={"id": "id"}),
     HttpRouteSpec("POST", "/api/agent/org/{id}/transfer", block_module="blocks.agent.org.transfer_context", path_inject={"id": "id"}),
+    HttpRouteSpec("GET", "/api/kanban/boards", block_module="blocks.kanban.api", defaults={"action": "list_boards"}),
+    HttpRouteSpec("POST", "/api/kanban/boards/bootstrap", block_module="blocks.kanban.api", defaults={"action": "bootstrap_board"}),
+    HttpRouteSpec("GET", "/api/kanban/boards/{board_id}", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "get_board"}),
+    HttpRouteSpec("PUT", "/api/kanban/boards/{board_id}", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "update_board"}),
+    HttpRouteSpec("POST", "/api/kanban/boards/{board_id}/cards", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "create_card"}),
+    HttpRouteSpec("POST", "/api/kanban/boards/{board_id}/columns", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "create_column"}),
+    HttpRouteSpec("POST", "/api/kanban/boards/{board_id}/sync-runs", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "sync_runs"}),
+    HttpRouteSpec("POST", "/api/kanban/boards/{board_id}/import-conversation", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "import_conversation"}),
+    HttpRouteSpec("PUT", "/api/kanban/cards/{card_id}", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "update_card"}),
+    HttpRouteSpec("DELETE", "/api/kanban/cards/{card_id}", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "delete_card"}),
+    HttpRouteSpec("POST", "/api/kanban/cards/{card_id}/move", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "move_card"}),
+    HttpRouteSpec("POST", "/api/kanban/cards/{card_id}/agent/start", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "agent_start"}),
+    HttpRouteSpec("GET", "/api/kanban/cards/{card_id}/agent/status", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "agent_status"}),
+    HttpRouteSpec("POST", "/api/kanban/cards/{card_id}/agent/ready", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "agent_ready"}),
+    HttpRouteSpec("POST", "/api/kanban/cards/{card_id}/agent/apply", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "agent_apply"}),
+    HttpRouteSpec("POST", "/api/kanban/cards/{card_id}/agent/dismiss", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "agent_dismiss"}),
+    HttpRouteSpec("PUT", "/api/kanban/columns/{column_id}", block_module="blocks.kanban.api", path_inject={"column_id": "column_id"}, defaults={"action": "update_column"}),
+    HttpRouteSpec("DELETE", "/api/kanban/columns/{column_id}", block_module="blocks.kanban.api", path_inject={"column_id": "column_id"}, defaults={"action": "delete_column"}),
     HttpRouteSpec("GET", "/api/capabilities", block_module="blocks.capability.list"),
     HttpRouteSpec("GET", "/api/capabilities/{id}", block_module="blocks.capability.manifest", path_inject={"id": "capability_id"}),
     HttpRouteSpec("GET", "/api/coding/context", block_module="blocks.coding.context"),
@@ -617,11 +694,18 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/coding/git/branch", block_module="blocks.coding.git_branch"),
     HttpRouteSpec("POST", "/api/coding/git/branch", block_module="blocks.coding.git_branch"),
     HttpRouteSpec("POST", "/api/coding/git/commit", block_module="blocks.coding.git_commit"),
+    HttpRouteSpec("GET", "/api/coding/rumi-log", block_module="blocks.coding.rumi_log", path_inject={"_method": "GET"}),
+    HttpRouteSpec("POST", "/api/coding/rumi-log", block_module="blocks.coding.rumi_log", path_inject={"_method": "POST"}),
     HttpRouteSpec("GET", "/api/coding/checkpoints", block_module="blocks.coding.file_checkpoint", path_inject={"_method": "GET"}),
     HttpRouteSpec("POST", "/api/coding/checkpoints", block_module="blocks.coding.file_checkpoint", path_inject={"_method": "POST"}),
     HttpRouteSpec("GET", "/api/coding/approvals", block_module="blocks.coding.approval_list"),
     HttpRouteSpec("POST", "/api/coding/approvals/approve", block_module="blocks.coding.approval_approve"),
     HttpRouteSpec("POST", "/api/coding/approvals/deny", block_module="blocks.coding.approval_deny"),
+    HttpRouteSpec("GET", "/api/authority/requests", handler_name="_handle_authority_requests"),
+    HttpRouteSpec("GET", "/api/authority/requests/{request_id}", handler_name="_handle_authority_request"),
+    HttpRouteSpec("POST", "/api/authority/test/request", handler_name="_handle_authority_test_request"),
+    HttpRouteSpec("POST", "/api/authority/requests/{request_id}/approve", handler_name="_handle_authority_approve"),
+    HttpRouteSpec("POST", "/api/authority/requests/{request_id}/deny", handler_name="_handle_authority_deny"),
     HttpRouteSpec("POST", "/api/coding/github/pr", block_module="blocks.coding.github_pr_read"),
     HttpRouteSpec("POST", "/api/coding/github/issue", block_module="blocks.coding.github_issue_read"),
     HttpRouteSpec("POST", "/api/coding/github/ci", block_module="blocks.coding.github_ci_status"),
@@ -656,6 +740,21 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/prompts/lint", block_module="blocks.prompt.lint_prompt"),
     HttpRouteSpec("POST", "/api/prompts/compact", block_module="blocks.prompt.compact_prompt"),
     HttpRouteSpec("GET", "/api/tools", block_module="blocks.tool.list"),
+    HttpRouteSpec("GET", "/api/tools/names", block_module="blocks.tool.names"),
+    HttpRouteSpec("GET", "/api/defaultspack/modules", function_id="management_list_modules", function_name="defaultspack:management_list_modules"),
+    HttpRouteSpec("GET", "/api/defaultspack/modules/{id}", function_id="management_get_module", function_name="defaultspack:management_get_module", path_inject={"id": "module_id"}),
+    HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/enable", function_id="management_set_module_state", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "enabled"}),
+    HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/disable", function_id="management_set_module_state", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "disabled"}),
+    HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/reload", function_id="management_set_module_state", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "enabled", "reason": "manual_reload"}),
+    HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/rollback", function_id="management_set_module_state", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "disabled", "reason": "manual_rollback"}),
+    HttpRouteSpec("GET", "/api/defaultspack/migration/status", function_id="management_get_migration_status", function_name="defaultspack:management_get_migration_status"),
+    HttpRouteSpec("GET", "/api/defaultspack/pack-requests", function_id="pack_request_list", function_name="defaultspack:pack_request_list"),
+    HttpRouteSpec("GET", "/api/defaultspack/pack-requests/{id}", function_id="pack_request_get", function_name="defaultspack:pack_request_get", path_inject={"id": "request_id"}),
+    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/request-extension", function_id="pack_request_request_extension", function_name="defaultspack:pack_request_request_extension"),
+    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/forced-patch", function_id="pack_request_forced_patch", function_name="defaultspack:pack_request_forced_patch"),
+    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/{id}/approve", function_id="pack_request_review", function_name="defaultspack:pack_request_review", path_inject={"id": "request_id"}, defaults={"decision": "approve"}),
+    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/{id}/reject", function_id="pack_request_review", function_name="defaultspack:pack_request_review", path_inject={"id": "request_id"}, defaults={"decision": "reject"}),
+    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/{id}/rollback", function_id="pack_request_rollback", function_name="defaultspack:pack_request_rollback", path_inject={"id": "request_id"}),
     HttpRouteSpec("GET", "/api/tools/mcp", block_module="blocks.tool.mcp_list"),
     HttpRouteSpec("POST", "/api/tools/mcp", block_module="blocks.tool.mcp_registry"),
     HttpRouteSpec("DELETE", "/api/tools/mcp", block_module="blocks.tool.mcp_registry"),
@@ -736,6 +835,8 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/desktop-system-info", handler_name="_handle_desktop_system_info"),
     HttpRouteSpec("GET", "/", handler_name="_handle_chat_redirect"),
     HttpRouteSpec("GET", "/chat", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/coding", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/approval", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/static/{path}", handler_name="_handle_static_file"),
 ]
 
@@ -792,7 +893,7 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
                 request_data,
                 path_params,
                 *,
-                function_name=spec.function_id,
+                function_name=spec.function_name or spec.function_id,
                 fallback_block_module=spec.legacy_block_module or spec.fallback_block_module,
                 path_inject=dict(spec.path_inject),
                 route_defaults=dict(spec.defaults),

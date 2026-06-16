@@ -1,0 +1,38 @@
+example:
+  id: language_vocab_review
+  user_request: Prepare a spaced review queue for my Spanish vocabulary notes.
+  input_state: local_artifacts_supplied
+  local_notes:
+  - note_id: note_spanish_03
+    title: Spanish notebook, food vocabulary
+    spans:
+    - span_id: span_03_s1
+      summary: la manzana means apple, el pan means bread, and la leche means milk.
+    - span_id: span_03_s2
+      summary: Teacher marked gendered articles as the review priority.
+  expected_result: review_queue_handoff_packet
+  expected_packet:
+    artifact_type: review_queue
+    handoff_owner: rumi_workflow_scheduler_pack
+    source_note_ids:
+    - note_spanish_03
+    uncertainty_level: low
+    review_items:
+    - item_id: vocab_food_apple
+      skill_id: article_plus_food_word
+      prompt: Recall the article and meaning for la manzana.
+      source_note_ids:
+      - note_spanish_03
+      source_span_ids:
+      - span_03_s1
+    next_review_reason: Prioritize gendered articles because the cited teacher note marks them for review.
+    uncertainty_or_limitations:
+    - Queue includes only vocabulary present in note_spanish_03.
+  must_include:
+  - evidence_ids
+  - uncertainty_or_limitations
+  - handoff_owner
+  must_not:
+  - external_action
+  - uncited_claim
+  - credential_requirement

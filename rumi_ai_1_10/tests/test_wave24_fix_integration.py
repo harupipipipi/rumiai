@@ -107,9 +107,12 @@ class TestVocabIntegration:
 # =================================================================
 
 class TestRegistryPattern:
-    def test_register_with_kwargs(self):
+    def test_register_with_kwargs(self, tmp_path):
         """registry.py の _load_functions() と同じキーワード引数で登録できる"""
         reg = FunctionRegistry()
+        func_dir = tmp_path / "functions" / "my_func"
+        func_dir.mkdir(parents=True)
+        (func_dir / "main.py").write_text("def run(ctx, args): return {}\n", encoding="utf-8")
         manifest = {
             "function_id": "my_func",
             "description": "Does something",
@@ -120,7 +123,7 @@ class TestRegistryPattern:
             pack_id="test_pack",
             function_id="my_func",
             manifest=manifest,
-            function_dir=Path("/tmp/functions/my_func"),
+            function_dir=func_dir,
         )
         assert result is True
         entry = reg.get("test_pack:my_func")

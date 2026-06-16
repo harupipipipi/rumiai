@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/consent_record.schema.json",
+  "title": "Consent Record",
+  "description": "Contract schema for Consent Record.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "consent_id",
+    "participant_id",
+    "consent_state",
+    "allowed_use",
+    "expires_at_state",
+    "evidence_ids",
+    "review_owner"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "consent_state": {
+            "const": "revoked"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "allowed_use": {
+            "contains": {
+              "const": "do_not_use"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "consent_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "participant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "consent_state": {
+      "type": "string",
+      "enum": [
+        "granted",
+        "limited",
+        "revoked",
+        "unknown"
+      ]
+    },
+    "allowed_use": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "synthesis",
+          "quote_with_review",
+          "aggregate_only",
+          "do_not_use"
+        ]
+      }
+    },
+    "expires_at_state": {
+      "type": "string",
+      "enum": [
+        "explicit",
+        "none",
+        "unknown"
+      ]
+    },
+    "evidence_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "review_owner": {
+      "type": "string",
+      "const": "rumi_customer_research_pack"
+    }
+  }
+}

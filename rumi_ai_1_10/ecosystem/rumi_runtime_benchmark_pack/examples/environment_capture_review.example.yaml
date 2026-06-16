@@ -1,0 +1,16 @@
+id: rumi_runtime_benchmark_pack.examples.environment_capture_review
+profile: rumi_runtime_benchmark_pack.runtime_benchmark_reviewer
+task: Review whether a benchmark result can be reproduced from local evidence.
+expected_passes:
+  - reproducibility_auditor
+  - sampling_reviewer
+  - final_benchmark_integrator
+required_outputs:
+  - environment_capture_summary
+  - missing_reproducibility_fields
+  - fixture_version_notes
+  - rerun_recommendation
+safety_notes:
+  - no credentials in environment capture
+  - network none by default
+  - record provider labels without secrets

@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/contradiction_detection_contract.schema.json",
+  "title": "Contradiction Detection Contract",
+  "description": "Contract for contradiction candidates; does not run a model scorer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_id",
+    "candidate_claim_ids",
+    "candidate_evidence_ids",
+    "detector_kind",
+    "human_review_required",
+    "output_schema_ref",
+    "model_scoring_allowed",
+    "runtime_execution",
+    "detection_output_only"
+  ],
+  "properties": {
+    "contract_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_claim_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "candidate_evidence_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "detector_kind": {
+      "type": "string",
+      "enum": [
+        "schema_rule",
+        "human_review",
+        "external_model_handoff"
+      ]
+    },
+    "human_review_required": {
+      "type": "boolean",
+      "const": true
+    },
+    "output_schema_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_scoring_allowed": {
+      "type": "boolean",
+      "const": false
+    },
+    "runtime_execution": {
+      "type": "string",
+      "const": "not_owned_by_this_pack"
+    },
+    "detection_output_only": {
+      "type": "boolean",
+      "const": true
+    }
+  }
+}

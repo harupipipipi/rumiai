@@ -8,23 +8,55 @@ from urllib.parse import unquote
 
 from ._helpers import _SAFE_ERROR_MSG, _log_internal_error
 from .api_response import APIResponse
+from .route_errors import api_route_function_error_status, api_route_function_public_error
 from .route_handlers import _compile_template_path, _is_safe_path_param
 from ..validation import HANDLER_NAME_RE
 
 
 logger = logging.getLogger(__name__)
 
-_FUNCTION_ROUTE_FORBIDDEN_ERRORS = {
-    "caller_requires_denied",
-    "grant_denied",
-    "pack_not_approved",
-    "permission_denied",
-    "requires_denied",
-    "trust_denied",
-}
-
-
 class APIRouteTableMixin:
+    @classmethod
+    def _is_pack_approved_for_runtime_routes(cls, pack_id: str) -> bool:
+        normalized_pack_id = str(pack_id or "").strip()
+        if not normalized_pack_id:
+            return False
+        manager = getattr(cls, "approval_manager", None)
+        if manager is None:
+            try:
+                from ..approval_manager import get_approval_manager
+
+                manager = get_approval_manager()
+            except Exception as exc:
+                logger.warning(
+                    "Skipping runtime routes for pack '%s': approval manager unavailable: %s",
+                    normalized_pack_id,
+                    exc,
+                )
+                return False
+        try:
+            result = manager.is_pack_approved_and_verified(normalized_pack_id)
+        except Exception as exc:
+            logger.warning(
+                "Skipping runtime routes for pack '%s': approval verification failed: %s",
+                normalized_pack_id,
+                exc,
+            )
+            return False
+        if isinstance(result, tuple):
+            approved = bool(result[0])
+            reason = result[1] if len(result) > 1 else None
+        else:
+            approved = bool(result)
+            reason = None
+        if not approved:
+            logger.warning(
+                "Skipping runtime routes for unapproved pack '%s': %s",
+                normalized_pack_id,
+                reason or "not approved",
+            )
+        return approved
+
     @staticmethod
     def _pack_root_hint(pack_info: Any) -> Optional[Any]:
         for attr in ("subdir", "path", "pack_dir"):
@@ -131,6 +163,8 @@ class APIRouteTableMixin:
             for pack_id, pack_info in registry.packs.items():
                 if pack_ids is not None and pack_id not in pack_ids:
                     continue
+                if not cls._is_pack_approved_for_runtime_routes(pack_id):
+                    continue
                 count += cls._register_api_routes_from_manifest(
                     pack_id,
                     pack_info.ecosystem,
@@ -178,6 +212,14 @@ class APIRouteTableMixin:
         if entry is None:
             return False
 
+        pack_id = entry.get("pack_id", "")
+        if not self._is_pack_approved_for_runtime_routes(pack_id):
+            self._send_response(
+                APIResponse(False, error=f"Pack not approved: {pack_id}"),
+                403,
+            )
+            return True
+
         handler_name = entry["handler"]
         pass_body = entry.get("pass_body", False)
         pass_query = entry.get("pass_query", False)
@@ -205,6 +247,8 @@ class APIRouteTableMixin:
                     return True
 
                 call_args = dict(body if pass_body and body is not None else {})
+                if pass_query:
+                    call_args.update(dict(query or {}))
                 call_args.update(entry.get("args") or {})
                 param_map = entry.get("path_param_map") or {}
                 if param_map:
@@ -230,15 +274,16 @@ class APIRouteTableMixin:
                 )
                 if not getattr(response, "success", False):
                     error_type = str(getattr(response, "error_type", "") or "")
-                    if error_type == "function_not_found":
+                    status = api_route_function_error_status(error_type)
+                    if status is None:
                         return False
-                    status = 403 if error_type in _FUNCTION_ROUTE_FORBIDDEN_ERRORS else 500
-                    if error_type == "invalid_request":
-                        status = 400
-                    elif error_type == "rate_limited":
-                        status = 429
+                    error_value = api_route_function_public_error(
+                        error_type,
+                        getattr(response, "error", None),
+                        _SAFE_ERROR_MSG,
+                    )
                     self._send_response(
-                        APIResponse(False, error=str(getattr(response, "error", None) or _SAFE_ERROR_MSG)),
+                        APIResponse(False, error=error_value),
                         status,
                     )
                     return True
@@ -259,6 +304,8 @@ class APIRouteTableMixin:
                     args.append(dict(query or {}))
                 result = handler(*args)
 
+            if entry.get("function_id") and str(entry.get("function_id") or "").startswith("remote_"):
+                result = self._unwrap_defaultspack_function_envelope(result)
             sse_events = self._sse_events_from_result(result)
             if sse_events is not None:
                 self._send_sse(sse_events)

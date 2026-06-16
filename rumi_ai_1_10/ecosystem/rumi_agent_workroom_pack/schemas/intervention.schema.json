@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/intervention.schema.json",
+  "title": "Intervention",
+  "description": "Human intervention contract for running workrooms.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "intervention_id",
+    "session_id",
+    "kind",
+    "target_sequence",
+    "instruction",
+    "approval_receipt",
+    "effect"
+  ],
+  "properties": {
+    "intervention_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "interrupt",
+        "redirect",
+        "cancel"
+      ]
+    },
+    "target_sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "instruction": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approval_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approved_by",
+        "approved_at",
+        "scope"
+      ],
+      "properties": {
+        "approved_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approved_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "effect": {
+      "type": "string",
+      "enum": [
+        "pause",
+        "replace_future_plan",
+        "cancel_future_events"
+      ]
+    }
+  }
+}

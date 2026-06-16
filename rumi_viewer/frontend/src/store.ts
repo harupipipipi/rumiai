@@ -20,6 +20,7 @@ import {
   openExternalUrl,
   startOAuth,
 } from './lib/api';
+import type { ApiSupervisorDashboard } from './lib/apiTypes';
 import {
   transformDashboard,
   transformPacks,
@@ -28,11 +29,15 @@ import {
   transformVersion,
 } from './lib/transforms';
 import { RUMI_DISPLAY_VERSION } from './lib/version';
+import {
+  COLOR_MODE_STORAGE_KEY,
+  THEME_STORAGE_KEY,
+  normalizeColorMode,
+  normalizeTheme,
+} from './lib/appearance';
+import type { ColorMode, Theme } from './lib/appearance';
 
-export type Theme = 'Rumi' | 'Minimal' | 'Standard' | 'Rounded';
-const VALID_THEMES: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
-
-export type ColorMode = 'light' | 'dark';
+export type { ColorMode, Theme } from './lib/appearance';
 
 function readLocalStorage(key: string): string | null {
   try {
@@ -109,6 +114,7 @@ export interface DashboardData {
   activePacks: number;
   registeredFlows: number;
   activities: Activity[];
+  supervisor: ApiSupervisorDashboard | null;
 }
 
 export interface Profile {
@@ -215,6 +221,7 @@ const defaultDashboard: DashboardData = {
   activePacks: 0,
   registeredFlows: 0,
   activities: [],
+  supervisor: null,
 };
 
 const defaultProfile: Profile = {
@@ -256,15 +263,15 @@ function transformUpdateInfo(update: {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  theme: (readLocalStorage('rumi-theme') as Theme) || 'Rumi',
+  theme: normalizeTheme(readLocalStorage(THEME_STORAGE_KEY)),
   setTheme: (theme) => {
-    writeLocalStorage('rumi-theme', theme);
+    writeLocalStorage(THEME_STORAGE_KEY, theme);
     set({ theme });
   },
 
-  colorMode: (readLocalStorage('rumi-color-mode') as ColorMode) || 'dark',
+  colorMode: normalizeColorMode(readLocalStorage(COLOR_MODE_STORAGE_KEY)),
   setColorMode: (mode) => {
-    writeLocalStorage('rumi-color-mode', mode);
+    writeLocalStorage(COLOR_MODE_STORAGE_KEY, mode);
     set({ colorMode: mode });
   },
 

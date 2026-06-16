@@ -1,0 +1,46 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://rumi.local/schemas/compatibility_matrix.schema.json
+title: Compatibility Matrix
+description: Code migration planning contract schema.
+type: object
+additionalProperties: false
+required:
+- matrix_id
+- runtime_versions
+- framework_versions
+- os_platform
+- package_manager_constraints
+- api_behavior_deltas
+- supported_cells
+- unsupported_cells
+properties:
+  matrix_id:
+    type: string
+    minLength: 1
+  runtime_versions:
+    type: array
+    items:
+      type: string
+  framework_versions:
+    type: array
+    items:
+      type: string
+  os_platform:
+    type: string
+    minLength: 1
+  package_manager_constraints:
+    type: array
+    items:
+      type: string
+  api_behavior_deltas:
+    type: array
+    items:
+      type: string
+  supported_cells:
+    type: array
+    items:
+      type: string
+  unsupported_cells:
+    type: array
+    items:
+      type: string

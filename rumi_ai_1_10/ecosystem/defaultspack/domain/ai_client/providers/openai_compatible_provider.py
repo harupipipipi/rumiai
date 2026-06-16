@@ -537,13 +537,13 @@ class OpenAICompatibleProvider(OpenAIProvider):
             raise RuntimeError(f"{self.provider_id}: base URL is not configured")
         self.BASE_URL = self._base_url
 
-    def _request_json(self, path, body):
+    def _request_json(self, path, body, *, timeout=120.0):
         self._ensure_runtime_config()
-        return super()._request_json(path, body)
+        return super()._request_json(path, body, timeout=timeout)
 
-    def _request_stream(self, path, body):
+    def _request_stream(self, path, body, *, timeout=120.0):
         self._ensure_runtime_config()
-        return super()._request_stream(path, body)
+        return super()._request_stream(path, body, timeout=timeout)
 
     def _request_multipart(self, path, fields, files):
         self._ensure_runtime_config()

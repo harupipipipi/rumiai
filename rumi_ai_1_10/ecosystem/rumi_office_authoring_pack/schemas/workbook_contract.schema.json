@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/workbook_contract.schema.json",
+  "title": "Workbook Contract",
+  "description": "Office authoring contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workbook_id",
+    "tabs",
+    "tables",
+    "formula_map_id",
+    "validation_plan_id",
+    "charts",
+    "review_gate",
+    "export_plan_id",
+    "file_creation_owner",
+    "analysis_owner",
+    "formula_review_required"
+  ],
+  "properties": {
+    "workbook_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tabs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tables": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "formula_map_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "validation_plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "charts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "review_gate": {
+      "type": "string",
+      "minLength": 1
+    },
+    "export_plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "file_creation_owner": {
+      "const": "rumi_workspace_pack"
+    },
+    "analysis_owner": {
+      "const": "rumi_data_analysis_pack"
+    },
+    "formula_review_required": {
+      "const": true
+    }
+  }
+}

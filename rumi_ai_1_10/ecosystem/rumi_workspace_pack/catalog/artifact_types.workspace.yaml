@@ -1,0 +1,36 @@
+catalog_id: rumi_workspace_pack.artifact_types
+version: 1.0.0
+artifact_types:
+  document:
+    extensions: [md, docx, txt]
+    editable: true
+    preferred_source: structured_markdown
+    lifecycle: [planned, drafted, reviewed, exported]
+  slides:
+    extensions: [pptx, html, pdf]
+    editable: true
+    preferred_source: slide_outline
+    lifecycle: [planned, storyboarded, rendered, reviewed, exported]
+  spreadsheet:
+    extensions: [xlsx, csv, tsv]
+    editable: true
+    preferred_source: workbook_schema
+    lifecycle: [planned, populated, validated, charted, exported]
+  chart:
+    extensions: [png, svg, html]
+    editable: partially
+    preferred_source: chart_spec
+    lifecycle: [specified, rendered, annotated, embedded]
+  pdf:
+    extensions: [pdf]
+    editable: false
+    preferred_source: document_or_deck
+    lifecycle: [queued, rendered, checked, exported]
+  export_bundle:
+    extensions: [zip]
+    editable: false
+    preferred_source: artifact_manifest
+    lifecycle: [assembled, checksummed, delivered]
+artifact_manifest_fields:
+  required: [artifact_id, type, path, title, source_profile]
+  recommended: [owner, created_at, source_inputs, export_targets, checksum]

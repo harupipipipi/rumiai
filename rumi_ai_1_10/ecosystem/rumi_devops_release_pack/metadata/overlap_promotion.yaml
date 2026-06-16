@@ -1,0 +1,34 @@
+version: rumi.pack_overlap.v1
+pack_id: rumi_devops_release_pack
+
+defaultspack_promotion:
+  eligible: false
+  reason: Optional DevOps and release overlay; defaultspack remains the runtime foundation.
+  promoted_capabilities: []
+
+overlap_policy:
+  default: prefer_explicit_pack_namespace
+  complements:
+    - pack_id: defaultspack
+      boundary: runtime primitives, approvals, graph, profile, prompt, and audit plumbing
+    - pack_id: rumi_default_tools_pack
+      boundary: concrete file, git, terminal, browser, and research tools
+    - pack_id: rumi_code_ide_pack
+      boundary: code edits, patch loops, IDE pairing, implementation tests
+    - pack_id: rumi_agent_services_pack
+      boundary: service-agent topology, service runtime composition, service lifecycle
+  owned_by_this_pack:
+    - ci triage evidence
+    - release gates
+    - release notes evidence
+    - deploy runbook drafts
+    - rollback planning
+    - incident recovery evidence
+
+conflict_policy:
+  conflicts_with: []
+  resolution: This pack should be opt-in and namespaced; it should not override code or service packs.
+
+network_policy:
+  default: none
+  live_platform_access: requires explicit user request and runtime approval

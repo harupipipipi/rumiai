@@ -1,0 +1,21 @@
+catalog_id: rumi_browser_automation.actions
+schema_version: 1
+actions:
+  - id: observe_page
+    purpose: Capture title, URL, visible text, screenshot, and optional semantic DOM.
+    requires_confirmation: false
+  - id: highlight_candidate
+    purpose: Visually mark the target element before acting when there is ambiguity.
+    requires_confirmation: false
+  - id: bounded_click
+    purpose: Click a stable element only after observation confirms intent.
+    requires_confirmation: false
+  - id: bounded_type
+    purpose: Type user-approved text into a recognized editable field.
+    requires_confirmation: false
+  - id: submit_or_save
+    purpose: Trigger a state-changing submit/save action.
+    requires_confirmation: true
+  - id: visual_compare
+    purpose: Compare expected and observed screenshots for layout regressions.
+    requires_confirmation: false

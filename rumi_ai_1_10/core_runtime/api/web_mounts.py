@@ -12,6 +12,35 @@ logger = logging.getLogger(__name__)
 
 
 class WebMountMixin:
+    _TRUSTED_PRE_AUTH_PACKS = {
+        "core_control_panel": "core:rumi/control_panel",
+        "core_setup": "core:rumi/setup",
+    }
+    _FIXED_PRE_AUTH_ROUTES = {
+        ("POST", "/api/integrations/p2p/events"),
+    }
+
+    @classmethod
+    def _is_trusted_pre_auth_pack(cls, pack_id: str, pack_info: Any) -> bool:
+        """Only bundled core packs may contribute global pre-auth routes."""
+        expected_identity = cls._TRUSTED_PRE_AUTH_PACKS.get(pack_id)
+        if expected_identity is None:
+            return False
+
+        ecosystem = getattr(pack_info, "ecosystem", {}) or {}
+        if ecosystem.get("pack_id", pack_id) != pack_id:
+            return False
+        if ecosystem.get("pack_identity") != expected_identity:
+            return False
+        if not (ecosystem.get("metadata", {}) or {}).get("is_core_pack", False):
+            return False
+
+        base_dir = Path(
+            str(getattr(pack_info, "subdir", None) or getattr(pack_info, "path", ""))
+        ).resolve()
+        expected_dir = (Path(__file__).resolve().parent.parent / "core_pack" / pack_id).resolve()
+        return base_dir == expected_dir
+
     @staticmethod
     def _resolve_pack_static_root(pack_info: Any, static_root_rel: str) -> Optional[Path]:
         """Resolve a pack static root and reject paths escaping the pack directory."""
@@ -36,6 +65,8 @@ class WebMountMixin:
         count = 0
         for pack_id, pack_info in registry.packs.items():
             if pack_ids is not None and pack_id not in pack_ids:
+                continue
+            if not cls._is_pack_approved_for_runtime_routes(pack_id):
                 continue
             wm = pack_info.ecosystem.get("web_mount")
             if not wm or not isinstance(wm, dict):
@@ -71,7 +102,7 @@ class WebMountMixin:
         for pack_id, pack_info in registry.packs.items():
             if pack_ids is not None and pack_id not in pack_ids:
                 continue
-            allow_pre_auth = cls._pack_allows_in_process_api_metadata(pack_id, pack_info)
+            allow_pre_auth = cls._is_trusted_pre_auth_pack(pack_id, pack_info)
             routes = pack_info.ecosystem.get("pre_auth_routes")
             if routes and isinstance(routes, list):
                 if not allow_pre_auth:
@@ -119,7 +150,9 @@ class WebMountMixin:
         for wm in self._web_mounts:
             prefix = wm["path_prefix"]
             if request_path == prefix or request_path.startswith(prefix + "/"):
-                return wm
+                if self._is_pack_approved_for_runtime_routes(wm.get("pack_id", "")):
+                    return wm
+                continue
         fallback_mounts = {
             "/panel": {
                 "web_root": Path(__file__).resolve().parent.parent / "core_pack" / "core_control_panel" / "web",
@@ -138,8 +171,13 @@ class WebMountMixin:
         }
         for prefix, mount in fallback_mounts.items():
             if request_path == prefix or request_path.startswith(prefix + "/"):
-                return {"path_prefix": prefix, **mount}
+                candidate = {"path_prefix": prefix, **mount}
+                if self._is_pack_approved_for_runtime_routes(candidate.get("pack_id", "")):
+                    return candidate
         return None
+
+    def _is_fixed_pre_auth_route(self, method: str, path: str) -> bool:
+        return (str(method or "").upper(), path) in self._FIXED_PRE_AUTH_ROUTES
 
     _MIME_TYPES = {
         ".html": "text/html; charset=utf-8",
@@ -167,6 +205,9 @@ class WebMountMixin:
             _wm = self._match_web_mount(request_path)
         if _wm is None:
             self._send_response(APIResponse(False, error="Not found"), 404)
+            return
+        if not self._is_pack_approved_for_runtime_routes(_wm.get("pack_id", "")):
+            self._send_response(APIResponse(False, error="Forbidden"), 403)
             return
 
         path_prefix = _wm["path_prefix"]

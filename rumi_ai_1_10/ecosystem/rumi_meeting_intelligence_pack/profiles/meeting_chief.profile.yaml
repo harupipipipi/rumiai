@@ -1,0 +1,21 @@
+profile:
+  id: meeting_chief
+  responsibilities:
+  - meeting_prebrief
+  - decision_log
+  - transcript_to_decisions
+  - action_item_extraction
+  - evidence_linked_recap
+  - evidence_linked_recap_bundle
+  - followup_draft_contract
+  default_posture:
+  - local_first
+  - cite_source_spans
+  - draft_only_external_messages
+  - handoff_execution_to_owner_packs
+  must_not:
+  - live capture
+  - connector sending
+  - calendar mutation
+  - business workflow execution
+  - document parsing

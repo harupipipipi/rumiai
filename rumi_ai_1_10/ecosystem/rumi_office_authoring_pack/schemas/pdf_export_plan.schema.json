@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/pdf_export_plan.schema.json",
+  "title": "Pdf Export Plan",
+  "description": "Office authoring contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "export_plan_id",
+    "source_artifact_ids",
+    "format_targets",
+    "pagination_checks",
+    "accessibility_checks",
+    "render_owner",
+    "manifest_only",
+    "file_creation_owner",
+    "verified_export_requires_review_gate"
+  ],
+  "properties": {
+    "export_plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_artifact_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "format_targets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pagination_checks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "accessibility_checks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "render_owner": {
+      "const": "rumi_workspace_pack"
+    },
+    "manifest_only": {
+      "const": true
+    },
+    "file_creation_owner": {
+      "const": "rumi_workspace_pack"
+    },
+    "verified_export_requires_review_gate": {
+      "const": true
+    }
+  }
+}

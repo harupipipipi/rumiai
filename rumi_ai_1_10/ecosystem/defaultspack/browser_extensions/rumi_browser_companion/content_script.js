@@ -1,37 +1,81 @@
 (function () {
   const ELEMENT_ATTR = "data-rumi-element-id";
+  const HIGHLIGHT_LAYER_ID = "rumi-browser-companion-highlight-layer";
   const ROUTE_MESSAGE_TYPE = "rumi:search-home-route-state";
+  const SEARCH_HOME_MESSAGE_SOURCE = "rumi-search-home";
+  const SEARCH_HOME_ROUTE_STATE_MAX_AGE_MS = 1000 * 60 * 60 * 6;
   let sequence = 0;
+  let highlightTimer = null;
+  let searchHomeRouteStateExpiresAt = 0;
+
+  refreshSearchHomeRouteState();
+  window.addEventListener("focus", () => {
+    refreshSearchHomeRouteState();
+  });
 
   window.addEventListener("message", (event) => {
     if (event.source !== window) {
       return;
     }
-    const payload = event.data;
-    if (!payload || payload.type !== ROUTE_MESSAGE_TYPE) {
+    const message = event.data;
+    if (!isTrustedSearchHomeRouteMessage(event, message)) {
       return;
     }
-    void chrome.runtime.sendMessage({
+    searchHomeRouteStateExpiresAt = Date.now() + SEARCH_HOME_ROUTE_STATE_MAX_AGE_MS;
+    chrome.runtime.sendMessage({
       type: "rumi:search-home:set-route-state",
-      payload: payload.payload || {}
+      source_origin: event.origin,
+      payload: message.payload || {}
     });
   });
 
   window.addEventListener(
     "keydown",
     (event) => {
-      const action = searchHomeHotkeyAction(event);
-      if (!action) {
+      if (!isSearchHomeHotkey(event)) {
         return;
       }
       event.preventDefault();
-      void chrome.runtime.sendMessage({
+      event.stopPropagation();
+      chrome.runtime.sendMessage({
         type: "rumi:search-home:advance-candidate",
-        action
+        action: event.key === "ArrowLeft" ? "prev" : event.key === "ArrowRight" ? "next" : "open"
       });
     },
     true
   );
+
+  function isSearchHomeHotkey(event) {
+    if (Date.now() > searchHomeRouteStateExpiresAt) {
+      return false;
+    }
+    return event.key === "ArrowRight" || event.key === "ArrowLeft" || event.key === "Enter";
+  }
+
+  function refreshSearchHomeRouteState() {
+    try {
+      const maybePromise = chrome.runtime.sendMessage(
+        { type: "rumi:search-home:get-route-state" },
+        (response) => {
+          updateSearchHomeRouteStateExpiry(response);
+        }
+      );
+      if (maybePromise && typeof maybePromise.then === "function") {
+        maybePromise.then(updateSearchHomeRouteStateExpiry).catch(() => {});
+      }
+    } catch (_error) {
+      searchHomeRouteStateExpiresAt = 0;
+    }
+  }
+
+  function updateSearchHomeRouteStateExpiry(response) {
+    if (!response || response.ok !== true || response.active !== true) {
+      searchHomeRouteStateExpiresAt = 0;
+      return;
+    }
+    const expiresAt = Number(response.expires_at);
+    searchHomeRouteStateExpiresAt = Number.isFinite(expiresAt) ? expiresAt : 0;
+  }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || !message.type) {
@@ -42,6 +86,7 @@
       if (message.type === "rumi:dom-snapshot") {
         sendResponse({
           ok: true,
+          schema_version: "semantic_dom_v2",
           url: location.href,
           title: document.title,
           viewport: {
@@ -50,7 +95,7 @@
             scrollX: window.scrollX,
             scrollY: window.scrollY
           },
-          nodes: collectSnapshot(Number(message.maxNodes) || 300)
+          nodes: collectSnapshot(Number(message.maxNodes) || 300, message.options || message)
         });
         return;
       }
@@ -69,48 +114,76 @@
     return true;
   });
 
-  function collectSnapshot(maxNodes) {
+  function collectSnapshot(maxNodes, options) {
     const nodes = [];
-    const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_ELEMENT);
+    const roots = [document.body || document.documentElement];
+    const includeHidden = Boolean(options && options.includeHidden);
 
-    while (walker.nextNode() && nodes.length < maxNodes) {
-      const element = walker.currentNode;
-      if (!(element instanceof HTMLElement)) {
-        continue;
+    while (roots.length > 0 && nodes.length < maxNodes) {
+      const root = roots.shift();
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+
+      while (walker.nextNode() && nodes.length < maxNodes) {
+        const element = walker.currentNode;
+        if (!(element instanceof HTMLElement)) {
+          continue;
+        }
+        if (element.shadowRoot) {
+          roots.push(element.shadowRoot);
+        }
+        const rect = element.getBoundingClientRect();
+        const computedStyle = window.getComputedStyle(element);
+        const isVisible =
+          rect.width > 0 &&
+          rect.height > 0 &&
+          computedStyle.visibility !== "hidden" &&
+          computedStyle.display !== "none" &&
+          Number(computedStyle.opacity || 1) > 0;
+        if (!includeHidden && !isVisible) {
+          continue;
+        }
+
+        const elementId = ensureElementId(element);
+        const role = element.getAttribute("role") || inferRole(element);
+        const labels = extractLabels(element);
+        const text = extractAccessibleText(element, labels);
+        const interactive = isInteractiveElement(element, role);
+        const actionHints = buildActionHints(element, role, interactive);
+
+        nodes.push({
+          index: nodes.length,
+          element_id: elementId,
+          semantic_id: buildSemanticId(element, role, text),
+          tag: element.tagName.toLowerCase(),
+          id: element.id || "",
+          role: role || "",
+          name: text,
+          accessible_name: text,
+          text,
+          labels,
+          nearby_text: extractNearbyText(element),
+          rect: {
+            x: round2(rect.x),
+            y: round2(rect.y),
+            width: round2(rect.width),
+            height: round2(rect.height)
+          },
+          is_visible: isVisible,
+          is_in_viewport: isInViewport(rect),
+          interactive,
+          flags: {
+            clickable: interactive.clickable,
+            editable: interactive.editable,
+            focusable: interactive.focusable,
+            scrollable: interactive.scrollable
+          },
+          action_hints: actionHints,
+          attributes: collectSafeAttributes(element),
+          recognition_confidence: recognitionConfidence(element, role, text, labels, interactive),
+          selector_hint: buildSelectorHint(element),
+          xpath_hint: buildXPathHint(element)
+        });
       }
-      const rect = element.getBoundingClientRect();
-      const isVisible = rect.width > 0 && rect.height > 0 && window.getComputedStyle(element).visibility !== "hidden";
-      if (!isVisible) {
-        continue;
-      }
-
-      const elementId = ensureElementId(element);
-      const role = element.getAttribute("role") || inferRole(element);
-      const text = extractAccessibleText(element);
-      const interactive = isInteractiveElement(element, role);
-
-      nodes.push({
-        element_id: elementId,
-        tag: element.tagName.toLowerCase(),
-        id: element.id || "",
-        role: role || "",
-        name: text,
-        text,
-        rect: {
-          x: round2(rect.x),
-          y: round2(rect.y),
-          width: round2(rect.width),
-          height: round2(rect.height)
-        },
-        interactive,
-        flags: {
-          clickable: interactive.clickable,
-          editable: interactive.editable,
-          focusable: interactive.focusable,
-          scrollable: interactive.scrollable
-        },
-        selector_hint: buildSelectorHint(element)
-      });
     }
 
     return nodes;
@@ -135,6 +208,11 @@
       case "page.extract":
       ensureTarget(target, "extract");
       return extractFromElement(target, command);
+      case "page.highlight":
+      ensureTarget(target, "highlight");
+      return highlightElement(target, command);
+      case "page.clear_highlight":
+      return clearHighlights();
       default:
         throw new Error(`Unsupported content command: ${action || command.type}`);
     }
@@ -156,6 +234,9 @@
     }
     if (action === "page.scroll") {
       return document.scrollingElement || document.documentElement || document.body;
+    }
+    if (action === "page.clear_highlight") {
+      return document.body || document.documentElement;
     }
     return null;
   }
@@ -328,13 +409,60 @@
     return "";
   }
 
-  function extractAccessibleText(element) {
+  function extractAccessibleText(element, labels) {
     const ariaLabel = element.getAttribute("aria-label");
     const alt = element.getAttribute("alt");
     const placeholder = element.getAttribute("placeholder");
     const value = "value" in element ? element.value : "";
+    const labelText = Array.isArray(labels) ? labels.join(" ") : "";
     const text = (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
-    return (ariaLabel || alt || placeholder || value || text || "").slice(0, 500);
+    return (ariaLabel || labelText || alt || placeholder || value || text || "").slice(0, 500);
+  }
+
+  function extractLabels(element) {
+    const labels = [];
+    const ariaLabel = element.getAttribute("aria-label");
+    if (ariaLabel) {
+      labels.push(ariaLabel);
+    }
+    const labelledBy = element.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      for (const id of labelledBy.split(/\s+/)) {
+        const ref = document.getElementById(id);
+        if (ref) {
+          labels.push(ref.innerText || ref.textContent || "");
+        }
+      }
+    }
+    if ("labels" in element && element.labels) {
+      for (const label of element.labels) {
+        labels.push(label.innerText || label.textContent || "");
+      }
+    }
+    if (element.id) {
+      const explicit = document.querySelector(`label[for="${cssEscape(element.id)}"]`);
+      if (explicit) {
+        labels.push(explicit.innerText || explicit.textContent || "");
+      }
+    }
+    const wrappingLabel = element.closest("label");
+    if (wrappingLabel) {
+      labels.push(wrappingLabel.innerText || wrappingLabel.textContent || "");
+    }
+    return uniqueCleanText(labels, 120).slice(0, 6);
+  }
+
+  function extractNearbyText(element) {
+    const candidates = [];
+    const previous = element.previousElementSibling;
+    const parent = element.parentElement;
+    if (previous) {
+      candidates.push(previous.innerText || previous.textContent || "");
+    }
+    if (parent) {
+      candidates.push(parent.innerText || parent.textContent || "");
+    }
+    return uniqueCleanText(candidates, 240).join(" | ").slice(0, 500);
   }
 
   function isInteractiveElement(element, role) {
@@ -387,6 +515,221 @@
     return parts.join(" > ");
   }
 
+  function buildXPathHint(element) {
+    const parts = [];
+    let current = element;
+    while (current instanceof Element && current.nodeType === Node.ELEMENT_NODE && parts.length < 6) {
+      let index = 1;
+      let sibling = current.previousElementSibling;
+      while (sibling) {
+        if (sibling.tagName === current.tagName) {
+          index += 1;
+        }
+        sibling = sibling.previousElementSibling;
+      }
+      parts.unshift(`${current.tagName.toLowerCase()}[${index}]`);
+      current = current.parentElement;
+    }
+    return parts.length ? `/${parts.join("/")}` : "";
+  }
+
+  function buildSemanticId(element, role, text) {
+    const tag = element.tagName.toLowerCase();
+    const stable =
+      element.id ||
+      element.getAttribute("data-testid") ||
+      element.getAttribute("data-test") ||
+      element.getAttribute("name") ||
+      text ||
+      "";
+    return [tag, role || "node", slugify(stable).slice(0, 48)].filter(Boolean).join(":");
+  }
+
+  function collectSafeAttributes(element) {
+    const allowed = [
+      "aria-label",
+      "aria-labelledby",
+      "data-testid",
+      "data-test",
+      "href",
+      "name",
+      "placeholder",
+      "role",
+      "title",
+      "type"
+    ];
+    const attributes = {};
+    for (const name of allowed) {
+      const value = element.getAttribute(name);
+      if (!value) {
+        continue;
+      }
+      attributes[name] = String(value).slice(0, 240);
+    }
+    return attributes;
+  }
+
+  function buildActionHints(element, role, interactive) {
+    const hints = ["extract"];
+    if (interactive.clickable) {
+      hints.push("click");
+    }
+    if (interactive.editable) {
+      hints.push(element instanceof HTMLSelectElement ? "select" : "type");
+    }
+    if (interactive.focusable) {
+      hints.push("press");
+    }
+    if (interactive.scrollable) {
+      hints.push("scroll");
+    }
+    if (role === "link") {
+      hints.push("open");
+    }
+    return Array.from(new Set(hints));
+  }
+
+  function recognitionConfidence(element, role, text, labels, interactive) {
+    let score = 0.25;
+    if (interactive.clickable || interactive.editable || interactive.focusable) {
+      score += 0.25;
+    }
+    if (role) {
+      score += 0.15;
+    }
+    if (text) {
+      score += 0.15;
+    }
+    if (labels.length > 0) {
+      score += 0.15;
+    }
+    if (element.id || element.getAttribute("data-testid") || element.getAttribute("name")) {
+      score += 0.05;
+    }
+    return round2(Math.min(score, 0.99));
+  }
+
+  function isInViewport(rect) {
+    return rect.bottom >= 0 && rect.right >= 0 && rect.top <= window.innerHeight && rect.left <= window.innerWidth;
+  }
+
+  function highlightElement(target, command) {
+    const rect = target.getBoundingClientRect();
+    const layer = ensureHighlightLayer(Boolean(command.clear_existing ?? true));
+    const color = String(command.color || "#2563eb");
+    const label = String(command.label || target.getAttribute(ELEMENT_ATTR) || "Rumi").slice(0, 80);
+    const overlay = document.createElement("div");
+    overlay.style.position = "fixed";
+    overlay.style.left = `${rect.left}px`;
+    overlay.style.top = `${rect.top}px`;
+    overlay.style.width = `${rect.width}px`;
+    overlay.style.height = `${rect.height}px`;
+    overlay.style.border = `2px solid ${color}`;
+    overlay.style.boxShadow = `0 0 0 3px ${hexToRgba(color, 0.18)}`;
+    overlay.style.borderRadius = "6px";
+    overlay.style.pointerEvents = "none";
+    overlay.style.zIndex = "2147483647";
+
+    const badge = document.createElement("div");
+    badge.textContent = label;
+    badge.style.position = "absolute";
+    badge.style.left = "0";
+    badge.style.top = "-22px";
+    badge.style.maxWidth = "320px";
+    badge.style.overflow = "hidden";
+    badge.style.textOverflow = "ellipsis";
+    badge.style.whiteSpace = "nowrap";
+    badge.style.background = color;
+    badge.style.color = "white";
+    badge.style.font = "12px/18px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+    badge.style.padding = "1px 6px";
+    badge.style.borderRadius = "4px";
+    overlay.appendChild(badge);
+    layer.appendChild(overlay);
+
+    const durationMs = Number(command.duration_ms);
+    if (Number.isFinite(durationMs) && durationMs > 0) {
+      if (highlightTimer) {
+        clearTimeout(highlightTimer);
+      }
+      highlightTimer = setTimeout(() => clearHighlights(), Math.min(durationMs, 30000));
+    }
+
+    return {
+      action: "highlight",
+      element_id: target.getAttribute(ELEMENT_ATTR),
+      rect: {
+        x: round2(rect.x),
+        y: round2(rect.y),
+        width: round2(rect.width),
+        height: round2(rect.height)
+      }
+    };
+  }
+
+  function ensureHighlightLayer(clearExisting) {
+    let layer = document.getElementById(HIGHLIGHT_LAYER_ID);
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.id = HIGHLIGHT_LAYER_ID;
+      layer.style.position = "fixed";
+      layer.style.inset = "0";
+      layer.style.pointerEvents = "none";
+      layer.style.zIndex = "2147483647";
+      document.documentElement.appendChild(layer);
+    }
+    if (clearExisting) {
+      layer.textContent = "";
+    }
+    return layer;
+  }
+
+  function clearHighlights() {
+    if (highlightTimer) {
+      clearTimeout(highlightTimer);
+      highlightTimer = null;
+    }
+    const layer = document.getElementById(HIGHLIGHT_LAYER_ID);
+    if (layer) {
+      layer.remove();
+    }
+    return { action: "clear_highlight" };
+  }
+
+  function uniqueCleanText(values, maxLength) {
+    const seen = new Set();
+    const result = [];
+    for (const value of values) {
+      const text = String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
+      if (!text || seen.has(text)) {
+        continue;
+      }
+      seen.add(text);
+      result.push(text);
+    }
+    return result;
+  }
+
+  function slugify(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  function hexToRgba(value, alpha) {
+    const match = /^#?([a-f0-9]{6})$/i.exec(value);
+    if (!match) {
+      return `rgba(37, 99, 235, ${alpha})`;
+    }
+    const intValue = parseInt(match[1], 16);
+    const r = (intValue >> 16) & 255;
+    const g = (intValue >> 8) & 255;
+    const b = intValue & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
   function normalizeModifiers(modifiers) {
     const list = Array.isArray(modifiers) ? modifiers.map((item) => String(item).toLowerCase()) : [];
     return {
@@ -408,19 +751,39 @@
     return Math.round(value * 100) / 100;
   }
 
-  function searchHomeHotkeyAction(event) {
-    if (!event.altKey) {
-      return null;
+  function isTrustedSearchHomeRouteMessage(event, message) {
+    if (
+      !message ||
+      (message.type !== "rumi:search-home:set-route-state" && message.type !== ROUTE_MESSAGE_TYPE)
+    ) {
+      return false;
     }
-    if (event.key === "ArrowRight") {
-      return "next";
+    if (message.source !== SEARCH_HOME_MESSAGE_SOURCE) {
+      return false;
     }
-    if (event.key === "ArrowLeft") {
-      return "prev";
+    if (!event.origin || event.origin !== window.location.origin) {
+      return false;
     }
-    if (event.key === "Enter") {
-      return "fallback";
+    if (!globalThis.RumiBridgeUrlPolicy?.isTrustedSearchHomeOrigin(event.origin)) {
+      return false;
     }
-    return null;
+    return isSearchHomeRouteState(message.payload);
+  }
+
+  function isSearchHomeRouteState(value) {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const hasTarget = typeof value.target_url === "string" && value.target_url.trim();
+    const hasFallback = typeof value.fallback_url === "string" && value.fallback_url.trim();
+    const hasCandidate =
+      Array.isArray(value.target_candidates) &&
+      value.target_candidates.some(
+        (candidate) =>
+          candidate &&
+          typeof candidate === "object" &&
+          (typeof candidate.url === "string" || typeof candidate.final_url === "string")
+      );
+    return Boolean(hasTarget || hasFallback || hasCandidate);
   }
 })();

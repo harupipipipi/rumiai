@@ -1,0 +1,57 @@
+example:
+  id: login_failure_trace
+  pack_id: rumi_browser_session_replay_pack
+  scenario: A failed sign-in flow is packaged with the typed input redacted and only
+    hash-backed screenshot refs retained.
+  input_refs:
+  - workspace_ref:case-file
+  evidence_refs:
+  - event:input_observed_redacted:email
+  - event:network_observed_redacted:auth_failure
+  - screenshot:artifact:login-error-redacted
+  handoff_owner: rumi_browser_automation_pack
+  trace_contract:
+    trace_id: trace_login_failure_2026_06_04
+    redaction_state: redacted
+    page_timeline:
+    - event_type: navigation_observed
+      page_ref: page:login
+    - event_type: input_observed_redacted
+      field_purpose: account_email
+      value_hash_ref: sha256:redacted-email-value
+    - event_type: network_observed_redacted
+      status_code: 401
+  redaction:
+    state: redacted
+    sensitive_classes:
+    - typed_input_evidence
+    - email_address
+    - credential_material
+    - private_url
+  replay_manifest:
+    manifest_id: manifest_login_failure_redacted
+    ordered_evidence_refs:
+    - event:input_observed_redacted:email
+    - event:network_observed_redacted:auth_failure
+    - screenshot:artifact:login-error-redacted
+    execution_owner: rumi_browser_automation_pack
+    transport_owner: rumi_default_tools_pack
+    external_action: handoff_only
+  review_gate: all_blocking_checks
+  expected_result: reviewed_handoff_packet
+  must_not:
+  - external_action
+  - runtime_execution
+  - secret_material
+  status: ready_for_owner_handoff
+  redaction:
+    state: redacted
+    sensitive_classes:
+    - private_url
+    - typed_input_evidence
+    - dom_text
+    receipt_ref: redaction:login_failure_trace
+  replay_manifest:
+    external_action: handoff_only
+    execution_owner: rumi_browser_automation_pack
+    transport_owner: rumi_default_tools_pack

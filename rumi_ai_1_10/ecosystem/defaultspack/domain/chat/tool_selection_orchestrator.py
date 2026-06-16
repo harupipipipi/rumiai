@@ -5,6 +5,7 @@ from typing import Any
 from domain.ai_client.model_call import call_model
 from domain.chat.tool_recommender import recommend_tool_ids
 from domain.chat.tool_selection_schema import COMPUTER_TOOL_IDS, ToolRecommendation, ToolSelectionResult
+from domain.tool.loading import split_tools_by_loading
 
 
 class ToolSelectionOrchestrator:
@@ -21,10 +22,26 @@ class ToolSelectionOrchestrator:
         settings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         allowed_tools = [tool for tool in tools if _tool_id(tool) not in COMPUTER_TOOL_IDS]
-        candidate_ids = recommend_tool_ids(user_text, allowed_tools, limit=min(20, max(limit, 1)))
-        candidates = [tool for tool in allowed_tools if _tool_id(tool) in set(candidate_ids)]
-        if not candidates:
+        always_tools, vector_tools = split_tools_by_loading(allowed_tools)
+        candidate_ids = recommend_tool_ids(user_text, vector_tools, limit=min(20, max(limit, 1)))
+        candidates = [tool for tool in vector_tools if _tool_id(tool) in set(candidate_ids)]
+        if not candidates and not always_tools:
             return ToolSelectionResult(candidate_count=0).to_dict()
+        always_recommendations = [
+            ToolRecommendation(tool_id=_tool_id(tool), confidence=1.0, reason="always-loaded tool")
+            for tool in always_tools
+            if _tool_id(tool)
+        ]
+        supports_tools = True
+        if isinstance(selected_model_capabilities, dict) and "supports_tool_calling" in selected_model_capabilities:
+            supports_tools = bool(selected_model_capabilities.get("supports_tool_calling"))
+        if not candidates:
+            return ToolSelectionResult(
+                recommended_tools=always_recommendations[:limit],
+                requires_tool_calling_model=bool(always_recommendations and supports_tools),
+                candidate_count=len(always_tools),
+                stage="tool_loading",
+            ).to_dict()
         model_call = call_model(
             {
                 "model_hint": (settings or {}).get("utility_models", {}).get("tool_selector") if isinstance((settings or {}).get("utility_models"), dict) else "",
@@ -49,14 +66,12 @@ class ToolSelectionOrchestrator:
             ToolRecommendation(tool_id=tool_id, confidence=_confidence(output, tool_id), reason=_reason(output, tool_id))
             for tool_id in selected_ids[:limit]
         ]
-        supports_tools = True
-        if isinstance(selected_model_capabilities, dict) and "supports_tool_calling" in selected_model_capabilities:
-            supports_tools = bool(selected_model_capabilities.get("supports_tool_calling"))
+        recommendations = [*always_recommendations, *recommendations][:limit]
         return ToolSelectionResult(
             recommended_tools=recommendations,
             not_selected=[],
             requires_tool_calling_model=bool(recommendations and supports_tools),
-            candidate_count=len(candidates),
+            candidate_count=len(always_tools) + len(candidates),
             stage="utility_model" if isinstance(model_call, dict) and model_call.get("status") == "ok" else "keyword",
         ).to_dict()
 

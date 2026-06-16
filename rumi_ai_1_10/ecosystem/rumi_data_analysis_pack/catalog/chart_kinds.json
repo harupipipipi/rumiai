@@ -1,0 +1,42 @@
+{
+  "catalog_id": "rumi.data_analysis.chart_kinds",
+  "version": "rumi.catalog.v1",
+  "chart_kinds": [
+    {
+      "id": "line",
+      "best_for": ["time_trend", "ordered_series"],
+      "required_encodings": ["x", "y"],
+      "notes": "Use when x has meaningful order, especially dates or sequence."
+    },
+    {
+      "id": "bar",
+      "best_for": ["category_comparison", "ranked_values"],
+      "required_encodings": ["category", "value"],
+      "notes": "Prefer sorted bars for ranking and grouped bars for limited comparisons."
+    },
+    {
+      "id": "scatter",
+      "best_for": ["relationship", "outlier_detection"],
+      "required_encodings": ["x", "y"],
+      "notes": "Include sample size and avoid implying causation without evidence."
+    },
+    {
+      "id": "histogram",
+      "best_for": ["distribution", "skew", "spread"],
+      "required_encodings": ["value", "bin"],
+      "notes": "State bin choice and note missing or clipped values."
+    },
+    {
+      "id": "heatmap",
+      "best_for": ["matrix", "correlation", "calendar_density"],
+      "required_encodings": ["x", "y", "color"],
+      "notes": "Use accessible color ramps and label outliers."
+    },
+    {
+      "id": "table",
+      "best_for": ["exact_values", "audit", "small_result_set"],
+      "required_encodings": ["columns"],
+      "notes": "Use when exact numbers matter more than visual trend."
+    }
+  ]
+}

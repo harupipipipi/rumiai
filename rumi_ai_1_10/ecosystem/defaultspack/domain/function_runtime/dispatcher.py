@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
+from pathlib import Path
 from typing import Any
 
 from .errors import FunctionNotFoundError
@@ -13,6 +15,9 @@ from .registry import (
 )
 from .response import error, normalize_exception, normalize_output, ok
 from .schemas import ensure_dict
+
+_PACK_ROOT = Path(__file__).resolve().parents[2]
+_FUNCTIONS_ROOT = _PACK_ROOT / "functions"
 
 
 def run_defaultspack_function(
@@ -73,9 +78,40 @@ def _run_existing_pack_function(
     args: dict[str, Any],
     context: dict[str, Any],
 ) -> Any:
-    from core_runtime.pack_function_runtime import invoke_pack_function
+    allowed_targets = frozenset(MANAGEMENT_ALIASES.values())
+    if existing_function_id not in allowed_targets:
+        raise FunctionNotFoundError(
+            f"No management target registered for defaultspack:{existing_function_id}"
+        )
 
-    return invoke_pack_function("defaultspack", existing_function_id, args, context)
+    module_path = (_FUNCTIONS_ROOT / existing_function_id / "main.py").resolve()
+    try:
+        module_path.relative_to(_FUNCTIONS_ROOT.resolve())
+    except ValueError as exc:
+        raise FunctionNotFoundError(
+            f"Unsafe management target path: defaultspack:{existing_function_id}"
+        ) from exc
+    if not module_path.is_file():
+        raise FunctionNotFoundError(
+            f"Management target not found: defaultspack:{existing_function_id}"
+        )
+
+    spec = importlib.util.spec_from_file_location(
+        f"defaultspack_management_target_{existing_function_id}",
+        str(module_path),
+    )
+    if spec is None or spec.loader is None:
+        raise FunctionNotFoundError(
+            f"Failed to load management target: defaultspack:{existing_function_id}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    run = getattr(module, "run", None)
+    if run is None:
+        raise FunctionNotFoundError(
+            f"Management target has no run(): defaultspack:{existing_function_id}"
+        )
+    return run(dict(context or {}), dict(args or {}))
 
 
 def _run_tool_function(

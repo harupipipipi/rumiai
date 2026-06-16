@@ -18,12 +18,18 @@ from domain.ai_client.model_roles import (
     normalize_utility_model_policy,
     normalize_utility_models,
 )
+from domain.ai_client.rumi_process import (
+    RUMI_MODEL_PACK_ID,
+    ensure_default_rumi_model_pack,
+    resolve_rumi_base_model,
+)
 
 
 VALID_THINKING_LEVELS = {"none", "low", "medium", "high", "xhigh"}
 DEFAULT_MODEL = "stub/default"
 LEGACY_CLOUD_DEFAULT_MODEL = "openrouter/tencent/hy3-preview:free"
 DEFAULT_THINKING_LEVEL = "medium"
+DEFAULT_DEEPTHINK_ENABLED = False
 CEREBRAS_REASONING_MODELS = {"gpt-oss-120b", "zai-glm-4.7"}
 
 
@@ -197,6 +203,33 @@ class ModelRuntimeSettingsService:
             "settings": updated,
         }
 
+    def get_deepthink_enabled(self) -> dict[str, Any]:
+        settings = self.get_settings()
+        return {
+            "enabled": bool(settings.get("deepthink_enabled", DEFAULT_DEEPTHINK_ENABLED)),
+            "warning": "DeepThinkが有効なタスクには数時間かかる可能性があります。",
+        }
+
+    def set_deepthink_enabled(self, enabled: bool | None = None) -> dict[str, Any]:
+        settings = self.get_settings()
+        if enabled is None:
+            next_enabled = not bool(settings.get("deepthink_enabled", DEFAULT_DEEPTHINK_ENABLED))
+        else:
+            next_enabled = self._coerce_bool(enabled, default=DEFAULT_DEEPTHINK_ENABLED)
+        updated = self.update_settings({"deepthink_enabled": next_enabled})
+        message = (
+            "DeepThinkをONにしました。タスクには数時間かかる可能性があります。"
+            if next_enabled
+            else "DeepThinkをOFFにしました。"
+        )
+        return {
+            "enabled": next_enabled,
+            "persisted": True,
+            "message": message,
+            "warning": "タスクには数時間かかる可能性があります。" if next_enabled else "",
+            "settings": updated,
+        }
+
     def get_effective_thinking_level(
         self,
         profile_id: str | None = None,
@@ -268,6 +301,7 @@ class ModelRuntimeSettingsService:
             "model_groups": default_model_groups(),
             "on_switch_to_non_vision_with_images": "auto_bridge",
             "thinking_level": DEFAULT_THINKING_LEVEL,
+            "deepthink_enabled": DEFAULT_DEEPTHINK_ENABLED,
             "favorite_profiles": [DEFAULT_MODEL],
             "thinking_level_by_profile": {DEFAULT_MODEL: DEFAULT_THINKING_LEVEL},
             "thinking_level_by_conversation": {},
@@ -284,6 +318,53 @@ class ModelRuntimeSettingsService:
             "openrouter_api_key": "",
             "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
         }
+
+    def _runtime_rumi_base_model(self, settings: dict[str, Any] | None = None) -> str:
+        base_profiles = self._base_profile_catalog(settings)
+        available_models: list[str] = []
+        available_providers: set[str] = set()
+        for profile in base_profiles:
+            if not isinstance(profile, dict):
+                continue
+            availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+            is_active = bool(
+                availability.get("active")
+                or availability.get("configured")
+                or availability.get("local")
+            )
+            if not is_active:
+                continue
+            for key in ("profile_id", "qualified_model_id", "model_ref"):
+                value = str(profile.get(key) or "").strip()
+                if value:
+                    available_models.append(value)
+            provider_id = str(profile.get("provider_id") or profile.get("provider") or "").strip()
+            if provider_id:
+                available_providers.add(provider_id)
+        try:
+            from domain.ai_client.providers import detect_available_providers, get_all_known_models
+
+            provider_map = detect_available_providers()
+            available_providers.update(str(name or "").strip() for name in provider_map.keys() if str(name or "").strip())
+            for model in get_all_known_models():
+                if not isinstance(model, dict):
+                    continue
+                provider_id = str(model.get("provider") or model.get("provider_id") or "").strip()
+                model_id = str(model.get("id") or model.get("qualified_model_id") or "").strip()
+                if provider_id and provider_id in available_providers and model_id:
+                    available_models.append(model_id)
+        except Exception:
+            pass
+        return resolve_rumi_base_model(
+            available_models,
+            available_providers=available_providers,
+        )
+
+    def _ensure_rumi_model_packs(self, model_packs: Any, *, settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        return ensure_default_rumi_model_pack(
+            model_packs,
+            base_model=self._runtime_rumi_base_model(settings),
+        )
 
     def sanitize_models_patch(self, patch: dict[str, Any]) -> dict[str, Any]:
         sanitized = deepcopy(patch or {})
@@ -306,10 +387,10 @@ class ModelRuntimeSettingsService:
         if "api_bound_profiles" in sanitized:
             sanitized["api_bound_profiles"] = self._normalize_api_bound_profiles(sanitized.get("api_bound_profiles"))
         if "model_packs" in sanitized:
-            sanitized["model_packs"] = normalize_model_packs(
+            sanitized["model_packs"] = self._ensure_rumi_model_packs(normalize_model_packs(
                 sanitized.get("model_packs"),
                 composite_models=sanitized.get("composite_models"),
-            )
+            ))
         if "composite_models" in sanitized:
             sanitized["composite_models"] = self._normalize_composite_models(sanitized.get("composite_models"))
         if "model_notes" in sanitized:
@@ -324,6 +405,11 @@ class ModelRuntimeSettingsService:
             sanitized["preferred_model_group"] = str(sanitized.get("preferred_model_group") or "default").strip() or "default"
         if "auto_route_within_group" in sanitized:
             sanitized["auto_route_within_group"] = bool(sanitized.get("auto_route_within_group"))
+        if "deepthink_enabled" in sanitized:
+            sanitized["deepthink_enabled"] = self._coerce_bool(
+                sanitized.get("deepthink_enabled"),
+                default=DEFAULT_DEEPTHINK_ENABLED,
+            )
         if "on_switch_to_non_vision_with_images" in sanitized:
             policy = str(sanitized.get("on_switch_to_non_vision_with_images") or "auto_bridge").strip()
             sanitized["on_switch_to_non_vision_with_images"] = policy if policy in {"auto_bridge", "ask", "block", "ignore"} else "auto_bridge"
@@ -370,14 +456,18 @@ class ModelRuntimeSettingsService:
                     values_by_scope = {}
             models[key] = values_by_scope if isinstance(values_by_scope, dict) else {}
         models["thinking_level"] = self._normalize_level(models.get("thinking_level"))
+        models["deepthink_enabled"] = self._coerce_bool(
+            models.get("deepthink_enabled"),
+            default=DEFAULT_DEEPTHINK_ENABLED,
+        )
         models["model_api_routes"] = self._normalize_model_api_routes(models.get("model_api_routes", ""))
         models["api_routes"] = self._normalize_api_routes(models.get("api_routes"))
         models["api_bound_profiles"] = self._normalize_api_bound_profiles(models.get("api_bound_profiles"))
         models["composite_models"] = self._normalize_composite_models(models.get("composite_models"))
-        models["model_packs"] = normalize_model_packs(
+        models["model_packs"] = self._ensure_rumi_model_packs(normalize_model_packs(
             models.get("model_packs"),
             composite_models=models.get("composite_models"),
-        )
+        ), settings=models)
         models["model_notes"] = self._normalize_model_notes(models.get("model_notes"))
         models["preferred_model_group"] = str(models.get("preferred_model_group") or "default").strip() or "default"
         models["auto_route_within_group"] = bool(models.get("auto_route_within_group", True))
@@ -519,7 +609,7 @@ class ModelRuntimeSettingsService:
                 continue
             composite_id = str(item.get("id") or item.get("profile_id") or item.get("name") or "").strip()
             mode = str(item.get("mode") or item.get("type") or "fallback_chain").strip()
-            if not composite_id or composite_id in seen or mode not in {"fallback_chain", "ensemble"}:
+            if not composite_id or composite_id in seen or mode not in {"fallback_chain", "ensemble", "review_chain"}:
                 continue
             raw_members = item.get("members", item.get("models", item.get("chain", [])))
             if isinstance(raw_members, str):
@@ -584,6 +674,19 @@ class ModelRuntimeSettingsService:
     def _normalize_level(self, value: Any) -> str:
         level = str(value or "").strip()
         return level if level in VALID_THINKING_LEVELS else DEFAULT_THINKING_LEVEL
+
+    @staticmethod
+    def _coerce_bool(value: Any, *, default: bool = False) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and value in {0, 1}:
+            return bool(value)
+        normalized = str(value or "").strip().lower()
+        if normalized in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "disabled"}:
+            return False
+        return default
 
     def runtime_defined_profiles(self, settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         settings = settings if isinstance(settings, dict) else self.get_settings()
@@ -651,10 +754,10 @@ class ModelRuntimeSettingsService:
                     },
                 }
             )
-        for model_pack in normalize_model_packs(
+        for model_pack in self._ensure_rumi_model_packs(normalize_model_packs(
             settings.get("model_packs"),
             composite_models=settings.get("composite_models"),
-        ):
+        ), settings=settings):
             profile_id = "modelpack/{}".format(str(model_pack.get("id") or "").strip())
             if not profile_id or profile_id == "modelpack/":
                 continue
@@ -670,6 +773,38 @@ class ModelRuntimeSettingsService:
                 if isinstance(profile, dict)
                 and str(profile.get("profile_id") or profile.get("qualified_model_id") or "") in set(member_ids)
             ]
+            is_rumi_pack = str(model_pack.get("id") or "").strip() == RUMI_MODEL_PACK_ID
+            if is_rumi_pack:
+                configured = bool(member_profiles) and any(bool(member.get("configured")) for member in member_profiles)
+                availability = {
+                    "configured": configured,
+                    "active": configured,
+                    "status": "configured" if configured else "missing_member_model",
+                    "model_pack": True,
+                }
+            else:
+                configured = any(bool(member.get("configured")) for member in member_profiles) if member_profiles else True
+                availability = {
+                    "configured": True,
+                    "active": True,
+                    "status": "configured",
+                    "model_pack": True,
+                }
+            def _member_supports(member: dict[str, Any], key: str) -> bool:
+                if bool(member.get(key)):
+                    return True
+                metadata = member.get("metadata") if isinstance(member.get("metadata"), dict) else {}
+                if bool(metadata.get(key)):
+                    return True
+                capabilities = metadata.get("capabilities") if isinstance(metadata.get("capabilities"), dict) else {}
+                capability_aliases = {
+                    "supports_vision": ("vision", "image_input"),
+                    "supports_image_input": ("image_input", "vision"),
+                    "supports_tool_calling": ("tool_calls", "tool_calling"),
+                    "supports_thinking": ("thinking",),
+                    "supports_fast": ("fast",),
+                }
+                return any(bool(capabilities.get(alias)) for alias in capability_aliases.get(key, ()))
             profiles.append(
                 {
                     "id": profile_id,
@@ -682,26 +817,29 @@ class ModelRuntimeSettingsService:
                     "display_name": str(model_pack.get("display_name") or model_pack.get("id") or ""),
                     "name": str(model_pack.get("display_name") or model_pack.get("id") or ""),
                     "type": "chat",
-                    "configured": any(bool(member.get("configured")) for member in member_profiles) if member_profiles else True,
-                    "supports_vision": any(bool(member.get("supports_vision") or member.get("supports_image_input")) for member in member_profiles),
-                    "supports_image_input": any(bool(member.get("supports_image_input") or member.get("supports_vision")) for member in member_profiles),
-                    "supports_tool_calling": any(bool(member.get("supports_tool_calling")) for member in member_profiles),
-                    "supports_thinking": any(bool(member.get("supports_thinking")) for member in member_profiles),
-                    "supports_fast": any(bool(member.get("supports_fast")) for member in member_profiles),
+                    "configured": configured,
+                    "supports_vision": any(_member_supports(member, "supports_vision") for member in member_profiles),
+                    "supports_image_input": any(_member_supports(member, "supports_image_input") for member in member_profiles),
+                    "supports_tool_calling": any(_member_supports(member, "supports_tool_calling") for member in member_profiles),
+                    "supports_thinking": any(_member_supports(member, "supports_thinking") for member in member_profiles),
+                    "supports_fast": any(_member_supports(member, "supports_fast") for member in member_profiles),
                     "capability_tags": sorted(
                         {
                             tag
                             for member in member_profiles
-                            for tag in (member.get("capability_tags") if isinstance(member.get("capability_tags"), list) else [])
+                            for tag in (
+                                member.get("capability_tags")
+                                if isinstance(member.get("capability_tags"), list)
+                                else (
+                                    (member.get("metadata") or {}).get("capability_tags")
+                                    if isinstance((member.get("metadata") or {}).get("capability_tags"), list)
+                                    else []
+                                )
+                            )
                             if str(tag).strip()
                         }
                     ),
-                    "availability": {
-                        "configured": True,
-                        "active": True,
-                        "status": "configured",
-                        "model_pack": True,
-                    },
+                    "availability": availability,
                     "metadata": {
                         "model_pack": True,
                         "source": model_pack.get("source"),

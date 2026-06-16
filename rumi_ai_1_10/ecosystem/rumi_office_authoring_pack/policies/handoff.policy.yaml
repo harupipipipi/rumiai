@@ -1,0 +1,16 @@
+handoff_policy:
+  pack_id: rumi_office_authoring_pack
+  default: do_not_execute_adjacent_runtime_action
+  overlap_policy:
+    workspace_artifact_catalog: handoff_to_rumi_workspace_pack
+    office_file_rendering: handoff_to_rumi_workspace_pack
+    pdf_rendering: handoff_to_rumi_workspace_pack
+    document_understanding: handoff_to_rumi_document_intelligence_pack
+    data_analysis: handoff_to_rumi_data_analysis_pack
+    citation_ledger: handoff_to_rumi_evidence_dossier_pack
+    artifact_app_runtime: handoff_to_rumi_artifact_app_runtime_pack
+    external_retrieval: handoff_to_rumi_research_pack
+    connector_access: handoff_to_rumi_connector_gateway_pack
+    office_authoring_contract: owned_by_rumi_office_authoring_pack
+    tool_aliases: prefer_explicit_pack_namespace
+  owner_surface_rule: owner_surface_wins_then_explicit_handoff

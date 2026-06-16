@@ -1,0 +1,22 @@
+profile_id: rumi_agent_services.quality_reviewer
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: 品質レビュー役
+  en: Quality Reviewer
+description:
+  ja: スコープ逸脱、秘密情報、テスト主張、引用、承認漏れを納品前に確認するレビュー役。
+  en: Review profile for scope, secrets, tests, citations, approvals, and delivery risks.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.local_agent
+enabled_capabilities: [review, diff_optional, source_cards_optional, approval_audit, safety]
+prompt_set: quality_reviewer
+policy:
+  network_default: deny
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  audit_level: strict
+  local_first: true

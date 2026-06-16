@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/doc_authoring_contract.schema.json",
+  "title": "Doc Authoring Contract",
+  "description": "Office authoring contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "doc_id",
+    "audience",
+    "purpose",
+    "outline",
+    "sections",
+    "style_brief",
+    "citation_plan_id",
+    "review_gate",
+    "export_plan_id",
+    "document_understanding_owner",
+    "citation_review_required"
+  ],
+  "properties": {
+    "doc_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "audience": {
+      "type": "string",
+      "minLength": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1
+    },
+    "outline": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "style_brief": {
+      "type": "string",
+      "minLength": 1
+    },
+    "citation_plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "review_gate": {
+      "type": "string",
+      "minLength": 1
+    },
+    "export_plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "document_understanding_owner": {
+      "const": "rumi_document_intelligence_pack"
+    },
+    "citation_review_required": {
+      "const": true
+    }
+  }
+}

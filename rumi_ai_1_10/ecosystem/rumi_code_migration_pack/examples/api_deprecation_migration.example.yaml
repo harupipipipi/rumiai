@@ -1,0 +1,218 @@
+example:
+  id: api_deprecation_migration
+  pack_id: rumi_code_migration_pack
+  scenario: deprecated API migration from BillingClient.createCharge to PaymentIntentService.create across services and integration tests, grouped into codemod dry-run buckets with manual-review shards.
+  input_refs:
+  - repo_inventory:billing-api-deprecation-2026-06-04
+  - migration_request:replace_create_charge
+  evidence_refs:
+  - evidence:deprecation-notice-v3
+  - evidence:callsite-inventory
+  - evidence:payment-contract-tests
+  handoff_owner: rumi_code_ide_pack
+  review_gate: all_blocking_checks
+  expected_result: reviewed_handoff_packet
+  must_not:
+  - external_action
+  - runtime_execution
+  - file_edit
+  - codemod_execution
+  - pull_request_creation
+  - secret_material
+  status: ready_for_owner_handoff
+  handoff_packet:
+    packet_id: billing-create-charge-deprecation-handoff
+    downstream_owner_pack: rumi_code_ide_pack
+    external_action: handoff_only
+    repo_inventory:
+      inventory_id: billing-api-deprecation-2026-06-04
+      languages:
+      - Python
+      - TypeScript
+      package_managers:
+      - uv
+      - npm
+      build_systems:
+      - pytest
+      - tsc
+      test_suites:
+      - pytest tests/billing
+      - npm run test:contracts
+      dependency_graph: services/billing imports BillingClient; web checkout imports generated payment sdk.
+      ownership_map: billing service owned by payments; checkout UI owned by growth; generated SDK owned by platform.
+      generated_files:
+      - sdk/generated/**
+      - openapi/payment.v3.json
+      deprecated_apis:
+      - BillingClient.createCharge
+      - createCharge webhook fixture
+      migration_hotspots:
+      - services/billing/charge_service.py
+      - workers/retry_failed_charge.py
+      - tests/contracts/payment_intents/**
+    migration_plan:
+      plan_id: billing-create-charge-plan
+      current_state: Direct charge creation with legacy idempotency keys.
+      target_state: PaymentIntent creation with explicit confirmation and mapped idempotency keys.
+      non_goals:
+      - no payment provider migration
+      - no checkout UI redesign
+      phases:
+      - inventory callsites and generated SDK boundaries
+      - define codemod dry-run and manual review buckets
+      - split service, worker, and contract-test shards
+      prerequisites:
+      - deprecation notice linked
+      - generated SDK regeneration owner identified
+      invariants:
+      - idempotency key semantics preserved
+      - webhook payload contract remains backward compatible
+      compatibility_constraints:
+      - legacy charge ids must remain readable during transition
+      - generated SDK updates require platform approval
+      acceptance_gates:
+      - contract tests pass for create and retry paths
+      - rollback path returns to BillingClient.createCharge without data loss
+    codemod_plan:
+      codemod_plan_id: billing-create-charge-codemod-plan
+      transform_intent: Replace direct createCharge calls with PaymentIntentService.create and map arguments into intent parameters.
+      matcher_strategy: AST match BillingClient.createCharge calls, imports, retry worker helpers, and test fixture names.
+      dry_run_requirements:
+      - report callsites by service, worker, test, and generated boundary
+      - mark ambiguous currency and idempotency mappings for manual review
+      manual_review_buckets:
+      - retry worker error handling
+      - contract tests with webhook fixtures
+      - any generated SDK references
+      generated_file_exclusions:
+      - sdk/generated/**
+      - openapi/payment.v3.json
+      idempotency_checks:
+      - second dry-run finds no BillingClient.createCharge callsites outside fixtures
+      validation_commands:
+      - pytest tests/billing
+      - npm run test:contracts
+      - npm run typecheck
+    pr_shard_plan:
+      shard_plan_id: billing-create-charge-shards
+      shards:
+      - shard_id: shard-01-service-wrapper
+        scope: introduce PaymentIntent adapter callsites in billing service only
+        dependencies: []
+        max_blast_radius:
+        - services/billing/**
+        ordering: first
+        owner_handoff: rumi_subagent_pr_manager_pack
+        reviewer_notes:
+        - preserve idempotency key mapping
+        merge_sequencing: merge before worker retry shard
+        conflict_risk: high
+      - shard_id: shard-02-worker-retry-path
+        scope: update retry worker and failed charge handling
+        dependencies:
+        - shard-01-service-wrapper
+        max_blast_radius:
+        - workers/**
+        ordering: second
+        owner_handoff: rumi_subagent_pr_manager_pack
+        reviewer_notes:
+        - verify retry behavior with existing failed charge fixtures
+        merge_sequencing: merge after service shard and before contract tests
+        conflict_risk: medium
+      - shard_id: shard-03-contract-tests
+        scope: update payment contract fixtures and assertions
+        dependencies:
+        - shard-01-service-wrapper
+        - shard-02-worker-retry-path
+        max_blast_radius:
+        - tests/contracts/**
+        ordering: third
+        owner_handoff: rumi_subagent_pr_manager_pack
+        reviewer_notes:
+        - generated SDK changes require separate platform handoff
+        merge_sequencing: final verification shard
+        conflict_risk: medium
+    compatibility_matrix:
+      matrix_id: billing-create-charge-compatibility
+      runtime_versions:
+      - Python 3.11
+      - Node 20
+      framework_versions:
+      - payment API v2 current
+      - payment API v3 target
+      os_platform: linux CI
+      package_manager_constraints:
+      - uv lock unchanged except payment client dependency
+      - npm lock unchanged unless contract SDK owner approves
+      api_behavior_deltas:
+      - createCharge returns charge id immediately
+      - PaymentIntent create returns intent id and requires confirmation
+      supported_cells:
+      - API v3 target with legacy charge id read path
+      - API v2 rollback with current retry worker
+      unsupported_cells:
+      - partial migration without idempotency mapping
+      - generated SDK mutation in service shard
+    risk_ledger:
+    - risk_id: risk_idempotency_regression
+      impact: duplicate payment attempts
+      likelihood: medium
+      detection_signal: contract test mismatch on retry idempotency
+      mitigation: manual review bucket and retry contract gate
+      owner: payments
+      escalation_path: security review for payment risk classification
+      rollback_linkage: rollback-billing-create-charge
+    - risk_id: risk_generated_sdk_drift
+      impact: generated SDK falls out of sync with OpenAPI contract
+      likelihood: low
+      detection_signal: generated path diff in codemod shard
+      mitigation: exclude generated SDK and hand off regeneration separately
+      owner: platform
+      escalation_path: rumi_subagent_pr_manager_pack shard owner
+      rollback_linkage: rollback-billing-create-charge
+    test_gates:
+    - gate_id: billing-contracts
+      static_checks:
+      - npm run typecheck
+      unit_tests:
+      - pytest tests/billing
+      integration_tests:
+      - pytest tests/integration/payment_retry
+      e2e_tests: []
+      migration_smoke_tests:
+      - legacy charge fixture compatibility
+      fixture_coverage: create, retry, webhook, and rollback fixtures covered
+      flake_policy: payment contract failures are blockers
+      pass_fail_evidence: contract test summary attached to handoff
+    - gate_id: generated-boundary
+      static_checks:
+      - diff generated paths
+      unit_tests: []
+      integration_tests: []
+      e2e_tests: []
+      migration_smoke_tests:
+      - generated SDK exclusion check
+      fixture_coverage: generated sdk and openapi paths included
+      flake_policy: deterministic blocker
+      pass_fail_evidence: diffstat attached to handoff
+    - gate_id: rollback-readiness
+      static_checks: []
+      unit_tests:
+      - pytest tests/billing/test_legacy_charge_read.py
+      integration_tests: []
+      e2e_tests: []
+      migration_smoke_tests:
+      - rollback path smoke
+      fixture_coverage: legacy charge ids represented
+      flake_policy: no retry on rollback readiness failures
+      pass_fail_evidence: rollback test summary
+    rollback_plan:
+      rollback_id: rollback-billing-create-charge
+      trigger: duplicate payment signal, contract failure, or payment-intent confirmation mismatch after implementation.
+      revert_strategy: revert service, worker, and contract shards in reverse order; restore legacy createCharge adapter.
+      data_config_considerations:
+      - no schema migration in this plan
+      - legacy charge id reads must remain supported
+      dependency_downgrade_path: restore payment client v2 dependency and lock entries.
+      user_impact: checkout remains on legacy charge flow while migration is re-planned.
+      verification_after_rollback: run billing contracts and legacy charge read smoke.

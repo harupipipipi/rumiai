@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
 from ecosystem.setup_pack.pack_selector import PackSelector
 
 
@@ -29,6 +31,7 @@ def test_scan_and_grant(tmp_path):
     selector = PackSelector(setup_pack_root)
     candidates = selector.scan_candidates()
     assert len(candidates) == 1
+    assert candidates[0].target_pack_id == "defaultspack"
     assert candidates[0].pack_identity == "rumi.defaults"
     assert candidates[0].all_ok_eligible
     assert selector.select_and_grant("defaultspack")["granted"]
@@ -168,5 +171,122 @@ def test_validate_candidates_reports_installed_pack_conflict(tmp_path):
             "resolution": "prefer_workspace",
             "reason": "Both own generated office artifacts.",
             "severity": "error",
+        }
+    ]
+
+
+def test_bundled_setup_pack_metadata_validates_cleanly():
+    repo_root = Path(__file__).resolve().parent.parent
+    selector = PackSelector(repo_root / "ecosystem")
+
+    issues = selector.validate_candidates(platform_name="darwin", python_version="3.11.0")
+
+    assert issues == []
+
+
+def test_validate_candidates_rejects_invalid_conflict_metadata(tmp_path):
+    ecosystem = tmp_path / "eco"
+    setup_pack_root = ecosystem / "setup_pack"
+    setup_pack_root.mkdir(parents=True)
+    pack = setup_pack_root / "workspace"
+    pack.mkdir()
+    (pack / "pack.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "workspace",
+                "target_pack_id": "workspace",
+                "conflicts_with": [
+                    {
+                        "reason": "Missing the conflicting pack id.",
+                        "resolution": "choose_one_pack",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    issues = PackSelector(setup_pack_root).validate_candidates()
+
+    assert issues == [
+        {
+            "type": "invalid_setup_pack_metadata",
+            "pack_id": "workspace",
+            "severity": "error",
+            "reason": "invalid_setup_pack_schema",
+            "message": "setup-pack field 'conflicts_with[0].pack_id' is required",
+            "field": "conflicts_with[0]",
+        }
+    ]
+
+
+def test_validate_candidates_accepts_bundled_marketplace_and_signing_metadata(tmp_path):
+    ecosystem = tmp_path / "eco"
+    setup_pack_root = ecosystem / "setup_pack"
+    setup_pack_root.mkdir(parents=True)
+    pack = setup_pack_root / "defaultspack"
+    pack.mkdir()
+    (pack / "pack.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "defaultspack",
+                "target_pack_id": "defaultspack",
+                "marketplace": {
+                    "registry": "bundled",
+                    "publisher": "rumi-ai",
+                    "status": "verified",
+                },
+                "signing": {
+                    "mode": "repository_reviewed",
+                    "verified": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    issues = PackSelector(setup_pack_root).validate_candidates(
+        platform_name="darwin",
+        python_version="3.11.0",
+    )
+
+    assert issues == []
+def test_validate_candidates_warns_about_conflicting_candidates(tmp_path):
+    ecosystem = tmp_path / "eco"
+    setup_pack_root = ecosystem / "setup_pack"
+    setup_pack_root.mkdir(parents=True)
+
+    workspace = setup_pack_root / "workspace"
+    workspace.mkdir()
+    (workspace / "pack.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "workspace",
+                "conflicts_with": [
+                    {
+                        "pack_id": "legacy_workspace",
+                        "reason": "Both own generated office artifacts.",
+                        "resolution": "prefer_workspace",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    legacy = setup_pack_root / "legacy_workspace"
+    legacy.mkdir()
+    (legacy / "pack.json").write_text(json.dumps({"pack_id": "legacy_workspace"}), encoding="utf-8")
+
+    issues = PackSelector(setup_pack_root).validate_candidates(installed_packs={})
+
+    assert issues == [
+        {
+            "type": "pack_conflict",
+            "pack_id": "workspace",
+            "conflicts_with": "legacy_workspace",
+            "resolution": "prefer_workspace",
+            "reason": "Both own generated office artifacts.",
+            "severity": "warning",
         }
     ]

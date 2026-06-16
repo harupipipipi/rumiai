@@ -1,0 +1,24 @@
+id: rumi_code_ide_pack.codex_patch_loop
+name: Codex Patch Loop
+profile: rumi_code_ide_pack.code_cli_ide
+inspiration:
+  - Codex
+intent: inspect, patch, test, summarize loop for scoped repository changes
+enabled_capabilities:
+  - local_file
+  - terminal
+  - git
+  - project
+  - compact
+  - safety
+ui_panels:
+  - chat
+  - diff
+  - terminal
+behavior:
+  - minimal_patch
+  - targeted_verification
+  - final_files_and_tests_summary
+  - no_unrelated_reverts
+overlap_notes:
+  defaultspack: does not replace default coding tools

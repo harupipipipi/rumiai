@@ -1,0 +1,212 @@
+example:
+  id: framework_upgrade
+  pack_id: rumi_code_migration_pack
+  scenario: Next.js 13 to Next.js 15 and React 18 to React 19 migration across a mixed frontend backend repository with compatibility gates and rollback notes.
+  input_refs:
+  - repo_inventory:acme-webapp-2026-06-04
+  - migration_request:upgrade_next_react_stack
+  evidence_refs:
+  - evidence:package-json-lockfile-diff
+  - evidence:ci-matrix-current-state
+  - evidence:app-router-route-inventory
+  handoff_owner: rumi_code_ide_pack
+  review_gate: all_blocking_checks
+  expected_result: reviewed_handoff_packet
+  must_not:
+  - external_action
+  - runtime_execution
+  - file_edit
+  - codemod_execution
+  - pull_request_creation
+  - secret_material
+  status: ready_for_owner_handoff
+  handoff_packet:
+    packet_id: next15-react19-upgrade-handoff
+    downstream_owner_pack: rumi_code_ide_pack
+    external_action: handoff_only
+    repo_inventory:
+      inventory_id: acme-webapp-2026-06-04
+      languages:
+      - TypeScript
+      - Python
+      package_managers:
+      - pnpm
+      - uv
+      build_systems:
+      - Next.js
+      - Vite storybook
+      - pytest
+      test_suites:
+      - pnpm lint
+      - pnpm test
+      - pnpm e2e
+      - pytest services
+      dependency_graph: frontend app imports shared ui package; api client package imports generated OpenAPI types.
+      ownership_map: app routes owned by web-platform; shared components owned by design-systems; generated api types owned by backend-platform.
+      generated_files:
+      - packages/api-client/src/generated/**
+      - apps/web/.next/**
+      deprecated_apis:
+      - legacy next/image layout prop
+      - ReactDOM.render in test harness
+      - custom next/router mocks
+      migration_hotspots:
+      - apps/web/app/** route handlers using cached fetch defaults
+      - packages/ui/** components relying on implicit React children typing
+      - tests/** mocks pinned to next/router
+    migration_plan:
+      plan_id: next15-react19-plan
+      current_state: Next.js 13.5, React 18.2, pnpm 8, Node 20.
+      target_state: Next.js 15, React 19, pnpm 9, Node 22.
+      non_goals:
+      - no app router rewrite outside compatibility fixes
+      - no design system restyle
+      phases:
+      - inventory and compatibility matrix review
+      - dependency bump preparation
+      - codemod dry-run packet
+      - test-gated implementation handoff
+      prerequisites:
+      - lockfile baseline captured
+      - generated files excluded from transform scope
+      invariants:
+      - public routes remain stable
+      - API client generated types are not hand edited
+      compatibility_constraints:
+      - Node 22 must pass linux and macos CI
+      - pnpm lockfile migration must be isolated
+      acceptance_gates:
+      - lint, unit, route smoke, and e2e gates named before implementation
+      - rollback dependency downgrade path approved
+    codemod_plan:
+      codemod_plan_id: next-react-codemod-dry-run
+      transform_intent: Replace deprecated Next.js and React API usages while preserving route behavior.
+      matcher_strategy: AST selectors for next/image props, ReactDOM.render imports, next/router test mocks, and fetch cache options.
+      dry_run_requirements:
+      - capture transform diffstat before write handoff
+      - classify every changed file as automated, manual-review, or excluded
+      manual_review_buckets:
+      - route handlers with auth or cache behavior
+      - tests with router mocks
+      generated_file_exclusions:
+      - packages/api-client/src/generated/**
+      - apps/web/.next/**
+      idempotency_checks:
+      - second dry-run reports zero transform candidates
+      validation_commands:
+      - pnpm lint
+      - pnpm test
+      - pnpm e2e --grep route-smoke
+    pr_shard_plan:
+      shard_plan_id: next15-react19-shards
+      shards:
+      - shard_id: shard-01-toolchain-lockfile
+        scope: package manager, Node engine, and lockfile only
+        dependencies: []
+        max_blast_radius:
+        - package manifests
+        - lockfile
+        ordering: first
+        owner_handoff: rumi_subagent_pr_manager_pack
+        reviewer_notes:
+        - no source changes in this shard
+        merge_sequencing: merge before codemod shards
+        conflict_risk: medium
+      - shard_id: shard-02-framework-codemods
+        scope: Next.js and React API compatibility changes
+        dependencies:
+        - shard-01-toolchain-lockfile
+        max_blast_radius:
+        - apps/web/**
+        - packages/ui/**
+        ordering: second
+        owner_handoff: rumi_subagent_pr_manager_pack
+        reviewer_notes:
+        - verify generated files remain untouched
+        merge_sequencing: merge after toolchain shard and before e2e cleanup
+        conflict_risk: high
+    compatibility_matrix:
+      matrix_id: next15-react19-compatibility
+      runtime_versions:
+      - Node 20 current
+      - Node 22 target
+      framework_versions:
+      - Next.js 13.5 current
+      - Next.js 15 target
+      - React 18 current
+      - React 19 target
+      os_platform: linux and macos CI runners
+      package_manager_constraints:
+      - pnpm 9 lockfile must be generated once
+      api_behavior_deltas:
+      - fetch cache behavior changes require route smoke tests
+      - React 19 typing changes require component compile review
+      supported_cells:
+      - Node 22 + pnpm 9 + Next.js 15 on linux
+      - Node 22 + pnpm 9 + Next.js 15 on macos
+      unsupported_cells:
+      - Node 18 + Next.js 15
+    risk_ledger:
+    - risk_id: risk_cache_behavior
+      impact: stale or over-fresh route data
+      likelihood: medium
+      detection_signal: route smoke test failures or changed cache headers
+      mitigation: manual review bucket for route handlers
+      owner: web-platform
+      escalation_path: release manager review through rumi_devops_release_pack
+      rollback_linkage: rollback-next15-react19
+    - risk_id: risk_generated_client_drift
+      impact: generated API client accidentally modified
+      likelihood: low
+      detection_signal: generated path diff appears in shard
+      mitigation: generated file exclusions and checklist blocker
+      owner: backend-platform
+      escalation_path: security and API owner review
+      rollback_linkage: rollback-next15-react19
+    test_gates:
+    - gate_id: static-types
+      static_checks:
+      - pnpm lint
+      - pnpm typecheck
+      unit_tests:
+      - pnpm test
+      integration_tests: []
+      e2e_tests: []
+      migration_smoke_tests:
+      - route import smoke
+      fixture_coverage: image prop and router mock fixtures covered
+      flake_policy: rerun once only after unrelated infrastructure failure
+      pass_fail_evidence: CI artifact links required in PR handoff
+    - gate_id: route-behavior
+      static_checks: []
+      unit_tests: []
+      integration_tests:
+      - route handler cache tests
+      e2e_tests:
+      - authenticated navigation smoke
+      migration_smoke_tests:
+      - changed route list smoke
+      fixture_coverage: high traffic routes represented
+      flake_policy: no quarantine for changed route failures
+      pass_fail_evidence: before and after route smoke summary
+    - gate_id: generated-file-guard
+      static_checks:
+      - diff check for generated paths
+      unit_tests: []
+      integration_tests: []
+      e2e_tests: []
+      migration_smoke_tests:
+      - generated exclusion check
+      fixture_coverage: generated API client path included
+      flake_policy: deterministic blocker
+      pass_fail_evidence: diffstat proving generated paths untouched
+    rollback_plan:
+      rollback_id: rollback-next15-react19
+      trigger: CI failure in route behavior or production canary regression after implementation owner executes changes.
+      revert_strategy: revert implementation shards in reverse order, then restore pnpm lockfile and Node engine constraints.
+      data_config_considerations:
+      - no data migration expected
+      - cache configuration changes must be restored with route shard
+      dependency_downgrade_path: restore Next.js 13.5, React 18.2, pnpm 8 lockfile.
+      user_impact: route behavior may revert to current cache semantics.
+      verification_after_rollback: rerun route smoke and generated-file guard.

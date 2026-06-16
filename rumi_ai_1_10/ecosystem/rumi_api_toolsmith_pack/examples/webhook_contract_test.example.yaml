@@ -1,0 +1,12 @@
+example:
+  id: webhook_contract_test
+  pack_id: rumi_api_toolsmith_pack
+  workflow: review_auth_surface
+  intent: Review an order.updated webhook payload catalog for signature header naming, replay-window policy, duplicate delivery, malformed payload, and retry fixtures.
+  evidence:
+    - spec_url_or_path
+    - operation_ids
+    - mock_response_fixture
+    - auth_boundary
+  handoff: handoff_to_rumi_mcp_gateway_pack
+  expected_result: webhook_contract_summary_with_secret_free_signature_policy_and_mock_delivery_cases

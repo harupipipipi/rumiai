@@ -1,0 +1,42 @@
+{
+  "function_id": "remote_host_status",
+  "description": "Get remote host readiness and runtime status.",
+  "tags": [
+    "remote",
+    "host"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.remote.host_status",
+    "defaultspack.remote.host_status",
+    "defaults.remote.host.status",
+    "defaultspack.remote.host.status"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.remote.host_status",
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,63 @@
+routing_matrix:
+  id: rumi_subagent_pr_manager_pack.subagent_routing_matrix
+  default_policy:
+    one_pack_per_pr: true
+    repeated_subagent_use_required: true
+    owner_reviewer_fallback_required: true
+    cross_pack_handoff_record_required: true
+  lanes:
+    pack_contract_thickening:
+      owner_subagent: pack_author
+      reviewer_subagent: contract_reviewer
+      fallback_subagent: evidence_auditor
+      owned_surfaces:
+        - docs
+        - catalogs
+        - policies
+        - tests
+      required_evidence:
+        - changed_file_manifest
+        - contract_test_result
+        - asset_quality_notes
+      handoff_if:
+        executable_code_requested: rumi_code_ide_pack
+        runtime_agent_needed: rumi_agent_services_pack
+    setup_policy_metadata:
+      owner_subagent: setup_policy_editor
+      reviewer_subagent: overlap_reviewer
+      fallback_subagent: defaultspack_guardian
+      owned_surfaces:
+        - setup_pack_metadata
+        - overlap_policy
+        - defaultspack_promotion
+      required_evidence:
+        - selector_discoverability_result
+        - overlap_policy_summary
+        - promotion_disabled_confirmation
+      handoff_if:
+        selector_code_change_needed: defaultspack
+        marketplace_release_needed: rumi_pack_suite_pack
+    integration_readiness:
+      owner_subagent: integration_coordinator
+      reviewer_subagent: regression_reviewer
+      fallback_subagent: evidence_auditor
+      owned_surfaces:
+        - branch_pr_ledger
+        - merge_readiness
+        - validation_commands
+      required_evidence:
+        - per_pack_test_commands
+        - known_risks
+        - reviewer_ready_summary
+      handoff_if:
+        telemetry_required: rumi_observability_pack
+        code_conflict_detected: rumi_code_ide_pack
+subagent_roles:
+  pack_author:
+    responsibility: Create scoped declarative assets and keep pack identity coherent.
+  contract_reviewer:
+    responsibility: Verify docs, metadata, no secrets, and no network by default.
+  evidence_auditor:
+    responsibility: Check that each PR candidate has a ledger and validation result.
+  overlap_reviewer:
+    responsibility: Confirm handoff boundaries and setup-pack overlap metadata.

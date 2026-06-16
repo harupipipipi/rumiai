@@ -1,0 +1,23 @@
+task:
+  title: Decision brief from evidence
+  preset: rumi_research_pack.genspark_research_brief
+  goal: Compare three options and produce a concise cited recommendation.
+  inputs:
+    options: [option_a, option_b, option_c]
+    evaluation_criteria: [cost, implementation_risk, expected_impact, evidence_strength]
+    local_sources:
+      - workspace/research/option_a_notes.md
+      - workspace/research/option_b_notes.md
+      - workspace/research/option_c_notes.md
+  output:
+    folder: workspace/research_outputs/decision_brief
+    artifacts:
+      - type: comparison_table
+        path: comparison_table.yaml
+      - type: cited_brief
+        path: decision_brief.md
+      - type: limitations
+        path: limitations.md
+  workflow: comparison_research_brief
+  review:
+    checks: [citation_required_for_non_obvious_factual_claims, limitations_section_required]

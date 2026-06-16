@@ -1,0 +1,29 @@
+profile:
+  id: artifact_app_runtime
+  pack_id: rumi_artifact_app_runtime_pack
+  mode: local_first_declarative
+  default_presets:
+  - safe_default
+  - handoff_review
+  - quality_gate
+  owned_surfaces:
+  - artifact_app_manifest
+  - sandbox_renderer_contract
+  - artifact_state_snapshot
+  - artifact_version_selector
+  - tool_mcp_approval_prompt
+  - runtime_error_boundary
+  - share_export_manifest
+  - artifact_runtime_ui_contract
+  handoff_surfaces:
+  - frontend design generation
+  - file persistence
+  - sandbox isolation runtime
+  - MCP execution
+  - API execution
+  - media transforms
+  - browser automation
+  review_contract:
+    external_actions: handoff_only
+    evidence_required: true
+    human_review_required: true

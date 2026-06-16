@@ -20,6 +20,19 @@ from .paths import (
 from .pack_function_policy import (
     permission_id_for_entry,
 )
+from .validation import validate_entrypoint
+
+
+def _is_pack_approved_and_verified(pack_id: str) -> tuple[bool, Optional[str]]:
+    try:
+        from .approval_manager import get_approval_manager
+
+        result = get_approval_manager().is_pack_approved_and_verified(pack_id)
+    except Exception as exc:
+        return False, f"approval_check_error:{exc}"
+    if isinstance(result, tuple):
+        return bool(result[0]), result[1] if len(result) > 1 else None
+    return bool(result), None
 
 
 TRUSTED_IN_PROCESS_PACK_IDS = frozenset({"defaultspack", "rumi_default_tools_pack"})
@@ -123,19 +136,35 @@ def resolve_function_entry(pack_id: str, function_id: str) -> Any:
     entry = get_container().get("function_registry").get(qualified_name)
     if entry is None:
         raise KeyError(f"Function not found: {qualified_name}")
-    if not is_pack_function_in_process_allowed(entry.pack_id, entry.function_dir):
+    pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
+    if not is_pack_function_in_process_allowed(entry.pack_id, pack_root_hint):
         raise PermissionError(
             f"In-process pack function execution is not allowed: {qualified_name}"
         )
+    approved, reason = _is_pack_approved_and_verified(entry.pack_id)
+    if not approved:
+        detail = f": {reason}" if reason else ""
+        raise PermissionError(f"Pack not approved: {entry.pack_id}{detail}")
     return entry
 
 
 def _resolve_entrypoint_parts(entry: Any) -> tuple[Path | None, str]:
     entrypoint = entry.entrypoint or "main.py:run"
-    module_rel, callable_name = (
-        entrypoint.rsplit(":", 1) if ":" in entrypoint else (entrypoint, "run")
-    )
-    module_path = Path(entry.function_dir) / module_rel
+    entrypoint_for_validation = entrypoint if ":" in entrypoint else f"{entrypoint}:run"
+    function_dir = Path(entry.function_dir)
+    valid, error, module_path = validate_entrypoint(entrypoint_for_validation, function_dir)
+    if not valid or module_path is None:
+        raise PermissionError(error or f"Invalid entrypoint: {entrypoint}")
+    _, callable_name = entrypoint_for_validation.rsplit(":", 1)
+    if not module_path.is_file():
+        raise FileNotFoundError(f"Entrypoint file not found: {module_path}")
+    if not is_path_within(module_path, BASE_DIR):
+        raise PermissionError(f"Entrypoint escapes project boundary: {module_path}")
+    trusted_path = getattr(entry, "main_py_path", None)
+    if trusted_path is not None and Path(trusted_path).resolve() != module_path.resolve():
+        raise PermissionError(
+            f"Entrypoint differs from trusted registry path: {module_path}"
+        )
     return module_path, callable_name
 
 
