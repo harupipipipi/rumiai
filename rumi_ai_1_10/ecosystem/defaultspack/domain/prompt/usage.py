@@ -172,8 +172,10 @@ def compact_prompt_usage_for_metadata(usage: dict[str, Any]) -> dict[str, Any]:
             for key, value in segment.items()
             if key not in {"text", "schema"}
         }
+        if text and not str(compact.get("preview") or "").strip():
+            compact["preview"] = " ".join(text.split())[:280]
         if text:
-            compact["text"] = text
+            compact["has_full_text"] = True
         segments.append(compact)
     return {
         "trace_id": usage.get("trace_id"),

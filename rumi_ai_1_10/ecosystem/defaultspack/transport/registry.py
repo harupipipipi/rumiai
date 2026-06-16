@@ -433,6 +433,90 @@ def flow_http_output_is_compatible(flow_id: str, output: Any, *, fallback_block_
     return True
 
 
+_PROMPT_HTTP_ROUTE_SPECS = [
+    HttpRouteSpec("GET", "/api/prompts", block_module="blocks.prompt.editor"),
+    HttpRouteSpec("GET", "/api/prompts/active", block_module="blocks.prompt.active"),
+    HttpRouteSpec("GET", "/api/prompts/traces", block_module="blocks.prompt.trace"),
+    HttpRouteSpec(
+        "GET",
+        "/api/prompts/traces/{trace_id}",
+        block_module="blocks.prompt.trace",
+        path_inject={"trace_id": "trace_id"},
+    ),
+    HttpRouteSpec("POST", "/api/prompts/toggle", block_module="blocks.prompt.toggle"),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/preview-toggle",
+        block_module="blocks.prompt.toggle",
+        defaults={"_preview": True},
+    ),
+    HttpRouteSpec("GET", "/api/prompts/editor", block_module="blocks.prompt.editor"),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/editor/save",
+        block_module="blocks.prompt.editor",
+        defaults={"action": "save"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/override",
+        block_module="blocks.prompt.editor",
+        defaults={"action": "override"},
+    ),
+    HttpRouteSpec("POST", "/api/prompts/diff", block_module="blocks.prompt.diff"),
+    HttpRouteSpec("POST", "/api/prompts/test", block_module="blocks.prompt.test"),
+    HttpRouteSpec(
+        "GET",
+        "/api/prompts/{name}/versions",
+        block_module="blocks.prompt.editor",
+        path_inject={"name": "name"},
+        defaults={"action": "versions"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/{name}/versions",
+        block_module="blocks.prompt.advanced.version",
+        path_inject={"name": "name"},
+    ),
+    HttpRouteSpec(
+        "PUT",
+        "/api/prompts/{name}/versions/{version}",
+        block_module="blocks.prompt.advanced.version",
+        path_inject={"name": "name", "version": "version"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/{name}/rollback",
+        block_module="blocks.prompt.rollback",
+        path_inject={"name": "name"},
+    ),
+    HttpRouteSpec("PUT", "/api/prompts/{name}", block_module="blocks.prompt.update", path_inject={"name": "name"}),
+    HttpRouteSpec("DELETE", "/api/prompts/{name}", block_module="blocks.prompt.delete", path_inject={"name": "name"}),
+    HttpRouteSpec("POST", "/api/prompts/convert", block_module="blocks.prompt.convert"),
+    HttpRouteSpec("POST", "/api/prompts/lint", block_module="blocks.prompt.lint_prompt"),
+    HttpRouteSpec("POST", "/api/prompts/compact", block_module="blocks.prompt.compact_prompt"),
+    HttpRouteSpec("POST", "/api/prompts/build", block_module="blocks.prompt.advanced.build"),
+    HttpRouteSpec("GET", "/api/prompts/context-vars", block_module="blocks.prompt.advanced.context_vars"),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/{name}/conditional",
+        block_module="blocks.prompt.advanced.conditional",
+        path_inject={"name": "name"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/{name}/inherit",
+        block_module="blocks.prompt.advanced.inherit",
+        path_inject={"name": "name"},
+    ),
+    HttpRouteSpec("POST", "/api/prompts/preview", block_module="blocks.prompt.advanced.preview"),
+]
+
+
+def prompt_http_route_specs() -> List[HttpRouteSpec]:
+    return list(_PROMPT_HTTP_ROUTE_SPECS)
+
+
 _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec(
         "POST",
@@ -734,26 +818,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/packs/defaultspack/knowledge/{id}", block_module="blocks.knowledge.get", path_inject={"id": "id"}),
     HttpRouteSpec("PUT", "/api/packs/defaultspack/knowledge/{id}", block_module="blocks.knowledge.update", path_inject={"id": "id"}),
     HttpRouteSpec("DELETE", "/api/packs/defaultspack/knowledge/{id}", block_module="blocks.knowledge.delete", path_inject={"id": "id"}),
-    HttpRouteSpec("GET", "/api/prompts", block_module="blocks.prompt.editor"),
-    HttpRouteSpec("GET", "/api/prompts/active", block_module="blocks.prompt.active"),
-    HttpRouteSpec("GET", "/api/prompts/traces", block_module="blocks.prompt.trace"),
-    HttpRouteSpec("GET", "/api/prompts/traces/{trace_id}", block_module="blocks.prompt.trace", path_inject={"trace_id": "trace_id"}),
-    HttpRouteSpec("POST", "/api/prompts/toggle", block_module="blocks.prompt.toggle"),
-    HttpRouteSpec("POST", "/api/prompts/preview-toggle", block_module="blocks.prompt.toggle", defaults={"_preview": True}),
-    HttpRouteSpec("GET", "/api/prompts/editor", block_module="blocks.prompt.editor"),
-    HttpRouteSpec("POST", "/api/prompts/editor/save", block_module="blocks.prompt.editor", defaults={"action": "save"}),
-    HttpRouteSpec("POST", "/api/prompts/override", block_module="blocks.prompt.editor", defaults={"action": "override"}),
-    HttpRouteSpec("POST", "/api/prompts/diff", block_module="blocks.prompt.diff"),
-    HttpRouteSpec("POST", "/api/prompts/test", block_module="blocks.prompt.test"),
-    HttpRouteSpec("GET", "/api/prompts/{name}/versions", block_module="blocks.prompt.editor", path_inject={"name": "name"}, defaults={"action": "versions"}),
-    HttpRouteSpec("POST", "/api/prompts/{name}/versions", block_module="blocks.prompt.advanced.version", path_inject={"name": "name"}),
-    HttpRouteSpec("PUT", "/api/prompts/{name}/versions/{version}", block_module="blocks.prompt.advanced.version", path_inject={"name": "name", "version": "version"}),
-    HttpRouteSpec("POST", "/api/prompts/{name}/rollback", block_module="blocks.prompt.rollback", path_inject={"name": "name"}),
-    HttpRouteSpec("PUT", "/api/prompts/{name}", block_module="blocks.prompt.update", path_inject={"name": "name"}),
-    HttpRouteSpec("DELETE", "/api/prompts/{name}", block_module="blocks.prompt.delete", path_inject={"name": "name"}),
-    HttpRouteSpec("POST", "/api/prompts/convert", block_module="blocks.prompt.convert"),
-    HttpRouteSpec("POST", "/api/prompts/lint", block_module="blocks.prompt.lint_prompt"),
-    HttpRouteSpec("POST", "/api/prompts/compact", block_module="blocks.prompt.compact_prompt"),
+    *_PROMPT_HTTP_ROUTE_SPECS,
     HttpRouteSpec("GET", "/api/tools", block_module="blocks.tool.list"),
     HttpRouteSpec("GET", "/api/tools/names", block_module="blocks.tool.names"),
     HttpRouteSpec("GET", "/api/defaultspack/modules", function_id="management_list_modules", function_name="defaultspack:management_list_modules"),

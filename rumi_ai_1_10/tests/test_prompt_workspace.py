@@ -17,8 +17,10 @@ from domain.prompt.usage import (  # noqa: E402
     active_prompt_summary,
     append_runtime_prompt_segment,
     compact_prompt_usage_for_metadata,
+    prompt_usage_from_trace,
     toggle_prompt_edge,
 )
+from transport.registry import _FALLBACK_HTTP_ROUTE_SPECS, prompt_http_route_specs  # noqa: E402
 
 
 class _EmptyToolRegistry:
@@ -290,7 +292,7 @@ def test_readonly_prompt_save_creates_profile_override(monkeypatch, tmp_path: Pa
     assert "profiles/prompt-profile/prompts/locked.system.system.md" in str(override_path)
 
 
-def test_prompt_usage_metadata_keeps_text_and_drops_tool_schema_payload() -> None:
+def test_prompt_usage_metadata_stores_previews_and_trace_pointer_not_full_text() -> None:
     usage = {
         "trace_id": "trace-1",
         "profile_id": "prompt-profile",
@@ -312,5 +314,55 @@ def test_prompt_usage_metadata_keeps_text_and_drops_tool_schema_payload() -> Non
     compact = compact_prompt_usage_for_metadata(usage)
 
     assert compact["trace_id"] == "trace-1"
-    assert compact["segments"][0]["text"] == "Visible prompt body"
+    assert compact["segments"][0]["preview"] == "Visible prompt body"
+    assert compact["segments"][0]["has_full_text"] is True
+    assert "text" not in compact["segments"][0]
     assert "schema" not in compact["segments"][0]
+
+
+def test_prompt_trace_detail_can_lazy_load_full_text() -> None:
+    trace = {
+        "trace_id": "trace-1",
+        "profile_id": "prompt-profile",
+        "conversation_id": "chat-1",
+        "run_id": "run-1",
+        "effective_input": {
+            "system_segments": [
+                {
+                    "id": "prompt:editable.system",
+                    "text": "Visible prompt body",
+                    "metadata": {"prompt_id": "editable.system"},
+                }
+            ],
+            "developer_segments": [],
+            "context_segments": [],
+            "tool_schemas": [],
+            "policy": {"segments": []},
+            "disabled_segments": [],
+        },
+        "graph": {},
+        "token_estimate": {"total": 3},
+    }
+
+    detail = prompt_usage_from_trace(trace, include_text=True)
+    compact = compact_prompt_usage_for_metadata(detail)
+
+    assert detail["segments"][0]["text"] == "Visible prompt body"
+    assert "text" not in compact["segments"][0]
+
+
+def test_prompt_route_specs_have_no_control_stub_and_match_fallback_registry() -> None:
+    canonical = {
+        (spec.method, spec.pattern, spec.legacy_block_module or spec.block_module or spec.fallback_block_module)
+        for spec in prompt_http_route_specs()
+    }
+    fallback = {
+        (spec.method, spec.pattern, spec.legacy_block_module or spec.block_module or spec.fallback_block_module)
+        for spec in _FALLBACK_HTTP_ROUTE_SPECS
+        if str(spec.pattern).startswith("/api/prompts")
+    }
+
+    assert canonical
+    assert canonical == fallback
+    assert all("/control" not in pattern for _, pattern, _ in canonical)
+    assert ("POST", "/api/prompts/editor", "blocks.prompt.control") not in canonical

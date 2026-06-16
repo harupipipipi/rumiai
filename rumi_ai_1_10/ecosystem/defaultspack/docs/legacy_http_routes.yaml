@@ -1756,6 +1756,111 @@ legacy_routes:
   owner: knowledge
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: GET
+  pattern: /api/prompts
+  legacy_block_module: blocks.prompt.editor
+  replacement_function_id: prompt_editor_load
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/prompts/active
+  legacy_block_module: blocks.prompt.active
+  replacement_function_id: prompt_active
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/prompts/traces
+  legacy_block_module: blocks.prompt.trace
+  replacement_function_id: prompt_trace_list
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/prompts/traces/{trace_id}
+  legacy_block_module: blocks.prompt.trace
+  replacement_function_id: prompt_trace_get
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/toggle
+  legacy_block_module: blocks.prompt.toggle
+  replacement_function_id: prompt_toggle
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/preview-toggle
+  legacy_block_module: blocks.prompt.toggle
+  replacement_function_id: prompt_preview_toggle
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/prompts/editor
+  legacy_block_module: blocks.prompt.editor
+  replacement_function_id: prompt_editor_load
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/editor/save
+  legacy_block_module: blocks.prompt.editor
+  replacement_function_id: prompt_editor_save
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/override
+  legacy_block_module: blocks.prompt.editor
+  replacement_function_id: prompt_create_override
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/diff
+  legacy_block_module: blocks.prompt.diff
+  replacement_function_id: prompt_diff
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/test
+  legacy_block_module: blocks.prompt.test
+  replacement_function_id: prompt_test
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/prompts/{name}/versions
+  legacy_block_module: blocks.prompt.editor
+  replacement_function_id: prompt_versions
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/{name}/versions
+  legacy_block_module: blocks.prompt.advanced.version
+  replacement_function_id: ''
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PUT
+  pattern: /api/prompts/{name}/versions/{version}
+  legacy_block_module: blocks.prompt.advanced.version
+  replacement_function_id: ''
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/{name}/rollback
+  legacy_block_module: blocks.prompt.rollback
+  replacement_function_id: prompt_rollback
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
 - method: PUT
   pattern: /api/prompts/{name}
   legacy_block_module: blocks.prompt.update
@@ -1788,6 +1893,41 @@ legacy_routes:
   pattern: /api/prompts/compact
   legacy_block_module: blocks.prompt.compact_prompt
   replacement_function_id: prompt_compact_prompt
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/build
+  legacy_block_module: blocks.prompt.advanced.build
+  replacement_function_id: ''
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/prompts/context-vars
+  legacy_block_module: blocks.prompt.advanced.context_vars
+  replacement_function_id: ''
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/{name}/conditional
+  legacy_block_module: blocks.prompt.advanced.conditional
+  replacement_function_id: ''
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/{name}/inherit
+  legacy_block_module: blocks.prompt.advanced.inherit
+  replacement_function_id: ''
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/preview
+  legacy_block_module: blocks.prompt.advanced.preview
+  replacement_function_id: ''
   owner: prompt
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4

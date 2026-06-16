@@ -16,11 +16,12 @@ Each segment records:
 - source, source type, source chain, and reason included.
 - whether it can be disabled with `allow_disable`.
 - whether it is editable, read-only, or override-only.
-- prompt text or preview when it was captured for that response.
+- preview text when the compact message metadata was captured.
 
-If a response has a `trace_id`, the full prompt trace can also be loaded later
-from trace storage with `defaults.prompt.trace_get` or
-`GET /api/prompts/traces/{trace_id}`.
+Chat metadata intentionally does not duplicate full prompt bodies or tool
+schemas. If a response has a `trace_id`, the full prompt trace can be loaded
+later from trace storage with `defaults.prompt.trace_get` or
+`GET /api/prompts/traces/{trace_id}?include_text=true`.
 
 ## Command Center
 

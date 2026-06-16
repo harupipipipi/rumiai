@@ -560,7 +560,7 @@ def _apply_effective_ai_input_to_request_context(
         "gate_decisions": trace.get("gate_decisions", []),
     }
     try:
-        updated["prompt_usage"] = compact_prompt_usage_for_metadata(prompt_usage_from_trace(trace, include_text=True))
+        updated["prompt_usage"] = compact_prompt_usage_for_metadata(prompt_usage_from_trace(trace, include_text=False))
     except Exception:
         pass
     try:

@@ -8,11 +8,13 @@ inspection through Rumi functions and matching HTTP routes.
 During a chat turn, defaultspack builds an AI Input Graph trace before provider
 payload assembly. The trace is saved through `AiInputTraceStore`, and a compact
 prompt usage payload is attached to the final assistant message at
-`metadata.prompt_usage`.
+`metadata.prompt_usage`. Message metadata keeps trace identifiers, counts, token
+estimates, segment previews, and source/status metadata. It does not duplicate
+full prompt text or tool schemas into every chat message.
 
 The chat disclosure reads the message metadata first. If text is missing and the
 metadata has a `trace_id`, it loads the full detail from
-`GET /api/prompts/traces/{trace_id}`.
+`GET /api/prompts/traces/{trace_id}?include_text=true`.
 
 ## Functions
 

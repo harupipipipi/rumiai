@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { PromptUsageSegmentCard } from "../components/prompts/PromptUsageSegmentCard";
+import { statusBadgeClass, tokenText } from "../components/prompts/promptSegmentView";
 import { api, type PromptStudioData, type PromptStudioPrompt, type PromptStudioTestResult, type PromptUsageSegment } from "../lib/api";
 import { cn } from "../lib/cn";
 
@@ -61,22 +63,9 @@ function promptBody(prompt?: PromptStudioPrompt | null): string {
   return String(prompt?.body ?? prompt?.content ?? "");
 }
 
-function tokenLabel(value: unknown): string {
-  const n = Number(value ?? 0);
-  return Number.isFinite(n) && n > 0 ? `${n.toLocaleString()} tokens` : "0 tokens";
-}
-
 function displaySource(prompt?: PromptStudioPrompt | null): string {
   if (!prompt) return "";
   return String(prompt.effective_source_type || prompt.source_type || prompt.source || "prompt").replace(/_/g, " ");
-}
-
-function activationTone(state?: string): string {
-  if (state === "active") return "border-emerald-500/25 bg-emerald-500/10 text-emerald-200";
-  if (state === "disabled") return "border-amber-500/25 bg-amber-500/10 text-amber-200";
-  if (state === "gated") return "border-sky-500/25 bg-sky-500/10 text-sky-200";
-  if (state === "budget-dropped") return "border-orange-500/25 bg-orange-500/10 text-orange-200";
-  return "border-zinc-800 bg-zinc-900 text-zinc-400";
 }
 
 function isOverride(prompt?: PromptStudioPrompt | null): boolean {
@@ -104,47 +93,6 @@ function formatInspectorValue(value: unknown): string {
   if (value && typeof value === "object") return JSON.stringify(value);
   if (typeof value === "boolean") return value ? "yes" : "no";
   return String(value ?? "");
-}
-
-function compactLine(value: unknown, fallback = ""): string {
-  const text = String(value ?? fallback).trim();
-  return text.length > 220 ? `${text.slice(0, 217)}...` : text;
-}
-
-function segmentRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function UsageSegmentCard({ segment }: { segment: PromptUsageSegment }) {
-  const detail = segmentRecord(segment.activation_detail);
-  const safety = segmentRecord(segment.safety_boundary);
-  const tool = segmentRecord(segment.tool_signal);
-  const skill = segmentRecord(segment.skill_signal);
-  const signal = Object.keys(tool).length
-    ? `Tool signal: ${formatInspectorValue(tool.display_name || tool.tool_name || tool.tool_id)} is schema metadata, not permission.`
-    : Object.keys(skill).length
-      ? `Skill trigger: ${formatInspectorValue(skill.triggered_by || "runtime skill selection")}`
-      : "";
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className={cn("rounded border px-1.5 py-0.5 text-[10px]", activationTone(segment.status))}>{segment.status || "available"}</span>
-        <span className="truncate text-sm font-semibold text-zinc-100">{segment.label || segment.prompt_id || segment.id}</span>
-        <span className="rounded border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">{segment.kind || segment.source_type || "prompt"}</span>
-        <span className="font-mono text-[10px] text-zinc-500">{tokenLabel(segment.tokens)}</span>
-      </div>
-      <div className="mt-2 rounded-md border border-zinc-800/80 bg-black/20 px-2 py-1.5 text-xs leading-relaxed text-zinc-300">
-        {segment.explanation || segment.reason || "Included by the prompt graph."}
-      </div>
-      <div className="mt-1.5 grid gap-1 text-[11px] text-zinc-500">
-        <div className="truncate">{compactLine(detail.effect || segment.input_role, "model input segment")}</div>
-        <div className="truncate">{compactLine(detail.trigger || segment.source_priority || segment.source, "profile selection")}</div>
-        <div className="truncate">{compactLine(safety.summary, "Passive text only: cannot grant permissions, call tools, or mutate chat state.")}</div>
-        {signal && <div className="truncate text-violet-200/80">{signal}</div>}
-      </div>
-      <div className="mt-1 truncate font-mono text-[10px] text-zinc-600">{segment.edge_id || segment.source}</div>
-    </div>
-  );
 }
 
 function splitCsvList(value: string): string[] {
@@ -302,8 +250,8 @@ function PromptStudioTestPanel({
               <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600">Test Model Input</div>
               <span className="font-mono text-[10px] text-zinc-600">{segments.length} segments</span>
             </div>
-            {focusedToolSegments.map((segment) => <UsageSegmentCard key={`${segment.id}-${segment.status}-test-focus`} segment={segment} />)}
-            {segments.filter((segment) => segment.kind === "skill").map((segment) => <UsageSegmentCard key={`${segment.id}-${segment.status}-test-skill`} segment={segment} />)}
+            {focusedToolSegments.map((segment) => <PromptUsageSegmentCard key={`${segment.id}-${segment.status}-test-focus`} segment={segment} />)}
+            {segments.filter((segment) => segment.kind === "skill").map((segment) => <PromptUsageSegmentCard key={`${segment.id}-${segment.status}-test-skill`} segment={segment} />)}
             {!focusedToolSegments.length && !segments.some((segment) => segment.kind === "skill") && (
               <div className="rounded-lg border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">No focused skill or tool-schema segment for this test.</div>
             )}
@@ -655,7 +603,7 @@ export function PromptStudio() {
                     {prompt.read_only ? <Lock size={11} className="shrink-0 text-zinc-600" /> : <Check size={11} className="shrink-0 text-emerald-300" />}
                   </div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
-                    <span className={cn("rounded border px-1.5 py-0.5 text-[9px]", activationTone(prompt.activation_state))}>{prompt.activation_state || "available"}</span>
+                    <span className={cn("rounded border px-1.5 py-0.5 text-[9px]", statusBadgeClass(prompt.activation_state))}>{prompt.activation_state || "available"}</span>
                     <span className="rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[9px] text-zinc-500">{displaySource(prompt)}</span>
                     {isOverride(prompt) && <span className="rounded border border-cyan-500/25 bg-cyan-500/10 px-1.5 py-0.5 text-[9px] text-cyan-200">override</span>}
                   </div>
@@ -673,10 +621,10 @@ export function PromptStudio() {
               <div className="min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <h2 className="truncate text-base font-semibold text-zinc-100">{selectedPrompt?.name || "Prompt"}</h2>
-                  <span className={cn("rounded border px-1.5 py-0.5 text-[10px]", activationTone(selectedPrompt?.activation_state))}>
+                  <span className={cn("rounded border px-1.5 py-0.5 text-[10px]", statusBadgeClass(selectedPrompt?.activation_state))}>
                     {selectedPrompt?.activation_state || "available"}
                   </span>
-                  <span className="rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-500">{tokenLabel(selectedPrompt?.tokens)}</span>
+                  <span className="rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-500">{tokenText(selectedPrompt?.tokens)}</span>
                 </div>
                 <p className="mt-1 truncate text-xs text-zinc-500">{selectedPrompt?.description || selectedPrompt?.source || "Prompt source"}</p>
               </div>
@@ -782,7 +730,7 @@ export function PromptStudio() {
               <div className="grid gap-3">
                 <section className="grid gap-2">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600">Selected Prompt Usage</div>
-                  {promptSegments.map((segment) => <UsageSegmentCard key={`${segment.id}-${segment.status}-selected`} segment={segment} />)}
+                  {promptSegments.map((segment) => <PromptUsageSegmentCard key={`${segment.id}-${segment.status}-selected`} segment={segment} />)}
                   {!promptSegments.length && <div className="rounded-lg border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">No recorded usage for this prompt in the active graph.</div>}
                 </section>
                 <section className="grid gap-2">
@@ -790,7 +738,7 @@ export function PromptStudio() {
                     <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600">Current Model Input</div>
                     <span className="font-mono text-[10px] text-zinc-600">{activeSegments.length} segments</span>
                   </div>
-                  {activeSegments.map((segment) => <UsageSegmentCard key={`${segment.id}-${segment.status}-all`} segment={segment} />)}
+                  {activeSegments.map((segment) => <PromptUsageSegmentCard key={`${segment.id}-${segment.status}-all`} segment={segment} />)}
                   {!activeSegments.length && <div className="rounded-lg border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">No model input segments are available.</div>}
                 </section>
               </div>
@@ -857,7 +805,7 @@ export function PromptStudio() {
                   </div>
                   <div className="flex justify-between gap-3">
                     <dt className="text-zinc-500">Tokens</dt>
-                    <dd className="text-right text-zinc-200">{tokenLabel(selectedPrompt?.tokens)}</dd>
+                    <dd className="text-right text-zinc-200">{tokenText(selectedPrompt?.tokens)}</dd>
                   </div>
                 </dl>
               </section>
@@ -891,7 +839,7 @@ export function PromptStudio() {
                 <div className="space-y-2 text-[11px] text-zinc-500">
                   <div className="flex items-center justify-between gap-2">
                     <span>State</span>
-                    <span className={cn("rounded border px-1.5 py-0.5", activationTone(selectedPrompt?.activation_state))}>{selectedPrompt?.activation_state || "available"}</span>
+                    <span className={cn("rounded border px-1.5 py-0.5", statusBadgeClass(selectedPrompt?.activation_state))}>{selectedPrompt?.activation_state || "available"}</span>
                   </div>
                   <div className="break-all font-mono text-zinc-600">{selectedPrompt?.active_edge_id || "no active edge"}</div>
                   <p className="leading-relaxed">{selectedPrompt?.active_reason || "Available in Prompt Studio."}</p>
