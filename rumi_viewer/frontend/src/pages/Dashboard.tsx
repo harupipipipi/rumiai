@@ -32,6 +32,7 @@ import {
   titleCasePortKey,
   type StartupSortMode,
 } from '@/src/lib/startupProfiles';
+import { isDefaultspackStartupProfile } from '@/src/lib/defaultspackLaunch';
 import { apiMapRoute, profileGraphRoute } from '@/src/lib/routes';
 import { useAppStore } from '@/src/store';
 import {
@@ -496,6 +497,7 @@ export function Dashboard() {
               const hasDanger = issues.some((i) => i.severity === 'danger');
               const isActive = payload.active_profile_id === profile.profile_id;
               const busy = actionState?.profileId === profile.profile_id;
+              const opensDefaultspack = isDefaultspackStartupProfile(profile);
 
               return (
                 <article
@@ -565,9 +567,20 @@ export function Dashboard() {
                   {/* Actions - primary right */}
                   <div className="mt-auto pt-4 flex gap-2 justify-end">
                     <Button variant="outline" size="sm" onClick={() => patchSearchParams({ edit: profile.profile_id })}>Edit</Button>
-                    <Button size="sm" onClick={() => void handleLaunch(profile.profile_id)} disabled={!profileReady || busy} loading={actionState?.type === 'launch' && busy}>
-                      <Rocket className="h-3.5 w-3.5" /> Launch
-                    </Button>
+                    {opensDefaultspack ? (
+                      <Button
+                        size="sm"
+                        onClick={() => void handleLaunchDefaultspack()}
+                        disabled={!runtimeReady || launchingDefaultspack}
+                        loading={launchingDefaultspack}
+                      >
+                        <AppWindow className="h-3.5 w-3.5" /> Defaultspackを開く
+                      </Button>
+                    ) : (
+                      <Button size="sm" onClick={() => void handleLaunch(profile.profile_id)} disabled={!profileReady || busy} loading={actionState?.type === 'launch' && busy}>
+                        <Rocket className="h-3.5 w-3.5" /> Launch
+                      </Button>
+                    )}
                   </div>
                 </article>
               );
@@ -606,11 +619,14 @@ export function Dashboard() {
           handleDuplicate={handleDuplicate}
           handleDelete={handleDelete}
           handleLaunch={handleLaunch}
+          handleLaunchDefaultspack={handleLaunchDefaultspack}
           handleOpenProfileGraph={handleOpenProfileGraph}
           handleOpenApiMap={handleOpenApiMap}
           handleAddPack={handleAddPack}
           handleRemovePack={handleRemovePack}
           handleOverrideChange={handleOverrideChange}
+          launchingDefaultspack={launchingDefaultspack}
+          runtimeReady={runtimeReady}
         />}
       </div>
     </div>
@@ -636,23 +652,28 @@ interface EditPanelProps {
   handleDuplicate: (id: string) => Promise<void>;
   handleDelete: (id: string, name: string) => void;
   handleLaunch: (id: string) => Promise<void>;
+  handleLaunchDefaultspack: () => Promise<void>;
   handleOpenProfileGraph: (id: string) => void;
   handleOpenApiMap: (id: string) => void;
   handleAddPack: (packId: string) => Promise<void>;
   handleRemovePack: (packId: string) => Promise<void>;
   handleOverrideChange: (portKey: string, nodeId: string) => Promise<void>;
+  launchingDefaultspack: boolean;
+  runtimeReady: boolean;
 }
 
 function EditPanel({
   draft, setDraft, catalog, catalogPacks, selectedBasePack, availablePacksToAdd,
   isDirty, actionState, profileCount, editProfileId, patchSearchParams,
-  handleSave, handleActivate, handleDuplicate, handleDelete, handleLaunch,
+  handleSave, handleActivate, handleDuplicate, handleDelete, handleLaunch, handleLaunchDefaultspack,
   handleOpenProfileGraph, handleOpenApiMap,
   handleAddPack, handleRemovePack, handleOverrideChange,
+  launchingDefaultspack, runtimeReady,
 }: EditPanelProps) {
   const [compilePreview, setCompilePreview] = useState<StartupProfileCompilePreviewResponseData | null>(null);
   const [compilePreviewError, setCompilePreviewError] = useState<string | null>(null);
   const [compilePreviewLoading, setCompilePreviewLoading] = useState(false);
+  const opensDefaultspack = isDefaultspackStartupProfile(draft);
   const compilePreviewKey = useMemo(
     () => JSON.stringify({
       profile_id: draft.profile_id,
@@ -728,9 +749,20 @@ function EditPanel({
             <Trash2 className="h-3.5 w-3.5" /> Delete
           </Button>
           <div className="flex-1" />
-          <Button size="sm" onClick={() => void handleLaunch(draft.profile_id)} disabled={actionState?.profileId === draft.profile_id} loading={actionState?.type === 'launch' && actionState?.profileId === draft.profile_id}>
-            <Rocket className="h-3.5 w-3.5" /> Launch
-          </Button>
+          {opensDefaultspack ? (
+            <Button
+              size="sm"
+              onClick={() => void handleLaunchDefaultspack()}
+              disabled={!runtimeReady || launchingDefaultspack}
+              loading={launchingDefaultspack}
+            >
+              <AppWindow className="h-3.5 w-3.5" /> Defaultspackを開く
+            </Button>
+          ) : (
+            <Button size="sm" onClick={() => void handleLaunch(draft.profile_id)} disabled={actionState?.profileId === draft.profile_id} loading={actionState?.type === 'launch' && actionState?.profileId === draft.profile_id}>
+              <Rocket className="h-3.5 w-3.5" /> Launch
+            </Button>
+          )}
           <Button size="sm" onClick={handleSave} disabled={!isDirty || actionState?.type === 'save'} loading={actionState?.type === 'save'}>
             <Save className="h-3.5 w-3.5" /> Save
           </Button>
