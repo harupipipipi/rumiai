@@ -153,7 +153,7 @@ export function ProfileWorkspace() {
               <section className="border border-border bg-bg-main p-4">
                 <div className="mb-3 flex items-center gap-2">
                   <FileCode2 className="h-4 w-4 text-accent" />
-                  <h2 className="text-sm font-semibold text-text-main">Profile Prompts</h2>
+                  <h2 className="text-sm font-semibold text-text-main">Profile Rule Prompts</h2>
                 </div>
                 <JsonBlock value={workspace.prompts} />
               </section>

@@ -11,6 +11,8 @@ import errno
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+
+from domain.ai_client.inline_reasoning import split_inline_reasoning
 from domain.chat.icon_matcher import match_icon
 
 DEFAULT_CHAT_MODEL = "stub/default"
@@ -189,9 +191,7 @@ class ChatStore:
             now = _now_ms()
             parent_id = str(parent_conversation_id) if parent_conversation_id else None
             metadata_dict = dict(metadata) if isinstance(metadata, dict) else {}
-            icon_info = match_icon("New Conversation", cid)
-            metadata_dict["icon_id"] = icon_info["icon_id"]
-            metadata_dict["icon_svg"] = icon_info["icon_svg"]
+            self._set_metadata_icon(metadata_dict, "New Conversation", cid)
             conv = {
                 "id": cid,
                 "title": "New Conversation",
@@ -321,10 +321,7 @@ class ChatStore:
             if "title" in updates or "metadata" in updates:
                 if not isinstance(conv.get("metadata"), dict):
                     conv["metadata"] = {}
-                if "title" in updates or "icon_svg" not in conv["metadata"]:
-                    icon_info = match_icon(conv.get("title") or "New Conversation", conversation_id)
-                    conv["metadata"]["icon_id"] = icon_info["icon_id"]
-                    conv["metadata"]["icon_svg"] = icon_info["icon_svg"]
+                self._set_metadata_icon(conv["metadata"], conv.get("title") or "New Conversation", conversation_id)
 
             conv["updated_at"] = _now_ms()
             self._save_conversation_file(conversation_id, conv)
@@ -801,6 +798,17 @@ class ChatStore:
             conversation["child_conversation_ids"] = []
         if not isinstance(conversation.get("metadata"), dict):
             conversation["metadata"] = {}
+        ChatStore._set_metadata_icon(
+            conversation["metadata"],
+            conversation.get("title") or "New Conversation",
+            conversation.get("id") or conversation_id,
+        )
+
+    @staticmethod
+    def _set_metadata_icon(metadata, title, conversation_id):
+        icon_info = match_icon(title or "New Conversation", conversation_id)
+        metadata["icon_id"] = icon_info["icon_id"]
+        metadata["icon_svg"] = icon_info["icon_svg"]
 
     @staticmethod
     def _normalize_filter_tags(tags):
@@ -1042,13 +1050,8 @@ class ChatStore:
                     continue
                 text = str(block.get("text") or "")
 
-                def collect(match):
-                    value = str(match.group(1) or "").strip()
-                    if value:
-                        thoughts.append(value)
-                    return ""
-
-                cleaned = re.sub(r"<thought>(.*?)</thought>", collect, text, flags=re.DOTALL).strip()
+                extracted, cleaned = split_inline_reasoning(text)
+                thoughts.extend(extracted)
                 if cleaned != text:
                     block["text"] = cleaned
             if thoughts:

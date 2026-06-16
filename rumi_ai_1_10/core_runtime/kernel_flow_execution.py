@@ -61,9 +61,11 @@ import copy
 import re
 import time
 import uuid
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .paths import BASE_DIR
+from .flow_context_security import sanitize_user_flow_context
 
 from .logging_utils import get_structured_logger
 from .profiling import get_profiler
@@ -86,6 +88,11 @@ _UC_MAX_RESPONSE_SIZE = 1 * 1024 * 1024   # 1 MiB
 _UC_MAX_TIMEOUT = 120.0                    # seconds
 _UC_DEFAULT_TIMEOUT = 30.0                 # seconds
 _UC_VALID_RUNTIMES = frozenset({"python", "binary", "command"})
+_FLOW_AUTHORIZATION_SOURCE_UNSET = object()
+_FLOW_AUTHORIZATION_SOURCE_METADATA = ContextVar(
+    "rumi_flow_authorization_source_metadata",
+    default=_FLOW_AUTHORIZATION_SOURCE_UNSET,
+)
 
 class KernelFlowExecutionMixin:
     """
@@ -94,6 +101,16 @@ class KernelFlowExecutionMixin:
     __init__ を持たない。self の属性は KernelCore.__init__ で初期化済みの
     前提でアクセスする。
     """
+
+    _PACK_FLOW_SOURCE_TYPES = frozenset({"pack", "local_pack"})
+    _PACK_FLOW_ALLOWED_KERNEL_HANDLERS = frozenset({
+        "kernel:noop",
+        "kernel:ctx.set",
+        "kernel:ctx.get",
+        "kernel:ctx.copy",
+        "kernel:python_file_call",
+        "kernel:graph.compile",
+    })
     _startup_ctx: Optional[Dict[str, Any]]
     _startup_steps: Optional[List[Dict[str, Any]]]
     _startup_next_index: int
@@ -114,6 +131,80 @@ class KernelFlowExecutionMixin:
         if isinstance(step, dict):
             return step.get("depends_on")
         return getattr(step, "depends_on", None)
+
+    @staticmethod
+    def _snapshot_flow_authorization_metadata(ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """Copy source metadata before flow steps can mutate kernel-owned ctx keys."""
+        return {
+            "source_type": ctx.get("_flow_source_type"),
+            "source_file": ctx.get("_flow_source_file"),
+            "source_pack_id": ctx.get("_flow_source_pack_id"),
+        }
+
+    def _get_flow_source_metadata_for_authorization(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """Return the immutable flow source metadata recorded for this step scope."""
+        metadata = _FLOW_AUTHORIZATION_SOURCE_METADATA.get()
+        if metadata is _FLOW_AUTHORIZATION_SOURCE_UNSET:
+            return self._snapshot_flow_authorization_metadata(ctx)
+        if isinstance(metadata, dict):
+            return dict(metadata)
+        return {"source_type": metadata, "source_file": None, "source_pack_id": None}
+
+    def _get_flow_source_type_for_authorization(self, ctx: Dict[str, Any]) -> str:
+        """Return the immutable flow source type recorded when step execution started."""
+        metadata = self._get_flow_source_metadata_for_authorization(ctx)
+        return str(metadata.get("source_type") or "").strip()
+
+    def _ensure_flow_authorization_context(self, ctx: Dict[str, Any]) -> Any:
+        """Snapshot mutable source metadata before any flow step can alter ctx."""
+        return _FLOW_AUTHORIZATION_SOURCE_METADATA.set(
+            self._snapshot_flow_authorization_metadata(ctx)
+        )
+
+    def _clear_flow_authorization_context(self, token: Any) -> None:
+        """Remove the immutable source snapshot for a completed flow context."""
+        _FLOW_AUTHORIZATION_SOURCE_METADATA.reset(token)
+
+    def _is_pack_flow_context(self, ctx: Dict[str, Any]) -> bool:
+        """Return True when the current async flow originated from an approved pack."""
+        return self._get_flow_source_type_for_authorization(ctx) in self._PACK_FLOW_SOURCE_TYPES
+
+    def _is_kernel_handler_allowed_for_pack_flow(self, handler_key: str) -> bool:
+        """Allow only inert/sandboxed kernel handlers needed by pack flow syntax."""
+        return handler_key in self._PACK_FLOW_ALLOWED_KERNEL_HANDLERS
+
+    def _should_block_kernel_handler_for_flow(self, handler_key: str, ctx: Dict[str, Any]) -> bool:
+        """Prevent pack-provided flows from invoking privileged internal kernel handlers."""
+        return (
+            isinstance(handler_key, str)
+            and handler_key.startswith("kernel:")
+            and self._is_pack_flow_context(ctx)
+            and not self._is_kernel_handler_allowed_for_pack_flow(handler_key)
+        )
+
+    def _record_blocked_kernel_handler_step(
+        self,
+        step_id: Any,
+        handler_key: str,
+        ctx: Dict[str, Any],
+        *,
+        phase: str = "flow",
+    ) -> None:
+        """Record an authorization skip for a blocked pack-flow kernel handler."""
+        source_metadata = self._get_flow_source_metadata_for_authorization(ctx)
+        self.diagnostics.record_step(
+            phase=phase,
+            step_id=f"{step_id or 'unknown'}.kernel_handler.blocked",
+            handler=handler_key,
+            status="skipped",
+            meta={
+                "reason": "pack_flow_kernel_handler_not_allowed",
+                "flow_id": ctx.get("_flow_id"),
+                "source_type": str(source_metadata.get("source_type") or "").strip(),
+                "source_file": source_metadata.get("source_file"),
+                "source_pack_id": source_metadata.get("source_pack_id"),
+            },
+        )
 
     def _check_depends_on(
         self, step: Any, executed_ids: Set[str]
@@ -278,7 +369,7 @@ class KernelFlowExecutionMixin:
             "on_missing_handler": str(defaults.get("on_missing_handler", "skip")).lower()
         }
         if context:
-            ctx.update(context)
+            ctx.update(sanitize_user_flow_context(context))
 
         self.diagnostics.record_step(
             phase=pipeline_name,
@@ -349,15 +440,37 @@ class KernelFlowExecutionMixin:
     # Async Flow 実行
     # ------------------------------------------------------------------
 
-    async def execute_flow(self, flow_id: str, context: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None) -> Dict[str, Any]:
+    async def execute_flow(
+        self,
+        flow_id: str,
+        context: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None,
+        trusted_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         if timeout:
             try:
-                return await asyncio.wait_for(self._execute_flow_internal(flow_id, context), timeout=timeout)
+                if trusted_context is None:
+                    return await asyncio.wait_for(
+                        self._execute_flow_internal(flow_id, context),
+                        timeout=timeout,
+                    )
+                return await asyncio.wait_for(
+                    self._execute_flow_internal(flow_id, context, trusted_context=trusted_context),
+                    timeout=timeout,
+                )
             except asyncio.TimeoutError:
                 return {"_error": f"Flow '{flow_id}' timed out after {timeout}s", "_flow_timeout": True}
-        return await self._execute_flow_internal(flow_id, context)
+        if trusted_context is None:
+            return await self._execute_flow_internal(flow_id, context)
+        return await self._execute_flow_internal(flow_id, context, trusted_context=trusted_context)
 
-    def execute_flow_sync(self, flow_id: str, context: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None) -> Dict[str, Any]:
+    def execute_flow_sync(
+        self,
+        flow_id: str,
+        context: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None,
+        trusted_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Flow を同期的に実行する。
 
@@ -365,7 +478,10 @@ class KernelFlowExecutionMixin:
         Python 3.9+ 互換のパターンに変更。
         """
         effective_timeout = timeout or 300
-        coro = self.execute_flow(flow_id, context, timeout)
+        if trusted_context is None:
+            coro = self.execute_flow(flow_id, context, timeout)
+        else:
+            coro = self.execute_flow(flow_id, context, timeout, trusted_context=trusted_context)
 
         # S-4: ループの状態を安全に判定
         try:
@@ -386,10 +502,17 @@ class KernelFlowExecutionMixin:
             # イベントループなし → asyncio.run で実行
             return asyncio.run(coro)
 
-    async def _execute_flow_internal(self, flow_id: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def _execute_flow_internal(
+        self,
+        flow_id: str,
+        context: Optional[Dict[str, Any]] = None,
+        trusted_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         _prof_start = time.monotonic()
         ctx = self._build_kernel_context()
-        ctx.update(context or {})
+        ctx.update(sanitize_user_flow_context(context))
+        if trusted_context:
+            ctx.update(trusted_context)
         try:
             from .runtime_profile_resolver import resolve_runtime_profile_context
 
@@ -430,6 +553,10 @@ class KernelFlowExecutionMixin:
                     meta={"_is_original": True, "_flow_id": flow_id},
                 )
 
+            ctx["_flow_source_type"] = flow_def.get("_source_type")
+            ctx["_flow_source_file"] = flow_def.get("_source_file")
+            ctx["_flow_source_pack_id"] = flow_def.get("_source_pack_id")
+
             steps = flow_def.get("steps", [])
             ctx["_total_steps"] = len(steps)
             self.diagnostics.record_step(phase="flow", step_id=f"flow.{flow_id}.start", handler="kernel:execute_flow",
@@ -452,123 +579,131 @@ class KernelFlowExecutionMixin:
                 pass
 
     async def _execute_steps_async(self, steps: List[Dict[str, Any]], ctx: Dict[str, Any]) -> Dict[str, Any]:
+        authorization_scope_token = self._ensure_flow_authorization_context(ctx)
         executed_ids: Set[str] = set()
-        for i, step in enumerate(steps):
-            if not isinstance(step, dict) or ctx.get("_flow_timeout"):
-                continue
-            ctx["_current_step_index"] = i
-            step_id = step.get("id", f"step_{i}")
-            step_type = step.get("type", "handler")
-            if step.get("when") and not self._eval_condition(step["when"], ctx):
-                continue
-            # --- Wave 10-C: depends_on check ---
-            dep_ok, dep_missing = self._check_depends_on(step, executed_ids)
-            if not dep_ok:
-                fail_soft = ctx.get("_flow_defaults", {}).get("fail_soft", True)
-                if fail_soft:
-                    _logger.warning(
-                        f"Step '{step_id}' skipped: depends_on not satisfied (missing: {dep_missing})",
-                    )
-                    self.diagnostics.record_step(
-                        phase="flow",
-                        step_id=f"{step_id}.depends_on.skipped",
-                        handler="kernel:depends_on_check",
-                        status="skipped",
-                        meta={
-                            "missing_deps": dep_missing,
-                            "flow_id": ctx.get("_flow_id"),
-                        },
-                    )
+        try:
+            for i, step in enumerate(steps):
+                if not isinstance(step, dict) or ctx.get("_flow_timeout"):
                     continue
-                else:
-                    self.diagnostics.record_step(
-                        phase="flow",
-                        step_id=f"{step_id}.depends_on.abort",
-                        handler="kernel:depends_on_check",
-                        status="failed",
-                        meta={
-                            "missing_deps": dep_missing,
-                            "flow_id": ctx.get("_flow_id"),
-                        },
-                    )
-                    return ctx
-            # --- end depends_on check ---
-            meta = {"flow_id": ctx.get("_flow_id"), "execution_id": ctx.get("_flow_execution_id"),
-                    "step_index": i, "total_steps": ctx.get("_total_steps", len(steps)),
-                    "parent_execution_id": ctx.get("_parent_flow_execution_id")}
-            should_skip, should_abort = False, False
-            for hook in self.interface_registry.get("flow.hooks.before_step", strategy="all"):
-                if callable(hook):
-                    try:
-                        result = hook(step, ctx, meta)
-                        if isinstance(result, dict):
-                            if result.get("_skip"):
-                                should_skip = True
-                                break
-                            if result.get("_abort"):
-                                should_abort = True
-                                break
-                    except Exception as e:
-                        self.diagnostics.record_step(phase="flow", step_id=f"{step_id}.before_hook",
-                                                      handler="flow.hooks.before_step", status="failed", error=e)
-            if should_abort:
-                return ctx
-            if should_skip:
-                continue
-            step_result = None
-            try:
-                if step_type == "handler":
-                    ctx, step_result = await self._execute_handler_step_async(step, ctx)
-                elif step_type == "flow":
-                    ctx, step_result = await self._execute_sub_flow_step(step, ctx)
-                elif step_type == "function":
-                    ctx, step_result = await self._execute_function_step_async(step, ctx)
-                else:
-                    construct = self.interface_registry.get(f"flow.construct.{step_type}")
-                    if construct and callable(construct):
-                        # Wave 17-A: Pack の construct に Kernel 直接参照を渡さず KernelFacade でラップ
-                        _facade = KernelFacade(self)
-                        ctx = await construct(_facade, step, ctx) if asyncio.iscoroutinefunction(construct) else construct(_facade, step, ctx)
-                # C5: check flow control abort after step execution
-                if ctx.get("_flow_control_abort"):
-                    return ctx
-                for hook in self.interface_registry.get("flow.hooks.after_step", strategy="all"):
+                ctx["_current_step_index"] = i
+                step_id = step.get("id", f"step_{i}")
+                step_type = step.get("type", "handler")
+                if step.get("when") and not self._eval_condition(step["when"], ctx):
+                    continue
+                # --- Wave 10-C: depends_on check ---
+                dep_ok, dep_missing = self._check_depends_on(step, executed_ids)
+                if not dep_ok:
+                    fail_soft = ctx.get("_flow_defaults", {}).get("fail_soft", True)
+                    if fail_soft:
+                        _logger.warning(
+                            f"Step '{step_id}' skipped: depends_on not satisfied (missing: {dep_missing})",
+                        )
+                        self.diagnostics.record_step(
+                            phase="flow",
+                            step_id=f"{step_id}.depends_on.skipped",
+                            handler="kernel:depends_on_check",
+                            status="skipped",
+                            meta={
+                                "missing_deps": dep_missing,
+                                "flow_id": ctx.get("_flow_id"),
+                            },
+                        )
+                        continue
+                    else:
+                        self.diagnostics.record_step(
+                            phase="flow",
+                            step_id=f"{step_id}.depends_on.abort",
+                            handler="kernel:depends_on_check",
+                            status="failed",
+                            meta={
+                                "missing_deps": dep_missing,
+                                "flow_id": ctx.get("_flow_id"),
+                            },
+                        )
+                        return ctx
+                # --- end depends_on check ---
+                meta = {"flow_id": ctx.get("_flow_id"), "execution_id": ctx.get("_flow_execution_id"),
+                        "step_index": i, "total_steps": ctx.get("_total_steps", len(steps)),
+                        "parent_execution_id": ctx.get("_parent_flow_execution_id")}
+                should_skip, should_abort = False, False
+                for hook in self.interface_registry.get("flow.hooks.before_step", strategy="all"):
                     if callable(hook):
                         try:
-                            hook(step, ctx, step_result, meta)
+                            result = hook(step, ctx, meta)
+                            if isinstance(result, dict):
+                                if result.get("_skip"):
+                                    should_skip = True
+                                    break
+                                if result.get("_abort"):
+                                    should_abort = True
+                                    break
                         except Exception as e:
-                            _logger.debug(f"after_step hook failed: {e}")
-                            self.diagnostics.record_step(
-                                phase="flow",
-                                step_id=f"{step_id}.after_hook",
-                                handler="flow.hooks.after_step",
-                                status="failed",
-                                error=e,
-                            )
-                # --- Wave 10-C: mark step as executed on success ---
-                executed_ids.add(step_id)
-            except Exception as e:
-                error_handler = self.interface_registry.get("flow.error_handler")
-                if error_handler and callable(error_handler):
-                    try:
-                        action = error_handler(step, ctx, e)
-                        if action == "abort":
-                            self.diagnostics.record_step(phase="flow", step_id=f"{step_id}.error",
-                                                          handler=step.get("handler", "unknown"), status="failed", error=e, meta={"action": "abort"})
-                            return ctx
-                        if action == "retry":
-                            continue
-                    except Exception:
-                        pass
-                self.diagnostics.record_step(phase="flow", step_id=f"{step_id}.error",
-                                              handler=step.get("handler", "unknown"), status="failed", error=e, meta={"action": "continue"})
-        return ctx
+                            self.diagnostics.record_step(phase="flow", step_id=f"{step_id}.before_hook",
+                                                          handler="flow.hooks.before_step", status="failed", error=e)
+                if should_abort:
+                    return ctx
+                if should_skip:
+                    continue
+                step_result = None
+                try:
+                    if step_type == "handler":
+                        ctx, step_result = await self._execute_handler_step_async(step, ctx)
+                    elif step_type == "flow":
+                        ctx, step_result = await self._execute_sub_flow_step(step, ctx)
+                    elif step_type == "function":
+                        ctx, step_result = await self._execute_function_step_async(step, ctx)
+                    else:
+                        construct = self.interface_registry.get(f"flow.construct.{step_type}")
+                        if construct and callable(construct):
+                            # Wave 17-A: Pack の construct に Kernel 直接参照を渡さず KernelFacade でラップ
+                            _facade = KernelFacade(self)
+                            ctx = await construct(_facade, step, ctx) if asyncio.iscoroutinefunction(construct) else construct(_facade, step, ctx)
+                    # C5: check flow control abort after step execution
+                    if ctx.get("_flow_control_abort"):
+                        return ctx
+                    for hook in self.interface_registry.get("flow.hooks.after_step", strategy="all"):
+                        if callable(hook):
+                            try:
+                                hook(step, ctx, step_result, meta)
+                            except Exception as e:
+                                _logger.debug(f"after_step hook failed: {e}")
+                                self.diagnostics.record_step(
+                                    phase="flow",
+                                    step_id=f"{step_id}.after_hook",
+                                    handler="flow.hooks.after_step",
+                                    status="failed",
+                                    error=e,
+                                )
+                    # --- Wave 10-C: mark step as executed on success ---
+                    executed_ids.add(step_id)
+                except Exception as e:
+                    error_handler = self.interface_registry.get("flow.error_handler")
+                    if error_handler and callable(error_handler):
+                        try:
+                            action = error_handler(step, ctx, e)
+                            if action == "abort":
+                                self.diagnostics.record_step(phase="flow", step_id=f"{step_id}.error",
+                                                              handler=step.get("handler", "unknown"), status="failed", error=e, meta={"action": "abort"})
+                                return ctx
+                            if action == "retry":
+                                continue
+                        except Exception:
+                            pass
+                    self.diagnostics.record_step(phase="flow", step_id=f"{step_id}.error",
+                                                  handler=step.get("handler", "unknown"), status="failed", error=e, meta={"action": "continue"})
+            return ctx
+        finally:
+            self._clear_flow_authorization_context(authorization_scope_token)
 
     async def _execute_handler_step_async(self, step: Dict[str, Any], ctx: Dict[str, Any]) -> Tuple[Dict[str, Any], Any]:
         handler_key = step.get("handler")
         if not handler_key:
             return ctx, None
         resolved_args = self._resolve_value(step.get("args", {}), ctx)
+
+        if self._should_block_kernel_handler_for_flow(handler_key, ctx):
+            self._record_blocked_kernel_handler_step(step.get("id"), handler_key, ctx)
+            return ctx, None
 
         # handler 解決統一: kernel:* は _resolve_handler を優先し、
         # pipeline 実行と同じ経路で解決する（async/pipeline 非対称の解消）
@@ -679,7 +814,7 @@ class KernelFlowExecutionMixin:
         args = step.get("args", {})
         resolved_args = self._resolve_value(args, ctx)
         if isinstance(resolved_args, dict):
-            child_ctx.update(resolved_args)
+            child_ctx.update(sanitize_user_flow_context(resolved_args))
 
         try:
             flow_def = self.interface_registry.get(f"flow.{flow_name}", strategy="last")
@@ -708,6 +843,9 @@ class KernelFlowExecutionMixin:
                 steps = first_pipeline if isinstance(first_pipeline, list) else []
 
             child_ctx["_flow_id"] = flow_name
+            child_ctx["_flow_source_type"] = flow_def.get("_source_type")
+            child_ctx["_flow_source_file"] = flow_def.get("_source_file")
+            child_ctx["_flow_source_pack_id"] = flow_def.get("_source_pack_id")
             child_ctx = await self._execute_steps_async(steps, child_ctx)
 
             result = child_ctx.get("output") or child_ctx.get("result") or child_ctx
@@ -747,7 +885,7 @@ class KernelFlowExecutionMixin:
         """function.call ステップを実行する。
 
         capability_executor 経由で function.call を呼ぶ。
-        principal_id は ctx から取得し、フォールバックは使わない（フェイルクローズ）。
+        principal_id は信頼済みの flow 実行コンテキストから取得し、フォールバックは使わない（フェイルクローズ）。
 
         Wave 27-D2: vocab_normalize (opt-in) を結果格納前に適用。
         """
@@ -756,12 +894,12 @@ class KernelFlowExecutionMixin:
             _logger.warning("function step '%s': missing 'function' field", step.get("id"))
             return ctx, None
 
-        # フェイルクローズ: principal_id が ctx に無い場合は実行拒否
-        principal_id = ctx.get("_principal_id")
+        # フェイルクローズ: trusted flow principal が ctx に無い場合は実行拒否
+        principal_id = ctx.get("_flow_run_principal_id")
         if not principal_id:
-            error_result = {"_error": "no _principal_id in ctx", "_step_id": step.get("id")}
+            error_result = {"_error": "no trusted flow principal in ctx", "_step_id": step.get("id")}
             _logger.error(
-                "function step '%s': no _principal_id in ctx, refusing execution",
+                "function step '%s': no trusted flow principal in ctx, refusing execution",
                 step.get("id"),
             )
             output_key = step.get("output") or step.get("id")
@@ -918,17 +1056,17 @@ class KernelFlowExecutionMixin:
                 handler=f"function:{function_name}", status="success",
                 meta={"function": function_name},
             )
-            # フェイルクローズ: principal_id が ctx に無い場合は実行拒否
-            principal_id = ctx.get("_principal_id")
+            # フェイルクローズ: trusted flow principal が ctx に無い場合は実行拒否
+            principal_id = ctx.get("_flow_run_principal_id")
             if not principal_id:
                 _logger.error(
-                    "sync function step '%s': no _principal_id in ctx, refusing execution",
+                    "sync function step '%s': no trusted flow principal in ctx, refusing execution",
                     step_id,
                 )
                 self.diagnostics.record_step(
                     phase=phase, step_id=f"{step_id_str}.failed",
                     handler=f"function:{function_name}", status="failed",
-                    error={"type": "MissingPrincipalId", "message": "no _principal_id in ctx"},
+                    error={"type": "MissingPrincipalId", "message": "no trusted flow principal in ctx"},
                     meta={"optional": optional},
                 )
                 fail_soft = ctx.get("_flow_defaults", {}).get("fail_soft", True)
@@ -997,6 +1135,9 @@ class KernelFlowExecutionMixin:
 
         step_id_str = str(step_id or "unknown.step")
         handler_str = str(handler or "unknown.handler")
+        if self._should_block_kernel_handler_for_flow(handler_str, ctx):
+            self._record_blocked_kernel_handler_step(step_id_str, handler_str, ctx, phase=phase)
+            return False
         fn = self._resolve_handler(handler_str, args)
         if fn is None:
             missing_policy = str(ctx.get("_flow_defaults", {}).get("on_missing_handler", "skip")).lower()

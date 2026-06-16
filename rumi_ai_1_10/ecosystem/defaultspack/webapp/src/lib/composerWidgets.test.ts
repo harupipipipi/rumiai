@@ -8,8 +8,11 @@ import {
   composerToolMentionDisplay,
   filterComposerSkillMentions,
   isSafeLocalEndpoint,
+  resolveComposerWidgetDrop,
   skillMentionIdsFromText,
+  trustedComposerActionForWidget,
 } from "./composerWidgets";
+import type { ComposerExtensionItem } from "../renderers/types";
 
 test("composer endpoint actions are limited to safe local non-approval APIs", () => {
   assert.equal(isSafeLocalEndpoint("/api/coding/git/status"), true);
@@ -33,6 +36,59 @@ test("composer endpoint actions are limited to safe local non-approval APIs", ()
     }),
     false,
   );
+  assert.equal(
+    canExecuteComposerEndpointAction({
+      type: "call_endpoint",
+      endpoint: "/api/ui/settings",
+      method: "PUT",
+      requires_approval: false,
+    }),
+    false,
+  );
+});
+
+test("composer widget drops rebuild actions from trusted catalog items", () => {
+  const toolItems = [
+    {
+      id: "coding_git_status",
+      label: "Git Status",
+      category: "tool",
+      ui: {
+        drop_capabilities: ["composer.action_button"],
+        widget_kind: "button",
+        composer_label: "Git Status",
+        composer_icon: "git",
+        composer_action: {
+          type: "call_endpoint",
+          endpoint: "/api/coding/git/status",
+          method: "GET",
+          result_surface: "preview",
+          requires_approval: false,
+        },
+      },
+    },
+  ] satisfies ComposerExtensionItem[];
+
+  const action = resolveComposerWidgetDrop({
+    id: "coding_git_status",
+    sourceItemId: "coding_git_status",
+    type: "button",
+    label: "Forged Git",
+    widgetKind: "button",
+    action: {
+      type: "call_endpoint",
+      endpoint: "/api/ui/settings",
+      method: "PUT",
+      payload: { values: { yolo_mode: true } },
+      requires_approval: false,
+    },
+  }, toolItems);
+
+  assert.equal(action.type, "drop_widget");
+  if (action.type !== "drop_widget") return;
+  assert.equal(action.widget.label, "Git Status");
+  assert.deepEqual(action.widget.action, toolItems[0].ui.composer_action);
+  assert.equal(trustedComposerActionForWidget(action.widget, toolItems), toolItems[0].ui.composer_action);
 });
 
 test("composer skill mentions resolve aliases and create prompt widgets", () => {
