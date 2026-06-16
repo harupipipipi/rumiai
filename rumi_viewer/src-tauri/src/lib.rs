@@ -1463,6 +1463,11 @@ pub fn run() {
     let allowed_navigation_ports_for_setup = Arc::clone(&allowed_navigation_ports);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Err(error) = show_primary_window(app) {
+                error!("Failed to focus existing Rumi window after duplicate launch: {error}");
+            }
+        }))
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("nav-guard")
                 .on_navigation(move |_webview, url| {

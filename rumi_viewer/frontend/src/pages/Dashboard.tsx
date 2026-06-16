@@ -8,13 +8,11 @@ import {
   createStartupProfile,
   deleteStartupProfile,
   duplicateStartupProfile,
-  fetchDashboard,
   fetchStartupProfiles,
   isDesktopShellAvailable,
   launchDefaultspackDesktop,
   launchStartupProfile,
   removePackFromStartupProfile,
-  restartKernel,
   setStartupProfileNodeOverride,
   updateStartupProfile,
 } from '@/src/lib/api';
@@ -35,20 +33,16 @@ import {
   type StartupSortMode,
 } from '@/src/lib/startupProfiles';
 import { apiMapRoute, profileGraphRoute } from '@/src/lib/routes';
-import { transformDashboard } from '@/src/lib/transforms';
-import { useAppStore, type DashboardData } from '@/src/store';
+import { useAppStore } from '@/src/store';
 import {
   AlertCircle,
-  ArrowLeft,
   AppWindow,
+  ArrowLeft,
   Box,
   CheckCircle2,
-  Cloud,
   Copy,
   Loader2,
-  Monitor,
   MoreHorizontal,
-  MousePointerClick,
   Plus,
   RefreshCw,
   Rocket,
@@ -56,25 +50,15 @@ import {
   Save,
   Search,
   Share2,
-  ShieldCheck,
   Star,
-  Terminal,
   Trash2,
 } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/src/components/ui/Popover';
 import { Button } from '@/src/components/ui/Button';
 import { Badge } from '@/src/components/ui/Badge';
 
-type ActionState = 'activate' | 'create' | 'delete' | 'duplicate' | 'launch' | 'restart' | 'save';
+type ActionState = 'activate' | 'create' | 'delete' | 'duplicate' | 'launch' | 'save';
 
-const defaultDashboard: DashboardData = {
-  kernelStatus: 'stopped',
-  uptime: '--',
-  activePacks: 0,
-  registeredFlows: 0,
-  activities: [],
-  supervisor: null,
-};
 const INITIAL_PROFILE_LOAD_MAX_ATTEMPTS = 3;
 const INITIAL_PROFILE_LOAD_RETRY_DELAY_MS = 900;
 
@@ -96,10 +80,6 @@ export function Dashboard() {
   const runtimeError = useAppStore((state) => state.runtimeError);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-
-  const [dashboard, setDashboard] = useState<DashboardData>(defaultDashboard);
-  const [dashboardLoading, setDashboardLoading] = useState(true);
-  const [dashboardError, setDashboardError] = useState<string | null>(null);
 
   const [payload, setPayload] = useState<StartupProfilesResponseData | null>(null);
   const [profilesLoading, setProfilesLoading] = useState(true);
@@ -132,19 +112,6 @@ export function Dashboard() {
   const translateActionError = (error: unknown, fallbackAction: string) => {
     const rawMessage = error instanceof Error ? error.message : '';
     return describeStartupActionError(rawMessage, fallbackAction);
-  };
-
-  const refreshDashboard = async () => {
-    setDashboardLoading(true);
-    try {
-      const response = await fetchDashboard();
-      setDashboard(transformDashboard(response));
-      setDashboardError(null);
-    } catch (error) {
-      setDashboardError(translateActionError(error, 'load your workspace summary'));
-    } finally {
-      setDashboardLoading(false);
-    }
   };
 
   const refreshProfiles = async (preferredProfileId?: string | null) => {
@@ -182,7 +149,6 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!runtimeReady) return;
-    void refreshDashboard();
     void refreshProfiles();
   }, [runtimeReady]);
 
@@ -345,7 +311,6 @@ export function Dashboard() {
       const response = await launchStartupProfile(profileId);
       if (!response.restart_requested) {
         await refreshProfiles(editProfileId);
-        await refreshDashboard();
       }
       setSuccessFeedback(response.restart_requested ? 'Profile launched. Kernel restart handoff was requested.' : 'Profile launched.');
     } catch (error) {
@@ -387,39 +352,14 @@ export function Dashboard() {
     });
   };
 
-  const handleRestartKernel = () => {
-    showDialog({
-      title: 'Restart kernel?',
-      message: 'This refreshes the runtime and may interrupt in-flight work.',
-      confirmText: 'Restart',
-      onConfirm: async () => {
-        setActionState({ type: 'restart' });
-        setFeedback(null);
-        try {
-          await restartKernel();
-          setDashboard((current) => ({ ...current, kernelStatus: 'stopped' }));
-          setSuccessFeedback('Kernel restart requested.');
-          closeDialog();
-          window.setTimeout(() => { void refreshDashboard(); }, 3000);
-        } catch (error) {
-          setErrorFeedback(translateActionError(error, 'restart the kernel'));
-          closeDialog();
-        } finally { setActionState(null); }
-      },
-    });
-  };
-
   const handleLaunchDefaultspack = async () => {
     if (launchingDefaultspack) return;
     setLaunchingDefaultspack(true);
     setFeedback(null);
     try {
       const message = await launchDefaultspackDesktop();
-      console.log('[defaultspack-launch] success:', message);
       setSuccessFeedback(message);
     } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : String(error);
-      console.error('[defaultspack-launch] failed:', rawMessage);
       setErrorFeedback(translateActionError(error, 'Defaultspackを開く'));
     } finally {
       setLaunchingDefaultspack(false);
@@ -526,8 +466,6 @@ export function Dashboard() {
             )}
           </div>
         )}
-
-        <SupervisorSnapshot data={dashboard.supervisor} loading={dashboardLoading} error={dashboardError} />
 
         {/* Profile Grid */}
         {visibleProfiles.length === 0 ? (
@@ -677,162 +615,6 @@ export function Dashboard() {
       </div>
     </div>
   );
-}
-
-function SupervisorSnapshot({
-  data,
-  loading,
-  error,
-}: {
-  data: DashboardData['supervisor'];
-  loading: boolean;
-  error: string | null;
-}) {
-  const router = data?.router ?? null;
-  const metrics = data?.metrics ?? null;
-  const defaultSandbox = data?.sandbox_providers.find((provider) => provider.default) ?? null;
-  const localSandbox = data?.sandbox_providers.find((provider) => provider.id === 'local_packaged') ?? null;
-  const selectedSession = data?.selected_session ?? null;
-  const computerLayer = router?.fallback_layers.find((layer) => layer.id === 'computer_use') ?? null;
-  const recentEvent = data?.recent_events[0] ?? null;
-  const macDriverOrder = router?.computer_driver_order.darwin ?? [];
-  const routeCount = (router?.operation_layers.length ?? 0) + (router?.fallback_layers.length ?? 0);
-
-  if (!data) {
-    return (
-      <section className="rounded-xl border border-border bg-bg-card p-5">
-        <div className="flex items-center gap-3">
-          <Monitor className="h-4 w-4 text-text-muted" />
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold text-text-main">Supervisor</h2>
-            <p className="text-xs text-text-muted">
-              {loading ? 'Loading runtime snapshot...' : error || 'Runtime snapshot unavailable.'}
-            </p>
-          </div>
-          {loading && <Loader2 className="h-4 w-4 animate-spin text-accent" />}
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr_1fr]">
-      <article className="rounded-xl border border-border bg-bg-card p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Route className="h-4 w-4 text-accent" />
-            <h2 className="text-sm font-semibold text-text-main">Runtime Router</h2>
-          </div>
-          <Badge variant="secondary" className="text-[10px]">{formatRuntimeLabel(router?.policy)}</Badge>
-        </div>
-        <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-          <MetricTile label="Routes" value={String(routeCount || '--')} />
-          <MetricTile label="Structured" value={String(router?.operation_layers.length ?? '--')} />
-          <MetricTile label="Fallback" value={String(router?.fallback_layers.length ?? '--')} />
-        </div>
-        <div className="mt-4 space-y-2">
-          <div className="flex items-center justify-between gap-3 text-xs">
-            <span className="text-text-muted">First layer</span>
-            <span className="truncate text-text-main">{router?.operation_layers[0]?.label ?? '--'}</span>
-          </div>
-          <div className="flex items-center justify-between gap-3 text-xs">
-            <span className="text-text-muted">Last layer</span>
-            <span className="truncate text-text-main">{computerLayer?.label ?? 'Computer use'}</span>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-text-muted">
-            <Terminal className="h-3.5 w-3.5" />
-            <span className="truncate">{formatCompactList(macDriverOrder.slice(0, 4))}</span>
-          </div>
-        </div>
-      </article>
-
-      <article className="rounded-xl border border-border bg-bg-card p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Cloud className="h-4 w-4 text-accent" />
-            <h2 className="text-sm font-semibold text-text-main">Sandbox Providers</h2>
-          </div>
-          <Badge variant="success" className="text-[10px]">{defaultSandbox?.tier ?? 'default'}</Badge>
-        </div>
-        <div className="mt-4 space-y-3">
-          <ProviderRow provider={defaultSandbox} />
-          <ProviderRow provider={localSandbox} />
-        </div>
-        <div className="mt-4 flex items-center gap-2 text-xs text-text-muted">
-          <ShieldCheck className="h-3.5 w-3.5" />
-          <span className="truncate">{formatCompactList(data.security_guardrails.slice(0, 3))}</span>
-        </div>
-      </article>
-
-      <article className="rounded-xl border border-border bg-bg-card p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Monitor className="h-4 w-4 text-accent" />
-            <h2 className="text-sm font-semibold text-text-main">Live Supervision</h2>
-          </div>
-          <Badge variant={metrics?.available ? 'success' : 'secondary'} className="text-[10px]">
-            {metrics?.available ? 'Connected' : 'Idle'}
-          </Badge>
-        </div>
-        <div className="mt-4 grid grid-cols-4 gap-2 text-center">
-          <MetricTile label="Active" value={String(metrics?.active_runs ?? 0)} />
-          <MetricTile label="Approval" value={String(metrics?.waiting_approvals ?? 0)} />
-          <MetricTile label="Stale" value={String(metrics?.stale_runs ?? 0)} />
-          <MetricTile label="Failed" value={String(metrics?.failed_runs ?? 0)} />
-        </div>
-        <div className="mt-4 space-y-2 text-xs">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-text-muted">Selected</span>
-            <span className="truncate text-text-main">{selectedSession?.run_id ?? 'No active session'}</span>
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-text-muted">Last event</span>
-            <span className="truncate text-text-main">{recentEvent?.event_type ?? '--'}</span>
-          </div>
-          <div className="flex items-center gap-2 text-text-muted">
-            <MousePointerClick className="h-3.5 w-3.5" />
-            <span className="truncate">{formatCompactList(data.action_buttons.slice(0, 4))}</span>
-          </div>
-        </div>
-      </article>
-    </section>
-  );
-}
-
-function MetricTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-bg-hover/40 px-2 py-2">
-      <div className="text-[11px] text-text-muted">{label}</div>
-      <div className="mt-1 text-sm font-semibold text-text-main">{value}</div>
-    </div>
-  );
-}
-
-function ProviderRow({ provider }: { provider: NonNullable<DashboardData['supervisor']>['sandbox_providers'][number] | null }) {
-  if (!provider) {
-    return null;
-  }
-  return (
-    <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-bg-hover/40 px-3 py-2">
-      <div className="min-w-0">
-        <div className="truncate text-xs font-medium text-text-main">{provider.label}</div>
-        <div className="mt-0.5 truncate text-[11px] text-text-muted">{formatCompactList(provider.providers.slice(0, 4))}</div>
-      </div>
-      <Badge variant={provider.default ? 'success' : 'secondary'} className="shrink-0 text-[10px]">
-        {provider.default ? 'Default' : formatRuntimeLabel(provider.user_burden)}
-      </Badge>
-    </div>
-  );
-}
-
-function formatRuntimeLabel(value: string | undefined): string {
-  if (!value) return '--';
-  return value.replaceAll('_', ' ');
-}
-
-function formatCompactList(values: string[]): string {
-  if (!values.length) return '--';
-  return values.map(formatRuntimeLabel).join(' / ');
 }
 
 // --- Edit Panel (extracted for readability) ---
@@ -985,7 +767,7 @@ function EditPanel({
                       packs: draft.packs.includes(nextBasePack) ? draft.packs : [nextBasePack, ...draft.packs],
                     });
                   }}
-                  className="w-full rounded-lg border border-border bg-bg-hover px-3 py-2.5 text-sm text-text-main outline-none transition focus:border-accent focus:ring-2 focus:ring-[var(--ring-color)]"
+                  className="rumi-select w-full rounded-lg border border-border px-3 py-2.5 pr-9 text-sm outline-none transition"
                 >
                   {catalogPacks.map((pack: any) => (
                     <option key={pack.pack_id} value={pack.pack_id} disabled={!pack.available}>
@@ -1036,7 +818,7 @@ function EditPanel({
                   value=""
                   onChange={(e) => void handleAddPack(e.target.value)}
                   disabled={availablePacksToAdd.length === 0 || actionState?.profileId === draft.profile_id}
-                  className="w-full rounded-lg border border-border bg-bg-hover px-3 py-2.5 text-sm text-text-main outline-none transition focus:border-accent disabled:opacity-60"
+                  className="rumi-select w-full rounded-lg border border-border px-3 py-2.5 pr-9 text-sm outline-none transition disabled:opacity-60"
                 >
                   <option value="">Select a pack</option>
                   {availablePacksToAdd.map((pack: any) => (
@@ -1071,7 +853,7 @@ function EditPanel({
                       value={currentOverride}
                       onChange={(e) => void handleOverrideChange(graphPort.port_key, e.target.value)}
                       disabled={actionState?.profileId === draft.profile_id}
-                      className="mt-2 w-full rounded-lg border border-border bg-bg-hover px-3 py-2 text-sm text-text-main outline-none transition focus:border-accent"
+                      className="rumi-select mt-2 w-full rounded-lg border border-border px-3 py-2 pr-9 text-sm outline-none transition"
                     >
                       <option value="">Use graph default ({defaultNode})</option>
                       {compatibleNodes.map((node: any) => (

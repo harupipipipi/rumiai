@@ -20,16 +20,21 @@ const GROUP_ORDER = [
 ] as const;
 
 const GROUP_ANCHORS: Record<(typeof GROUP_ORDER)[number], {x: number; y: number}> = {
-  profile: {x: 360, y: 250},
-  prompt: {x: 360, y: 60},
-  tool: {x: 90, y: 120},
-  webhook: {x: 90, y: 320},
-  api: {x: 630, y: 120},
-  frontend: {x: 630, y: 320},
-  flow: {x: 520, y: 430},
-  node: {x: 210, y: 430},
-  storage: {x: 360, y: 430},
+  profile: {x: 500, y: 320},
+  prompt: {x: 500, y: 92},
+  tool: {x: 170, y: 180},
+  webhook: {x: 170, y: 420},
+  api: {x: 830, y: 180},
+  frontend: {x: 830, y: 420},
+  flow: {x: 650, y: 588},
+  node: {x: 350, y: 588},
+  storage: {x: 500, y: 540},
 };
+
+const ROW_GAP = 96;
+const COLUMN_GAP = 184;
+const ROWS_PER_GROUP = 3;
+const CANVAS_PADDING = 80;
 
 export function layoutProfileGraph(
   nodes: ApiProfileGraphNode[],
@@ -50,21 +55,28 @@ export function layoutProfileGraph(
     items
       .sort((left, right) => (left.label || left.ref || left.id).localeCompare(right.label || right.ref || right.id))
       .forEach((node, index) => {
-        const row = index % 3;
-        const column = Math.floor(index / 3);
-        const width = group === 'profile' ? 170 : group === 'storage' ? 132 : 148;
-        const height = group === 'storage' ? 52 : 72;
+        const row = index % ROWS_PER_GROUP;
+        const column = Math.floor(index / ROWS_PER_GROUP);
+        const width = group === 'profile' ? 180 : group === 'storage' ? 148 : 156;
+        const height = group === 'storage' ? 56 : 70;
         positioned.push({
           ...node,
-          x: anchor.x + column * 160 - width / 2,
-          y: anchor.y + row * 84 - height / 2,
+          x: anchor.x + column * COLUMN_GAP - width / 2,
+          y: anchor.y + row * ROW_GAP - height / 2,
           width,
           height,
         });
       });
   }
 
-  return {nodes: positioned, width: 760, height: 520};
+  const maxX = Math.max(...positioned.map((node) => node.x + node.width), 0);
+  const maxY = Math.max(...positioned.map((node) => node.y + node.height), 0);
+
+  return {
+    nodes: positioned,
+    width: Math.max(1000, maxX + CANVAS_PADDING),
+    height: Math.max(680, maxY + CANVAS_PADDING),
+  };
 }
 
 export function edgePath(
@@ -76,12 +88,46 @@ export function edgePath(
   if (!from || !to) {
     return '';
   }
-  const startX = from.x + from.width / 2;
-  const startY = from.y + from.height / 2;
-  const endX = to.x + to.width / 2;
-  const endY = to.y + to.height / 2;
-  const midX = (startX + endX) / 2;
-  return `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`;
+  const fromCenter = centerPoint(from);
+  const toCenter = centerPoint(to);
+  const horizontal = Math.abs(toCenter.x - fromCenter.x) >= Math.abs(toCenter.y - fromCenter.y);
+  const start = boundaryPoint(from, toCenter, horizontal);
+  const end = boundaryPoint(to, fromCenter, horizontal);
+
+  if (horizontal) {
+    const midX = (start.x + end.x) / 2;
+    return `M ${start.x} ${start.y} C ${midX} ${start.y}, ${midX} ${end.y}, ${end.x} ${end.y}`;
+  }
+
+  const midY = (start.y + end.y) / 2;
+  return `M ${start.x} ${start.y} C ${start.x} ${midY}, ${end.x} ${midY}, ${end.x} ${end.y}`;
+}
+
+function centerPoint(node: PositionedProfileGraphNode): {x: number; y: number} {
+  return {
+    x: node.x + node.width / 2,
+    y: node.y + node.height / 2,
+  };
+}
+
+function boundaryPoint(
+  node: PositionedProfileGraphNode,
+  target: {x: number; y: number},
+  preferHorizontal: boolean,
+): {x: number; y: number} {
+  const center = centerPoint(node);
+
+  if (preferHorizontal) {
+    return {
+      x: target.x >= center.x ? node.x + node.width : node.x,
+      y: center.y,
+    };
+  }
+
+  return {
+    x: center.x,
+    y: target.y >= center.y ? node.y + node.height : node.y,
+  };
 }
 
 function groupForNode(node: ApiProfileGraphNode): (typeof GROUP_ORDER)[number] {

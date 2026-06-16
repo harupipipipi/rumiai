@@ -58,12 +58,10 @@ export function PackDetail() {
     setLaunchingDesktop(true);
     try {
       const message = await launchDefaultspackDesktop();
-      console.log('[defaultspack-launch] success:', message);
       addToast(message, 'success');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Defaultspackを開けませんでした';
-      console.error('[defaultspack-launch] failed:', msg);
-      addToast(msg, 'error');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Defaultspackを開けませんでした';
+      addToast(message, 'error');
     } finally {
       setLaunchingDesktop(false);
     }

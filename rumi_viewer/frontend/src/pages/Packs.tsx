@@ -45,12 +45,10 @@ export function Packs() {
     setLaunchingDesktop(true);
     try {
       const message = await launchDefaultspackDesktop();
-      console.log('[defaultspack-launch] success:', message);
       addToast(message, 'success');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Defaultspackを開けませんでした';
-      console.error('[defaultspack-launch] failed:', msg);
-      addToast(msg, 'error');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Defaultspackを開けませんでした';
+      addToast(message, 'error');
     } finally {
       setLaunchingDesktop(false);
     }
@@ -92,13 +90,7 @@ export function Packs() {
               <Card
                 key={pack.id}
                 className="cursor-pointer transition-all hover:shadow-[var(--shadow-md)]"
-                onClick={() => {
-                  if (isDefaultspackLaunchPack(pack)) {
-                    void handleLaunchDefaultspack();
-                    return;
-                  }
-                  navigate(panelRoutes.packDetail(pack.id));
-                }}
+                onClick={() => navigate(panelRoutes.packDetail(pack.id))}
               >
                 <div className="flex items-center justify-between p-5">
                   <div className="flex flex-col gap-1.5 min-w-0 flex-1">

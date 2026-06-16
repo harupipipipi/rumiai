@@ -22,38 +22,9 @@ fn get_km(app: &tauri::AppHandle) -> Arc<Mutex<KernelManager>> {
 pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_i = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
     let restart_i = MenuItem::with_id(app, "restart_kernel", "Restart Kernel", true, None::<&str>)?;
-    #[cfg(target_os = "macos")]
-    let open_defaultspack_i = MenuItem::with_id(
-        app,
-        "open_defaultspack",
-        "Defaultspackを開く",
-        true,
-        None::<&str>,
-    )?;
-    #[cfg(target_os = "macos")]
-    let register_dock_i = MenuItem::with_id(
-        app,
-        "register_dock",
-        "DefaultspackをDockに追加",
-        true,
-        None::<&str>,
-    )?;
     let update_i = MenuItem::with_id(app, "check_update", "Check for Updates", true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
-    #[cfg(target_os = "macos")]
-    let menu = Menu::with_items(
-        app,
-        &[
-            &open_i,
-            &restart_i,
-            &open_defaultspack_i,
-            &register_dock_i,
-            &update_i,
-            &quit_i,
-        ],
-    )?;
-    #[cfg(not(target_os = "macos"))]
     let menu = Menu::with_items(app, &[&open_i, &restart_i, &update_i, &quit_i])?;
 
     let mut tray_builder = TrayIconBuilder::with_id("main-tray")
@@ -78,50 +49,6 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                         error!("Failed to lock kernel manager: {e}");
                     }
                 };
-            }
-            "register_dock" => {
-                #[cfg(target_os = "macos")]
-                {
-                    let config = app.state::<crate::config::AppConfig>().inner().clone();
-                    std::thread::spawn(move || {
-                        match crate::dock_registration::register_defaultspack_dock_impl(&config) {
-                            Ok(msg) => {
-                                info!("Dock registration: {msg}");
-                            }
-                            Err(e) => {
-                                error!("Dock registration failed: {e}");
-                            }
-                        }
-                    });
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    error!("Dock registration is only supported on macOS");
-                }
-            }
-            "open_defaultspack" => {
-                #[cfg(target_os = "macos")]
-                {
-                    let app_handle = app.clone();
-                    let config = app.state::<crate::config::AppConfig>().inner().clone();
-                    std::thread::spawn(move || {
-                        match crate::dock_registration::launch_defaultspack_desktop_window_impl(
-                            &app_handle,
-                            &config,
-                        ) {
-                            Ok(msg) => {
-                                info!("Defaultspack launch: {msg}");
-                            }
-                            Err(e) => {
-                                error!("Defaultspack launch failed: {e}");
-                            }
-                        }
-                    });
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    error!("Defaultspack desktop launch is only supported on macOS");
-                }
             }
             "check_update" => {
                 std::thread::spawn(|| match updater::check_for_update() {
