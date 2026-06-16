@@ -1,0 +1,14 @@
+preset_id: manus_genspark_data_report
+name: Manus/Genspark Style Data Report Workflow
+profile: rumi_data_analysis.report_synthesizer
+inspired_by: [Manus, Genspark]
+enabled_capabilities: [data_intake, csv_profile, notebook_reasoning, chart_design, analysis_audit, workspace_handoff]
+ui_panels: [chat, plan, data_profile, chart_specs, report, audit_trail]
+behavior: [report_workflow, source_inventory, structured_findings, final_review]
+policy:
+  network_default: none
+  file_write_requires_approval: true
+  workspace_export_requires_approval: true
+task_defaults:
+  output:
+    type: decision_ready_data_report

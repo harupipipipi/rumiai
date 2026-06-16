@@ -1,0 +1,21 @@
+evidence_bundle_contract:
+  pack_id: rumi_browser_session_replay_pack
+  binary_policy: hash_and_ref_only
+  inline_binary_allowed: false
+  minimum_redaction_state_before_share: redacted
+  required_refs:
+  - dom_snapshot
+  - screenshot_ref
+  - event_evidence
+  - redaction_receipt
+  required_metadata:
+  - trace_id
+  - captured_at
+  - checksum
+  - privacy_class
+  - artifact_ref
+  - source_owner_pack
+  owner_boundaries:
+    semantic_dom: rumi_browser_element_pack
+    browser_execution: rumi_browser_automation_pack
+    browser_transport: rumi_default_tools_pack

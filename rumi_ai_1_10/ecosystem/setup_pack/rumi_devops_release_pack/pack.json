@@ -1,0 +1,63 @@
+{
+  "pack_id": "rumi_devops_release_pack",
+  "display_name": "Rumi DevOps Release Pack",
+  "description": "Optional local-first DevOps and release operations pack for CI triage, release evidence, runbooks, and rollback planning.",
+  "target_pack_id": "rumi_devops_release_pack",
+  "version": "1.0.0",
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    },
+    {
+      "pack_id": "rumi_default_tools_pack",
+      "version": ">=1.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "default": "prefer_explicit_pack_namespace",
+    "complements": [
+      "defaultspack",
+      "rumi_default_tools_pack",
+      "rumi_code_ide_pack",
+      "rumi_agent_services_pack"
+    ],
+    "owns": [
+      "ci_triage_evidence",
+      "release_gates",
+      "release_notes_evidence",
+      "deploy_runbooks",
+      "rollback_plans"
+    ],
+    "does_not_own": [
+      "code_edits",
+      "service_agent_topology",
+      "runtime_tool_implementation"
+    ]
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Optional operational overlay; defaultspack remains the runtime foundation.",
+    "promotes": []
+  },
+  "marketplace": {
+    "id": "rumi.devops_release_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "source": "repository",
+    "status": "verified"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false
+}

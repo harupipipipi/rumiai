@@ -1,0 +1,54 @@
+{
+  "pack_id": "rumi_workspace_pack",
+  "pack_identity": "rumi:ecosystem/rumi_workspace_pack",
+  "version": "1.0.0",
+  "metadata": {
+    "name": "Rumi Workspace Pack",
+    "description": "Declarative workspace artifact profiles, catalogs, presets, prompts, examples, exports, and background job recipes for document-oriented agent work.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "inspired_by": ["Genspark-style artifact generation", "Manus-style async workspace execution"],
+    "declarative_only": true,
+    "required_secrets": [],
+    "network_policy": "none_by_default"
+  },
+  "vocabulary": {
+    "types": [
+      "workspace_artifact",
+      "workspace_profile",
+      "workspace_preset",
+      "workspace_capability_catalog",
+      "workspace_job_recipe"
+    ]
+  },
+  "components": {
+    "workspace_catalog": {
+      "type": "workspace_capability_catalog",
+      "id": "workspace_catalog",
+      "path": "catalog",
+      "connectivity": {
+        "provides": [
+          "rumi.workspace.capabilities",
+          "rumi.workspace.tools",
+          "rumi.workspace.artifact_types",
+          "rumi.workspace.export_targets",
+          "rumi.workspace.job_recipes"
+        ],
+        "requires": []
+      }
+    },
+    "workspace_profiles": {
+      "type": "workspace_profile",
+      "id": "workspace_profiles",
+      "path": "profiles",
+      "connectivity": {
+        "provides": ["rumi.workspace.profiles"],
+        "requires": ["rumi.workspace.capabilities"]
+      }
+    }
+  },
+  "load_order": [
+    "workspace_capability_catalog:workspace_catalog",
+    "workspace_profile:workspace_profiles"
+  ]
+}

@@ -1,0 +1,20 @@
+preset:
+  id: quality_gate
+  mode: blocking_checks
+  minimum_pass: all_blocking_checks
+  on_fail: return_blocked_packet
+  blocking_checks:
+  - learner_goal_alignment
+  - source_note_citation
+  - uncertainty_when_notes_insufficient
+  - no_external_fact_invention
+  - spacing_reason_present
+  - difficulty_calibration
+  - accessibility_constraint_respected
+  - handoff_owner_named
+  evidence_to_record:
+  - source_note_ids
+  - source_span_ids
+  - uncertainty_reason
+  - reviewer_decision
+  - handoff_owner_when_applicable

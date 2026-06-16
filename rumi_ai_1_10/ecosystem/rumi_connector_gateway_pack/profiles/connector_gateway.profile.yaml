@@ -1,0 +1,12 @@
+profile_id: rumi_connector_gateway.router
+pack_id: rumi_connector_gateway_pack
+purpose: Normalize connector work into scoped, evidence-backed handoffs.
+policy:
+  local_first: true
+  network_default: deny
+  require_source_provenance: true
+  require_scope_card_for_sensitive_actions: true
+routing:
+  mcp_servers: defaultspack.mcp_registry
+  recurring_tasks: defaultspack.scheduler
+  security_review: defaultspack.approvals

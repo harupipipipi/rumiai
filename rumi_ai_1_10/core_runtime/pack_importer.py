@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .validation import check_path_within, is_safe_staging_id
+
 
 STAGING_ROOT = "user_data/pack_staging"
 MAX_FILES = 2000
@@ -69,6 +71,15 @@ class PackImporter:
     @staticmethod
     def _now_ts() -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def _staging_dir_for(self, staging_id: str) -> Optional[Path]:
+        if not is_safe_staging_id(staging_id):
+            return None
+        staging_dir = self._staging_root / str(staging_id)
+        path_ok, _ = check_path_within(staging_dir, self._staging_root)
+        if not path_ok:
+            return None
+        return staging_dir
 
     def import_pack(
         self,
@@ -415,7 +426,10 @@ class PackImporter:
         )
 
     def get_staging_meta(self, staging_id: str) -> Optional[Dict[str, Any]]:
-        meta_path = self._staging_root / staging_id / "meta.json"
+        staging_dir = self._staging_dir_for(staging_id)
+        if staging_dir is None:
+            return None
+        meta_path = staging_dir / "meta.json"
         if not meta_path.exists():
             return None
         try:
@@ -429,14 +443,16 @@ class PackImporter:
         if not self._staging_root.exists():
             return results
         for d in sorted(self._staging_root.iterdir()):
-            if d.is_dir():
+            if d.is_dir() and is_safe_staging_id(d.name):
                 meta = self.get_staging_meta(d.name)
                 if meta:
                     results.append(meta)
         return results
 
     def cleanup_staging(self, staging_id: str) -> bool:
-        staging_dir = self._staging_root / staging_id
+        staging_dir = self._staging_dir_for(staging_id)
+        if staging_dir is None:
+            return False
         if staging_dir.exists():
             shutil.rmtree(staging_dir, ignore_errors=True)
             return True

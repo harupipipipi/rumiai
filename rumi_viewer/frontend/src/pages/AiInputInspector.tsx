@@ -209,12 +209,12 @@ export function AiInputInspector() {
         </div>
       </div>
 
-      <section className="rounded-2xl border border-border bg-bg-card/80 p-4">
-        <div className="grid gap-3 xl:grid-cols-[240px_minmax(260px,1fr)_auto]">
-          <label className="text-sm text-text-muted">
+      <section className="rounded-xl border border-border bg-bg-card p-4 shadow-none">
+        <div className="grid gap-4 lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)]">
+          <label className="min-w-0 text-sm text-text-muted">
             <span className="mb-1 block text-xs font-medium uppercase tracking-wide">Profile</span>
             <select
-              className="h-10 w-full rounded-lg border border-border bg-bg-main px-3 text-sm text-text-main"
+              className="rumi-select h-10 w-full rounded-lg border border-border px-3 pr-9 text-sm"
               value={profileId}
               onChange={(event) => void loadProfile(event.target.value)}
             >
@@ -223,24 +223,26 @@ export function AiInputInspector() {
               ))}
             </select>
           </label>
-          <label className="text-sm text-text-muted">
+          <label className="min-w-0 text-sm text-text-muted">
             <span className="mb-1 block text-xs font-medium uppercase tracking-wide">Preview message</span>
             <Input value={previewMessage} onChange={(event) => setPreviewMessage(event.target.value)} />
           </label>
-          <div className="flex items-end gap-2">
-            <Button type="button" onClick={handlePreview} disabled={!profileId || previewing}>
+        </div>
+        <div className="mt-4 flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="min-w-0 flex-1 break-all text-xs text-text-muted sm:break-normal">
+            {selectedProfile ? `${selectedProfile.profile_id} -> ${visibleData?.model_input.provider || 'provider pending'} / ${visibleData?.model_input.model || 'model pending'}` : 'Select a profile to inspect model input wiring.'}
+          </p>
+          <div className="flex flex-wrap gap-2 sm:justify-end">
+            <Button type="button" onClick={handlePreview} disabled={!profileId || previewing} className="min-w-[108px]">
               {previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
               Preview
             </Button>
-            <Button type="button" variant="outline" onClick={handleApply} disabled={!dirty || saving}>
+            <Button type="button" variant="outline" onClick={handleApply} disabled={!dirty || saving} className="min-w-[96px]">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Apply
             </Button>
           </div>
         </div>
-        <p className="mt-3 text-xs text-text-muted">
-          {selectedProfile ? `${selectedProfile.profile_id} -> ${visibleData?.model_input.provider || 'provider pending'} / ${visibleData?.model_input.model || 'model pending'}` : 'Select a profile to inspect model input wiring.'}
-        </p>
       </section>
 
       {loading ? (
@@ -274,7 +276,7 @@ export function AiInputInspector() {
 
             <InspectorCard title="Edge Controls" icon={Scissors}>
               <select
-                className="h-10 w-full rounded-lg border border-border bg-bg-main px-3 text-xs text-text-main"
+                className="rumi-select h-10 w-full rounded-lg border border-border px-3 pr-9 text-xs"
                 value={selectedEdgeId}
                 onChange={(event) => setSelectedEdgeId(event.target.value)}
               >
@@ -300,7 +302,7 @@ export function AiInputInspector() {
                 <div className="text-xs font-medium uppercase tracking-wide text-text-muted">Insert Condition Gate</div>
                 <div className="grid gap-2">
                   <select
-                    className="h-9 w-full rounded-lg border border-border bg-bg-card px-3 text-xs text-text-main"
+                    className="rumi-select h-9 w-full rounded-lg border border-border px-3 pr-9 text-xs"
                     value={gateField}
                     onChange={(event) => setGateField(event.target.value)}
                   >
@@ -310,7 +312,7 @@ export function AiInputInspector() {
                     <option value="profile_id">profile_id</option>
                   </select>
                   <select
-                    className="h-9 w-full rounded-lg border border-border bg-bg-card px-3 text-xs text-text-main"
+                    className="rumi-select h-9 w-full rounded-lg border border-border px-3 pr-9 text-xs"
                     value={gateOperator}
                     onChange={(event) => setGateOperator(event.target.value)}
                   >
@@ -430,7 +432,7 @@ function InspectorCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-border bg-bg-card/80 p-4 shadow-sm">
+    <section className="rounded-xl border border-border bg-bg-card p-4 shadow-none">
       <div className="mb-3 flex items-center gap-2">
         <Icon className="h-4 w-4 text-accent" />
         <h2 className="text-sm font-semibold text-text-main">{title}</h2>

@@ -1,0 +1,7 @@
+example_id: rumi_business_ops.procurement_memo
+request: Prepare a procurement decision memo comparing three vendors with requirements, evidence strength, approval risk, and workspace artifact handoff.
+expected_outputs:
+  - procurement_comparison_scorecard
+  - approval_risk_matrix_result
+  - research_evidence_handoff
+  - workspace_memo_handoff

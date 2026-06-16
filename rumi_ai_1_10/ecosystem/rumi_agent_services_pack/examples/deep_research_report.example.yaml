@@ -1,0 +1,18 @@
+example_id: rumi_agent_services.examples.deep_research_report
+preset: chatgpt_agent_deep_research_service
+title: Compare local-first agent service patterns
+goal: Produce a concise report comparing service workflows, role boundaries, approval posture, and evidence practices.
+constraints:
+  local_first: true
+  network: optional_with_approval
+  no_vendor_credentials: true
+deliverable:
+  type: markdown_report
+  required_sections: [summary, comparison_table, evidence_notes, recommendations, risks]
+handoffs:
+  - target_role: research_analyst
+    objective: Collect source cards and comparison dimensions.
+  - target_role: synthesis_writer
+    objective: Convert evidence into a user-facing report.
+  - target_role: quality_reviewer
+    objective: Check citations, caveats, and unsupported claims.

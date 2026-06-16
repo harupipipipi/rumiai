@@ -1,0 +1,12 @@
+example:
+  id: agent_regression_case
+  pack_id: rumi_agentic_qa_pack
+  workflow: define_agent_scenario
+  intent: Define a reproducible agent behavior regression with expected observation, actual observation, evidence references, and owner-pack triage.
+  evidence:
+    - scenario_id
+    - expected_observation
+    - actual_observation
+    - triage_owner_pack
+  handoff: handoff_to_rumi_model_evals_pack
+  expected_result: regression_triage_report_with_model_eval_owner_and_evidence_ledger_entries

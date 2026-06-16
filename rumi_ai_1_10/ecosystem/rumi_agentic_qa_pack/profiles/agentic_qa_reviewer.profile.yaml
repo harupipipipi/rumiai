@@ -1,0 +1,13 @@
+profile:
+  id: agentic_qa_reviewer
+  pack_id: rumi_agentic_qa_pack
+  stance: evidence_first_reviewer
+  owner_surfaces:
+  - scenario_replay
+  - acceptance_matrix
+  - regression_triage
+  - cross_pack_quality_gates
+  required_checks:
+    - parse_catalog
+    - inspect_overlap_policy
+    - preserve_evidence

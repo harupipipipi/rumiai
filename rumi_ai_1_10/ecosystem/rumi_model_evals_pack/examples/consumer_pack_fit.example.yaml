@@ -1,0 +1,10 @@
+example_id: rumi_model_evals.examples.consumer_pack_fit
+preset: routing_fit_matrix
+title: Build routing notes for agent, code, and data packs
+goal: Map model evidence into task-family notes for rumi_agent_services_pack, rumi_code_ide_pack, and rumi_data_analysis_pack.
+constraints:
+  network: none
+  consumer_pack_updates: not_in_scope
+deliverable:
+  type: consumer_pack_routing_notes
+  required_sections: [agent_service_fit, code_ide_fit, data_analysis_fit, missing_evidence, caveats]

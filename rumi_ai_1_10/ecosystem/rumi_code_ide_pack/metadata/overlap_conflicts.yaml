@@ -1,0 +1,23 @@
+version: rumi.overlap_notes.v1
+pack_id: rumi_code_ide_pack
+notes:
+  - pack_id: defaultspack
+    relationship: required_dependency
+    overlap: coding graph, profile conventions, prompt composition, approval policy, and core capabilities
+    conflict_policy: defaultspack owns runtime primitives; rumi_code_ide_pack only references them.
+
+  - pack_id: rumi_default_tools_pack
+    relationship: required_dependency
+    overlap: concrete file, terminal, git, todo, subagent, and browser companion tools
+    conflict_policy: rumi_default_tools_pack owns tool implementation; rumi_code_ide_pack only declares intended scope and recipes.
+
+  - pack_id: rumi_local_agent_pack
+    relationship: optional_neighbor
+    overlap: coding prompts and local-agent style presets
+    conflict_policy: use rumi_code_ide_pack for advanced code/CLI/IDE customization and rumi_local_agent_pack for broader starter local-agent behavior.
+
+resolution_rules:
+  - Prefer fully qualified asset IDs when profile or preset names are similar.
+  - Do not auto-enable this pack over defaultspack defaults.
+  - Keep this pack optional because its workflow policy is stricter and more coding-specific.
+  - If a future runtime tool is added here, move implementation details into docs and update interfaces before release.

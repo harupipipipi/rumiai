@@ -1,0 +1,52 @@
+policy_id: rumi_workflow_scheduler.retry_policy
+version: 1
+pack_id: rumi_workflow_scheduler_pack
+default_decision: stop_without_owner_execution
+local_first: true
+network_default: deny
+retry_classes:
+  - class_id: no_retry
+    max_attempts: 1
+    backoff: none
+    use_for:
+      - one_shot_wakeup
+      - release_gate_blocked
+  - class_id: conservative_retry
+    max_attempts: 3
+    backoff: linear
+    minimum_delay: owner_defined
+    use_for:
+      - local_monitor
+      - local_followup
+  - class_id: escalating_retry
+    max_attempts: 5
+    backoff: exponential
+    minimum_delay: owner_defined
+    use_for:
+      - delivery_handoff_pending_owner
+      - evidence_temporarily_missing
+idempotency:
+  required: true
+  idempotency_key_fields:
+    - schedule_id
+    - owner_route
+    - cadence
+    - delivery_handoff
+evidence_rules:
+  - each_run_requires_evidence_summary
+  - missing_evidence_counts_as_failure
+  - external_delivery_requires_audience_summary
+  - monitor_success_requires_named_condition
+stop_conditions:
+  required: true
+  defaults:
+    - max_runs_reached
+    - objective_resolved
+    - owner_cancels
+    - repeated_failure
+    - audience_policy_missing
+    - owner_route_unavailable
+escalation:
+  after_retry_exhaustion: create_local_review_note
+  never_escalate_by_network_without_owner: true
+  never_send_external_message_without_owner: true

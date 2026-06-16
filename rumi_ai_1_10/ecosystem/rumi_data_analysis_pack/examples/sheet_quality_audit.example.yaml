@@ -1,0 +1,14 @@
+example_id: rumi_data_analysis.examples.sheet_quality_audit
+preset: gemini_sheet_sql_audit
+title: Audit exported spreadsheet tabs
+goal: Inspect exported sheet tabs for schema drift, duplicate keys, formulas, totals, and suspicious missing values.
+inputs:
+  files: [local_exports/operations_workbook.xlsx]
+  expected_tabs: [summary, raw_orders, lookup_regions]
+constraints:
+  network: none
+  remote_sheet_access: deny
+  formulas: inspect_if_export_contains_them
+deliverable:
+  type: audit_report
+  required_sections: [source_inventory, checks, findings, remediation_recipe, limitations]

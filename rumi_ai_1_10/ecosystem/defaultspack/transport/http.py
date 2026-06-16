@@ -858,6 +858,140 @@ class DefaultsHttpServer:
             "permissions": permissions,
         })
 
+    @staticmethod
+    def _authority_http_error(result, default_code="AUTHORITY_ERROR"):
+        response = error(str(result.get("error") or "authority request failed"), default_code)
+        response["_http_status"] = int(result.get("status_code") or 400)
+        return response
+
+    def _handle_authority_requests(self, request_data, path_params):
+        del path_params
+        try:
+            from core_runtime.authority import get_authority_service
+
+            return ok(get_authority_service().list_requests(str(request_data.get("status") or "all")))
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+
+    def _handle_authority_request(self, request_data, path_params):
+        del request_data
+        request_id = str((path_params or {}).get("request_id") or "").strip()
+        try:
+            from core_runtime.authority import get_authority_service
+
+            result = get_authority_service().get_request(request_id)
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+        if not result.get("success"):
+            return self._authority_http_error(result, "AUTHORITY_NOT_FOUND")
+        return ok(result.get("request"))
+
+    def _handle_authority_test_request(self, request_data, path_params):
+        del path_params
+        if str(os.environ.get("RUMI_AUTHORITY_TEST_ENDPOINT") or "").strip().lower() not in {"1", "true", "yes"}:
+            response = error("authority test endpoint is disabled", "AUTHORITY_TEST_DISABLED")
+            response["_http_status"] = 404
+            return response
+
+        def clean_string(key, fallback):
+            value = str(request_data.get(key) or fallback).strip()
+            return value or fallback
+
+        resource = {
+            "kind": "model",
+            "provider_id": clean_string("provider_id", "openai"),
+            "api_id": clean_string("api_id", "authority-window-smoke"),
+            "model_id": clean_string("model_id", "gpt-5.4-test"),
+            "stream": bool(request_data.get("stream", True)),
+        }
+        for key in (
+            "model_ref",
+            "pack_id",
+            "app_display_name",
+            "provider_display_name",
+            "model_display_name",
+            "credential_label",
+            "endpoint_url",
+            "endpoint_path",
+            "domain",
+            "transport",
+            "provider_transport",
+            "provider_kind",
+        ):
+            value = str(request_data.get(key) or "").strip()
+            if value:
+                resource[key] = value
+        if request_data.get("port") is not None:
+            try:
+                resource["port"] = int(request_data.get("port"))
+            except (TypeError, ValueError):
+                pass
+        if request_data.get("input_tokens") is not None:
+            try:
+                resource["input_tokens"] = max(0, int(request_data.get("input_tokens")))
+            except (TypeError, ValueError):
+                pass
+
+        profile_id = clean_string("profile_id", "authority-test")
+        node_id = clean_string("node_id", "approval-window")
+        conversation_id = str(request_data.get("conversation_id") or "").strip() or None
+        reason = str(request_data.get("reason") or "Authority approval window smoke test").strip()
+        try:
+            from core_runtime.authority import get_authority_service
+
+            decision = get_authority_service().check(
+                principal_id="",
+                permission_id="model.invoke",
+                resource=resource,
+                reason=reason,
+                conversation_id=conversation_id,
+                profile_id=profile_id,
+                node_id=node_id,
+            )
+            data = decision.to_dict()
+            data["approval_url"] = f"/approval?request_id={decision.request_id}" if decision.request_id else None
+            return ok(data)
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+
+    def _handle_authority_approve(self, request_data, path_params):
+        request_id = str((path_params or {}).get("request_id") or "").strip()
+        config = request_data.get("config") if isinstance(request_data.get("config"), dict) else None
+        ui_operator = request_data.get("ui_operator") if isinstance(request_data.get("ui_operator"), dict) else None
+        try:
+            from core_runtime.authority import get_authority_service
+
+            result = get_authority_service().approve_request(
+                request_id,
+                scope=str(request_data.get("scope") or "once"),
+                config=config,
+                expires_in_seconds=request_data.get("expires_in_seconds"),
+                ui_operator=ui_operator,
+            )
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+        if not result.get("success"):
+            return self._authority_http_error(result)
+        return ok(result)
+
+    def _handle_authority_deny(self, request_data, path_params):
+        request_id = str((path_params or {}).get("request_id") or "").strip()
+        ui_operator = request_data.get("ui_operator") if isinstance(request_data.get("ui_operator"), dict) else None
+        try:
+            from core_runtime.authority import get_authority_service
+
+            result = get_authority_service().deny_request(
+                request_id,
+                reason=str(request_data.get("reason") or ""),
+                persist=bool(request_data.get("persist") or request_data.get("remember")),
+                ui_operator=ui_operator,
+            )
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+        if not result.get("success"):
+            return self._authority_http_error(result)
+        return ok(result)
+
     def _handle_health(self, request_data, path_params):
         return ok({
             "status": "healthy",

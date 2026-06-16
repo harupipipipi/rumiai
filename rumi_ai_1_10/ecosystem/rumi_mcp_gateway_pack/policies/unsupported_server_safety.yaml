@@ -1,0 +1,57 @@
+policy_id: rumi_mcp_gateway.unsupported_server_safety
+version: 1
+pack_id: rumi_mcp_gateway_pack
+default_decision: deny
+local_first: true
+network_default: deny
+server_classes:
+  unknown:
+    risk_level: high
+    connect_requires_approval: true
+    execute_requires_approved_registry_entry: true
+    namespace_required: true
+    allowed_before_approval:
+      - read_catalog_metadata
+      - prepare_review_summary
+      - draft_resource_card
+  reviewed_metadata:
+    risk_level: medium
+    connect_requires_approval: true
+    execute_requires_approved_registry_entry: true
+    namespace_required: true
+  directly_supported_elsewhere:
+    risk_level: defer_to_owner_pack
+    connect_requires_approval: defer_to_owner_pack
+    execute_requires_approved_registry_entry: defer_to_runtime
+hard_blocks:
+  - server_descriptor_embeds_secret_material
+  - server_descriptor_requests_unbounded_filesystem
+  - server_descriptor_requests_unbounded_network
+  - server_claims_self_approval
+  - server_tool_name_collides_without_namespace
+  - server_requires_auto_install_or_auto_execute
+approval_requirements:
+  connection:
+    operation: tool.mcp_connect
+    owner: defaultspack
+    risk_level: high
+    approval_binding: resolved_server_descriptor
+  execution:
+    owner: defaultspack.tool.executor
+    requires_registry_permission: approved
+    client_supplied_approved_flags_trusted: false
+audit_requirements:
+  - namespace_assignment
+  - descriptor_review
+  - approval_request
+  - defaultspack_connection_attempt
+  - discovered_tool_mapping
+prompt_safety:
+  must_say:
+    - Unknown MCP servers are not trusted by default.
+    - Namespaces are labels, not permission boundaries.
+    - Actual connection and execution use defaultspack approval enforcement.
+  must_not_say:
+    - This gateway automatically supports every server safely.
+    - Installing this pack approves unknown servers.
+    - A server namespace grants permission.

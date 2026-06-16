@@ -1,0 +1,22 @@
+ledger_id: rumi_sandbox_runtime.runtime_receipt_ledger.v1
+owner: rumi_sandbox_runtime_pack
+purpose: Template for collecting runtime receipts from approved execution owners.
+entry_fields:
+  - receipt_id
+  - created_at
+  - runtime_owner
+  - boundary_classification
+  - approval_ref
+  - receipt_schema_ref
+  - reproducibility_checklist_ref
+  - reviewer_decision
+reviewer_decisions:
+  - accept_receipt
+  - accept_with_caveats
+  - needs_missing_evidence
+  - reject_secret_or_boundary_violation
+ledger_rules:
+  - no_secret_values
+  - no_raw_command_output_if_sensitive
+  - link_artifacts_by_ref_only
+  - keep_failed_and_blocked_runs_for_audit

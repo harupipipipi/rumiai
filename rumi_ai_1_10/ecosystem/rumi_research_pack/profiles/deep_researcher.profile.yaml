@@ -1,0 +1,22 @@
+profile_id: rumi_research_pack.deep_researcher
+version: rumi.profile.v1
+kind: runtime_profile
+locale: en
+display_name:
+  en: Deep Researcher
+enabled_capabilities:
+  - research.plan.create
+  - research.source.triage
+  - research.evidence.extract
+  - research.contradiction.review
+  - research.synthesis.write
+  - research.handoff.package
+prompt_set: deep_research
+policy:
+  local_first: true
+  network_default: none
+  cite_non_obvious_factual_claims: true
+  expose_uncertainty: true
+  preserve_evidence_cards: true
+  supported_outputs: [research_report, evidence_cards, source_manifest, claim_trace, limitations]
+ui_panels: [chat, research_plan, source_cards, evidence_table, synthesis]

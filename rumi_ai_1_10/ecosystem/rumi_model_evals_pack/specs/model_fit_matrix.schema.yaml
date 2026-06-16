@@ -1,0 +1,38 @@
+spec_id: rumi.model_evals.model_fit_matrix.v1
+description: Task-family routing fit matrix for model/provider evidence.
+required_fields:
+  - matrix_id
+  - generated_at
+  - evidence_window
+  - rows
+row_fields:
+  - provider_id
+  - model_id
+  - task_family
+  - route_label
+  - fit_rating
+  - pass_at_k
+  - pass_power_k
+  - flakiness_rating
+  - cost_rating
+  - latency_rating
+  - safety_rating
+  - evidence_refs
+  - caveats
+task_families:
+  - general_chat
+  - coding_cli
+  - code_review
+  - agent_service
+  - research_synthesis
+  - data_analysis
+  - sql_reasoning
+  - chart_reasoning
+  - tool_calling
+  - local_private_work
+fit_ratings:
+  - preferred
+  - acceptable
+  - fallback
+  - hold
+  - quarantine

@@ -1,0 +1,39 @@
+quality_matrix:
+  checks:
+  - id: trace_schema_valid
+    blocking: true
+    evidence_required: true
+  - id: redaction_complete
+    blocking: true
+    evidence_required: true
+  - id: source_consent_recorded
+    blocking: true
+    evidence_required: true
+  - id: assumptions_marked
+    blocking: true
+    evidence_required: true
+  - id: human_owner_approved
+    blocking: true
+    evidence_required: true
+  - id: approver_identity_recorded
+    blocking: true
+    evidence_required: true
+  - id: approved_at_recorded
+    blocking: true
+    evidence_required: true
+  - id: non_execution_boundary_confirmed
+    blocking: true
+    evidence_required: true
+  - id: automation_handoff_named
+    blocking: true
+    evidence_required: true
+  - id: browser_or_computer_handoff_named
+    blocking: true
+    evidence_required: true
+  - id: scheduler_handoff_named
+    blocking: true
+    evidence_required: true
+  - id: evidence_links
+    blocking: false
+    evidence_required: true
+  minimum_pass: all_blocking_checks

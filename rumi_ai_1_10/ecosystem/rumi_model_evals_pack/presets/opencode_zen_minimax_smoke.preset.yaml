@@ -1,0 +1,14 @@
+preset_id: opencode_zen_minimax_smoke
+name: OpenCode Zen + MiniMax Smoke Evidence
+profile: rumi_model_evals.provider_smoke_reviewer
+inspired_by: [Hermes provider catalog, OpenClaw routing, OpenCode Zen]
+enabled_capabilities: [provider_smoke, cost_latency_evidence, flakiness_review]
+ui_panels: [chat, provider_overlay, smoke_result, cost_latency]
+behavior: [runtime_credentials_only, tiny_prompt_smoke, route_hold_by_default]
+policy:
+  network_default: none
+  provider_calls_require_approval: true
+  cost_bearing_actions_require_approval: true
+task_defaults:
+  output:
+    type: provider_smoke_evidence

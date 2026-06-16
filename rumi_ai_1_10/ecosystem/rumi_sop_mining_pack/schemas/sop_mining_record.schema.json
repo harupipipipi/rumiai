@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Rumi SOP Mining Pack Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sop_id",
+    "trace_id",
+    "source_evidence",
+    "events",
+    "redaction_state",
+    "assumptions",
+    "sop_output",
+    "approval_state",
+    "human_approval",
+    "non_execution_boundary"
+  ],
+  "properties": {
+    "sop_id": {
+      "type": "string",
+      "minLength": 3
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 3
+    },
+    "source_evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evidence_id",
+          "trace_id",
+          "source_type",
+          "evidence_ref",
+          "redaction_state",
+          "consent_basis"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "chat_message",
+              "tool_call",
+              "tool_result",
+              "audit_log",
+              "test_output",
+              "handoff_note",
+              "approval_record"
+            ]
+          },
+          "evidence_ref": {
+            "type": "string"
+          },
+          "redaction_state": {
+            "type": "string",
+            "enum": [
+              "redacted",
+              "no_sensitive_data"
+            ]
+          },
+          "consent_basis": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "summary",
+          "evidence_id"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "evidence_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": [
+        "redacted",
+        "no_sensitive_data"
+      ]
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sop_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "output_type",
+        "title",
+        "steps",
+        "handoff_owner"
+      ],
+      "properties": {
+        "output_type": {
+          "type": "string",
+          "enum": [
+            "sop",
+            "checklist",
+            "runbook",
+            "human_approved_workflow_recipe"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "handoff_owner": {
+          "type": "string"
+        }
+      }
+    },
+    "approval_state": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "needs_review",
+        "approved",
+        "rejected"
+      ]
+    },
+    "human_approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "state",
+        "approver_role",
+        "approved_at",
+        "approval_record_ref"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "const": true
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ]
+        },
+        "approver_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approved_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approval_record_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "non_execution_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "automation_execution",
+        "browser_control",
+        "computer_control",
+        "schedule_creation",
+        "run_ledger_storage",
+        "tool_creation_or_invocation"
+      ],
+      "properties": {
+        "automation_execution": {
+          "type": "string",
+          "const": "handoff_required"
+        },
+        "browser_control": {
+          "type": "string",
+          "const": "handoff_required"
+        },
+        "computer_control": {
+          "type": "string",
+          "const": "handoff_required"
+        },
+        "schedule_creation": {
+          "type": "string",
+          "const": "handoff_required"
+        },
+        "run_ledger_storage": {
+          "type": "string",
+          "const": "handoff_required"
+        },
+        "tool_creation_or_invocation": {
+          "type": "string",
+          "const": "handoff_required"
+        }
+      }
+    }
+  }
+}

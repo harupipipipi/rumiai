@@ -1,0 +1,42 @@
+spec_id: rumi_sandbox_runtime.execution_boundary_matrix.v1
+owner: rumi_sandbox_runtime_pack
+purpose: Classify execution requests by isolation boundary, allowed evidence, and required handoff before runtime action.
+network_default: none
+boundaries:
+  local_read_only:
+    isolation: host_filesystem_read_only
+    allowed_actions: [inspect_paths, read_logs, summarize_config]
+    approval: user_review_required
+    handoff: defaultspack_tool_grants
+  local_host_mutating:
+    isolation: host_process_and_filesystem
+    allowed_actions: [write_files, run_installers, mutate_state]
+    approval: explicit_user_confirmation_required
+    handoff: rumi_security_review_pack
+  container_ephemeral:
+    isolation: disposable_container_without_secret_mounts
+    allowed_actions: [run_tests, build_artifacts, collect_logs]
+    approval: runtime_owner_approval_required
+    handoff: defaultspack_tool_grants
+  remote_ssh:
+    isolation: external_host
+    allowed_actions: [remote_command_plan_only]
+    approval: remote_scope_card_required
+    handoff: rumi_devops_release_pack
+  browser_or_desktop:
+    isolation: user_session_surface
+    allowed_actions: [classify_request_only]
+    approval: browser_or_computer_owner_required
+    handoff: rumi_computer_control_pack
+decision_rules:
+  - id: untrusted_code_prefers_container_ephemeral
+    rule: Untrusted code must be routed to container_ephemeral unless the user explicitly accepts host risk.
+  - id: host_mutation_requires_security_handoff
+    rule: Any host mutation needs a security review handoff before runtime execution.
+  - id: network_requires_scope_card
+    rule: Network access is denied by default and requires purpose, destination class, and data egress notes.
+outputs:
+  - boundary_classification
+  - approval_requirements
+  - handoff_target
+  - evidence_requirements

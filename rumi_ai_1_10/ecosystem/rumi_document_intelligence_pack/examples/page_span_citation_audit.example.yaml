@@ -1,0 +1,16 @@
+id: rumi_document_intelligence_pack.examples.page_span_citation_audit
+profile: rumi_document_intelligence_pack.document_intelligence_reviewer
+task: Audit a PDF answer for claim-level citation and page-span coverage.
+expected_passes:
+  - citation_mapper
+  - privacy_reviewer
+  - final_evidence_integrator
+required_outputs:
+  - claim_to_page_span_map
+  - claims_missing_evidence
+  - privacy_classification_summary
+  - corrected_answer_with_citations
+safety_notes:
+  - do not invent page numbers
+  - do not quote long copyrighted passages
+  - network none by default

@@ -1,0 +1,66 @@
+{
+  "pack_id": "rumi_api_toolsmith_pack",
+  "display_name": "Rumi API Toolsmith Pack",
+  "description": "Declarative API, OpenAPI, GraphQL, webhook, and tool-schema generation workflow pack.",
+  "target_pack_id": "rumi_api_toolsmith_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "mcp_server_registration": "handoff_to_rumi_mcp_gateway_pack",
+    "external_connector_delivery": "handoff_to_rumi_connector_gateway_pack",
+    "auth_or_secret_review": "handoff_to_rumi_security_review_pack",
+    "mock_execution": "handoff_to_rumi_sandbox_runtime_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "API Toolsmith is a declarative review and handoff pack; it must not be promoted into defaultspack until runtime tool registration, secret review, and real contract-test evidence exist outside this pack.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required",
+      "promotion_requires_real_world_success_cases"
+    ],
+    "promotion_blockers": [
+      "no_executable_runtime_tools",
+      "no_runtime_secret_handling",
+      "mock_execution_owned_by_sandbox_runtime_pack",
+      "mcp_registration_owned_by_rumi_mcp_gateway_pack"
+    ],
+    "promotion_evidence_required": [
+      "openapi_destructive_method_handoff_cases",
+      "graphql_mutation_confirmation_and_idempotency_cases",
+      "webhook_signature_policy_secret_free_review",
+      "mock_test_evidence_with_malformed_partial_retry_cases"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.api_toolsmith_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "api-tooling",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools."
+  ]
+}

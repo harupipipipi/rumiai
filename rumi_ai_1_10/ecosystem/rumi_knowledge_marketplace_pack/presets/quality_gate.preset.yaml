@@ -1,0 +1,36 @@
+preset_id: rumi_knowledge_marketplace.quality_gate
+profile: rumi_knowledge_marketplace.marketplace_curator
+features:
+  local_first: true
+  evidence_required: true
+  owner_boundary_check: true
+quality_gates:
+  - gate_id: card_schema_complete
+    pass_when:
+      - card_id_present
+      - capability_type_declared
+      - source_ref_present
+      - publisher_present
+      - install_review_present
+  - gate_id: provenance_recorded
+    pass_when:
+      - content_digest_recorded
+      - reviewer_recorded
+      - reviewed_at_recorded
+      - trust_status_matches_rubric
+  - gate_id: permission_scope_reviewed
+    pass_when:
+      - required_permissions_listed
+      - network_requirement_declared
+      - secret_requirement_declared
+      - host_execution_requirement_declared
+  - gate_id: promotion_or_blacklist_decided
+    pass_when:
+      - promotion_blockers_checked
+      - blacklist_status_recorded
+      - explicit_user_approval_required_for_install
+failure_status:
+  missing_provenance: needs_review
+  excessive_permissions: needs_security_review
+  blacklisted: blocked
+  unreviewed_candidate: needs_review

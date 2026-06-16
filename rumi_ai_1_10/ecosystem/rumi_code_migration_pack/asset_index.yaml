@@ -1,0 +1,64 @@
+asset_index:
+  pack_id: rumi_code_migration_pack
+  categories:
+    root:
+    - README.md
+    - asset_index.json
+    - asset_index.yaml
+    catalog:
+    - catalog/compatibility_dimensions.yaml
+    - catalog/handoff_matrix.yaml
+    - catalog/migration_patterns.yaml
+    - catalog/quality_matrix.yaml
+    - catalog/taxonomy.yaml
+    - catalog/workflows.yaml
+    checklists:
+    - checklists/review.checklist.yaml
+    docs:
+    - docs/README.md
+    - docs/architecture.md
+    - docs/interfaces.md
+    - docs/operations.md
+    examples:
+    - examples/api_deprecation_migration.example.yaml
+    - examples/framework_upgrade.example.yaml
+    - examples/monorepo_sharded_migration.example.yaml
+    fixtures:
+    - fixtures/contract_fixture.yaml
+    - fixtures/negative_cases.yaml
+    ledgers:
+    - ledgers/migration_risk_ledger.schema.yaml
+    metadata:
+    - metadata/overlap_promotion.yaml
+    policies:
+    - policies/handoff.policy.yaml
+    - policies/migration_governance.policy.yaml
+    - policies/safety.policy.yaml
+    presets:
+    - presets/handoff_review.preset.yaml
+    - presets/quality_gate.preset.yaml
+    - presets/safe_default.preset.yaml
+    profiles:
+    - profiles/migration_planner.profile.yaml
+    prompts:
+    - prompts/migration_planner.system.md
+    schemas:
+    - schemas/codemod_plan.schema.yaml
+    - schemas/compatibility_matrix.schema.yaml
+    - schemas/migration_handoff_packet.schema.yaml
+    - schemas/migration_plan.schema.yaml
+    - schemas/pr_shard_plan.schema.yaml
+    - schemas/repo_inventory.schema.yaml
+    - schemas/risk_ledger.schema.yaml
+    - schemas/rollback_plan.schema.yaml
+    - schemas/test_gate.schema.yaml
+    templates:
+    - templates/handoff.template.md
+    - templates/migration_handoff_packet.template.yaml
+    - templates/pr_shard_brief.template.yaml
+    - templates/review_report.template.md
+    - templates/ui_contract.template.md
+  invariants:
+    external_actions_are_handoffs: true
+    defaultspack_promotion_eligible: false
+    declarative_only: true

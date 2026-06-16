@@ -1,0 +1,36 @@
+version: rumi.observability.run_ledger_contract.v1
+pack_id: rumi_observability_pack
+network_default: none
+
+ledger_required_fields:
+  - run_id
+  - objective
+  - started_at
+  - completed_at_or_status
+  - initiating_surface
+  - involved_pack_ids
+  - tool_call_count
+  - model_call_count
+  - cost_summary
+  - latency_summary
+  - evidence_refs
+  - redaction_summary
+
+event_sequence_rules:
+  - agent_run_start must appear before tool_call or model_call events for a run_id
+  - handoff events must name source_pack and target_pack
+  - incident events must link at least one trigger event
+  - cost_latency events must declare units and pricing_source
+
+ledger_quality_gates:
+  - all_sensitive_fields_redacted
+  - cost_units_declared
+  - latency_units_declared
+  - owner_pack_boundaries_recorded
+  - unresolved_incidents_have_followups
+
+handoff_contract:
+  model_metrics: rumi_model_evals_pack
+  security_findings: rumi_security_review_pack
+  release_incidents: rumi_devops_release_pack
+  service_run_summaries: rumi_agent_services_pack

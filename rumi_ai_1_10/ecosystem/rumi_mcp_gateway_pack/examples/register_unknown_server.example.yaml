@@ -1,0 +1,29 @@
+example_id: rumi_mcp_gateway.register_unknown_server
+pack_id: rumi_mcp_gateway_pack
+title: Register an unsupported MCP server for review
+intent: Capture metadata before any defaultspack MCP connection attempt.
+server_descriptor:
+  server_id: local_notes
+  display_name: Local Notes MCP
+  category_id: productivity
+  transport: stdio
+  proposed_namespace: mcp_gateway.local_notes
+  claimed_capabilities:
+    - search_notes
+    - read_note
+  requested_scopes:
+    filesystem: user_selected_notes_folder
+    network: none_declared
+    credentials: none_declared
+review:
+  status: ready_for_user_approval
+  risk_level: medium
+  approval_reason: The server claims read-only local notes access and must still be approved before defaultspack connection.
+routes:
+  connect: defaultspack.tool.mcp_connect
+  list: defaultspack.tool.mcp_list
+  discovered_tool_pattern: mcp__local_notes__<tool_name>
+constraints:
+  - Do not execute commands from this descriptor.
+  - Do not treat namespace assignment as permission.
+  - Verify actual discovered tools with defaultspack.tool.mcp_list after approval.

@@ -1,0 +1,14 @@
+policy_id: rumi_multimodal_media.rights_privacy
+local_first: true
+network_default: deny
+rules:
+  - id: record_source_before_transform
+    decision: require
+  - id: redact_secrets_in_screenshots
+    decision: require
+  - id: track_generated_asset_prompt
+    decision: require
+  - id: pause_on_unknown_rights
+    decision: needs_review
+  - id: handoff_requires_ledger
+    decision: require

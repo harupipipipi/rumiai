@@ -1,0 +1,10 @@
+preset_id: rumi_business_ops.safe_default
+profile: rumi_business_ops.business_ops_operator
+features:
+  local_first: true
+  evidence_required: true
+  owner_boundary_check: true
+purpose: Start business operations work with local evidence, approval posture, and no connector action by this pack.
+required_assets:
+  - catalog/business_ops_workflows.yaml
+  - policies/business_ops_safety.policy.yaml

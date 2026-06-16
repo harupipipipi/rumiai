@@ -1,0 +1,46 @@
+version: rumi.computer_control.policy.v1
+policy_id: rumi_computer_control_pack.evidence_first_control
+pack_id: rumi_computer_control_pack
+network_default: none
+
+principles:
+  - Observe before acting.
+  - Name the foreground app or surface before state-changing actions.
+  - Classify the action risk before keyboard, mouse, paste, submit, send, command, or app-switch actions.
+  - Prefer screenshots and explicit target descriptions over blind coordinate actions.
+  - Preserve user control and stop on ambiguity.
+
+required_evidence:
+  before_click:
+    - screenshot_or_accessibility_observation
+    - target_description
+    - expected_state_change
+  before_type_or_paste:
+    - focused_field_or_prompt
+    - text_intent_summary
+    - secret_absence_check
+  before_terminal_command:
+    - backend_classification
+    - command_risk_classification
+    - working_directory_or_context
+  before_send_submit_or_delete:
+    - explicit_user_request
+    - visible_target
+    - approval_if_required
+    - rollback_or_stop_condition
+
+blocked_by_default:
+  - blind_clicking
+  - blind_typing
+  - credential_collection
+  - bypassing_defaultspack_grants
+  - production_or_remote_state_change_without_approval
+
+unrestricted_local_testing_contract:
+  user_request_reflected: true
+  grant_effect: none
+  requirements:
+    - local_target_only
+    - no_network_by_default
+    - evidence_record_before_state_change
+    - runtime_approval_still_applies

@@ -1,0 +1,42 @@
+review_checklist:
+  minimum_pass: all_blocking_items
+  items:
+  - id: script_present
+    question: A script must exist before mock provider handoff.
+    blocking: true
+  - id: consent_disclosure_present
+    question: Opening disclosure and consent question are required.
+    blocking: true
+  - id: never_call_checked
+    question: Never-call list screening is mandatory.
+    blocking: true
+  - id: approval_state_approved
+    question: Only approved approval records can hand off to a provider.
+    blocking: true
+  - id: approved_number_matches
+    question: Human approval must match target alias.
+    blocking: true
+  - id: disallowed_intent_aborts
+    question: Disallowed purposes never produce provider handoff.
+    blocking: true
+  - id: consent_decline_aborts
+    question: Declined consent returns an aborted session packet with takeover required.
+    blocking: true
+  - id: transcript_pii_redacted
+    question: Configured PII classes are replaced before handoff.
+    blocking: true
+  - id: takeover_owner_present
+    question: Escalation packets name a human or owner pack.
+    blocking: true
+  - id: takeover_abort_required
+    question: Safety-triggered escalation records set abort_required before handoff.
+    blocking: true
+  - id: no_credentials_or_network
+    question: Confirm the pack declares no credentials and no network by default.
+    blocking: true
+  - id: defaultspack_not_eligible
+    question: Confirm defaultspack promotion remains false until evidence is supplied.
+    blocking: true
+  - id: owner_boundary_review
+    question: Confirm adjacent runtime ownership is expressed as handoff policy.
+    blocking: true

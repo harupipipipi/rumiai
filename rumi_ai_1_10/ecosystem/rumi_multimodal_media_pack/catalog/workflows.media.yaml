@@ -1,0 +1,11 @@
+catalog_id: rumi_multimodal_media.workflows
+schema_version: 1
+workflows:
+  - workflow_id: screenshot_to_issue_report
+    phases: [intake, redact, inspect, classify, handoff]
+  - workflow_id: image_brief_to_reviewed_asset
+    phases: [brief, generate_plan, review_variants, record_ledger, handoff]
+  - workflow_id: ocr_to_structured_notes
+    phases: [intake, extract_text, verify_uncertain_regions, summarize]
+  - workflow_id: video_storyboard_review
+    phases: [segment, summarize_motion, check_accessibility, produce_notes]

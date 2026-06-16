@@ -1,0 +1,22 @@
+profile_id: rumi_workspace_pack.workspace_artifact_agent
+version: rumi.profile.v1
+kind: runtime_profile
+locale: en
+display_name:
+  ja: ワークスペース成果物エージェント
+  en: Workspace Artifact Agent
+enabled_capabilities:
+  - workspace.document.create
+  - workspace.slides.create
+  - workspace.sheet.create
+  - workspace.chart.render
+  - workspace.pdf.compose
+  - workspace.bundle.export
+prompt_set: workspace_artifacts
+policy:
+  save_to_workspace: true
+  preserve_editable_sources: true
+  overwrite_requires_approval: true
+  export_requires_render_check: true
+  supported_artifact_types: [document, slides, spreadsheet, chart, pdf, export_bundle]
+ui_panels: [chat, artifact_tree, preview, export_queue]

@@ -142,7 +142,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("tool_assist_mode", tools_field_ids)
         tool_assist_field = next(field for field in tools_section["fields"] if field["id"] == "tool_assist_mode")
         self.assertEqual(catalog["settings"]["values"]["tools"]["tool_assist_mode"], "all")
-        self.assertIn("vector", {option["value"] for option in tool_assist_field["options"]})
+        tool_assist_options = {option["value"] for option in tool_assist_field["options"]}
+        self.assertIn("auto", tool_assist_options)
+        self.assertIn("vector", tool_assist_options)
         general_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "general")
         general_field_ids = {field["id"] for field in general_section["fields"]}
         self.assertIn("language", general_field_ids)
@@ -991,6 +993,11 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from transport.registry import build_fallback_http_routes
 
         class FakeServer:
+            def __getattr__(self, name):
+                if str(name).startswith("_handle_authority_"):
+                    return lambda *_args, **_kwargs: {"status": "ok"}
+                raise AttributeError(name)
+
             def _invoke_fallback_block(self, block_module, request_data, path_params, inject=None):
                 return {"block_module": block_module, "request_data": request_data}
 
@@ -1255,6 +1262,11 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         registered_patterns = {route["pattern"] for route in registry.routes}
 
         class FakeServer:
+            def __getattr__(self, name):
+                if str(name).startswith("_handle_authority_"):
+                    return lambda *_args, **_kwargs: {"status": "ok"}
+                raise AttributeError(name)
+
             def _invoke_fallback_block(self, module_name, request_data, path_params, inject=None):
                 return {"module_name": module_name}
 
@@ -1283,10 +1295,46 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("/api/ui/settings", registered_patterns)
         self.assertIn("/api/ui/commands", registered_patterns)
         self.assertIn("/api/ui/commands/execute", registered_patterns)
+        self.assertIn("/api/ui/client-events", registered_patterns)
         self.assertIn("/api/ui/conversations/{id}/preview", registered_patterns)
         self.assertTrue(any("api/ui/catalog" in pattern for pattern in fallback_patterns))
         self.assertTrue(any("api/ui/commands" in pattern for pattern in fallback_patterns))
+        self.assertTrue(any("api/ui/client-events" in pattern for pattern in fallback_patterns))
         self.assertTrue(any("api/ui/conversations" in pattern for pattern in fallback_patterns))
+
+    def test_client_event_route_records_redacted_audit_entry(self):
+        from blocks.ui.client_events import run
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+            os.environ,
+            {"RUMI_DEFAULTSPACK_AUDIT_PATH": str(Path(tmpdir) / "audit.jsonl")},
+            clear=False,
+        ):
+            result = run(
+                {
+                    "_method": "POST",
+                    "source": "webapp",
+                    "category": "conversation_integrity",
+                    "level": "warning",
+                    "message": "Frontend collapsed duplicate assistant finals.",
+                    "fingerprint": "conv-1:assistant:2",
+                    "conversation_id": "conv-1",
+                    "detail": {
+                        "duplicate_count": 2,
+                        "api_key": "secret-value",
+                    },
+                },
+                {},
+            )
+
+            self.assertEqual(result["status"], "ok")
+            audit_path = Path(tmpdir) / "audit.jsonl"
+            self.assertTrue(audit_path.exists())
+            audit_entry = json.loads(audit_path.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(audit_entry["event"], "client_diagnostic")
+            self.assertEqual(audit_entry["category"], "conversation_integrity")
+            self.assertEqual(audit_entry["conversation_id"], "conv-1")
+            self.assertEqual(audit_entry["details"]["api_key"], "***")
 
     def test_slash_command_registry_lists_defaults_and_executes_thinking(self):
         from domain.frontend.command_registry import SlashCommandRegistry
@@ -1297,6 +1345,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         self.assertIn("model", ids)
         self.assertIn("think", ids)
+        self.assertIn("deepthink", ids)
         self.assertIn("compact", ids)
         self.assertIn("commit", ids)
         self.assertEqual(next(command for command in commands if command["id"] == "commit")["risk"], "high")
@@ -1322,6 +1371,26 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             "google/gemma-4-31b-it",
             "conv-1",
         )
+
+    def test_slash_command_registry_executes_deepthink_toggle_with_warning(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        registry = SlashCommandRegistry(DEFAULTSPACK_ROOT)
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            service = service_cls.return_value
+            service.set_deepthink_enabled.return_value = {
+                "enabled": True,
+                "message": "DeepThinkをONにしました。タスクには数時間かかる可能性があります。",
+            }
+            result = registry.execute(
+                {"command": "deepthink", "mode": "chat", "args": {"enabled": "on"}},
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["data"]["executed"])
+        self.assertIn("数時間", result["data"]["message"])
+        service.set_deepthink_enabled.assert_called_once_with(True)
 
     def test_slash_command_registry_model_command_opens_picker_without_query(self):
         from domain.frontend.command_registry import SlashCommandRegistry

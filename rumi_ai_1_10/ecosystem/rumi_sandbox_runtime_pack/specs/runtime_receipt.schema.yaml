@@ -1,0 +1,29 @@
+schema_id: rumi_sandbox_runtime.runtime_receipt.v1
+owner: rumi_sandbox_runtime_pack
+purpose: Evidence schema for runtime execution receipts produced by an approved execution owner.
+required_fields:
+  - receipt_id
+  - request_summary
+  - boundary_classification
+  - runtime_owner
+  - approval_ref
+  - command_or_job_summary
+  - input_refs
+  - output_refs
+  - log_refs
+  - exit_status
+  - network_state
+  - secret_mount_decision
+  - reproducibility_ref
+network_state_values: [none, denied, approved_scoped, blocked_attempt]
+exit_status_values: [not_executed, success, failure, cancelled, unsafe_blocked]
+redaction_policy:
+  redact_secret_values: true
+  redact_private_paths_when_requested: true
+  preserve_command_shape: true
+receipt_quality_gates:
+  - approval_ref_present
+  - boundary_classification_matches_matrix
+  - secret_mount_decision_recorded
+  - output_refs_are_local_or_artifact_ids
+  - reproducibility_checklist_linked

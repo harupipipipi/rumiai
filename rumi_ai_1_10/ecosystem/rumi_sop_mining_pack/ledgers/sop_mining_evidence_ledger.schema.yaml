@@ -1,0 +1,36 @@
+evidence_ledger_schema:
+  required_records:
+  - record_id
+  - source_evidence_id
+  - trace_id
+  - source_type
+  - redaction_state
+  - redaction_actions
+  - consent_basis
+  - owner_surface
+  - handoff_owner
+  - review_state
+  - human_approver
+  - approval_record_ref
+  - approved_at
+  - non_execution_boundary
+  completion_rules:
+    every_record_has_evidence: true
+    every_trace_has_redaction_state: true
+    every_trace_has_consent_basis: true
+    every_promotion_has_human_approval: true
+    adjacent_execution_requires_handoff: true
+    browser_or_computer_actions_are_not_executed: true
+    scheduler_actions_are_not_created: true
+    observability_storage_requires_handoff: true
+    no_runtime_grant_created: true
+    no_raw_payload_storage: true
+  review_states:
+  - draft
+  - needs_redaction
+  - needs_human_approval
+  - approved_for_recipe
+  - rejected
+  non_execution_boundary_values:
+  - handoff_required
+  - not_applicable

@@ -1,0 +1,10 @@
+id: genspark_research_brief
+name: Genspark-like Research Brief
+profile: rumi_research_pack.deep_researcher
+enabled_capabilities:
+  - research.plan.create
+  - research.evidence.extract
+  - research.synthesis.write
+ui_panels: [chat, source_cards, comparison_table, synthesis]
+behavior: [comparison_tables, source_synthesis, executive_summary, cited_findings]
+default_outputs: [comparison_table, cited_brief, source_manifest]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -51,6 +52,29 @@ def test_action_map_doctor_maps_correctly():
     source = main_path.read_text()
     assert '"doctor": "computer.doctor"' in source
     assert '"diagnose": "computer.doctor"' in source
+
+
+def test_computer_use_manifest_exposes_new_actions():
+    manifest_path = Path(_funcs_dir).parent / "tools" / "computer_use" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    actions = manifest["config"]["schema"]["parameters"]["properties"]["action"]["enum"]
+    for action in ["observe", "semantic_action", "press", "pid_event", "doctor", "diagnose"]:
+        assert action in actions
+
+
+def test_browser_computer_manifest_exposes_new_actions():
+    manifest_path = Path(_funcs_dir).parent / "tools" / "browser_computer" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    actions = manifest["config"]["schema"]["parameters"]["properties"]["action"]["enum"]
+    for action in [
+        "computer.observe",
+        "computer.semantic_action",
+        "computer.press",
+        "computer.pid_event",
+        "computer.doctor",
+        "computer.diagnose",
+    ]:
+        assert action in actions
 
 
 def test_action_map_open_url_maps_to_browser_open_url(monkeypatch):

@@ -1,0 +1,79 @@
+{
+  "catalog_id": "rumi_workspace_pack.capabilities",
+  "version": "1.0.0",
+  "description": "Workspace artifact capability names and interface expectations.",
+  "capabilities": [
+    {
+      "id": "workspace.document.create",
+      "label": "Create editable document",
+      "artifact_types": ["doc", "docx", "markdown"],
+      "inputs": ["outline", "source_material", "style_guide"],
+      "outputs": ["editable_document", "revision_notes"],
+      "expected_grants": ["workspace.write", "artifact.preview"],
+      "risk_level": "low"
+    },
+    {
+      "id": "workspace.slides.create",
+      "label": "Create editable slide deck",
+      "artifact_types": ["slides", "pptx"],
+      "inputs": ["narrative", "sections", "brand_constraints", "visual_assets"],
+      "outputs": ["editable_deck", "speaker_notes", "asset_manifest"],
+      "expected_grants": ["workspace.write", "artifact.preview"],
+      "risk_level": "low"
+    },
+    {
+      "id": "workspace.sheet.create",
+      "label": "Create spreadsheet workbook",
+      "artifact_types": ["xlsx", "csv"],
+      "inputs": ["tables", "schema", "formulas", "validation_rules"],
+      "outputs": ["workbook", "formula_map", "data_quality_notes"],
+      "expected_grants": ["workspace.write", "artifact.preview"],
+      "risk_level": "low"
+    },
+    {
+      "id": "workspace.chart.render",
+      "label": "Render chart from structured data",
+      "artifact_types": ["chart", "png", "svg"],
+      "inputs": ["dataset", "chart_spec", "theme"],
+      "outputs": ["chart_asset", "chart_spec", "alt_text"],
+      "expected_grants": ["workspace.write", "artifact.preview"],
+      "risk_level": "low"
+    },
+    {
+      "id": "workspace.pdf.compose",
+      "label": "Compose paginated PDF",
+      "artifact_types": ["pdf"],
+      "inputs": ["document_or_deck", "pagination_rules", "export_profile"],
+      "outputs": ["pdf", "render_report"],
+      "expected_grants": ["workspace.write", "artifact.export"],
+      "risk_level": "medium"
+    },
+    {
+      "id": "workspace.bundle.export",
+      "label": "Export artifact bundle",
+      "artifact_types": ["zip", "folder"],
+      "inputs": ["artifact_manifest", "export_targets", "naming_policy"],
+      "outputs": ["export_bundle", "checksum_manifest"],
+      "expected_grants": ["workspace.read", "workspace.write", "artifact.export"],
+      "risk_level": "medium"
+    },
+    {
+      "id": "workspace.job.enqueue",
+      "label": "Enqueue background workspace job",
+      "artifact_types": ["job"],
+      "inputs": ["recipe_id", "job_parameters", "workspace_scope"],
+      "outputs": ["job_id", "job_plan"],
+      "expected_grants": ["job.enqueue"],
+      "risk_level": "medium"
+    },
+    {
+      "id": "workspace.job.status",
+      "label": "Inspect background job status",
+      "artifact_types": ["job_status"],
+      "inputs": ["job_id"],
+      "outputs": ["status", "progress", "artifact_manifest"],
+      "expected_grants": ["job.status"],
+      "risk_level": "low"
+    }
+  ]
+}

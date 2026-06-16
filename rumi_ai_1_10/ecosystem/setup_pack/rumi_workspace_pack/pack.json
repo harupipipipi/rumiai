@@ -1,0 +1,54 @@
+{
+  "pack_id": "rumi_workspace_pack",
+  "display_name": "Rumi Workspace Pack",
+  "description": "Optional declarative workspace artifact pack for slides, sheets, docs, PDFs, charts, exports, and background job recipes.",
+  "target_pack_id": "rumi_workspace_pack",
+  "version": "1.0.0",
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "optional_dependencies": [
+    {
+      "pack_id": "rumi_default_tools_pack",
+      "reason": "Can provide concrete file, export, and local tool implementations for workspace interfaces."
+    },
+    {
+      "pack_id": "rumi_local_agent_pack",
+      "reason": "Can provide adjacent local agent profiles and prompts for artifact-first work."
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "tool_aliases": "prefer_explicit_pack_namespace",
+    "profiles": "allow_side_by_side",
+    "artifact_catalogs": "merge_by_catalog_id"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Optional workspace catalog pack; it augments defaultspack instead of replacing it."
+  },
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"],
+    "conflicts": [],
+    "notes": "This selector enforces depends_on, platform, python, signing, and marketplace metadata. Conflict metadata is intentionally harmless for older selectors."
+  },
+  "marketplace": {
+    "id": "rumi.workspace_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "workspace"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": false,
+  "risk_level": "low",
+  "supports_all_ok": true
+}

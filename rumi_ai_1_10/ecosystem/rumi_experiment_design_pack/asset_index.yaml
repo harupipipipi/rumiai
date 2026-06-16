@@ -1,0 +1,60 @@
+asset_index:
+  pack_id: rumi_experiment_design_pack
+  generated_on: '2026-06-04'
+  categories:
+    index:
+    - asset_index.yaml
+    readme:
+    - README.md
+    docs:
+    - docs/README.md
+    - docs/architecture.md
+    - docs/interfaces.md
+    - docs/operations.md
+    catalog:
+    - catalog/workflows.yaml
+    - catalog/quality_matrix.yaml
+    - catalog/taxonomy.yaml
+    - catalog/handoff_matrix.yaml
+    schema:
+    - schemas/assignment_plan.schema.json
+    - schemas/decision_record.schema.json
+    - schemas/guardrail_plan.schema.json
+    - schemas/hypothesis.schema.json
+    - schemas/instrumentation_request.schema.json
+    - schemas/metric_plan.schema.json
+    - schemas/sample_size_plan.schema.json
+    policy:
+    - policies/safety.policy.yaml
+    - policies/handoff.policy.yaml
+    checklist:
+    - checklists/review.checklist.yaml
+    ledger:
+    - ledgers/evidence_ledger.schema.yaml
+    template:
+    - templates/handoff.template.md
+    - templates/review_report.template.md
+    - templates/artifact_card.template.md
+    fixtures:
+    - fixtures/contract_fixture.yaml
+    - fixtures/negative_cases.yaml
+    profiles:
+    - profiles/experiment_designer.profile.yaml
+    prompts:
+    - prompts/experiment_planner.system.md
+    presets:
+    - presets/safe_default.preset.yaml
+    - presets/handoff_review.preset.yaml
+    - presets/quality_gate.preset.yaml
+    example:
+    - examples/ab_test_checkout_copy.example.yaml
+    - examples/instrumentation_request.example.yaml
+    - examples/quasi_experiment_pricing.example.yaml
+    - examples/rollout_guardrail_plan.example.yaml
+  invariants:
+    required_secrets: []
+    required_network: []
+    executable_code: false
+    supports_all_ok: false
+    external_actions_are_handoffs: true
+    defaultspack_promotion_eligible: false

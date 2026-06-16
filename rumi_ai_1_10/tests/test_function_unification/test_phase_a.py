@@ -52,9 +52,10 @@ class TestFunctionEntryNewFields:
         """_entry_from_kwargs が 4 新フィールドを kwargs から受け取れる"""
         func_dir = tmp_path / "func"
         func_dir.mkdir()
+        (func_dir / "run.py").write_text("def run(ctx, args): return {}\n", encoding="utf-8")
         manifest = {
             "description": "test",
-            "entrypoint": "run.py",
+            "entrypoint": "run.py:run",
             "risk": "medium",
             "grant_config": {"fs": False},
             "vocab_aliases": ["perm.execute"],
@@ -65,15 +66,16 @@ class TestFunctionEntryNewFields:
             manifest=manifest,
             function_dir=str(func_dir),
         )
-        assert entry.entrypoint == "run.py"
+        assert entry.entrypoint == "run.py:run"
         assert entry.risk == "medium"
         assert entry.grant_config == {"fs": False}
         assert entry.vocab_aliases == ["perm.execute"]
 
     def test_entry_from_kwargs_new_fields_default(self, tmp_path):
-        """_entry_from_kwargs に新フィールドを渡さない場合、デフォルト None になる"""
+        """_entry_from_kwargs は省略時の Python entrypoint を正規化する"""
         func_dir = tmp_path / "func"
         func_dir.mkdir()
+        (func_dir / "main.py").write_text("def run(ctx, args): return {}\n", encoding="utf-8")
         manifest = {"description": "test"}
         entry = FunctionRegistry._entry_from_kwargs(
             pack_id="pk1",
@@ -81,7 +83,7 @@ class TestFunctionEntryNewFields:
             manifest=manifest,
             function_dir=str(func_dir),
         )
-        assert entry.entrypoint is None
+        assert entry.entrypoint == "main.py:run"
         assert entry.risk is None
         assert entry.grant_config is None
         assert entry.vocab_aliases is None

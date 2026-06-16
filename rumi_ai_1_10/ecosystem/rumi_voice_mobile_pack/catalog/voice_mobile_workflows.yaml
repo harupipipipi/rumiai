@@ -1,0 +1,17 @@
+catalog_id: rumi_voice_mobile.workflows
+schema_version: 1
+workflows:
+  - workflow_id: voice_memo_to_task
+    phases: [transcribe, classify_intent, extract_deadlines, confirm]
+    intent_taxonomy_ref: specs/intent_taxonomy.yaml
+    consent_policy_ref: policies/transcription_notification_consent.policy.yaml
+  - workflow_id: morning_mobile_brief
+    phases: [collect_sources, summarize, risk_check, deliver]
+    consent_policy_ref: policies/transcription_notification_consent.policy.yaml
+    handoff_receipt_ref: specs/handoff_receipt.schema.yaml
+  - workflow_id: speech_driven_desktop_fix
+    phases: [capture_command, confirm_scope, route_to_computer_control, report]
+    action_safety_checklist_ref: checklists/mobile_action_safety_checklist.yaml
+  - workflow_id: mobile_followup_ping
+    phases: [schedule, context_pack, deliver, record_ack]
+    handoff_receipt_ref: specs/handoff_receipt.schema.yaml

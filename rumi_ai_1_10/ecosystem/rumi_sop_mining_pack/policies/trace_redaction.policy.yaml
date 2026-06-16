@@ -1,0 +1,11 @@
+trace_redaction_policy:
+  blocked_by_default:
+  - raw secrets in trace evidence
+  - unreviewed personal data
+  - opaque shell commands as SOP steps
+  required_redactions:
+  - credential_values
+  - personal_identifiers
+  - private_urls
+  review_owners:
+  - rumi_security_review_pack
