@@ -12,10 +12,11 @@ def test_shipped_composer_bundle_rehydrates_catalog_actions():
     assert "trustedComposerActionForWidget" in bundle
     assert "composer_catalog_drop" in bundle
     assert "sourceItemId" in bundle
-    assert re.search(
-        r"\?\?\([^)]*\.action\?\.type===`call_endpoint`\?void 0:[^)]*\.action\)",
-        bundle,
-    )
+    safe_action_fallback_patterns = [
+        r"\?\?\([^)]*\.action\?\.type===[`\"]call_endpoint[`\"]\?void 0:[^)]*\.action\)",
+        r"\?\?\(\(\([^=]+=[^.]+\.action\)==null\?void 0:[^.]+\.type\)===[`\"]call_endpoint[`\"]\?void 0:[^.]+\.action\)",
+    ]
+    assert any(re.search(pattern, bundle) for pattern in safe_action_fallback_patterns)
 
     # Regression guard for the stale bundle vulnerability: the shipped composer
     # must not execute a dropped widget's serialized action directly.
@@ -29,6 +30,6 @@ def test_shipped_composer_bundle_keeps_endpoint_allowlist():
     assert "call_endpoint" in bundle
     assert "requires_approval" in bundle
     assert re.search(
-        r"\.type===`call_endpoint`&&![^.]+\.requires_approval&&[^(]+\([^.]+\.endpoint\)&&[^.]+\.has\(",
+        r"\.type===[`\"]call_endpoint[`\"]&&![^.]+\.requires_approval&&[^(]+\([^.]+\.endpoint\)&&[^.]+\.has\(",
         bundle,
     )
