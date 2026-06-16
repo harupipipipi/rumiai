@@ -127,6 +127,13 @@ jobs:
             rumi_ai_1_10/requirements.txt
             rumi_ai_1_10/requirements-dev.txt
 
+      - name: Preinstall PyYAML wheel on Windows
+        if: runner.os == 'Windows'
+        working-directory: rumi_ai_1_10
+        run: |
+          "pyyaml==6.0.2 --hash=sha256:e10ce637b18caea04431ce14fabcf5c64a1c61ec9c56b071a4b7ca131ca52d44" | Out-File -FilePath "$env:RUNNER_TEMP\pyyaml-wheel.txt" -Encoding utf8
+          python -m pip install --only-binary=:all: --require-hashes -r "$env:RUNNER_TEMP\pyyaml-wheel.txt"
+
       - name: Install dependencies
         working-directory: rumi_ai_1_10
         run: |
@@ -489,6 +496,12 @@ jobs:
           cache-dependency-path: |
             rumi_ai_1_10/requirements.txt
             rumi_ai_1_10/requirements-dev.txt
+
+      - name: Preinstall PyYAML wheel on Windows
+        working-directory: rumi_ai_1_10
+        run: |
+          "pyyaml==6.0.2 --hash=sha256:e10ce637b18caea04431ce14fabcf5c64a1c61ec9c56b071a4b7ca131ca52d44" | Out-File -FilePath "$env:RUNNER_TEMP\pyyaml-wheel.txt" -Encoding utf8
+          python -m pip install --only-binary=:all: --require-hashes -r "$env:RUNNER_TEMP\pyyaml-wheel.txt"
 
       - name: Install dependencies
         working-directory: rumi_ai_1_10

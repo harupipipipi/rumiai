@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from domain.external.response_adapter import ResponseAdapter
@@ -22,7 +23,13 @@ class LineResponseAdapter(ResponseAdapter):
         if mode == "reply_to_origin":
             if not origin.can_reply or not origin.reply_token:
                 return {"sent": False, "reason": "missing reply token", "mode": mode, "origin": origin.as_dict()}
-            return self.send_reply_messages(origin.reply_token, messages)
+            if _reply_token_expired(origin.reply_expires_at_ms):
+                return {"sent": False, "reason": "LINE reply token expired", "mode": mode, "origin": origin.as_dict()}
+            return self.send_reply_messages(
+                origin.reply_token,
+                messages,
+                reply_expires_at_ms=origin.reply_expires_at_ms,
+            )
         if mode == "push_to_origin":
             if not _push_allowed(context, origin):
                 return {"sent": False, "reason": "push not allowed", "mode": mode, "origin": origin.as_dict()}
@@ -36,16 +43,30 @@ class LineResponseAdapter(ResponseAdapter):
             return self.send_push_messages(target_id, messages)
         return {"sent": False, "reason": f"unsupported LINE send mode: {mode}", "mode": mode}
 
-    def send_text_reply(self, reply_token: str, text: str) -> dict[str, Any]:
+    def send_text_reply(
+        self,
+        reply_token: str,
+        text: str,
+        *,
+        reply_expires_at_ms: int | None = None,
+    ) -> dict[str, Any]:
         messages = _text_to_messages(text)
-        return self.send_reply_messages(reply_token, messages)
+        return self.send_reply_messages(reply_token, messages, reply_expires_at_ms=reply_expires_at_ms)
 
-    def send_reply_messages(self, reply_token: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+    def send_reply_messages(
+        self,
+        reply_token: str,
+        messages: list[dict[str, str]],
+        *,
+        reply_expires_at_ms: int | None = None,
+    ) -> dict[str, Any]:
+        if not reply_token or not messages:
+            return {"sent": False, "reason": "missing reply token or messages"}
+        if _reply_token_expired(reply_expires_at_ms):
+            return {"sent": False, "reason": "LINE reply token expired"}
         token = read_external_token("line", kind="channel_access_token")
         if not token:
             return {"sent": False, "reason": "LINE channel access token not configured"}
-        if not reply_token or not messages:
-            return {"sent": False, "reason": "missing reply token or messages"}
         response = post_json(
             "https://api.line.me/v2/bot/message/reply",
             {"Authorization": "Bearer " + token},
@@ -135,6 +156,9 @@ def _origin_from_context(context: dict[str, Any] | None) -> ExternalOrigin:
     source_id = str(raw.get("source_id") or context.get("source_id") or "")
     reply_token = str(raw.get("reply_token") or context.get("reply_token") or "")
     mode = str(raw.get("mode") or context.get("mode") or "active")
+    reply_expires_at_ms = raw.get("reply_expires_at_ms")
+    if not isinstance(reply_expires_at_ms, int):
+        reply_expires_at_ms = context.get("line_reply_expires_at_ms")
     return ExternalOrigin(
         provider="line",
         workspace_id=str(raw.get("workspace_id") or context.get("workspace_id") or "unknown"),
@@ -143,11 +167,19 @@ def _origin_from_context(context: dict[str, Any] | None) -> ExternalOrigin:
         actor_id=str(raw.get("actor_id") or context.get("actor_id") or "unknown"),
         conversation_id=str(raw.get("conversation_id") or context.get("conversation_id") or ""),
         reply_token=reply_token,
-        reply_expires_at_ms=raw.get("reply_expires_at_ms") if isinstance(raw.get("reply_expires_at_ms"), int) else None,
+        reply_expires_at_ms=reply_expires_at_ms if isinstance(reply_expires_at_ms, int) else None,
         mode=mode,
         can_reply=bool(reply_token) and mode != "standby",
         can_push=bool(source_id) and mode != "standby",
     )
+
+
+def _reply_token_expired(reply_expires_at_ms: int | None) -> bool:
+    return isinstance(reply_expires_at_ms, int) and reply_expires_at_ms <= _now_ms()
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 def _push_allowed(context: dict[str, Any] | None, origin: ExternalOrigin) -> bool:

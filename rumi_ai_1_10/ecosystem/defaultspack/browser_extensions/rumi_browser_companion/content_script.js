@@ -1,6 +1,8 @@
 (function () {
   const ELEMENT_ATTR = "data-rumi-element-id";
   const HIGHLIGHT_LAYER_ID = "rumi-browser-companion-highlight-layer";
+  const ROUTE_MESSAGE_TYPE = "rumi:search-home-route-state";
+  const SEARCH_HOME_MESSAGE_SOURCE = "rumi-search-home";
   const SEARCH_HOME_ROUTE_STATE_MAX_AGE_MS = 1000 * 60 * 60 * 6;
   let sequence = 0;
   let highlightTimer = null;
@@ -16,16 +18,15 @@
       return;
     }
     const message = event.data;
-    if (!message || typeof message !== "object") {
+    if (!isTrustedSearchHomeRouteMessage(event, message)) {
       return;
     }
-    if (message.type === "rumi:search-home:set-route-state") {
-      searchHomeRouteStateExpiresAt = Date.now() + SEARCH_HOME_ROUTE_STATE_MAX_AGE_MS;
-      chrome.runtime.sendMessage({
-        type: "rumi:search-home:set-route-state",
-        payload: message.payload || {}
-      });
-    }
+    searchHomeRouteStateExpiresAt = Date.now() + SEARCH_HOME_ROUTE_STATE_MAX_AGE_MS;
+    chrome.runtime.sendMessage({
+      type: "rumi:search-home:set-route-state",
+      source_origin: event.origin,
+      payload: message.payload || {}
+    });
   });
 
   window.addEventListener(
@@ -748,5 +749,41 @@
 
   function round2(value) {
     return Math.round(value * 100) / 100;
+  }
+
+  function isTrustedSearchHomeRouteMessage(event, message) {
+    if (
+      !message ||
+      (message.type !== "rumi:search-home:set-route-state" && message.type !== ROUTE_MESSAGE_TYPE)
+    ) {
+      return false;
+    }
+    if (message.source !== SEARCH_HOME_MESSAGE_SOURCE) {
+      return false;
+    }
+    if (!event.origin || event.origin !== window.location.origin) {
+      return false;
+    }
+    if (!globalThis.RumiBridgeUrlPolicy?.isTrustedSearchHomeOrigin(event.origin)) {
+      return false;
+    }
+    return isSearchHomeRouteState(message.payload);
+  }
+
+  function isSearchHomeRouteState(value) {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const hasTarget = typeof value.target_url === "string" && value.target_url.trim();
+    const hasFallback = typeof value.fallback_url === "string" && value.fallback_url.trim();
+    const hasCandidate =
+      Array.isArray(value.target_candidates) &&
+      value.target_candidates.some(
+        (candidate) =>
+          candidate &&
+          typeof candidate === "object" &&
+          (typeof candidate.url === "string" || typeof candidate.final_url === "string")
+      );
+    return Boolean(hasTarget || hasFallback || hasCandidate);
   }
 })();

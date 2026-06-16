@@ -130,7 +130,7 @@ def _handle_event(
     decision = AudiencePolicy(policy).evaluate(external_event, mentioned=addressed if require_group_mention else mentioned)
     if not decision.allowed:
         return _policy_denied_result(external_event, decision)
-    acknowledgement = _send_line_webhook_acknowledgement(event, endpoint=endpoint)
+    acknowledgement = _send_line_webhook_acknowledgement(event, endpoint=endpoint, origin=origin)
     runtime_context.setdefault("line_webhook_acknowledgement", acknowledgement)
     if _should_process_line_event_in_background(endpoint):
         return _with_line_acknowledgement(_dispatch_line_event_in_background(
@@ -311,17 +311,35 @@ def _verify_line(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
     return {"ok": True, "verified": True, "reason": ""}
 
 
-def _send_line_reply(reply_token: str, text: str) -> Dict[str, Any]:
-    return LineResponseAdapter().send_text_reply(reply_token, text_limit(text, 5000))
+def _send_line_reply(
+    reply_token: str,
+    text: str,
+    *,
+    reply_expires_at_ms: int | None = None,
+) -> Dict[str, Any]:
+    return LineResponseAdapter().send_text_reply(
+        reply_token,
+        text_limit(text, 5000),
+        reply_expires_at_ms=reply_expires_at_ms,
+    )
 
 
-def _send_line_webhook_acknowledgement(event: dict[str, Any], *, endpoint: WebhookEndpoint) -> Dict[str, Any]:
+def _send_line_webhook_acknowledgement(
+    event: dict[str, Any],
+    *,
+    endpoint: WebhookEndpoint,
+    origin=None,
+) -> Dict[str, Any]:
     if not _line_webhook_ack_enabled(endpoint):
         return {"sent": False, "reason": "LINE webhook acknowledgement disabled"}
     reply_token = str(event.get("replyToken") or "").strip()
     if not reply_token:
         return {"sent": False, "reason": "missing reply token"}
-    result = _send_line_reply(reply_token, _LINE_WEBHOOK_ACK_TEXT)
+    result = _send_line_reply(
+        reply_token,
+        _LINE_WEBHOOK_ACK_TEXT,
+        reply_expires_at_ms=getattr(origin, "reply_expires_at_ms", None),
+    )
     return {
         **result,
         "text": _LINE_WEBHOOK_ACK_TEXT,
