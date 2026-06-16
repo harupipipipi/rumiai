@@ -779,7 +779,7 @@ class AIClient:
                 provider._base_url = base_url
                 provider.BASE_URL = base_url
             method = getattr(provider, method_name)
-            return method(model_name, messages, tools or [], self._strip_authority_params(params))
+            return method(model_name, messages, tools or [], self._strip_authority_params(self._provider_params(params)))
         finally:
             if had_key:
                 provider._api_key = previous_key
@@ -837,7 +837,12 @@ class AIClient:
                 if base_url:
                     provider._base_url = base_url
                     provider.BASE_URL = base_url
-                for chunk in provider.stream(model_name, messages, tools or [], self._strip_authority_params(params)):
+                for chunk in provider.stream(
+                    model_name,
+                    messages,
+                    tools or [],
+                    self._strip_authority_params(self._provider_params(params)),
+                ):
                     yielded = True
                     yield chunk
                 return
@@ -1350,13 +1355,11 @@ class AIClient:
         model_pack = self._model_pack_for_model(model) if int(params.get("_composite_depth", 0) or 0) < 3 else None
         if model_pack is not None:
             response = self._complete_model_pack(model_pack, messages, tools, params)
-            text = self._response_text(response)
-            return iter([{"type": "text_delta", "text": text}, {"finish_reason": response.get("finish_reason", "stop") if isinstance(response, dict) else "stop"}])
+            return self._response_to_stream(response)
         composite = self._composite_for_model(model) if int(params.get("_composite_depth", 0) or 0) < 3 else None
         if composite is not None:
             response = self._complete_composite(composite, messages, tools, params)
-            text = self._response_text(response)
-            return iter([{"type": "text_delta", "text": text}, {"finish_reason": response.get("finish_reason", "stop") if isinstance(response, dict) else "stop"}])
+            return self._response_to_stream(response)
         provider_params = self._provider_params(params)
         routed, handled = self._call_with_api_routes("stream", model, messages, tools, params)
         if handled:
@@ -1379,6 +1382,19 @@ class AIClient:
             return provider.stream(model_name, messages, tools or [], self._strip_authority_params(provider_params))
         except NotImplementedError as e:
             raise RuntimeError(str(e)) from None
+
+    @classmethod
+    def _response_to_stream(cls, response):
+        text = cls._response_text(response)
+        if text:
+            yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
+        finish_reason = response.get("finish_reason", "stop") if isinstance(response, dict) else "stop"
+        usage = response.get("usage") if isinstance(response, dict) and isinstance(response.get("usage"), dict) else {}
+        metadata = response.get("metadata") if isinstance(response, dict) and isinstance(response.get("metadata"), dict) else {}
+        event = {"type": "stream_end", "finish_reason": finish_reason, "usage": usage}
+        if metadata:
+            event["metadata"] = metadata
+        yield event
 
     @staticmethod
     def _provider_params(params):

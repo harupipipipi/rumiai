@@ -17,6 +17,7 @@ export default defineConfig({
     },
   },
   build: {
+    minify: false,
     outDir: path.resolve(__dirname, "../ui"),
     emptyOutDir: false,
     cssCodeSplit: false,
@@ -25,6 +26,13 @@ export default defineConfig({
       output: {
         entryFileNames: "shell-app.js",
         chunkFileNames: "shell-[name].js",
+        keepNames: true,
+        minify: {
+          compress: true,
+          mangle: false,
+          codegen: true,
+        },
+        minifyInternalExports: false,
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined;
           if (id.includes("react-markdown") || id.includes("micromark") || id.includes("remark") || id.includes("mdast") || id.includes("hast")) {

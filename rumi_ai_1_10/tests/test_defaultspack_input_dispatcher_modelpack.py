@@ -639,6 +639,169 @@ def test_model_pack_review_chain_quarantines_unmarked_generator_scratch(monkeypa
     assert "scratch text that must never ship" not in text
     assert [call["model"] for call in provider.calls] == ["generator"]
 
+def test_model_pack_stream_uses_canonical_events_with_metadata(monkeypatch, tmp_path):
+    settings_path = tmp_path / "frontend_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "model_packs": [
+                        {
+                            "id": "stream-pack",
+                            "mode": "review_chain",
+                            "members": [{"model": "demo/generator", "metadata": {"role": "generator"}}],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(AIClient, "_settings_path", lambda self: settings_path)
+
+    class DemoProvider:
+        def complete(self, model_name, messages, tools, params):
+            assert model_name == "generator"
+            return {"content": [{"type": "text", "text": "DRAFT_RESPONSE: stream ok"}]}
+
+    provider = DemoProvider()
+
+    def fake_resolve(self, model):
+        if model.startswith("demo/"):
+            return provider, model.split("/", 1)[1]
+        raise AssertionError(model)
+
+    monkeypatch.setattr(AIClient, "resolve_provider", fake_resolve)
+
+    events = list(AIClient().stream("modelpack/stream-pack", [{"role": "user", "content": "hello"}], [], {}))
+
+    assert events[0] == {"type": "content_delta", "delta": {"type": "text", "text": "stream ok"}}
+    assert events[-1]["type"] == "stream_end"
+    assert events[-1]["finish_reason"] == "stop"
+    assert "rumi_process" in events[-1]["metadata"]
+    assert all(event.get("type") != "text_delta" for event in events)
+
+
+def test_model_pack_defers_content_block_tool_use(monkeypatch, tmp_path):
+    settings_path = tmp_path / "frontend_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "model_packs": [
+                        {
+                            "id": "tool-block-pack",
+                            "mode": "review_chain",
+                            "members": [{"model": "demo/generator", "metadata": {"role": "generator"}}],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(AIClient, "_settings_path", lambda self: settings_path)
+
+    class DemoProvider:
+        def complete(self, model_name, messages, tools, params):
+            assert model_name == "generator"
+            return {
+                "content": [
+                    {"type": "text", "text": "DRAFT_RESPONSE: should defer"},
+                    {"type": "tool_use", "id": "call_1", "name": "lookup", "input": {"q": "rumi"}},
+                ],
+                "finish_reason": "stop",
+            }
+
+    provider = DemoProvider()
+
+    def fake_resolve(self, model):
+        if model.startswith("demo/"):
+            return provider, model.split("/", 1)[1]
+        raise AssertionError(model)
+
+    monkeypatch.setattr(AIClient, "resolve_provider", fake_resolve)
+
+    response = AIClient().complete("modelpack/tool-block-pack", [{"role": "user", "content": "hello"}], [], {})
+    process = response["metadata"]["rumi_process"]
+
+    assert process["review"]["deferred"] is True
+    assert process["review"]["reason"] == "generator_returned_tool_calls"
+    assert response["content"][1]["type"] == "tool_use"
+
+
+def test_rumi_tool_call_detection_covers_content_tool_call_blocks():
+    from domain.ai_client import rumi_process
+
+    assert rumi_process.response_has_tool_calls({"content": [{"type": "tool_call", "name": "lookup"}]}) is True
+    assert rumi_process.response_has_tool_calls({"content": [{"type": "text", "text": "tool_call is only prose"}]}) is False
+
+
+def test_model_pack_reviewer_payload_excludes_non_user_history(monkeypatch, tmp_path):
+    settings_path = tmp_path / "frontend_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "model_packs": [
+                        {
+                            "id": "review-pack",
+                            "mode": "review_chain",
+                            "members": [
+                                {"model": "demo/generator", "metadata": {"role": "generator"}},
+                                {"model": "demo/reviewer", "metadata": {"role": "reviewer"}},
+                            ],
+                            "budget": {"max_review_rounds": 1},
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(AIClient, "_settings_path", lambda self: settings_path)
+    history = [
+        {"role": "system", "content": "system secret"},
+        {"role": "user", "content": "real request"},
+        {"role": "assistant", "content": "assistant secret"},
+        {"role": "tool", "content": "tool secret"},
+    ]
+
+    class DemoProvider:
+        def complete(self, model_name, messages, tools, params):
+            if model_name == "generator":
+                return {"content": [{"type": "text", "text": "RUMI_REASONING_BRIEF: concise\nDRAFT_RESPONSE: draft ok"}]}
+            if model_name == "reviewer":
+                payload = json.loads(messages[-1]["content"])
+                serialized = json.dumps(payload, ensure_ascii=False)
+                assert payload["user_messages"] == [{"role": "user", "content": "real request"}]
+                assert "system secret" not in serialized
+                assert "assistant secret" not in serialized
+                assert "tool secret" not in serialized
+                return {"content": [{"type": "text", "text": json.dumps({"pass": True, "score": 90, "issues": [], "required_changes": []})}]}
+            raise AssertionError(model_name)
+
+    provider = DemoProvider()
+
+    def fake_resolve(self, model):
+        if model.startswith("demo/"):
+            return provider, model.split("/", 1)[1]
+        raise AssertionError(model)
+
+    monkeypatch.setattr(AIClient, "resolve_provider", fake_resolve)
+
+    response = AIClient().complete("modelpack/review-pack", history, [], {})
+
+    assert response["content"][0]["text"] == "draft ok"
+
+    from domain.ai_client import rumi_process
+
+    deep_review_payload = rumi_process.build_deepthink_reviewer_messages(history, "draft ok")[-1]["content"]
+    assert "real request" in deep_review_payload
+    assert "system secret" not in deep_review_payload
+    assert "assistant secret" not in deep_review_payload
+    assert "tool secret" not in deep_review_payload
+
 
 def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_tools(monkeypatch, tmp_path):
     settings_path = tmp_path / "frontend_settings.json"
@@ -726,6 +889,72 @@ def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_to
     assert any(event["phase"] == "deepthink_notes" and "harness tool selection" in event["metadata"]["label"] for event in process["events"])
     assert provider.calls[-1]["model"] == "reviewer"
     assert provider.calls[-1]["tools"] == []
+
+def test_deepthink_reviewer_failure_quarantines_current_answer(monkeypatch, tmp_path):
+    settings_path = tmp_path / "frontend_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "model_packs": [
+                        {
+                            "id": "deepthink-quarantine-pack",
+                            "mode": "review_chain",
+                            "members": [
+                                {"model": "demo/generator", "metadata": {"role": "generator", "thinking_level": "medium"}},
+                                {"model": "demo/reviewer", "metadata": {"role": "reviewer", "thinking_level": "medium"}},
+                            ],
+                            "budget": {
+                                "deepthink_max_review_iterations": 1,
+                                "deepthink_user_rejection_review_cycles": 0,
+                                "deepthink_max_sections": 1,
+                            },
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(AIClient, "_settings_path", lambda self: settings_path)
+
+    class DemoProvider:
+        def complete(self, model_name, messages, tools, params):
+            system = messages[0]["content"]
+            if model_name == "generator":
+                if "Plan the response before writing it" in system:
+                    return {"content": [{"type": "text", "text": json.dumps({"structure": ["A"], "key_points": ["k"], "risks": []})}]}
+                if "Write one visible pseudo DeepThinking step" in system:
+                    return {"content": [{"type": "text", "text": json.dumps({"thinking": "check", "output": "next"})}]}
+                if "section only" in system:
+                    return {"content": [{"type": "text", "text": "section draft"}]}
+                return {"content": [{"type": "text", "text": "unapproved current answer"}]}
+            if model_name == "reviewer":
+                raise RuntimeError("reviewer unavailable")
+            raise AssertionError(model_name)
+
+    provider = DemoProvider()
+
+    def fake_resolve(self, model):
+        if model.startswith("demo/"):
+            return provider, model.split("/", 1)[1]
+        raise AssertionError(model)
+
+    monkeypatch.setattr(AIClient, "resolve_provider", fake_resolve)
+
+    response = AIClient().complete(
+        "modelpack/deepthink-quarantine-pack",
+        [{"role": "user", "content": "implement a larger change"}],
+        [],
+        {"deepthink_enabled": True},
+    )
+    text = response["content"][0]["text"]
+    process = response["metadata"]["rumi_process"]
+
+    assert response["finish_reason"] == "review_quarantine"
+    assert process["review"]["reason"] == "reviewer_failed"
+    assert "quarantined this draft" in text
+    assert "unapproved current answer" not in text
 
 
 def _run_deepthink_json_repair_case(monkeypatch, tmp_path, malformed_phase: str):

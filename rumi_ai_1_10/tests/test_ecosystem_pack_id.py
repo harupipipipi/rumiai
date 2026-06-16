@@ -180,4 +180,3 @@ class TestPackIdAutoComplement:
 
         assert info is None
         assert "reserved built-in pack_id" in caplog.text
-

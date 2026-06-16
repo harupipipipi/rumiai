@@ -33,6 +33,7 @@ if _this_module is not None:
     else:
         sys.modules.setdefault(f"rumi_ai_1_10.{__name__}", _this_module)
 
+
 def _docker_run_builder_class():
     modules = []
     for module_name in (
@@ -57,6 +58,7 @@ def _docker_run_builder_class():
     from .docker_run_builder import DockerRunBuilder
 
     return DockerRunBuilder
+
 
 class DockerCapabilityHandler:
     """Pack からの docker.run リクエストを検証・実行するハンドラ。"""
