@@ -1,34 +1,42 @@
 from pathlib import Path
-import re
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SHELL_APP = REPO_ROOT / "ecosystem" / "defaultspack" / "ui" / "shell-app.js"
+COMPOSER_WIDGETS = REPO_ROOT / "ecosystem" / "defaultspack" / "webapp" / "src" / "lib" / "composerWidgets.ts"
 
 
 def test_shipped_composer_bundle_rehydrates_catalog_actions():
     bundle = SHELL_APP.read_text(encoding="utf-8")
+    source = COMPOSER_WIDGETS.read_text(encoding="utf-8")
 
     assert "trustedComposerActionForWidget" in bundle
     assert "composer_catalog_drop" in bundle
     assert "sourceItemId" in bundle
-    assert re.search(
-        r"\?\?\([^)]*\.action\?\.type===`call_endpoint`\?void 0:[^)]*\.action\)",
-        bundle,
-    )
+
+    trusted_action_fn = source.split("export function trustedComposerActionForWidget", 1)[1].split(
+        "(trustedComposerActionForWidget",
+        1,
+    )[0]
+    assert "item.ui?.composer_action" in trusted_action_fn
+    assert "widget.action" not in trusted_action_fn
 
     # Regression guard for the stale bundle vulnerability: the shipped composer
-    # must not execute a dropped widget's serialized action directly.
+    # must not execute a dropped widget's serialized action directly.  Keep the
+    # minified-string sentinel, but assert the source-level security invariant so
+    # harmless bundle reshaping does not break CI.
     assert "Yu=u=>{const b=u.action" not in bundle
 
 
 def test_shipped_composer_bundle_keeps_endpoint_allowlist():
     bundle = SHELL_APP.read_text(encoding="utf-8")
+    source = COMPOSER_WIDGETS.read_text(encoding="utf-8")
 
     assert "GET /api/coding/git/status" in bundle
     assert "call_endpoint" in bundle
     assert "requires_approval" in bundle
-    assert re.search(
-        r"\.type===`call_endpoint`&&![^.]+\.requires_approval&&[^(]+\([^.]+\.endpoint\)&&[^.]+\.has\(",
-        bundle,
-    )
+    assert "COMPOSER_ENDPOINT_ACTION_ALLOWLIST" in source
+    assert "action.type === \"call_endpoint\"" in source
+    assert "&& !action.requires_approval" in source
+    assert "&& isSafeLocalEndpoint(action.endpoint)" in source
+    assert "&& COMPOSER_ENDPOINT_ACTION_ALLOWLIST.has(composerEndpointActionKey(action))" in source
