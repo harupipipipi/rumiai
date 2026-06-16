@@ -27,10 +27,16 @@ import {
   agentInitials,
   agentName,
   buildAgentActivity,
-  channelCount,
+  channelMemberCount,
   channelName,
+  channelUnreadCount,
+  fallbackSubagentOpenPreview,
+  fallbackSubagentTreeState,
+  hasSubagentTeamWorkspaceMarker,
   messageTime,
   messageTimestamp,
+  normalizeSubagentOpenPreview,
+  normalizeSubagentTreeResponse,
   previewAgents,
   previewChannels,
   previewCompany,
@@ -39,11 +45,17 @@ import {
   previewRuns,
   previewTasks,
   shortId,
+  subagentTreeItemsForMode,
+  subagentTeamWorkspaceMetadata,
   type AgentActivity,
+  type SubagentOpenPreview,
   type SubagentThread,
+  type SubagentTreeItem,
+  type SubagentTreeMode,
+  type SubagentTreeState,
 } from "./subagentTeamData";
 
-type TreeMode = "files" | "history" | null;
+type TreeMode = SubagentTreeMode | null;
 type DecisionStatus = "waiting" | "approved" | "revision";
 
 type SubagentTeamWorkspaceProps = {
@@ -52,22 +64,6 @@ type SubagentTeamWorkspaceProps = {
 };
 
 const DEFAULT_CHANNEL_ID = "ship-room";
-
-const fileTreeItems = [
-  { id: "workspace", depth: 0, label: "workspace", kind: "folder" },
-  { id: "src", depth: 1, label: "src", kind: "folder" },
-  { id: "team", depth: 2, label: "subagentTeam", kind: "folder" },
-  { id: "panel", depth: 3, label: "SubagentTeamWorkspace.tsx", kind: "file" },
-  { id: "notes", depth: 1, label: "decision-log.md", kind: "file" },
-  { id: "qa", depth: 1, label: "qa-evidence", kind: "folder" },
-];
-
-const historyTreeItems = [
-  { id: "brief", depth: 0, label: "Creator brief accepted", kind: "event" },
-  { id: "pm", depth: 1, label: "PM routed frontend and QA", kind: "event" },
-  { id: "ui", depth: 1, label: "Channel/DM shell drafted", kind: "event" },
-  { id: "decision", depth: 1, label: "Decision preview awaiting Creator", kind: "event" },
-];
 
 function effectiveThreadId(thread: SubagentThread): string {
   return thread.type === "dm" ? `dm-${thread.id}` : thread.id;
@@ -106,14 +102,34 @@ function compactCount(value: number): string {
   return String(Math.max(0, value));
 }
 
-function TreePreview({ mode, onClose }: { mode: Exclude<TreeMode, null>; onClose: () => void }) {
-  const items = mode === "files" ? fileTreeItems : historyTreeItems;
+function TreePreview({
+  mode,
+  treeState,
+  activePreview,
+  openingNodeId,
+  treeError,
+  onOpenNode,
+  onClose,
+}: {
+  mode: Exclude<TreeMode, null>;
+  treeState: SubagentTreeState;
+  activePreview: SubagentOpenPreview | null;
+  openingNodeId: string | null;
+  treeError: string | null;
+  onOpenNode: (item: SubagentTreeItem) => void;
+  onClose: () => void;
+}) {
+  const items = subagentTreeItemsForMode(treeState, mode);
+  const preview = activePreview?.mode === mode ? activePreview : null;
   return (
     <div className="mx-2 mb-2 rounded-lg border border-zinc-800/80 bg-zinc-950/65 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-zinc-200">
           {mode === "files" ? <FolderTree size={13} className="text-sky-300" /> : <History size={13} className="text-amber-300" />}
           <span className="truncate">{mode === "files" ? "File tree" : "History tree"}</span>
+          <span className={cn("rounded px-1 py-0.5 text-[9px]", treeState.source === "api" ? "bg-emerald-500/10 text-emerald-200" : "bg-zinc-900 text-zinc-500")}>
+            {treeState.source}
+          </span>
         </div>
         <button
           type="button"
@@ -123,19 +139,62 @@ function TreePreview({ mode, onClose }: { mode: Exclude<TreeMode, null>; onClose
           Close
         </button>
       </div>
-      <div className="space-y-0.5">
+      {treeError && treeState.source === "fallback" && (
+        <p className="mb-1.5 truncate rounded border border-amber-500/20 bg-amber-500/10 px-1.5 py-1 text-[10px] text-amber-100">
+          {treeError}
+        </p>
+      )}
+      <div className="space-y-0.5" data-testid={`subagent-${mode}-tree`}>
         {items.map((item) => (
           <button
             key={item.id}
             type="button"
+            onClick={() => onOpenNode(item)}
+            data-testid={`subagent-tree-node-${item.nodeId}`}
             className="flex h-6 w-full items-center gap-1.5 rounded px-1 text-left text-[11px] text-zinc-400 hover:bg-zinc-900/80 hover:text-zinc-100"
             style={{ paddingLeft: `${4 + item.depth * 12}px` }}
           >
             {item.kind === "folder" ? <FolderTree size={11} className="shrink-0 text-sky-400/80" /> : <FileText size={11} className="shrink-0 text-zinc-500" />}
             <span className="truncate">{item.label}</span>
+            {openingNodeId === item.nodeId && <RefreshCw size={10} className="ml-auto shrink-0 animate-spin text-zinc-600" />}
           </button>
         ))}
+        {items.length === 0 && (
+          <p className="rounded border border-zinc-800 bg-zinc-950/50 px-2 py-2 text-[10px] text-zinc-600">No nodes</p>
+        )}
       </div>
+      {preview && (
+        <div className="mt-2 border-t border-zinc-800/70 pt-2" data-testid="subagent-tree-preview">
+          <div className="mb-1 flex min-w-0 items-center justify-between gap-2">
+            <p className="min-w-0 truncate text-[11px] font-semibold text-zinc-200">{preview.title}</p>
+            {preview.source === "fallback" && (
+              <span className="shrink-0 rounded bg-zinc-900 px-1 py-0.5 text-[9px] text-zinc-500">preview</span>
+            )}
+          </div>
+          {preview.path && <p className="mb-1 truncate font-mono text-[10px] text-zinc-600">{preview.path}</p>}
+          {preview.messages?.length ? (
+            <div className="space-y-1">
+              {preview.messages.slice(0, 4).map((message) => (
+                <div key={`${message.channel_id}-${message.id}`} className="rounded bg-zinc-900/55 px-2 py-1">
+                  <div className="mb-0.5 flex items-center gap-1.5 text-[9px] text-zinc-600">
+                    <span className="font-semibold text-zinc-400">{message.sender_id}</span>
+                    <span>#{shortId(message.id)}</span>
+                  </div>
+                  <p className="line-clamp-2 text-[11px] leading-relaxed text-zinc-300">{message.content}</p>
+                </div>
+              ))}
+            </div>
+          ) : preview.content ? (
+            <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded bg-zinc-900/55 px-2 py-1.5 font-mono text-[10px] leading-relaxed text-zinc-300">
+              {preview.content}
+            </pre>
+          ) : (
+            <p className="rounded bg-zinc-900/55 px-2 py-1.5 text-[10px] text-zinc-500">
+              {preview.error || "No preview content"}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -261,15 +320,17 @@ function MessageRow({
   );
 }
 
-function ChannelButton({
+export function ChannelButton({
   channel,
   active,
-  count,
+  memberCount,
+  unreadCount,
   onClick,
 }: {
   channel: CompanyChannel;
   active: boolean;
-  count: number;
+  memberCount: number;
+  unreadCount: number;
   onClick: () => void;
 }) {
   return (
@@ -284,10 +345,15 @@ function ChannelButton({
       title={channel.description || channelName(channel)}
     >
       <Hash size={12} className="shrink-0" />
-      <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{channelName(channel)}</span>
-      {count > 0 && (
-        <span className={cn("shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold", active ? "bg-zinc-950 text-zinc-200" : "bg-zinc-800 text-zinc-400")}>
-          {compactCount(count)}
+      <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
+        {channelName(channel)} <span className={active ? "text-zinc-400" : "text-zinc-600"}>({memberCount})</span>
+      </span>
+      {unreadCount > 0 && (
+        <span
+          data-testid={`subagent-channel-unread-${channel.id}`}
+          className={cn("shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold", active ? "bg-zinc-950 text-zinc-200" : "bg-zinc-800 text-zinc-400")}
+        >
+          {compactCount(unreadCount)}
         </span>
       )}
     </button>
@@ -381,6 +447,38 @@ export function SubagentTeamWorkspace({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [decisionStatus, setDecisionStatus] = useState<DecisionStatus>("waiting");
+  const [treeState, setTreeState] = useState<SubagentTreeState>(() => fallbackSubagentTreeState());
+  const [treeError, setTreeError] = useState<string | null>(null);
+  const [openingNodeId, setOpeningNodeId] = useState<string | null>(null);
+  const [openPreview, setOpenPreview] = useState<SubagentOpenPreview | null>(null);
+
+  const loadSubagentTree = useCallback(async (companyId?: string | null) => {
+    try {
+      const result = await api.getSubagentTeamFileTree({
+        companyId,
+        conversationId: activeConversationId,
+        limit: 240,
+        includeGit: true,
+      });
+      setTreeState(normalizeSubagentTreeResponse(result));
+      setTreeError(null);
+      setOpenPreview(null);
+    } catch (treeLoadError) {
+      setTreeState(fallbackSubagentTreeState());
+      setTreeError(treeLoadError instanceof Error ? treeLoadError.message : "File tree API unavailable.");
+    }
+  }, [activeConversationId]);
+
+  const ensureSubagentCompanyMarker = useCallback(async (record: CompanyRecord | null): Promise<CompanyRecord | null> => {
+    if (!activeConversationId || !record?.id || hasSubagentTeamWorkspaceMarker(record.metadata)) return record;
+    try {
+      return await api.updateCompany(record.id, {
+        metadata: subagentTeamWorkspaceMetadata(record.metadata ?? {}),
+      });
+    } catch {
+      return record;
+    }
+  }, [activeConversationId]);
 
   const loadWorkspace = useCallback(async (requestedCompanyId?: string | null) => {
     setBusy(true);
@@ -401,7 +499,11 @@ export function SubagentTeamWorkspace({
 
       setCompanies(listedCompanies);
       setActiveCompanyId(selectedId);
-      setCompany(statusCompany ?? (selectedId ? listedCompanies.find((item) => item.id === selectedId) ?? null : null));
+      const selectedCompany = await ensureSubagentCompanyMarker(
+        statusCompany ?? (selectedId ? listedCompanies.find((item) => item.id === selectedId) ?? null : null),
+      );
+      setCompany(selectedCompany);
+      void loadSubagentTree(selectedId);
 
       if (!selectedId) {
         setAgents([]);
@@ -459,10 +561,11 @@ export function SubagentTeamWorkspace({
       setTasks([]);
       setRuns([]);
       setInboxItems([]);
+      void loadSubagentTree(null);
     } finally {
       setBusy(false);
     }
-  }, [activeConversationId]);
+  }, [activeConversationId, ensureSubagentCompanyMarker, loadSubagentTree]);
 
   useEffect(() => {
     setActiveCompanyId(null);
@@ -544,12 +647,12 @@ export function SubagentTeamWorkspace({
     setError(null);
     try {
       const result = await api.bootstrapCompanyWorkspace(
-        {
+        subagentTeamWorkspaceMetadata({
           source: "webapp",
           name: "Subagent Team",
           conversation_id: activeConversationId,
           scope: "conversation",
-        },
+        }),
         { conversationId: activeConversationId, scope: "conversation" },
       );
       setCompany(result.company);
@@ -577,10 +680,10 @@ export function SubagentTeamWorkspace({
       content,
       mentions,
       created_at: now,
-      metadata: {
+      metadata: subagentTeamWorkspaceMetadata({
         source: "subagent_team_ui",
         ...(activeThread.type === "dm" ? { dm_agent_id: activeThread.id } : {}),
-      },
+      }),
     };
     setLocalMessages((current) => [...current, optimistic]);
     setDraft("");
@@ -601,6 +704,25 @@ export function SubagentTeamWorkspace({
       setError(sendError instanceof Error ? sendError.message : "Message was kept locally, but backend send failed.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleOpenTreeNode = async (item: SubagentTreeItem) => {
+    setOpeningNodeId(item.nodeId);
+    try {
+      const result = await api.openSubagentTeamFileTreeNode({
+        nodeId: item.nodeId,
+        companyId: activeCompanyId,
+        conversationId: activeConversationId,
+      });
+      setOpenPreview(normalizeSubagentOpenPreview(result, item));
+    } catch (openError) {
+      setOpenPreview(fallbackSubagentOpenPreview(
+        item,
+        openError instanceof Error ? openError.message : "Could not open tree node.",
+      ));
+    } finally {
+      setOpeningNodeId(null);
     }
   };
 
@@ -669,7 +791,8 @@ export function SubagentTeamWorkspace({
                     key={channel.id}
                     channel={channel}
                     active={activeThread.type === "channel" && activeThread.id === channel.id}
-                    count={channelCount(channel, allMessages)}
+                    memberCount={channelMemberCount(channel)}
+                    unreadCount={channelUnreadCount(channel, allMessages)}
                     onClick={() => setActiveThread({ type: "channel", id: channel.id })}
                   />
                 ))}
@@ -789,7 +912,17 @@ export function SubagentTeamWorkspace({
                 text="PM summarizes handoffs and queues Creator decisions before subagents fan out."
               />
             </div>
-            {treeMode && <TreePreview mode={treeMode} onClose={() => setTreeMode(null)} />}
+            {treeMode && (
+              <TreePreview
+                mode={treeMode}
+                treeState={treeState}
+                activePreview={openPreview}
+                openingNodeId={openingNodeId}
+                treeError={treeError}
+                onOpenNode={(item) => void handleOpenTreeNode(item)}
+                onClose={() => setTreeMode(null)}
+              />
+            )}
             <CreatorDecisionPreview task={latestDecisionTask} status={decisionStatus} onStatusChange={setDecisionStatus} />
             <div className="px-1 pb-2">
               {threadMessages.map((message) => (

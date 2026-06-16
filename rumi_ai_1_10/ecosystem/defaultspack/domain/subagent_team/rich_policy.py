@@ -85,15 +85,18 @@ def evaluate_rich_policy(
         run for run in runs if str(run.get("status") or "").lower() in ACTIVE_RUN_STATUSES
     ]
     requested = max(0, int(requested_new_agents or 0))
-    allowed = len(active_runs) + requested <= cap
+    enabled = bool(nested.get("rich_enabled", settings.get("rich_enabled", False)))
+    within_cap = len(active_runs) + requested <= cap
+    allowed = enabled or within_cap
     return {
-        "enabled": bool(nested.get("rich_enabled", settings.get("rich_enabled", True))),
+        "enabled": enabled,
         "cap": cap,
         "active_agents": len(active_runs),
         "requested_new_agents": requested,
         "available_slots": max(0, cap - len(active_runs)),
         "allowed": allowed,
-        "reason": "within /rich cap" if allowed else "/rich active subagent cap reached",
+        "code": None if allowed else "RICH_MODE_REQUIRED",
+        "reason": "rich mode enabled" if enabled else ("within /rich cap" if within_cap else "/rich active subagent cap reached"),
     }
 
 

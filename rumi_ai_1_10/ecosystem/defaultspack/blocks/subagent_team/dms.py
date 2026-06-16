@@ -1,7 +1,7 @@
 from blocks._common import ok, error
 from domain.subagent_team.service import SubagentTeamService
 
-from ._helpers import company_id_from, invalid, missing_team, require_dict
+from ._helpers import company_id_from, denied, invalid, is_denied, missing_team, require_dict
 
 
 def run(input_data, context):
@@ -24,11 +24,15 @@ def run(input_data, context):
                 input_data,
                 actor_id=str(input_data.get("actor_id") or input_data.get("sender_id") or "creator"),
             )
+            if is_denied(dm):
+                return denied(dm)
             if dm is None:
                 return missing_team(company_id)
             return ok(dm)
         if action in {"send", "message"}:
             result = service.send_dm(company_id, input_data, context=context if isinstance(context, dict) else {})
+            if is_denied(result):
+                return denied(result)
             if result is None:
                 return missing_team(company_id)
             return ok(result)

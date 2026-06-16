@@ -13,17 +13,30 @@ def normalize_team_channel(data: dict[str, Any], *, existing_short_ids: list[str
     name = str(item.get("name") or item.get("id") or item.get("channel_id") or "team").strip().lstrip("#")
     channel_id = str(item.get("id") or item.get("channel_id") or slug_id(name, fallback="team")).strip()
     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    subagent_metadata = metadata.get("subagent_team") if isinstance(metadata.get("subagent_team"), dict) else {}
+    if subagent_metadata.get("short_id") and not metadata.get("short_id"):
+        metadata["short_id"] = str(subagent_metadata["short_id"])
     short_id, metadata = ensure_short_id(metadata, prefix="ch", seed=channel_id, existing=existing_short_ids)
     lifecycle = metadata.get("lifecycle") if isinstance(metadata.get("lifecycle"), dict) else {}
+    members = _clean_ids(item.get("members") if isinstance(item.get("members"), list) else [])
     metadata["short_id"] = short_id
-    metadata["subagent_team"] = True
+    metadata["subagent_team"] = {
+        **subagent_metadata,
+        "short_id": short_id,
+        "kind": str(subagent_metadata.get("kind") or item.get("kind") or "public"),
+        "member_count_cache": len(members),
+        "pm_required": bool(subagent_metadata.get("pm_required", len(members) >= 5)),
+        "pm_agent_id": subagent_metadata.get("pm_agent_id") or item.get("pm_agent_id"),
+        "rich_required": bool(subagent_metadata.get("rich_required", item.get("rich_required", False))),
+        "creator_managed": bool(subagent_metadata.get("creator_managed", True)),
+    }
     metadata["lifecycle"] = {"managed_by": "creator", "state": "active", **lifecycle}
     return {
         "id": channel_id,
         "name": name or channel_id,
         "description": str(item.get("description") or ""),
         "visibility": str(item.get("visibility") or "team"),
-        "members": _clean_ids(item.get("members") if isinstance(item.get("members"), list) else []),
+        "members": members,
         "mentions": bool(item.get("mentions", True)),
         "append_only": bool(item.get("append_only", True)),
         "metadata": metadata,
@@ -35,19 +48,31 @@ def normalize_team_agent(data: dict[str, Any], *, existing_short_ids: list[str] 
     display_name = str(item.get("display_name") or item.get("agent_name") or item.get("name") or item.get("agent_id") or "Agent").strip()
     agent_id = str(item.get("agent_id") or item.get("id") or slug_id(display_name, fallback="agent")).strip()
     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    subagent_metadata = metadata.get("subagent_team") if isinstance(metadata.get("subagent_team"), dict) else {}
+    if subagent_metadata.get("short_id") and not metadata.get("short_id"):
+        metadata["short_id"] = str(subagent_metadata["short_id"])
     short_id, metadata = ensure_short_id(metadata, prefix="ag", seed=agent_id, existing=existing_short_ids)
     aliases = _clean_ids(item.get("aliases") if isinstance(item.get("aliases"), list) else [])
     if short_id not in aliases:
         aliases.append(short_id)
     lifecycle = metadata.get("lifecycle") if isinstance(metadata.get("lifecycle"), dict) else {}
+    role_key = str(item.get("role_key") or subagent_metadata.get("role") or agent_id).strip()
     metadata["short_id"] = short_id
-    metadata["subagent_team"] = True
+    metadata["subagent_team"] = {
+        **subagent_metadata,
+        "uuid": str(subagent_metadata.get("uuid") or agent_id),
+        "short_id": short_id,
+        "display_name": display_name,
+        "role": str(subagent_metadata.get("role") or role_key).strip().lower(),
+        "channels": list(subagent_metadata.get("channels") or []),
+        "creator_managed": bool(subagent_metadata.get("creator_managed", True)),
+    }
     metadata["lifecycle"] = {"managed_by": "creator", "state": "active", **lifecycle}
     return {
         **item,
         "id": agent_id,
         "agent_id": agent_id,
-        "role_key": str(item.get("role_key") or agent_id),
+        "role_key": role_key,
         "agent_name": str(item.get("agent_name") or display_name),
         "display_name": display_name,
         "aliases": aliases,
@@ -122,7 +147,8 @@ def lifecycle_update(metadata: dict[str, Any] | None, *, state: str, actor_id: s
         "updated_by": str(actor_id or "creator"),
         "updated_at": now,
     }
-    data["subagent_team"] = True
+    nested = data.get("subagent_team") if isinstance(data.get("subagent_team"), dict) else {}
+    data["subagent_team"] = {**nested, "creator_managed": bool(nested.get("creator_managed", True))}
     return data
 
 

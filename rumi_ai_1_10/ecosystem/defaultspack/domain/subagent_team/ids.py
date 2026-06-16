@@ -28,6 +28,19 @@ def generate_short_id(prefix: str = "t", *, existing: Iterable[str] | None = Non
             return short_id
 
 
+def generate_internal_uuid() -> str:
+    """Return an opaque internal id for newly-created subagents."""
+    return str(uuid.uuid4())
+
+
+def is_uuid(value: str | None) -> bool:
+    try:
+        uuid.UUID(str(value or ""))
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def stable_short_id(
     prefix: str,
     seed: str = "",

@@ -1,7 +1,7 @@
 from blocks._common import ok, error
 from domain.subagent_team.service import SubagentTeamService
 
-from ._helpers import company_id_from, invalid, missing_team, require_dict
+from ._helpers import company_id_from, denied, invalid, is_denied, missing_team, require_dict
 
 
 def run(input_data, context):
@@ -32,11 +32,19 @@ def run(input_data, context):
                 agent = {key: value for key, value in input_data.items() if key not in {"company_id", "action"}}
             if not isinstance(agent, dict):
                 return invalid("agent must be a dict")
-            updated = service.upsert_agent(
+            updated = service.creator_request(
                 company_id,
-                agent,
-                actor_id=str(input_data.get("actor_id") or "creator"),
+                {
+                    **input_data,
+                    "action": "create_agent" if action == "create" else "create_agent",
+                    "agent": agent,
+                    "team_size": 1,
+                    "create_channel": bool(input_data.get("create_channel", False)),
+                },
+                context=context if isinstance(context, dict) else {},
             )
+            if is_denied(updated):
+                return denied(updated)
             if updated is None:
                 return missing_team(company_id)
             return ok(updated)

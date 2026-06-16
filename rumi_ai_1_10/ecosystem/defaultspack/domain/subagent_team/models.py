@@ -4,7 +4,7 @@ from typing import Any
 
 from domain.company.models import DEFAULT_COMPANY_ID, DEFAULT_COMPANY_NAME, normalize_agent, timestamp
 
-from .ids import channel_id_from_name, stable_short_id
+from .ids import channel_id_from_name, generate_internal_uuid, is_uuid, stable_short_id
 
 
 DEFAULT_TEAM_COMPANY_ID = DEFAULT_COMPANY_ID
@@ -116,8 +116,12 @@ def make_agent_spec(
 ) -> dict[str, Any]:
     role_key = str(role or "worker").strip().lower()
     short_id = stable_short_id(display_name, role_key, existing=existing_short_ids or [])
-    internal_id = agent_id or short_id.replace("-", "_")
+    requested_agent_id = str(agent_id or "").strip()
+    internal_id = requested_agent_id if requested_agent_id and is_uuid(requested_agent_id) else generate_internal_uuid()
     prompt = PM_SYSTEM_PROMPT if role_key == "pm" else WORKER_SYSTEM_PROMPT
+    aliases = [short_id, display_name, role_key]
+    if requested_agent_id and requested_agent_id not in aliases:
+        aliases.append(requested_agent_id)
     metadata = {
         SUBAGENT_METADATA_KEY: {
             "uuid": internal_id,
@@ -132,6 +136,7 @@ def make_agent_spec(
             "system_prompt_profile": system_prompt_profile or f"{role_key}_default",
             "hierarchy": "Main Agent -> Subagent Creator -> PM -> Workers / Checkers",
             "channel_check_required": True,
+            "legacy_alias": requested_agent_id or None,
         }
     }
     return normalize_agent(
@@ -142,7 +147,7 @@ def make_agent_spec(
             "display_name": display_name,
             "model": model or "default",
             "allowed_tools": tools_for_role(role_key),
-            "aliases": [short_id, display_name, role_key],
+            "aliases": aliases,
             "system_prompt": prompt,
             "metadata": metadata,
         }

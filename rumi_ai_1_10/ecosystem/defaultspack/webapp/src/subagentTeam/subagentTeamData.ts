@@ -5,12 +5,88 @@ export type SubagentThread = {
   id: string;
 };
 
+export const SUBAGENT_TEAM_WORKSPACE_SURFACE = "subagent_team_workspace";
+
 export type AgentActivity = {
   latestInbox?: CompanyInboxItem;
   latestRun?: CompanyRunLink;
   openInboxCount: number;
   status: string;
 };
+
+export type SubagentTreeMode = "files" | "history";
+
+export type SubagentTreeItemKind = "folder" | "file" | "event";
+
+export type SubagentTreeItem = {
+  id: string;
+  nodeId: string;
+  depth: number;
+  label: string;
+  kind: SubagentTreeItemKind;
+  mode: SubagentTreeMode;
+  path?: string;
+  size?: number;
+  source: "api" | "fallback";
+};
+
+export type SubagentTreeState = {
+  source: "api" | "fallback";
+  files: SubagentTreeItem[];
+  history: SubagentTreeItem[];
+  workspaceId?: string | null;
+};
+
+export type SubagentOpenPreview = {
+  nodeId: string;
+  mode: SubagentTreeMode;
+  title: string;
+  kind: SubagentTreeItemKind;
+  path?: string;
+  content?: string;
+  messages?: CompanyMessage[];
+  source: "api" | "fallback";
+  error?: string;
+};
+
+export const fallbackFileTreeItems: SubagentTreeItem[] = [
+  { id: "workspace", nodeId: "workspace", depth: 0, label: "workspace", kind: "folder", mode: "files", source: "fallback" },
+  { id: "src", nodeId: "src", depth: 1, label: "src", kind: "folder", mode: "files", source: "fallback" },
+  { id: "team", nodeId: "team", depth: 2, label: "subagentTeam", kind: "folder", mode: "files", source: "fallback" },
+  { id: "panel", nodeId: "panel", depth: 3, label: "SubagentTeamWorkspace.tsx", kind: "file", mode: "files", source: "fallback" },
+  { id: "notes", nodeId: "notes", depth: 1, label: "decision-log.md", kind: "file", mode: "files", source: "fallback" },
+  { id: "qa", nodeId: "qa", depth: 1, label: "qa-evidence", kind: "folder", mode: "files", source: "fallback" },
+];
+
+export const fallbackHistoryTreeItems: SubagentTreeItem[] = [
+  { id: "brief", nodeId: "brief", depth: 0, label: "Creator brief accepted", kind: "event", mode: "history", source: "fallback" },
+  { id: "pm", nodeId: "pm", depth: 1, label: "PM routed frontend and QA", kind: "event", mode: "history", source: "fallback" },
+  { id: "ui", nodeId: "ui", depth: 1, label: "Channel/DM shell drafted", kind: "event", mode: "history", source: "fallback" },
+  { id: "decision", nodeId: "decision", depth: 1, label: "Decision preview awaiting Creator", kind: "event", mode: "history", source: "fallback" },
+];
+
+export function fallbackSubagentTreeState(): SubagentTreeState {
+  return {
+    source: "fallback",
+    files: fallbackFileTreeItems,
+    history: fallbackHistoryTreeItems,
+  };
+}
+
+export function subagentTeamWorkspaceMetadata(metadata: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    ...metadata,
+    surface: SUBAGENT_TEAM_WORKSPACE_SURFACE,
+    subagent_team: true,
+  };
+}
+
+export function hasSubagentTeamWorkspaceMarker(metadata: Record<string, unknown> | undefined | null): boolean {
+  return Boolean(
+    metadata
+    && (metadata.subagent_team === true || metadata.surface === SUBAGENT_TEAM_WORKSPACE_SURFACE),
+  );
+}
 
 export const previewCompany: CompanyRecord = {
   id: "preview-team",
@@ -289,17 +365,158 @@ export function channelName(channel: CompanyChannel | undefined | null, fallback
   return channel?.name || fallbackId || channel?.id || "channel";
 }
 
+export function channelMemberCount(channel: CompanyChannel): number {
+  return Array.isArray(channel.members) ? channel.members.length : 0;
+}
+
 export function metadataNumber(metadata: Record<string, unknown> | undefined, key: string): number | null {
   const value = metadata?.[key];
   const numeric = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-export function channelCount(channel: CompanyChannel, messages: CompanyMessage[]): number {
+export function channelUnreadCount(channel: CompanyChannel, messages: CompanyMessage[]): number {
   const unread = metadataNumber(channel.metadata, "unread_count");
   if (unread !== null) return Math.max(0, Math.round(unread));
   if (typeof channel.message_count === "number") return Math.max(0, channel.message_count);
   return messages.filter((message) => message.channel_id === channel.id).length;
+}
+
+export function channelCount(channel: CompanyChannel, messages: CompanyMessage[]): number {
+  return channelUnreadCount(channel, messages);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function recordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    const text = typeof value === "string" ? value.trim() : "";
+    if (text) return text;
+  }
+  return "";
+}
+
+function firstNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const numeric = typeof value === "number" ? value : Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return undefined;
+}
+
+function basename(path: string): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalized.split("/").filter(Boolean).at(-1) || normalized || ".";
+}
+
+function itemDepth(raw: Record<string, unknown>, path: string): number {
+  const explicitDepth = firstNumber(raw.depth);
+  if (explicitDepth !== undefined) return Math.max(0, Math.round(explicitDepth));
+  if (!path || path === ".") return 0;
+  return Math.max(0, path.split("/").filter(Boolean).length - 1);
+}
+
+function itemKind(raw: Record<string, unknown>, mode: SubagentTreeMode): SubagentTreeItemKind {
+  if (mode === "history") return "event";
+  const type = firstString(raw.kind, raw.type).toLowerCase();
+  if (type === "folder" || type === "dir" || type === "directory") return "folder";
+  if (raw.is_dir === true || raw.is_directory === true) return "folder";
+  return "file";
+}
+
+function normalizeTreeItems(value: unknown, mode: SubagentTreeMode): SubagentTreeItem[] {
+  return recordArray(value).map((raw, index) => {
+    const path = firstString(raw.path, raw.file_path, raw.relative_path);
+    const label = firstString(raw.label, raw.name, raw.title, path ? basename(path) : "", `node-${index + 1}`);
+    const nodeId = firstString(raw.node_id, raw.nodeId, raw.id, path, label);
+    return {
+      id: firstString(raw.id, nodeId, `${mode}-${index}`),
+      nodeId,
+      depth: itemDepth(raw, path),
+      label,
+      kind: itemKind(raw, mode),
+      mode,
+      path: path || undefined,
+      size: firstNumber(raw.size),
+      source: "api",
+    };
+  });
+}
+
+export function normalizeSubagentTreeResponse(payload: unknown): SubagentTreeState {
+  const data = isRecord(payload) ? payload : {};
+  const files = normalizeTreeItems(
+    data.files ?? data.file_tree ?? data.tree ?? data.nodes ?? data.items,
+    "files",
+  );
+  const history = normalizeTreeItems(
+    data.history ?? data.history_tree ?? data.events ?? data.conversations,
+    "history",
+  );
+  return {
+    source: "api",
+    files,
+    history,
+    workspaceId: firstString(data.workspace_id, data.workspaceId) || null,
+  };
+}
+
+function normalizePreviewMessages(value: unknown, fallback: SubagentTreeItem): CompanyMessage[] | undefined {
+  const messages = recordArray(value).map((raw, index): CompanyMessage => ({
+    id: firstString(raw.id, raw.message_id, `${fallback.nodeId}-${index}`),
+    company_id: firstString(raw.company_id, "subagent-team"),
+    channel_id: firstString(raw.channel_id, raw.thread_id, fallback.nodeId),
+    sender_id: firstString(raw.sender_id, raw.sender, raw.role, "history"),
+    content: firstString(raw.content, raw.text, raw.message, raw.preview),
+    created_at: firstString(raw.created_at, raw.timestamp),
+    metadata: isRecord(raw.metadata) ? raw.metadata : undefined,
+  })).filter((message) => message.content);
+  return messages.length ? messages : undefined;
+}
+
+export function normalizeSubagentOpenPreview(payload: unknown, fallback: SubagentTreeItem): SubagentOpenPreview {
+  const data = isRecord(payload) ? payload : {};
+  const content = firstString(
+    data.content,
+    data.file_content,
+    data.text,
+    data.preview,
+    data.body,
+    data.markdown,
+  );
+  return {
+    nodeId: firstString(data.node_id, data.nodeId, data.id, fallback.nodeId),
+    mode: fallback.mode,
+    title: firstString(data.title, data.label, data.name, data.path, fallback.label),
+    kind: fallback.kind,
+    path: firstString(data.path, data.file_path, fallback.path) || undefined,
+    content: content || undefined,
+    messages: normalizePreviewMessages(data.messages ?? data.history ?? data.conversation, fallback),
+    source: "api",
+  };
+}
+
+export function fallbackSubagentOpenPreview(item: SubagentTreeItem, error?: string): SubagentOpenPreview {
+  return {
+    nodeId: item.nodeId,
+    mode: item.mode,
+    title: item.label,
+    kind: item.kind,
+    path: item.path,
+    content: item.kind === "folder" ? undefined : `${item.label} preview`,
+    source: "fallback",
+    error,
+  };
+}
+
+export function subagentTreeItemsForMode(state: SubagentTreeState, mode: SubagentTreeMode): SubagentTreeItem[] {
+  return mode === "files" ? state.files : state.history;
 }
 
 export function buildAgentActivity(agents: CompanyAgent[], inboxItems: CompanyInboxItem[], runs: CompanyRunLink[]): Map<string, AgentActivity> {

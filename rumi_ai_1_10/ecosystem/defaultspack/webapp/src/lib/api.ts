@@ -439,6 +439,68 @@ export type CompanyInboxItem = {
   updated_at?: string;
 };
 
+export type SubagentTeamFileTreeEntry = {
+  id?: string;
+  node_id?: string;
+  nodeId?: string;
+  name?: string;
+  label?: string;
+  title?: string;
+  path?: string;
+  file_path?: string;
+  relative_path?: string;
+  is_dir?: boolean;
+  is_directory?: boolean;
+  kind?: string;
+  type?: string;
+  depth?: number;
+  size?: number;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type SubagentTeamFileTreeResponse = {
+  workspace_id?: string;
+  workspaceId?: string;
+  workspace_hash?: string;
+  root?: string;
+  directory?: string;
+  files?: SubagentTeamFileTreeEntry[];
+  file_tree?: SubagentTeamFileTreeEntry[];
+  tree?: SubagentTeamFileTreeEntry[];
+  nodes?: SubagentTeamFileTreeEntry[];
+  items?: SubagentTeamFileTreeEntry[];
+  history?: SubagentTeamFileTreeEntry[];
+  history_tree?: SubagentTeamFileTreeEntry[];
+  events?: SubagentTeamFileTreeEntry[];
+  clipped?: boolean;
+  status?: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type SubagentTeamFileTreeOpenResponse = {
+  id?: string;
+  node_id?: string;
+  nodeId?: string;
+  title?: string;
+  label?: string;
+  name?: string;
+  path?: string;
+  file_path?: string;
+  content?: string;
+  file_content?: string;
+  text?: string;
+  preview?: string;
+  body?: string;
+  markdown?: string;
+  messages?: Array<Record<string, unknown>>;
+  history?: Array<Record<string, unknown>>;
+  conversation?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
 export type CompanyInboundRoute = {
   id: string;
   provider?: string;
@@ -2266,6 +2328,40 @@ export const api = {
   listCompanyInboundRoutes(companyId: string) {
     return request<{ routes: CompanyInboundRoute[]; total: number }>(
       withQuery(`/api/company/${encodeURIComponent(companyId)}/inbound-routes`, { company_id: companyId }),
+      { cache: "no-store" },
+    );
+  },
+
+  getSubagentTeamFileTree(options?: {
+    companyId?: string | null;
+    conversationId?: string | null;
+    directory?: string;
+    limit?: number;
+    includeGit?: boolean;
+  }) {
+    return request<SubagentTeamFileTreeResponse>(
+      withQuery("/api/subagent-team/file-tree", {
+        company_id: options?.companyId,
+        conversation_id: options?.conversationId,
+        directory: options?.directory,
+        limit: options?.limit,
+        include_git: options?.includeGit,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  openSubagentTeamFileTreeNode(options: {
+    nodeId: string;
+    companyId?: string | null;
+    conversationId?: string | null;
+  }) {
+    return request<SubagentTeamFileTreeOpenResponse>(
+      withQuery("/api/subagent-team/file-tree/open", {
+        node_id: options.nodeId,
+        company_id: options.companyId,
+        conversation_id: options.conversationId,
+      }),
       { cache: "no-store" },
     );
   },

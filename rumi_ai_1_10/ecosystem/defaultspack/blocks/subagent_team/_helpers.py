@@ -26,6 +26,14 @@ def missing_team(company_id: str):
     return error("subagent team not found: " + str(company_id), "NOT_FOUND")
 
 
+def is_denied(result: Any) -> bool:
+    return isinstance(result, dict) and bool(result.get("denied")) and result.get("allowed") is False
+
+
+def denied(result: dict[str, Any]):
+    return error(str(result.get("message") or "denied"), str(result.get("code") or "FORBIDDEN"))
+
+
 def limit_offset(input_data: dict[str, Any]) -> tuple[int, int]:
     limit = input_data.get("limit", 50)
     offset = input_data.get("offset", 0)
