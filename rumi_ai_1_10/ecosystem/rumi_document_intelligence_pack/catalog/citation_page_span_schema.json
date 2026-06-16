@@ -1,0 +1,45 @@
+{
+  "version": "rumi.document_intelligence.citation_page_span.v1",
+  "pack_id": "rumi_document_intelligence_pack",
+  "description": "Declarative schema for citation traceability, page-span references, and quote provenance.",
+  "network_default": "none",
+  "citation_record": {
+    "required_fields": [
+      "claim_id",
+      "source_document_id",
+      "page_start",
+      "page_end",
+      "span_start_hint",
+      "span_end_hint",
+      "evidence_type",
+      "confidence",
+      "privacy_classification"
+    ],
+    "evidence_type_allowed": [
+      "verbatim_quote",
+      "paraphrase",
+      "table_value",
+      "figure_reference",
+      "redline_delta",
+      "missing_evidence"
+    ],
+    "confidence_allowed": [
+      "high_exact_span",
+      "medium_page_level",
+      "low_needs_human_review",
+      "blocked_by_privacy"
+    ]
+  },
+  "page_span_rules": {
+    "single_page_claim": "Record identical page_start and page_end.",
+    "multi_page_claim": "Record page range and explain how the cited span crosses pages.",
+    "unknown_page": "Mark confidence low_needs_human_review and do not invent page numbers.",
+    "quote_limits": "Prefer short excerpts and summaries; preserve copyright and privacy boundaries."
+  },
+  "review_gates": [
+    "every_material_claim_has_citation_record",
+    "page_spans_are_not_invented",
+    "redline_deltas_link_to_source_and_target_versions",
+    "privacy_classification_completed_before_external_handoff"
+  ]
+}

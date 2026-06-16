@@ -1,0 +1,22 @@
+task:
+  title: Research brief to deck and PDF
+  preset: rumi_workspace_pack.genspark_workspace
+  goal: Turn a research brief into an editable slide deck, speaker notes, chart assets, and PDF export.
+  inputs:
+    brief_path: workspace/briefs/market_landscape.md
+    audience: executive_review
+    brand_constraints: minimal_internal
+  output:
+    folder: workspace/outputs/market_landscape_deck
+    artifacts:
+      - type: slides
+        path: market_landscape_deck.pptx
+      - type: pdf
+        path: market_landscape_deck.pdf
+      - type: chart
+        path: assets/
+      - type: export_bundle
+        path: market_landscape_deck_bundle.zip
+  recipe: deck_from_brief
+  review:
+    checks: [layout_non_overlapping, speaker_notes_present, image_refs_valid]

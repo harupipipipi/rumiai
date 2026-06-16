@@ -1,0 +1,3 @@
+# Rumi Frontend Design Pack Docs
+
+These docs describe the declarative contract for `rumi_frontend_design_pack`. The pack does not add executable runtime behavior; it provides pack-specific structure for planning, review, and handoff.

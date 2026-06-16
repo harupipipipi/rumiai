@@ -1,0 +1,13 @@
+schema_id: rumi_connector_gateway.handoff
+version: 1
+required_fields:
+  - handoff_id
+  - connector_id
+  - owner_tool
+  - source_channel
+  - provenance
+  - trust_label
+  - requested_action
+  - data_classes
+  - delivery_target
+trust_labels: [trusted_user_command, untrusted_inbound, mixed, sensitive, unknown]

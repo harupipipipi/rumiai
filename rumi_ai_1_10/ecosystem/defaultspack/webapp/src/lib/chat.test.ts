@@ -4,6 +4,7 @@ import {
   contentBlocksToText,
   deriveConversationTitle,
   formatRelativeTime,
+  inspectConversationIntegrity,
   messageToText,
   orderConversationMessages,
 } from "./chat";
@@ -75,4 +76,30 @@ test("orderConversationMessages restores chronological sequence and removes dupl
 
   assert.deepEqual(ordered.map((message) => message.id), ["user-1", "assistant-1"]);
   assert.deepEqual(ordered[1].events, duplicateDone.events);
+});
+
+test("orderConversationMessages collapses duplicate sequence finals even when ids differ", () => {
+  const assistantA = {
+    id: "assistant-1",
+    role: "assistant",
+    content: [{ type: "text", text: "draft" }],
+    raw_text: "draft",
+    created_at: 1010,
+    conversation_id: "c1",
+    sequence_number: 2,
+  } satisfies ChatMessage;
+  const assistantB = {
+    ...assistantA,
+    id: "assistant-2",
+    raw_text: "final",
+    content: [{ type: "text", text: "final" }],
+  } satisfies ChatMessage;
+
+  const ordered = orderConversationMessages([assistantA, assistantB]);
+  const diagnostics = inspectConversationIntegrity([assistantA, assistantB]);
+
+  assert.equal(ordered.length, 1);
+  assert.equal(ordered[0]?.raw_text, "final");
+  assert.equal(diagnostics.collapsedCount, 1);
+  assert.equal(diagnostics.duplicateSequenceCount, 1);
 });

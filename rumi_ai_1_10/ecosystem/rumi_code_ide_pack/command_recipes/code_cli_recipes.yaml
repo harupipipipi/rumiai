@@ -1,0 +1,99 @@
+version: rumi.command_recipes.v1
+pack_id: rumi_code_ide_pack
+recipes:
+  - id: orient_repository
+    title: Orient in a repository
+    intent: Build enough context before editing.
+    preferred_commands:
+      - git status --short
+      - rg --files
+      - rg "<symbol-or-error>"
+    approval:
+      read_only: true
+      requires_user_approval: false
+    stop_conditions:
+      - workspace root is unclear
+      - command output reveals unrelated dirty changes that affect the task
+
+  - id: bugfix_loop
+    title: Focused bugfix loop
+    intent: Reproduce, patch, and verify one defect.
+    phases:
+      - inspect failing output and related files
+      - write the smallest local patch
+      - rerun the focused test or command
+      - summarize changed files and residual risk
+    approval:
+      file_writes_require_user_approval: true
+      terminal_commands_require_user_approval: true
+      destructive_commands_allowed: false
+
+  - id: add_tests
+    title: Add or adjust tests
+    intent: Cover the changed behavior without excessive fixture churn.
+    phases:
+      - locate nearby tests and test helpers
+      - add the narrowest test that fails without the fix
+      - run focused test target
+    approval:
+      file_writes_require_user_approval: true
+      terminal_commands_require_user_approval: true
+
+  - id: safe_refactor
+    title: Safe local refactor
+    intent: Improve shape while preserving behavior.
+    constraints:
+      - no public API changes unless requested
+      - no broad formatting-only churn
+      - no package changes unless requested
+    phases:
+      - identify local duplication or complexity
+      - patch with the smallest useful abstraction
+      - run targeted checks
+    approval:
+      file_writes_require_user_approval: true
+      terminal_commands_require_user_approval: true
+      destructive_commands_allowed: false
+
+  - id: review_diff
+    title: Review local diff
+    intent: Find bugs and risks before merge.
+    preferred_commands:
+      - git status --short
+      - git diff --stat
+      - git diff
+    response_order:
+      - findings
+      - open_questions
+      - test_gaps
+      - brief_summary
+    approval:
+      read_only: true
+      requires_user_approval: false
+
+  - id: explain_error
+    title: Explain a terminal or build error
+    intent: Connect an error message to likely local causes.
+    phases:
+      - capture the exact error and command
+      - search for referenced symbols, files, or config
+      - explain likely cause and smallest next check
+    approval:
+      read_only_first: true
+      terminal_commands_require_user_approval: true
+
+  - id: prepare_pr
+    title: Prepare a pull request summary
+    intent: Convert local changes into a concise review-ready summary.
+    preferred_commands:
+      - git status --short
+      - git diff --stat
+      - git diff --cached --stat
+    output_sections:
+      - summary
+      - tests
+      - risk
+    approval:
+      git_commit_requires_user_approval: true
+      git_push_requires_user_approval: true
+      destructive_commands_allowed: false

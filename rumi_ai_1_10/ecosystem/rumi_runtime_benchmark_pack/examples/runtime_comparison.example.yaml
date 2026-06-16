@@ -1,0 +1,22 @@
+example:
+  id: runtime_comparison
+  pack_id: rumi_runtime_benchmark_pack
+  workflow: publish_reproducibility_notes
+  intent: Compare two runtime profiles using the same fixture, seed, cache policy, and environment descriptor.
+  sampling_plan: release_gate_thirty_run
+  seed: 9001
+  evidence:
+    - environment_descriptor_id
+    - fixture_id
+    - prompt_hash
+    - tool_trace_id
+    - sample_count
+    - variance_notes
+  handoff: handoff_to_rumi_devops_release_pack_for_release_gate_reporting
+  expected_result:
+    decision: release_gate_ready_if_thresholds_pass
+    deliverables:
+      - threshold_status
+      - confidence_statement
+      - warm_cold_start_notes
+      - reproducibility_ledger_entry

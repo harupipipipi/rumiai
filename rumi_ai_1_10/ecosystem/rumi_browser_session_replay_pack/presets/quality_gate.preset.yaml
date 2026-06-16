@@ -1,0 +1,5 @@
+preset:
+  id: quality_gate
+  pack_id: rumi_browser_session_replay_pack
+  mode: declarative_contract
+  external_action: handoff_only

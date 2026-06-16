@@ -1,0 +1,39 @@
+acceptance_rubric:
+  id: rumi_subagent_pr_manager_pack.pr_acceptance_rubric
+  scoring:
+    scale: [blocked, weak, acceptable, strong]
+    minimum_merge_readiness: strong
+  criteria:
+    scope_control:
+      description: PR touches only the pack-owned files and matching contract test.
+      blocking_failures:
+        - edits_unowned_pack
+        - reverts_other_work
+    declarative_depth:
+      description: Assets are meaningful contracts rather than placeholder manifests.
+      strong_signals:
+        - routing_matrix_present
+        - acceptance_rubric_present
+        - evidence_ledger_present
+        - examples_reference_real_workflows
+    subagent_repetition:
+      description: Owner, reviewer, and fallback subagents are named for each lane.
+      blocking_failures:
+        - missing_reviewer_subagent
+        - only_one_subagent_role
+    setup_policy:
+      description: supports_all_ok remains false and defaultspack promotion remains disabled.
+      blocking_failures:
+        - supports_all_ok_true
+        - defaultspack_promotion_eligible
+    verification:
+      description: Focused pytest command and result are present in the evidence ledger.
+      blocking_failures:
+        - missing_test_command
+        - missing_test_result
+merge_decision:
+  reviewer_ready_requires:
+    - all_blocking_failures_empty
+    - minimum_merge_readiness_met
+    - evidence_ledger_complete
+    - handoff_checklist_complete

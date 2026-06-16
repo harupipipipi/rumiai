@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { RightSidebar } from "./RightSidebar";
+import { getRailFloatingMenuPosition, RightSidebar } from "./RightSidebar";
 
 const noop = () => undefined;
 
@@ -48,6 +48,26 @@ test("right sidebar initially focuses the rail on tools", () => {
   assert.match(html, /title="Filter: Tools"/);
   assert.match(html, /title="other \(1\)"/);
   assert.doesNotMatch(html, /title="Widget A"/);
+});
+
+test("right sidebar does not auto-open employees on initial render", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      items: [],
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      companyPanel: createElement("div", null, "Employee workspace content"),
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /title="Employees"/);
+  assert.doesNotMatch(html, /Employee workspace content/);
 });
 
 test("right sidebar keeps initial tool groups compact", () => {
@@ -102,4 +122,50 @@ test("YOLO switch and Model Manager can be pinned", () => {
 
   assert.match(html, /title="YOLO Switch"/);
   assert.match(html, /title="Model Manager"/);
+});
+
+test("right sidebar exposes workspace tabs as a vertical switcher widget", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      items: [],
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      workspaceTabs: [
+        { id: "tab-chat", kind: "chat", title: "Planning", conversationId: "conv-1", createdAt: 1 },
+        { id: "tab-calendar", kind: "calendar", title: "Calendar", createdAt: 2 },
+      ],
+      activeWorkspaceTabId: "tab-chat",
+      onSettingChange: noop,
+      onOpenSettings: noop,
+      onWorkspaceTabSelect: noop,
+      onWorkspaceTabClose: noop,
+      onWorkspaceTabCreate: noop,
+    }),
+  );
+
+  assert.match(html, /title="Workspace tabs"/);
+  assert.match(html, /aria-label="Workspace tabs"/);
+  assert.match(html, />2</);
+});
+
+test("right sidebar floating menus clamp to the viewport", () => {
+  assert.deepEqual(
+    getRailFloatingMenuPosition(
+      { left: 1238, top: 627 },
+      { width: 224, height: 360, viewportWidth: 1280, viewportHeight: 720 },
+    ),
+    { top: 352, right: 50 },
+  );
+
+  assert.deepEqual(
+    getRailFloatingMenuPosition(
+      { left: 8, top: -40 },
+      { width: 224, height: 360, viewportWidth: 320, viewportHeight: 480 },
+    ),
+    { top: 8, right: 88 },
+  );
 });

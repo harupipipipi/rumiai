@@ -456,12 +456,22 @@ def _run_validation():
     """Pack ecosystem.json を検証し結果を出力する。"""
     from core_runtime.pack_validator import validate_packs
 
+    def _print_validation_line(level: str, message: str) -> None:
+        line = f"{level}: {message}"
+        try:
+            print(line)
+        except UnicodeEncodeError:
+            encoding = sys.stdout.encoding or "utf-8"
+            sys.stdout.write(
+                line.encode(encoding, errors="backslashreplace").decode(encoding) + "\n"
+            )
+
     report = validate_packs()
 
     for err in report.errors:
-        print(f"ERROR: {err}")
+        _print_validation_line("ERROR", err)
     for warn in report.warnings:
-        print(f"WARNING: {warn}")
+        _print_validation_line("WARNING", warn)
 
     summary = (
         f"{report.pack_count} packs scanned, {report.valid_count} valid, "

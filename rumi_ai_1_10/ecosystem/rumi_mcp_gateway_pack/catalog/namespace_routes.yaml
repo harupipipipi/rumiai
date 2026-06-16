@@ -1,0 +1,54 @@
+route_policy_id: rumi_mcp_gateway.namespace_routes
+version: 1
+pack_id: rumi_mcp_gateway_pack
+owner_boundary:
+  executable_mcp_owner: defaultspack
+  gateway_metadata_owner: rumi_mcp_gateway_pack
+  namespace_is_permission_boundary: false
+explicit_namespace_required: true
+unknown_server_namespace:
+  pattern: mcp_gateway.<server_slug>
+  server_slug_rules:
+    - lowercase_ascii
+    - replace_spaces_with_underscore
+    - strip_protocol_and_vendor_marketing
+    - reject_empty_or_ambiguous_slug
+tool_name_routes:
+  discovered_defaultspack_tool:
+    pattern: mcp__<server_id>__<tool_name>
+    owner: defaultspack.tool.registry
+    approval_source: defaultspack.mcp_registry
+  gateway_alias:
+    pattern: rumi_mcp_gateway.<server_slug>.<tool_name>
+    allowed: metadata_only
+    maps_to: mcp__<server_id>__<tool_name>
+    requires_explicit_mapping: true
+conflict_resolution:
+  directly_supported_pack:
+    rule: prefer_direct_pack_namespace
+    reason: First-party pack support has a narrower contract than the gateway catalog.
+  defaultspack_mcp_interfaces:
+    rule: do_not_override
+    interfaces:
+      - defaults.tool.mcp_connect
+      - defaultspack.tool.mcp_connect
+      - defaults.tool.mcp_list
+      - defaultspack.tool.mcp_list
+  duplicate_gateway_slug:
+    rule: append_stable_suffix_after_user_review
+    suffix_examples:
+      - source domain
+      - local descriptor hash prefix
+      - user supplied label
+unsupported_server_route:
+  default_status: blocked_until_reviewed
+  required_steps:
+    - assign_explicit_namespace
+    - classify_category
+    - record_transport_and_requested_scopes
+    - request_user_approval
+    - connect_using_defaultspack_only
+audit_labels:
+  - mcp_gateway.namespace_assigned
+  - mcp_gateway.server_reviewed
+  - mcp_gateway.defaultspack_mcp_connect_requested

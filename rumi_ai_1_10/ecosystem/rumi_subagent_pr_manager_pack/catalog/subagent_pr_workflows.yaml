@@ -1,0 +1,25 @@
+workflows:
+  assign_subagent_to_pr:
+    owner: rumi_subagent_pr_manager_pack
+    requires_evidence:
+      - branch_name
+      - pr_url
+      - assigned_subagent_id
+      - validation_commands
+    handoff_policy: setup_pack_overlap_policy
+  track_pack_pr_readiness:
+    owner: rumi_subagent_pr_manager_pack
+    requires_evidence:
+      - branch_name
+      - pr_url
+      - assigned_subagent_id
+      - validation_commands
+    handoff_policy: setup_pack_overlap_policy
+  coordinate_review_handoffs:
+    owner: rumi_subagent_pr_manager_pack
+    requires_evidence:
+      - branch_name
+      - pr_url
+      - assigned_subagent_id
+      - validation_commands
+    handoff_policy: setup_pack_overlap_policy

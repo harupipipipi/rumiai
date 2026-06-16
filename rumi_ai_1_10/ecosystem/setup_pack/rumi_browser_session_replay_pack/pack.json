@@ -1,0 +1,68 @@
+{
+  "pack_id": "rumi_browser_session_replay_pack",
+  "display_name": "Rumi Browser Session Replay Pack",
+  "description": "Declarative browser session trace, evidence bundle, replay manifest, selector drift, and redaction contracts.",
+  "target_pack_id": "rumi_browser_session_replay_pack",
+  "version": "1.0.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "browser_execution": "handoff_to_rumi_browser_automation_pack",
+    "semantic_dom": "handoff_to_rumi_browser_element_pack",
+    "browser_transport": "handoff_to_rumi_default_tools_pack",
+    "audit_logs": "handoff_to_defaultspack",
+    "form_submission": "handoff_to_rumi_browser_form_operator_pack",
+    "session_replay_contract": "owned_by_rumi_browser_session_replay_pack",
+    "redaction_review": "owned_by_rumi_browser_session_replay_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Browser replay evidence is sensitive and belongs behind explicit review before any defaultspack promotion.",
+    "promotion_blockers": [
+      "contains_browser_session_trace_contracts_not_core_defaults",
+      "requires_redaction_review_for_sensitive_browser_evidence",
+      "browser_execution_owned_by_rumi_browser_automation_pack",
+      "semantic_dom_owned_by_rumi_browser_element_pack",
+      "transport_owned_by_rumi_default_tools_pack",
+      "no_runtime_enforcement_or_browser_driver",
+      "replay_manifest_contract_requires_multi_pack_handoff"
+    ],
+    "promotion_evidence_required": [
+      "schema_contract_tests_pass",
+      "redaction_policy_cases_cover_auth_payment_private_urls",
+      "selector_drift_examples_reviewed",
+      "evidence_bundle_hash_and_ref_cases",
+      "handoff_boundary_reviewed_with_browser_automation_and_element_packs"
+    ]
+  },
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.9",
+    "platforms": [
+      "windows",
+      "linux",
+      "macos"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.browser_session_replay_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "browser-safety",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  }
+}

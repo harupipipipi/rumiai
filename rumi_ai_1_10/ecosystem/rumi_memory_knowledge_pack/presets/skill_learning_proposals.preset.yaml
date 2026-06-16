@@ -1,0 +1,9 @@
+id: skill_learning_proposals
+name: Skill-learning Proposals
+profile: rumi_memory_knowledge_pack.project_knowledge_steward
+enabled_capabilities:
+  - memory.skill.propose
+  - memory.recall.session
+ui_panels: [skill_proposal_queue, evidence_links, review_checklist]
+behavior: [detect_repeated_patterns, proposals_only, require_user_review, no_auto_install]
+default_outputs: [skill_learning_proposal, safety_notes, review_checklist]

@@ -1,0 +1,25 @@
+workflows:
+  extract_cited_answers:
+    owner: rumi_document_intelligence_pack
+    requires_evidence:
+      - page_span
+      - quote_digest
+      - risk_label
+      - handoff_artifact_id
+    handoff_policy: setup_pack_overlap_policy
+  classify_document_risks:
+    owner: rumi_document_intelligence_pack
+    requires_evidence:
+      - page_span
+      - quote_digest
+      - risk_label
+      - handoff_artifact_id
+    handoff_policy: setup_pack_overlap_policy
+  prepare_redline_handoff:
+    owner: rumi_document_intelligence_pack
+    requires_evidence:
+      - page_span
+      - quote_digest
+      - risk_label
+      - handoff_artifact_id
+    handoff_policy: setup_pack_overlap_policy

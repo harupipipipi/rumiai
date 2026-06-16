@@ -1,0 +1,28 @@
+recipe_id: rumi.model_evals.recipes.opencode_zen_minimax_smoke
+version: rumi.recipe.v1
+purpose: Declarative smoke recipe for OpenCode Zen and MiniMax provider paths.
+network: explicit_runtime_approval_required
+credentials: runtime_supplied_only
+providers:
+  - opencode_zen
+  - minimax
+checks:
+  - id: provider_available
+    description: Confirm the runtime has a provider entry and externally supplied credential reference.
+  - id: tiny_chat
+    description: Ask a minimal non-sensitive prompt and verify response envelope shape.
+  - id: coding_microtask
+    description: Request a tiny deterministic code explanation or patch plan without file writes.
+  - id: tool_call_shape_optional
+    description: If tool calling is enabled, verify schema shape using a dry-run fixture.
+  - id: latency_capture
+    description: Record observed p50 candidate and max observed latency for the tiny prompt.
+  - id: cost_capture
+    description: Record token or cost units if runtime exposes them.
+outputs:
+  - provider_smoke_result
+  - cost_latency_evidence
+  - route_hold_or_allow_recommendation
+secret_policy:
+  include_credentials_in_output: false
+  redact_runtime_credential_labels: true

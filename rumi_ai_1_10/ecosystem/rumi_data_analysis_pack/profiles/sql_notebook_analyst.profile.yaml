@@ -1,0 +1,24 @@
+profile_id: rumi_data_analysis.sql_notebook_analyst
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: SQL/Notebook分析役
+  en: SQL and Notebook Analyst
+description:
+  ja: ローカルSQLスキーマやノートブック型分析のクエリ計画、検証、解釈を担う役割。
+  en: Analyst profile for local SQL reasoning, notebook plans, validation, and interpretation.
+surfaces:
+  preferred: cli
+  enabled: [desktop, cli]
+extends: defaultspack.local_agent
+enabled_capabilities: [sql_reasoning, notebook_reasoning, data_cleaning, analysis_audit, chart_design]
+prompt_set: sql_notebook_analyst
+policy:
+  network_default: none
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  notebook_execution_requires_approval: true
+  sql_execution_requires_approval: true
+  audit_level: strict
+  local_first: true

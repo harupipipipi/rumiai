@@ -1,0 +1,12 @@
+example:
+  id: cross_pack_acceptance
+  pack_id: rumi_agentic_qa_pack
+  workflow: replay_acceptance_matrix
+  intent: Replay a cross-pack acceptance scenario and confirm each out-of-scope failure is routed to the owning pack.
+  evidence:
+    - scenario_id
+    - expected_observation
+    - actual_observation
+    - triage_owner_pack
+  handoff: handoff_to_owner_pack_named_by_qa_routing_matrix
+  expected_result: acceptance_matrix_row_with_replay_checklist_and_owner_handoff

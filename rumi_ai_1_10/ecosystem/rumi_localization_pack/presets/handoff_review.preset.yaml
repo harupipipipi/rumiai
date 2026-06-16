@@ -1,0 +1,15 @@
+preset:
+  id: handoff_review
+  purpose: Prepare a handoff packet for the adjacent owner pack.
+  required_assets:
+  - schemas
+  - policies
+  - checklists
+  - templates
+  - ledgers
+  defaults:
+    network: none
+    grant_effect: none
+    human_review: true
+    include_boundary_section: true
+    include_locale_issue_records: true

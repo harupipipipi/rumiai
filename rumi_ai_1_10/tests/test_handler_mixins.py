@@ -644,7 +644,7 @@ class TestPackLifecycleHandlers:
             "success": True, "applied": True,
         }
         mock_applier = MagicMock()
-        mock_applier.apply_staging.return_value = mock_apply_result
+        mock_applier.apply.return_value = mock_apply_result
         with patch(
             "rumi_ai_1_10.core_runtime.pack_importer.get_pack_importer",
             return_value=mock_importer,
@@ -654,7 +654,7 @@ class TestPackLifecycleHandlers:
         ):
             result = handler._pack_apply("s1", mode="replace")
         assert result["success"] is True
-        mock_applier.apply_staging.assert_called_once_with(
+        mock_applier.apply.assert_called_once_with(
             "s1", mode="replace",
         )
 

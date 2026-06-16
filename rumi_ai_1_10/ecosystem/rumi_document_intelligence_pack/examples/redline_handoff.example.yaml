@@ -1,0 +1,24 @@
+example:
+  id: redline_handoff
+  pack_id: rumi_document_intelligence_pack
+  workflow: prepare_redline_handoff
+  intent: Prepare a redline handoff for a revised policy document with operation-level evidence.
+  document_type: redline
+  expected_passes:
+    - redline_delta_reviewer
+    - citation_mapper
+    - privacy_reviewer
+  evidence:
+    - source_page_span
+    - target_page_span
+    - quote_digest
+    - redline_operation
+    - privacy_class
+  handoff: handoff_to_rumi_workspace_pack_after_privacy_review
+  expected_result:
+    decision: handoff_ready_if_no_high_risk_blockers
+    deliverables:
+      - redline_operation_table
+      - high_risk_delta_table
+      - page_span_evidence_map
+      - privacy_review_status

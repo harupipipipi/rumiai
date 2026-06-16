@@ -1,0 +1,11 @@
+example_id: rumi_voice_mobile.voice_memo_task
+request: Convert a reviewed voice memo transcript into a task draft while preserving transcription consent and retention notes.
+intent_class: voice_memo_to_task
+transcript_ref: local_transcript_ref_required
+consent_required:
+  - transcription
+  - transcript_storage
+expected_outputs:
+  - extracted_task_summary
+  - consent_refs
+  - handoff_receipt

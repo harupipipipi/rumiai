@@ -1,0 +1,81 @@
+quality_matrix:
+  version: 0.1.0
+  checks:
+  - id: deterministic_prompt_id
+    blocking: true
+    evidence_required: true
+    dimension: identity
+    failure_examples:
+    - missing prompt_id
+    - prompt_id changes without a version ledger entry
+  - id: instruction_hierarchy
+    blocking: true
+    evidence_required: true
+    dimension: hierarchy
+    failure_examples:
+    - mixes system-level authority with user-editable preferences
+    - asks the assistant to ignore adjacent owner policy
+  - id: scope_boundary
+    blocking: true
+    evidence_required: true
+    dimension: non_overlap
+    failure_examples:
+    - claims to route models
+    - claims to create tools or APIs
+  - id: risk_notes
+    blocking: true
+    evidence_required: true
+    dimension: safety
+    failure_examples:
+    - hides uncertainty
+    - omits migration risks
+  - id: evidence_requirement
+    blocking: true
+    evidence_required: true
+    dimension: reviewability
+    failure_examples:
+    - relies on undocumented intuition
+    - treats local fixtures as model benchmarks
+  - id: customization_knobs
+    blocking: false
+    evidence_required: true
+    dimension: usability
+    failure_examples:
+    - exposes preferences without default values
+    - stores user-specific preferences as pack defaults
+  - id: fixture_dry_run
+    blocking: true
+    evidence_required: true
+    dimension: local_validation
+    failure_examples:
+    - fixture expectation is missing
+    - fixture requires network access
+  - id: custom_instruction_migration_fidelity
+    blocking: true
+    evidence_required: true
+    dimension: migration
+    failure_examples:
+    - copies platform-specific permissions as portable prompt behavior
+    - loses user-visible style requirements without reviewer note
+  - id: style_persona_consistency
+    blocking: false
+    evidence_required: true
+    dimension: style
+    failure_examples:
+    - preset conflicts with prompt objective
+    - tone rules override safety or evidence rules
+  - id: privacy_secret_boundary
+    blocking: true
+    evidence_required: true
+    dimension: privacy
+    failure_examples:
+    - asks for credential discovery
+    - includes real personal data in fixture
+  - id: owner_handoff
+    blocking: true
+    evidence_required: true
+    dimension: non_overlap
+    failure_examples:
+    - model eval, memory, API, or code request has no owner
+    - handoff owner is named but evidence is missing
+  minimum_pass: all_blocking_checks

@@ -1,0 +1,10 @@
+id: local_workspace_safe
+name: Local Workspace Safe Mode
+profile: rumi_workspace_pack.workspace_artifact_agent
+enabled_capabilities:
+  - workspace.document.create
+  - workspace.sheet.create
+  - workspace.chart.render
+ui_panels: [chat, artifact_tree, preview]
+behavior: [local_only, editable_sources_first, no_network_by_default, approval_before_overwrite]
+default_outputs: [editable_sources, artifact_manifest]

@@ -1,0 +1,30 @@
+regression_triage_report_template:
+  id: rumi_agentic_qa_pack.regression_triage_report
+  required_fields:
+    - scenario_id
+    - lane
+    - triage_owner_pack
+    - expected_observation
+    - actual_observation
+    - evidence_references
+    - suspected_regression_type
+    - reviewer_decision
+    - handoff_notes
+  suspected_regression_types:
+    - model_behavior
+    - browser_e2e
+    - unsafe_behavior
+    - run_ledger
+    - pack_contract
+    - test_flake
+  sections:
+    summary:
+      prompt: One paragraph describing the failure and owner pack.
+    replay_context:
+      prompt: Scenario id, inputs, replay steps, and assigned subagents.
+    evidence:
+      prompt: Expected observation, actual observation, and local evidence references.
+    decision:
+      prompt: Pass, pass with notes, flaky, or fail with handoff.
+    next_owner_action:
+      prompt: What the owner pack needs to investigate or fix.

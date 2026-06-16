@@ -1,0 +1,6 @@
+example_id: rumi_connector_gateway.gmail_followup
+request: Draft a reply and schedule a follow-up reminder.
+expected_handoff:
+  connector_id: gmail
+  delivery_target: defaultspack.scheduler
+  scope_review_card: required

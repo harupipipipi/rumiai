@@ -1,0 +1,17 @@
+preset:
+  id: quality_gate
+  pack_id: rumi_document_intelligence_pack
+  mode: citation_redline_privacy_gate
+  description: Block final answers until citation trace, redline operation tests, and privacy classification are complete.
+  require_evidence: true
+  require_overlap_check: true
+  gates:
+    - all_material_claims_have_page_spans_or_missing_evidence_reason
+    - all_redline_operations_have_quote_digest
+    - high_risk_redline_operations_have_human_review_flags
+    - privacy_class_assigned_before_handoff
+  output_contract:
+    - reviewer_decision
+    - blockers
+    - residual_risk
+    - human_review_questions

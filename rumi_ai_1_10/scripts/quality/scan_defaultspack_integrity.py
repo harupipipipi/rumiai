@@ -6,35 +6,45 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 WEBAPP_ROOT = DEFAULTSPACK_ROOT / "webapp"
+COMPAT_ALIASES_PATH = DEFAULTSPACK_ROOT / "compat_aliases.yaml"
 
 
 def _failures() -> list[str]:
     return []
 
 
-def _route_specs() -> list[tuple[str, str, str]]:
+def _read_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _read_yaml(path: Path) -> dict[str, Any]:
+    try:
+        import yaml
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _route_specs():
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(DEFAULTSPACK_ROOT))
-    from transport.registry import _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS, _FALLBACK_HTTP_ROUTE_SPECS
+    from transport.registry import canonical_http_route_specs
 
-    specs = [*_FALLBACK_HTTP_ROUTE_SPECS, *_ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS]
-    return [(spec.method, spec.pattern, spec.block_module) for spec in specs]
+    return canonical_http_route_specs(include_always_available=True)
 
 
 def _module_path(block_module: str) -> Path:
     if block_module.startswith("ecosystem."):
         return ROOT / Path(block_module.replace(".", "/") + ".py")
     return DEFAULTSPACK_ROOT / Path(block_module.replace(".", "/") + ".py")
-
-
-def _read_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _extract_api_endpoints() -> set[str]:
@@ -55,12 +65,18 @@ def _normalize_route(pattern: str) -> str:
     return re.sub(r"\{[^}]+\}", "{id}", pattern)
 
 
+def _compat_aliases_config() -> dict[str, Any]:
+    return _read_yaml(COMPAT_ALIASES_PATH)
+
+
 def check_ecosystem_manifest(errors: list[str]) -> None:
     manifest = _read_json(DEFAULTSPACK_ROOT / "ecosystem.json")
     if manifest.get("pack_id") != "defaultspack":
         errors.append("ecosystem.json pack_id must be defaultspack")
     if manifest.get("pack_identity") != "rumi:ecosystem/defaultspack":
-        errors.append("ecosystem.json pack_identity must be rumi:ecosystem/defaultspack")
+        errors.append(
+            "ecosystem.json pack_identity must be rumi:ecosystem/defaultspack"
+        )
     for route in manifest.get("api_routes", []):
         function_id = route.get("function_id")
         if not function_id:
@@ -72,18 +88,54 @@ def check_ecosystem_manifest(errors: list[str]) -> None:
 
 
 def check_routes(errors: list[str]) -> None:
+    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+    from transport.registry import require_legacy_route_allowlisted
+
     seen: set[tuple[str, str]] = set()
-    for method, pattern, block_module in _route_specs():
+    for spec in _route_specs():
+        method = str(spec.method or "").upper()
+        pattern = str(spec.pattern or "")
         key = (method, pattern)
         if key in seen:
             errors.append(f"duplicate fallback route: {method} {pattern}")
         seen.add(key)
-        if block_module and not _module_path(block_module).is_file():
-            errors.append(f"route references missing block module: {method} {pattern} -> {block_module}")
+
+        function_id = str(getattr(spec, "function_id", "") or "").strip()
+        flow_id = str(getattr(spec, "flow_id", "") or "").strip()
+        handler_name = str(getattr(spec, "handler_name", "") or "").strip()
+        legacy_block_module = str(
+            getattr(spec, "legacy_block_module", "") or ""
+        ).strip()
+
+        if function_id:
+            if not (DEFAULTSPACK_ROOT / "functions" / function_id / "manifest.json").is_file():
+                errors.append(
+                    f"route references missing function manifest: {method} {pattern} -> {function_id}"
+                )
+            if not (DEFAULTSPACK_ROOT / "functions" / function_id / "main.py").is_file():
+                errors.append(
+                    f"route references missing function main.py: {method} {pattern} -> {function_id}"
+                )
+
+        if legacy_block_module:
+            if not _module_path(legacy_block_module).is_file():
+                errors.append(
+                    f"route references missing legacy block module: {method} {pattern} -> {legacy_block_module}"
+                )
+            try:
+                require_legacy_route_allowlisted(spec)
+            except Exception as exc:
+                errors.append(str(exc))
+
+        if not (function_id or flow_id or handler_name or legacy_block_module):
+            errors.append(
+                f"route has no executable target: {method} {pattern}"
+            )
 
 
 def check_frontend_route_parity(errors: list[str]) -> None:
-    backend = {_normalize_route(pattern) for _, pattern, _ in _route_specs()}
+    backend = {_normalize_route(str(spec.pattern or "")) for spec in _route_specs()}
     optional_prefixes = ("/api/agent/company/",)
     for endpoint in sorted(_extract_api_endpoints()):
         if endpoint in backend:
@@ -95,22 +147,48 @@ def check_frontend_route_parity(errors: list[str]) -> None:
 
 def check_function_aliases(errors: list[str]) -> None:
     alias_owner: dict[str, str] = {}
+    compat_config = _compat_aliases_config()
+    canonical_prefix = str(compat_config.get("canonical_prefix") or "defaultspack.")
+    compat_prefixes = tuple(
+        str(prefix)
+        for prefix in (compat_config.get("compat_prefixes") or ["defaults."])
+    )
+    compat_aliases = compat_config.get("aliases") or {}
+
     for manifest_path in sorted((DEFAULTSPACK_ROOT / "functions").glob("*/manifest.json")):
         manifest = _read_json(manifest_path)
         function_id = manifest.get("function_id") or manifest.get("name")
         if function_id != manifest_path.parent.name:
             errors.append(f"function_id mismatch in {manifest_path}")
-        aliases = manifest.get("vocab_aliases") or []
-        if not any(str(alias).startswith("defaultspack.") for alias in aliases):
-            errors.append(f"missing defaultspack.* alias for {function_id}")
-        if manifest.get("calling_convention") == "subprocess" and not any(
-            str(alias).startswith("defaults.") for alias in aliases
-        ):
-            errors.append(f"missing defaults.* alias for generated function {function_id}")
+        aliases = [str(alias) for alias in (manifest.get("vocab_aliases") or [])]
+        canonical_aliases = [
+            alias for alias in aliases if alias.startswith(canonical_prefix)
+        ]
+        if not canonical_aliases:
+            errors.append(f"missing {canonical_prefix}* alias for {function_id}")
         for alias in aliases:
             if alias in alias_owner:
-                errors.append(f"duplicate function alias {alias}: {alias_owner[alias]} and {function_id}")
-            alias_owner[str(alias)] = str(function_id)
+                errors.append(
+                    f"duplicate function alias {alias}: {alias_owner[alias]} and {function_id}"
+                )
+            alias_owner[alias] = str(function_id)
+            if any(alias.startswith(prefix) for prefix in compat_prefixes):
+                compat_meta = compat_aliases.get(alias)
+                if not isinstance(compat_meta, dict):
+                    errors.append(f"compat alias missing allowlist entry: {alias}")
+                    continue
+                replacement = str(compat_meta.get("replacement") or "").strip()
+                if not replacement:
+                    errors.append(f"compat alias missing replacement: {alias}")
+                    continue
+                if replacement not in canonical_aliases:
+                    errors.append(
+                        f"compat alias replacement must point to a canonical alias on the same function: {alias} -> {replacement}"
+                    )
+
+    for alias in sorted(compat_aliases):
+        if alias not in alias_owner:
+            errors.append(f"compat alias allowlist entry is stale: {alias}")
 
 
 def check_local_first_defaults(errors: list[str]) -> None:
@@ -121,24 +199,35 @@ def check_local_first_defaults(errors: list[str]) -> None:
         WEBAPP_ROOT / "src" / "App.tsx",
     ]
     forbidden_defaults = [
-        "DEFAULT_CHAT_MODEL = \"openrouter/",
-        "preferred_model ?? \"openrouter/",
-        "\"default\": \"openrouter/",
-        "model_api_routes\": \"openrouter/",
+        'DEFAULT_CHAT_MODEL = "openrouter/',
+        'preferred_model ?? "openrouter/',
+        '"default": "openrouter/',
+        'model_api_routes": "openrouter/',
     ]
     for path in critical_files:
         text = path.read_text(encoding="utf-8")
         for needle in forbidden_defaults:
             if needle in text:
-                errors.append(f"cloud model remains in local default path: {path.relative_to(ROOT)} contains {needle}")
+                errors.append(
+                    "cloud model remains in local default path: "
+                    f"{path.relative_to(ROOT)} contains {needle}"
+                )
 
 
 def check_sensitive_guard(errors: list[str]) -> None:
     http_text = (DEFAULTSPACK_ROOT / "transport" / "http.py").read_text(encoding="utf-8")
     if "require_local_guard(" not in http_text:
-        errors.append("transport/http.py does not call require_local_guard for sensitive coding paths")
-    approval_text = (DEFAULTSPACK_ROOT / "blocks" / "coding" / "_approval.py").read_text(encoding="utf-8")
-    for needle in ("hash_arguments", "verify_execution_token", "create_approval_request"):
+        errors.append(
+            "transport/http.py does not call require_local_guard for sensitive coding paths"
+        )
+    approval_text = (
+        DEFAULTSPACK_ROOT / "blocks" / "coding" / "_approval.py"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "hash_arguments",
+        "verify_execution_token",
+        "create_approval_request",
+    ):
         if needle not in approval_text:
             errors.append(f"coding approval helper missing {needle}")
 

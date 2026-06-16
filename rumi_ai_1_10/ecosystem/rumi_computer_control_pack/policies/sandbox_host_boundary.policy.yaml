@@ -1,0 +1,52 @@
+version: rumi.computer_control.boundary_policy.v1
+policy_id: rumi_computer_control_pack.sandbox_host_boundary
+pack_id: rumi_computer_control_pack
+network_default: none
+
+boundary_classes:
+  host:
+    examples:
+      - macOS desktop
+      - local app window
+      - system dialog
+    note: Highest privacy and side-effect sensitivity.
+
+  local_sandbox:
+    examples:
+      - local isolated test workspace
+      - disposable app preview
+      - local browser profile for testing
+    note: Still local-first; do not assume host escape is impossible.
+
+  container:
+    examples:
+      - Docker terminal backend
+      - dev container shell
+    note: Classify mounted paths before file or command actions.
+
+  remote_backend:
+    examples:
+      - SSH terminal
+      - Modal terminal
+      - Daytona workspace
+    note: Network and remote state are involved; explicit request and approval required.
+
+  browser_remote_page:
+    examples:
+      - authenticated web app
+      - hosted production page
+    note: Browser automation ownership belongs to rumi_browser_automation_pack.
+
+classification_required_for:
+  - terminal commands
+  - app switching
+  - file picker usage
+  - upload or download flows
+  - form submit
+  - delete or destructive action
+
+handoff_rules:
+  browser_navigation: rumi_browser_automation_pack
+  grant_or_permission_review: rumi_security_review_pack
+  multi_agent_delegation: rumi_agent_services_pack
+  runtime_approval: defaultspack

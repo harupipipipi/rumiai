@@ -68,18 +68,20 @@ class TestAppLifecycleManagerHealth:
         assert result["status"] == "ok"
 
     def test_health_no_auth_required(self):
-        """/health は認証ヘッダーなしでもアクセス可能であること（設計確認）。
-
-        PackAPIHandler の do_GET で _check_auth(...) の前に分岐されることを
-        コードレベルで検証する。
-        """
-        import inspect
+        """/health は認証前に処理されること。"""
         from core_runtime.pack_api_server import PackAPIHandler
 
-        source = inspect.getsource(PackAPIHandler.do_GET)
-        # /health の分岐が _check_auth の前にあることを確認
-        health_pos = source.find('"/health"')
-        auth_pos = source.find('_check_auth("GET", _pre_auth_path)')
-        assert health_pos != -1, "/health endpoint not found in do_GET"
-        assert auth_pos != -1, "_check_auth not found in do_GET"
-        assert health_pos < auth_pos, "/health must appear before _check_auth in do_GET"
+        handler = object.__new__(PackAPIHandler)
+        handler.path = "/health"
+        handler.client_address = ("198.51.100.7", 12345)
+        handler._send_response = MagicMock()
+        handler._check_auth = MagicMock(side_effect=AssertionError("auth should not run"))
+        handler._match_web_mount = MagicMock(return_value=None)
+        handler._check_rate_limit = MagicMock(return_value=True)
+        PackAPIHandler.app_lifecycle_manager = MagicMock()
+        PackAPIHandler.app_lifecycle_manager.get_health.return_value = {"status": "ok"}
+
+        PackAPIHandler.do_GET(handler)
+
+        handler._send_response.assert_called_once()
+        handler._check_auth.assert_not_called()

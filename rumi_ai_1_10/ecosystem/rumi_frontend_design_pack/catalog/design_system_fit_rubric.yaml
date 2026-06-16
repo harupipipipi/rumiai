@@ -1,0 +1,44 @@
+rubric_id: rumi_frontend_design.design_system_fit
+schema_version: 1
+minimum_ready_score: 16
+score_scale:
+  min: 0
+  max: 4
+  labels:
+    0: missing
+    1: weak
+    2: acceptable
+    3: strong
+    4: exemplary
+criteria:
+  product_density:
+    question: Does the UI match the expected information density for the product type?
+    strong_signals:
+      - dashboard_tables_are_scan_friendly
+      - operational_views_avoid_marketing_hero_layouts
+      - repeated_actions_are_visible_without_excessive_scrolling
+  component_idioms:
+    question: Does the proposal use familiar controls for modes, toggles, filters, commands, and numeric input?
+    strong_signals:
+      - segmented_controls_for_modes
+      - toggles_for_binary_settings
+      - icon_buttons_for_common_tools
+      - menus_for_option_sets
+  visual_language:
+    question: Does typography, spacing, radius, and color match the existing app rather than inventing a one-off theme?
+    strong_signals:
+      - no_one_note_palette
+      - compact_panels_use_compact_type
+      - cards_not_nested_unnecessarily
+  accessibility_and_states:
+    question: Are keyboard, focus, labels, loading, empty, disabled, and error states specified?
+    strong_signals:
+      - focus_order_defined
+      - state_matrix_complete
+      - error_text_does_not_overlap
+readiness_rules:
+  ready_requires:
+    - all_criteria_scored
+    - no_zero_scores
+    - minimum_ready_score_met
+    - implementation_handoff_owner_named

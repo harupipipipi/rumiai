@@ -1,0 +1,17 @@
+task:
+  title: Recall prior session evidence
+  preset: rumi_memory_knowledge_pack.evidence_backed_recall
+  goal: Answer a question about past project context using local session evidence.
+  inputs:
+    query: What deployment constraint did we decide to keep for the desktop build?
+    session_scope: current_project
+    recency_window: last_30_days
+  output:
+    artifacts:
+      - type: recall_summary
+        path: memory_outputs/deployment_constraint_recall.md
+      - type: evidence_links
+        path: memory_outputs/deployment_constraint_evidence.yaml
+  workflow: session_recall_with_evidence
+  review:
+    checks: [evidence_required_for_specific_recall, label_uncertain_recall]
