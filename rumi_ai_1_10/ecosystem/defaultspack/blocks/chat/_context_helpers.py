@@ -94,6 +94,16 @@ def search_memory(user_text, limit=5):
         return []
 
 
+def search_rule_records(conversation_id, limit=40):
+    if not conversation_id:
+        return []
+    try:
+        from domain.chat.rules import ConversationRuleStore
+        return ConversationRuleStore().list_rules(str(conversation_id), limit=limit)
+    except Exception:
+        return []
+
+
 # ---------------------------------------------------------------------------
 # フォーマット
 # ---------------------------------------------------------------------------
@@ -134,6 +144,21 @@ def format_memory_results(results):
     return "\n".join(lines)
 
 
+def format_rule_results(results):
+    if not results:
+        return ""
+    try:
+        from domain.chat.rules import format_rules_for_prompt
+        return format_rules_for_prompt(results)
+    except Exception:
+        lines = ["--- Pinned Conversation Rules ---"]
+        for i, item in enumerate(results, 1):
+            content = item.get("text", "")
+            if content:
+                lines.append(f"[{i}] {content}")
+        return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # コンテキスト補強メイン
 # ---------------------------------------------------------------------------
@@ -166,8 +191,16 @@ def enrich_messages(standard_messages, system_prompt, conversation_id, user_text
     memory_results = search_memory(user_text)
     memory_text = format_memory_results(memory_results)
 
-    # 3. システムプロンプトにナレッジ / メモリ情報を付加
+    # 3. 会話ルール検索
+    rule_results = search_rule_records(conversation_id)
+    rule_text = format_rule_results(rule_results)
+
+    # 4. システムプロンプトにナレッジ / メモリ情報を付加
     enriched_prompt = system_prompt or ""
+    if rule_text:
+        if enriched_prompt:
+            enriched_prompt += "\n\n"
+        enriched_prompt += rule_text
     if knowledge_text:
         if enriched_prompt:
             enriched_prompt += "\n\n"
@@ -177,7 +210,7 @@ def enrich_messages(standard_messages, system_prompt, conversation_id, user_text
             enriched_prompt += "\n\n"
         enriched_prompt += memory_text
 
-    # 4. コンテキスト変数の注入と解決
+    # 5. コンテキスト変数の注入と解決
     ctx = {
         "total_tokens": 0,
         "message_count": len(standard_messages),
@@ -186,18 +219,21 @@ def enrich_messages(standard_messages, system_prompt, conversation_id, user_text
         "conversation_id": conversation_id or "",
         "knowledge": knowledge_text,
         "memory": memory_text,
+        "rules": rule_text,
     }
     resolved_vars = manager.inject_context_variables({}, ctx)
     enriched_prompt = render_template(enriched_prompt, resolved_vars)
 
-    # 5. standard_messages の先頭にシステムプロンプトを挿入
+    # 6. standard_messages の先頭にシステムプロンプトを挿入
     if enriched_prompt:
         standard_messages.insert(0, {"role": "system", "content": enriched_prompt})
 
     return {
         "knowledge_text": knowledge_text,
         "memory_text": memory_text,
+        "rule_text": rule_text,
         "knowledge_results": knowledge_results,
         "memory_results": memory_results,
+        "rule_results": rule_results,
         "enriched_prompt": enriched_prompt,
     }
