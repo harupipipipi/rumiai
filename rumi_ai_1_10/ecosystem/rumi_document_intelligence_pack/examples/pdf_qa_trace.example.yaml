@@ -1,0 +1,22 @@
+example:
+  id: pdf_qa_trace
+  pack_id: rumi_document_intelligence_pack
+  workflow: classify_document_risks
+  intent: Answer questions about a research PDF using only page-span evidence and missing-evidence markers.
+  document_type: research_pdf
+  expected_passes:
+    - citation_mapper
+    - final_evidence_integrator
+  evidence:
+    - page_span
+    - quote_digest
+    - evidence_type
+    - confidence
+  handoff: handoff_to_rumi_research_pack_only_for_external_source_lookup
+  expected_result:
+    decision: answer_with_cited_claims
+    deliverables:
+      - claim_to_page_span_map
+      - unsupported_claims
+      - concise_answer
+      - limitation_notes

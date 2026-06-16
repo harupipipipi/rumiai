@@ -1,0 +1,24 @@
+profile_id: rumi_workflow_scheduler.scheduler_designer
+pack_id: rumi_workflow_scheduler_pack
+title: Rumi Workflow Scheduler Designer
+description: Local-first profile for drafting recurring task, monitor, wakeup, follow-up, delivery handoff, retry, evidence, and stop-condition contracts.
+surface: workflow_scheduler
+policy:
+  local_first: true
+  network_default: deny
+  executable_code_allowed: false
+  implements_automations: false
+  require_owner_route: true
+  require_stop_conditions: true
+  require_evidence_summary: true
+  approval_decision_owner: app_automation_or_defaultspack
+catalogs:
+  schedule_contracts: catalog/schedule_contracts.yaml
+  workflow_routes: catalog/workflow_routes.yaml
+  delivery_handoffs: catalog/delivery_handoffs.yaml
+  scheduler_schema: catalog/scheduler_schema.json
+policies:
+  retry_policy: policies/retry_policy.yaml
+prompts:
+  design: prompts/scheduler_designer.system.md
+  review: prompts/schedule_review.system.md

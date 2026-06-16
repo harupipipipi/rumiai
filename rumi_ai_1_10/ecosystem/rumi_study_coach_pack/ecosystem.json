@@ -1,0 +1,156 @@
+{
+  "pack_id": "rumi_study_coach_pack",
+  "pack_identity": "rumi:ecosystem/rumi_study_coach_pack",
+  "display_name": "Rumi Study Coach Pack",
+  "version": "0.1.0",
+  "description": "Declarative local-note study coaching, diagnostic assessment, quiz generation, spaced review, and progress reporting pack.",
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "schema",
+      "policy",
+      "checklist",
+      "ledger",
+      "template",
+      "fixture",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "connectivity": {
+    "requires": [
+      "defaultspack"
+    ],
+    "provides": []
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "host_execution": false,
+  "metadata": {
+    "runtime_type": "declarative_setup_pack",
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "declarative_only": true,
+    "consumes_existing_sources_only": true,
+    "output_effect": "draft_and_handoff_only",
+    "defaultspack_promotion_eligible": false,
+    "owner_surfaces": [
+      "learner_profile",
+      "study_goal_contract",
+      "diagnostic_assessment",
+      "study_plan",
+      "practice_session",
+      "quiz_item_contract",
+      "spaced_review_queue",
+      "progress_report",
+      "evidence_bound_explanation"
+    ],
+    "non_owner_surfaces": [
+      "document parsing",
+      "web research",
+      "long term memory storage",
+      "calendar scheduling",
+      "workspace export",
+      "medical or therapeutic advice",
+      "graded credential issuance"
+    ],
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_document_intelligence_pack",
+        "reason": "Parse notebooks, PDFs, and lecture material before this pack creates study artifacts."
+      },
+      {
+        "pack_id": "rumi_research_pack",
+        "reason": "Fetch new background sources only through a research owner; this pack consumes cited notes."
+      },
+      {
+        "pack_id": "rumi_memory_knowledge_pack",
+        "reason": "Persist durable learner memory outside the declarative study packet."
+      },
+      {
+        "pack_id": "rumi_workflow_scheduler_pack",
+        "reason": "Schedule review reminders after this pack emits review windows."
+      },
+      {
+        "pack_id": "rumi_workspace_pack",
+        "reason": "Export study sheets, slides, or flashcard tables through the workspace owner."
+      }
+    ],
+    "asset_index": {
+      "index": [
+        "asset_index.yaml"
+      ],
+      "readme": [
+        "README.md"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "catalog": [
+        "catalog/workflows.yaml",
+        "catalog/quality_matrix.yaml",
+        "catalog/taxonomy.yaml",
+        "catalog/handoff_matrix.yaml"
+      ],
+      "schema": [
+        "schemas/diagnostic_assessment.schema.json",
+        "schemas/learner_profile.schema.json",
+        "schemas/practice_session.schema.json",
+        "schemas/progress_report.schema.json",
+        "schemas/review_queue.schema.json",
+        "schemas/study_goal.schema.json",
+        "schemas/study_plan.schema.json"
+      ],
+      "policy": [
+        "policies/safety.policy.yaml",
+        "policies/handoff.policy.yaml"
+      ],
+      "checklist": [
+        "checklists/review.checklist.yaml"
+      ],
+      "ledger": [
+        "ledgers/evidence_ledger.schema.yaml"
+      ],
+      "template": [
+        "templates/handoff.template.md",
+        "templates/review_report.template.md",
+        "templates/artifact_card.template.md"
+      ],
+      "fixtures": [
+        "fixtures/contract_fixture.yaml",
+        "fixtures/negative_cases.yaml"
+      ],
+      "profiles": [
+        "profiles/study_coach.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/socratic_tutor.system.md"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "example": [
+        "examples/biology_uncertainty_report.example.yaml",
+        "examples/history_exam_plan.example.yaml",
+        "examples/language_vocab_review.example.yaml",
+        "examples/math_notes_quiz.example.yaml"
+      ]
+    }
+  }
+}

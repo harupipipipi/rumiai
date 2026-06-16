@@ -1,0 +1,106 @@
+{
+  "pack_id": "rumi_browser_form_operator_pack",
+  "pack_identity": "rumi:ecosystem/rumi_browser_form_operator_pack",
+  "display_name": "Rumi Browser Form Operator Pack",
+  "version": "0.1.0",
+  "description": "Declarative browser form recognition, field mapping, action staging, risk review, and submission safety pack.",
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "spec",
+      "policy",
+      "evidence",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": [],
+  "host_execution": false,
+  "metadata": {
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "registers_tools": false,
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_browser_element_pack",
+        "reason": "Semantic DOM collection owner; this pack depends on its field evidence contract."
+      },
+      {
+        "pack_id": "rumi_browser_automation_pack",
+        "reason": "Navigation and click execution owner; this pack only reviews staged form actions."
+      },
+      {
+        "pack_id": "rumi_security_review_pack",
+        "reason": "PII, payment, identity, legal, and irreversible-action review owner."
+      },
+      {
+        "pack_id": "rumi_connector_gateway_pack",
+        "reason": "Post-submit external delivery owner; this pack only records receipt evidence."
+      }
+    ],
+    "owner_surfaces": [
+      "semantic_form_fields",
+      "safe_field_filling",
+      "submission_review",
+      "action_replay_receipts",
+      "field_risk_classification",
+      "semantic_dom_dependency",
+      "pre_submit_review",
+      "submission_receipt_evidence"
+    ],
+    "asset_index": {
+      "catalogs": [
+        "catalog/form_action_recipes.yaml"
+      ],
+      "specs": [
+        "specs/form_taxonomy.yaml",
+        "specs/field_risk_classification.yaml",
+        "specs/semantic_dom_dependency.yaml",
+        "specs/submission_review_checklist.yaml"
+      ],
+      "policies": [
+        "policies/form_action_safety.policy.yaml"
+      ],
+      "checklists": [
+        "specs/submission_review_checklist.yaml"
+      ],
+      "evidence_ledgers": [
+        "evidence/submission_receipt_evidence.schema.yaml"
+      ],
+      "examples": [
+        "examples/contact_form_fill.example.yaml",
+        "examples/checkout_review.example.yaml",
+        "examples/multi_step_application.example.yaml"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "readme": [
+        "README.md"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "profiles": [
+        "profiles/browser_form_operator.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/browser_form_operator.system.md"
+      ]
+    }
+  }
+}

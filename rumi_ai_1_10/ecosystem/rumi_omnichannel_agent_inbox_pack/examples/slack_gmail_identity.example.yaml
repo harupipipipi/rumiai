@@ -1,0 +1,13 @@
+example:
+  id: slack_gmail_identity
+  user_request: Link Slack and Gmail sender refs to one identity
+  input_state: local_records_supplied
+  expected_result: identity_map_handoff_packet
+  must_include:
+  - evidence_ids_or_approval_receipt
+  - review_state
+  - handoff_owner
+  must_not:
+  - external_action
+  - uncited_claim
+  - unapproved_tool_call

@@ -1,0 +1,69 @@
+{
+  "pack_id": "rumi_workflow_scheduler_pack",
+  "pack_identity": "rumi:ecosystem/rumi_workflow_scheduler_pack",
+  "version": "1.0.0",
+  "metadata": {
+    "name": "Rumi Workflow Scheduler Pack",
+    "description": "Declarative local-first workflow scheduler pack for recurring tasks, monitors, wakeups, follow-ups, cron-like schedules, delivery handoffs, retry policy, evidence, and stop conditions.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "tags": ["workflow", "scheduler", "cron", "automation", "monitor", "wakeup", "follow-up"],
+    "runtime_type": "declarative_pack",
+    "network_policy": "none_by_default",
+    "required_secrets": [],
+    "executable_code": false,
+    "implements_automations": false,
+    "asset_index": {
+      "catalogs": [
+        "catalog/schedule_contracts.yaml",
+        "catalog/workflow_routes.yaml",
+        "catalog/delivery_handoffs.yaml",
+        "catalog/scheduler_schema.json"
+      ],
+      "policies": [
+        "policies/retry_policy.yaml"
+      ],
+      "profiles": [
+        "profiles/scheduler_designer.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/scheduler_designer.system.md",
+        "prompts/schedule_review.system.md"
+      ],
+      "presets": [
+        "presets/recurring_followup.preset.yaml",
+        "presets/monitor_with_stop_conditions.preset.yaml",
+        "presets/release_check_wakeup.preset.yaml",
+        "presets/delivery_handoff_digest.preset.yaml"
+      ],
+      "examples": [
+        "examples/daily_followup.example.yaml",
+        "examples/monitor_with_retry.example.yaml",
+        "examples/release_wakeup.example.yaml"
+      ],
+      "docs": [
+        "README.md",
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ]
+    }
+  },
+  "vocabulary": {
+    "types": [
+      "workflow_scheduler",
+      "schedule_contract",
+      "delivery_handoff",
+      "retry_policy",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ]
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": []
+}

@@ -1,0 +1,10 @@
+preset:
+  id: handoff_review
+  pack_id: rumi_subagent_pr_manager_pack
+  mode: handoff_review
+  purpose: Build a maintainer handoff from the PR evidence ledger, routing matrix, and owner-pack decisions.
+  require_evidence: true
+  require_overlap_check: true
+  required_assets:
+    - ledgers/pr_evidence_ledger.schema.yaml
+    - checklists/reviewer_handoff.checklist.yaml

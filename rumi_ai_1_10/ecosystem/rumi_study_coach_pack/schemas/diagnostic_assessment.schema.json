@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/diagnostic_assessment.schema.json",
+  "title": "Diagnostic Assessment",
+  "description": "Contract schema for Diagnostic Assessment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "assessment_id",
+    "study_goal_id",
+    "skill_map",
+    "question_set",
+    "uncertainty_notes",
+    "evidence_summary"
+  ],
+  "properties": {
+    "assessment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "study_goal_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "skill_map": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "skill_id",
+          "observed_state",
+          "source_note_ids"
+        ],
+        "properties": {
+          "skill_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observed_state": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "introduced",
+              "practicing",
+              "stable"
+            ]
+          },
+          "source_note_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "question_set": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "question_id",
+          "skill_id",
+          "difficulty",
+          "source_note_ids"
+        ],
+        "properties": {
+          "question_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skill_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "recall",
+              "application",
+              "transfer"
+            ]
+          },
+          "source_note_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "uncertainty_notes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "gap",
+          "why_notes_are_insufficient",
+          "safe_next_step"
+        ],
+        "properties": {
+          "gap": {
+            "type": "string",
+            "minLength": 1
+          },
+          "why_notes_are_insufficient": {
+            "type": "string",
+            "minLength": 1
+          },
+          "safe_next_step": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "evidence_summary": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_note_id",
+          "span_ids",
+          "summary"
+        ],
+        "properties": {
+          "source_note_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "span_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

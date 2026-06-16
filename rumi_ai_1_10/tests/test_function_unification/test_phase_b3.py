@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import time
 import unittest
 from dataclasses import dataclass, field
@@ -167,14 +168,20 @@ class TestUnifiedExecuteBuiltinTrustBypass(unittest.TestCase):
     def test_unified_execute_builtin_trust_bypass(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
+        tmp_ctx = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_ctx.cleanup)
+        function_dir = Path(tmp_ctx.name)
+        handler_path = function_dir / "handler.py"
+        handler_path.write_text("def execute(ctx, args): return {'result': 'ok'}\n", encoding="utf-8")
+
         entry = _MockFunctionEntry(
             pack_id="core_test",
             qualified_name="core_test:test_func",
             vocab_aliases=["test.perm"],
             entrypoint="handler.py:execute",
-            function_dir="/fake/dir",
+            function_dir=str(function_dir),
+            main_py_path=str(handler_path),
         )
-        entry.legacy_handler_builtin = True
 
         trust_store = MagicMock()
         grant_manager = MagicMock()
@@ -274,15 +281,13 @@ class TestUnifiedExecuteGrantCheckRequired(unittest.TestCase):
         mock_audit_module.return_value = MagicMock()
 
         entry = _MockFunctionEntry(
-            pack_id="test_pack",
-            qualified_name="test_pack:test_func",
+            pack_id="core_test",
+            qualified_name="core_test:test_func",
             vocab_aliases=["test.perm"],
             grant_config=None,
             entrypoint="handler.py:execute",
-            function_dir=str(Path(__file__).resolve().parent),
-            main_py_path=str(Path(__file__).resolve()),
+            function_dir="/fake/dir",
         )
-        entry.legacy_grant_required = True
 
         grant_manager = MagicMock()
         grant_manager.check.return_value = _MockGrantResult(allowed=False, reason="No grant")
@@ -311,8 +316,6 @@ class TestUnifiedExecuteFlowRunDispatch(unittest.TestCase):
             qualified_name="core_flow:run",
             grant_config={},
             vocab_aliases=["flow.run"],
-            function_dir=str(Path(__file__).resolve().parent),
-            main_py_path=str(Path(__file__).resolve()),
         )
 
         grant_manager = MagicMock()
@@ -341,13 +344,19 @@ class TestUnifiedExecuteSubprocessDispatch(unittest.TestCase):
     def test_unified_execute_subprocess_dispatch(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
+        tmp_ctx = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_ctx.cleanup)
+        function_dir = Path(tmp_ctx.name)
+        handler_path = function_dir / "handler.py"
+        handler_path.write_text("def execute(ctx, args): return {'result': 'ok'}\n", encoding="utf-8")
+
         entry = _MockFunctionEntry(
             pack_id="core_test",
             qualified_name="core_test:test_func",
             vocab_aliases=["test.perm"],
             entrypoint="handler.py:execute",
-            function_dir=str(Path(__file__).resolve().parent),
-            main_py_path=str(Path(__file__).resolve()),
+            function_dir=str(function_dir),
+            main_py_path=str(handler_path),
         )
 
         grant_manager = MagicMock()

@@ -7,6 +7,7 @@ test_capability_executor.py - CapabilityExecutor ユニットテスト
 from __future__ import annotations
 
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -193,7 +194,17 @@ class TestExecuteSuccess(unittest.TestCase):
     @patch("core_runtime.capability_executor.compute_file_sha256", return_value="sha256_abc")
     def test_execute_success(self, mock_sha, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
-        handler_def = _MockHandlerDef(is_builtin=True)
+        tmp_ctx = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_ctx.cleanup)
+        handler_dir = Path(tmp_ctx.name)
+        handler_path = handler_dir / "handler.py"
+        handler_path.write_text("def handle(ctx, args): return {'result': 'ok'}\n", encoding="utf-8")
+        handler_def = _MockHandlerDef(
+            handler_py_path=str(handler_path),
+            handler_dir=handler_dir,
+            entrypoint="handler.py:handle",
+            is_builtin=True,
+        )
         registry = MagicMock()
         registry.get_by_permission_id.return_value = handler_def
 
@@ -257,10 +268,7 @@ class TestFlowRunRecursive(unittest.TestCase):
         registry.get_by_permission_id.return_value = handler_def
 
         grant_manager = MagicMock()
-        grant_manager.check.return_value = _MockGrantResult(
-            allowed=True,
-            config={"allowed_flow_ids": ["my_flow"]},
-        )
+        grant_manager.check.return_value = _MockGrantResult(allowed=True)
 
         mock_kernel = MagicMock()
         executor = _make_executor(handler_registry=registry, grant_manager=grant_manager)
@@ -300,10 +308,7 @@ class TestFlowRunDepthExceeded(unittest.TestCase):
         registry.get_by_permission_id.return_value = handler_def
 
         grant_manager = MagicMock()
-        grant_manager.check.return_value = _MockGrantResult(
-            allowed=True,
-            config={"allowed_flow_ids": ["new_flow"]},
-        )
+        grant_manager.check.return_value = _MockGrantResult(allowed=True)
 
         mock_kernel = MagicMock()
         executor = _make_executor(handler_registry=registry, grant_manager=grant_manager)
@@ -363,7 +368,7 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
         mock_exec.assert_called_once()
 
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
-    def test_function_call_nonbundled_defaultspack_checks_pack_requires(self, mock_audit_module):
+    def test_function_call_nonbundled_defaultspack_is_rejected_before_pack_requires(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
         entry = _make_function_entry("defaultspack", requires=["tool.write"])
         function_registry = MagicMock()
@@ -395,7 +400,7 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
     def test_function_call_repo_defaultspack_path_is_treated_as_trusted_builtin(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
         entry = _make_function_entry("defaultspack", requires=["ai.route.model"])
-        entry.function_dir = str(_project_root / "ecosystem" / "defaultspack" / "domain")
+        entry.function_dir = str(_project_root / "ecosystem" / "defaultspack" / "functions" / "ai_route_model")
         entry.main_py_path = str(Path(entry.function_dir) / "main.py")
         function_registry = MagicMock()
         function_registry.get.return_value = entry
@@ -750,7 +755,16 @@ class TestHandlerSubprocessEntrypointCompatibility(unittest.TestCase):
     def test_execute_handler_subprocess_defaults_callable_when_entrypoint_has_no_colon(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
         executor = _make_executor()
-        handler_def = _MockHandlerDef(entrypoint="handler.py")
+        tmp_ctx = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_ctx.cleanup)
+        handler_dir = Path(tmp_ctx.name)
+        handler_path = handler_dir / "handler.py"
+        handler_path.write_text("def run(ctx, args): return {'ok': True}\n", encoding="utf-8")
+        handler_def = _MockHandlerDef(
+            handler_py_path=str(handler_path),
+            handler_dir=handler_dir,
+            entrypoint="handler.py",
+        )
         success = CapabilityResponse(success=True, output={"ok": True})
 
         with patch.object(executor, "_run_runner_on_host", return_value=success) as mock_run:

@@ -1,0 +1,26 @@
+schema_id: rumi.browser.semantic_dom_v2
+source_tool: rumi_default_tools_pack:browser_companion
+purpose: "Compact browser element context for page-grounded agents."
+required_fields:
+  - element_id
+  - semantic_id
+  - accessible_name
+  - rect
+  - action_hints
+ranking:
+  prefer:
+    - "is_in_viewport == true"
+    - "action_hints contains requested action"
+    - "accessible_name or labels match user wording"
+    - "recognition_confidence >= 0.75"
+  avoid:
+    - "is_visible == false unless include_hidden was requested"
+    - "large container nodes when a child control matches"
+    - "selector-only actions before semantic match is checked"
+actions:
+  click: "Use for buttons, links, tabs, menu items, and checkboxes."
+  type: "Use for textboxes, textareas, contenteditable, and editable combo boxes."
+  press: "Use for keyboard confirmation or navigation after focus."
+  scroll: "Use when target content is not in viewport."
+  extract: "Use before acting when data is needed."
+  highlight: "Use to visually ground the target for user verification."

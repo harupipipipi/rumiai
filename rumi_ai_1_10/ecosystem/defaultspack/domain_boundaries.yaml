@@ -20,6 +20,7 @@ domains:
     - domain/components
     - domain/extensions
     - domain/human_operator
+    - domain/temporal_context
     - domain/tool
     path: domain/ai_client
   api_map:
@@ -54,10 +55,12 @@ domains:
     - domain/dev
     - domain/extensions
     - domain/human_operator
+    - domain/kanban
     - domain/prompt
     - domain/safety
     - domain/skill_trigger
     - domain/stream
+    - domain/temporal_context
     - domain/tool
     - domain/vision
     path: domain/chat
@@ -172,6 +175,11 @@ domains:
     - domain/ai_client
     - domain/extensions
     path: domain/knowledge
+  kanban:
+    may_import:
+    - domain/ai_client
+    - domain/chat
+    path: domain/kanban
   media:
     may_import: []
     path: domain/media
@@ -204,6 +212,11 @@ domains:
   recording:
     may_import: []
     path: domain/recording
+  remote:
+    may_import:
+    - domain/agent_runtime
+    - domain/company
+    path: domain/remote
   research:
     may_import: []
     path: domain/research
@@ -240,6 +253,7 @@ domains:
     - domain/host_bridge
     - domain/human_operator
     - domain/integrations
+    - domain/kanban
     - domain/prompt
     - domain/research
     - domain/runtime_config

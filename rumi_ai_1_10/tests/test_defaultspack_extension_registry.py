@@ -1,14 +1,11 @@
 from __future__ import annotations
 
+import builtins
 import json
 from pathlib import Path
 
 import pytest
 
-import ecosystem.defaultspack.domain.ai_client.providers as providers_module
-import ecosystem.defaultspack.domain.prompt.manager as prompt_manager_module
-import ecosystem.defaultspack.domain.tool.registry as tool_registry_module
-import ecosystem.defaultspack.transport.registry as transport_registry_module
 from ecosystem.defaultspack.domain.ai_client.providers import detect_available_providers
 from ecosystem.defaultspack.domain.ai_client.providers.openai_compatible_provider import (
     OpenAICompatibleProvider,
@@ -27,10 +24,11 @@ from ecosystem.defaultspack.domain.extensions.runtime import build_extensions_ro
 from ecosystem.defaultspack.domain.prompt.manager import PromptManager
 from ecosystem.defaultspack.domain.tool.broker import ToolBroker
 from ecosystem.defaultspack.domain.tool.registry import ToolRegistry
-from ecosystem.defaultspack.transport.registry import (
-    build_fallback_http_routes,
-    load_legacy_http_route_allowlist,
-)
+from ecosystem.defaultspack.transport.registry import build_fallback_http_routes
+import ecosystem.defaultspack.domain.ai_client.providers as providers_module
+import ecosystem.defaultspack.domain.prompt.manager as prompt_manager_module
+import ecosystem.defaultspack.domain.tool.registry as tool_registry_module
+import ecosystem.defaultspack.transport.registry as transport_registry_module
 
 
 class _DummyProvider:
@@ -581,6 +579,11 @@ def test_import_entrypoint_normalizes_legacy_module_names():
 
 def test_build_fallback_http_routes_contains_core_routes():
     class _Server:
+        def __getattr__(self, name):
+            if str(name).startswith("_handle_authority_"):
+                return lambda *_args, **_kwargs: {"status": "ok"}
+            raise AttributeError(name)
+
         def _invoke_fallback_block(self, block_module, request_data, path_params, inject=None):
             return {
                 "block_module": block_module,
@@ -611,31 +614,26 @@ def test_build_fallback_http_routes_contains_core_routes():
     assert ("POST", "^/v1/chat/completions$") in route_methods
     assert ("GET", "^/api/health$") in route_methods
     assert ("GET", "^/api/tools/mcp$") in route_methods
+    assert ("DELETE", "^/api/tools/mcp$") in route_methods
     assert ("POST", "^/api/tools/mcp/connect$") in route_methods
 
 
-def test_legacy_http_allowlist_loads_mcp_delete_without_pyyaml(monkeypatch):
-    import builtins
+def test_legacy_http_route_allowlist_loads_without_pyyaml(monkeypatch):
+    real_import = builtins.__import__
 
-    original_import = builtins.__import__
-
-    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def _raise_for_yaml(name, *args, **kwargs):
         if name == "yaml":
-            raise ImportError("simulated missing PyYAML")
-        return original_import(name, globals, locals, fromlist, level)
+            raise ImportError("No module named 'yaml'")
+        return real_import(name, *args, **kwargs)
 
-    load_legacy_http_route_allowlist.cache_clear()
-    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(builtins, "__import__", _raise_for_yaml)
+    transport_registry_module.load_legacy_http_route_allowlist.cache_clear()
     try:
-        transport_registry_module.require_legacy_route_allowlisted(
-            transport_registry_module.HttpRouteSpec(
-                "DELETE",
-                "/api/tools/mcp",
-                block_module="blocks.tool.mcp_registry",
-            )
-        )
-        allowlist = load_legacy_http_route_allowlist()
+        allowlist = transport_registry_module.load_legacy_http_route_allowlist()
+        assert (
+            "DELETE",
+            "/api/tools/mcp",
+            "blocks.tool.mcp_registry",
+        ) in allowlist
     finally:
-        load_legacy_http_route_allowlist.cache_clear()
-
-    assert ("DELETE", "/api/tools/mcp", "blocks.tool.mcp_registry") in allowlist
+        transport_registry_module.load_legacy_http_route_allowlist.cache_clear()

@@ -7,16 +7,15 @@ pip依存ライブラリ管理のHTTP APIを提供。
 
 from __future__ import annotations
 
+import collections
+import hashlib
 import hmac
 import json
 import logging
 import os
-import base64
 import re
-import secrets
 import threading
 import time
-import collections
 from pathlib import Path
 from typing import Any, Optional
 from http import cookies
@@ -30,18 +29,25 @@ from .runtime_port import resolve_runtime_port
 from .validation import (
     validate_pack_id as _v_validate_pack_id,
     is_safe_id as _v_is_safe_id,
-    PACK_ID_RE,
-    SAFE_ID_RE,
+    is_safe_staging_id as _v_is_safe_staging_id,
+    PACK_ID_RE,  # noqa: F401 - re-exported for legacy pack_api_server imports.
+    SAFE_ID_RE,  # noqa: F401 - re-exported for legacy pack_api_server imports.
     MAX_REQUEST_BODY_BYTES,
 )
 
 from .api.route_handlers import _is_safe_path_param
 
 from .api.api_response import APIResponse
+from .api.route_errors import (
+    APIRouteFunctionError,
+    api_route_function_error_status,
+    api_route_function_public_error,
+)
 
 from .api import (
     APIRouteTableMixin,
     AuthGateMixin,
+    AuthorityHandlersMixin,
     PackHandlersMixin,
     ContainerHandlersMixin,
     NetworkHandlersMixin,
@@ -191,6 +197,7 @@ class PackAPIHandler(
     RequestBodyMixin,
     PackHandlersMixin,
     ContainerHandlersMixin,
+    AuthorityHandlersMixin,
     NetworkHandlersMixin,
     CapabilityGrantHandlersMixin,
     StoreShareHandlersMixin,
@@ -288,6 +295,8 @@ class PackAPIHandler(
         for pack_id, pack_info in registry.packs.items():
             if pack_ids is not None and pack_id not in pack_ids:
                 continue
+            if not cls._is_pack_approved_for_runtime_routes(pack_id):
+                continue
             wm = pack_info.ecosystem.get("web_mount")
             if not wm or not isinstance(wm, dict):
                 continue
@@ -326,6 +335,8 @@ class PackAPIHandler(
             if pack_ids is not None and pack_id not in pack_ids:
                 continue
             # 1. 明示的な pre_auth_routes
+            if not cls._is_pack_approved_for_runtime_routes(pack_id):
+                continue
             routes = pack_info.ecosystem.get("pre_auth_routes")
             if routes and isinstance(routes, list):
                 for route in routes:
@@ -366,7 +377,9 @@ class PackAPIHandler(
         for wm in self._web_mounts:
             prefix = wm["path_prefix"]
             if request_path == prefix or request_path.startswith(prefix + "/"):
-                return wm
+                if self._is_pack_approved_for_runtime_routes(wm.get("pack_id", "")):
+                    return wm
+                continue
         fallback_mounts = {
             "/panel": {
                 "web_root": Path(__file__).resolve().parent / "core_pack" / "core_control_panel" / "web",
@@ -385,7 +398,9 @@ class PackAPIHandler(
         }
         for prefix, mount in fallback_mounts.items():
             if request_path == prefix or request_path.startswith(prefix + "/"):
-                return {"path_prefix": prefix, **mount}
+                candidate = {"path_prefix": prefix, **mount}
+                if self._is_pack_approved_for_runtime_routes(candidate.get("pack_id", "")):
+                    return candidate
         return None
 
 
@@ -417,6 +432,8 @@ class PackAPIHandler(
         }
         if (method_upper, path) in core_pre_auth_routes:
             return True
+        if self._is_fixed_pre_auth_route(method_upper, path):
+            return True
         # Provider webhooks must reach their own signature/shared-secret checks
         # before panel or bearer auth can apply.
         if method_upper == "POST":
@@ -425,7 +442,6 @@ class PackAPIHandler(
                 "/api/integrations/slack/events",
                 "/api/integrations/discord/interactions",
                 "/api/integrations/discord/events",
-                "/api/integrations/p2p/events",
             }:
                 return True
             if path.startswith("/api/webhooks/inbound/"):
@@ -433,10 +449,14 @@ class PackAPIHandler(
         for entry in self._pre_auth_table:
             if entry["method"] != method_upper:
                 continue
-            if "path" in entry and entry["path"] == path:
-                return True
-            if "path_prefix" in entry and path.startswith(entry["path_prefix"]):
-                return True
+            matched = "path" in entry and entry["path"] == path
+            if "path_prefix" in entry:
+                prefix = str(entry["path_prefix"]).rstrip("/")
+                if path == prefix or path.startswith(prefix + "/"):
+                    matched = True
+            if matched:
+                if self._is_pack_approved_for_runtime_routes(entry.get("pack_id", "")):
+                    return True
         return False
 
 
@@ -485,6 +505,14 @@ class PackAPIHandler(
         if entry is None:
             return False
 
+        pack_id = entry.get("pack_id", "")
+        if not self._is_pack_approved_for_runtime_routes(pack_id):
+            self._send_response(
+                APIResponse(False, error=f"Pack not approved: {pack_id}"),
+                403,
+            )
+            return True
+
         handler_name = entry["handler"]
         pass_body = entry.get("pass_body", False)
         pass_query = entry.get("pass_query", False)
@@ -501,9 +529,9 @@ class PackAPIHandler(
         # ハンドラ呼び出し
         try:
             if entry.get("function_id"):
-                from .pack_function_runtime import invoke_pack_function
-
                 call_args = dict(body if pass_body and body is not None else {})
+                if pass_query:
+                    call_args.update(dict(query or {}))
                 # Route-level args define the contract for fixed endpoints such as
                 # /approve and /reject, so body values must not override them.
                 call_args.update(entry.get("args") or {})
@@ -514,7 +542,7 @@ class PackAPIHandler(
                             call_args[target_key] = path_params[source_key]
                 else:
                     call_args.update(path_params)
-                result = invoke_pack_function(
+                result = self._execute_api_route_pack_function(
                     entry["pack_id"],
                     entry["function_id"],
                     call_args,
@@ -538,6 +566,8 @@ class PackAPIHandler(
 
                 result = handler(*args)
 
+            if entry.get("function_id") and str(entry.get("function_id") or "").startswith("remote_"):
+                result = self._unwrap_defaultspack_function_envelope(result)
             sse_events = self._sse_events_from_result(result)
             if sse_events is not None:
                 self._send_sse(sse_events)
@@ -545,11 +575,82 @@ class PackAPIHandler(
                 self._send_response(APIResponse(True, data=result))
             else:
                 self._send_result(result)
+        except LookupError as e:
+            logger.warning("api_route function not found: %s", e)
+            return False
+        except PermissionError as e:
+            logger.warning("api_route denied: %s", e)
+            self._send_response(APIResponse(False, error="Forbidden"), 403)
+        except APIRouteFunctionError as e:
+            logger.warning("api_route function failed: %s", e)
+            self._send_response(APIResponse(False, error=str(e)), e.status)
         except Exception as e:
             _log_internal_error(f"api_route:{handler_name}", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
         return True
+
+    def _execute_api_route_pack_function(
+        self,
+        pack_id: str,
+        function_id: str,
+        args: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Any:
+        """Execute a pack-backed API route through the capability boundary.
+
+        Pack-declared HTTP routes are externally triggerable, so they must not
+        import and execute pack code in the API server process. Route function
+        calls go through ``CapabilityExecutor`` to preserve approval/hash, grant,
+        audit, and sandbox/subprocess dispatch semantics.
+        """
+        from .capability_executor import get_capability_executor
+
+        qualified_name = (
+            function_id if ":" in function_id else f"{pack_id}:{function_id}"
+        )
+        route_context = dict(context or {})
+        route_context["_api_route"] = True
+        request_id = "api-route:{}:{}".format(
+            route_context.get("method", ""),
+            route_context.get("path", ""),
+        )
+        request = {
+            "type": "function.call",
+            "qualified_name": qualified_name,
+            "args": dict(args or {}),
+            "request_id": request_id,
+            "context": route_context,
+        }
+        response = get_capability_executor().execute(pack_id, request)
+        if response.success:
+            return response.output
+
+        error_type = getattr(response, "error_type", None) or "function_call_failed"
+        status = api_route_function_error_status(error_type)
+        if status is None:
+            raise LookupError(
+                getattr(response, "error", None) or "Pack function not found"
+            )
+        if status == 403:
+            logger.warning(
+                "api_route pack function denied: pack_id=%s function_id=%s error_type=%s",
+                pack_id,
+                function_id,
+                error_type,
+            )
+            raise PermissionError(
+                getattr(response, "error", None) or "Pack function denied"
+            )
+        raise APIRouteFunctionError(
+            api_route_function_public_error(
+                str(error_type),
+                getattr(response, "error", None),
+                _SAFE_ERROR_MSG,
+            ),
+            status=status,
+            error_type=str(error_type),
+        )
 
     def _send_response(
         self,
@@ -810,6 +911,28 @@ class PackAPIHandler(
             )
         else:
             self._send_response(APIResponse(True, data=result))
+
+    @staticmethod
+    def _unwrap_defaultspack_function_envelope(result: Any) -> Any:
+        if not isinstance(result, dict) or "status" not in result:
+            return result
+        status = str(result.get("status") or "").lower()
+        if status == "ok":
+            return result.get("data")
+        if status != "error":
+            return result
+        error_payload = result.get("error")
+        if isinstance(error_payload, dict):
+            code = str(error_payload.get("code") or "ERROR")
+            message = str(error_payload.get("message") or code)
+            error_value: Any = {"code": code, "message": message}
+        else:
+            error_value = str(error_payload or "error")
+        try:
+            status_int = int(result.get("status_code"))
+        except (TypeError, ValueError):
+            status_int = 500
+        return {"error": error_value, "status_code": status_int}
     
     @staticmethod
     def _is_loopback_ip(ip: str) -> bool:
@@ -1095,8 +1218,12 @@ class PackAPIHandler(
                 health = alm.get_health()
             else:
                 health = {"status": "ok", "needs_setup": True}
-            headers = getattr(self, "headers", {})
-            challenge = headers.get("X-Rumi-Desktop-Health-Challenge", "")
+            headers = getattr(self, "headers", None)
+            challenge = (
+                headers.get("X-Rumi-Desktop-Health-Challenge", "")
+                if headers is not None
+                else ""
+            )
             bootstrap_secret = os.environ.get("RUMI_PANEL_BOOTSTRAP_SECRET", "")
             if challenge and bootstrap_secret:
                 health["desktop_challenge_response"] = hmac.new(
@@ -1270,6 +1397,9 @@ class PackAPIHandler(
         if _wm is None:
             self._send_response(APIResponse(False, error="Not found"), 404)
             return
+        if not self._is_pack_approved_for_runtime_routes(_wm.get("pack_id", "")):
+            self._send_response(APIResponse(False, error="Forbidden"), 403)
+            return
 
         path_prefix = _wm["path_prefix"]
         web_root = _wm["web_root"]
@@ -1327,7 +1457,7 @@ class PackAPIHandler(
             if origin:
                 self.send_header('Access-Control-Allow-Origin', origin)
                 self.send_header('Vary', 'Origin')
-            self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
             self.send_header('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Rumi-CSRF, X-Rumi-Desktop-Bootstrap')
             self.end_headers()
         except self._CLIENT_DISCONNECT_EXCEPTIONS:
@@ -1426,7 +1556,56 @@ class PackAPIHandler(
             if self._dispatch_defaultspack_http_route("GET", path):
                 return
 
-            if path.startswith("/api/packs/") and path.endswith("/dependencies"):
+            if path == "/api/authority/requests":
+                status_filter = query.get("status", "all")
+                result = self._authority_requests(status_filter)
+                self._send_result(result)
+
+            elif path.startswith("/api/authority/requests/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4:
+                    request_id = unquote(parts[3])
+                    result = self._authority_request(request_id)
+                    if result.get("success"):
+                        self._send_result(result.get("request", {}))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Authority request not found")), result.get("status_code", 404))
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
+            elif path == "/api/authority/grants":
+                principal_id = query.get("principal_id", "")
+                result = self._authority_grants(principal_id)
+                self._send_result(result)
+
+            elif path == "/api/authority/events":
+                try:
+                    limit = int(query.get("limit", "200") or 200)
+                except ValueError:
+                    limit = 200
+                result = self._authority_events(limit)
+                self._send_result(result)
+
+            elif path == "/api/packs":
+                result = self._get_all_packs()
+                self._send_result(result)
+
+            elif path == "/api/packs/pending":
+                result = self._get_pending_packs()
+                self._send_result(result)
+
+            elif path.startswith("/api/packs/") and path.endswith("/status"):
+                pack_id = path.split("/")[3]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
+                result = self._get_pack_status(pack_id)
+                if result:
+                    self._send_result(result)
+                else:
+                    self._send_response(APIResponse(False, error="Pack not found"), 404)
+
+            elif path.startswith("/api/packs/") and path.endswith("/dependencies"):
                 pack_id = path.split("/")[3]
                 if not self._validate_pack_id(pack_id):
                     self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
@@ -1546,7 +1725,35 @@ class PackAPIHandler(
             if self._dispatch_defaultspack_http_route("POST", path, body):
                 return
 
-            if path == "/api/network/grant":
+            if path == "/api/authority/check":
+                result = self._authority_check(body)
+                self._send_result(result)
+
+            elif path.startswith("/api/authority/requests/") and path.endswith("/approve"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 5:
+                    request_id = unquote(parts[3])
+                    result = self._authority_approve(request_id, body)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Authority approve failed")), result.get("status_code", 400))
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
+            elif path.startswith("/api/authority/requests/") and path.endswith("/deny"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 5:
+                    request_id = unquote(parts[3])
+                    result = self._authority_deny(request_id, body)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Authority deny failed")), result.get("status_code", 400))
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
+            elif path == "/api/network/grant":
                 pack_id = body.get("pack_id", "")
                 allowed_domains = body.get("allowed_domains", [])
                 allowed_ports = body.get("allowed_ports", [])
@@ -1604,9 +1811,9 @@ class PackAPIHandler(
                     self._send_response(APIResponse(False, error="Missing 'path'"), 400)
                 else:
                     # パストラバーサル防止: ecosystem/ 配下のみ許可
-                    _eco_base = Path(
-                        os.environ.get("RUMI_ECOSYSTEM_DIR", "ecosystem")
-                    ).resolve()
+                    from .paths import ECOSYSTEM_DIR as _ECOSYSTEM_DIR
+
+                    _eco_base = Path(_ECOSYSTEM_DIR).resolve()
                     try:
                         _resolved = Path(source_path).resolve()
                         _resolved.relative_to(_eco_base)
@@ -1626,7 +1833,7 @@ class PackAPIHandler(
                 mode = body.get("mode", "replace")
                 if not staging_id:
                     self._send_response(APIResponse(False, error="Missing 'staging_id'"), 400)
-                elif not self._is_safe_id(staging_id):
+                elif not _v_is_safe_staging_id(staging_id):
                     self._send_response(APIResponse(False, error="Invalid staging_id"), 400)
                 else:
                     result = self._pack_apply(staging_id, mode)
@@ -1955,7 +2162,6 @@ class PackAPIHandler(
         self._request_auth_mode = None
         self._panel_session = None
         self._panel_session_cookie = None
-        result: Any = None
         # --- テーブル駆動: 認証チェック ---
         if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth("PUT", _pre_auth_path_put):
             self._discard_request_body()
@@ -1990,6 +2196,10 @@ class PackAPIHandler(
         except Exception as e:
             _log_internal_error("do_PUT", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
+
+    def do_PATCH(self) -> None:
+        return self.do_PUT()
+
     def do_DELETE(self) -> None:
         _pre_auth_path_del = urlparse(self.path).path
         if not self._check_rate_limit(_pre_auth_path_del):
@@ -2019,8 +2229,21 @@ class PackAPIHandler(
             if self._dispatch_defaultspack_http_route("DELETE", path):
                 return
 
+            if path.startswith("/api/authority/grants/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 5:
+                    principal_id = unquote(parts[3])
+                    permission_id = unquote(parts[4])
+                    if not principal_id or not permission_id:
+                        self._send_response(APIResponse(False, error="Missing principal_id or permission_id"), 400)
+                        return
+                    result = self._authority_delete_grant(principal_id, permission_id)
+                    self._send_result(result)
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
             # --- W19-B: Secret Grant DELETE endpoints ---
-            if path.startswith("/api/secrets/grants/"):
+            elif path.startswith("/api/secrets/grants/"):
                 parts = path.strip("/").split("/")
                 # DELETE /api/secrets/grants/{pack_id}/{secret_key} (5 parts)
                 if len(parts) == 5:

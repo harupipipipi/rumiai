@@ -1,0 +1,95 @@
+workflows:
+  pack_id: rumi_code_migration_pack
+  default_execution: no_runtime_action
+  ownership:
+    owned:
+    - repo_inventory
+    - migration_plan
+    - codemod_plan
+    - pr_shard_plan
+    - compatibility_matrix
+    - risk_ledger
+    - test_gate_plan
+    - rollback_plan
+    - migration_handoff_packet
+    handoff:
+    - CLI IDE command loops
+    - file editing and patch execution
+    - subagent assignment and PR execution
+    - release notes and deploy runbooks
+    - security findings
+    - model provider scoring
+    - runtime telemetry storage
+  items:
+  - id: large_repo_inventory
+    execution: declarative_only
+    description: Contract workflow for large repo inventory.
+    handoffs:
+    - handoff_to_rumi_code_ide_pack
+    - handoff_to_rumi_code_ide_pack
+    - handoff_to_rumi_subagent_pr_manager_pack
+    - handoff_to_rumi_devops_release_pack
+    - handoff_to_rumi_security_review_pack
+    - handoff_to_rumi_model_evals_pack
+    - handoff_to_rumi_observability_pack
+    produces: large_repo_inventory_handoff_packet
+  - id: codemod_planning
+    execution: declarative_only
+    description: Contract workflow for codemod planning.
+    handoffs:
+    - handoff_to_rumi_code_ide_pack
+    - handoff_to_rumi_code_ide_pack
+    - handoff_to_rumi_subagent_pr_manager_pack
+    - handoff_to_rumi_devops_release_pack
+    - handoff_to_rumi_security_review_pack
+    - handoff_to_rumi_model_evals_pack
+    - handoff_to_rumi_observability_pack
+    produces: codemod_planning_handoff_packet
+  - id: pr_shard_planning
+    execution: declarative_only
+    description: Contract workflow for pr shard planning.
+    handoffs:
+    - handoff_to_rumi_code_ide_pack
+    - handoff_to_rumi_code_ide_pack
+    - handoff_to_rumi_subagent_pr_manager_pack
+    - handoff_to_rumi_devops_release_pack
+    - handoff_to_rumi_security_review_pack
+    - handoff_to_rumi_model_evals_pack
+    - handoff_to_rumi_observability_pack
+    produces: pr_shard_planning_handoff_packet
+  - id: compatibility_gate
+    execution: declarative_only
+    description: Contract workflow for compatibility gate.
+    handoffs:
+    - handoff_to_rumi_code_ide_pack
+    - handoff_to_rumi_code_ide_pack
+    - handoff_to_rumi_subagent_pr_manager_pack
+    - handoff_to_rumi_devops_release_pack
+    - handoff_to_rumi_security_review_pack
+    - handoff_to_rumi_model_evals_pack
+    - handoff_to_rumi_observability_pack
+    produces: compatibility_gate_handoff_packet
+  - id: risk_rollback_review
+    execution: declarative_only
+    description: Contract workflow for risk rollback review.
+    handoffs:
+    - handoff_to_rumi_code_ide_pack
+    - handoff_to_rumi_code_ide_pack
+    - handoff_to_rumi_subagent_pr_manager_pack
+    - handoff_to_rumi_devops_release_pack
+    - handoff_to_rumi_security_review_pack
+    - handoff_to_rumi_model_evals_pack
+    - handoff_to_rumi_observability_pack
+    produces: risk_rollback_review_handoff_packet
+  - id: migration_handoff
+    execution: declarative_only
+    description: Contract workflow for migration handoff.
+    handoffs:
+    - handoff_to_rumi_code_ide_pack
+    - handoff_to_rumi_code_ide_pack
+    - handoff_to_rumi_subagent_pr_manager_pack
+    - handoff_to_rumi_devops_release_pack
+    - handoff_to_rumi_security_review_pack
+    - handoff_to_rumi_model_evals_pack
+    - handoff_to_rumi_observability_pack
+    produces: migration_handoff_handoff_packet

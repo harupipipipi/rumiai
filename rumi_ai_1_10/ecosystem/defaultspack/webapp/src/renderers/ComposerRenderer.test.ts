@@ -8,6 +8,7 @@ import {
   filterAtMentionFiles,
   insertAtMentionText,
   composerChromeWidgetStyle,
+  composerModelControlWidth,
   modelDropdownPlacementClassName,
   modelCandidateMenuKeyAction,
   modelCandidatePopupStyleForAnchor,
@@ -135,6 +136,22 @@ test("new conversation model dropdown opens below and offset to the right", () =
   assert.equal(modelDropdownPlacementClassName("above"), "bottom-full right-0 mb-2");
 });
 
+test("model picker width follows the compact model name only", () => {
+  assert.deepEqual(composerModelControlWidth("GPT-5.4"), {
+    basis: "9ch",
+    min: "5.5rem",
+    max: "12rem",
+    shrink: 1,
+  });
+  assert.deepEqual(composerModelControlWidth("GPT 5.4"), composerModelControlWidth("GPT-5.4"));
+  assert.deepEqual(composerModelControlWidth("Qwen 3.5 Plus"), {
+    basis: "18ch",
+    min: "5.5rem",
+    max: "12rem",
+    shrink: 1,
+  });
+});
+
 test("model candidate popup anchors to the right edge of the model control", () => {
   assert.deepEqual(
     modelCandidatePopupStyleForAnchor({ left: 820, right: 1010, top: 410 }, 1280),
@@ -245,11 +262,46 @@ test("composer chrome widgets declare layout widths separately from actions", ()
   assert.match(html, /data-composer-widget="send"/);
   assert.match(html, /data-composer-widget="file-attach" data-composer-slot="leading"/);
   assert.match(html, /data-composer-widget="model-picker" data-composer-slot="trailing"/);
-  assert.match(html, /style="[^"]*flex:0 0 11.5rem;min-width:11.5rem;max-width:11.5rem/);
-  assert.match(html, /class="[^"]*rumi-composer-control-surface[^"]*gap-2/);
+  assert.match(html, /style="[^"]*flex:0 1 12ch;min-width:5.5rem;max-width:12rem/);
+  assert.match(html, /class="[^"]*rumi-composer-control-surface[^"]*w-full[^"]*gap-2/);
   assert.match(html, /class="[^"]*min-w-0 flex-1 truncate/);
   assert.match(html, /aria-label="Thinking level"/);
   assert.doesNotMatch(html, />thinking</);
+});
+
+test("new conversation composer input is not locked to one visual line", () => {
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "first line\nsecond line",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      isNewConversation: true,
+      selectedProfile: {
+        profile_id: "openai/gpt-5.4",
+        display_name: "GPT 5.4",
+        provider_id: "openai",
+        model_id: "gpt-5.4",
+        supports_vision: true,
+        supports_tool_calling: true,
+        supports_thinking: true,
+        thinking_levels: ["high"],
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      thinkingLevel: "high",
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /rumi-composer-input-new-overlay/);
+  assert.match(html, /rumi-composer-input-new[^"]*min-h-\[22px\]/);
+  assert.doesNotMatch(html, /rumi-composer-input-new[^"]*\sh-\[22px\]/);
+  assert.match(html, /style="[^"]*flex:0 1 9ch;min-width:5.5rem;max-width:12rem/);
 });
 
 test("composer renders model status indicators beside the model picker", () => {

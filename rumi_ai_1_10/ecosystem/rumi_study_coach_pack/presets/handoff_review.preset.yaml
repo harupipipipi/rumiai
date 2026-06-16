@@ -1,0 +1,22 @@
+preset:
+  id: handoff_review
+  mode: review_packet
+  requires:
+  - owner_pack
+  - reason
+  - artifact_path
+  - evidence_ids
+  - uncertainty_or_limitations
+  - human_review
+  external_actions: handoff_only
+  reviewer_questions:
+  - Does the owner pack match the overlap policy for this surface?
+  - Are all claims linked to local notes or marked uncertain?
+  - Is the requested next action outside this pack's owner surfaces?
+  - Has the packet avoided credentials, connector state, and real-world mutation?
+  allowed_handoff_targets:
+  - rumi_document_intelligence_pack
+  - rumi_research_pack
+  - rumi_memory_knowledge_pack
+  - rumi_workflow_scheduler_pack
+  - rumi_workspace_pack

@@ -1,0 +1,72 @@
+quality_matrix:
+  minimum_pass: all_blocking_checks
+  fail_states:
+  - missing_evidence
+  - boundary_violation
+  - unsafe_external_action
+  - unreviewed_handoff
+  checks:
+  - id: append_only_event_log
+    blocking: true
+    description: Run events are append-only and sequence ordered.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: checkpoint_resume_review
+    blocking: true
+    description: Resume from checkpoints requires human review.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: intervention_future_only
+    blocking: true
+    description: Redirect and cancel never rewrite past events.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: no_tool_execution
+    blocking: true
+    description: Tool, browser, desktop, and schedule actions are handoffs only.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: deterministic_replay
+    blocking: true
+    description: The same ordered event log yields the same replay digest.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: run_board_readability
+    blocking: true
+    description: Run-board UI exposes status, approvals, and blocked states.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: handoff_owner_named
+    blocking: true
+    description: Every adjacent action names an owner pack.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test
+  - id: defaultspack_not_promoted
+    blocking: true
+    description: Promotion remains false until durable runtime evidence exists.
+    review_evidence:
+    - schema
+    - fixture
+    - workflow
+    - contract_test

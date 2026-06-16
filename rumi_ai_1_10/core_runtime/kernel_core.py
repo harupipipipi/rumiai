@@ -18,6 +18,7 @@ import json
 import os
 import importlib.util
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from dataclasses import dataclass
@@ -41,6 +42,13 @@ from .kernel_flow_execution import MAX_FLOW_CHAIN_DEPTH  # re-export for backwar
 from .deprecation import deprecated
 from .logging_utils import get_structured_logger
 _logger = get_structured_logger("rumi.kernel.core")
+
+_this_module = sys.modules.get(__name__)
+if _this_module is not None:
+    if __name__.startswith("rumi_ai_1_10."):
+        sys.modules.setdefault(__name__.removeprefix("rumi_ai_1_10."), _this_module)
+    else:
+        sys.modules.setdefault(f"rumi_ai_1_10.{__name__}", _this_module)
 
 @dataclass
 class KernelConfig:

@@ -317,11 +317,39 @@
       }
     },
     "required_network": {
-      "type": "array",
       "description": "Pack が必要とするネットワークアクセス先のリスト",
-      "items": {
-        "type": "string"
-      }
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "allowed_domains": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "allowed_ports": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            }
+          },
+          "required": [
+            "allowed_domains",
+            "allowed_ports"
+          ],
+          "additionalProperties": false
+        }
+      ]
     },
     "host_execution": {
       "type": "boolean",

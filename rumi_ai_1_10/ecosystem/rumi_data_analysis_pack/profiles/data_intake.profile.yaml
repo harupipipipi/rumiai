@@ -1,0 +1,24 @@
+profile_id: rumi_data_analysis.data_intake
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: データ分析受付
+  en: Data Analysis Intake
+description:
+  ja: 分析目的、データ範囲、粒度、制約、期待する成果物を整理するローカル優先プロファイル。
+  en: Local-first profile for framing data questions, sources, grain, constraints, and deliverables.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.local_agent
+enabled_capabilities: [data_intake, project, memory, safety]
+prompt_set: data_intake
+policy:
+  network_default: none
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  notebook_execution_requires_approval: true
+  sql_execution_requires_approval: true
+  audit_level: strict
+  local_first: true

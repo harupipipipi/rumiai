@@ -1,0 +1,72 @@
+quality_matrix:
+  minimum_pass: all_blocking_checks
+  fail_states:
+  - missing_evidence
+  - boundary_violation
+  - unsafe_external_action
+  - unreviewed_handoff
+  checks:
+  - id: learner_goal_alignment
+    blocking: true
+    description: Every quiz, plan step, and report line maps to a declared goal.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: source_note_citation
+    blocking: true
+    description: Every answer or explanation cites source_note_ids.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: uncertainty_when_notes_insufficient
+    blocking: true
+    description: Missing or thin notes create uncertainty notes instead of confident answers.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: no_external_fact_invention
+    blocking: true
+    description: The pack does not add uncited external facts.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: spacing_reason_present
+    blocking: true
+    description: Review queue entries state why the next review window exists.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: difficulty_calibration
+    blocking: true
+    description: Questions are tagged recall, application, or transfer.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: accessibility_constraint_respected
+    blocking: true
+    description: Learner accommodations are present in plan generation.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: handoff_owner_named
+    blocking: true
+    description: Scheduler, memory, and workspace handoffs name the owner pack.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note

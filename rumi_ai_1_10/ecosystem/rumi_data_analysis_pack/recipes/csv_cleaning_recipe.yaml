@@ -1,0 +1,25 @@
+recipe_id: rumi.data_analysis.recipes.csv_cleaning
+version: rumi.recipe.v1
+purpose: Declare reversible CSV cleaning steps before analysis.
+inputs:
+  accepted_shapes: [csv, tsv, pasted_table]
+  required_context: [question, data_grain, key_columns_if_known]
+steps:
+  - id: profile_columns
+    action: record column names, inferred types, units, missingness, and sample values
+  - id: normalize_headers
+    action: propose safe header normalization without dropping original names
+  - id: parse_dates
+    action: identify date columns, expected format, timezone assumptions, and failed parses
+  - id: standardize_categories
+    action: map spelling or case variants with a reversible lookup table
+  - id: handle_missing
+    action: state missing data policy per column before imputation or exclusion
+  - id: validate_totals
+    action: compare row counts, sums, duplicates, and key uniqueness before and after cleaning
+outputs:
+  - cleaned_data_notes
+  - transformation_log
+  - validation_checks
+  - audit_trail_update
+network: none

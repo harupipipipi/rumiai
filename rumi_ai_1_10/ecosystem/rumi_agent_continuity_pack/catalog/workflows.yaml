@@ -1,0 +1,87 @@
+workflows:
+  pack_id: rumi_agent_continuity_pack
+  default_execution: no_runtime_action
+  ownership:
+    owned:
+    - continuity_packet_contract
+    - restart_evidence_packet
+    - compaction_handoff_packet
+    - attention_drift_recovery_note
+    - run_summary_for_resume
+    - continuity_artifact_manifest
+    - branch_resume_packet
+    - agent_health_note
+    handoff:
+    - run boards live run events checkpoints interventions replay indexes
+    - memory objects recall storage knowledge updates skill learning
+    - metrics telemetry run ledgers cost latency postmortems
+    - schedules monitors wakeups retries recurring follow-ups
+    - file artifact persistence and export
+    - git branch creation switching push
+  items:
+  - id: long_running_resume
+    execution: declarative_only
+    description: Contract workflow for long running resume.
+    handoffs:
+    - handoff_to_rumi_agent_workroom_pack
+    - handoff_to_rumi_memory_knowledge_pack
+    - handoff_to_rumi_observability_pack
+    - handoff_to_rumi_workflow_scheduler_pack
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_defaultspack_or_coding_owner
+    produces: long_running_resume_handoff_packet
+  - id: attention_drift_recovery
+    execution: declarative_only
+    description: Contract workflow for attention drift recovery.
+    handoffs:
+    - handoff_to_rumi_agent_workroom_pack
+    - handoff_to_rumi_memory_knowledge_pack
+    - handoff_to_rumi_observability_pack
+    - handoff_to_rumi_workflow_scheduler_pack
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_defaultspack_or_coding_owner
+    produces: attention_drift_recovery_handoff_packet
+  - id: compaction_handoff
+    execution: declarative_only
+    description: Contract workflow for compaction handoff.
+    handoffs:
+    - handoff_to_rumi_agent_workroom_pack
+    - handoff_to_rumi_memory_knowledge_pack
+    - handoff_to_rumi_observability_pack
+    - handoff_to_rumi_workflow_scheduler_pack
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_defaultspack_or_coding_owner
+    produces: compaction_handoff_handoff_packet
+  - id: run_summary_refresh
+    execution: declarative_only
+    description: Contract workflow for run summary refresh.
+    handoffs:
+    - handoff_to_rumi_agent_workroom_pack
+    - handoff_to_rumi_memory_knowledge_pack
+    - handoff_to_rumi_observability_pack
+    - handoff_to_rumi_workflow_scheduler_pack
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_defaultspack_or_coding_owner
+    produces: run_summary_refresh_handoff_packet
+  - id: branch_resume_packet
+    execution: declarative_only
+    description: Contract workflow for branch resume packet.
+    handoffs:
+    - handoff_to_rumi_agent_workroom_pack
+    - handoff_to_rumi_memory_knowledge_pack
+    - handoff_to_rumi_observability_pack
+    - handoff_to_rumi_workflow_scheduler_pack
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_defaultspack_or_coding_owner
+    produces: branch_resume_packet_handoff_packet
+  - id: health_note_review
+    execution: declarative_only
+    description: Contract workflow for health note review.
+    handoffs:
+    - handoff_to_rumi_agent_workroom_pack
+    - handoff_to_rumi_memory_knowledge_pack
+    - handoff_to_rumi_observability_pack
+    - handoff_to_rumi_workflow_scheduler_pack
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_defaultspack_or_coding_owner
+    produces: health_note_review_handoff_packet

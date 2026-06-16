@@ -1,0 +1,56 @@
+review_checklist:
+  id: localization_review_v1
+  required_checks:
+  - id: terminology
+    blocking: true
+    evidence:
+    - glossary_term_ids
+    - source_excerpt
+    - target_excerpt
+    failure_action: revise_translation
+  - id: protected_terms
+    blocking: true
+    evidence:
+    - protected_term_policy_id
+    - exact_preservation_result
+    failure_action: block_release
+  - id: tone_register
+    blocking: true
+    evidence:
+    - tone_goal
+    - locale_register_note
+    failure_action: request_locale_owner_review
+  - id: placeholder_integrity
+    blocking: true
+    evidence:
+    - placeholder_inventory
+    - target_placeholder_inventory
+    failure_action: block_release
+  - id: expansion_or_truncation_risk
+    blocking: false
+    evidence:
+    - expansion_risk_note
+    - affected_string_keys
+    failure_action: handoff_to_frontend_design_owner
+  - id: number_date_currency
+    blocking: false
+    evidence:
+    - locale_format_examples
+    failure_action: revise_translation
+  - id: segment_evidence_map
+    blocking: true
+    evidence:
+    - source_segment_id
+    - target_segment_id
+    failure_action: block_until_evidence_added
+  - id: owner_boundary
+    blocking: true
+    evidence:
+    - handoff_owner
+    - no_adjacent_execution
+    failure_action: produce_handoff_packet
+  completion_rules:
+    all_blocking_checks_pass_or_handoff: true
+    no_external_publish_from_this_pack: true
+    no_document_mutation_from_this_pack: true
+    no_ui_layout_change_from_this_pack: true

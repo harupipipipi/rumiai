@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -18,11 +19,31 @@ from .paths import (
 )
 from .pack_function_policy import (
     permission_id_for_entry,
-    validate_function_execution,
 )
+from .validation import validate_entrypoint
+
+
+def _is_pack_approved_and_verified(pack_id: str) -> tuple[bool, Optional[str]]:
+    try:
+        from .approval_manager import get_approval_manager
+
+        result = get_approval_manager().is_pack_approved_and_verified(pack_id)
+    except Exception as exc:
+        return False, f"approval_check_error:{exc}"
+    if isinstance(result, tuple):
+        return bool(result[0]), result[1] if len(result) > 1 else None
+    return bool(result), None
 
 
 TRUSTED_IN_PROCESS_PACK_IDS = frozenset({"defaultspack", "rumi_default_tools_pack"})
+
+
+def _pack_function_policy_module():
+    """Resolve policy helpers at call time so test monkeypatches survive import aliases."""
+    return (
+        sys.modules.get("core_runtime.pack_function_policy")
+        or sys.modules.get("rumi_ai_1_10.core_runtime.pack_function_policy")
+    )
 
 
 def _find_pack_root(path_hint: Any) -> Optional[Path]:
@@ -120,15 +141,30 @@ def resolve_function_entry(pack_id: str, function_id: str) -> Any:
         raise PermissionError(
             f"In-process pack function execution is not allowed: {qualified_name}"
         )
+    approved, reason = _is_pack_approved_and_verified(entry.pack_id)
+    if not approved:
+        detail = f": {reason}" if reason else ""
+        raise PermissionError(f"Pack not approved: {entry.pack_id}{detail}")
     return entry
 
 
 def _resolve_entrypoint_parts(entry: Any) -> tuple[Path | None, str]:
     entrypoint = entry.entrypoint or "main.py:run"
-    module_rel, callable_name = (
-        entrypoint.rsplit(":", 1) if ":" in entrypoint else (entrypoint, "run")
-    )
-    module_path = Path(entry.function_dir) / module_rel
+    entrypoint_for_validation = entrypoint if ":" in entrypoint else f"{entrypoint}:run"
+    function_dir = Path(entry.function_dir)
+    valid, error, module_path = validate_entrypoint(entrypoint_for_validation, function_dir)
+    if not valid or module_path is None:
+        raise PermissionError(error or f"Invalid entrypoint: {entrypoint}")
+    _, callable_name = entrypoint_for_validation.rsplit(":", 1)
+    if not module_path.is_file():
+        raise FileNotFoundError(f"Entrypoint file not found: {module_path}")
+    if not is_path_within(module_path, BASE_DIR):
+        raise PermissionError(f"Entrypoint escapes project boundary: {module_path}")
+    trusted_path = getattr(entry, "main_py_path", None)
+    if trusted_path is not None and Path(trusted_path).resolve() != module_path.resolve():
+        raise PermissionError(
+            f"Entrypoint differs from trusted registry path: {module_path}"
+        )
     return module_path, callable_name
 
 
@@ -182,7 +218,9 @@ def assert_pack_function_executable(
                 f"Entrypoint escapes project boundary: {boundary_path}"
             )
 
-    calling_convention, grant_config = validate_function_execution(entry, boundary_path)
+    policy_module = _pack_function_policy_module()
+    validate = getattr(policy_module, "validate_function_execution")
+    calling_convention, grant_config = validate(entry, boundary_path)
     if calling_convention == "python_host":
         allow_host = str(os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "")).lower()
         if allow_host not in {"1", "true"}:

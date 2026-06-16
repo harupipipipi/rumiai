@@ -1,0 +1,8 @@
+profile_id: rumi_voice_mobile.voice_mobile_operator
+pack_id: rumi_voice_mobile_pack
+purpose: Operate within the Rumi Voice Mobile Pack declarative contract.
+policy:
+  local_first: true
+  network_default: deny
+  require_evidence: true
+  respect_owner_boundaries: true

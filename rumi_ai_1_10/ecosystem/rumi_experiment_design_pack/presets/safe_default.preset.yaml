@@ -1,0 +1,6 @@
+preset:
+  id: safe_default
+  mode: draft_only
+  network: none
+  external_actions: blocked
+  uncertainty: required_when_evidence_is_thin

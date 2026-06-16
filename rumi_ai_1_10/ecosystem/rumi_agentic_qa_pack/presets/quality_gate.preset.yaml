@@ -1,0 +1,10 @@
+preset:
+  id: quality_gate
+  pack_id: rumi_agentic_qa_pack
+  mode: quality_gate
+  purpose: Apply the agentic QA acceptance rubric before a scenario is marked passing.
+  require_evidence: true
+  require_overlap_check: true
+  required_assets:
+    - catalog/acceptance_rubric.yaml
+    - checklists/qa_replay.checklist.yaml

@@ -1,0 +1,27 @@
+task:
+  title: Quarterly business review workspace
+  preset: rumi_workspace_pack.manus_workspace
+  goal: Run a background job that assembles a QBR document, deck, workbook, chart assets, PDFs, and a final bundle.
+  inputs:
+    brief_path: workspace/briefs/qbr.md
+    data_folder: workspace/data/qbr
+    output_folder: workspace/outputs/qbr
+  output:
+    artifacts:
+      - type: document
+        path: qbr_report.docx
+      - type: slides
+        path: qbr_deck.pptx
+      - type: spreadsheet
+        path: qbr_metrics.xlsx
+      - type: pdf
+        path: qbr_report.pdf
+      - type: pdf
+        path: qbr_deck.pdf
+      - type: export_bundle
+        path: qbr_workspace_bundle.zip
+  recipe: research_to_report_bundle
+  background_job:
+    resumable: true
+    status_updates: concise
+    approval_before_overwrite: true

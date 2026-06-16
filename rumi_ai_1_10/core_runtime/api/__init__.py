@@ -28,6 +28,7 @@ from .viewer_handlers import ViewerHandlersMixin
 from .desktop_handlers import DesktopHandlersMixin
 from .web_mounts import WebMountMixin
 from .security import (
+    AuthorityHandlersMixin,
     CapabilityGrantHandlersMixin,
     CapabilityInstallerHandlersMixin,
     NetworkHandlersMixin,
@@ -53,6 +54,7 @@ __all__ = [
     "WebMountMixin",
     "APIRouteTableMixin",
     "RequestBodyMixin",
+    "AuthorityHandlersMixin",
     "PackHandlersMixin",
     "ContainerHandlersMixin",
     "NetworkHandlersMixin",

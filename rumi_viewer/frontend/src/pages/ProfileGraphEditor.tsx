@@ -164,7 +164,7 @@ export function ProfileGraphEditorShell({
         </div>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
+      <div className="grid gap-4 2xl:grid-cols-[260px_minmax(0,1fr)_300px]">
         <section className="space-y-4">
           <div className="rounded-2xl border border-border bg-bg-card p-4">
             <div className="mb-3 flex items-center gap-2">
@@ -208,12 +208,10 @@ export function ProfileGraphEditorShell({
 
         <section className="space-y-4">
           <ProfileGraphToolbar
-            activeCategory={activeCategory}
             dirty={dirty}
             saving={saving}
             previewing={previewing}
             launching={launching}
-            onCategoryChange={onCategoryChange}
             onPreview={onPreview}
             onApply={onApply}
             onLaunch={onLaunch}

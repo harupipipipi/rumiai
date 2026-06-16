@@ -1,0 +1,14 @@
+id: rumi_computer_control_pack.examples.terminal_sandbox_observation
+profile: rumi_computer_control_pack.terminal_session_monitor
+preset: rumi_computer_control_pack.terminal_observation
+task: Observe a terminal session and classify whether it is host, Docker, SSH, Modal, Daytona, or unknown.
+expected_agent_steps:
+  - inspect prompt and visible session labels
+  - classify terminal backend
+  - identify read-only next checks
+  - require approval for remote or state-changing commands
+  - record sandbox/host boundary in the response
+safety_notes:
+  - no remote command without approval
+  - do not infer sandbox safety from appearance alone
+  - no network by default

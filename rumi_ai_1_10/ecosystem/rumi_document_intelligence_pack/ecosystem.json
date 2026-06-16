@@ -1,0 +1,106 @@
+{
+  "pack_id": "rumi_document_intelligence_pack",
+  "pack_identity": "rumi:ecosystem/rumi_document_intelligence_pack",
+  "display_name": "Rumi Document Intelligence Pack",
+  "description": "Declarative PDF, contract, citation, redline, page-span, and privacy-aware document review workflow pack.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "schema",
+      "policy",
+      "coordination",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": [],
+  "metadata": {
+    "runtime_type": "declarative_pack",
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "required_secrets": [],
+    "owner_surfaces": [
+      "pdf_extraction",
+      "contract_clause_review",
+      "citation_traceability",
+      "redline_handoffs",
+      "page_span_mapping",
+      "privacy_review",
+      "multi_pass_specialist_review"
+    ],
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_workspace_pack",
+        "reason": "Workspace pack owns generated documents, sheets, slides, and export-ready artifacts."
+      },
+      {
+        "pack_id": "rumi_research_pack",
+        "reason": "Research pack owns external-source research beyond local document evidence."
+      },
+      {
+        "pack_id": "rumi_multimodal_media_pack",
+        "reason": "Multimodal media pack owns image, scan, OCR, and media interpretation workflows."
+      },
+      {
+        "pack_id": "rumi_security_review_pack",
+        "reason": "Security review pack owns privacy, permission, and sensitive-data risk review."
+      }
+    ],
+    "asset_index": {
+      "catalog": [
+        "catalog/document_intelligence_workflows.yaml",
+        "catalog/citation_page_span_schema.json",
+        "catalog/redline_review_matrix.yaml",
+        "catalog/document_types.yaml",
+        "catalog/redline_operation_tests.yaml"
+      ],
+      "schemas": [
+        "schemas/citation_trace.schema.json",
+        "schemas/redline_handoff.schema.json"
+      ],
+      "policies": [
+        "policies/document_privacy.policy.yaml",
+        "policies/citation_privacy_review.policy.yaml"
+      ],
+      "coordination": [
+        "coordination/subagent_review_roster.yaml"
+      ],
+      "profiles": [
+        "profiles/document_intelligence_reviewer.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/document_intelligence_reviewer.system.md",
+        "prompts/citation_redline_privacy_reviewer.system.md"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "examples": [
+        "examples/contract_clause_review.example.yaml",
+        "examples/pdf_qa_trace.example.yaml",
+        "examples/redline_handoff.example.yaml",
+        "examples/page_span_citation_audit.example.yaml",
+        "examples/redline_privacy_review.example.yaml"
+      ],
+      "docs": [
+        "README.md",
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ]
+    }
+  }
+}

@@ -1,0 +1,23 @@
+profile_id: rumi_model_evals.provider_smoke_reviewer
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: Provider Smokeレビュー
+  en: Provider Smoke Reviewer
+description:
+  ja: Provider接続、モデルID、レスポンス形、コスト/レイテンシの最小確認をレビューする役割。
+  en: Review profile for provider availability, model id, response envelope, and cost/latency smoke evidence.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.local_agent
+enabled_capabilities: [provider_smoke, cost_latency_evidence, flakiness_review, safety]
+prompt_set: provider_smoke_reviewer
+policy:
+  network_default: none
+  provider_calls_require_approval: true
+  cost_bearing_actions_require_approval: true
+  write_actions_require_approval: true
+  audit_level: strict
+  local_first: true

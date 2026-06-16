@@ -1,0 +1,12 @@
+policy_id: rumi_frontend_design.quality
+local_first: true
+network_default: deny
+rules:
+  - id: build_actual_experience
+    decision: require
+  - id: no_design_without_responsive_qa
+    decision: require
+  - id: visual_assets_need_provenance
+    decision: handoff_to_rumi_multimodal_media_pack
+  - id: code_changes_route_to_code_pack
+    decision: handoff_to_rumi_code_ide_pack

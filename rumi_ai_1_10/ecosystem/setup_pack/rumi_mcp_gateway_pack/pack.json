@@ -1,0 +1,58 @@
+{
+  "pack_id": "rumi_mcp_gateway_pack",
+  "display_name": "Rumi MCP Gateway Pack",
+  "description": "Optional declarative catalog and gateway profile for unsupported MCP server discovery, namespace routing, prompt/resource templates, registry metadata, and safety policy.",
+  "target_pack_id": "rumi_mcp_gateway_pack",
+  "version": "1.0.0",
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "marketplace": {
+    "id": "rumi.mcp_gateway_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "mcp-gateway",
+    "optional": true
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "conflicts_with": [],
+  "overlap_policy": {
+    "defaultspack_tool_mcp": "do_not_override",
+    "tool_aliases": "prefer_explicit_gateway_namespace",
+    "unknown_servers": "namespace_and_approval_required",
+    "direct_support_pack": "prefer_direct_pack_namespace",
+    "notes": [
+      "defaultspack owns MCP connection, listing, registry, approval, and execution.",
+      "This pack owns only catalog, routing, template, marketplace, and safety metadata.",
+      "Unknown MCP servers must remain behind explicit namespace and user approval."
+    ]
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Gateway metadata for unsupported MCP servers must remain opt-in and approval gated."
+  },
+  "conflict_notes": [
+    "This pack does not replace defaults.tool.mcp_connect, defaultspack.tool.mcp_connect, defaults.tool.mcp_list, or defaultspack.tool.mcp_list.",
+    "When another pack directly supports an MCP server, prefer that pack over gateway routing.",
+    "Unknown servers use mcp_gateway.<server_slug> labels but still rely on runtime approval and defaultspack execution policy."
+  ],
+  "security_notes": [
+    "No secrets, credentials, provider endpoints, or ready-to-run connector commands are embedded.",
+    "Unsupported MCP servers are denied by default until explicitly reviewed, namespaced, and approved."
+  ]
+}

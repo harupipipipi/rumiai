@@ -1,0 +1,25 @@
+taxonomy:
+  domains:
+  - evidence-dossier
+  - local_first_contracts
+  - handoff_review
+  artifact_types:
+  - source_registry
+  - source_quality_label
+  - claim_record
+  - evidence_link
+  - contradiction_record
+  - citation_ledger
+  - reviewer_queue
+  - dossier_export_manifest
+  handoff_targets:
+  - defaultspack
+  - rumi_default_tools_pack
+  forbidden_ownership:
+  - source retrieval
+  - connector access
+  - data transformation
+  - document rendering
+  - workspace export
+  - model eval scoring
+  - web browsing

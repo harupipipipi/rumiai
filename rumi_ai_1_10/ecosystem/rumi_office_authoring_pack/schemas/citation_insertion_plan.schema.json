@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/citation_insertion_plan.schema.json",
+  "title": "Citation Insertion Plan",
+  "description": "Office authoring contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "citation_plan_id",
+    "citation_style",
+    "source_refs",
+    "insertion_targets",
+    "missing_source_policy",
+    "ledger_owner",
+    "verified_export_allowed"
+  ],
+  "properties": {
+    "citation_plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "citation_style": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "insertion_targets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "missing_source_policy": {
+      "const": "block_verified_export_when_missing_sources"
+    },
+    "ledger_owner": {
+      "const": "rumi_evidence_dossier_pack"
+    },
+    "verified_export_allowed": {
+      "const": false
+    }
+  }
+}
