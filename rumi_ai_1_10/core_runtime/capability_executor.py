@@ -1086,6 +1086,7 @@ class CapabilityExecutor:
             bool(getattr(entry, "legacy_grant_required", False))
             or entry_grant_config is not None
             or host_grant_required
+            or self._grant_manager is not None
         )
         grant_config = dict(entry_grant_config or {})
         if grant_required:
