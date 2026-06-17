@@ -19,6 +19,7 @@ import {
   filterComposerToolMentions,
   filterModelProfilesBySearch,
   resolveComposerWidgetDrop,
+  shouldMeasureComposerDockWidget,
   shouldFocusComposerForSlashKey,
   toolMentionIdsFromText,
 } from "./ComposerRenderer";
@@ -152,6 +153,13 @@ test("model picker width follows the compact model name only", () => {
   });
 });
 
+test("composer dock measurement is limited to model picker anchoring", () => {
+  assert.equal(shouldMeasureComposerDockWidget("model-picker"), true);
+  assert.equal(shouldMeasureComposerDockWidget("thinking-control"), false);
+  assert.equal(shouldMeasureComposerDockWidget("model-status"), false);
+  assert.equal(shouldMeasureComposerDockWidget("send"), false);
+});
+
 test("model candidate popup anchors to the right edge of the model control", () => {
   assert.deepEqual(
     modelCandidatePopupStyleForAnchor({ left: 820, right: 1010, top: 410 }, 1280),
@@ -267,6 +275,12 @@ test("composer chrome widgets declare layout widths separately from actions", ()
   assert.match(html, /class="[^"]*min-w-0 flex-1 truncate/);
   assert.match(html, /aria-label="Thinking level"/);
   assert.doesNotMatch(html, />thinking</);
+
+  const dockWidgetStyles = Array.from(html.matchAll(/data-composer-widget="([^"]+)"[^>]*style="([^"]*)"/g));
+  assert.ok(dockWidgetStyles.length >= 4);
+  for (const [, widgetId, style] of dockWidgetStyles) {
+    assert.doesNotMatch(style, /(?:^|;)(?:transform|transition|opacity)\s*:/, widgetId);
+  }
 });
 
 test("new conversation composer input is not locked to one visual line", () => {
