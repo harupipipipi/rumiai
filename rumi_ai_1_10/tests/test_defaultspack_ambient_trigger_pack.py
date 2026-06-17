@@ -140,6 +140,8 @@ def test_pinch_and_agent_dispatch_share_ambient_router(monkeypatch, tmp_path):
                         "dataUrl": "data:audio/webm;base64,AAAA",
                         "ephemeral": True,
                         "do_not_persist": True,
+                        "transcript": "今日の予定を確認して",
+                        "transcript_source": "web_speech_api",
                     }
                 ],
                 "metadata": {"hand": "Right", "normalized_distance": 0.42},
@@ -150,8 +152,10 @@ def test_pinch_and_agent_dispatch_share_ambient_router(monkeypatch, tmp_path):
     assert pinch_release["status"] == "ok"
     envelope = submit.call_args.args[0]
     assert envelope.delivery["action_id"] == "chat.message"
-    assert envelope.input.startswith("このpinch中")
+    assert envelope.input == "今日の予定を確認して"
+    assert "pinch.webm" not in envelope.input
     assert envelope.attachments[0]["type"] == "audio/webm"
+    assert "dataUrl" not in envelope.attachments[0]
     assert envelope.attachments[0]["do_not_persist"] is True
 
     router.submit_event(
@@ -291,6 +295,144 @@ def test_selected_chat_routing_passes_saved_model_as_turn_param(monkeypatch, tmp
     assert envelope.target["conversation_id"] == "conv-selected"
     assert envelope.chat["conversation_id"] == "conv-selected"
     assert envelope.params["model"] == "opencode-go/kimi-k2.6"
+
+
+def test_ambient_audio_release_without_transcript_transcribes_for_text_model(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+
+    transcript = "会議メモをまとめて"
+    with (
+        patch(
+            "domain.ambient.router.transcribe_ambient_audio",
+            return_value={
+                "status": "ok",
+                "text": transcript,
+                "source": "openai",
+                "model": "openai/gpt-4o-mini-transcribe",
+                "results": [{"index": 0, "text": transcript, "source": "openai", "model": "openai/gpt-4o-mini-transcribe"}],
+            },
+        ) as transcribe,
+        patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": ""}) as submit,
+    ):
+        dispatched = router.submit_event(_pinch_audio_payload(transcript=None), {"conversation_id": "conv-text"})
+
+    assert dispatched["status"] == "ok"
+    transcribe.assert_called_once()
+    envelope = submit.call_args.args[0]
+    assert envelope.input == transcript
+    assert envelope.attachments[0]["transcript"] == transcript
+    assert "dataUrl" not in envelope.attachments[0]
+    assert "data:audio" not in json.dumps(envelope.attachments, ensure_ascii=False)
+
+
+def test_ambient_audio_release_without_transcript_requires_transcription_for_text_model(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+
+    with (
+        patch(
+            "domain.ambient.router.transcribe_ambient_audio",
+            return_value={
+                "status": "unavailable",
+                "code": "no_transcription_model",
+                "reason": "No configured transcription model is available.",
+                "text": "",
+            },
+        ) as transcribe,
+        patch("domain.ambient.router.submit_input") as submit,
+    ):
+        result = router.submit_event(_pinch_audio_payload(transcript=None), {"conversation_id": "conv-text"})
+
+    assert result["status"] == "transcription_required"
+    assert result["reason"] == "ambient.audio_transcription_unavailable"
+    assert result["transcription"]["code"] == "no_transcription_model"
+    transcribe.assert_called_once()
+    submit.assert_not_called()
+
+
+def test_ambient_transcription_without_explicit_model_rejects_stub_only_provider(monkeypatch):
+    from domain.ambient.transcription import TRANSCRIPTION_ENV_KEYS, transcribe_ambient_audio
+
+    for env_key in TRANSCRIPTION_ENV_KEYS:
+        monkeypatch.delenv(env_key, raising=False)
+
+    class StubOnlyClient:
+        def __init__(self):
+            self._providers = {"stub": object()}
+
+        def transcribe(self, model, audio, params):
+            raise AssertionError("implicit stub transcription should not be attempted")
+
+    attachment = _pinch_audio_payload(transcript=None)["attachments"][0]
+    with patch("domain.ai_client.client.AIClient", return_value=StubOnlyClient()):
+        result = transcribe_ambient_audio([attachment])
+
+    assert result["status"] == "unavailable"
+    assert result["code"] == "no_transcription_model"
+    assert result["text"] == ""
+    assert "pinch.webm" not in result["text"]
+    assert "data:audio" not in result["text"]
+    assert "AAAA" not in result["text"]
+
+
+def test_ambient_transcription_allows_explicit_stub_model_from_params_or_env(monkeypatch):
+    from domain.ambient.transcription import TRANSCRIPTION_ENV_KEYS, transcribe_ambient_audio
+
+    class FakeTranscriptionClient:
+        def __init__(self, transcript):
+            self._providers = {"stub": object()}
+            self.calls = []
+            self.transcript = transcript
+
+        def transcribe(self, model, audio, params):
+            self.calls.append({"model": model, "audio": audio, "params": params})
+            return {"text": self.transcript}
+
+    model_ref = "stub/ambient-transcribe"
+    for source in ("params", "env"):
+        for env_key in TRANSCRIPTION_ENV_KEYS:
+            monkeypatch.delenv(env_key, raising=False)
+
+        params = {}
+        if source == "params":
+            params = {"transcription_model": model_ref}
+        else:
+            monkeypatch.setenv("RUMI_AMBIENT_TRANSCRIPTION_MODEL", model_ref)
+
+        transcript = f"deterministic local transcript from {source}"
+        client = FakeTranscriptionClient(transcript)
+        attachment = _pinch_audio_payload(transcript=None)["attachments"][0]
+        with patch("domain.ai_client.client.AIClient", return_value=client):
+            result = transcribe_ambient_audio([attachment], params=params)
+
+        assert result["status"] == "ok"
+        assert result["text"] == transcript
+        assert result["source"] == "stub"
+        assert result["model"] == model_ref
+        assert client.calls == [
+            {
+                "model": model_ref,
+                "audio": "data:audio/webm;base64,AAAA",
+                "params": {"format": "webm"},
+            }
+        ]
 
 
 def test_ai_send_approval_mode_holds_ambient_input_until_server_approval(monkeypatch, tmp_path):
@@ -687,22 +829,24 @@ def _contains_any_key(value, keys: set[str]) -> bool:
     return False
 
 
-def _pinch_audio_payload() -> dict:
+def _pinch_audio_payload(transcript: str | None = "今日の予定を確認して") -> dict:
+    attachment = {
+        "name": "pinch.webm",
+        "type": "audio/webm",
+        "size": 1234,
+        "dataUrl": "data:audio/webm;base64,AAAA",
+        "ephemeral": True,
+        "do_not_persist": True,
+    }
+    if transcript is not None:
+        attachment["transcript"] = transcript
+        attachment["transcript_source"] = "web_speech_api"
     return {
         "source": "camera",
         "trigger": "pinch",
         "confidence": 0.94,
         "duration_ms": 900,
         "mode": "dispatch_audio",
-        "attachments": [
-            {
-                "name": "pinch.webm",
-                "type": "audio/webm",
-                "size": 1234,
-                "dataUrl": "data:audio/webm;base64,AAAA",
-                "ephemeral": True,
-                "do_not_persist": True,
-            }
-        ],
+        "attachments": [attachment],
         "metadata": {"hand": "Right", "normalized_distance": 0.42},
     }

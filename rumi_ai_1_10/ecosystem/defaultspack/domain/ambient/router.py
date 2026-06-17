@@ -5,6 +5,7 @@ import time
 import uuid
 from typing import Any
 
+from domain.ai_client.model_search import get_model_capabilities
 from domain.chat.store import ChatStore
 from domain.input.envelope import RumiInputEnvelope
 from domain.input.submit import submit_input
@@ -14,6 +15,16 @@ from .audio_classifier import cosine_similarity, embedding_from_payload, normali
 from .event import AmbientTriggerEvent
 from .permission_check import missing_rumi_permissions
 from .store import AmbientStore
+from .transcription import (
+    attachment_transcript,
+    attachment_transcript_model,
+    attachment_transcript_source,
+    audio_transcript_text,
+    is_audio_attachment,
+    mark_transcription_status,
+    strip_audio_media,
+    transcribe_ambient_audio,
+)
 
 
 ACTION_ALIASES = {
@@ -258,7 +269,7 @@ class AmbientTriggerRouter:
         if action_id not in ALLOWED_ACTIONS:
             return self._record(event, "denied", "ambient.action_not_allowed", action_id=action_id)
         attachments = attachments or []
-        input_text = event.input_text or self._default_input_text(event, attachments)
+        input_text = audio_transcript_text(attachments) or event.input_text or self._default_input_text(event, attachments)
         if require_approval and self._requires_ai_send_approval(state):
             return self._queue_ai_send_approval(
                 event,
@@ -274,6 +285,28 @@ class AmbientTriggerRouter:
         params = dict(event.payload.get("params") if isinstance(event.payload.get("params"), dict) else {})
         if model and not str(params.get("model") or params.get("profile_id") or "").strip():
             params["model"] = model
+        model_ref = self._model_ref_for_dispatch(event, context, state, target_conversation_id, params=params, routing=routing)
+        audio_plan = self._prepare_audio_dispatch(
+            event,
+            attachments,
+            input_text=input_text,
+            params=params,
+            routing=routing,
+            model_ref=model_ref,
+        )
+        if audio_plan.get("blocked"):
+            return self._record(
+                event,
+                "transcription_required",
+                "ambient.audio_transcription_unavailable",
+                action_id=action_id,
+                approval_request_id=approval_request_id,
+                model=model_ref,
+                transcription=audio_plan.get("transcription"),
+            )
+        input_text = str(audio_plan.get("input_text") or input_text)
+        attachments = list(audio_plan.get("attachments") if isinstance(audio_plan.get("attachments"), list) else attachments)
+        transcription_summary = audio_plan.get("transcription") if isinstance(audio_plan.get("transcription"), dict) else {}
         envelope = RumiInputEnvelope(
             role="user",
             input=input_text,
@@ -309,6 +342,7 @@ class AmbientTriggerRouter:
                             if approval_request_id
                             else {}
                         ),
+                        **({"transcription": transcription_summary} if transcription_summary else {}),
                         "metadata": event.metadata,
                     }
                 )
@@ -424,16 +458,22 @@ class AmbientTriggerRouter:
         context = pending.get("context") if isinstance(pending.get("context"), dict) else {}
         routing = state.get("routing") if isinstance(state.get("routing"), dict) else {}
         input_text = str(pending.get("input_text") or "")
+        has_audio_transcript = any(
+            _is_audio_attachment(item) and attachment_transcript(item)
+            for item in attachments
+            if isinstance(item, dict)
+        )
         return {
             "request_id": str(pending.get("request_id") or ""),
             "source": event.source if isinstance(event, AmbientTriggerEvent) else "",
             "trigger": event.trigger if isinstance(event, AmbientTriggerEvent) else "",
             "mode": event.mode if isinstance(event, AmbientTriggerEvent) else "",
             "action_id": str(pending.get("action_id") or ""),
-            "input_preview": _preview(input_text),
+            "input_preview": "[audio transcript redacted]" if has_audio_transcript else _preview(input_text),
             "has_text": bool(input_text.strip()),
             "attachment_count": len(attachments),
             "has_audio": any(_is_audio_attachment(item) for item in attachments if isinstance(item, dict)),
+            **({"transcription": _audio_transcription_summary(attachments)} if has_audio_transcript else {}),
             "conversation_id": (
                 _clean_string(event.payload.get("conversation_id")) if isinstance(event, AmbientTriggerEvent) else ""
             )
@@ -496,6 +536,133 @@ class AmbientTriggerRouter:
         group_id = (_clean_string(routing.get("group_id")) or "gesture") if group_enabled else ""
         model = _clean_string(routing.get("model")) or ""
         return f"{self.store.path}:{group_enabled}:{group_id}:{model}"
+
+    def _model_ref_for_dispatch(
+        self,
+        event: AmbientTriggerEvent,
+        context: dict[str, Any],
+        state: dict[str, Any],
+        target_conversation_id: str | None,
+        *,
+        params: dict[str, Any],
+        routing: dict[str, Any],
+    ) -> str:
+        for value in (
+            params.get("model"),
+            params.get("profile_id"),
+            event.payload.get("model"),
+            event.payload.get("profile_id"),
+            routing.get("model"),
+            context.get("model") if isinstance(context, dict) else "",
+            context.get("profile_id") if isinstance(context, dict) else "",
+        ):
+            model_ref = _clean_string(value)
+            if model_ref:
+                return model_ref
+        if target_conversation_id:
+            conversation = ChatStore().get_conversation(target_conversation_id) or {}
+            return _clean_string(conversation.get("model"))
+        return ""
+
+    def _prepare_audio_dispatch(
+        self,
+        event: AmbientTriggerEvent,
+        attachments: list[dict[str, Any]],
+        *,
+        input_text: str,
+        params: dict[str, Any],
+        routing: dict[str, Any],
+        model_ref: str,
+    ) -> dict[str, Any]:
+        audio_indexes = [
+            index
+            for index, attachment in enumerate(attachments)
+            if isinstance(attachment, dict) and _is_audio_attachment(attachment)
+        ]
+        if not audio_indexes:
+            return {"input_text": input_text, "attachments": attachments, "transcription": {}}
+
+        working = [dict(item) if isinstance(item, dict) else item for item in attachments]
+        supports_audio = _model_supports_audio(model_ref)
+        transcript_text = audio_transcript_text([item for item in working if isinstance(item, dict)])
+        transcription = _audio_transcription_summary([item for item in working if isinstance(item, dict)])
+        if transcript_text:
+            transcription["status"] = transcription.get("status") or "provided"
+        else:
+            result = transcribe_ambient_audio(
+                working,
+                payload=event.payload,
+                params=params,
+                routing=routing,
+            )
+            transcription = _transcription_result_summary(result)
+            if result.get("status") == "ok" and str(result.get("text") or "").strip():
+                by_index = {
+                    int(item.get("index")): item
+                    for item in (result.get("results") if isinstance(result.get("results"), list) else [])
+                    if isinstance(item, dict) and item.get("index") is not None
+                }
+                missing_audio_indexes = [
+                    index
+                    for index in audio_indexes
+                    if isinstance(working[index], dict) and not attachment_transcript(working[index])
+                ]
+                for index in missing_audio_indexes:
+                    item = by_index.get(index)
+                    text = str((item or {}).get("text") or result.get("text") or "").strip()
+                    if not text:
+                        continue
+                    attachment = dict(working[index])
+                    attachment["transcript"] = text
+                    attachment = mark_transcription_status(
+                        attachment,
+                        status="ok",
+                        source=str((item or {}).get("source") or result.get("source") or "transcription"),
+                        model=str((item or {}).get("model") or result.get("model") or ""),
+                    )
+                    working[index] = attachment
+                transcript_text = audio_transcript_text([item for item in working if isinstance(item, dict)])
+            elif not supports_audio:
+                return {
+                    "blocked": True,
+                    "input_text": input_text,
+                    "attachments": [strip_audio_media(item) if isinstance(item, dict) else item for item in working],
+                    "transcription": transcription,
+                }
+
+        if supports_audio:
+            if transcript_text:
+                working = [
+                    mark_transcription_status(
+                        item,
+                        status=str(transcription.get("status") or "ok"),
+                        source=str(transcription.get("source") or attachment_transcript_source(item)),
+                        model=str(transcription.get("model") or attachment_transcript_model(item)),
+                        include_audio_with_transcript=True,
+                    )
+                    if isinstance(item, dict) and _is_audio_attachment(item)
+                    else item
+                    for item in working
+                ]
+                return {"input_text": transcript_text, "attachments": working, "transcription": transcription}
+            working = [
+                mark_transcription_status(
+                    item,
+                    status=str(transcription.get("status") or "unavailable"),
+                    reason=str(transcription.get("reason") or ""),
+                )
+                if isinstance(item, dict) and _is_audio_attachment(item)
+                else item
+                for item in working
+            ]
+            fallback = _audio_passthrough_input_text(transcription)
+            return {"input_text": fallback, "attachments": working, "transcription": transcription}
+
+        clean_attachments = [
+            strip_audio_media(item) if isinstance(item, dict) and _is_audio_attachment(item) else item
+            for item in working
+        ]
+        return {"input_text": transcript_text or input_text, "attachments": clean_attachments, "transcription": transcription}
 
     def _record(self, event: AmbientTriggerEvent, status: str, reason: str, **extra: Any) -> dict[str, Any]:
         record = {
@@ -593,8 +760,62 @@ class AmbientTriggerRouter:
 
 
 def _is_audio_attachment(attachment: dict[str, Any]) -> bool:
-    mime_type = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
-    return mime_type.startswith("audio/")
+    return is_audio_attachment(attachment)
+
+
+def _model_supports_audio(model_ref: str) -> bool:
+    capabilities = get_model_capabilities(model_ref) if str(model_ref or "").strip() else None
+    if not isinstance(capabilities, dict):
+        return False
+    if str(capabilities.get("provider_id") or "").strip() == "stub":
+        return False
+    if capabilities.get("supports_audio") is True:
+        return True
+    if capabilities.get("supports_audio_input") is True:
+        return True
+    model_capabilities = capabilities.get("model_capabilities") if isinstance(capabilities.get("model_capabilities"), dict) else {}
+    flags = model_capabilities.get("capabilities") if isinstance(model_capabilities.get("capabilities"), dict) else {}
+    return bool(flags.get("audio_input") or flags.get("audio"))
+
+
+def _audio_transcription_summary(attachments: list[dict[str, Any]]) -> dict[str, Any]:
+    audio_items = [item for item in attachments if isinstance(item, dict) and _is_audio_attachment(item)]
+    transcripts = [attachment_transcript(item) for item in audio_items]
+    transcripts = [text for text in transcripts if text]
+    if not audio_items:
+        return {}
+    source = next((attachment_transcript_source(item) for item in audio_items if attachment_transcript_source(item)), "")
+    model = next((attachment_transcript_model(item) for item in audio_items if attachment_transcript_model(item)), "")
+    status = next((str(item.get("transcription_status") or "").strip() for item in audio_items if str(item.get("transcription_status") or "").strip()), "")
+    return {
+        "status": status or ("provided" if transcripts else "missing"),
+        "source": source,
+        "model": model,
+        "attachment_count": len(audio_items),
+        "transcript_count": len(transcripts),
+        "transcript_length": sum(len(text) for text in transcripts),
+    }
+
+
+def _transcription_result_summary(result: dict[str, Any]) -> dict[str, Any]:
+    status = str(result.get("status") or "unavailable").strip()
+    text = str(result.get("text") or "")
+    return {
+        "status": status,
+        "source": str(result.get("source") or ""),
+        "model": str(result.get("model") or ""),
+        "code": str(result.get("code") or ""),
+        "reason": str(result.get("reason") or "")[:300],
+        "transcript_count": 1 if text.strip() else 0,
+        "transcript_length": len(text.strip()),
+    }
+
+
+def _audio_passthrough_input_text(transcription: dict[str, Any]) -> str:
+    status = str(transcription.get("status") or "unavailable").strip()
+    if status == "unavailable":
+        return "音声入力を添付しています。文字起こしは利用できませんでした。"
+    return "音声入力を添付しています。"
 
 
 def _clean_string(value: Any) -> str:

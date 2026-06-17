@@ -1251,7 +1251,7 @@ def _attachment_audio_blocks(attachments: list[dict[str, Any]]) -> list[dict[str
     for attachment in attachments:
         if not isinstance(attachment, dict):
             continue
-        if _attachment_audio_transcript(attachment):
+        if _attachment_audio_transcript(attachment) and not _attachment_include_audio_with_transcript(attachment):
             continue
         mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
         data_url = attachment.get("dataUrl") or attachment.get("data_url")
@@ -1311,6 +1311,13 @@ def _attachment_audio_transcript(attachment: dict[str, Any]) -> str:
     return ""
 
 
+def _attachment_include_audio_with_transcript(attachment: dict[str, Any]) -> bool:
+    if bool(attachment.get("include_audio_with_transcript")):
+        return True
+    metadata = attachment.get("metadata") if isinstance(attachment.get("metadata"), dict) else {}
+    return bool(metadata.get("include_audio_with_transcript"))
+
+
 def _audio_format_from_mime(value: str) -> str:
     lowered = str(value or "").lower()
     if "audio/webm" in lowered:
@@ -1346,9 +1353,21 @@ def _sanitize_attachment_metadata(attachments: list[dict[str, Any]]) -> list[dic
         }
         if _attachment_audio_transcript(attachment):
             item["transcribed"] = True
+            item["transcript_length"] = len(_attachment_audio_transcript(attachment))
             source = attachment.get("transcript_source") or attachment.get("transcription_source")
+            metadata = attachment.get("metadata") if isinstance(attachment.get("metadata"), dict) else {}
+            if not source:
+                source = metadata.get("transcript_source") or metadata.get("transcription_source")
             if isinstance(source, str) and source.strip():
                 item["transcript_source"] = source.strip()[:80]
+            status = attachment.get("transcription_status") or metadata.get("transcription_status")
+            if isinstance(status, str) and status.strip():
+                item["transcription_status"] = status.strip()[:80]
+            model = attachment.get("transcription_model") or metadata.get("transcription_model")
+            if isinstance(model, str) and model.strip():
+                item["transcription_model"] = model.strip()[:120]
+            if _attachment_include_audio_with_transcript(attachment):
+                item["audio_included_with_transcript"] = True
         sanitized.append(item)
     return sanitized
 

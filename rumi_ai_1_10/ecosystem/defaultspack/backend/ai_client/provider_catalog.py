@@ -106,6 +106,8 @@ def _capability_enrichment(model: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "supports_vision": False,
             "supports_image_input": False,
+            "supports_audio": False,
+            "supports_audio_input": False,
             "supports_tool_calling": False,
             "supports_fast": False,
             "supports_thinking": supports_thinking,
@@ -175,6 +177,8 @@ def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
     )
     item["supports_vision"] = bool(capability_fields.get("supports_vision"))
     item["supports_image_input"] = bool(capability_fields.get("supports_image_input"))
+    item["supports_audio"] = bool(capability_fields.get("supports_audio"))
+    item["supports_audio_input"] = bool(capability_fields.get("supports_audio_input") or capability_fields.get("supports_audio"))
     item["supports_tool_calling"] = bool(capability_fields.get("supports_tool_calling"))
     item["supports_fast"] = bool(capability_fields.get("supports_fast"))
     item["speed_tier"] = str(capability_fields.get("speed_tier") or "balanced")
@@ -197,6 +201,8 @@ def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
             "thinking_levels": thinking_levels,
             "supports_vision": item["supports_vision"],
             "supports_image_input": item["supports_image_input"],
+            "supports_audio": item["supports_audio"],
+            "supports_audio_input": item["supports_audio_input"],
             "supports_tool_calling": item["supports_tool_calling"],
             "supports_fast": item["supports_fast"],
             "speed_tier": item["speed_tier"],
@@ -233,6 +239,8 @@ def _with_legacy_profile_fields(profile: Dict[str, Any]) -> Dict[str, Any]:
         "capabilities": item.get("capabilities", []),
         "supports_vision": item.get("supports_vision"),
         "supports_image_input": item.get("supports_image_input"),
+        "supports_audio": item.get("supports_audio"),
+        "supports_audio_input": item.get("supports_audio_input"),
         "supports_tool_calling": item.get("supports_tool_calling"),
         "supports_fast": item.get("supports_fast"),
         "speed_tier": item.get("speed_tier"),
@@ -250,6 +258,8 @@ def _with_legacy_profile_fields(profile: Dict[str, Any]) -> Dict[str, Any]:
     item["default_thinking_level"] = enriched["default_thinking_level"]
     item["supports_vision"] = enriched["supports_vision"]
     item["supports_image_input"] = enriched["supports_image_input"]
+    item["supports_audio"] = enriched["supports_audio"]
+    item["supports_audio_input"] = enriched["supports_audio_input"]
     item["supports_tool_calling"] = enriched["supports_tool_calling"]
     item["supports_fast"] = enriched["supports_fast"]
     item["speed_tier"] = enriched["speed_tier"]
