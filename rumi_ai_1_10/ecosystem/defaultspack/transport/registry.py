@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -385,6 +386,17 @@ def _dedupe_http_route_specs(groups: list[list[HttpRouteSpec]]) -> list[HttpRout
     return result
 
 
+def _change_request_commit_route_enabled() -> bool:
+    value = str(os.environ.get("RUMI_REVIEW_ENABLE_COMMIT") or "").strip().lower()
+    return value in {"1", "true", "yes", "on", "enabled"}
+
+
+def _route_enabled_by_default(spec: HttpRouteSpec) -> bool:
+    if spec.method == "POST" and spec.pattern == "/api/change-requests/{id}/commit":
+        return _change_request_commit_route_enabled()
+    return True
+
+
 def canonical_http_route_specs(*, include_always_available: bool = True) -> list[HttpRouteSpec]:
     """Return the canonical endpoint -> flow/function/block declaration map.
 
@@ -392,7 +404,7 @@ def canonical_http_route_specs(*, include_always_available: bool = True) -> list
     chat ingress can move without changing public HTTP paths.
     """
     flow_specs = flow_http_route_specs()
-    fallback_specs = list(_FALLBACK_HTTP_ROUTE_SPECS)
+    fallback_specs = [spec for spec in _FALLBACK_HTTP_ROUTE_SPECS if _route_enabled_by_default(spec)]
     base_specs = _dedupe_http_route_specs([flow_specs, fallback_specs])
     existing = {(spec.method, spec.pattern) for spec in base_specs}
     component_specs = [

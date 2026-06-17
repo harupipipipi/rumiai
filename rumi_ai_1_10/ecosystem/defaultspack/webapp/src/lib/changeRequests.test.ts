@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   addChangeRequestComment,
+  changeRequestCommitEnabled,
   commitChangeRequest,
   createChangeRequest,
   exportChangeRequestPatch,
@@ -224,11 +225,11 @@ test("change request review actions use canonical mutation routes", async () => 
   }
 });
 
-test("commitChangeRequest preserves approval-required and blocked responses", async () => {
+test("commitChangeRequest is blocked in the default Phase 1 frontend", async () => {
   const originalFetch = globalThis.fetch;
-  let requestUrl = "";
+  let called = false;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    requestUrl = String(input);
+    called = true;
     assert.equal(init?.method, "POST");
     assert.deepEqual(JSON.parse(String(init?.body)), { message: "seal commit" });
     return new Response(JSON.stringify({
@@ -242,10 +243,11 @@ test("commitChangeRequest preserves approval-required and blocked responses", as
   }) as typeof fetch;
 
   try {
+    assert.equal(changeRequestCommitEnabled, false);
     const result = await commitChangeRequest("cr review", "seal commit");
-    assert.equal(requestUrl, "/api/change-requests/cr%20review/commit");
-    assert.equal(result?.approval_required, true);
-    assert.equal(result?.approval_request_id, "approval_1");
+    assert.equal(called, false);
+    assert.equal(result?.blocked, true);
+    assert.equal(result?.reason, "phase1_review_only");
   } finally {
     globalThis.fetch = originalFetch;
   }

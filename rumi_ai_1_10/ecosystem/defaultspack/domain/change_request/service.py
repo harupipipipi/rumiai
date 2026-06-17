@@ -312,17 +312,25 @@ class ChangeRequestService:
             command = self._command_for_suggestion(record, str(payload.get("suggested_check_id") or ""))
         validate_check_command(command)
         result = run_allowed_check(record["workspace_root"], command, cwd=payload.get("cwd"))
+        full_log = str(result.pop("_full_log", ""))
+        check_id = new_review_check_id()
+        log_ref = f"store://change_request/{change_request_id}/checks/{check_id}/log"
+        self.store.write_check_log(change_request_id, check_id, full_log)
         check = {
-            "id": new_review_check_id(),
-            "log_ref": f"store://change_request/{change_request_id}/checks",
+            "id": check_id,
+            "log_ref": log_ref,
+            "full_log_ref": log_ref,
             **result,
         }
-        check["log_ref"] = f"store://change_request/{change_request_id}/checks/{check['id']}/log"
         checks = [*self._checks(record), check]
         updated = self._update_with_counts(change_request_id, {"checks": checks})
+        persisted_check = next(
+            (item for item in self._checks(updated) if item.get("id") == check_id),
+            check,
+        )
         return {
             "change_request": self._public_record(updated),
-            "check": check,
+            "check": persisted_check,
             "checks": self._checks(updated),
             "check_summary": check_summary(self._checks(updated)),
             "suggested_checks": self._suggested_checks(updated),

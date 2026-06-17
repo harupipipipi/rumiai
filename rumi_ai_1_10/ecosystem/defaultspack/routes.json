@@ -409,12 +409,6 @@
       "description": "Recalculate the Rumi Review Seal"
     },
     {
-      "method": "POST",
-      "path": "/api/change-requests/{id}/commit",
-      "flow_id": "transport_direct",
-      "description": "Commit a sealed Rumi Review snapshot without pushing"
-    },
-    {
       "method": "GET",
       "path": "/api/coding/git/branch",
       "flow_id": "transport_direct",

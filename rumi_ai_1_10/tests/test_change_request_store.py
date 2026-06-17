@@ -227,6 +227,45 @@ def test_store_persists_outside_reviewed_repo_and_snapshots_dirty_files(tmp_path
     assert statuses.get("untracked.txt") in {"untracked", "new", "A", "added"}
 
 
+def test_store_normalizes_legacy_check_full_log_to_bounded_refs(tmp_path):
+    store_cls = _change_request_store_class()
+    store = store_cls(tmp_path / "change_requests.json")
+    large_log = "BEGIN_FULL_LOG" + ("x" * 13000)
+    log_ref = "store://change_request/cr_test/checks/chk_test/log"
+
+    created = store.create(
+        {
+            "id": "cr_test",
+            "title": "Legacy check",
+            "checks": [
+                {
+                    "id": "chk_test",
+                    "name": "pytest",
+                    "status": "passed",
+                    "stdout_tail": large_log,
+                    "stderr_tail": large_log,
+                    "full_log": large_log,
+                    "log_ref": log_ref,
+                }
+            ],
+        }
+    )
+    check = created["checks"][0]
+    persisted = json.loads(store.storage_path.read_text(encoding="utf-8"))
+    stored_check = persisted["change_requests"]["cr_test"]["checks"][0]
+
+    assert "full_log" not in check
+    assert "full_log" not in stored_check
+    assert check["full_log_ref"] == log_ref
+    assert stored_check["full_log_ref"] == log_ref
+    assert "BEGIN_FULL_LOG" not in stored_check["stdout_tail"]
+    assert "BEGIN_FULL_LOG" not in stored_check["stderr_tail"]
+    assert "BEGIN_FULL_LOG" not in stored_check["log_tail"]
+    assert len(stored_check["stdout_tail"]) <= 12000
+    assert len(stored_check["stderr_tail"]) <= 12000
+    assert len(stored_check["log_tail"]) <= 12000
+
+
 def test_synthetic_untracked_diff_looks_like_new_file_diff(tmp_path, monkeypatch):
     workspace = tmp_path / "reviewed-repo"
     workspace.mkdir()

@@ -8,6 +8,11 @@ import sys
 from typing import Any
 
 
+def _commit_route_enabled() -> bool:
+    value = str(os.environ.get("RUMI_REVIEW_ENABLE_COMMIT") or "").strip().lower()
+    return value in {"1", "true", "yes", "on", "enabled"}
+
+
 def run(context: dict[str, Any]):
     pack_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     if pack_root not in sys.path:
@@ -58,8 +63,9 @@ def run(context: dict[str, Any]):
             {"id": "id", "check_id": "check_id"},
         ),
         ("GET", "/api/change-requests/{id}/seal", "blocks.change_request.seal", {"id": "id"}),
-        ("POST", "/api/change-requests/{id}/commit", "blocks.change_request.commit", {"id": "id"}),
     ]
+    if _commit_route_enabled():
+        routes.append(("POST", "/api/change-requests/{id}/commit", "blocks.change_request.commit", {"id": "id"}))
 
     for method, pattern, module_path, path_inject in routes:
         interface_registry.register(

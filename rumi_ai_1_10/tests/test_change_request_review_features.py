@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -81,19 +82,33 @@ def test_comments_decisions_and_viewed_files_are_persisted(tmp_path, monkeypatch
 
 def test_run_check_uses_allowlist_and_persists_log_tail(tmp_path, monkeypatch):
     workspace = _workspace(tmp_path)
-    (workspace / "test_sample.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    (workspace / "test_sample.py").write_text(
+        "def test_ok():\n    print('BEGIN_FULL_LOG' + ('x' * 13000))\n    assert True\n",
+        encoding="utf-8",
+    )
     service = _service(tmp_path, monkeypatch)
     created = service.create(workspace_root=str(workspace), title="Review")
 
     with pytest.raises(ValueError):
         service.run_check(created["id"], {"command": "python -m pytest && rm -rf ."})
 
-    result = service.run_check(created["id"], {"command": "python -m pytest test_sample.py -q"})
+    result = service.run_check(created["id"], {"command": "python -m pytest test_sample.py -q -s"})
     check = result["check"]
     fetched = service.get(created["id"])
+    stored_payload = json.loads(service.store.storage_path.read_text(encoding="utf-8"))
+    stored_check = stored_payload["change_requests"][created["id"]]["checks"][0]
+    artifact_log = service.store.check_log_path(created["id"], check["id"]).read_text(encoding="utf-8")
 
     assert check["status"] == "passed"
     assert check["log_ref"].startswith("store://change_request/")
+    assert check["full_log_ref"] == check["log_ref"]
+    assert "full_log" not in check
+    assert "full_log" not in stored_check
+    assert "BEGIN_FULL_LOG" in artifact_log
+    assert "BEGIN_FULL_LOG" not in stored_check["log_tail"]
+    assert len(stored_check["stdout_tail"]) <= 12000
+    assert len(stored_check["stderr_tail"]) <= 12000
+    assert len(stored_check["log_tail"]) <= 12000
     assert fetched["check_summary"]["passed"] == 1
 
 
@@ -123,6 +138,12 @@ def test_commit_block_ignores_client_approved_flag(tmp_path, monkeypatch):
 
     from blocks.change_request.commit import run as commit_run
 
+    result = commit_run({"id": created["id"], "message": "sealed", "approved": True}, {})
+    assert result["status"] == "ok"
+    assert result["data"]["blocked"] is True
+    assert result["data"]["reason"] == "phase1_review_only"
+
+    monkeypatch.setenv("RUMI_REVIEW_ENABLE_COMMIT", "1")
     result = commit_run({"id": created["id"], "message": "sealed", "approved": True}, {})
     assert result["status"] == "ok"
     assert result["data"]["approval_required"] is True

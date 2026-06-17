@@ -5,6 +5,7 @@ import type { CodingDiffResponse, CodingGitStatus } from "../../lib/api";
 import type { ChangeRequestRecord } from "../../lib/changeRequests";
 import {
   addChangeRequestComment,
+  changeRequestCommitEnabled,
   commitChangeRequest,
   createChangeRequest,
   exportChangeRequestPatch,
@@ -309,7 +310,7 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
   };
 
   const handleCommit = () => {
-    if (!selectedReview) return;
+    if (!selectedReview || !changeRequestCommitEnabled || !commitReady) return;
     void runReviewAction("commit", async () => {
       const result = await commitChangeRequest(selectedReview.id, commitMessage);
       if (!result) return;
@@ -466,7 +467,7 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
           )}
 
           <div className="flex flex-wrap gap-1">
-            {(["summary", "files", "checks", "review", "commit"] as const).map((tab) => (
+            {(["summary", "files", "checks", "review", ...(changeRequestCommitEnabled ? ["commit" as const] : [])] as const).map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -497,7 +498,7 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
                 <span className="rounded border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">{checkLabel(selectedReview ?? { id: "working-tree", status: "open" })}</span>
               </div>
               {selectedReview && (
-                <div className="mt-3 grid gap-2 min-[1440px]:grid-cols-3">
+                <div className={`mt-3 grid gap-2 ${changeRequestCommitEnabled ? "min-[1440px]:grid-cols-3" : "min-[1440px]:grid-cols-2"}`}>
                   <div className={`rounded border px-2 py-1.5 ${stale ? "border-amber-500/30 bg-amber-500/10" : "border-zinc-800 bg-black/20"}`}>
                     <p className="text-[10px] text-zinc-500">Seal</p>
                     <p className={`mt-0.5 text-[11px] ${stale ? "text-amber-100" : "text-zinc-200"}`}>{stale ? "stale" : "current"}</p>
@@ -506,10 +507,12 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
                     <p className="text-[10px] text-zinc-500">Review</p>
                     <p className={`mt-0.5 text-[11px] ${unresolvedCount ? "text-amber-100" : "text-zinc-200"}`}>{unresolvedCount ? `${unresolvedCount} unresolved` : "clear"}</p>
                   </div>
-                  <div className={`rounded border px-2 py-1.5 ${commitReady ? "border-emerald-500/30 bg-emerald-500/10" : "border-zinc-800 bg-black/20"}`}>
-                    <p className="text-[10px] text-zinc-500">Commit</p>
-                    <p className={`mt-0.5 text-[11px] ${commitReady ? "text-emerald-100" : "text-zinc-200"}`}>{commitReady ? "ready" : "blocked"}</p>
-                  </div>
+                  {changeRequestCommitEnabled && (
+                    <div className={`rounded border px-2 py-1.5 ${commitReady ? "border-emerald-500/30 bg-emerald-500/10" : "border-zinc-800 bg-black/20"}`}>
+                      <p className="text-[10px] text-zinc-500">Commit</p>
+                      <p className={`mt-0.5 text-[11px] ${commitReady ? "text-emerald-100" : "text-zinc-200"}`}>{commitReady ? "ready" : "blocked"}</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -616,7 +619,7 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
               </div>
             </div>
           )}
-          {detailTab === "commit" && (
+          {changeRequestCommitEnabled && detailTab === "commit" && (
             <div className="space-y-2">
               <div className="rounded-md border border-zinc-800 bg-black/20 p-3">
                 <div className="flex items-center gap-2">
@@ -663,7 +666,7 @@ export function ChangeReviewPanel({ workspaceId }: { workspaceId?: string | null
                   onChange={(event) => setCommitMessage(event.target.value)}
                   className="mt-2 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-[11px] text-zinc-200 outline-none focus:border-zinc-600"
                 />
-                <button type="button" onClick={handleCommit} disabled={!selectedReview || !commitMessage.trim() || actionBusy === "commit"} className="mt-2 flex h-8 items-center gap-1 rounded-md bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-600">
+                <button type="button" onClick={handleCommit} disabled={!selectedReview || !commitReady || !commitMessage.trim() || actionBusy === "commit"} className="mt-2 flex h-8 items-center gap-1 rounded-md bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-600">
                   <GitCommit size={12} /> Commit sealed snapshot
                 </button>
               </div>

@@ -6,6 +6,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = 2
+CHECK_LOG_TAIL_CHARS = 12000
 STATUS_VALUES = {"draft", "open", "changes_requested", "approved", "committed", "closed", "archived"}
 DECISION_VALUES = {"none", "commented", "changes_requested", "approved"}
 COMMENT_KIND_VALUES = {"comment", "change_request", "suggestion"}
@@ -151,6 +152,7 @@ def normalize_viewed_files(raw: Any) -> dict[str, dict[str, Any]]:
 
 def normalize_check(raw: dict[str, Any]) -> dict[str, Any]:
     check = dict(raw or {})
+    legacy_full_log = str(check.get("full_log") or "")
     check["id"] = str(check.get("id") or new_review_check_id())
     check["name"] = str(check.get("name") or check.get("command") or "check")
     check["command"] = str(check.get("command") or "")
@@ -158,16 +160,22 @@ def normalize_check(raw: dict[str, Any]) -> dict[str, Any]:
     check["status"] = status if status in CHECK_STATUS_VALUES else "queued"
     exit_code = check.get("exit_code")
     check["exit_code"] = exit_code if isinstance(exit_code, int) else None
-    check["stdout_tail"] = str(check.get("stdout_tail") or "")
-    check["stderr_tail"] = str(check.get("stderr_tail") or "")
-    check["log_tail"] = str(check.get("log_tail") or "")
-    check["full_log"] = str(check.get("full_log") or "")
+    check["stdout_tail"] = bounded_log_tail(check.get("stdout_tail"))
+    check["stderr_tail"] = bounded_log_tail(check.get("stderr_tail"))
+    check["log_tail"] = bounded_log_tail(check.get("log_tail") or legacy_full_log)
+    check.pop("full_log", None)
+    check.pop("_full_log", None)
     check["log_ref"] = str(check.get("log_ref") or "")
+    check["full_log_ref"] = str(check.get("full_log_ref") or check.get("log_ref") or "")
     check["started_at"] = str(check.get("started_at") or "")
     check["completed_at"] = str(check.get("completed_at") or "")
     duration = check.get("duration_ms")
     check["duration_ms"] = duration if isinstance(duration, int) else None
     return check
+
+
+def bounded_log_tail(value: Any) -> str:
+    return str(value or "")[-CHECK_LOG_TAIL_CHARS:]
 
 
 def refresh_review_counts(record: dict[str, Any]) -> None:

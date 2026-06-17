@@ -1,12 +1,24 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Any
 
 from .context import principal_from_context
 from .response import error, normalize_output
+
+
+def _flag_enabled(name: str) -> bool:
+    value = str(os.environ.get(name) or "").strip().lower()
+    return value in {"1", "true", "yes", "on", "enabled"}
+
+
+def _defaultspack_function_enabled(function_id: str) -> bool:
+    if function_id == "coding_change_request_commit":
+        return _flag_enabled("RUMI_REVIEW_ENABLE_COMMIT")
+    return True
 
 
 def ensure_defaultspack_functions_registered(container: Any | None = None) -> int:
@@ -39,6 +51,8 @@ def ensure_defaultspack_functions_registered(container: Any | None = None) -> in
             continue
         function_id = str(manifest.get("function_id") or function_dir.name).strip()
         if not function_id:
+            continue
+        if not _defaultspack_function_enabled(function_id):
             continue
         try:
             if registry.register(

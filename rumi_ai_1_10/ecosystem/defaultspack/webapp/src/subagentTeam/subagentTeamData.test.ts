@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import type { CompanyMessage } from "../lib/api";
 import { ChannelButton } from "./SubagentTeamWorkspace";
 import {
   agentShortId,
@@ -18,7 +19,9 @@ import {
   previewInbox,
   previewMessages,
   previewRuns,
+  removeReconciledLocalSubagentMessages,
   shortId,
+  subagentMessageClientId,
   subagentTeamWorkspaceMetadata,
   subagentTreeItemsForMode,
 } from "./subagentTeamData";
@@ -54,6 +57,62 @@ test("subagent team workspace metadata carries the backend guard marker", () => 
   assert.equal(hasSubagentTeamWorkspaceMarker({ surface: "subagent_team_workspace" }), true);
   assert.equal(hasSubagentTeamWorkspaceMarker({ subagent_team: true }), true);
   assert.equal(hasSubagentTeamWorkspaceMarker({ surface: "main_chat" }), false);
+});
+
+test("subagent message client ids round-trip through metadata", () => {
+  const metadata = subagentTeamWorkspaceMetadata({ client_message_id: "client-1" });
+  assert.equal(subagentMessageClientId({ metadata }), "client-1");
+});
+
+test("local optimistic messages reconcile with server client ids", () => {
+  const local: CompanyMessage[] = [
+    {
+      id: "local-client-1",
+      company_id: "company-1",
+      channel_id: "ship-room",
+      sender_id: "you",
+      content: "same message",
+      metadata: subagentTeamWorkspaceMetadata({ client_message_id: "client-1" }),
+    },
+    {
+      id: "local-client-2",
+      company_id: "company-1",
+      channel_id: "ship-room",
+      sender_id: "you",
+      content: "still pending",
+      metadata: subagentTeamWorkspaceMetadata({ client_message_id: "client-2" }),
+    },
+  ];
+  const server: CompanyMessage[] = [
+    {
+      id: "server-client-1",
+      company_id: "company-1",
+      channel_id: "ship-room",
+      sender_id: "user",
+      content: "same message",
+      metadata: subagentTeamWorkspaceMetadata({ client_message_id: "client-1" }),
+    },
+  ];
+
+  assert.deepEqual(
+    removeReconciledLocalSubagentMessages(local, server).map((message) => message.id),
+    ["local-client-2"],
+  );
+});
+
+test("local optimistic message is removed after send success even before reload metadata", () => {
+  const local: CompanyMessage[] = [
+    {
+      id: "local-client-1",
+      company_id: "company-1",
+      channel_id: "ship-room",
+      sender_id: "you",
+      content: "same message",
+      metadata: subagentTeamWorkspaceMetadata({ client_message_id: "client-1" }),
+    },
+  ];
+
+  assert.deepEqual(removeReconciledLocalSubagentMessages(local, [], "client-1"), []);
 });
 
 test("channelCount prefers unread metadata and falls back to messages", () => {

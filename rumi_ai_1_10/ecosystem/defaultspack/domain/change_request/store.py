@@ -44,6 +44,33 @@ class ChangeRequestStore:
     def storage_path(self) -> Path:
         return self._storage_path
 
+    def check_log_path(self, change_request_id: str, check_id: str) -> Path:
+        cr_id = sanitize_change_request_id(change_request_id)
+        check_segment = _sanitize_artifact_segment(check_id, label="check id")
+        return self._storage_path.parent / "change_request_logs" / cr_id / "checks" / f"{check_segment}.log"
+
+    def write_check_log(self, change_request_id: str, check_id: str, log_text: str) -> Path:
+        path = self.check_log_path(change_request_id, check_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(path.parent),
+            prefix="." + path.name + ".",
+            suffix=".tmp",
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(str(log_text or ""))
+                handle.flush()
+                os.fsync(handle.fileno())
+            self._replace_atomic_file(Path(tmp_name), path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
+        return path
+
     def list(self) -> list[dict[str, Any]]:
         data = self._load()
         records = [copy.deepcopy(record) for record in data["change_requests"].values()]
@@ -175,3 +202,11 @@ class ChangeRequestStore:
                 time.sleep(min(0.05 * (2 ** attempt), 0.5))
         if last_error is not None:
             raise last_error
+
+
+def _sanitize_artifact_segment(value: Any, *, label: str) -> str:
+    text = str(value or "").strip()
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+    if not text or any(ch not in allowed for ch in text):
+        raise ValueError(label + " is invalid")
+    return text

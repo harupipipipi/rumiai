@@ -594,7 +594,21 @@ export type ChangeRequestCommitResult = {
   review?: ChangeRequestRecord | null;
 };
 
+const CHANGE_REQUEST_COMMIT_ENABLED_VALUES = new Set(["1", "true", "yes", "on", "enabled"]);
+
+export const changeRequestCommitEnabled = CHANGE_REQUEST_COMMIT_ENABLED_VALUES.has(
+  String((import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_RUMI_REVIEW_ENABLE_COMMIT ?? "").trim().toLowerCase(),
+);
+
 export async function commitChangeRequest(reviewId: string, message: string): Promise<ChangeRequestCommitResult | null> {
+  if (!changeRequestCommitEnabled) {
+    return {
+      committed: false,
+      blocked: true,
+      reason: "phase1_review_only",
+      display_summary: "Rumi Review Phase 1 is review-only; commit is disabled by default.",
+    };
+  }
   const result = await requestChangeRequest<unknown>(`/api/change-requests/${encodeURIComponent(reviewId)}/commit`, {
     method: "POST",
     body: JSON.stringify({ message }),

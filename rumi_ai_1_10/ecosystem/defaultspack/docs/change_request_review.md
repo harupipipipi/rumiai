@@ -25,6 +25,9 @@ Phase 1 does not write into the reviewed workspace. In particular, it must not
 create `.rumi_review`, `.rumi_reviews`, `.rumi_change_requests`, or equivalent
 metadata inside the target repo. The store belongs in defaultspack runtime data,
 for example under the configured `RUMI_DEFAULTSPACK_CHANGE_REQUEST_STORE_PATH`.
+The default UI, HTTP route set, and function registry do not expose commit
+controls, `POST /api/change-requests/{id}/commit`, or
+`coding_change_request_commit`.
 
 ## Diff Seal
 
@@ -82,3 +85,8 @@ or publishing it to a remote requires separate approval-aware flows, audit
 entries, and policy checks. Keeping Phase 1 read-only makes it safe to open a
 review without granting write capability, network access, or Git publication
 authority.
+
+Experimental local commit plumbing may be enabled explicitly with
+`RUMI_REVIEW_ENABLE_COMMIT=1` on the backend and
+`VITE_RUMI_REVIEW_ENABLE_COMMIT=1` in the web build. Those flags are
+default-off and are outside the Phase 1 default surface.

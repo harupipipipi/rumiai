@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import os
+
 from blocks._common import error, ok
 from blocks.coding._approval import approval_invalid_response, approval_required, is_server_approved
 from domain.change_request import ChangeRequestService
 from domain.safety.audit import record_attempt, record_execution, record_failure
+
+
+def _commit_enabled() -> bool:
+    value = str(os.environ.get("RUMI_REVIEW_ENABLE_COMMIT") or "").strip().lower()
+    return value in {"1", "true", "yes", "on", "enabled"}
 
 
 def run(input_data, context=None):
@@ -11,6 +18,16 @@ def run(input_data, context=None):
     cr_id = str(input_data.get("id") or "").strip()
     operation = "coding.change_request.commit"
     record_attempt(operation, "high", {"id": cr_id, "message": input_data.get("message")})
+    if not _commit_enabled():
+        record_failure(operation, "high", "phase1_review_only", {"id": cr_id})
+        return ok(
+            {
+                "committed": False,
+                "blocked": True,
+                "reason": "phase1_review_only",
+                "display_summary": "Rumi Review Phase 1 is review-only; commit is disabled by default.",
+            }
+        )
     if not is_server_approved(context, operation, input_data):
         invalid = approval_invalid_response(operation, input_data, error)
         if invalid:

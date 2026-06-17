@@ -81,6 +81,32 @@ export function subagentTeamWorkspaceMetadata(metadata: Record<string, unknown> 
   };
 }
 
+export function subagentClientMessageId(metadata: Record<string, unknown> | undefined | null): string | null {
+  const value = metadata?.client_message_id;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+export function subagentMessageClientId(message: Pick<CompanyMessage, "metadata">): string | null {
+  return subagentClientMessageId(message.metadata);
+}
+
+export function removeReconciledLocalSubagentMessages(
+  localMessages: CompanyMessage[],
+  serverMessages: CompanyMessage[],
+  sentClientMessageId?: string | null,
+): CompanyMessage[] {
+  const serverClientIds = new Set(
+    serverMessages.map(subagentMessageClientId).filter((value): value is string => Boolean(value)),
+  );
+  const sentId = sentClientMessageId?.trim() || null;
+  return localMessages.filter((message) => {
+    const clientMessageId = subagentMessageClientId(message);
+    if (!clientMessageId) return true;
+    if (sentId && clientMessageId === sentId) return false;
+    return !serverClientIds.has(clientMessageId);
+  });
+}
+
 export function hasSubagentTeamWorkspaceMarker(metadata: Record<string, unknown> | undefined | null): boolean {
   return Boolean(
     metadata

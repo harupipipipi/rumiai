@@ -326,7 +326,7 @@ legacy_routes:
   legacy_block_module: blocks.change_request.commit
   replacement_function_id: coding_change_request_commit
   owner: rumi_review
-  reason: tracked compatibility fallback during HTTP function migration
+  reason: default-off compatibility fallback; registered only with RUMI_REVIEW_ENABLE_COMMIT
   remove_after: v2.4
 - method: POST
   pattern: /api/subagent-team/bootstrap

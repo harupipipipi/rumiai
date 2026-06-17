@@ -65,6 +65,7 @@ import {
   previewMessages,
   previewRuns,
   previewTasks,
+  removeReconciledLocalSubagentMessages,
   shortId,
   subagentTreeItemsForMode,
   subagentTeamWorkspaceMetadata,
@@ -88,6 +89,13 @@ const DEFAULT_CHANNEL_ID = "ship-room";
 
 function effectiveThreadId(thread: SubagentThread): string {
   return thread.type === "dm" ? `dm-${thread.id}` : thread.id;
+}
+
+function createClientMessageId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `subagent-${crypto.randomUUID()}`;
+  }
+  return `subagent-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 const ROLE_ICON_REGISTRY: Record<string, LucideIcon> = {
@@ -961,6 +969,7 @@ export function SubagentTeamWorkspace({
       setChannels(nextChannels);
       setTasks(nextTasks);
       setMessages(nextMessages);
+      setLocalMessages((current) => removeReconciledLocalSubagentMessages(current, nextMessages));
       setRuns(nextRuns);
 
       const inboxResults = await Promise.allSettled(
@@ -1017,7 +1026,10 @@ export function SubagentTeamWorkspace({
   const visibleRuns = usePreviewData ? previewRuns : runs;
   const visibleInbox = usePreviewData ? previewInbox : inboxItems;
   const allMessages = useMemo(
-    () => [...visibleMessages, ...localMessages].sort((left, right) => messageTimestamp(left.created_at) - messageTimestamp(right.created_at)),
+    () => [
+      ...visibleMessages,
+      ...removeReconciledLocalSubagentMessages(localMessages, visibleMessages),
+    ].sort((left, right) => messageTimestamp(left.created_at) - messageTimestamp(right.created_at)),
     [localMessages, visibleMessages],
   );
   const agentsById = useMemo(() => new Map(visibleAgents.map((agent) => [agent.agent_id, agent])), [visibleAgents]);
@@ -1165,10 +1177,11 @@ export function SubagentTeamWorkspace({
     const content = draft.trim();
     if (!content || busy) return;
     const now = new Date().toISOString();
+    const clientMessageId = createClientMessageId();
     const targetChannelId = activeThread.type === "channel" ? activeThread.id : visibleChannels[0]?.id ?? DEFAULT_CHANNEL_ID;
     const mentions = activeThread.type === "dm" ? [activeThread.id] : mentionIdsFromText(content, visibleAgents);
     const optimistic: CompanyMessage = {
-      id: `local-${Date.now()}`,
+      id: `local-${clientMessageId}`,
       company_id: visibleCompany.id,
       channel_id: activeThread.type === "dm" ? effectiveThreadId(activeThread) : targetChannelId,
       sender_id: "you",
@@ -1177,6 +1190,7 @@ export function SubagentTeamWorkspace({
       created_at: now,
       metadata: subagentTeamWorkspaceMetadata({
         source: "subagent_team_ui",
+        client_message_id: clientMessageId,
         ...(activeThread.type === "dm" ? { dm_agent_id: activeThread.id } : {}),
       }),
     };
@@ -1187,15 +1201,17 @@ export function SubagentTeamWorkspace({
     setBusy(true);
     setError(null);
     try {
-      await api.sendSubagentTeamMessage({
+      const sentMessage = await api.sendSubagentTeamMessage({
         companyId: activeCompanyId,
         conversationId: activeConversationId,
         content,
         channel_id: targetChannelId,
         sender_id: "user",
         mentions,
+        client_message_id: clientMessageId,
         metadata: optimistic.metadata,
       });
+      setLocalMessages((current) => removeReconciledLocalSubagentMessages(current, [sentMessage], clientMessageId));
       await loadWorkspace(activeCompanyId);
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Message was kept locally, but backend send failed.");

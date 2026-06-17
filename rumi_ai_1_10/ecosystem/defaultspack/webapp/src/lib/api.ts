@@ -2732,6 +2732,7 @@ export const api = {
     sender_id?: string;
     mentions?: string[];
     task_ids?: string[];
+    client_message_id?: string;
     metadata?: Record<string, unknown>;
   }) {
     return request<CompanyMessage>("/api/subagent-team/messages", {
@@ -2744,6 +2745,7 @@ export const api = {
         sender_id: payload.sender_id,
         mentions: payload.mentions,
         task_ids: payload.task_ids,
+        client_message_id: payload.client_message_id,
         metadata: payload.metadata,
       }),
     });

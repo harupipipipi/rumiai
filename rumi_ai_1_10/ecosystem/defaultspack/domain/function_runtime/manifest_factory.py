@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,6 +37,15 @@ def _default_aliases(function_id: str) -> tuple[str, ...]:
         dotted = ".".join(op_parts)
         aliases.extend(_alias_pair(namespace, dotted))
     return tuple(dict.fromkeys(aliases))
+
+
+def _flag_enabled(name: str) -> bool:
+    value = str(os.environ.get(name) or "").strip().lower()
+    return value in {"1", "true", "yes", "on", "enabled"}
+
+
+def _change_request_commit_enabled() -> bool:
+    return _flag_enabled("RUMI_REVIEW_ENABLE_COMMIT")
 
 
 def _requires(function_id: str, risk: str) -> tuple[str, ...]:
@@ -339,6 +349,12 @@ CHANGE_REQUEST_FUNCTIONS: tuple[FunctionSpec, ...] = (
     _spec("coding_change_request_check_get", "Get one Rumi Review check.", ("coding", "change_request"), block="blocks.change_request.checks", default_args={"_method": "GET"}),
     _spec("coding_change_request_seal", "Recalculate the Rumi Review Seal.", ("coding", "change_request"), block="blocks.change_request.seal", default_args={"_method": "GET"}),
     _spec("coding_change_request_commit", "Commit a sealed Rumi Review snapshot without pushing.", ("coding", "change_request"), risk="high", block="blocks.change_request.commit", default_args={"_method": "POST"}),
+)
+
+DEFAULT_ENABLED_CHANGE_REQUEST_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
+    spec
+    for spec in CHANGE_REQUEST_FUNCTIONS
+    if spec.function_id != "coding_change_request_commit" or _change_request_commit_enabled()
 )
 
 
@@ -693,7 +709,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + SKILL_FUNCTIONS
     + CONVERSATION_FUNCTIONS
     + CODING_FUNCTIONS
-    + CHANGE_REQUEST_FUNCTIONS
+    + DEFAULT_ENABLED_CHANGE_REQUEST_FUNCTIONS
     + AGENT_FUNCTIONS
     + SUBAGENT_TEAM_FUNCTIONS
     + REMOTE_FUNCTIONS

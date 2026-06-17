@@ -10,9 +10,10 @@ from typing import Any
 
 from domain.coding.workspace_jail import WorkspaceJail
 
+from .models import CHECK_LOG_TAIL_CHARS
+
 
 CHECK_TIMEOUT_SECONDS = 120
-LOG_TAIL_CHARS = 12000
 SHELL_MARKERS = (";", "&&", "||", "|", ">", "<", "`", "$(", "${")
 WRITE_FLAGS = {
     "--fix",
@@ -93,7 +94,7 @@ def run_allowed_check(workspace_root: str, command: Any, *, cwd: str | None = No
             "stdout_tail": _tail(stdout),
             "stderr_tail": _tail(stderr),
             "log_tail": _tail(full_log),
-            "full_log": full_log,
+            "_full_log": full_log,
             "started_at": started,
             "completed_at": _utc_now(),
             "duration_ms": duration,
@@ -112,7 +113,7 @@ def run_allowed_check(workspace_root: str, command: Any, *, cwd: str | None = No
             "stdout_tail": _tail(stdout),
             "stderr_tail": _tail(stderr),
             "log_tail": _tail(full_log),
-            "full_log": full_log,
+            "_full_log": full_log,
             "started_at": started,
             "completed_at": _utc_now(),
             "duration_ms": duration,
@@ -211,7 +212,7 @@ def _full_log(stdout: str, stderr: str) -> str:
 
 
 def _tail(text: str) -> str:
-    return str(text or "")[-LOG_TAIL_CHARS:]
+    return str(text or "")[-CHECK_LOG_TAIL_CHARS:]
 
 
 def _decode_timeout_stream(value: Any) -> str:
