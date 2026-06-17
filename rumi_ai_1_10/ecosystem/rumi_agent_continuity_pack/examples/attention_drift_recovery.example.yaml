@@ -1,0 +1,18 @@
+example:
+  id: attention_drift_recovery
+  pack_id: rumi_agent_continuity_pack
+  scenario: Attention drift is detected from focus mismatch and converted into a recovery
+    prompt without mutating memory.
+  input_refs:
+  - workspace_ref:case-file
+  evidence_refs:
+  - evidence:review-note
+  - evidence:source-fragment
+  handoff_owner: rumi_agent_workroom_pack
+  review_gate: all_blocking_checks
+  expected_result: reviewed_handoff_packet
+  must_not:
+  - external_action
+  - runtime_execution
+  - secret_material
+  status: ready_for_owner_handoff

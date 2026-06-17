@@ -1,0 +1,27 @@
+policy:
+  id: tool_mcp_approval_policy
+  client_supplied_approved: never_trusted
+  first_call_requires_approval: true
+  required_fields:
+  - approval_required
+  - requires_approval
+  - approval_request_id
+  - tool_call_id
+  - operation
+  - risk_level
+  - args_hash
+  - expires_at
+  - display_summary
+  - redacted_arguments
+  - payload
+  - client_supplied_approved_trusted
+  - trusted_authority
+  - execution_owner
+  trusted_authority: server_issued_approval_token
+  execution_owner: defaultspack
+  operation_pattern: ^tool\.
+  forbidden_client_fields:
+  - approved
+  - approval_token_without_request
+  - approval_required_false
+  - requires_approval_false

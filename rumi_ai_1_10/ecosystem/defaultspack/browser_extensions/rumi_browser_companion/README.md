@@ -25,7 +25,7 @@ This gives Rumi a "computer use + browser use" path where the model can inspect 
 4. In Rumi, call `browser_companion` with `action: "bridge.pairing"` to get the pairing token and candidate server URLs.
 5. Open the extension options page and paste:
 
-   - local/private `Server URL` such as `http://127.0.0.1:8766`
+   - `Server URL` such as `http://127.0.0.1:8766`
    - `Pairing Token`
 
 6. Click `Poll Bridge Now` to confirm the extension can connect.
@@ -138,7 +138,7 @@ The extension talks to these local endpoints:
 - This extension can inspect and act on pages in the user's real browser profile.
 - Only pair it with a local Rumi server you control.
 - Do not share the pairing token.
-- The extension only accepts HTTP(S) bridge URLs on loopback, `.localhost`, private IPv4, IPv4 link-local, IPv6 loopback, IPv6 ULA, or IPv6 link-local hosts.
+- The pairing token is stored in browser-local extension storage and is not synced between browser profiles.
 - Capture and tab selection may foreground the browser tab.
 - DOM actions are best-effort and may not work on all pages.
 

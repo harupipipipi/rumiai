@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/inbox_thread.schema.json",
+  "title": "Inbox Thread",
+  "description": "Thread state inside agent inbox.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "thread_id",
+    "identity_id",
+    "channel_message_ids",
+    "state",
+    "assigned_agent",
+    "routing_rule_id"
+  ],
+  "properties": {
+    "thread_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "identity_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "channel_message_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "new",
+        "triaged",
+        "waiting",
+        "routed",
+        "blocked",
+        "closed"
+      ]
+    },
+    "assigned_agent": {
+      "type": "string"
+    },
+    "routing_rule_id": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

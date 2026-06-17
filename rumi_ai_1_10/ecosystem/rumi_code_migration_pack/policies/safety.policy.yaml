@@ -1,0 +1,15 @@
+policy:
+  pack_id: rumi_code_migration_pack
+  default_mode: migration_plan_and_handoff_only
+  blocked_by_default:
+  - execute codemods
+  - edit files directly
+  - run terminal command loops
+  - create pull requests
+  - merge pull requests
+  - publish release notes
+  - deploy changes
+  - record telemetry
+  - claim migration success without checks
+  external_effect: handoff_packet_only
+  network_policy: none_by_default

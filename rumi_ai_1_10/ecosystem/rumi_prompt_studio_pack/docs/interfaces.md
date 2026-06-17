@@ -1,34 +1,32 @@
 # Interfaces
 
-Prompt Studio exposes file-level contracts rather than runtime interfaces.
+## Required Secrets
 
-## Prompt Artifact Interface
+None.
 
-`schemas/prompt_artifact.schema.json` describes a reusable prompt asset with:
+## Required Network
 
-- Stable `id`.
-- `audience` and `objective`.
-- `instruction_hierarchy`.
-- Slot definitions.
-- Style preset references.
-- Lint rubric references.
-- Local dry-run fixture references.
-- Explicit owner and handoff fields.
+None by default.
 
-## Migration Interface
+## Grants
 
-`schemas/instruction_migration_record.schema.json` describes how instructions from Claude, ChatGPT, or Gemini are translated into Rumi fields. Migration records must separate:
+`supports_all_ok` is false. This pack does not install runtime tools.
 
-- Portable behavior.
-- Platform-specific behavior.
-- Blocked imports.
-- Clarifying questions.
-- Reviewer notes.
+## Inputs
 
-## Review Interface
+Reviewed local artifacts and source evidence supplied by the user or by an adjacent owner pack.
 
-`schemas/prompt_lint_result.schema.json` and `templates/prompt_review_report.template.yaml` define the review output. Reviewers must capture evidence for instruction hierarchy, style clarity, testability, privacy, migration fidelity, and boundary ownership.
+## Outputs
 
-## Handoff Points
+Schema-valid records, policy-reviewed checklists, evidence ledgers, version ledger entries, and handoff templates.
 
-Handoff is required when an artifact requests model routing, model scoring, persistent memory, tool creation, API creation, remote execution, or production telemetry. The Prompt Studio Pack records the handoff and blocks release until the owning pack is named.
+## Handoffs
+
+- `rumi_model_evals_pack`
+- `rumi_memory_knowledge_pack`
+- `rumi_code_ide_pack`
+- `rumi_knowledge_marketplace_pack`
+
+## Does Not Provide
+
+Model benchmarking, model routing, persistent memory storage, tool/API creation, runtime execution, and code edits are not Prompt Studio interfaces.

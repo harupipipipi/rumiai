@@ -1,0 +1,15 @@
+sop_step_taxonomy:
+  step_types:
+  - id: observe
+    execution_allowed: false
+  - id: decide
+    execution_allowed: false
+  - id: handoff
+    execution_allowed: false
+  - id: external_action
+    execution_allowed: false
+    requires_owner_pack: true
+  blocked_step_shapes:
+  - raw shell command
+  - credential copy
+  - browser click sequence without owner pack

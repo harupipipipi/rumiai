@@ -1,49 +1,50 @@
 asset_index:
   pack_id: rumi_meeting_intelligence_pack
   version: 0.1.0
-  generated_from: ecosystem.metadata.asset_index
+  source: ecosystem.metadata.asset_index
   categories:
     index:
       - asset_index.yaml
-    catalog:
-      - catalog/meeting_workflow_catalog.yaml
-      - catalog/decision_action_taxonomy.yaml
-      - catalog/evidence_bundle_catalog.yaml
-      - catalog/handoff_surface_matrix.yaml
-    schemas:
-      - schemas/meeting_input.schema.json
-      - schemas/decision_record.schema.json
-      - schemas/recap_bundle.schema.json
-    policies:
-      - policies/local_first_meeting.policy.yaml
-      - policies/evidence_linking.policy.yaml
-      - policies/boundary_handoff.policy.yaml
-    templates:
-      - templates/meeting_prep_brief.template.yaml
-      - templates/follow_up_draft.template.yaml
-      - templates/evidence_linked_recap_bundle.template.yaml
-    checklists:
-      - checklists/meeting_prep.checklist.yaml
-      - checklists/recap_bundle_quality.checklist.yaml
-    ledgers:
-      - ledgers/meeting_evidence_ledger.schema.yaml
-    profiles:
-      - profiles/meeting_intelligence_reviewer.profile.yaml
-    prompts:
-      - prompts/meeting_intelligence_reviewer.system.md
-      - prompts/follow_up_drafter.system.md
-    presets:
-      - presets/safe_default.preset.yaml
-      - presets/prep_brief.preset.yaml
-      - presets/recap_quality_gate.preset.yaml
-    examples:
-      - examples/prep_from_notes.example.yaml
-      - examples/transcript_to_decisions.example.yaml
-      - examples/follow_up_draft_handoff.example.yaml
-      - examples/evidence_recap_bundle.example.yaml
-    docs:
+    readme:
       - README.md
+    docs:
       - docs/README.md
       - docs/architecture.md
       - docs/interfaces.md
       - docs/operations.md
+    catalog:
+      - catalog/meeting_intelligence_workflows.yaml
+      - catalog/meeting_intelligence_quality_matrix.yaml
+      - catalog/participant_consent_matrix.yaml
+    schema:
+      - schemas/action_item.schema.json
+      - schemas/meeting_intelligence_record.schema.json
+    policy:
+      - policies/meeting_intelligence_safety.policy.yaml
+    checklist:
+      - checklists/meeting_intelligence_review.checklist.yaml
+    ledger:
+      - ledgers/meeting_intelligence_evidence_ledger.schema.yaml
+    template:
+      - templates/followup_email.template.md
+      - templates/meeting_intelligence_handoff.template.md
+    profiles:
+      - profiles/meeting_chief.profile.yaml
+    prompts:
+      - prompts/meeting_recap_scribe.system.md
+    presets:
+      - presets/safe_default.preset.yaml
+      - presets/handoff_review.preset.yaml
+      - presets/quality_gate.preset.yaml
+    example:
+      - examples/weekly_sync_recap.example.yaml
+      - examples/sales_call_followup.example.yaml
+      - examples/incident_review_decisions.example.yaml
+  invariants:
+    required_secrets: []
+    required_network:
+      allowed_domains: []
+      allowed_ports: []
+    executable_code: false
+    supports_all_ok: false
+    external_actions_are_handoffs: true

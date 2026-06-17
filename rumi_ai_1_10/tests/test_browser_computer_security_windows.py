@@ -254,6 +254,113 @@ def test_default_click_uses_virtual_cursor_until_physical_true(tmp_path, monkeyp
     assert result["virtual_cursor"] is True
 
 
+def test_background_click_uses_seat_and_skips_virtual_cursor(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    seat_calls = []
+
+    def fake_seat(action, payload):
+        seat_calls.append((action, dict(payload)))
+        return {
+            "action": "click",
+            "driver": "windows_postmessage",
+            "executed": True,
+            "confidence": "best_effort",
+            "can_parallel_user_work": True,
+            "data": {
+                "hwnd": 123,
+                "input_space": "screen",
+                "screen": {"x": 10, "y": 20},
+                "client": {"x": 5, "y": 8},
+            },
+            "notes": ["posted"],
+        }
+
+    monkeypatch.setattr(controller, "_try_computer_seat_action", fake_seat)
+    monkeypatch.setattr(controller, "_set_ai_cursor", lambda payload: (_ for _ in ()).throw(AssertionError("background must not use virtual cursor")))
+
+    result = controller.run("computer.click", {"x": 10, "y": 20, "background": True}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["background"] is True
+    assert result["driver"] == "windows_postmessage"
+    assert result["target"]["client"] == {"x": 5, "y": 8}
+    assert seat_calls and seat_calls[0][1]["background"] is True
+
+
+def test_background_click_passes_hwnd_and_coordinate_space_to_seat(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    captured = {}
+
+    class FakeSeat:
+        def click(self, target, x=0, y=0, button="left"):
+            captured["target"] = dict(target)
+            captured["point"] = {"x": x, "y": y, "button": button}
+            return {
+                "action": "click",
+                "driver": "windows_postmessage",
+                "executed": True,
+                "data": {
+                    "hwnd": target["hwnd"],
+                    "input_space": target["coordinate_space"],
+                    "screen": {"x": x, "y": y},
+                    "client": {"x": 50, "y": 40},
+                },
+            }
+
+    monkeypatch.setattr(controller, "_get_computer_seat", lambda: FakeSeat())
+    monkeypatch.setattr(controller, "_window_at_point", lambda x, y: None)
+
+    result = controller.run(
+        "computer.click",
+        {
+            "x": 150,
+            "y": 90,
+            "hwnd": 9001,
+            "coordinate_space": "screen",
+            "background": True,
+        },
+        yolo_mode=True,
+    )
+
+    assert result["executed"] is True
+    assert captured["target"]["hwnd"] == 9001
+    assert captured["target"]["coordinate_space"] == "screen"
+    assert captured["point"] == {"x": 150, "y": 90, "button": "left"}
+    assert result["target"]["input_space"] == "screen"
+
+
+def test_background_type_does_not_fall_back_to_foreground(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    monkeypatch.setattr(controller, "_try_computer_seat_action", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        controller,
+        "_windows_desktop_action",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("background must not use foreground fallback")),
+    )
+
+    result = controller.run("computer.type", {"text": "hello", "background": True}, yolo_mode=True)
+
+    assert result["executed"] is False
+    assert result["is_error"] is True
+    assert result["background"] is True
+    assert result["recovery"]["kind"] == "foreground_fallback_available"
+
+
+def test_type_without_text_is_rejected_as_invalid_payload(tmp_path):
+    controller = _controller(tmp_path)
+
+    result = controller.run(
+        "computer.type",
+        {"key": "l", "modifiers": ["command"]},
+        yolo_mode=True,
+    )
+
+    assert result["executed"] is False
+    assert result["is_error"] is True
+    assert result["recovery"]["kind"] == "invalid_type_payload"
+    assert "computer.key" in result["reason"]
+
+
 def test_windows_open_url_can_target_specific_browser(monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController

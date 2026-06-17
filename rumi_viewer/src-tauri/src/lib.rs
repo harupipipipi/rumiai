@@ -182,10 +182,7 @@ fn focus_authority_approval_window(window: &tauri::WebviewWindow) -> Result<(), 
         .map_err(|error| format!("failed to focus approval window: {error}"))
 }
 
-fn open_authority_approval_window_for_app(
-    app: &AppHandle,
-    request_id: &str,
-) -> Result<(), String> {
+fn open_authority_approval_window_for_app(app: &AppHandle, request_id: &str) -> Result<(), String> {
     let request_id = request_id.trim().to_string();
     let approval_url = authority_approval_url(&request_id)?;
     if let Some(window) = app.get_webview_window(AUTHORITY_APPROVAL_WINDOW_LABEL) {
@@ -213,10 +210,7 @@ fn open_authority_approval_window_for_app(
 }
 
 #[tauri::command]
-async fn open_authority_approval_window(
-    app: AppHandle,
-    request_id: String,
-) -> Result<(), String> {
+async fn open_authority_approval_window(app: AppHandle, request_id: String) -> Result<(), String> {
     open_authority_approval_window_for_app(&app, &request_id)
 }
 
@@ -281,10 +275,23 @@ fn maybe_spawn_authority_approval_smoke_window(app: AppHandle) {
         let response = match client
             .post(&request_url)
             .json(&serde_json::json!({
-                "provider_id": "openai",
-                "api_id": "authority-window-smoke",
-                "model_id": "gpt-5.4-test",
-                "reason": "Authority approval window smoke test"
+                "provider_id": "opencode-go",
+                "api_id": "legacy",
+                "model_id": "deepseek-v4-pro",
+                "model_ref": "opencode-go/deepseek-v4-pro",
+                "pack_id": "defaultspack",
+                "app_display_name": "defaultspack v2",
+                "provider_display_name": "OpenCode Go",
+                "model_display_name": "DeepSeek V4 Pro via OpenCode Go",
+                "credential_label": "OpenCode Go API key",
+                "endpoint_url": "https://opencode.ai/zen/go/v1/chat/completions",
+                "endpoint_path": "/chat/completions",
+                "domain": "opencode.ai",
+                "transport": "https",
+                "provider_transport": "openai_chat_completions",
+                "provider_kind": "cloud",
+                "port": 443,
+                "reason": "defaultspack v2: OpenCode Go provider を DeepSeek V4 Pro との通信に使います。"
             }))
             .send()
         {
@@ -303,7 +310,10 @@ fn maybe_spawn_authority_approval_smoke_window(app: AppHandle) {
             }
         };
         if payload.status != "ok" {
-            warn!("authority smoke test endpoint returned status={}", payload.status);
+            warn!(
+                "authority smoke test endpoint returned status={}",
+                payload.status
+            );
             return;
         }
         let request_id = payload
@@ -413,12 +423,8 @@ fn authority_approval_context(
         .take(32)
         .map(char::from)
         .collect();
-    let operator = sign_authority_ui_operator(
-        &request_id,
-        &bootstrap_secret,
-        unix_now_seconds(),
-        nonce,
-    )?;
+    let operator =
+        sign_authority_ui_operator(&request_id, &bootstrap_secret, unix_now_seconds(), nonce)?;
     Ok(AuthorityApprovalContext {
         request_id,
         ui_operator: operator,
@@ -855,6 +861,21 @@ fn navigate_window_to_panel_session(
     let current_url = window.url().ok();
     let panel_url = panel_session_url_for_current(current_url.as_ref(), port, panel_code)?;
     window.navigate(panel_url)
+}
+
+fn show_and_focus_window(window: &tauri::WebviewWindow) -> Result<(), tauri::Error> {
+    window.unminimize()?;
+    window.show()?;
+    window.set_focus()
+}
+
+fn navigate_and_show_window_to_panel_session(
+    window: &tauri::WebviewWindow,
+    port: u16,
+    panel_code: &str,
+) -> Result<(), tauri::Error> {
+    navigate_window_to_panel_session(window, port, panel_code)?;
+    show_and_focus_window(window)
 }
 
 pub(crate) fn refresh_panel_session_for_window(app: &AppHandle, window_label: &str) {
@@ -1337,7 +1358,7 @@ pub fn run() {
                             update_setup_progress(Some(&handle), &progress_arc, "Ready");
                             if let Some(win) = handle.get_webview_window("main") {
                                 if let Err(e) =
-                                    navigate_window_to_panel_session(&win, port, &panel_code)
+                                    navigate_and_show_window_to_panel_session(&win, port, &panel_code)
                                 {
                                     error!("Failed to navigate to panel: {e}");
                                 }
@@ -1380,7 +1401,7 @@ pub fn run() {
                 update_setup_progress(Some(&handle), &progress_arc, "Ready");
 
                 if let Some(win) = handle.get_webview_window("main") {
-                    if let Err(e) = navigate_window_to_panel_session(&win, port, &panel_code) {
+                    if let Err(e) = navigate_and_show_window_to_panel_session(&win, port, &panel_code) {
                         error!("Failed to navigate to panel: {e}");
                     }
                 }
@@ -1479,7 +1500,10 @@ mod tests {
     fn authority_approval_url_targets_defaultspack_window_route() {
         let url = authority_approval_url("auth_123").unwrap();
 
-        assert_eq!(url.as_str(), "http://127.0.0.1:8766/approval?request_id=auth_123");
+        assert_eq!(
+            url.as_str(),
+            "http://127.0.0.1:8766/approval?request_id=auth_123"
+        );
     }
 
     #[test]
@@ -1505,7 +1529,9 @@ mod tests {
     fn close_policy_keeps_primary_windows_but_allows_approval_close() {
         assert!(should_send_to_background_on_close("main"));
         assert!(should_send_to_background_on_close("panel"));
-        assert!(!should_send_to_background_on_close(AUTHORITY_APPROVAL_WINDOW_LABEL));
+        assert!(!should_send_to_background_on_close(
+            AUTHORITY_APPROVAL_WINDOW_LABEL
+        ));
     }
 
     #[test]

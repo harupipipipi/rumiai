@@ -1,0 +1,55 @@
+{
+  "catalog_id": "rumi_research_pack.capabilities",
+  "version": "1.0.0",
+  "description": "Research capability names and interface expectations.",
+  "capabilities": [
+    {
+      "id": "research.plan.create",
+      "label": "Create research plan",
+      "inputs": ["research_question", "scope", "known_constraints", "local_sources"],
+      "outputs": ["research_plan", "open_questions", "source_strategy"],
+      "expected_grants": ["research.read_local_sources", "research.write_evidence"],
+      "risk_level": "low"
+    },
+    {
+      "id": "research.source.triage",
+      "label": "Triage sources",
+      "inputs": ["source_manifest", "quality_rubric", "research_plan"],
+      "outputs": ["source_scores", "excluded_sources", "follow_up_targets"],
+      "expected_grants": ["research.review_sources"],
+      "risk_level": "low"
+    },
+    {
+      "id": "research.evidence.extract",
+      "label": "Extract evidence cards",
+      "inputs": ["source_material", "claims_of_interest", "citation_style"],
+      "outputs": ["evidence_cards", "citation_map", "source_manifest"],
+      "expected_grants": ["research.read_local_sources", "research.write_evidence"],
+      "risk_level": "low"
+    },
+    {
+      "id": "research.contradiction.review",
+      "label": "Review contradictions",
+      "inputs": ["evidence_cards", "claim_graph", "source_scores"],
+      "outputs": ["contradiction_table", "confidence_updates", "review_notes"],
+      "expected_grants": ["research.review_sources", "research.write_evidence"],
+      "risk_level": "medium"
+    },
+    {
+      "id": "research.synthesis.write",
+      "label": "Write cited synthesis",
+      "inputs": ["research_plan", "evidence_cards", "citation_map", "audience"],
+      "outputs": ["cited_report", "claim_trace", "limitations"],
+      "expected_grants": ["research.write_synthesis", "artifact.preview"],
+      "risk_level": "medium"
+    },
+    {
+      "id": "research.handoff.package",
+      "label": "Package research handoff",
+      "inputs": ["cited_report", "evidence_cards", "source_manifest", "next_steps"],
+      "outputs": ["handoff_bundle", "evidence_index", "decision_summary"],
+      "expected_grants": ["research.write_synthesis"],
+      "risk_level": "low"
+    }
+  ]
+}

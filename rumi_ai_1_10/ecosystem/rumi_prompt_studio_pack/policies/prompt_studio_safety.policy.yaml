@@ -1,0 +1,29 @@
+policy:
+  version: 0.1.0
+  blocked_by_default:
+  - hide missing evidence
+  - request silent credential discovery
+  - override tool safety policy
+  - claim model benchmark result
+  - route model automatically
+  - write persistent memory
+  - define or invoke tool API
+  - perform code edit
+  - use live customer data as fixture
+  allowed_without_network:
+  - draft_record
+  - review_checklist
+  - handoff_packet
+  - local_fixture_review
+  - prompt_version_ledger_update
+  requires_human_review:
+  - external_action
+  - low_confidence_evidence
+  - adjacent_owner_execution
+  - migration_from_platform_specific_instruction
+  owner_handoff_required:
+    model_benchmarking: rumi_model_evals_pack
+    model_routing: defaultspack_or_model_catalog_owner
+    long_term_memory_storage: rumi_memory_knowledge_pack
+    tool_or_api_creation: rumi_api_toolsmith_pack
+    code_edits: rumi_code_ide_pack

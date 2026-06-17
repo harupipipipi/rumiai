@@ -1,23 +1,21 @@
 # Operations
 
-## Reviewer Workflow
+## Install
 
-1. Confirm the source inventory is local and already available.
-2. Choose the smallest preset that fits the task.
-3. Extract only decisions, actions, risks, open questions, and follow-up drafts supported by evidence.
-4. Mark unresolved owners, ambiguous deadlines, and missing source spans instead of guessing.
-5. Produce a recap bundle with a human review gate and handoff queue.
+Select `rumi_meeting_intelligence_pack` as a setup pack. It depends on `defaultspack >=2.0.0`.
 
-## Quality Gates
+## Test
 
-- Decisions require source spans and confidence.
-- Actions require owner, due date, dependency, or an explicit unknown marker.
-- Follow-up drafts must be labelled `draft_only`.
-- External execution must be represented as handoff, not completed work.
-- Private attendee details should be redacted unless they are necessary to the meeting outcome.
+Run `python -m pytest -q rumi_ai_1_10/tests/test_rumi_meeting_intelligence_pack_contract.py`.
 
-## Failure Handling
+## Failure Modes
 
-If the supplied source is too thin, the correct output is an evidence gap report. If the task requires connector fetch, scheduling, live voice capture, business operations execution, or document parsing, stop and hand off to the correct owner pack.
+Missing evidence, owner ambiguity, unsafe requests, absent participant consent, or attempts to execute adjacent-domain actions must block the quality gate and produce a handoff.
 
-Required Secrets: None.
+## Rollback And Revocation
+
+Remove the setup pack selection. No credentials, background jobs, or runtime grants are created by this pack.
+
+## Manual Review Points
+
+Review evidence links, transcript source spans, assumptions, protected records, owner handoffs, draft-only follow-ups, and defaultspack promotion blockers before treating output as production-ready.

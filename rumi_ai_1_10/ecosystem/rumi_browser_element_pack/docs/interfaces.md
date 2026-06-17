@@ -17,9 +17,6 @@
 - `nodes[].flags`
 - `nodes[].action_hints`
 - `nodes[].selector_hint`
-- `nodes[].selector_hint_unique`
-- `nodes[].selector_hint_confidence`
-- `nodes[].selector_hint_error`
 - `nodes[].xpath_hint`
 
 ## Grants

@@ -59,7 +59,7 @@ METHOD_SENSITIVE_LOCAL_PATHS = {
 }
 
 SENSITIVE_LOCAL_PREFIXES = (
-    "/api/authority/requests/",
+    "/api/authority/",
     "/api/container/",
     "/api/agent/self-improvement/",
     "/api/memory/memo/",

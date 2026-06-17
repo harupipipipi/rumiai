@@ -1,0 +1,71 @@
+qa_routing_matrix:
+  id: rumi_agentic_qa_pack.qa_routing_matrix
+  default_policy:
+    repeated_subagent_use_required: true
+    specialist_subagents_required:
+      - scenario_runner
+      - adversarial_tester
+      - regression_analyst
+      - evidence_reviewer
+      - pack_handoff_coordinator
+    owner_pack_handoff_required: true
+  lanes:
+    model_behavior_regression:
+      scenario_runner: qa_scenario_runner
+      adversarial_tester: prompt_edge_case_tester
+      regression_analyst: behavior_regression_analyst
+      evidence_reviewer: evidence_reviewer
+      pack_handoff_coordinator: model_eval_handoff
+      owner_pack: rumi_model_evals_pack
+      required_evidence:
+        - prompt_fixture
+        - expected_observation
+        - actual_observation
+        - scoring_notes
+    browser_e2e_replay:
+      scenario_runner: browser_replay_runner
+      adversarial_tester: interaction_edge_case_tester
+      regression_analyst: browser_regression_analyst
+      evidence_reviewer: evidence_reviewer
+      pack_handoff_coordinator: browser_automation_handoff
+      owner_pack: rumi_browser_automation_pack
+      required_evidence:
+        - replay_steps
+        - screenshot_or_trace_reference
+        - expected_observation
+        - actual_observation
+    unsafe_behavior_triage:
+      scenario_runner: safety_scenario_runner
+      adversarial_tester: misuse_case_tester
+      regression_analyst: safety_regression_analyst
+      evidence_reviewer: evidence_reviewer
+      pack_handoff_coordinator: security_review_handoff
+      owner_pack: rumi_security_review_pack
+      required_evidence:
+        - safety_policy_reference
+        - refusal_or_allowance_expected
+        - observed_behavior
+        - severity_label
+    cross_pack_acceptance:
+      scenario_runner: acceptance_runner
+      adversarial_tester: integration_edge_case_tester
+      regression_analyst: cross_pack_regression_analyst
+      evidence_reviewer: evidence_reviewer
+      pack_handoff_coordinator: observability_handoff
+      owner_pack: rumi_observability_pack
+      required_evidence:
+        - pack_under_test
+        - acceptance_matrix_row
+        - validation_command
+        - run_ledger_reference
+subagent_roles:
+  qa_scenario_runner:
+    responsibility: Replays declared scenarios and records actual observations.
+  prompt_edge_case_tester:
+    responsibility: Probes model-facing prompts for ambiguity or brittle behavior.
+  behavior_regression_analyst:
+    responsibility: Compares current behavior against expected acceptance criteria.
+  evidence_reviewer:
+    responsibility: Ensures evidence is sufficient, local, and reviewable.
+  pack_handoff_coordinator:
+    responsibility: Routes failures to the pack that owns the implementation surface.

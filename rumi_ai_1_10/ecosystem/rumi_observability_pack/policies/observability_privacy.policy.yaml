@@ -1,0 +1,12 @@
+policy_id: rumi_observability.privacy
+local_first: true
+network_default: deny
+rules:
+  - id: redact_secrets_in_ledgers
+    decision: require
+  - id: summarize_before_external_share
+    decision: require
+  - id: preserve_pack_owner
+    decision: require
+  - id: postmortem_needs_evidence
+    decision: require

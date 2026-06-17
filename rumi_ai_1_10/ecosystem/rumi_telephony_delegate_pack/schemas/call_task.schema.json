@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/call_task.schema.json",
+  "title": "Call Task",
+  "description": "Contract schema for Call Task.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "call_task_id",
+    "phone_target_alias",
+    "purpose",
+    "allowed_intent",
+    "approval_state",
+    "pre_call_script_id",
+    "never_call_checked",
+    "human_approval_receipt"
+  ],
+  "properties": {
+    "call_task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phone_target_alias": {
+      "type": "string",
+      "minLength": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allowed_intent": {
+      "type": "string",
+      "enum": [
+        "appointment_reschedule",
+        "customer_callback",
+        "information_collection",
+        "status_check",
+        "support_followup"
+      ]
+    },
+    "approval_state": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "pending_human",
+        "approved",
+        "rejected",
+        "expired"
+      ]
+    },
+    "pre_call_script_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "never_call_checked": {
+      "type": "boolean",
+      "const": true
+    },
+    "human_approval_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approved_by",
+        "approved_at",
+        "approved_number_alias",
+        "approved_script_id",
+        "approval_scope",
+        "explicit_human_approval"
+      ],
+      "properties": {
+        "approved_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approved_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approved_number_alias": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approved_script_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approval_scope": {
+          "type": "string",
+          "const": "single_provider_handoff_packet"
+        },
+        "explicit_human_approval": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    }
+  }
+}

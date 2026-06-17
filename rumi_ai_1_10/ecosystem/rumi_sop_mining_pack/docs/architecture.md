@@ -1,32 +1,9 @@
 # Architecture
 
-## Responsibility
+`rumi_sop_mining_pack` is declarative. It ships catalogs, schemas, policies, templates, examples, prompts, profiles, and presets. It registers no tools and grants no broad permissions.
 
-`rumi_sop_mining_pack` is a declarative documentation pack. It converts evidence from local chat transcripts, tool traces, audit logs, test output, and handoff notes into repeatable SOPs. It does this by defining schemas, checklists, redaction rules, and human approval gates.
+Owned surfaces: trace_redaction_contract, sop_extraction, assumption_log, runbook_template, human_approval_gate.
 
-## Directory Layout
+Expanded owner surfaces: trace_schema, source_consent_review, and non_execution_boundary_review.
 
-- `catalog/` contains allowed evidence sources, SOP pattern families, and workflow recipe lanes.
-- `schemas/` contains JSON schemas for normalized trace records and mined SOP records.
-- `policies/` contains redaction, human approval, and non-execution rules.
-- `runbooks/` contains the SOP mining runbook template.
-- `checklists/` contains the reviewer checklist.
-- `ledgers/` contains the ledger schema for trace-to-SOP decisions.
-- `profiles/`, `prompts/`, and `presets/` provide reviewer operating modes.
-- `examples/` contains realistic, redacted examples that show the expected outputs.
-
-## Runtime Contact
-
-The pack has no components, no load order, no routes, and no executable code. Runtime setup discovers it through `ecosystem/setup_pack/rumi_sop_mining_pack/pack.json`; all runtime action surfaces stay with defaultspack or named owner packs.
-
-## Boundary Design
-
-The architecture is intentionally extraction-only:
-
-- consume already available evidence references
-- normalize and redact evidence
-- identify repeatable process patterns
-- draft SOPs, runbooks, checklists, and recipes
-- require human approval before promotion
-
-It never starts capture, runs automation, controls a browser or computer, schedules background work, creates tools, or invokes tools.
+Excluded surfaces: automation execution, browser control, computer control, schedule creation, live trace capture, long-term observability ledger storage, tool creation, tool invocation, and message delivery. The pack can document a repeatable process only after evidence already exists and after redaction has been reviewed.

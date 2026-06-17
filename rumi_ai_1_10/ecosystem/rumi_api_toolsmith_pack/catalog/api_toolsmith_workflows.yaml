@@ -1,0 +1,67 @@
+workflows:
+  derive_tool_schema_from_api_spec:
+    owner: rumi_api_toolsmith_pack
+    spec_asset: specs/openapi_schema_review.yaml
+    requires_evidence:
+      - spec_url_or_path
+      - operation_ids
+      - mock_response_fixture
+      - auth_boundary
+      - schema_review_notes
+    handoff_policy: setup_pack_overlap_policy
+    acceptance_gates:
+      - operation_id_present_and_stable
+      - request_response_shapes_reviewed
+      - auth_boundary_recorded_without_secrets
+      - mock_test_evidence_recorded
+  create_mocked_contract_tests:
+    owner: rumi_api_toolsmith_pack
+    evidence_asset: evidence/mock_test_evidence.schema.yaml
+    requires_evidence:
+      - spec_url_or_path
+      - operation_ids
+      - mock_response_fixture
+      - auth_boundary
+      - expected_error_cases
+    handoff_policy: setup_pack_overlap_policy
+    acceptance_gates:
+      - happy_path_mock
+      - invalid_input_case
+      - auth_boundary_no_secret
+      - response_shape_assertions
+  review_auth_surface:
+    owner: rumi_api_toolsmith_pack
+    requires_evidence:
+      - spec_url_or_path
+      - operation_ids
+      - mock_response_fixture
+      - auth_boundary
+    handoff_policy: setup_pack_overlap_policy
+  map_graphql_operation_to_tool:
+    owner: rumi_api_toolsmith_pack
+    spec_asset: specs/graphql_operation_review.yaml
+    requires_evidence:
+      - schema_snapshot_or_sdl
+      - operation_document
+      - variable_examples
+      - mock_response_fixture
+    handoff_policy: setup_pack_overlap_policy
+    acceptance_gates:
+      - operation_kind_classified
+      - variable_contract_reviewed
+      - partial_error_policy_recorded
+      - sensitive_variables_flagged
+  review_webhook_contract:
+    owner: rumi_api_toolsmith_pack
+    spec_asset: specs/webhook_contract_review.yaml
+    requires_evidence:
+      - event_catalog
+      - payload_examples
+      - signature_policy_description
+      - replay_policy
+    handoff_policy: setup_pack_overlap_policy
+    acceptance_gates:
+      - event_versions_recorded
+      - payload_schema_reviewed
+      - signature_policy_recorded_without_secrets
+      - duplicate_delivery_case_included

@@ -1,42 +1,33 @@
 # Interfaces
 
+## Required Secrets
+
+None.
+
+## Required Network
+
+None by default.
+
+## Grants
+
+`supports_all_ok` is false. This pack does not install runtime tools.
+
 ## Inputs
 
-Accepted inputs are existing user-supplied materials:
-
-- transcript text with speaker labels or line numbers,
-- agenda or meeting brief text,
-- local notes,
-- chat or email excerpts already provided by the user,
-- already extracted document text.
-
-The pack must not fetch calendars, pull mail, download drive files, join meetings, record audio, or parse binary documents. Those actions require an explicit handoff to another owner pack.
+Reviewed local artifacts and source evidence supplied by the user or by an adjacent owner pack. Accepted source types are existing transcript text, meeting notes, agenda text, chat excerpts, and already extracted document text.
 
 ## Outputs
 
-The pack emits draft and bundle artifacts:
+Schema-valid decision records, action registers, draft follow-ups, evidence ledgers, recap bundles, and handoff templates.
 
-- meeting prep brief,
-- decision log,
-- action register,
-- open question list,
-- follow-up drafts,
-- evidence-linked recap bundle,
-- owner handoff queue.
+## Handoffs
 
-## Evidence References
+- `rumi_connector_gateway_pack`
+- `rumi_workflow_scheduler_pack`
+- `rumi_voice_mobile_pack`
+- `rumi_document_intelligence_pack`
+- `rumi_business_ops_pack`
 
-Every material claim must include an evidence reference with:
+## Does Not Provide
 
-- `source_id`,
-- `source_type`,
-- `source_span`,
-- `excerpt_summary`,
-- `confidence`,
-- `claim_ids`.
-
-## Handoff Records
-
-Execution requests must be represented as handoff records with the owner pack, requested action, review status, and evidence references. No handoff record is itself permission to send, schedule, update, or publish.
-
-Required Secrets: None.
+No connector fetching or sending. No calendar booking or reminders. No voice capture or transcription. No business workflow execution. No document parsing. Requests for those actions must be represented as handoff records with evidence and review state.

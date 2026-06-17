@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import error, ok
 from domain.chat.message_builder import build_assistant_message
 from domain.chat.store import ChatStore
+from domain.kanban.chat_sync import sync_conversation_kanban
 
 
 def _normalize_content(content):
@@ -115,6 +116,7 @@ def run(input_data, context):
     assistant_message = store.add_message(conversation_id, assistant_message)
     if assistant_message is None:
         return error("Failed to persist assistant message", "INTERNAL_ERROR")
+    sync_conversation_kanban(conversation_id, reason="turn_persisted")
 
     audit_path = _persist_audit_jsonl(data)
     return ok(

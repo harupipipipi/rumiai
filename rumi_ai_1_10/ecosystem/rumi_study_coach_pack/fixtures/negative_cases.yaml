@@ -1,0 +1,35 @@
+negative_cases:
+  cases:
+  - id: missing_note_negative
+    given:
+      learner_goal: Explain the epsilon-delta proof for a calculus limit.
+      supplied_source_note_ids: []
+      supplied_span_ids: []
+    expected:
+      decision: blocked_packet
+      uncertainty: high_due_to_missing_notes
+      required_fields:
+      - uncertainty_notes
+      - safe_next_step
+      - requested_local_note_evidence
+      forbidden:
+      - fabricated_answer
+      - uncited_claim
+      - external_research
+  - id: scheduler_boundary_negative
+    given:
+      learner_goal: Review biology cards every morning at 8.
+      supplied_source_note_ids:
+      - note_bio_02
+      requested_action: create_calendar_reminders
+    expected:
+      decision: handoff_packet
+      owner_pack: rumi_workflow_scheduler_pack
+      required_fields:
+      - review_window_reason
+      - human_review_required
+      forbidden:
+      - calendar_write
+      - reminder_creation
+      - durable_memory_write
+  expected_behavior: block_or_handoff_without_external_action

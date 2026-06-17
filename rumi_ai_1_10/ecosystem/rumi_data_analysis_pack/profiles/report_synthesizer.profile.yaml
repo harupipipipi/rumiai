@@ -1,0 +1,22 @@
+profile_id: rumi_data_analysis.report_synthesizer
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: データレポート統合役
+  en: Data Report Synthesizer
+description:
+  ja: 分析結果、表、チャート仕様、監査メモを意思決定向けレポートへ統合する役割。
+  en: Profile for turning findings, tables, chart specs, and audit notes into decision-ready reports.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.artifact_agent
+enabled_capabilities: [artifact, chart_design, analysis_audit, workspace_handoff]
+prompt_set: report_synthesizer
+policy:
+  network_default: none
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  audit_level: standard
+  local_first: true

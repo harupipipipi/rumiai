@@ -1480,7 +1480,7 @@ def test_browser_computer_screenshot_falls_back_to_window_capture_when_rect_capt
         "_capture_target",
         lambda payload: {
             "app": "Google Chrome",
-            "title": "defaultspack luxe shell",
+            "title": "rumi DP",
             "window_id": 3023,
             "capture_rect": {"x": 0, "y": 37, "width": 1470, "height": 919},
         },
@@ -3861,6 +3861,7 @@ def test_sensitive_routes_do_not_use_wildcard_cors():
     assert _is_sensitive_http_path("/api/coding/terminal/exec") is True
     assert _is_sensitive_http_path("/api/coding/files/write") is True
     assert _is_sensitive_http_path("/api/coding/approvals") is True
+    assert _is_sensitive_http_path("/api/authority/requests/auth_1/approve") is True
     assert _is_sensitive_http_path("/api/browser/artifacts") is True
     assert _is_sensitive_http_path("/api/coding/agent/sessions") is True
     assert _is_sensitive_http_path("/api/integrations/secrets") is True

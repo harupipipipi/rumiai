@@ -1,0 +1,14 @@
+preset_id: rumi_workflow_scheduler.release_check_wakeup
+pack_id: rumi_workflow_scheduler_pack
+title: Release Check Wakeup
+profile: rumi_workflow_scheduler.scheduler_designer
+schedule_kind: one_shot_wakeup
+default_owner_route: rumi_devops_release_pack
+required_fields:
+  - release_ref
+  - gate_name
+  - wakeup_time
+  - evidence_required
+  - stop_conditions
+retry_policy: no_retry
+status: draft_until_release_owner_accepts

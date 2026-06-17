@@ -1,11 +1,11 @@
 {
   "pack_id": "rumi_localization_pack",
   "display_name": "Rumi Localization Pack",
-  "description": "Declarative translation, terminology, protected-term, tone-preservation, locale QA, and localization issue-triage review pack.",
+  "description": "Declarative terminology, protected-term, translation review, locale QA, and localization issue triage pack.",
   "target_pack_id": "rumi_localization_pack",
   "version": "0.1.0",
   "recommended": false,
-  "risk_level": "medium",
+  "risk_level": "low",
   "supports_all_ok": false,
   "depends_on": [
     {
@@ -14,52 +14,66 @@
     }
   ],
   "conflicts_with": [],
+  "compatibility": {
+    "python": ">=3.9",
+    "platforms": [
+      "macos",
+      "linux",
+      "windows"
+    ]
+  },
   "overlap_policy": {
-    "document_intelligence": "handoff_to_rumi_documents_pack",
-    "frontend_design": "handoff_to_rumi_reference_ui_pack",
-    "workspace_export_generation": "handoff_to_rumi_workspace_export_pack",
-    "connector_delivery": "handoff_to_connector_packs",
-    "generic_qa": "handoff_to_rumi_agentic_qa_pack",
+    "document_parsing": "handoff_to_rumi_document_intelligence_pack",
+    "document_mutation": "handoff_to_rumi_document_intelligence_pack",
+    "ui_layout_design": "handoff_to_rumi_frontend_design_pack",
+    "browser_or_visual_replay": "handoff_to_rumi_agentic_qa_pack",
+    "artifact_export": "handoff_to_rumi_workspace_pack",
+    "external_publishing": "handoff_to_rumi_connector_gateway_pack",
+    "connector_delivery": "handoff_to_rumi_connector_gateway_pack",
     "model_quality_evals": "handoff_to_rumi_model_evals_pack",
     "terminology_glossary": "owned_by_rumi_localization_pack",
-    "protected_term_policy": "owned_by_rumi_localization_pack",
+    "protected_terms_policy": "owned_by_rumi_localization_pack",
     "tone_preservation": "owned_by_rumi_localization_pack",
     "locale_qa_matrix": "owned_by_rumi_localization_pack",
     "locale_issue_schema": "owned_by_rumi_localization_pack",
+    "localization_issue_triage": "owned_by_rumi_localization_pack",
     "tool_aliases": "prefer_explicit_pack_namespace"
   },
   "defaultspack_promotion": {
     "eligible": false,
-    "reason": "Localization is a language policy and review recipe pack, not a replacement for defaultspack runtime startup, workspace export, connector delivery, document intelligence, or frontend ownership.",
+    "reason": "Rumi Localization Pack is a declarative domain contract pack; promotion is blocked until runtime owners prove the adjacent execution and audit evidence outside this pack.",
     "criteria": [
       "contract_tests_pass",
       "overlap_policy_reviewed",
-      "terminology_governance_reviewed",
-      "locale_issue_schema_adopted_by_owner_packs"
+      "maintainer_runtime_evidence_required",
+      "promotion_requires_real_world_success_cases"
     ],
     "promotion_blockers": [
       "no_executable_runtime",
       "localization_contract_only",
-      "does_not_generate_workspace_exports",
-      "requires_document_owner_for_source_extraction",
-      "requires_frontend_owner_for_layout_changes",
-      "requires_connector_owner_for_delivery"
+      "requires_user_glossary",
+      "requires_locale_policy_selection",
+      "requires_protected_term_owner",
+      "requires_adjacent_owner_handoff_for_execution",
+      "document_export_owned_by_workspace_pack",
+      "layout_changes_owned_by_frontend_design_pack",
+      "connector_delivery_owned_by_connector_gateway_pack"
     ],
     "promotion_evidence_required": [
-      "maintainer_approved_language_policy_owner",
-      "glossary_change_control_evidence",
-      "locale_issue_triage_examples",
-      "protected_term_exception_review",
-      "documented_defaultspack_replacement_plan"
+      "protected_term_preservation_cases",
+      "locale_issue_schema_cases",
+      "tone_register_review_cases",
+      "cross_locale_glossary_change_control",
+      "adjacent_owner_handoff_examples"
     ]
   },
   "marketplace": {
     "id": "rumi.localization_pack",
-    "channel": "experimental",
     "registry": "bundled",
     "publisher": "rumi-ai",
     "status": "verified",
-    "category": "localization"
+    "category": "localization",
+    "channel": "experimental"
   },
   "signing": {
     "mode": "repository_reviewed",
@@ -71,6 +85,6 @@
     "Network is none by default."
   ],
   "conflict_notes": [
-    "This pack declares language review boundaries and handoff policy instead of overriding document, frontend, export, connector, QA, or eval tools."
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools."
   ]
 }

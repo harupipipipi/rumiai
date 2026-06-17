@@ -1,0 +1,69 @@
+{
+  "pack_id": "rumi_subagent_pr_manager_pack",
+  "display_name": "Rumi Subagent PR Manager Pack",
+  "description": "Declarative PM, subagent assignment, branch ledger, and one-pack-one-PR governance pack.",
+  "target_pack_id": "rumi_subagent_pr_manager_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "code_edits": "handoff_to_rumi_code_ide_pack",
+    "agent_execution": "handoff_to_rumi_agent_services_pack",
+    "merge_metrics": "handoff_to_rumi_observability_pack",
+    "bundle_selection": "handoff_to_rumi_pack_suite_pack",
+    "subagent_routing_matrix": "owned_by_rumi_subagent_pr_manager_pack",
+    "pr_acceptance_rubric": "owned_by_rumi_subagent_pr_manager_pack",
+    "evidence_ledger": "owned_by_rumi_subagent_pr_manager_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Subagent PR management is a governance overlay for optional pack PRs and must not replace defaultspack runtime startup or tool ownership.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required",
+      "promotion_requires_real_world_success_cases"
+    ],
+    "promotion_blockers": [
+      "no_executable_runtime",
+      "governance_only_pack",
+      "requires_external_owner_for_code_edits",
+      "no_default_user_surface"
+    ],
+    "promotion_evidence_required": [
+      "maintainer_approved_runtime_owner",
+      "multiple_successful_pack_pr_cycles",
+      "observability_evidence_for_review_outcomes",
+      "documented_defaultspack_replacement_plan"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.subagent_pr_manager_pack",
+    "channel": "experimental",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "governance"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools."
+  ]
+}

@@ -1,0 +1,27 @@
+policy_id: rumi_memory_knowledge_pack.memory_hygiene
+version: 1.0.0
+defaults:
+  local_first: true
+  runtime_memory_writes_allowed: false
+  approval_before_user_profile_update: true
+  approval_before_forget_or_archive: true
+deduplication:
+  detect_near_duplicates: true
+  prefer_latest_with_stronger_evidence: true
+  preserve_superseded_link: true
+staleness:
+  project_knowledge_review_days: 90
+  routine_review_days: 60
+  user_preference_review_days: 180
+contradictions:
+  do_not_silently_overwrite: true
+  create_conflict_note: true
+  require_human_review_for_sensitive_conflicts: true
+sensitivity:
+  sensitive_memories_require_explicit_approval: true
+  restricted_memories_default_to_reject: true
+  credential_like_content_default_to_reject: true
+archive:
+  archive_instead_of_delete_by_default: true
+  deletion_requires_explicit_user_request: true
+  preserve_audit_reason: true

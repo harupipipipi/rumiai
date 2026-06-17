@@ -68,6 +68,7 @@ def _make_kernel_core_module():
     for name, mod in stubs.items():
         saved[name] = sys.modules.get(name)
         sys.modules[name] = mod
+    saved_kernel_core = sys.modules.get("core_runtime.kernel_core")
 
     try:
         sys.modules.pop("core_runtime.kernel_core", None)
@@ -81,6 +82,10 @@ def _make_kernel_core_module():
         spec.loader.exec_module(module)
         return module
     finally:
+        if saved_kernel_core is None:
+            sys.modules.pop("core_runtime.kernel_core", None)
+        else:
+            sys.modules["core_runtime.kernel_core"] = saved_kernel_core
         for name, orig in saved.items():
             if orig is None:
                 sys.modules.pop(name, None)

@@ -649,12 +649,13 @@ class GoogleProvider(OpenAICompatibleProvider):
             token in lowered for token in ("internal error encountered",) + _TRANSIENT_GOOGLE_CONNECTION_TOKENS
         )
 
-    def _request_json(self, path, body):
+    def _request_json(self, path, body, *, timeout=None):
         max_attempts = 5
         last_error: Exception | None = None
+        request_kwargs = {"timeout": timeout} if timeout is not None else {}
         for attempt in range(max_attempts):
             try:
-                return super()._request_json(path, body)
+                return super()._request_json(path, body, **request_kwargs)
             except RuntimeError as exc:
                 last_error = exc
                 if attempt >= max_attempts - 1 or not self._is_transient_google_api_error(exc):
@@ -662,12 +663,13 @@ class GoogleProvider(OpenAICompatibleProvider):
                 _retry_sleep(0.5 * (attempt + 1))
         raise last_error or RuntimeError("Google API request failed")
 
-    def _request_stream(self, path, body):
+    def _request_stream(self, path, body, *, timeout=None):
         max_attempts = 5
         last_error: Exception | None = None
+        request_kwargs = {"timeout": timeout} if timeout is not None else {}
         for attempt in range(max_attempts):
             try:
-                return super()._request_stream(path, body)
+                return super()._request_stream(path, body, **request_kwargs)
             except RuntimeError as exc:
                 last_error = exc
                 if attempt >= max_attempts - 1 or not self._is_transient_google_api_error(exc):
@@ -938,7 +940,7 @@ class GoogleProvider(OpenAICompatibleProvider):
         if sanitized_tools:
             body["tools"] = sanitized_tools
         self._copy_chat_params(body, translated)
-        raw = self._request_json("/chat/completions", body)
+        raw = self._request_json("/chat/completions", body, **self._request_timeout_kwargs(translated))
         return self._parse_response_with_tool_name_map(raw, reverse_name_map)
 
     def stream(self, model, messages, tools, params):
@@ -953,7 +955,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             body["tools"] = sanitized_tools
         self._copy_chat_params(body, translated)
         body.setdefault("stream_options", {"include_usage": True})
-        resp = self._request_stream("/chat/completions", body)
+        resp = self._request_stream("/chat/completions", body, **self._request_timeout_kwargs(translated))
         tool_call_state = {}
         try:
             for payload in self._parse_sse_lines(resp):

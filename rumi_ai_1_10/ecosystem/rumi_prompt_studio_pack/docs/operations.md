@@ -1,29 +1,25 @@
 # Operations
 
-Use this pack as a review surface before prompt artifacts are copied into a runtime or product pack.
+## Install
 
-## Review Flow
+Select `rumi_prompt_studio_pack` as a setup pack. It depends on `defaultspack >=2.0.0`.
 
-1. Select a prompt from `catalog/prompt_library.yaml` or draft a new artifact using `schemas/prompt_artifact.schema.json`.
-2. Apply the matching rubric in `catalog/prompt_lint_rubrics.yaml`.
-3. Check migration provenance when the prompt came from Claude, ChatGPT, or Gemini instructions.
-4. Run the local fixture mentally or in an external owner-approved harness.
-5. Fill the ledger using `ledgers/prompt_studio_review_ledger.schema.yaml`.
-6. Complete `checklists/prompt_release.checklist.yaml`.
+## Test
 
-## Required Evidence
+Run `python -m pytest -q rumi_ai_1_10/tests/test_rumi_prompt_studio_pack_contract.py`.
 
-- Prompt artifact id and version.
-- Rubric ids used.
-- Fixture ids used.
-- Expected response traits.
-- Actual observed response summary when a runtime owner runs it.
-- Boundary handoffs for any requested runtime, model, memory, tool, or API behavior.
+## Failure Modes
 
-## Required Secrets
+Missing evidence, owner ambiguity, unsafe requests, or attempts to execute adjacent-domain actions must block the quality gate and produce a handoff.
 
-None.
+## Rollback And Revocation
 
-## Safety Notes
+Remove the setup pack selection. No credentials, background jobs, or runtime grants are created by this pack.
 
-Do not paste real customer data into fixtures. Do not store persistent personal preferences in presets. Do not turn platform-specific instructions into hidden memory. Do not use local fixture dry runs as benchmark claims.
+## Manual Review Points
+
+Review evidence links, assumptions, protected records, owner handoffs, and defaultspack promotion blockers before treating output as production-ready.
+
+## Version Ledger
+
+Every prompt artifact release must update `ledgers/prompt_version_ledger.yaml` with prompt id, version, fixture ids, change summary, status, and non-overlap compatibility notes.

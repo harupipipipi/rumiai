@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/replay_index.schema.json",
+  "title": "Replay Index",
+  "description": "Replay index for audit and deterministic run review.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "replay_id",
+    "session_id",
+    "event_ids",
+    "checkpoint_ids",
+    "determinism_state",
+    "divergence_notes"
+  ],
+  "properties": {
+    "replay_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "checkpoint_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "determinism_state": {
+      "type": "string",
+      "enum": [
+        "deterministic",
+        "diverged",
+        "not_replayed"
+      ]
+    },
+    "divergence_notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

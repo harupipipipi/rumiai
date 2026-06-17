@@ -1,36 +1,21 @@
 # Operations
 
-## Review Workflow
+## Install
 
-1. Confirm the evidence already exists locally and is inside the requested scope.
-2. Normalize each source into the trace record schema.
-3. Apply the redaction policy before deriving any reusable procedure.
-4. Match evidence against the SOP pattern catalog.
-5. Draft a runbook, checklist, or workflow recipe with trace references.
-6. Complete the SOP mining checklist.
-7. Record approval, rejection, or revision in the ledger.
-8. Promote only human-approved recipes.
+Select `rumi_sop_mining_pack` as a setup pack. It depends on `defaultspack >=2.0.0`.
 
-## Development
+## Test
 
-The pack is asset-only. Changes should update the relevant catalog, schema, policy, template, docs, and contract test together.
+Run `python -m pytest -q rumi_ai_1_10/tests/test_rumi_sop_mining_pack_contract.py`.
 
-## Testing
+## Failure Modes
 
-Run the focused contract:
+Missing evidence, owner ambiguity, unsafe requests, or attempts to execute adjacent-domain actions must block the quality gate and produce a handoff.
 
-```bash
-python -m pytest tests/test_rumi_sop_mining_pack_contract.py -v
-```
+## Rollback And Revocation
 
-## Common Failure Modes
+Remove the setup pack selection. No credentials, background jobs, or runtime grants are created by this pack.
 
-- Raw secrets or tokens appear in examples or docs.
-- A recipe implies that this pack can execute automation.
-- A trace source lacks consent basis or redaction status.
-- A promoted SOP has no human approval record.
-- A handoff surface is documented without naming the owner pack.
+## Manual Review Points
 
-## Required Secrets
-
-None.
+Review evidence links, assumptions, protected records, redaction classes, source consent basis, owner handoffs, human approver role, approval record reference, and defaultspack promotion blockers before treating output as production-ready. Automation, browser, computer, scheduler, tool, and observability actions stay outside this pack.

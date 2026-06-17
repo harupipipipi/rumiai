@@ -1,0 +1,9 @@
+contract_fixture:
+  positive_cases:
+  - id: ab_test_positive
+    given: hypothesis plus metric plan and traffic estimate
+    expected: design packet with sample assumptions and guardrails
+  minimum_expected:
+  - schema_valid
+  - evidence_linked
+  - handoff_scoped

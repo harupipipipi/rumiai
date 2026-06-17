@@ -1,0 +1,24 @@
+policy:
+  id: agent_workroom_safety_policy
+  default_mode: draft_and_handoff_only
+  blocked_by_default:
+  - execute tools from a workroom event
+  - mutate browser or desktop state
+  - schedule future work directly
+  - write run files directly
+  - rewrite replay history after checkpoint
+  allowed_outputs:
+  - schema_valid_packet
+  - review_packet
+  - handoff_packet
+  - ui_contract
+  requires_human_review_before:
+  - external_action
+  - connector_io
+  - tool_execution
+  - file_write
+  - schedule_mutation
+  evidence_rules:
+  - source records or approval receipts must be cited
+  - missing evidence creates blocked state
+  - adjacent runtime actions name owner pack

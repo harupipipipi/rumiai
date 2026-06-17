@@ -1,0 +1,26 @@
+version: rumi.runtime_benchmark.release_gate_thresholds.v1
+pack_id: rumi_runtime_benchmark_pack
+network_default: none
+
+thresholds:
+  latency:
+    median_regression_percent_warn: 10
+    median_regression_percent_block: 25
+    p95_regression_percent_warn: 15
+    p95_regression_percent_block: 35
+    units: milliseconds
+  cost:
+    estimated_cost_percent_warn: 10
+    estimated_cost_percent_block: 30
+    units: estimated_usd
+  reliability:
+    failure_rate_warn: 0.05
+    failure_rate_block: 0.1
+    units: ratio
+
+gate_requirements:
+  - release_gate_thirty_run sample plan for blocking decisions
+  - environment descriptor complete
+  - reproducibility ledger complete
+  - warm and cold start samples separated
+  - variance and confidence notes attached

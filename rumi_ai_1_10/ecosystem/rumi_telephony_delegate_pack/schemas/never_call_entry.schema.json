@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/never_call_entry.schema.json",
+  "title": "Never Call Entry",
+  "description": "Contract schema for Never Call Entry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "entry_id",
+    "phone_target_alias",
+    "reason",
+    "effective_until",
+    "source_evidence_id",
+    "enforcement_state"
+  ],
+  "properties": {
+    "entry_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phone_target_alias": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "effective_until": {
+      "type": "string",
+      "enum": [
+        "indefinite",
+        "explicit_date",
+        "unknown"
+      ]
+    },
+    "source_evidence_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "enforcement_state": {
+      "type": "string",
+      "enum": [
+        "active",
+        "expired",
+        "needs_review"
+      ]
+    }
+  }
+}

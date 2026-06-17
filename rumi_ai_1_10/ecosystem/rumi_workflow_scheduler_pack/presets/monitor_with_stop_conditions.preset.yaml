@@ -1,0 +1,15 @@
+preset_id: rumi_workflow_scheduler.monitor_with_stop_conditions
+pack_id: rumi_workflow_scheduler_pack
+title: Monitor With Stop Conditions
+profile: rumi_workflow_scheduler.scheduler_designer
+schedule_kind: monitor
+default_owner_route: defaultspack_scheduler
+required_fields:
+  - monitored_condition
+  - cadence
+  - evidence_required
+  - stop_conditions
+  - retry_policy
+  - escalation_note
+retry_policy: escalating_retry
+status: draft_until_owner_approval

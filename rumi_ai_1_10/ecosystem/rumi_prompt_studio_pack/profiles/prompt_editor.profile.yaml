@@ -1,0 +1,15 @@
+profile:
+  id: prompt_editor
+  responsibilities:
+  - prompt_artifact_catalog
+  - prompt_lint_rubric
+  - custom_instruction_migration
+  - fixture_dry_run_contract
+  - prompt_version_ledger
+  must_not:
+  - model benchmarking
+  - model routing
+  - persistent memory storage
+  - tool creation
+  - API creation
+  - code edits

@@ -1,0 +1,30 @@
+profile:
+  id: study_coach
+  pack_id: rumi_study_coach_pack
+  mode: local_first_declarative
+  default_presets:
+  - safe_default
+  - handoff_review
+  - quality_gate
+  owned_surfaces:
+  - learner_profile
+  - study_goal_contract
+  - diagnostic_assessment
+  - study_plan
+  - practice_session
+  - quiz_item_contract
+  - spaced_review_queue
+  - progress_report
+  - evidence_bound_explanation
+  handoff_surfaces:
+  - document parsing
+  - web research
+  - long term memory storage
+  - calendar scheduling
+  - workspace export
+  - medical or therapeutic advice
+  - graded credential issuance
+  review_contract:
+    external_actions: handoff_only
+    evidence_required: true
+    human_review_required: true

@@ -17,6 +17,5 @@
 
 - No connected client: pair the extension again.
 - Missing content script: reload the target tab.
-- Element not found: take a fresh snapshot and use `semantic_id`, `labels`, or a unique `selector_hint`.
-- Unsafe form action: use a fresh snapshot entry and explicit approval evidence before submit-like clicks or Enter.
+- Element not found: take a fresh snapshot and use `semantic_id`, `labels`, or `selector_hint`.
 - Cross-origin frame: fall back to visible computer use or a CDP flow with frame access.

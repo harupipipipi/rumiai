@@ -4,17 +4,28 @@ import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePane
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
+import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { WarmActionIcon } from "./components/WarmActionIcon";
-import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
+import {
+  DEFAULT_WORKSPACE_TAB_ID,
+  WORKSPACE_TAB_CREATE_OPTIONS,
+  WorkspaceLaunchpad,
+  WorkspaceTabBar,
+  createWorkspaceTab,
+  workspaceTabDisplayTitle,
+  type WorkspaceTab,
+  type WorkspaceTabKind,
+} from "./components/WorkspaceTabs";
+import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { authorityApprovalTitle, pendingAuthorityApproval } from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
-import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
+import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
@@ -22,7 +33,9 @@ import { boundedDurationLabel } from "./lib/duration";
 import { openAuthorityApprovalWindow } from "./lib/desktopApproval";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
+import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
+import { reportClientDiagnostic } from "./lib/clientDiagnostics";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
@@ -38,6 +51,7 @@ type ComposerCandidateMenuState = {
 } | null;
 
 type WorkspacePanelMode = "composer" | "calendar";
+type BackendConnectionState = "online" | "degraded" | "offline";
 
 type PendingNewTaskContext = {
   groupId?: string;
@@ -102,6 +116,41 @@ type CalendarDragState = {
   startKey: string;
   startedAt: number;
 };
+
+function formatLastHealthyLabel(timestamp: number | null): string | null {
+  if (!timestamp) return null;
+  return new Intl.DateTimeFormat("ja-JP", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(timestamp);
+}
+
+function backendConnectionCopy(
+  state: BackendConnectionState,
+  lastHealthyAt: number | null,
+  note: string | null,
+): { title: string; detail: string } {
+  if (state === "offline") {
+    return {
+      title: "backend との接続が切れても、ここまでの表示は守ります。",
+      detail: note || "再接続を試しながら、いま見えている会話と操作面を保持しています。",
+    };
+  }
+  if (state === "degraded") {
+    const lastHealthy = formatLastHealthyLabel(lastHealthyAt);
+    return {
+      title: "接続は揺れていますが、画面は崩さず受け止めます。",
+      detail: lastHealthy
+        ? `最後に backend を確認できたのは ${lastHealthy} です。いまは再接続を試しながら静かに保護運転へ切り替えています。`
+        : "いまは再接続を試しながら静かに保護運転へ切り替えています。",
+    };
+  }
+  return {
+    title: "",
+    detail: "",
+  };
+}
 
 const dangerShieldSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <rect width="100" height="100" rx="20" fill="#2d2e2f"/>
@@ -536,7 +585,11 @@ function CalendarComposerPanel({
   const calendarCells = Array.from({ length: 42 }, (_, index): CalendarCell => {
     const date = new Date(year, month, 1 + index - monthStartOffset);
     const isCurrentMonth = date.getMonth() === month;
-    const isToday = date.getFullYear() === year && date.getMonth() === month && date.getDate() === today.getDate();
+    const isToday = (
+      date.getFullYear() === today.getFullYear()
+      && date.getMonth() === today.getMonth()
+      && date.getDate() === today.getDate()
+    );
     const row = Math.floor(index / 7);
     const col = index % 7;
     return {
@@ -794,14 +847,15 @@ function CalendarComposerPanel({
     <section
       ref={calendarRef}
       aria-label="Calendar month"
-      className="relative h-full min-h-0 w-full overflow-hidden rounded-[26px] border border-zinc-800 bg-[#101112] shadow-[0_24px_80px_rgba(0,0,0,0.36)]"
+      className="relative flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-zinc-800 bg-[#101112] shadow-[0_20px_60px_rgba(0,0,0,0.32)]"
     >
-      <div className="pointer-events-none absolute left-4 top-3 rumi-layer-local-popover flex items-center gap-2">
+      <div className="flex h-12 flex-shrink-0 items-center justify-between border-b border-zinc-800/80 bg-[#121314] px-4">
+        <div className="flex items-center gap-2">
         <button
           type="button"
           aria-label="前の月"
           title="前の月"
-          className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700/80 bg-zinc-950/82 text-lg leading-none text-zinc-300 shadow-lg backdrop-blur transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700/80 bg-zinc-950/70 text-lg leading-none text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
           onClick={() => moveVisibleMonth(-1)}
         >
           ‹
@@ -810,7 +864,7 @@ function CalendarComposerPanel({
           type="button"
           aria-label="今日"
           title="今日"
-          className="pointer-events-auto rounded-lg border border-zinc-700/80 bg-zinc-950/82 px-3 py-1.5 text-[12px] font-semibold text-zinc-200 shadow-lg backdrop-blur transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
+          className="rounded-md border border-zinc-700/80 bg-zinc-950/70 px-3 py-1.5 text-[12px] font-semibold text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
           onClick={returnToToday}
         >
           {year}年{month + 1}月
@@ -819,13 +873,15 @@ function CalendarComposerPanel({
           type="button"
           aria-label="次の月"
           title="次の月"
-          className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700/80 bg-zinc-950/82 text-lg leading-none text-zinc-300 shadow-lg backdrop-blur transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700/80 bg-zinc-950/70 text-lg leading-none text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
           onClick={() => moveVisibleMonth(1)}
         >
           ›
         </button>
+        </div>
+        <div className="h-8 w-[112px]" aria-hidden="true" />
       </div>
-      <div className="grid h-full min-h-[620px] grid-cols-7 grid-rows-6 overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6 overflow-hidden">
         {calendarCells.map((cell, index) => {
           const visibleItems = (itemsByDate[cell.key] ?? []).slice(0, settings.maxItemsPerDay);
           const hiddenCount = Math.max(0, (itemsByDate[cell.key] ?? []).length - visibleItems.length);
@@ -1181,6 +1237,11 @@ function externalConversationSection(conversation: Conversation): { id: string; 
 function toChatItem(conversation: Conversation): ChatItem {
   const section = externalConversationSection(conversation);
   const metadata = conversation.metadata ?? {};
+  const groupId = cleanOptionalString(conversation.group_id) ?? cleanOptionalString(metadata.group_id ?? metadata.groupId);
+  const normalizedMetadata: Record<string, unknown> = {
+    ...metadata,
+    ...(groupId ? { group_id: groupId } : {}),
+  };
   return {
     id: conversation.id,
     title: conversation.title,
@@ -1193,9 +1254,9 @@ function toChatItem(conversation: Conversation): ChatItem {
     tags: conversation.tags ?? [],
     isStarred: conversation.is_starred,
     isPinned: Boolean(conversation.is_pinned),
-    companyId: typeof metadata.company_id === "string" ? metadata.company_id : null,
-    workspaceId: typeof metadata.workspace_id === "string" ? metadata.workspace_id : null,
-    metadata,
+    companyId: typeof normalizedMetadata.company_id === "string" ? normalizedMetadata.company_id : null,
+    workspaceId: typeof normalizedMetadata.workspace_id === "string" ? normalizedMetadata.workspace_id : null,
+    metadata: normalizedMetadata,
   };
 }
 
@@ -1233,11 +1294,56 @@ function buildChatItems(conversations: Conversation[]): ChatItem[] {
     .map(build);
 }
 
+function visitChatItems(items: ChatItem[], visitor: (chat: ChatItem) => void) {
+  for (const item of items) {
+    visitor(item);
+    visitChatItems(item.children ?? [], visitor);
+  }
+}
+
+function kanbanConversationOptions(chatItems: ChatItem[]): Array<{ id: string; title: string; groupId?: string | null }> {
+  const options: Array<{ id: string; title: string; groupId?: string | null }> = [];
+  visitChatItems(chatItems, (chat) => {
+    options.push({
+      id: chat.id,
+      title: chat.title,
+      groupId: cleanOptionalString(chat.metadata?.group_id ?? chat.metadata?.groupId),
+    });
+  });
+  return options;
+}
+
+function kanbanGroupOptions(chatItems: ChatItem[]): Array<{ id: string; title: string; description?: string | null }> {
+  const groups = new Map<string, { id: string; title: string; count: number }>();
+  visitChatItems(chatItems, (chat) => {
+    const groupId = cleanOptionalString(chat.metadata?.group_id ?? chat.metadata?.groupId);
+    if (!groupId) return;
+    const groupTitle = cleanOptionalString(chat.metadata?.group_title ?? chat.metadata?.groupTitle) ?? groupId;
+    const existing = groups.get(groupId);
+    if (existing) {
+      existing.count += 1;
+      return;
+    }
+    groups.set(groupId, { id: groupId, title: groupTitle, count: 1 });
+  });
+  return [...groups.values()].map((group) => ({
+    id: group.id,
+    title: group.title,
+    description: `${group.count} chats`,
+  }));
+}
+
 function normalizeBlocks(message: ChatMessage): ChatContentBlock[] {
   if (typeof message.content === "string") {
     return [{ type: "text", text: message.content }];
   }
   return message.content;
+}
+
+function chatMessageMetadataRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }
 
 function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatUiMessage {
@@ -1246,12 +1352,21 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
   const thinking = metadata.thinking as Record<string, unknown> | undefined;
   const timing = metadata.timing as Record<string, unknown> | undefined;
   const pendingApproval = metadata.pending_approval;
+  const pendingAuthorityApproval = chatMessageMetadataRecord(metadata.pendingAuthorityApproval ?? metadata.pending_authority_approval);
+  const authorityFollowup = chatMessageMetadataRecord(metadata.authority_followup ?? metadata.authorityFollowup);
+  const chatDisplay = chatMessageMetadataRecord(metadata.chat_display ?? metadata.chatDisplay);
   const attachedToolCount = Number(metadata.attached_tool_count ?? 0);
   const thinkingDuration = String(timing?.thinking_duration_label ?? "")
     || boundedDurationLabel(timing?.thinking_started_at, timing?.completed_at);
+  const displayMetadata = {
+    ...(authorityFollowup ? { authorityFollowup } : {}),
+    ...(chatDisplay ? { chatDisplay } : {}),
+  };
+  const userMetadata = Object.keys(displayMetadata).length > 0 ? displayMetadata : undefined;
   return {
     id: message.id,
     conversationId: message.conversation_id,
+    createdAt: message.created_at,
     role: isUser ? "user" : "agent",
     content: normalizeBlocks(message),
     rawText: messageToText(message),
@@ -1259,7 +1374,7 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
     events: message.events ?? [],
     toolLogs: message.tool_logs ?? [],
     metadata: isUser
-      ? undefined
+      ? userMetadata
       : {
           executionTime: formatRelativeTime(message.created_at),
           modelName: profile?.display_name ?? String(message.model ?? ""),
@@ -1270,6 +1385,8 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
           pendingApproval: pendingApproval && typeof pendingApproval === "object" && !Array.isArray(pendingApproval)
             ? pendingApproval as Record<string, unknown>
             : undefined,
+          pendingAuthorityApproval,
+          ...displayMetadata,
         },
   };
 }
@@ -1549,7 +1666,7 @@ function getNewConversationPlaceholder(): string {
 }
 
 function getNewConversationGreeting(): string {
-  return "Defaults Console";
+  return "rumi DP";
 }
 
 function findProfile(profiles: ModelProfile[], modelId: string): ModelProfile | null {
@@ -2063,7 +2180,10 @@ function ChatApp() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
-  const [workspacePanelMode, setWorkspacePanelMode] = useState<WorkspacePanelMode>("composer");
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => [
+    createWorkspaceTab("chat", { id: DEFAULT_WORKSPACE_TAB_ID, title: "New Conversation" }),
+  ]);
+  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(DEFAULT_WORKSPACE_TAB_ID);
   const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
   const [modelSteerStatus, setModelSteerStatus] = useState<string | null>(null);
@@ -2076,6 +2196,8 @@ function ChatApp() {
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
   const [settledRuntimeApprovalIds, setSettledRuntimeApprovalIds] = useState<string[]>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
+  const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>("online");
+  const [backendConnectionNote, setBackendConnectionNote] = useState<string | null>(null);
   const [operationsStatus, setOperationsStatus] = useState<OperationsCompanyStatus | null>(null);
   const [operationsBusy, setOperationsBusy] = useState(false);
   const [mimoCodingStatus, setMimoCodingStatus] = useState<MimoCodingCompanyStatus | null>(null);
@@ -2102,6 +2224,8 @@ function ChatApp() {
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
+  const lastHealthyAtRef = useRef<number | null>(null);
+  const consecutiveHealthFailuresRef = useRef(0);
   const authorityApprovalWindowRequestRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -2112,6 +2236,8 @@ function ChatApp() {
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
+  const kanbanChatOptions = useMemo(() => kanbanConversationOptions(chatItems), [chatItems]);
+  const kanbanGroups = useMemo(() => kanbanGroupOptions(chatItems), [chatItems]);
   const recentSpotlightResults = useMemo(
     () => conversations
       .filter((conversation) => conversationMatchesSpotlightFilter(conversation, spotlightFilter))
@@ -2126,6 +2252,29 @@ function ChatApp() {
     () => activeConversation ? orderConversationMessages(activeConversation.messages) : [],
     [activeConversation?.messages],
   );
+  const conversationIntegrity = useMemo(
+    () => activeConversation
+      ? inspectConversationIntegrity(activeConversation.messages)
+      : {
+          collapsedCount: 0,
+          duplicateIdCount: 0,
+          duplicateSequenceCount: 0,
+          duplicateKeys: [],
+        },
+    [activeConversation?.messages],
+  );
+  useEffect(() => {
+    if (!activeConversationId || conversationIntegrity.collapsedCount === 0) return;
+    void reportClientDiagnostic({
+      source: "webapp",
+      category: "conversation_integrity",
+      level: "warning",
+      message: "Frontend collapsed duplicate conversation messages before rendering.",
+      fingerprint: `conversation-integrity:${activeConversationId}:${conversationIntegrity.duplicateKeys.join("|")}`,
+      conversationId: activeConversationId,
+      detail: conversationIntegrity,
+    });
+  }, [activeConversationId, conversationIntegrity]);
   const latestActiveMessage = activeConversation?.messages[activeConversation.messages.length - 1];
   const latestActiveMetadata = latestActiveMessage?.metadata && typeof latestActiveMessage.metadata === "object"
     ? latestActiveMessage.metadata as Record<string, unknown>
@@ -2137,11 +2286,38 @@ function ChatApp() {
     ? `${latestActiveMessage.id}:${latestActiveMessage.role}:${latestActiveMessage.finish_reason ?? ""}:${String(latestActiveThinking.state ?? "")}`
     : "";
   const messages = orderedMessages.map((message) => toUiMessage(message, activeProfile));
+  const backendConnectionBanner = backendConnectionCopy(
+    backendConnectionState,
+    lastHealthyAtRef.current,
+    backendConnectionNote,
+  );
   const activeChatTitle = activeConversation?.title ?? "New Conversation";
+  const activeWorkspaceTab = workspaceTabs.find((tab) => tab.id === activeWorkspaceTabId) ?? workspaceTabs[0] ?? null;
+  const activeWorkspaceKind = activeWorkspaceTab?.kind ?? "chat";
+  const isChatWorkspace = activeWorkspaceKind === "chat";
+  const isCodingWorkspace = activeWorkspaceKind === "coding";
+  const isCanvasWorkspace = activeWorkspaceKind === "canvas";
+  const isToolsWorkspace = activeWorkspaceKind === "tools";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
+  useEffect(() => {
+    setWorkspaceTabs((current) => current.map((tab) => {
+      if (tab.id !== activeWorkspaceTabId || tab.kind !== "chat") return tab;
+      const nextTitle = activeConversationId ? activeChatTitle : "New Conversation";
+      if (tab.conversationId === activeConversationId && tab.title === nextTitle) return tab;
+      return {
+        ...tab,
+        conversationId: activeConversationId,
+        title: nextTitle,
+      };
+    }));
+  }, [activeChatTitle, activeConversationId, activeWorkspaceTabId]);
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const locale = normalizeLocale(settingsValues.general?.language);
   const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
+  const spotlightShortcut = String(settingsValues.general?.spotlight_shortcut ?? "Ctrl+K").trim() || "Ctrl+K";
+  const spotlightShortcutEnabled = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_enabled, true);
+  const spotlightShortcutTextInput = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_text_input, true);
+  const spotlightShortcutLabel = spotlightShortcutEnabled ? shortcutLabel(spotlightShortcut) : "Off";
   const disabledToolIds = settingList(settingsValues.tools?.disabled_tool_ids);
   const hiddenToolIds = settingList(settingsValues.tools?.hidden_tool_ids);
   const disabledToolIdSet = useMemo(() => new Set(disabledToolIds), [disabledToolIds]);
@@ -2160,6 +2336,7 @@ function ChatApp() {
     ?? activeProfile?.default_thinking_level
     ?? "medium",
   );
+  const deepthinkEnabled = parseCommandBoolean(settingsValues.models?.deepthink_enabled, false);
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = useMemo(
     () => composerExtensionItems(sidebarItems).filter((item) => !disabledToolIdSet.has(item.id)),
@@ -2316,16 +2493,16 @@ function ChatApp() {
       .filter((command) => command.id !== "think" || profileSupportsThinking(activeProfile))
       .map((command) => ({
         ...command,
-        active: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === mode,
-        enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === mode,
+        active: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
+        enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
       }));
-  }, [activeProfile, commandCatalog, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, ultraYoloMode, yoloMode]);
+  }, [activeProfile, commandCatalog, deepthinkEnabled, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, ultraYoloMode, yoloMode]);
   const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
-  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview;
+  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace;
   const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
   const mimoCodingProfileAvailable = hasMimoCodingProfile(catalog);
@@ -2518,13 +2695,70 @@ function ChatApp() {
     };
   }, [isSettingsOpen]);
 
-  async function refreshHealth() {
+  const refreshHealth = useCallback(async (reason: "bootstrap" | "poll" | "focus" = "poll") => {
     try {
-      setHealth(await api.health());
+      const nextHealth = await api.health();
+      consecutiveHealthFailuresRef.current = 0;
+      lastHealthyAtRef.current = Date.now();
+      setHealth(nextHealth);
+      setBackendConnectionState("online");
+      setBackendConnectionNote(null);
     } catch (healthError) {
       console.error(healthError);
+      consecutiveHealthFailuresRef.current += 1;
+      const hadHealthyConnection = lastHealthyAtRef.current !== null;
+      const nextState: BackendConnectionState = hadHealthyConnection && consecutiveHealthFailuresRef.current < 3
+        ? "degraded"
+        : "offline";
+      const message = healthError instanceof Error ? healthError.message : "backend connection lost";
+      setBackendConnectionState(nextState);
+      setBackendConnectionNote(
+        hadHealthyConnection
+          ? `最後に安定していた backend から切れました。再接続を試しています。${message}`
+          : `backend の応答をまだ確認できていません。${message}`,
+      );
+      if (reason !== "poll" || nextState === "offline") {
+        void reportClientDiagnostic({
+          source: "webapp",
+          category: "backend_connection",
+          level: nextState === "offline" ? "error" : "warning",
+          message: nextState === "offline"
+            ? "The frontend lost its backend connection and entered offline protection."
+            : "The frontend detected backend instability and entered degraded mode.",
+          fingerprint: `backend-connection:${nextState}:${message}`,
+          conversationId: activeConversationId,
+          detail: {
+            reason,
+            error: message,
+            consecutiveFailures: consecutiveHealthFailuresRef.current,
+            lastHealthyAt: lastHealthyAtRef.current,
+          },
+        });
+      }
     }
-  }
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshHealth("focus");
+      }
+    };
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshHealth("poll");
+      }
+    }, backendConnectionState === "online" ? 15_000 : 4_000);
+    window.addEventListener("focus", refreshWhenVisible);
+    window.addEventListener("online", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      window.removeEventListener("online", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [backendConnectionState, refreshHealth]);
 
   function mergeProviderOAuthStatus(providerId: string, oauthStatus: Record<string, unknown>) {
     setSettingsValues((current) => {
@@ -2707,7 +2941,7 @@ function ChatApp() {
           recoveredFromLocation: true,
         });
       }
-      const shellBootstrap = Promise.all([refreshHealth(), refreshCatalog()])
+      const shellBootstrap = Promise.all([refreshHealth("bootstrap"), refreshCatalog()])
         .then(([, nextCatalog]) => {
           if (cancelled) return;
           const statusRefreshes: Array<Promise<unknown>> = [];
@@ -2779,14 +3013,15 @@ function ChatApp() {
 
   useEffect(() => {
     const handleGlobalKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey && event.key.toLowerCase() === "k")) return;
+      if (!spotlightShortcutEnabled) return;
+      if (!shortcutSpecMatchesEvent(spotlightShortcut, event, { allowTextInput: spotlightShortcutTextInput })) return;
       event.preventDefault();
       setIsSpotlightOpen(true);
       setSpotlightSelectedIndex(0);
     };
     document.addEventListener("keydown", handleGlobalKeyDown);
     return () => document.removeEventListener("keydown", handleGlobalKeyDown);
-  }, []);
+  }, [spotlightShortcut, spotlightShortcutEnabled, spotlightShortcutTextInput]);
 
   useEffect(() => {
     if (!isSpotlightOpen) return;
@@ -2877,6 +3112,9 @@ function ChatApp() {
 
   const handleNewTask = (options?: HistoryBoardNewTaskOptions) => {
     const nextContext = workspaceContextFromHistoryOptions(options);
+    const nextTab = createWorkspaceTab("chat", { title: "New Conversation" });
+    setWorkspaceTabs((current) => [...current, nextTab]);
+    setActiveWorkspaceTabId(nextTab.id);
     setPendingNewTaskContext(nextContext);
     if (nextContext?.workspaceId) {
       setMode("coding");
@@ -2888,7 +3126,6 @@ function ChatApp() {
     setIsGenerating(false);
     setAttachedFiles([]);
     setDroppedWidgets([]);
-    setWorkspacePanelMode("composer");
     replaceChatIdInUrl(null, false);
   };
 
@@ -2910,7 +3147,14 @@ function ChatApp() {
   const handleHistoryClick = (conversationId: string) => {
     setError(null);
     setPendingNewTaskContext(null);
-    setWorkspacePanelMode("composer");
+    const activeTab = workspaceTabs.find((tab) => tab.id === activeWorkspaceTabId);
+    if (activeTab?.kind === "chat") {
+      setWorkspaceTabs((current) => current.map((tab) => tab.id === activeWorkspaceTabId ? { ...tab, conversationId } : tab));
+    } else {
+      const nextTab = createWorkspaceTab("chat", { conversationId, title: "AI Chat" });
+      setWorkspaceTabs((current) => [...current, nextTab]);
+      setActiveWorkspaceTabId(nextTab.id);
+    }
     void loadConversation(conversationId);
   };
 
@@ -3381,7 +3625,7 @@ function ChatApp() {
       }
       case "show_status":
         setError(
-          `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
+          `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, deepthink=${deepthinkEnabled ? "on" : "off"}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
         );
         return;
       case "open_settings":
@@ -3509,6 +3753,9 @@ function ChatApp() {
       if (parsed.command.execution.type === "rumi_function") {
         await refreshCatalog();
       }
+      if (result.message) {
+        setError(result.message);
+      }
     } catch (commandError) {
       setError(commandError instanceof Error ? commandError.message : "command execution に失敗しました。");
     }
@@ -3552,6 +3799,57 @@ function ChatApp() {
       else url.searchParams.delete("chat");
       url.searchParams.delete("pending");
       window.history.pushState({ mode: newMode, conversationId: activeConversationId }, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  };
+
+  const activateWorkspaceTab = (tab: WorkspaceTab) => {
+    setActiveWorkspaceTabId(tab.id);
+    setError(null);
+    if (tab.kind === "chat") {
+      handleModeChange("agent");
+      void loadConversation(tab.conversationId ?? null);
+      return;
+    }
+    if (tab.kind === "coding") {
+      handleModeChange("coding");
+      return;
+    }
+    handleModeChange("agent");
+    if (tab.kind === "calendar" || tab.kind === "kanban") {
+      return;
+    }
+    if (tab.kind === "canvas") {
+      setShowPreview(true);
+    }
+    if (tab.kind === "tools") {
+      setActiveSidebarItemId("__tool_manager__");
+      setSidebarSelectionTick((value) => value + 1);
+    }
+  };
+
+  const handleWorkspaceTabSelect = (tabId: string) => {
+    const tab = workspaceTabs.find((candidate) => candidate.id === tabId);
+    if (tab) activateWorkspaceTab(tab);
+  };
+
+  const handleWorkspaceTabCreate = (kind: WorkspaceTabKind) => {
+    const option = WORKSPACE_TAB_CREATE_OPTIONS.find((candidate) => candidate.kind === kind);
+    if (option?.disabled) return;
+    const tab = createWorkspaceTab(kind, {
+      title: kind === "chat" ? "New Conversation" : option?.label,
+    });
+    setWorkspaceTabs((current) => [...current, tab]);
+    activateWorkspaceTab(tab);
+  };
+
+  const handleWorkspaceTabClose = (tabId: string) => {
+    if (workspaceTabs.length <= 1) return;
+    const closedIndex = workspaceTabs.findIndex((tab) => tab.id === tabId);
+    const nextTabs = workspaceTabs.filter((tab) => tab.id !== tabId);
+    setWorkspaceTabs(nextTabs);
+    if (activeWorkspaceTabId === tabId) {
+      const nextTab = nextTabs[Math.max(0, closedIndex - 1)] ?? nextTabs[0];
+      if (nextTab) activateWorkspaceTab(nextTab);
     }
   };
 
@@ -4192,6 +4490,8 @@ function ChatApp() {
       ?? null;
     const rumiDataPathForSubmit = pendingNewTaskContext?.rumiDataPath ?? activeContextForSubmit.rumiDataPath ?? null;
     const isCodingWorkspaceSubmit = mode === "coding" || Boolean(workspaceIdForSubmit);
+    let submittedConversationRuntimeId: string | null = null;
+    let markInterruptedAssistant: ((streamError: ChatStreamInterruptedError) => void) | null = null;
 
     try {
       let conversation = activeConversation;
@@ -4220,6 +4520,7 @@ function ChatApp() {
       const isOperationsMode = isOperationsConversation(conversation);
       const isMimoCodingMode = isMimoCodingConversation(conversation);
       submittedConversationId = conversation.id;
+      submittedConversationRuntimeId = conversation.id;
       const requestStartedAt = Date.now();
       rememberPendingRequest({
         conversationId: conversation.id,
@@ -4422,6 +4723,54 @@ function ChatApp() {
         replaceChatIdInUrl(conversation.id, false);
         setIsGenerating(false);
       };
+      markInterruptedAssistant = (streamError: ChatStreamInterruptedError) => {
+        const completedAt = Date.now();
+        setActiveConversation((current) => {
+          if (!current || current.id !== conversation.id) return current;
+          const existing = current.messages.find((message) => message.id === assistantDraft.id);
+          const existingMetadata = existing?.metadata && typeof existing.metadata === "object"
+            ? existing.metadata as Record<string, unknown>
+            : {};
+          const existingThinking = existingMetadata.thinking && typeof existingMetadata.thinking === "object"
+            ? existingMetadata.thinking as Record<string, unknown>
+            : {};
+          const nextText = String(existing?.raw_text ?? "") || streamError.partialText;
+          const nextTranscript = `${String(existingThinking.transcript ?? "")}${streamError.thinkingText}`;
+          const interruptedMessage: ChatMessage = {
+            ...(existing ?? assistantDraft),
+            content: nextText ? [{ type: "text", text: nextText }] : existing?.content ?? assistantDraft.content,
+            raw_text: nextText,
+            finish_reason: "interrupted",
+            metadata: {
+              ...existingMetadata,
+              thinking: {
+                ...existingThinking,
+                state: "interrupted",
+                transcript: nextTranscript || undefined,
+              },
+              transport: {
+                status: "interrupted",
+                reason: streamError.message,
+                saw_activity: streamError.sawActivity,
+              },
+              timing: {
+                ...((existingMetadata.timing && typeof existingMetadata.timing === "object") ? existingMetadata.timing as Record<string, unknown> : {}),
+                thinking_started_at: requestStartedAt,
+                completed_at: completedAt,
+                thinking_duration_ms: completedAt - requestStartedAt,
+                thinking_duration_label: boundedDurationLabel(requestStartedAt, completedAt),
+              },
+            },
+          };
+          const hasExisting = current.messages.some((message) => message.id === assistantDraft.id);
+          return {
+            ...current,
+            messages: hasExisting
+              ? current.messages.map((message) => message.id === assistantDraft.id ? interruptedMessage : message)
+              : [...current.messages, interruptedMessage],
+          };
+        });
+      };
 
       const operationsModelAllowlist = settingList(settingsValues.operations_company?.model_allowlist);
       const operationsToolDenylist = settingList(settingsValues.operations_company?.tool_denylist);
@@ -4461,6 +4810,7 @@ function ChatApp() {
 
       await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
+        deepthink_enabled: deepthinkEnabled,
         tool_choice: submittedToolIds.length > 0 ? "required" : undefined,
         tool_policy: {
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
@@ -4532,11 +4882,54 @@ function ChatApp() {
         setError(null);
         return;
       }
+      if (submitError instanceof ChatStreamInterruptedError) {
+        const interruptedConversationId = submittedConversationId ?? submittedConversationRuntimeId;
+        markInterruptedAssistant?.(submitError);
+        if (interruptedConversationId) {
+          forgetPendingRequest(interruptedConversationId);
+          replaceChatIdInUrl(interruptedConversationId, false);
+        }
+        setBackendConnectionState("degraded");
+        setBackendConnectionNote("応答 stream が途中で閉じました。ここまで届いた内容を保持しつつ、backend の回復を待っています。");
+        void reportClientDiagnostic({
+          source: "webapp",
+          category: "stream_interrupted",
+          level: "warning",
+          message: "The frontend preserved a partial assistant response after the stream was interrupted.",
+          fingerprint: `stream-interrupted:${interruptedConversationId ?? "new"}:${submitError.message}`,
+          conversationId: interruptedConversationId,
+          detail: {
+            error: submitError.message,
+            partialTextLength: submitError.partialText.length,
+            thinkingTextLength: submitError.thinkingText.length,
+            sawActivity: submitError.sawActivity,
+          },
+        });
+        setError(
+          submitError.partialText.trim()
+            ? "応答ストリームが途中で切れたため、ここまで届いた内容を保護して着地しました。"
+            : "応答ストリームが途中で切れました。画面は保護したまま、再接続の余地を残しています。",
+        );
+        setIsNewChatLaunching(false);
+        return;
+      }
       if (submittedConversationId && !isUnloadingRef.current && document.visibilityState !== "hidden") {
         forgetPendingRequest(submittedConversationId);
         replaceChatIdInUrl(submittedConversationId, false);
         await refreshConversations(submittedConversationId).catch(console.error);
       }
+      void reportClientDiagnostic({
+        source: "webapp",
+        category: "chat_submit_error",
+        level: "error",
+        message: submitError instanceof Error ? submitError.message : "Message submission failed.",
+        fingerprint: `chat-submit:${submittedConversationId ?? "new"}:${submitError instanceof Error ? submitError.message : "unknown"}`,
+        conversationId: submittedConversationId,
+        detail: {
+          mode,
+          hadAttachments: submittedAttachments.length > 0,
+        },
+      });
       setInput(userText);
       setAttachedFiles(submittedAttachments);
       setError(
@@ -4564,9 +4957,66 @@ function ChatApp() {
       onWorkspacesRefresh={() => void loadCodingWorkspaces()}
     />
   ) : null;
-  const isCalendarMode = workspacePanelMode === "calendar";
+  const isCalendarMode = activeWorkspaceKind === "calendar";
+  const isKanbanMode = activeWorkspaceKind === "kanban";
   const calendarSettings = parseCalendarSettings(settingsValues.calendar);
-  const handleCalendarModeToggle = () => setWorkspacePanelMode((current) => current === "calendar" ? "composer" : "calendar");
+  const activeConversationMetadata: Record<string, unknown> = activeConversation?.metadata && typeof activeConversation.metadata === "object"
+    ? activeConversation.metadata
+    : {};
+  const activeConversationCompanyId = typeof activeConversationMetadata.company_id === "string"
+    ? activeConversationMetadata.company_id
+    : typeof activeConversationMetadata.companyId === "string"
+      ? activeConversationMetadata.companyId
+      : null;
+  const handleCalendarModeToggle = () => {
+    const existingCalendarTab = workspaceTabs.find((tab) => tab.kind === "calendar");
+    if (existingCalendarTab) {
+      activateWorkspaceTab(existingCalendarTab);
+      return;
+    }
+    handleWorkspaceTabCreate("calendar");
+  };
+
+  const openKanbanScope = (scope: KanbanBoardScope = { type: "global", id: "default" }, label = "All Rumi Runs") => {
+    const existingKanbanTab = workspaceTabs.find((tab) => tab.kind === "kanban");
+    if (existingKanbanTab) {
+      const updatedTab = {
+        ...existingKanbanTab,
+        title: label ? `Kanban: ${label}` : "Kanban",
+        kanbanScope: scope,
+        kanbanScopeLabel: label,
+      };
+      setWorkspaceTabs((current) => current.map((tab) => tab.id === existingKanbanTab.id ? updatedTab : tab));
+      activateWorkspaceTab(updatedTab);
+      return;
+    }
+    const tab = createWorkspaceTab("kanban", {
+      title: label ? `Kanban: ${label}` : "Kanban",
+      kanbanScope: scope,
+      kanbanScopeLabel: label,
+    });
+    setWorkspaceTabs((current) => [...current, tab]);
+    activateWorkspaceTab(tab);
+  };
+
+  const handleKanbanModeToggle = () => {
+    openKanbanScope();
+  };
+
+  const handleKanbanScopeChange = (scope: KanbanBoardScope, label?: string | null) => {
+    setWorkspaceTabs((current) => current.map((tab) => tab.id === activeWorkspaceTabId && tab.kind === "kanban"
+      ? {
+          ...tab,
+          title: label ? `Kanban: ${label}` : "Kanban",
+          kanbanScope: scope,
+          kanbanScopeLabel: label ?? null,
+        }
+      : tab));
+  };
+
+  const handleHistoryGroupKanbanOpen = (group: ChatGroup) => {
+    openKanbanScope({ type: "group", id: group.id }, group.title);
+  };
   const renderComposer = (isCentered = false) => (
     <Renderers.composer
       input={input}
@@ -4656,6 +5106,9 @@ function ChatApp() {
               }}
               onCalendarOpen={handleCalendarModeToggle}
               isCalendarActive={isCalendarMode}
+              onKanbanOpen={handleKanbanModeToggle}
+              onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
+              isKanbanActive={isKanbanMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onMinimize={() => setIsHistoryMinimized(true)}
@@ -4681,6 +5134,9 @@ function ChatApp() {
               }}
               onCalendarOpen={handleCalendarModeToggle}
               isCalendarActive={isCalendarMode}
+              onKanbanOpen={handleKanbanModeToggle}
+              onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
+              isKanbanActive={isKanbanMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onRestore={() => setIsHistoryMinimized(false)}
@@ -4694,9 +5150,17 @@ function ChatApp() {
           style={{ "--rumi-activity-preview-width": `${activityPreviewWidthPx}px` } as CSSProperties}
         >
           <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0 rumi-anim-fade-up", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
-            {showRegion("chat_header") && !isCalendarMode && (
+            <WorkspaceTabBar
+              tabs={workspaceTabs}
+              activeTabId={activeWorkspaceTabId}
+              onSelect={handleWorkspaceTabSelect}
+              onClose={handleWorkspaceTabClose}
+              onCreate={handleWorkspaceTabCreate}
+            />
+
+            {showRegion("chat_header") && isChatWorkspace && !isCalendarMode && !isKanbanMode && (
               <Renderers.chatHeader
-                title={activeChatTitle}
+                title={activeWorkspaceTab ? workspaceTabDisplayTitle(activeWorkspaceTab) : activeChatTitle}
                 showPreview={effectiveShowPreview}
                 canShowPreview={showRegion("activity_preview") && canShowCanvas}
                 canOpenSettings={showRegion("settings_modal")}
@@ -4707,7 +5171,61 @@ function ChatApp() {
               />
             )}
 
-            {isCalendarMode ? (
+            {backendConnectionState !== "online" && (
+              <div
+                role="status"
+                className={cn(
+                  "mx-3 mt-3 rounded-2xl border px-4 py-3",
+                  backendConnectionState === "offline"
+                    ? "border-red-500/20 bg-red-500/10 text-red-100"
+                    : "border-amber-500/20 bg-amber-500/10 text-amber-100",
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className={cn(
+                      "mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full",
+                      backendConnectionState === "offline" ? "bg-red-400" : "bg-amber-300 animate-pulse",
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{backendConnectionBanner.title}</p>
+                    <p className="mt-1 text-xs leading-5 opacity-90">{backendConnectionBanner.detail}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void refreshHealth("focus")}
+                    className="shrink-0 rounded-xl border border-current/20 px-3 py-1.5 text-[11px] font-semibold text-current transition hover:bg-white/5"
+                  >
+                    いま確認
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {isKanbanMode ? (
+              <div className="flex min-h-0 flex-1 p-1.5">
+                <KanbanWorkspacePanel
+                  activeConversationId={activeConversationId}
+                  activeConversationTitle={activeChatTitle}
+                  initialScope={activeWorkspaceTab?.kind === "kanban" ? activeWorkspaceTab.kanbanScope ?? null : null}
+                  initialScopeLabel={activeWorkspaceTab?.kind === "kanban" ? activeWorkspaceTab.kanbanScopeLabel ?? null : null}
+                  conversationOptions={kanbanChatOptions}
+                  groupOptions={kanbanGroups}
+                  workspaceId={effectiveWorkspaceId}
+                  workspaceLabel={activeConversationWorkspaceContext.workspaceLabel}
+                  workspaceRoot={activeConversationWorkspaceContext.workspaceRoot}
+                  companyId={activeConversationCompanyId}
+                  modelId={activeModelId}
+                  modelProfiles={selectableModelProfiles}
+                  onOpenChat={(conversationId) => {
+                    handleHistoryClick(conversationId);
+                  }}
+                  onScopeChange={handleKanbanScopeChange}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
+                />
+              </div>
+            ) : isCalendarMode ? (
               <div className="flex min-h-0 flex-1 p-1.5">
                 <CalendarComposerPanel
                   conversationId={activeConversationId}
@@ -4716,6 +5234,44 @@ function ChatApp() {
                   settings={calendarSettings}
                 />
               </div>
+            ) : isCodingWorkspace ? (
+              <div className="flex min-h-0 flex-1 p-1.5">
+                <CodingCockpit
+                  variant="sidebar"
+                  workspaces={codingWorkspaces}
+                  selectedWorkspaceId={effectiveWorkspaceId}
+                  consoleScopeKey={effectiveConsoleKey}
+                  onWorkspaceSelect={handleCodingWorkspaceSelect}
+                  onWorkspacesRefresh={() => void loadCodingWorkspaces()}
+                />
+              </div>
+            ) : isCanvasWorkspace ? (
+              <div className="flex min-h-0 flex-1 p-1.5">
+                <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-800/70 bg-[#0a0a0c]">
+                  <Renderers.toolPreviewPanel
+                    previews={canvasPreviews}
+                    showPreview
+                    onClose={() => {
+                      const chatTab = workspaceTabs.find((tab) => tab.kind === "chat") ?? workspaceTabs[0];
+                      if (chatTab) activateWorkspaceTab(chatTab);
+                    }}
+                    previewMode={previewMode}
+                    onModeChange={setPreviewMode}
+                    activePreviewId={activePreviewId}
+                    memo={canvasMemo}
+                    onMemoChange={setCanvasMemo}
+                  />
+                </div>
+              </div>
+            ) : isToolsWorkspace ? (
+              <WorkspaceLaunchpad
+                sidebarItems={sidebarItems}
+                onCreate={handleWorkspaceTabCreate}
+                onOpenSidebarItem={(itemId) => {
+                  setActiveSidebarItemId(itemId);
+                  setSidebarSelectionTick((value) => value + 1);
+                }}
+              />
             ) : isNewConversation && !isLoading ? (
               <div className={cn("rumi-new-chat-stage flex flex-1 items-center justify-center px-5 pb-[10vh]", isNewChatLaunching && "is-launching")}>
                 <div className="w-full">
@@ -4749,7 +5305,7 @@ function ChatApp() {
               />
             )}
 
-            {showRegion("composer") && !isNewConversation && !isCalendarMode && (
+            {showRegion("composer") && isChatWorkspace && !isNewConversation && !isCalendarMode && !isKanbanMode && (
               <div className="relative">
                 {showRegion("activity_preview") && !effectiveShowPreview && canShowCanvas && (
                   <CanvasPeek
@@ -4907,10 +5463,15 @@ function ChatApp() {
             toolFilterEntries={toolFilterEntries}
             runtimeCapabilitySnapshot={runtimeCapabilitySnapshot}
             yoloMode={yoloMode}
+            workspaceTabs={workspaceTabs}
+            activeWorkspaceTabId={activeWorkspaceTabId}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenSettingsSection={openSettingsSection}
             onToggleYolo={() => setYoloMode((value) => !value)}
+            onWorkspaceTabSelect={handleWorkspaceTabSelect}
+            onWorkspaceTabClose={handleWorkspaceTabClose}
+            onWorkspaceTabCreate={handleWorkspaceTabCreate}
             onToolToggle={(item) => toggleSelectedTool({
               id: item.id,
               label: item.label,
@@ -4934,6 +5495,7 @@ function ChatApp() {
         selectedIndex={spotlightSelectedIndex}
         loading={spotlightLoading}
         locale={locale}
+        shortcutLabel={spotlightShortcutLabel}
         onQueryChange={setSpotlightQuery}
         onFilterChange={setSpotlightFilter}
         onKeyDown={handleSpotlightKeyDown}

@@ -1,0 +1,30 @@
+review_checklist:
+  required_checks:
+  - id: trace_schema_valid
+    blocking: true
+  - id: redaction_complete
+    blocking: true
+  - id: redaction_classes_recorded
+    blocking: true
+  - id: source_consent_recorded
+    blocking: true
+  - id: assumptions_marked
+    blocking: true
+  - id: human_owner_approved
+    blocking: true
+  - id: approver_identity_recorded
+    blocking: true
+  - id: approved_at_recorded
+    blocking: true
+  - id: non_execution_boundary_confirmed
+    blocking: true
+  - id: automation_handoff_named
+    blocking: true
+  - id: browser_or_computer_handoff_named
+    blocking: true
+  - id: scheduler_handoff_named
+    blocking: true
+  - id: observability_handoff_named
+    blocking: true
+  - id: evidence_links
+    blocking: false

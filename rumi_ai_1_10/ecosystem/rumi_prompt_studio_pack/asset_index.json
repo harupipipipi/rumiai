@@ -2,10 +2,15 @@
   "pack_id": "rumi_prompt_studio_pack",
   "version": "0.1.0",
   "asset_groups": {
+    "readme": {
+      "purpose": "Top-level pack orientation.",
+      "paths": [
+        "README.md"
+      ]
+    },
     "docs": {
       "purpose": "Human operating guide and boundary documentation.",
       "paths": [
-        "README.md",
         "docs/README.md",
         "docs/architecture.md",
         "docs/interfaces.md",
@@ -13,58 +18,83 @@
       ]
     },
     "catalog": {
-      "purpose": "Prompt, lint, migration, style, and local dry-run declarations.",
+      "purpose": "Prompt library, workflow, quality, and migration declarations.",
       "paths": [
-        "catalog/prompt_library.yaml",
-        "catalog/prompt_lint_rubrics.yaml",
+        "catalog/prompt_studio_prompt_library.yaml",
+        "catalog/prompt_studio_workflows.yaml",
+        "catalog/prompt_studio_quality_matrix.yaml",
         "catalog/custom_instruction_migration_map.yaml",
-        "catalog/style_persona_catalog.yaml",
-        "catalog/local_fixture_dry_runs.yaml"
+        "catalog/provider_migration_matrix.yaml"
       ]
     },
-    "schemas": {
-      "purpose": "Portable JSON contracts for prompt artifacts, migration records, and lint results.",
+    "schema": {
+      "purpose": "Portable JSON contracts for prompt studio records, artifacts, migration records, and lint results.",
       "paths": [
+        "schemas/prompt_studio_record.schema.json",
         "schemas/prompt_artifact.schema.json",
         "schemas/instruction_migration_record.schema.json",
         "schemas/prompt_lint_result.schema.json"
       ]
     },
-    "review_controls": {
-      "purpose": "Policies, checklists, ledgers, and templates for prompt review.",
+    "policy": {
+      "purpose": "Declarative safety and provider-boundary policies.",
       "paths": [
-        "policies/prompt_studio_review.policy.yaml",
-        "policies/custom_instruction_migration.policy.yaml",
-        "checklists/prompt_release.checklist.yaml",
-        "ledgers/prompt_studio_review_ledger.schema.yaml",
-        "templates/prompt_review_report.template.yaml",
-        "templates/custom_instruction_migration.template.yaml"
+        "policies/prompt_studio_safety.policy.yaml",
+        "policies/provider_style_boundary.policy.yaml"
+      ]
+    },
+    "checklist": {
+      "purpose": "Review checklist for prompt studio artifacts.",
+      "paths": [
+        "checklists/prompt_studio_review.checklist.yaml"
+      ]
+    },
+    "ledger": {
+      "purpose": "Prompt studio evidence and version ledgers.",
+      "paths": [
+        "ledgers/prompt_studio_evidence_ledger.schema.yaml",
+        "ledgers/prompt_version_ledger.yaml"
+      ]
+    },
+    "template": {
+      "purpose": "Prompt studio handoff and migration report templates.",
+      "paths": [
+        "templates/prompt_studio_handoff.template.md",
+        "templates/custom_instruction_migration.template.md"
+      ]
+    },
+    "profiles": {
+      "purpose": "Reviewer profile declarations.",
+      "paths": [
+        "profiles/prompt_editor.profile.yaml"
+      ]
+    },
+    "prompts": {
+      "purpose": "System prompt declarations for prompt linting.",
+      "paths": [
+        "prompts/prompt_linter.system.md"
+      ]
+    },
+    "presets": {
+      "purpose": "Reusable prompt review presets.",
+      "paths": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ]
+    },
+    "example": {
+      "purpose": "Portable examples for prompt linting and instruction migration.",
+      "paths": [
+        "examples/claude_style_instruction_migration.example.yaml",
+        "examples/chatgpt_custom_instruction_lint.example.yaml",
+        "examples/gemini_gem_prompt_normalization.example.yaml"
       ]
     },
     "fixtures": {
       "purpose": "Local-only dry-run inputs for migration and prompt lint smoke checks.",
       "paths": [
-        "fixtures/chatgpt_custom_instructions.fixture.md",
-        "fixtures/claude_project_instructions.fixture.md",
-        "fixtures/gemini_gem_instruction.fixture.md",
-        "fixtures/local_dry_run_cases.yaml"
-      ]
-    },
-    "prompt_surfaces": {
-      "purpose": "Reusable reviewer profiles, system prompts, style presets, and examples.",
-      "paths": [
-        "profiles/prompt_librarian.profile.yaml",
-        "profiles/instruction_migration_reviewer.profile.yaml",
-        "prompts/prompt_librarian.system.md",
-        "prompts/instruction_migration_reviewer.system.md",
-        "presets/concise_operator.preset.yaml",
-        "presets/warm_research_partner.preset.yaml",
-        "presets/code_review_senior.preset.yaml",
-        "presets/technical_writer_plain.preset.yaml",
-        "examples/prompt_library_entry.example.yaml",
-        "examples/chatgpt_instruction_migration.example.yaml",
-        "examples/claude_instruction_migration.example.yaml",
-        "examples/local_fixture_dry_run.example.yaml"
+        "fixtures/prompt_regression_cases.yaml"
       ]
     }
   },

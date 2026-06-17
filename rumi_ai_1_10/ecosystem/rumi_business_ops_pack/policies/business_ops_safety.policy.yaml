@@ -1,0 +1,12 @@
+policy_id: rumi_business_ops.safety
+local_first: true
+network_default: deny
+rules:
+  - id: no_unsourced_business_claims
+    decision: require_evidence
+  - id: connector_actions_need_owner
+    decision: handoff_to_rumi_connector_gateway_pack
+  - id: money_or_contract_changes_pause
+    decision: needs_review
+  - id: followups_route_to_scheduler
+    decision: handoff_to_rumi_workflow_scheduler_pack

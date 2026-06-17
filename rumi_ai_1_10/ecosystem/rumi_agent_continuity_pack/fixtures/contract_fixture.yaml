@@ -1,0 +1,7 @@
+fixture:
+  packet_id: continuity_long_run_001
+  resume_goal: finish verified pack PR
+  safe_next_action: rerun focused contract tests
+  handoff_targets:
+  - rumi_agent_workroom_pack
+  - rumi_code_ide_pack

@@ -1,0 +1,79 @@
+quality_matrix:
+  id: locale_qa_matrix_v1
+  surfaces:
+  - id: app_string
+    owner_boundary: frontend_design_for_layout_changes
+    required_evidence:
+    - string_key
+    - source_segment_id
+    - target_segment_id
+  - id: documentation
+    owner_boundary: document_intelligence_for_document_mutation
+    required_evidence:
+    - heading_path
+    - source_segment_id
+    - target_segment_id
+  - id: support_copy
+    owner_boundary: connector_delivery_for_external_send
+    required_evidence:
+    - macro_id
+    - customer_commitment_check
+    - locale_owner_note
+  checks:
+  - id: terminology
+    blocking: true
+    evidence_required: true
+    applies_to:
+    - app_string
+    - documentation
+    - support_copy
+    failure_action: revise_translation
+  - id: protected_terms
+    blocking: true
+    evidence_required: true
+    applies_to:
+    - app_string
+    - documentation
+    - support_copy
+    failure_action: block_release
+  - id: tone_register
+    blocking: true
+    evidence_required: true
+    applies_to:
+    - documentation
+    - support_copy
+    failure_action: request_locale_owner_review
+  - id: placeholder_integrity
+    blocking: true
+    evidence_required: true
+    applies_to:
+    - app_string
+    - connector_message
+    failure_action: block_release
+  - id: expansion_or_truncation_risk
+    blocking: false
+    evidence_required: true
+    applies_to:
+    - app_string
+    failure_action: handoff_to_rumi_frontend_design_pack
+  - id: number_date_currency
+    blocking: false
+    evidence_required: true
+    applies_to:
+    - app_string
+    - documentation
+    - support_copy
+    failure_action: revise_translation
+  - id: locale_issue_triage
+    blocking: true
+    evidence_required: true
+    applies_to:
+    - app_string
+    - documentation
+    - support_copy
+    failure_action: create_locale_issue_record
+  minimum_pass: all_blocking_checks
+  completion_rules:
+    source_and_target_segments_required: true
+    protected_term_failures_block_release: true
+    adjacent_owner_actions_require_handoff: true

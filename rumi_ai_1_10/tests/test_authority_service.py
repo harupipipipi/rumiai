@@ -175,6 +175,172 @@ def test_authority_approve_once_consumes_token(tmp_path, monkeypatch):
     assert second.approval_required is True
 
 
+def test_authority_approve_once_can_bundle_model_api_key_and_network_tokens(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    model_resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+        "domain": "api.openai.com",
+        "port": 443,
+    }
+    api_resource = {**model_resource, "kind": "api_key"}
+    network_resource = {**model_resource, "kind": "network"}
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=model_resource,
+        conversation_id="c1",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="once",
+        related_permissions=["api_key.use", "network.egress"],
+        ui_operator=_ui_operator(decision.request_id),
+    )
+    related = {item["permission_id"]: item for item in approval["related_approvals"]}
+
+    model_allowed = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=model_resource,
+        conversation_id="c1",
+        request_id=approval["request_id"],
+        approval_token=approval["token"],
+    )
+    api_allowed = service.check(
+        principal_id="conversation:c1",
+        permission_id="api_key.use",
+        resource=api_resource,
+        conversation_id="c1",
+        request_id=related["api_key.use"]["request_id"],
+        approval_token=related["api_key.use"]["token"],
+    )
+    network_allowed = service.check(
+        principal_id="conversation:c1",
+        permission_id="network.egress",
+        resource=network_resource,
+        conversation_id="c1",
+        request_id=related["network.egress"]["request_id"],
+        approval_token=related["network.egress"]["token"],
+    )
+
+    assert approval["permission_id"] == "model.invoke"
+    assert related["api_key.use"]["resource"]["kind"] == "api_key"
+    assert related["network.egress"]["resource"]["kind"] == "network"
+    assert model_allowed.allowed is True
+    assert api_allowed.allowed is True
+    assert network_allowed.allowed is True
+
+
+def test_authority_persistent_approval_can_bundle_model_api_key_and_network_grants(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+        "domain": "api.openai.com",
+        "port": 443,
+    }
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=resource,
+        conversation_id="c1",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="conversation",
+        related_permissions=["api_key.use", "network.egress"],
+        ui_operator=_ui_operator(decision.request_id),
+    )
+    grant = grants.get_grant("conversation:c1")
+
+    assert approval["success"] is True
+    assert grant is not None
+    assert "model.invoke" in grant.permissions
+    assert "api_key.use" in grant.permissions
+    assert "network.egress" in grant.permissions
+
+
+def test_authority_request_display_metadata_explains_provider_endpoint_and_key(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "opencode-go",
+        "api_id": "legacy",
+        "model_id": "deepseek-v4-pro",
+        "pack_id": "defaultspack",
+        "app_display_name": "defaultspack v2",
+        "provider_display_name": "OpenCode Go provider",
+        "model_display_name": "DeepSeek V4 Pro via OpenCode Go",
+        "credential_label": "OpenCode Go API key",
+        "endpoint_url": "https://opencode.ai/zen/go/v1/chat/completions",
+        "endpoint_path": "/chat/completions",
+        "domain": "opencode.ai",
+        "port": 443,
+    }
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=resource,
+        conversation_id="c1",
+    )
+
+    view = service.get_request(decision.request_id)["request"]
+    display = view["display_metadata"]
+
+    assert display["title"] == (
+        "defaultspack v2 / OpenCode Go provider に OpenCode Go API key の使用と "
+        "https://opencode.ai/zen/go/v1/chat/completions へのアクセスを許可しますか？"
+    )
+    assert "OpenCode Go API key の使用" in display["summary"]
+    assert "https://opencode.ai/zen/go/v1/chat/completions へのアクセス" in display["summary"]
+    assert "使用 と" not in display["summary"]
+    assert "アクセス を" not in display["summary"]
+    assert display["model_display_name"] == "DeepSeek V4 Pro via OpenCode Go"
+    assert display["endpoint_host"] == "opencode.ai"
+    assert "provider provider" not in display["title"]
+    assert "provider provider" not in display["summary"]
+
+
+def test_authority_approve_once_ignores_stream_transport_flag(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "opencode-go",
+        "api_id": "legacy",
+        "model_id": "qwen3.5-plus",
+        "stream": True,
+    }
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=resource,
+        conversation_id="c1",
+    )
+    approval = service.approve_request(
+        decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    followup = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource={**resource, "stream": False},
+        conversation_id="c1",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+    )
+
+    assert followup.allowed is True
+
+
 def test_authority_service_resolves_from_di(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUMI_AUTHORITY_MODE", "enforce")

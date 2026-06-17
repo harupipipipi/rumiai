@@ -1,0 +1,24 @@
+recipe_id: rumi.model_evals.recipes.pass_k_flakiness
+version: rumi.recipe.v1
+purpose: Declarative recipe for pass@k, pass^k, and flakiness evidence review.
+network: none_by_default
+inputs:
+  required: [run_set, task_family, target_provider, target_model, grader_policy]
+steps:
+  - id: normalize_runs
+    action: record run ids, seeds if known, timestamps, task fixture ids, and grader version
+  - id: compute_pass_at_k
+    action: summarize successes over allowed attempts and state estimator
+  - id: compute_pass_power_k
+    action: summarize consecutive success evidence and independence assumption
+  - id: classify_flakiness
+    action: identify retry-sensitive failures, provider errors, timeout patterns, and nondeterminism
+  - id: budget_review
+    action: compare cost and latency evidence against task-family budget
+  - id: routing_recommendation
+    action: recommend preferred, acceptable, fallback, hold, or quarantine status
+outputs:
+  - metric_set
+  - flakiness_report
+  - fit_matrix_update
+  - promotion_gate_input

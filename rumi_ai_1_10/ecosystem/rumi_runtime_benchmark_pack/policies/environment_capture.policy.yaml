@@ -1,0 +1,34 @@
+version: rumi.runtime_benchmark.environment_capture_policy.v1
+policy_id: rumi_runtime_benchmark_pack.environment_capture
+pack_id: rumi_runtime_benchmark_pack
+network_default: none
+
+principles:
+  - Capture enough environment detail to reproduce the benchmark without collecting secrets.
+  - Separate deterministic fixtures from live provider or network-dependent runs.
+  - Record cache, warmup, and retry posture before interpreting latency.
+  - Treat cost as an estimate unless a user supplies approved billing evidence.
+  - Avoid claims that exceed the sampling plan.
+
+required_before_comparison:
+  - benchmark_id
+  - runtime_surface
+  - model_or_provider_label
+  - git_ref_or_fixture_version
+  - sampling_plan_id
+  - network_policy
+  - cache_policy
+  - latency_units
+  - cost_units
+
+blocked_by_default:
+  - storing provider credentials
+  - live network benchmarking without explicit user request
+  - comparing samples with different fixtures without disclosure
+  - claiming p95 from smoke samples
+
+handoff_policy:
+  model_quality_metrics: rumi_model_evals_pack
+  run_event_logging: rumi_observability_pack
+  isolated_execution: rumi_sandbox_runtime_pack
+  release_gate_reporting: rumi_devops_release_pack
