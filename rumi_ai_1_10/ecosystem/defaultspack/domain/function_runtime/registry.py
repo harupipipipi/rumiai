@@ -44,7 +44,10 @@ TOOL_FUNCTION_ACTIONS = {
 
 
 def get_spec(function_id: str) -> FunctionSpec | None:
-    return FUNCTION_SPECS_BY_ID.get(function_id)
+    spec = FUNCTION_SPECS_BY_ID.get(function_id)
+    if spec is not None:
+        return spec
+    return _template_specs().get(function_id)
 
 
 def block_module_for(function_id: str) -> str | None:
@@ -62,3 +65,12 @@ def function_id_for_block_module(block_module: str) -> str | None:
         if spec.block_module == block_module:
             return spec.function_id
     return None
+
+
+def _template_specs() -> dict[str, FunctionSpec]:
+    try:
+        from .template_specs import template_function_specs
+
+        return template_function_specs()
+    except Exception:
+        return {}

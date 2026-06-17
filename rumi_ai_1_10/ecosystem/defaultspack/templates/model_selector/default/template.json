@@ -79,7 +79,8 @@
       "order": 25,
       "role": "data_source",
       "data_source": "selectable_model_profiles",
-      "function_id": "ai_models_catalog",
+      "function_id": "ai_models",
+      "handler_ref": "blocks.ai.models:run",
       "route_path": "/api/ai/models",
       "method": "GET",
       "returns": "model profile options"
@@ -119,7 +120,7 @@
         "method": "GET",
         "path": "/api/ai/models",
         "block_module": "blocks.ai.models",
-        "diagnostic": "Template route metadata is catalog/test-contract only and does not register a transport route."
+        "diagnostic": "Template function route_path is projected to transport when it is not already covered by a builtin route."
       },
       "assertions": [
         "catalog.templates includes rumi.model_selector.default",

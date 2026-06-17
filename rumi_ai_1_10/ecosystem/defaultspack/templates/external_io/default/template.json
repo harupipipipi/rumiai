@@ -37,6 +37,7 @@
       "role": "data_source",
       "data_source": "external_io_template_catalog",
       "function_id": "external_io_template_catalog",
+      "handler_ref": "blocks.external.templates:run",
       "route_path": "/api/external/templates",
       "method": "GET",
       "returns": "external input/output templates projected from RumiTemplate plus user custom templates"
@@ -48,7 +49,10 @@
       "role": "action",
       "action_id": "external_io_upsert_custom_template",
       "function_id": "external_io_upsert_custom_template",
-      "handler_ref": "domain.external.io_templates:ExternalIOTemplateRegistry.upsert_custom",
+      "handler_ref": "blocks.external.templates:run",
+      "default_args": {
+        "_method": "POST"
+      },
       "requires_approval": true
     },
     {

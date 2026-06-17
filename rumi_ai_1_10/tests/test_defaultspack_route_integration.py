@@ -83,6 +83,23 @@ def test_flow_yaml_routes_are_the_canonical_chat_ingress():
     assert canonical[("POST", "/api/chat/conversations/{id}/stream")].flow_id == "defaultspack.chat_stream_turn"
 
 
+def test_template_function_routes_join_canonical_transport_registry():
+    from ecosystem.defaultspack.transport.registry import (
+        canonical_http_route_specs,
+        template_http_route_specs,
+    )
+
+    template_routes = {(spec.method, spec.pattern): spec for spec in template_http_route_specs()}
+    canonical = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
+
+    token_route = template_routes[("POST", "/api/context/token-estimate")]
+    assert token_route.function_id == "context_token_estimate"
+    assert token_route.function_name == "defaultspack:context_token_estimate"
+    assert canonical[("POST", "/api/context/token-estimate")].function_name == (
+        "defaultspack:context_token_estimate"
+    )
+
+
 def test_pack_api_dispatches_defaultspack_interface_routes(monkeypatch):
     from core_runtime.pack_api_server import PackAPIHandler
 

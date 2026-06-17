@@ -50,7 +50,8 @@
       "order": 35,
       "role": "data_source",
       "data_source": "model_route_options",
-      "function_id": "ai_get_preferred_model",
+      "function_id": "ai_route_model",
+      "handler_ref": "blocks.ai.route_model:run",
       "route_path": "/api/ai/models/route",
       "method": "POST",
       "returns": "model routing candidates and reason codes"
@@ -62,7 +63,7 @@
       "role": "action",
       "action_id": "ai_route_model",
       "function_id": "ai_route_model",
-      "handler_ref": "domain.ai_client.model_router:route_model",
+      "handler_ref": "blocks.ai.route_model:run",
       "requires_approval": false
     },
     {

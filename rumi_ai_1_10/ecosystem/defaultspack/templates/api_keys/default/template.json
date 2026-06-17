@@ -89,8 +89,11 @@
       "order": 16,
       "role": "action",
       "action_id": "ai_set_provider_api_key",
-      "function_id": "ai_set_provider_api_key",
-      "handler_ref": "domain.ai_client.api_key_store:set_provider_api_key",
+      "function_id": "ai_set_provider_key",
+      "handler_ref": "blocks.ai.provider_key:run",
+      "default_args": {
+        "_method": "POST"
+      },
       "requires_approval": true
     },
     {
@@ -118,7 +121,7 @@
         "method": "POST",
         "path": "/api/ai/provider-key",
         "block_module": "blocks.ai.provider_key",
-        "diagnostic": "Template route metadata is catalog/test-contract only and does not register a transport route."
+        "diagnostic": "Template function route_path is projected to transport when it is not already covered by a builtin route."
       },
       "assertions": [
         "catalog.actions includes ai_set_provider_api_key",

@@ -245,6 +245,11 @@ def test_frontend_catalog_merges_template_metadata_without_dropping_existing_key
     assert any(item["id"] == "compact_context" for item in catalog["commands"])
     assert any(item["id"] == "materialize_txt" for item in catalog["context_policies"])
     assert any(item["id"] == "line.input.default" for item in catalog["external_io_templates"])
+    assert any(
+        item["path"] == "/api/context/token-estimate"
+        and item["function_name"] == "defaultspack:context_token_estimate"
+        for item in catalog["routes"]["template_backed"]
+    )
     composer_region = next(item for item in catalog["shell"]["layout"]["regions"] if item["id"] == "composer")
     composer_renderer = next(item for item in catalog["shell"]["renderers"] if item["id"] == "composer")
     assert composer_region["template_id"] == "rumi.composer.default"

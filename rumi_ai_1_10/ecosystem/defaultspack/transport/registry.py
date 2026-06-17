@@ -238,6 +238,61 @@ def component_route_diagnostics() -> list[dict[str, str]]:
     return diagnostics
 
 
+def template_http_route_specs(defaultspack_root: str | Path | None = None) -> List[HttpRouteSpec]:
+    try:
+        from domain.function_runtime.template_specs import template_route_items
+    except Exception:
+        return []
+    specs: List[HttpRouteSpec] = []
+    for item in template_route_items(defaultspack_root):
+        function_id = str(item.get("function_id") or "").strip()
+        method = str(item.get("method") or "").strip().upper()
+        pattern = str(item.get("path") or "").strip()
+        if not function_id or not method or not pattern.startswith("/"):
+            continue
+        specs.append(
+            HttpRouteSpec(
+                method,
+                pattern,
+                function_id=function_id,
+                function_name=f"defaultspack:{function_id}",
+                defaults=dict(item.get("default_args") or {}),
+            )
+        )
+    return specs
+
+
+def template_route_diagnostics(defaultspack_root: str | Path | None = None) -> list[dict[str, str]]:
+    diagnostics: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    base_routes = {
+        (spec.method, spec.pattern)
+        for spec in _dedupe_http_route_specs([flow_http_route_specs(), list(_FALLBACK_HTTP_ROUTE_SPECS)])
+    }
+    for spec in template_http_route_specs(defaultspack_root):
+        key = (spec.method, spec.pattern)
+        if key in seen:
+            diagnostics.append(
+                {
+                    "level": "warning",
+                    "code": "template_route_duplicate",
+                    "message": f"duplicate template route {spec.method} {spec.pattern}",
+                    "source": "RumiTemplate function route_path",
+                }
+            )
+        elif key in base_routes:
+            diagnostics.append(
+                {
+                    "level": "info",
+                    "code": "template_route_shadowed_by_builtin",
+                    "message": f"template route {spec.method} {spec.pattern} is already provided by a builtin route",
+                    "source": "RumiTemplate function route_path",
+                }
+            )
+        seen.add(key)
+    return diagnostics
+
+
 def _defaultspack_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -395,12 +450,18 @@ def canonical_http_route_specs(*, include_always_available: bool = True) -> list
     fallback_specs = list(_FALLBACK_HTTP_ROUTE_SPECS)
     base_specs = _dedupe_http_route_specs([flow_specs, fallback_specs])
     existing = {(spec.method, spec.pattern) for spec in base_specs}
+    template_specs = [
+        spec
+        for spec in template_http_route_specs()
+        if (spec.method, spec.pattern) not in existing
+    ]
+    existing.update((spec.method, spec.pattern) for spec in template_specs)
     component_specs = [
         spec
         for spec in _component_route_specs()
         if (spec.method, spec.pattern) not in existing
     ]
-    groups = [base_specs, component_specs]
+    groups = [base_specs, template_specs, component_specs]
     if include_always_available:
         groups.append(list(_ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS))
     return _dedupe_http_route_specs(groups)

@@ -50,6 +50,12 @@ def ensure_defaultspack_functions_registered(container: Any | None = None) -> in
                 registered += 1
         except Exception:
             continue
+    try:
+        from .template_specs import register_template_functions
+
+        registered += register_template_functions(registry)
+    except Exception:
+        pass
     return registered
 
 

@@ -27,7 +27,12 @@ from domain.external.source_store import ExternalSourceStore, external_source_ke
 from domain.external.token_store import external_token_status
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
-from transport.registry import component_http_route_specs, component_route_diagnostics
+from transport.registry import (
+    component_http_route_specs,
+    component_route_diagnostics,
+    template_http_route_specs,
+    template_route_diagnostics,
+)
 
 
 class FrontendRegistry:
@@ -2072,7 +2077,8 @@ class FrontendRegistry:
         return surfaces
 
     def _route_metadata(self) -> dict[str, Any]:
-        specs = component_http_route_specs()
+        component_specs = component_http_route_specs()
+        template_specs = template_http_route_specs(defaultspack_root=self._pack_root)
         return {
             "manifest_backed": [
                 {
@@ -2081,9 +2087,21 @@ class FrontendRegistry:
                     "block_module": spec.block_module,
                     "handler_name": spec.handler_name,
                 }
-                for spec in specs
+                for spec in component_specs
             ],
-            "diagnostics": component_route_diagnostics(),
+            "template_backed": [
+                {
+                    "method": spec.method,
+                    "path": spec.pattern,
+                    "function_id": spec.function_id,
+                    "function_name": spec.function_name,
+                }
+                for spec in template_specs
+            ],
+            "diagnostics": [
+                *component_route_diagnostics(),
+                *template_route_diagnostics(defaultspack_root=self._pack_root),
+            ],
         }
 
     def _load_extensions(self) -> list[dict[str, Any]]:
