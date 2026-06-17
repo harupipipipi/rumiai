@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { authorityApprovalConfig, authorityApprovalRiskTone, authorityApprovalTitle } from "./authorityApproval";
+import { authorityApprovalConfig, authorityApprovalRiskTone, authorityApprovalTitle, authorityRelatedPermissions } from "./authorityApproval";
 
 test("authority approval title describes app provider key and endpoint without duplicating provider", () => {
   const title = authorityApprovalTitle({
@@ -49,6 +49,20 @@ test("authority approval config dedupes matching host action aliases", () => {
     {
       host_actions: ["host.process.open_url"],
     },
+  );
+});
+
+test("authority related permissions bundle provider-scoped network approval", () => {
+  assert.deepEqual(
+    authorityRelatedPermissions({
+      permissionId: "model.invoke",
+      resource: {
+        provider_id: "opencode-go",
+        api_id: "legacy",
+        model_id: "deepseek-v4-pro",
+      },
+    }),
+    ["api_key.use", "network.egress"],
   );
 });
 

@@ -17,6 +17,10 @@ type AuthorityApprovalResource = {
   resource: Record<string, unknown>;
 };
 
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export function authorityApprovalRiskTone(riskLevel?: string): string {
   const normalized = String(riskLevel ?? "").trim().toLowerCase();
   if (normalized === "critical") return "border-red-400/60 bg-red-600/20 text-red-100 ring-1 ring-red-500/25";
@@ -102,6 +106,18 @@ export function authorityApprovalConfig(approval: AuthorityApprovalResource): Re
     config.max_input_tokens = resource.input_tokens;
   }
   return config;
+}
+
+export function authorityRelatedPermissions(approval: AuthorityApprovalResource): string[] {
+  const resource = approval.resource ?? {};
+  const permissions: string[] = [];
+  const providerId = stringValue(resource.provider_id);
+  const hasProviderModel = Boolean(providerId && (stringValue(resource.model_id) || stringValue(resource.model_ref)));
+  const hasEndpoint = Boolean(stringValue(resource.endpoint_url) || stringValue(resource.domain));
+  if (approval.permissionId !== "model.invoke" && hasProviderModel) permissions.push("model.invoke");
+  if (approval.permissionId !== "api_key.use" && providerId) permissions.push("api_key.use");
+  if (approval.permissionId !== "network.egress" && (hasEndpoint || providerId)) permissions.push("network.egress");
+  return permissions;
 }
 
 export function authorityApprovalTitle(approval: AuthorityApprovalResource): string {

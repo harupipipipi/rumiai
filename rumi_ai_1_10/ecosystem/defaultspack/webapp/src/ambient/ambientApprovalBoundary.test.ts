@@ -29,3 +29,12 @@ test("ambient authority approval cancel and close settle the opener", () => {
   assert.match(source, /window\.addEventListener\("beforeunload",\s*settleOnClose\)/);
   assert.match(source, /onClick=\{\(\) => void closeWindow\(\)\}/);
 });
+
+test("generic authority approval approve and reject schedule window close", () => {
+  const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
+
+  assert.match(source, /function scheduleAuthorityApprovalWindowClose\(\)/);
+  assert.match(source, /if \(await closeCurrentWindow\(\)\) return/);
+  assert.match(source, /window\.close\(\)/);
+  assert.equal((source.match(/scheduleAuthorityApprovalWindowClose\(\);/g) ?? []).length, 2);
+});

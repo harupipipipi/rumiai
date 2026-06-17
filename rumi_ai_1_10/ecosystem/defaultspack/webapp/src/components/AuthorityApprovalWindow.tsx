@@ -15,6 +15,7 @@ import {
 import { authorityApprovalResources, type AuthorityApprovalDecision, type AuthorityRequest } from "../features/chat/resources/authorityApprovalResources";
 import {
   authorityApprovalConfig,
+  authorityRelatedPermissions,
   authorityApprovalRiskTone,
   authorityApprovalRuntimeContent,
   authorityApprovalTitle,
@@ -85,19 +86,21 @@ async function returnToFingerRecordingAfterApproval() {
   }, 250);
 }
 
-function stringValue(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+async function closeAuthorityApprovalWindow() {
+  try {
+    if (await closeCurrentWindow()) return;
+  } catch {
+    // Fall back below when the approval page is not inside Rumi Viewer.
+  }
+  window.close();
 }
 
-function relatedPermissionsForApproval(approval: AuthorityApproval): string[] {
-  const resource = approval.resource ?? {};
-  const permissions: string[] = [];
-  const hasProviderModel = Boolean(stringValue(resource.provider_id) && (stringValue(resource.model_id) || stringValue(resource.model_ref)));
-  const hasEndpoint = Boolean(stringValue(resource.endpoint_url) || stringValue(resource.domain));
-  if (approval.permissionId !== "model.invoke" && hasProviderModel) permissions.push("model.invoke");
-  if (approval.permissionId !== "api_key.use" && stringValue(resource.provider_id)) permissions.push("api_key.use");
-  if (approval.permissionId !== "network.egress" && hasEndpoint) permissions.push("network.egress");
-  return permissions;
+function scheduleAuthorityApprovalWindowClose() {
+  window.setTimeout(() => void closeAuthorityApprovalWindow(), 650);
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function windowTitle(request: AuthorityRequest | null): string {
@@ -241,7 +244,7 @@ export function AuthorityApprovalWindow() {
       const decision = await authorityApprovalResources.approveAuthorityApproval(request.request_id, {
         scope: selectedScope,
         config,
-        related_permissions: relatedPermissionsForApproval(approval),
+        related_permissions: authorityRelatedPermissions(approval),
         ui_operator: context.ui_operator,
       });
       if (!decision.approved) throw new Error("authority approval failed");
@@ -290,6 +293,7 @@ export function AuthorityApprovalWindow() {
         status: "approved",
         conversationId: request.conversation_id,
       });
+      scheduleAuthorityApprovalWindowClose();
     } catch (approvalError) {
       setError(approvalError instanceof Error ? approvalError.message : "authority 承認に失敗しました。");
     } finally {
@@ -316,6 +320,7 @@ export function AuthorityApprovalWindow() {
         status: "denied",
         conversationId: request.conversation_id,
       });
+      scheduleAuthorityApprovalWindowClose();
     } catch (rejectionError) {
       setError(rejectionError instanceof Error ? rejectionError.message : "authority 承認の拒否に失敗しました。");
     } finally {

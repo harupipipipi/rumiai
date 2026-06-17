@@ -24,6 +24,11 @@ class _FakeProvider:
         yield {"type": "stream_end", "finish_reason": "stop"}
 
 
+class _HmacKey:
+    def get_active_key(self):
+        return "defaultspack-ai-client-authority-test-key-" + ("x" * 32)
+
+
 class _DenyAuthority:
     def check(self, **kwargs):
         from core_runtime.authority.models import AuthorityDecision
@@ -369,6 +374,70 @@ def test_authority_followup_metadata_carries_multiple_approval_tokens():
             "permission_id": "api_key.use",
         },
     }
+
+
+def test_bundled_authority_tokens_allow_ambient_model_retry(monkeypatch, tmp_path):
+    from core_runtime.authority.request_store import AuthorityRequestStore
+    from core_runtime.authority.service import AuthorityService
+    from core_runtime.authority.ui_operator import sign_ui_operator
+    from domain.ai_client.client import AuthorityApprovalRequired
+
+    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "authority-window-secret")
+    client = _client(monkeypatch)
+    service = AuthorityService(request_store=AuthorityRequestStore(tmp_path / "authority", hmac_key_manager=_HmacKey()))
+    read_calls = []
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
+    monkeypatch.setattr("domain.ai_client.client.read_provider_api_key", lambda provider_id, api_id: read_calls.append((provider_id, api_id)) or "key")
+
+    try:
+        client.complete(
+            "gpt-5.4",
+            [{"role": "user", "content": "このpinch中に録音した音声を入力として処理してください。"}],
+            params={"_authority_context": {"principal_id": "profile:work", "conversation_id": "conv-ambient"}},
+        )
+    except AuthorityApprovalRequired as exc:
+        assert exc.decision.permission_id == "model.invoke"
+        request_id = exc.decision.request_id
+    else:
+        raise AssertionError("AuthorityApprovalRequired was not raised")
+
+    approval = service.approve_request(
+        request_id,
+        scope="once",
+        related_permissions=["api_key.use", "network.egress"],
+        ui_operator=sign_ui_operator(request_id, nonce="ambient-model-retry"),
+    )
+    assert approval["approved"] is True
+    approval_tokens = {
+        "model.invoke": {
+            "request_id": approval["request_id"],
+            "approval_token": approval["token"],
+            "permission_id": "model.invoke",
+        }
+    }
+    for related in approval["related_approvals"]:
+        approval_tokens[related["permission_id"]] = {
+            "request_id": related["request_id"],
+            "approval_token": related["token"],
+            "permission_id": related["permission_id"],
+        }
+
+    response = client.complete(
+        "gpt-5.4",
+        [{"role": "user", "content": "このpinch中に録音した音声を入力として処理してください。"}],
+        params={
+            "_authority_context": {
+                "principal_id": "profile:work",
+                "conversation_id": "conv-ambient",
+                "approval_tokens": approval_tokens,
+            },
+        },
+    )
+
+    assert response["finish_reason"] == "stop"
+    assert read_calls == [("openai", "work")]
+    assert client._providers["openai"].calls
+    assert service.list_requests("pending")["pending"] == []
 
 
 def test_compiled_provider_requires_api_key_use_before_request_json(monkeypatch):
