@@ -1,0 +1,58 @@
+{
+  "pack_id": "rumi_sandbox_runtime_pack",
+  "display_name": "Rumi Sandbox Runtime Pack",
+  "description": "Declarative sandbox/runtime pack for safe code execution, isolated terminals, containers, and artifact-producing jobs.",
+  "target_pack_id": "rumi_sandbox_runtime_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "high",
+  "supports_all_ok": false,
+  "conflicts_with": [],
+  "overlap_policy": {
+    "code_execution": "requires_defaultspack_tool_grants",
+    "desktop_control": "handoff_to_rumi_computer_control_pack",
+    "security_review": "handoff_to_rumi_security_review_pack",
+    "release_jobs": "handoff_to_rumi_devops_release_pack"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Sandbox Runtime is a high-risk declarative boundary and evidence pack; defaultspack promotion is blocked until runtime execution owners prove isolation, secret handling, and receipt evidence outside this pack.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required"
+    ],
+    "promotion_blockers": [
+      "no_executable_runtime_code",
+      "runtime_execution_owned_by_defaultspack_tools",
+      "secret_mounts_require_security_review",
+      "release_jobs_owned_by_rumi_devops_release_pack"
+    ],
+    "promotion_evidence_required": [
+      "execution_boundary_matrix_review_cases",
+      "secret_mount_policy_review_cases",
+      "runtime_receipt_schema_cases",
+      "reproducibility_checklist_cases"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.sandbox_runtime_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "runtime-safety",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools."
+  ]
+}

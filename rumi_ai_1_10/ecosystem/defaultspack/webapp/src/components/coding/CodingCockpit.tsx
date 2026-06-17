@@ -13,6 +13,7 @@ import { codingResources } from "../../features/coding/resources/codingResources
 import { ApprovalQueue } from "./ApprovalQueue";
 import { CheckpointPanel } from "./CheckpointPanel";
 import { DiffPanel } from "./DiffPanel";
+import { RumiLogPanel } from "./RumiLogPanel";
 import { TerminalPanel, type ApprovedTerminalDecision } from "./TerminalPanel";
 
 function workspaceLabel(workspace: CodingWorkspaceRecord): string {
@@ -210,6 +211,7 @@ export function CodingCockpit({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <RumiLogPanel workspaceId={activeWorkspaceId} />
         <ApprovalQueue onApproved={handleApprovalApproved} />
         <DiffPanel workspaceId={activeWorkspaceId} />
         <CheckpointPanel workspaceId={activeWorkspaceId} />

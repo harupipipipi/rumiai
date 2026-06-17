@@ -291,13 +291,13 @@ class TestFunctionStep:
             return await engine._execute_function_step_async(step, ctx)
 
         new_ctx, result = asyncio.run(run())
-        assert result["_error"] == "no _principal_id in ctx"
+        assert result["_error"] == "no trusted flow principal in ctx"
         assert "_step_out.fn1" in new_ctx
 
     # 15. capability_executor 不在 → エラー返却
     def test_no_executor(self, engine):
         step = {"id": "fn2", "type": "function", "function": "pack:do_thing"}
-        ctx = {"_flow_execution_id": "e1", "_principal_id": "test_pack"}
+        ctx = {"_flow_execution_id": "e1", "_flow_run_principal_id": "test_pack"}
 
         with patch.dict(_sys.modules, {"core_runtime.di_container": MagicMock()}):
             mock_di = _sys.modules["core_runtime.di_container"]
@@ -320,7 +320,7 @@ class TestFunctionStep:
             "args": {"text": "hello"},
             "output": "analyze_result",
         }
-        ctx = {"_flow_execution_id": "e1", "_principal_id": "test_pack"}
+        ctx = {"_flow_execution_id": "e1", "_flow_run_principal_id": "test_pack"}
 
         mock_executor = MagicMock()
         mock_executor.execute.return_value = _FakeResp(
@@ -358,7 +358,7 @@ class TestFunctionStep:
             "function": "pack:analyze",
             "args": {},
         }
-        ctx = {"_flow_execution_id": "e1", "_principal_id": "test_pack"}
+        ctx = {"_flow_execution_id": "e1", "_flow_run_principal_id": "test_pack"}
 
         mock_executor = MagicMock()
         mock_executor.execute.return_value = _FakeResp(
@@ -393,7 +393,7 @@ class TestFunctionStep:
             "args": {},
             "output": "bad_result",
         }
-        ctx = {"_flow_execution_id": "e1", "_principal_id": "test_pack"}
+        ctx = {"_flow_execution_id": "e1", "_flow_run_principal_id": "test_pack"}
 
         mock_executor = MagicMock()
         mock_executor.execute.return_value = _FakeResp(

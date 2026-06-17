@@ -1,0 +1,9 @@
+preset:
+  id: handoff_review
+  mode: handoff_packet
+  requires:
+  - owner_pack
+  - reason
+  - evidence_ids
+  - human_review
+  external_actions: handoff_only

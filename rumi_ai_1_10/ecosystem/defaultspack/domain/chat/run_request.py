@@ -12,6 +12,7 @@ from typing import Any
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import gen_id
+from core_runtime.authority.principal import build_principal_id
 from domain.ai_client.capabilities.registry import get_model_provider_capabilities
 from blocks.chat._context_helpers import enrich_messages, extract_user_text
 from domain.capability.catalog import CapabilityCatalog
@@ -26,6 +27,7 @@ from domain.chat.ir_legacy_adapter import ir_to_legacy_standard_messages, legacy
 from domain.chat.modality_detector import detect_modalities
 from domain.chat.public_metadata import compact_tool_filter_entries
 from domain.chat.store import ChatStore
+from domain.human_operator.constants import HUMAN_OPERATOR_TOOL_NAME, is_human_operator_model
 from domain.vision.image_bridge import (
     apply_vision_bridge_to_messages,
     conversation_image_context,
@@ -34,6 +36,8 @@ from domain.vision.image_bridge import (
 from domain.chat.tool_recommender import effective_tool_assist_mode, recommend_tool_ids, tool_assist_limit
 from domain.prompt.manager import get_manager
 from domain.skill_trigger import RuntimeSkillTriggerService
+from domain.temporal_context import add_temporal_context_message, current_datetime_context
+from domain.tool.loading import split_tools_by_loading
 from domain.tool.registry import ToolRegistry
 from domain.tool.eligibility import filter_tool_definitions_by_eligibility
 from domain.tool.schema_adapter import (
@@ -183,9 +187,6 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     if system_prompt and (not standard_messages or standard_messages[0].get("role") != "system"):
         standard_messages.insert(0, {"role": "system", "content": system_prompt})
     chat_reference_prompt = _format_chat_references_for_prompt(chat_references)
-    if chat_reference_prompt:
-        insert_at = 1 if standard_messages and standard_messages[0].get("role") == "system" else 0
-        standard_messages.insert(insert_at, {"role": "system", "content": chat_reference_prompt})
 
     params = dict(prepared_input.get("params") or {})
     requested_model = str(params.get("model") or params.get("profile_id") or "").strip()
@@ -203,6 +204,8 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             profile_id=model,
             conversation_id=conversation_id,
         )["level"]
+    if "deepthink_enabled" not in params:
+        params["deepthink_enabled"] = bool(model_settings.get("deepthink_enabled", False))
 
     request_context = _merge_active_startup_profile_context(context or {}, active_startup_profile)
     if effective_inferred_tool_ids:
@@ -269,6 +272,25 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     if effective_system_prompt:
         system_prompt = effective_system_prompt
         _replace_system_prompt_message(standard_messages, effective_system_prompt)
+    temporal_context = current_datetime_context(request_context)
+    request_context["current_datetime_context"] = temporal_context
+    request_context.setdefault("current_datetime", temporal_context["iso"])
+    request_context.setdefault("current_date", temporal_context["date"])
+    request_context.setdefault("current_time_zone", temporal_context["timezone"])
+    add_temporal_context_message(
+        standard_messages,
+        request_context,
+        temporal_context=temporal_context,
+    )
+    _append_system_context_message(standard_messages, chat_reference_prompt)
+
+    _apply_authority_context(
+        request_context,
+        metadata,
+        conversation_id=conversation_id,
+        request_id=request_id,
+        active_profile=active_startup_profile,
+    )
 
     raw_tools, provider_tools, tool_context = _available_tools(request_context, prepared_input, user_text=user_text)
     modalities = detect_modalities(content, metadata)
@@ -398,8 +420,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     matched_skills = skill_eval.get("matched", []) if isinstance(skill_eval, dict) else []
     skill_instructions = str(skill_eval.get("instructions") or "").strip() if isinstance(skill_eval, dict) else ""
     if skill_instructions:
-        insert_at = 1 if standard_messages and standard_messages[0].get("role") == "system" else 0
-        standard_messages.insert(insert_at, {"role": "system", "content": skill_instructions})
+        _append_system_context_message(standard_messages, skill_instructions)
         request_context["matched_skill_instructions"] = matched_skills
         tool_context["matched_skill_instructions"] = matched_skills
 
@@ -485,7 +506,7 @@ def _apply_effective_ai_input_to_request_context(
         for item in trace.get("allowed_tool_ids", [])
         if str(item or "").strip()
     ]
-    if allowed_tool_ids:
+    if allowed_tool_ids and _active_profile_enforces_tool_allowlist(active_profile):
         updated["effective_tool_allowlist"] = allowed_tool_ids
         profile_policy = dict(updated.get("profile_policy") if isinstance(updated.get("profile_policy"), dict) else {})
         profile_policy["tool_allowlist"] = allowed_tool_ids
@@ -510,6 +531,8 @@ def _apply_effective_ai_input_to_request_context(
         for segment in [*segments, *context_segments]
         if isinstance(segment, dict) and str(segment.get("text") or segment.get("preview") or "").strip()
     )
+    if not _active_profile_provides_system_prompt(active_profile):
+        system_text = ""
     return updated, system_text
 
 
@@ -534,6 +557,53 @@ def _replace_system_prompt_message(messages: list[dict[str, Any]], system_prompt
         messages[0]["content"] = system_prompt
         return
     messages.insert(0, {"role": "system", "content": system_prompt})
+
+
+def _append_system_context_message(messages: list[dict[str, Any]], content: str) -> None:
+    text = str(content or "").strip()
+    if not text:
+        return
+    if messages and messages[0].get("role") == "system":
+        existing = str(messages[0].get("content") or "").strip()
+        messages[0]["content"] = "{}\n\n{}".format(existing, text) if existing else text
+        return
+    messages.insert(0, {"role": "system", "content": text})
+
+
+def _active_profile_selected(active_profile: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(active_profile, dict):
+        return {}
+    metadata = active_profile.get("metadata") if isinstance(active_profile.get("metadata"), dict) else {}
+    selected = metadata.get("selected") if isinstance(metadata.get("selected"), dict) else {}
+    return selected if isinstance(selected, dict) else {}
+
+
+def _active_profile_enforces_tool_allowlist(active_profile: dict[str, Any] | None) -> bool:
+    if not isinstance(active_profile, dict):
+        return False
+    policy = active_profile.get("policy") if isinstance(active_profile.get("policy"), dict) else {}
+    allowlist = policy.get("tool_allowlist")
+    if isinstance(allowlist, list) and any(str(item or "").strip() for item in allowlist):
+        return True
+    selected = _active_profile_selected(active_profile)
+    tools = selected.get("tools") if isinstance(selected.get("tools"), list) else []
+    return any(str(item or "").strip() for item in tools)
+
+
+def _active_profile_provides_system_prompt(active_profile: dict[str, Any] | None) -> bool:
+    if not isinstance(active_profile, dict):
+        return False
+    for key in ("system_prompt_id", "default_prompt_id", "prompt_id"):
+        if str(active_profile.get(key) or "").strip():
+            return True
+    selected = _active_profile_selected(active_profile)
+    for key in ("prompts", "ai_input_nodes", "gates"):
+        values = selected.get(key) if isinstance(selected.get(key), list) else []
+        if any(str(item or "").strip() for item in values):
+            return True
+    metadata = active_profile.get("metadata") if isinstance(active_profile.get("metadata"), dict) else {}
+    ai_input = metadata.get("ai_input") if isinstance(metadata.get("ai_input"), dict) else {}
+    return bool(ai_input)
 
 
 def _mark_tool_calling_unavailable(entries: Any, tool_names: list[str], actual: dict[str, Any]) -> list[dict[str, Any]]:
@@ -888,6 +958,96 @@ def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str
     return {"tool_approval_tokens": token_map}
 
 
+def _apply_authority_context(
+    request_context: dict[str, Any],
+    metadata: dict[str, Any] | None,
+    *,
+    conversation_id: str,
+    request_id: str,
+    active_profile: dict[str, Any] | None,
+) -> None:
+    profile_id = str(
+        request_context.get("profile_id")
+        or request_context.get("active_startup_profile_id")
+        or ((active_profile or {}).get("profile_id") if isinstance(active_profile, dict) else "")
+        or ""
+    ).strip()
+    graph_id = str(
+        request_context.get("graph_id")
+        or request_context.get("capability_graph_id")
+        or request_context.get("default_graph")
+        or ((active_profile or {}).get("default_graph") if isinstance(active_profile, dict) else "")
+        or ""
+    ).strip()
+    node_id = str(request_context.get("node_id") or request_context.get("runtime_node_id") or "").strip()
+    authority_principal_id = build_principal_id(
+        profile_id=profile_id,
+        graph_id=graph_id,
+        node_id=node_id,
+        conversation_id=conversation_id,
+    )
+    if profile_id:
+        request_context.setdefault("profile_id", profile_id)
+    if graph_id:
+        request_context.setdefault("graph_id", graph_id)
+    if node_id:
+        request_context.setdefault("node_id", node_id)
+
+    followup: dict[str, str] = {}
+    approval_tokens: dict[str, dict[str, str]] = {}
+
+    def add_authority_followup(raw: Any) -> None:
+        nonlocal followup
+        if not isinstance(raw, dict):
+            return
+        permission_id = str(raw.get("permission_id") or "").strip()
+        if permission_id not in {"model.invoke", "api_key.use"}:
+            return
+        token = str(raw.get("approval_token") or raw.get("token") or "").strip()
+        authority_request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+        if token and authority_request_id:
+            approval_tokens[permission_id] = {
+                "approval_token": token,
+                "request_id": authority_request_id,
+                "permission_id": permission_id,
+            }
+        if not followup:
+            followup = {
+                "approval_token": token,
+                "request_id": authority_request_id,
+                "permission_id": permission_id,
+            }
+
+    if isinstance(metadata, dict):
+        raw_followup = metadata.get("authority_followup")
+        if not isinstance(raw_followup, dict):
+            raw_followup = metadata.get("approval_followup")
+        if isinstance(raw_followup, dict):
+            approvals = raw_followup.get("approvals")
+            if isinstance(approvals, list):
+                for item in approvals:
+                    add_authority_followup(item)
+            add_authority_followup(raw_followup)
+
+    authority_context = {
+        "principal_id": authority_principal_id,
+        "profile_id": profile_id or None,
+        "graph_id": graph_id or None,
+        "node_id": node_id or None,
+        "conversation_id": conversation_id,
+        "request_id": followup.get("request_id") or request_id,
+        "run_request_id": request_id,
+    }
+    if followup.get("approval_token"):
+        authority_context["approval_token"] = followup["approval_token"]
+    if followup.get("permission_id"):
+        authority_context["permission_id"] = followup["permission_id"]
+    if approval_tokens:
+        authority_context["approval_tokens"] = approval_tokens
+    request_context["authority_principal_id"] = authority_principal_id
+    request_context["authority"] = authority_context
+
+
 def _consume_turn_model_route_override(
     store: ChatStore,
     conversation_id: str,
@@ -923,22 +1083,10 @@ def _replace_current_user_content_for_model(
 
 
 def _conversation_system_prompt(conv: dict[str, Any], manager: Any) -> str:
-    prompt_id = str((conv or {}).get("system_prompt_id") or "").strip()
-    if not prompt_id:
-        return manager.get_system_prompt()
-    prompt = manager.get_prompt(prompt_id) or manager.get_prompt_by_name(prompt_id)
-    if isinstance(prompt, dict):
-        body = prompt.get("body") or prompt.get("content")
-        if body:
-            return str(body)
-    if _PROMPT_ID_RE.match(prompt_id):
-        prompt_path = Path(__file__).resolve().parents[2] / "prompts" / (prompt_id + ".system.md")
-        try:
-            if prompt_path.is_file():
-                return prompt_path.read_text(encoding="utf-8")
-        except OSError:
-            pass
-    return manager.get_system_prompt()
+    from blocks.chat._prompt_helpers import resolve_conversation_system_prompt
+    from domain.kanban.service import append_kanban_system_prompt_note
+
+    return append_kanban_system_prompt_note(resolve_conversation_system_prompt(conv, manager), conv)
 
 
 def _load_active_startup_profile() -> dict[str, Any]:
@@ -1124,17 +1272,24 @@ def _resolve_selected_tools(
                 None,
                 policy_context=context or {},
             )
+        always_tools, vector_tools = split_tools_by_loading(candidate_tools)
         recommended_ids = recommend_tool_ids(
             user_text,
-            candidate_tools,
+            vector_tools,
             limit=tool_assist_limit(pack_root=pack_root),
         )
-        resolved = [tool for tool in candidate_tools if str(tool.get("tool_id") or "") in set(recommended_ids)]
+        recommended = set(recommended_ids)
+        resolved = [
+            *always_tools,
+            *[tool for tool in vector_tools if str(tool.get("tool_id") or "") in recommended],
+        ]
         if isinstance(context, dict):
             context["tool_assist"] = {
-                "mode": "vector",
+                "mode": mode,
                 "recommended_tools": recommended_ids,
+                "always_tools": [str(tool.get("tool_id") or tool.get("name") or "") for tool in always_tools],
                 "available_tool_count": len(candidate_tools),
+                "vector_candidate_count": len(vector_tools),
             }
         return resolved, []
     resolved = []
@@ -1230,6 +1385,31 @@ def _apply_computer_use_context_preferences(context: dict[str, Any], user_text: 
     return updated
 
 
+def _append_special_model_tools(
+    tools: list[dict[str, Any]],
+    context: dict[str, Any],
+    *,
+    agent_id: Any = None,
+) -> list[dict[str, Any]]:
+    if not is_human_operator_model(str(context.get("model") or "").strip()):
+        return tools
+    if any(tool_name_from_definition(tool) == HUMAN_OPERATOR_TOOL_NAME for tool in tools):
+        return tools
+    tool_def = ToolRegistry().get(HUMAN_OPERATOR_TOOL_NAME)
+    if not isinstance(tool_def, dict):
+        return tools
+    runtime_profile = context.get("runtime_profile")
+    helper_tools = filter_tool_definitions_for_runtime_profile(
+        [tool_def],
+        runtime_profile,
+        agent_id=agent_id,
+        policy_context=context,
+    )
+    if not helper_tools:
+        return tools
+    return [*tools, *helper_tools]
+
+
 def _available_tools(
     context: dict[str, Any],
     input_data: dict[str, Any],
@@ -1261,4 +1441,5 @@ def _available_tools(
         agent_id=agent_id,
         policy_context=resolved_context,
     )
+    filtered = _append_special_model_tools(filtered, resolved_context, agent_id=agent_id)
     return filtered, adapt_tool_definitions(filtered), resolved_context

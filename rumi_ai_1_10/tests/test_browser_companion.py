@@ -19,6 +19,17 @@ _PNG_DATA_URL = (
 )
 
 
+def _browser_companion_extension_root() -> Path:
+    candidates = [
+        DEFAULTSPACK_ROOT / "browser_extensions" / "rumi_browser_companion",
+        ROOT.parent / "browser_extensions" / "rumi_browser_companion",
+    ]
+    for candidate in candidates:
+        if (candidate / "content_script.js").is_file() and (candidate / "background.js").is_file():
+            return candidate
+    return candidates[0]
+
+
 def test_browser_companion_candidate_urls_match_defaultspack_default_port():
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import candidate_base_urls
 
@@ -55,7 +66,9 @@ def test_browser_companion_controller_round_trip_uses_active_tab_and_saves_captu
         {
             "client_id": "edge-1",
             "browser_name": "Microsoft Edge",
-            "tabs": [{"id": 17, "active": True, "title": "Example", "url": "https://example.com"}],
+            "tabs": [
+                {"id": 17, "active": True, "title": "Example", "url": "https://example.com"},
+            ],
             "active_tab_id": 17,
         }
     )
@@ -93,7 +106,11 @@ def test_browser_companion_controller_round_trip_uses_active_tab_and_saves_captu
 
     worker = threading.Thread(target=extension_worker, daemon=True)
     worker.start()
-    result = controller.run("page.snapshot", {"include_capture": True}, context={})
+    result = controller.run(
+        "page.snapshot",
+        {"include_capture": True},
+        context={"profile_policy": {"yolo_mode": True}},
+    )
     worker.join(timeout=1.0)
 
     assert result["is_error"] is False
@@ -114,7 +131,9 @@ def test_browser_companion_controller_marks_dom_actions_parallel_safe(tmp_path):
         {
             "client_id": "edge-1",
             "browser_name": "Microsoft Edge",
-            "tabs": [{"id": 17, "active": True, "title": "Example", "url": "https://example.com"}],
+            "tabs": [
+                {"id": 17, "active": True, "title": "Example", "url": "https://example.com"},
+            ],
             "active_tab_id": 17,
         }
     )
@@ -140,7 +159,11 @@ def test_browser_companion_controller_marks_dom_actions_parallel_safe(tmp_path):
 
     worker = threading.Thread(target=extension_worker, daemon=True)
     worker.start()
-    result = controller.run("page.click", {"element_id": "rumi-el-1"}, context={})
+    result = controller.run(
+        "page.click",
+        {"element_id": "rumi-el-1"},
+        context={"profile_policy": {"yolo_mode": True}},
+    )
     worker.join(timeout=1.0)
 
     assert result["is_error"] is False
@@ -148,8 +171,151 @@ def test_browser_companion_controller_marks_dom_actions_parallel_safe(tmp_path):
     assert result["can_parallel_user_work"] is True
 
 
+def test_browser_companion_page_action_requires_approval_before_queueing(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion import BrowserCompanionController
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
+
+    store = BrowserCompanionBridgeStore(root=tmp_path / "bridge")
+    store.upsert_client(
+        {
+            "client_id": "edge-1",
+            "browser_name": "Microsoft Edge",
+            "tabs": [
+                {"id": 17, "active": True, "title": "Example", "url": "https://example.com"},
+            ],
+            "active_tab_id": 17,
+        }
+    )
+    controller = BrowserCompanionController(
+        artifact_root=tmp_path / "artifacts",
+        bridge_store=store,
+    )
+
+    result = controller.run(
+        "page.type",
+        {"selector": "#amount", "text": "TRANSFER 1000"},
+        context={},
+    )
+
+    assert result["requires_approval"] is True
+    assert result["approval_required"] is True
+    assert result["payload"] == {
+        "action": "page.type",
+        "client_id": "edge-1",
+        "selector": "#amount",
+        "tab_id": 17,
+        "text": "TRANSFER 1000",
+    }
+    assert store.claim_next_command("edge-1") is None
+
+
+def test_browser_companion_page_action_approval_token_allows_single_replay(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion import BrowserCompanionController
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
+
+    store = BrowserCompanionBridgeStore(root=tmp_path / "bridge")
+    store.upsert_client(
+        {
+            "client_id": "edge-1",
+            "browser_name": "Microsoft Edge",
+            "tabs": [
+                {"id": 17, "active": True, "title": "Example", "url": "https://example.com"},
+            ],
+            "active_tab_id": 17,
+        }
+    )
+    controller = BrowserCompanionController(
+        artifact_root=tmp_path / "artifacts",
+        bridge_store=store,
+    )
+    approval = controller.run("page.click", {"element_id": "rumi-el-1"}, context={})
+
+    def extension_worker():
+        claimed = None
+        deadline = time.time() + 3.0
+        while claimed is None and time.time() < deadline:
+            claimed = store.claim_next_command("edge-1")
+            if claimed is None:
+                time.sleep(0.05)
+        assert claimed is not None
+        assert claimed["request"]["action"] == "page.click"
+        assert "approval_token" not in claimed["request"]["payload"]
+        store.complete_command(
+            "edge-1",
+            claimed["command_id"],
+            {"ok": True, "action": "click", "element_id": "rumi-el-1"},
+        )
+
+    worker = threading.Thread(target=extension_worker, daemon=True)
+    worker.start()
+    result = controller.run(
+        "page.click",
+        {"element_id": "rumi-el-1", "approval_token": approval["approval_token"]},
+        context={},
+    )
+    worker.join(timeout=1.0)
+
+    assert result["is_error"] is False
+    assert store.claim_next_command("edge-1") is None
+    replay = controller.run(
+        "page.click",
+        {"element_id": "rumi-el-1", "approval_token": approval["approval_token"]},
+        context={},
+    )
+    assert replay["requires_approval"] is True
+
+
+def test_browser_companion_read_only_safety_blocks_write_actions(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion import BrowserCompanionController
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
+
+    store = BrowserCompanionBridgeStore(root=tmp_path / "bridge")
+    store.upsert_client({"client_id": "edge-1", "active_tab_id": 17})
+    controller = BrowserCompanionController(
+        artifact_root=tmp_path / "artifacts",
+        bridge_store=store,
+    )
+
+    result = controller.run(
+        "page.type",
+        {"selector": "#amount", "text": "TRANSFER 1000"},
+        context={
+            "tool_settings": {
+                "browser_companion": {"values": {"safety": "read_only"}},
+            },
+        },
+    )
+
+    assert result["is_error"] is True
+    assert "read-only" in result["reason"]
+    assert store.claim_next_command("edge-1") is None
+
+
+def test_browser_companion_executor_approval_scope_is_page_action():
+    from domain.tool.executor import _tool_approval_scope
+
+    operation, approval_args = _tool_approval_scope(
+        {"name": "browser_companion"},
+        {"action": "page.type", "selector": "#amount", "text": "TRANSFER 1000"},
+    )
+
+    assert operation == "page.type"
+    assert approval_args == {
+        "action": "page.type",
+        "selector": "#amount",
+        "text": "TRANSFER 1000",
+    }
+
+
 def test_browser_companion_extension_focus_semantics_are_explicit():
-    background = (ROOT.parent / "browser_extensions" / "rumi_browser_companion" / "background.js").read_text(encoding="utf-8")
+    background = (
+        ROOT
+        / "ecosystem"
+        / "defaultspack"
+        / "browser_extensions"
+        / "rumi_browser_companion"
+        / "background.js"
+    ).read_text(encoding="utf-8")
     send_element_body = background[
         background.index("async function sendElementCommand") : background.index("async function sendToTab")
     ]
@@ -167,6 +333,75 @@ def test_browser_companion_extension_focus_semantics_are_explicit():
     assert "chrome.windows.update" not in send_element_body
     assert "requires_foreground: true" in capture_body
     assert "can_parallel_user_work: false" in capture_body
+
+
+def test_browser_companion_extension_semantic_dom_and_highlight_contract():
+    extension_root = _browser_companion_extension_root()
+    content = (extension_root / "content_script.js").read_text(encoding="utf-8")
+    background = (extension_root / "background.js").read_text(encoding="utf-8")
+    tool_manifest = (
+        ROOT
+        / "ecosystem"
+        / "rumi_default_tools_pack"
+        / "tools"
+        / "browser_companion"
+        / "manifest.json"
+    ).read_text(encoding="utf-8")
+
+    for needle in (
+        'schema_version: "semantic_dom_v2"',
+        "semantic_id:",
+        "accessible_name:",
+        "labels,",
+        "nearby_text:",
+        "action_hints:",
+        "recognition_confidence:",
+        "xpath_hint:",
+        "function highlightElement",
+        "function clearHighlights",
+    ):
+        assert needle in content
+
+    for needle in (
+        "semantic_dom: true",
+        "accessible_labels: true",
+        '"highlight"',
+        '"clear_highlight"',
+        'case "page.highlight"',
+        'case "page.clear_highlight"',
+    ):
+        assert needle in background or needle in tool_manifest
+
+
+def test_browser_companion_snapshot_forwards_snapshot_options_to_content_script():
+    background = (_browser_companion_extension_root() / "background.js").read_text(encoding="utf-8")
+    capture_body = background[
+        background.index("async function captureDomSnapshot") : background.index("async function sendElementCommand")
+    ]
+
+    for needle in (
+        "snapshotRequest.options = snapshotOptions",
+        "snapshotOptions.includeHidden",
+        "snapshotOptions.includeHtml",
+        "snapshotOptions.includeAttributes",
+        "snapshotOptions.attributeNames",
+        "snapshotOptions.includeSemantics",
+    ):
+        assert needle in capture_body
+
+
+def test_browser_companion_extension_keeps_pairing_token_in_local_storage():
+    extension_root = _browser_companion_extension_root()
+    background = (extension_root / "background.js").read_text(encoding="utf-8")
+    options = (extension_root / "options.js").read_text(encoding="utf-8")
+
+    assert "readLocalSettingsWithSyncMigration" in background
+    assert "chrome.storage.local.set({ [STORAGE_KEY]: merged })" in background
+    assert "chrome.storage.sync.remove(STORAGE_KEY)" in background
+    assert 'areaName !== "local"' in background
+    assert "chrome.storage.local.get(STORAGE_KEY)" in options
+    assert "chrome.storage.local.set({ [STORAGE_KEY]: settings })" in options
+    assert "chrome.storage.sync.set({ [STORAGE_KEY]: settings })" not in options
 
 
 def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeypatch):

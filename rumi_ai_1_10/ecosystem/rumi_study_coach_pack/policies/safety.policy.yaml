@@ -1,0 +1,24 @@
+policy:
+  id: learning_safety_policy
+  default_mode: draft_and_handoff_only
+  blocked_by_default:
+  - claim mastery without local note evidence
+  - invent facts absent from notes
+  - schedule reminders without workflow scheduler handoff
+  - store durable learner memory inside this pack
+  - present medical or therapeutic advice as tutoring
+  allowed_outputs:
+  - validated_schema_packet
+  - evidence_linked_draft
+  - review_checklist
+  - handoff_packet
+  requires_human_review_before:
+  - external_connector_action
+  - message_send
+  - calendar_write
+  - production_change
+  - real_world_action
+  evidence_rules:
+  - cite source IDs for claims
+  - record uncertainty when evidence is thin
+  - name owner pack for adjacent runtime actions

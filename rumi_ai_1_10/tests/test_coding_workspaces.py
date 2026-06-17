@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -44,6 +45,44 @@ def test_workspace_store_persists_validated_schema(tmp_path, coding_workspace_st
     selected = WorkspaceStore().select("ws1")
     assert selected["workspace_id"] == "ws1"
     assert WorkspaceStore().selected_workspace_id() == "ws1"
+
+
+def test_workspace_store_retries_transient_replace_failure(tmp_path, coding_workspace_store, monkeypatch):
+    import domain.coding.workspace_store as workspace_store_module
+    from domain.coding.workspace_store import WorkspaceStore
+
+    root = tmp_path / "project"
+    root.mkdir()
+    store = WorkspaceStore()
+    target = store.storage_path
+    original_replace = workspace_store_module.Path.replace
+    attempts = []
+
+    def flaky_replace(self, destination):
+        if destination == target and self.name.startswith(".coding_workspaces.json.") and len(attempts) < 2:
+            attempts.append(self.name)
+            raise PermissionError("Access is denied")
+        return original_replace(self, destination)
+
+    monkeypatch.setattr(workspace_store_module.Path, "replace", flaky_replace)
+    monkeypatch.setattr(workspace_store_module.time, "sleep", lambda _seconds: None)
+
+    record = store.create(root, workspace_id="ws1")
+
+    assert record["workspace_id"] == "ws1"
+    assert len(attempts) == 2
+    assert json.loads(target.read_text(encoding="utf-8"))["workspaces"]["ws1"]["workspace_id"] == "ws1"
+    assert list(tmp_path.glob(".coding_workspaces.json.*.tmp")) == []
+
+
+def test_workspace_store_shares_lock_for_same_storage_path(coding_workspace_store):
+    from domain.coding.workspace_store import WorkspaceStore
+
+    first = WorkspaceStore()
+    second = WorkspaceStore()
+
+    assert first.storage_path == second.storage_path
+    assert first._lock is second._lock
 
 
 def test_workspace_resolver_prefers_id_then_legacy_root_then_cwd(tmp_path, coding_workspace_store):

@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Context, Result as AnyResult};
 use log::{error, info, warn};
 use serde_json::Value;
+use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
 use crate::config::AppConfig;
 use crate::process_utils;
@@ -19,6 +20,8 @@ use crate::process_utils;
 const DEFAULTSPACK_DEFAULT_PORT: u16 = 8766;
 const DEFAULTSPACK_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULTSPACK_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const DEFAULTSPACK_WINDOW_LABEL: &str = "defaultspack";
+const DEFAULTSPACK_WINDOW_TITLE: &str = "Rumi Defaultspack";
 
 #[derive(Debug, Clone)]
 struct DefaultspackDesktopMetadata {
@@ -315,6 +318,7 @@ fn xml_escape(value: &str) -> String {
 fn build_launch_script(
     pack_shell: &Path,
     token_file: &Path,
+    panel_bootstrap_secret_file: &Path,
     rumi_home: &Path,
     app_dir: &Path,
     user_data_dir: &Path,
@@ -348,6 +352,7 @@ RUMI_USER_DATA={user_data_dir}
 VENV_DIR={venv_dir}
 PACK_SHELL={pack_shell}
 TOKEN_FILE={token_file}
+PANEL_BOOTSTRAP_SECRET_FILE={panel_bootstrap_secret_file}
 APP_WORKING_DIR={app_working_dir}
 DESKTOP_COMMAND={command}
 KERNEL_COMMAND={kernel_command}
@@ -360,13 +365,14 @@ export RUMI_USER_DATA
 
 RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')
 export RUMI_API_TOKEN
+RUMI_PANEL_BOOTSTRAP_SECRET=$(cat "$PANEL_BOOTSTRAP_SECRET_FILE" 2>/dev/null | tr -d '\n')
+export RUMI_PANEL_BOOTSTRAP_SECRET
 
 exec "$PACK_SHELL" run "defaultspack" \
   --command "$DESKTOP_COMMAND" \
   --port {kernel_port} \
   --kernel-cmd "$KERNEL_COMMAND" \
   --working-dir "$APP_WORKING_DIR" \
-  --api-token "$RUMI_API_TOKEN" \
   --timeout 120
 "#,
         rumi_home = shell_quote_path(rumi_home),
@@ -375,6 +381,7 @@ exec "$PACK_SHELL" run "defaultspack" \
         venv_dir = shell_quote_path(venv_dir),
         pack_shell = shell_quote_path(pack_shell),
         token_file = shell_quote_path(token_file),
+        panel_bootstrap_secret_file = shell_quote_path(panel_bootstrap_secret_file),
         app_working_dir = shell_quote_path(app_working_dir),
         command = shell_quote(command),
         kernel_command = shell_quote(&kernel_command),
@@ -391,6 +398,7 @@ fn create_macos_app_bundle(
     app_name: &str,
     pack_shell: &Path,
     token_file: &Path,
+    panel_bootstrap_secret_file: &Path,
     rumi_home: &Path,
     app_dir: &Path,
     user_data_dir: &Path,
@@ -444,6 +452,7 @@ fn create_macos_app_bundle(
     let launch_script = build_launch_script(
         pack_shell,
         token_file,
+        panel_bootstrap_secret_file,
         rumi_home,
         app_dir,
         user_data_dir,
@@ -542,16 +551,37 @@ pub(crate) fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<S
 }
 
 #[tauri::command]
-pub fn launch_defaultspack_desktop(config: tauri::State<'_, AppConfig>) -> Result<String, String> {
-    launch_defaultspack_desktop_impl(&config).map_err(|e| {
+pub fn launch_defaultspack_desktop(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+) -> Result<String, String> {
+    launch_defaultspack_desktop_window_impl(&app, config.inner()).map_err(|e| {
         error!("launch_defaultspack_desktop failed: {e:#}");
         format!("{e:#}")
     })
 }
 
-pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<String> {
+pub(crate) fn launch_defaultspack_desktop_window_impl(
+    app: &AppHandle,
+    config: &AppConfig,
+) -> AnyResult<String> {
     info!("launch_defaultspack_desktop_impl: starting");
+    let url = ensure_defaultspack_desktop_ready(config)?;
+    open_defaultspack_tauri_window(app, &url)?;
+    info!("launch_defaultspack_desktop_impl: opened Tauri window {url}");
+    Ok(format!("Opening Rumi Defaultspack at {url}"))
+}
 
+#[allow(dead_code)]
+pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<String> {
+    info!("launch_defaultspack_desktop_impl: starting external browser launch");
+    let url = ensure_defaultspack_desktop_ready(config)?;
+    open::that_detached(&url).with_context(|| format!("failed to open {url}"))?;
+    info!("launch_defaultspack_desktop_impl: opened browser URL {url}");
+    Ok(format!("Opening Rumi Defaultspack at {url}"))
+}
+
+fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
     let metadata = match read_defaultspack_desktop_metadata(config) {
         Ok(m) => {
             info!("launch_defaultspack_desktop_impl: metadata loaded (port={}, command={}, working_dir={})",
@@ -610,9 +640,41 @@ pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<
         );
     }
 
-    open::that_detached(&url).with_context(|| format!("failed to open {url}"))?;
-    info!("launch_defaultspack_desktop_impl: opened browser URL {url}");
-    Ok(format!("Opening Rumi Defaultspack at {url}"))
+    Ok(url)
+}
+
+fn focus_defaultspack_window(window: &tauri::WebviewWindow) -> AnyResult<()> {
+    window
+        .unminimize()
+        .context("failed to unminimize defaultspack window")?;
+    window
+        .show()
+        .context("failed to show defaultspack window")?;
+    window
+        .set_focus()
+        .context("failed to focus defaultspack window")
+}
+
+fn open_defaultspack_tauri_window(app: &AppHandle, url: &str) -> AnyResult<()> {
+    let url = Url::parse(url).with_context(|| format!("invalid defaultspack URL: {url}"))?;
+    if let Some(window) = app.get_webview_window(DEFAULTSPACK_WINDOW_LABEL) {
+        window
+            .navigate(url)
+            .context("failed to navigate defaultspack window")?;
+        return focus_defaultspack_window(&window);
+    }
+
+    let window =
+        WebviewWindowBuilder::new(app, DEFAULTSPACK_WINDOW_LABEL, WebviewUrl::External(url))
+            .title(DEFAULTSPACK_WINDOW_TITLE)
+            .inner_size(1280.0, 800.0)
+            .min_inner_size(800.0, 600.0)
+            .resizable(true)
+            .focused(true)
+            .visible(true)
+            .build()
+            .context("failed to open defaultspack window")?;
+    focus_defaultspack_window(&window)
 }
 
 fn read_defaultspack_desktop_metadata(
@@ -724,14 +786,27 @@ fn persist_desktop_api_token(config: &AppConfig, api_token: &str) -> AnyResult<P
     Ok(token_path)
 }
 
+fn read_panel_bootstrap_secret_from_config(config: &AppConfig) -> AnyResult<String> {
+    let path = config.panel_bootstrap_secret_path();
+    let secret = fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?
+        .trim()
+        .to_string();
+    if secret.is_empty() {
+        bail!("panel bootstrap secret is empty at {}", path.display());
+    }
+    Ok(secret)
+}
+
 fn spawn_defaultspack_local_server(
     config: &AppConfig,
     metadata: &DefaultspackDesktopMetadata,
 ) -> AnyResult<Child> {
     let pack_shell = config
-        .pack_shell_path()
-        .context("pack-shell binary not found. Build it with `cargo build` in pack-shell/")?;
+        .ensure_pack_shell_path()
+        .context("pack-shell binary is required to launch Defaultspack")?;
     let api_token = read_desktop_api_token_from_config(config)?;
+    let panel_bootstrap_secret = read_panel_bootstrap_secret_from_config(config)?;
     let kernel_command = kernel_command_for_python(&config.venv_python());
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
 
@@ -757,13 +832,12 @@ fn spawn_defaultspack_local_server(
         .arg(&metadata.app_working_dir)
         .arg("--timeout")
         .arg("120")
-        .arg("--api-token")
-        .arg(&api_token)
         .env("PATH", path)
         .env("RUMI_HOME", &config.rumi_home)
         .env("RUMI_APP_DIR", &config.app_dir)
         .env("RUMI_USER_DATA", &config.user_data_dir)
         .env("RUMI_API_TOKEN", &api_token)
+        .env("RUMI_PANEL_BOOTSTRAP_SECRET", &panel_bootstrap_secret)
         .env("RUMI_DEFAULTSPACK_OPEN_BROWSER", "0")
         .current_dir(&metadata.app_working_dir)
         .stdin(Stdio::null())
@@ -785,19 +859,21 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
     }
 
     let pack_shell = config
-        .pack_shell_path()
-        .context("pack-shell binary not found. Build it with `cargo build` in pack-shell/")?;
+        .ensure_pack_shell_path()
+        .context("pack-shell binary is required to register Defaultspack")?;
 
     let metadata = read_defaultspack_desktop_metadata(config)?;
 
     let api_token = read_desktop_api_token_from_config(config)?;
     let token_path = persist_desktop_api_token(config, &api_token)?;
+    let panel_bootstrap_secret_path = config.panel_bootstrap_secret_path();
 
     let app_name = "Rumi Defaultspack";
     let app_dir = create_macos_app_bundle(
         app_name,
         &pack_shell,
         &token_path,
+        &panel_bootstrap_secret_path,
         &config.rumi_home,
         &config.app_dir,
         &config.user_data_dir,
@@ -893,6 +969,7 @@ mod tests {
         let script = build_launch_script(
             Path::new("/tmp/Rumi's bin/pack-shell"),
             Path::new("/tmp/token file"),
+            Path::new("/tmp/panel secret file"),
             Path::new("/tmp/rumi home"),
             Path::new("/tmp/app dir"),
             Path::new("/tmp/user data"),
@@ -907,11 +984,12 @@ mod tests {
         assert!(script.contains("RUMI_APP_DIR='/tmp/app dir'"));
         assert!(script.contains("RUMI_USER_DATA='/tmp/user data'"));
         assert!(script.contains("TOKEN_FILE='/tmp/token file'"));
+        assert!(script.contains("PANEL_BOOTSTRAP_SECRET_FILE='/tmp/panel secret file'"));
         assert!(script.contains("APP_WORKING_DIR='/tmp/work $(bad)'"));
         assert!(script.contains("DESKTOP_COMMAND='python -c \"print('\\''hello'\\'')\"'"));
         assert!(script.contains("KERNEL_COMMAND=''\\''/tmp/venv dir/bin/python3'\\'' -m app'"));
         assert!(script.contains("exec \"$PACK_SHELL\" run \"defaultspack\""));
-        assert!(script.contains("--api-token \"$RUMI_API_TOKEN\""));
+        assert!(!script.contains("--api-token"));
         assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
         assert!(!script.contains(".defaultspack_launch_request"));
         assert!(!script.contains("open -a \"Rumi AI\""));
@@ -923,6 +1001,7 @@ mod tests {
         let script = build_launch_script(
             Path::new("/tmp/pack-shell"),
             Path::new("/tmp/token"),
+            Path::new("/tmp/panel-secret"),
             Path::new("/tmp/rumi-home"),
             Path::new("/tmp/app-dir"),
             Path::new("/tmp/user-data"),
@@ -938,6 +1017,7 @@ mod tests {
 
         assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
         assert!(script.contains("export DEFAULTS_HTTP_PORT='8766'"));
+        assert!(script.contains("export RUMI_PANEL_BOOTSTRAP_SECRET"));
     }
 
     #[test]
@@ -946,6 +1026,7 @@ mod tests {
         let script = build_launch_script(
             Path::new("/tmp/pack-shell"),
             Path::new("/tmp/token"),
+            Path::new("/tmp/panel-secret"),
             Path::new("/tmp/rumi-home"),
             Path::new("/tmp/app-dir"),
             Path::new("/tmp/user-data"),
@@ -959,7 +1040,7 @@ mod tests {
         assert!(script.contains("exec \"$PACK_SHELL\" run \"defaultspack\""));
         assert!(script.contains("--working-dir \"$APP_WORKING_DIR\""));
         assert!(script.contains("--kernel-cmd \"$KERNEL_COMMAND\""));
-        assert!(script.contains("--api-token \"$RUMI_API_TOKEN\""));
+        assert!(!script.contains("--api-token"));
 
         assert!(!script.contains("SIGNAL_FILE"));
         assert!(!script.contains("Rumi AI"));

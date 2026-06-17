@@ -1,0 +1,8 @@
+example_id: rumi_browser_automation.form_fill
+request: Fill a settings form and verify the saved confirmation.
+playbook: browser_form_completion
+expected_evidence:
+  - before_snapshot
+  - field_map
+  - highlighted_submit_target
+  - saved_confirmation

@@ -1,0 +1,40 @@
+version: rumi.runtime_benchmark.sample_size_confidence_policy.v1
+policy_id: rumi_runtime_benchmark_pack.sample_size_confidence
+pack_id: rumi_runtime_benchmark_pack
+network_default: none
+
+sample_size_rules:
+  smoke_three_run:
+    minimum_samples: 3
+    allowed_claims:
+      - basic_completion
+      - rough_latency_range
+    prohibited_claims:
+      - p95_regression
+      - cost_regression_threshold
+  comparison_ten_run:
+    minimum_samples: 10
+    allowed_claims:
+      - median_directional_comparison
+      - failure_mode_summary
+    prohibited_claims:
+      - formal_statistical_significance
+  release_gate_thirty_run:
+    minimum_samples: 30
+    allowed_claims:
+      - median_regression_check
+      - directional_p95_check
+      - threshold_gate_summary
+
+variance_notes_required:
+  - sample_count
+  - seed
+  - fixture_id
+  - retry_count
+  - outlier_policy
+  - confidence_statement
+
+confidence_language:
+  low: smoke evidence only
+  medium: directional comparison with disclosed variance
+  high: release-gate sample count with stable fixture and environment descriptor

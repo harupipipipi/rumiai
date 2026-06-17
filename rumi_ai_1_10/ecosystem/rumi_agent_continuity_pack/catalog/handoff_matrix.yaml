@@ -1,0 +1,22 @@
+handoff_matrix:
+  pack_id: rumi_agent_continuity_pack
+  pack_boundary_rule: owner_surface_wins_then_explicit_handoff
+  items:
+  - surface: run_board_events_checkpoints
+    resolution: handoff_to_rumi_agent_workroom_pack
+  - surface: memory_storage_recall
+    resolution: handoff_to_rumi_memory_knowledge_pack
+  - surface: metrics_telemetry_ledgers
+    resolution: handoff_to_rumi_observability_pack
+  - surface: schedules_wakeups_retries
+    resolution: handoff_to_rumi_workflow_scheduler_pack
+  - surface: artifact_persistence_export
+    resolution: handoff_to_rumi_workspace_pack
+  - surface: git_branch_mutation
+    resolution: handoff_to_defaultspack_or_coding_owner
+  - surface: continuity_packets
+    resolution: owned_by_rumi_agent_continuity_pack
+  - surface: restart_evidence
+    resolution: owned_by_rumi_agent_continuity_pack
+  - surface: tool_aliases
+    resolution: prefer_explicit_pack_namespace

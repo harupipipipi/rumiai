@@ -73,15 +73,42 @@ import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePin
 import { compareToolUiItems, sortedToolGroups, sortedToolUiItems, supportedComposerDropKind, supportsComposerDrop, toolGroupFor } from "../lib/toolUi";
 import { PlacementHtmlRenderer } from "./PlacementHtmlRenderer";
 import { ToolFilterLogWidget, ToolManagerWidget } from "./ToolStatusWidgets";
+import { WorkspaceTabRailPanel, type WorkspaceTab, type WorkspaceTabKind } from "./WorkspaceTabs";
+import { LayerPortal } from "../ui/layers/LayerPortal";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const RAIL_BUTTON_CLASS = "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center overflow-visible rounded-md transition-colors";
+const RAIL_BUTTON_CLASS = "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center overflow-visible rounded-md transition-all duration-200 ease-out hover:scale-[1.06] active:scale-[0.94]";
 const PANEL_WIDTH_STORAGE_KEY = "rumi-right-sidebar-panel-width";
 const PLACEMENT_PANEL_PREFIX = "__placement__:";
 const DEFAULT_TOOL_GROUP_RAIL_LIMIT = 8;
+const RAIL_MENU_GAP = 8;
+
+export function getRailFloatingMenuPosition(
+  rect: Pick<DOMRect, "left" | "top">,
+  options: {
+    width?: number;
+    height?: number;
+    gap?: number;
+    viewportWidth?: number;
+    viewportHeight?: number;
+  } = {},
+): { top: number; right: number } {
+  const width = options.width ?? 224;
+  const height = options.height ?? 320;
+  const gap = options.gap ?? RAIL_MENU_GAP;
+  const viewportWidth = options.viewportWidth ?? (typeof window === "undefined" ? width + gap * 2 : window.innerWidth);
+  const viewportHeight = options.viewportHeight ?? (typeof window === "undefined" ? height + gap * 2 : window.innerHeight);
+  const maxTop = Math.max(gap, viewportHeight - height - gap);
+  const maxRight = Math.max(gap, viewportWidth - width - gap);
+
+  return {
+    top: Math.max(gap, Math.min(rect.top, maxTop)),
+    right: Math.max(gap, Math.min(viewportWidth - rect.left + gap, maxRight)),
+  };
+}
 
 function clampPanelWidth(value: unknown): number {
   const numeric = typeof value === "number" ? value : Number(value);
@@ -594,12 +621,7 @@ function CategorySwitcher({
   const hasActiveFilter = active !== "all";
   const buttonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const rect = buttonRef.current?.getBoundingClientRect();
-  const menuPosition = rect
-    ? {
-        top: `${Math.max(8, rect.top)}px`,
-        right: `${Math.max(8, window.innerWidth - rect.left + 8)}px`,
-      }
-    : undefined;
+  const menuPosition = rect ? getRailFloatingMenuPosition(rect, { width: 150, height: 220 }) : null;
 
   return (
     <div className="relative">
@@ -626,11 +648,11 @@ function CategorySwitcher({
       </button>
 
       {isOpen && (
-        <>
+        <LayerPortal layer="modal">
           <div className="fixed inset-0 rumi-layer-global-overlay" onClick={() => setIsOpen(false)} />
           <div
             className="fixed rumi-layer-modal bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden min-w-[150px]"
-            style={menuPosition}
+            style={menuPosition ? { top: `${menuPosition.top}px`, right: `${menuPosition.right}px` } : undefined}
           >
             <div className="px-2 py-1.5 border-b border-zinc-800/60">
               <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider">表示フィルター</p>
@@ -658,7 +680,7 @@ function CategorySwitcher({
               })}
             </div>
           </div>
-        </>
+        </LayerPortal>
       )}
     </div>
   );
@@ -683,12 +705,7 @@ function SidebarSearchControl({
   const hasQuery = query.trim().length > 0;
   const buttonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const rect = buttonRef.current?.getBoundingClientRect();
-  const menuPosition = rect
-    ? {
-        top: `${Math.max(8, rect.top)}px`,
-        right: `${Math.max(8, window.innerWidth - rect.left + 8)}px`,
-      }
-    : undefined;
+  const menuPosition = rect ? getRailFloatingMenuPosition(rect, { width: 256, height: 100 }) : null;
 
   useEffect(() => {
     if (isOpen) {
@@ -720,11 +737,11 @@ function SidebarSearchControl({
       </button>
 
       {isOpen && (
-        <>
+        <LayerPortal layer="modal">
           <div className="fixed inset-0 rumi-layer-global-overlay" onClick={() => setIsOpen(false)} />
           <div
             className="fixed rumi-layer-modal w-64 rounded-xl border border-zinc-700/70 bg-zinc-950 p-2 shadow-2xl"
-            style={menuPosition}
+            style={menuPosition ? { top: `${menuPosition.top}px`, right: `${menuPosition.right}px` } : undefined}
           >
             <label className="relative block">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
@@ -762,7 +779,7 @@ function SidebarSearchControl({
               <span>{resultCount} / {totalCount}</span>
             </div>
           </div>
-        </>
+        </LayerPortal>
       )}
     </div>
   );
@@ -781,10 +798,15 @@ export function RightSidebar({
   toolFilterEntries = [],
   runtimeCapabilitySnapshot = null,
   yoloMode = false,
+  workspaceTabs = [],
+  activeWorkspaceTabId = null,
   onSettingChange,
   onOpenSettings,
   onOpenSettingsSection,
   onToggleYolo,
+  onWorkspaceTabSelect,
+  onWorkspaceTabClose,
+  onWorkspaceTabCreate,
   onToolToggle,
   onToolBatchSet,
   onPanelAction,
@@ -801,10 +823,15 @@ export function RightSidebar({
   toolFilterEntries?: ToolFilterEntry[];
   runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
   yoloMode?: boolean;
+  workspaceTabs?: WorkspaceTab[];
+  activeWorkspaceTabId?: string | null;
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
   onOpenSettings: () => void;
   onOpenSettingsSection?: (sectionId: string) => void;
   onToggleYolo?: () => void;
+  onWorkspaceTabSelect?: (tabId: string) => void;
+  onWorkspaceTabClose?: (tabId: string) => void;
+  onWorkspaceTabCreate?: (kind: WorkspaceTabKind) => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
@@ -818,6 +845,7 @@ export function RightSidebar({
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [panelWidth, setPanelWidth] = useState(readStoredPanelWidth);
   const [placementMenuOpen, setPlacementMenuOpen] = useState(false);
+  const [placementMenuPosition, setPlacementMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const sidebarSettings = settingsValues.sidebar ?? {};
   const toolsSettings = settingsValues.tools ?? {};
   const pinnedItemIds = useMemo(
@@ -850,6 +878,9 @@ export function RightSidebar({
   const [contextMenu, setContextMenu] = useState<{ itemId: string; x: number; y: number } | null>(null);
   const toolManagerSearchRef = useRef<HTMLDivElement | null>(null);
   const toolGroupMenuRef = useRef<HTMLDivElement | null>(null);
+  const toolGroupFloatingMenuRef = useRef<HTMLDivElement | null>(null);
+  const placementMenuRef = useRef<HTMLDivElement | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const buttonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const pinnedItemIdSet = useMemo(() => new Set(pinnedItemIds), [pinnedItemIds]);
@@ -904,7 +935,15 @@ export function RightSidebar({
 
   useEffect(() => {
     const requestedId = activeItemId?.split(":").slice(0, -1).join(":") || activeItemId;
-    if (requestedId && items.some((item) => item.id === requestedId)) {
+    const specialPanelIds = new Set([
+      "__tool_manager__",
+      "__tool_filter_log__",
+      "__runtime_status__",
+      "__company_workspace__",
+      "__coding_widget__",
+      "__workspace_tabs__",
+    ]);
+    if (requestedId && (items.some((item) => item.id === requestedId) || specialPanelIds.has(requestedId))) {
       setActivePanel(requestedId);
     }
   }, [activeItemId, items]);
@@ -916,21 +955,22 @@ export function RightSidebar({
     if (activePanel === "__runtime_status__") return;
     if (activePanel === "__company_workspace__" && companyPanel) return;
     if (activePanel === "__coding_widget__" && codingPanel) return;
+    if (activePanel === "__workspace_tabs__" && workspaceTabs.length > 0) return;
     if (activePanel.startsWith(PLACEMENT_PANEL_PREFIX) && placementManifestMap.has(activePanel.slice(PLACEMENT_PANEL_PREFIX.length))) {
       return;
     }
     if (!items.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
-  }, [activePanel, codingPanel, companyPanel, items, placementManifestMap]);
+  }, [activePanel, codingPanel, companyPanel, items, placementManifestMap, workspaceTabs.length]);
 
   useEffect(() => {
     if (!activePanel || categoryFilter === "all") return;
     const active = items.find((item) => item.id === activePanel);
-    if (active && active.category !== categoryFilter) {
+    if (active && active.category !== categoryFilter && !pinnedItemIdSet.has(active.id)) {
       setActivePanel(null);
     }
-  }, [activePanel, categoryFilter, items]);
+  }, [activePanel, categoryFilter, items, pinnedItemIdSet]);
 
   useEffect(() => {
     if (!openToolGroupMenu) return;
@@ -939,6 +979,7 @@ export function RightSidebar({
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (toolGroupMenuRef.current?.contains(target)) return;
+      if (toolGroupFloatingMenuRef.current?.contains(target)) return;
       setOpenToolGroupMenu(null);
       setContextMenu(null);
     };
@@ -960,7 +1001,11 @@ export function RightSidebar({
 
   useEffect(() => {
     if (!placementMenuOpen) return;
-    const handlePointerDown = () => setPlacementMenuOpen(false);
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && placementMenuRef.current?.contains(target)) return;
+      setPlacementMenuOpen(false);
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setPlacementMenuOpen(false);
     };
@@ -975,9 +1020,13 @@ export function RightSidebar({
   useEffect(() => {
     if (!contextMenu) return;
 
-    const close = () => setContextMenu(null);
+    const close = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && contextMenuRef.current?.contains(target)) return;
+      setContextMenu(null);
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+      if (event.key === "Escape") setContextMenu(null);
     };
     document.addEventListener("pointerdown", close);
     document.addEventListener("keydown", handleKeyDown);
@@ -1037,7 +1086,7 @@ export function RightSidebar({
     [hiddenToolIdSet, items, searchQuery, tagMap],
   );
   useEffect(() => {
-    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || !searchQuery.trim()) return;
+    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || activePanel === "__workspace_tabs__" || !searchQuery.trim()) return;
     if (!searchFilteredItems.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
@@ -1120,6 +1169,7 @@ export function RightSidebar({
   const isRuntimeStatusActive = activePanel === "__runtime_status__";
   const isCompanyPanelActive = activePanel === "__company_workspace__" && Boolean(companyPanel);
   const isCodingPanelActive = activePanel === "__coding_widget__" && Boolean(codingPanel);
+  const isWorkspaceTabsActive = activePanel === "__workspace_tabs__" && workspaceTabs.length > 0;
   const isPlacementPanelActive = Boolean(activePlacementManifest);
   const activeToolGroupId = activeItem?.category === "tool" ? toolGroupFor(activeItem).id : null;
   const shouldCompactToolRail = categoryFilter === "tool" && !searchQuery.trim() && !activeTagFilter && !showStarredOnly;
@@ -1341,17 +1391,14 @@ export function RightSidebar({
     event.stopPropagation();
     setContextMenu({
       itemId: item.id,
-      x: Math.min(event.clientX, window.innerWidth - 190),
-      y: Math.min(event.clientY, window.innerHeight - 150),
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 190)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 230)),
     });
   };
 
   const openToolGroup = (groupId: string, button: HTMLButtonElement) => {
     const rect = button.getBoundingClientRect();
-    setToolGroupMenuPosition({
-      top: Math.max(8, Math.min(rect.top, window.innerHeight - 300)),
-      right: Math.max(8, window.innerWidth - rect.left + 8),
-    });
+    setToolGroupMenuPosition(getRailFloatingMenuPosition(rect, { width: 224, height: 360 }));
     setOpenToolGroupMenu(groupId);
   };
 
@@ -1468,7 +1515,7 @@ export function RightSidebar({
 
   return (
     <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
-      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isCompanyPanelActive || isCodingPanelActive) && (
+      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isCompanyPanelActive || isCodingPanelActive || isWorkspaceTabsActive) && (
         <div
           className="relative flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200"
           style={{ width: panelWidthPx }}
@@ -1482,8 +1529,8 @@ export function RightSidebar({
           />
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
-              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Company Workspace" : isCodingPanelActive ? "Coding widget" : isToolFilterLogActive ? "Tool filter log" : isRuntimeStatusActive ? "Runtime status" : "Tool manager")}</h3>
+              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isWorkspaceTabsActive ? "bg-emerald-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
+              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Employees" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isToolFilterLogActive ? "Tool filter log" : isRuntimeStatusActive ? "Runtime status" : "Tool manager")}</h3>
               {activeItem?.badge && (
                 <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.5 rounded-full font-bold flex-shrink-0">
                   {activeItem.badge}
@@ -1583,6 +1630,14 @@ export function RightSidebar({
               companyPanel
             ) : isCodingPanelActive ? (
               codingPanel
+            ) : isWorkspaceTabsActive ? (
+              <WorkspaceTabRailPanel
+                tabs={workspaceTabs}
+                activeTabId={activeWorkspaceTabId ?? ""}
+                onSelect={(tabId) => onWorkspaceTabSelect?.(tabId)}
+                onClose={(tabId) => onWorkspaceTabClose?.(tabId)}
+                onCreate={(kind) => onWorkspaceTabCreate?.(kind)}
+              />
             ) : isPlacementPanelActive && activePlacementManifest ? (
               renderPlacementPanel(activePlacementManifest.id)
             ) : isToolFilterLogActive ? (
@@ -1891,7 +1946,7 @@ export function RightSidebar({
 
               <div className="w-12 flex flex-col flex-shrink-0 overflow-visible">
                 <div
-                  className="flex-1 flex flex-col items-center gap-1 overflow-x-visible overflow-y-auto w-full py-1.5 scrollbar-none"
+                  className="flex-1 flex flex-col items-center gap-1 overflow-x-visible overflow-y-auto w-full py-1.5 scrollbar-none rumi-stagger-tight"
                   onDragOver={(event) => {
                     if (event.dataTransfer.types.includes("application/rumi-sidebar-shortcut")) {
                       event.preventDefault();
@@ -1901,13 +1956,34 @@ export function RightSidebar({
                   onDrop={handleShortcutDrop}
                 >
           {(pinnedRailItems.length > 0 || pinnedRightSidebarPlacements.length > 0) && (
-            <div className="flex w-full flex-col items-center gap-1">
+            <div className="flex w-full flex-col items-center gap-1 rumi-stagger-tight">
               {pinnedRailItems.map((item) => renderRailItemButton(item, true))}
               {pinnedRightSidebarPlacements.map((placement) => renderPinnedPlacementButton(placement.id))}
               <div className="w-5 h-px bg-sky-500/20 my-0.5" />
             </div>
           )}
                   <CategorySwitcher active={categoryFilter} counts={counts} keyboardButtonNavigation={keyboardButtonNavigation} onChange={(id) => { setCategoryFilter(id); setOpenToolGroupMenu(null); }} />
+                  {workspaceTabs.length > 0 && (
+                    <button
+                      type="button"
+                      tabIndex={buttonTabIndex}
+                      onClick={() => setActivePanel((current) => (current === "__workspace_tabs__" ? null : "__workspace_tabs__"))}
+                      className={cn(
+                        RAIL_BUTTON_CLASS,
+                        isWorkspaceTabsActive
+                          ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/30"
+                          : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+                      )}
+                      title="Workspace tabs"
+                      aria-label="Workspace tabs"
+                      aria-pressed={isWorkspaceTabsActive}
+                    >
+                      <LayoutGrid size={17} className="h-[17px] w-[17px] shrink-0" />
+                      <span className="absolute -top-0.5 -right-0.5 rounded-full bg-emerald-500 px-0.5 text-[7px] font-bold leading-tight text-black">
+                        {workspaceTabs.length}
+                      </span>
+                    </button>
+                  )}
                   <SidebarSearchControl
                     query={searchQuery}
                     resultCount={searchFilteredItems.length}
@@ -1965,9 +2041,14 @@ export function RightSidebar({
             <button
               type="button"
               tabIndex={buttonTabIndex}
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
-                setPlacementMenuOpen((current) => !current);
+                const nextOpen = !placementMenuOpen;
+                if (nextOpen) {
+                  setPlacementMenuPosition(getRailFloatingMenuPosition(event.currentTarget.getBoundingClientRect(), { width: 224, height: 320 }));
+                }
+                setPlacementMenuOpen(nextOpen);
               }}
               className={cn(
                 RAIL_BUTTON_CLASS,
@@ -1980,39 +2061,43 @@ export function RightSidebar({
               <Plus size={16} className="h-4 w-4 shrink-0" />
             </button>
             {placementMenuOpen && (
-              <div
-                className="absolute left-full top-0 rumi-layer-modal ml-2 w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl"
-                onPointerDown={(event) => event.stopPropagation()}
-              >
-                <div className="border-b border-zinc-800 px-3 py-2">
-                  <p className="text-[11px] font-semibold text-zinc-200">Pin to sidebar</p>
-                  <p className="text-[10px] text-zinc-500">vertical / configurable</p>
+              <LayerPortal layer="modal">
+                <div
+                  ref={placementMenuRef}
+                  className="fixed rumi-layer-modal w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl"
+                  style={placementMenuPosition ? { top: `${placementMenuPosition.top}px`, right: `${placementMenuPosition.right}px` } : undefined}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <div className="border-b border-zinc-800 px-3 py-2">
+                    <p className="text-[11px] font-semibold text-zinc-200">Pin to sidebar</p>
+                    <p className="text-[10px] text-zinc-500">vertical / configurable</p>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto py-1">
+                    {rightSidebarPlacementCandidates.map((manifest) => (
+                      <button
+                        key={manifest.id}
+                        type="button"
+                        onClick={() => {
+                          updatePinnedPlacements((current) => togglePinnedPlacement(current, { id: manifest.id, surface: "right_sidebar" }));
+                          setPlacementMenuOpen(false);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"
+                      >
+                        <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-400">
+                          {placementIcon(manifest.id)}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-[12px]">{manifest.label}</span>
+                          {manifest.description && <span className="block truncate text-[10px] text-zinc-500">{manifest.description}</span>}
+                        </span>
+                      </button>
+                    ))}
+                    {rightSidebarPlacementCandidates.length === 0 && (
+                      <p className="px-3 py-3 text-[11px] text-zinc-500">追加できる candidate はありません。</p>
+                    )}
+                  </div>
                 </div>
-                <div className="max-h-64 overflow-y-auto py-1">
-                  {rightSidebarPlacementCandidates.map((manifest) => (
-                    <button
-                      key={manifest.id}
-                      type="button"
-                      onClick={() => {
-                        updatePinnedPlacements((current) => togglePinnedPlacement(current, { id: manifest.id, surface: "right_sidebar" }));
-                        setPlacementMenuOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"
-                    >
-                      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-400">
-                        {placementIcon(manifest.id)}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-[12px]">{manifest.label}</span>
-                        {manifest.description && <span className="block truncate text-[10px] text-zinc-500">{manifest.description}</span>}
-                      </span>
-                    </button>
-                  ))}
-                  {rightSidebarPlacementCandidates.length === 0 && (
-                    <p className="px-3 py-3 text-[11px] text-zinc-500">追加できる candidate はありません。</p>
-                  )}
-                </div>
-              </div>
+              </LayerPortal>
             )}
           </div>
           {companyPanel && (
@@ -2026,7 +2111,7 @@ export function RightSidebar({
                   ? "bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/30"
                   : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
               )}
-              title="Company workspace"
+              title="Employees"
             >
               <Building2 size={17} className="h-[17px] w-[17px] shrink-0" />
             </button>
@@ -2060,17 +2145,14 @@ export function RightSidebar({
                               type="button"
                               tabIndex={buttonTabIndex}
                               onClick={(event) => {
-                                if (group.items.length === 1) {
-                                  setActivePanel((current) => (current === group.items[0].id ? null : group.items[0].id));
-                                  setOpenToolGroupMenu(null);
-                                  return;
-                                }
                                 if (openToolGroupMenu === group.id) {
                                   setOpenToolGroupMenu(null);
                                   return;
                                 }
                                 openToolGroup(group.id, event.currentTarget);
                               }}
+                              aria-label={`${group.path?.length ? group.path.join(" / ") : group.label || TOOL_GROUP_LABELS[group.id] || group.id} tool folder`}
+                              aria-expanded={isGroupOpen}
                               className={cn(
                                 RAIL_BUTTON_CLASS,
                                 "group/group",
@@ -2092,17 +2174,19 @@ export function RightSidebar({
                     )}
                   </button>
                   {openToolGroupMenu === group.id && (
-                    <div
-                      className="fixed rumi-layer-modal w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
-                      style={toolGroupMenuPosition ? { top: `${toolGroupMenuPosition.top}px`, right: `${toolGroupMenuPosition.right}px` } : undefined}
-                    >
-                      <div className="border-b border-zinc-800 px-3 py-2">
-                        <p className="truncate text-[11px] font-semibold text-zinc-200">{group.label || TOOL_GROUP_LABELS[group.id] || group.id}</p>
-                        {group.path?.length && group.path.length > 1 && (
-                          <p className="truncate text-[10px] text-zinc-500">{group.path.join(" / ")}</p>
-                        )}
-                        <p className="text-[10px] text-zinc-500">{group.count} tools</p>
-                      </div>
+                    <LayerPortal layer="modal">
+                      <div
+                        ref={toolGroupFloatingMenuRef}
+                        className="fixed rumi-layer-modal w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
+                        style={toolGroupMenuPosition ? { top: `${toolGroupMenuPosition.top}px`, right: `${toolGroupMenuPosition.right}px` } : undefined}
+                      >
+                        <div className="border-b border-zinc-800 px-3 py-2">
+                          <p className="truncate text-[11px] font-semibold text-zinc-200">{group.label || TOOL_GROUP_LABELS[group.id] || group.id}</p>
+                          {group.path?.length && group.path.length > 1 && (
+                            <p className="truncate text-[10px] text-zinc-500">{group.path.join(" / ")}</p>
+                          )}
+                          <p className="text-[10px] text-zinc-500">{group.count} tools</p>
+                        </div>
                               <div className="grid grid-cols-2 gap-1 border-b border-zinc-800 p-2">
                                 <button
                                   type="button"
@@ -2159,6 +2243,7 @@ export function RightSidebar({
                         ))}
                       </div>
                     </div>
+                    </LayerPortal>
                   )}
                 </div>
               );
@@ -2205,15 +2290,17 @@ export function RightSidebar({
             const starred = starredItemIdSet.has(item.id);
             const enabled = selectedToolIdSet.has(item.id);
             return (
-              <div
-                className="fixed rumi-layer-command-palette w-44 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
-                style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
-                onPointerDown={(event) => event.stopPropagation()}
-              >
-                <div className="border-b border-zinc-800 px-3 py-2">
-                  <p className="truncate text-[11px] font-semibold text-zinc-200">{item.label}</p>
-                  <p className="truncate text-[10px] text-zinc-500">{item.category}</p>
-                </div>
+              <LayerPortal layer="commandPalette">
+                <div
+                  ref={contextMenuRef}
+                  className="fixed rumi-layer-command-palette w-44 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
+                  style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <div className="border-b border-zinc-800 px-3 py-2">
+                    <p className="truncate text-[11px] font-semibold text-zinc-200">{item.label}</p>
+                    <p className="truncate text-[10px] text-zinc-500">{item.category}</p>
+                  </div>
                         <button
                           type="button"
                           tabIndex={buttonTabIndex}
@@ -2265,6 +2352,7 @@ export function RightSidebar({
                   <span>詳細を開く</span>
                 </button>
               </div>
+              </LayerPortal>
             );
           })()}
 

@@ -15,6 +15,7 @@ export function ConversationSpotlight({
   selectedIndex,
   loading,
   locale,
+  shortcutLabel,
   onQueryChange,
   onFilterChange,
   onKeyDown,
@@ -28,6 +29,7 @@ export function ConversationSpotlight({
   selectedIndex: number;
   loading: boolean;
   locale: LocaleSetting;
+  shortcutLabel?: string;
   onQueryChange: (value: string) => void;
   onFilterChange: (value: SpotlightFilter) => void;
   onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
@@ -36,9 +38,9 @@ export function ConversationSpotlight({
 }) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 rumi-layer-modal flex items-start justify-center bg-black/45 px-4 pt-[9vh] backdrop-blur-sm" onMouseDown={onClose}>
+    <div className="fixed inset-0 rumi-layer-modal flex items-start justify-center bg-black/45 px-4 pt-[9vh] backdrop-blur-sm rumi-anim-fade-in" onMouseDown={onClose}>
       <div
-        className="w-full max-w-2xl overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/95 shadow-[0_32px_120px_rgba(0,0,0,0.65)] ring-1 ring-white/5"
+        className="w-full max-w-2xl overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/95 shadow-[0_32px_120px_rgba(0,0,0,0.65)] ring-1 ring-white/5 rumi-anim-pop-in"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b border-zinc-800/80 px-4 py-3">
@@ -52,7 +54,7 @@ export function ConversationSpotlight({
             className="min-w-0 flex-1 bg-transparent text-lg text-zinc-100 outline-none placeholder:text-zinc-600"
           />
           <div className="hidden rounded-full border border-zinc-800 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500 sm:block">
-            {t(locale, "spotlight.shortcut")}
+            {shortcutLabel || t(locale, "spotlight.shortcut")}
           </div>
           <button type="button" onClick={onClose} className="rounded-full p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">
             <X size={16} />

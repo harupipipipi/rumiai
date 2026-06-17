@@ -6,8 +6,14 @@ All operations use ChatStore's existing public API without modifying it.
 """
 
 import copy
+import sys
 import time
 import uuid
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
+from blocks.chat._prompt_helpers import build_text_from_content
 
 
 def _gen_id():
@@ -20,30 +26,7 @@ def _now_ms():
 
 def _build_text_from_content(content):
     """Extract plain text from a content field (str or list of blocks)."""
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, dict):
-                btype = block.get("type", "text")
-                if btype == "text":
-                    parts.append(block.get("text", ""))
-                elif btype == "tool_call":
-                    parts.append("[tool_call: " + block.get("name", "unknown") + "]")
-                elif btype == "tool_result":
-                    tc = block.get("content", "")
-                    parts.append(tc if isinstance(tc, str) else str(tc))
-                else:
-                    parts.append(block.get("text", str(block)))
-            elif isinstance(block, str):
-                parts.append(block)
-            else:
-                parts.append(str(block))
-        return "\n".join(t for t in parts if t)
-    return str(content)
+    return build_text_from_content(content)
 
 
 def delete_range(store, conversation_id, start_message_id, end_message_id):

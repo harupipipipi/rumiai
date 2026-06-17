@@ -1,0 +1,21 @@
+office_authoring_patterns:
+  pack_id: rumi_office_authoring_pack
+  patterns:
+  - board_update_deck
+  - financial_model_workbook
+  - policy_brief_doc
+  - cited_report_to_pdf
+  - suite_handoff_packet
+  review_gates:
+  - citation
+  - layout
+  - formula
+  - accessibility
+  - export
+  owner_handoffs:
+    rendering: rumi_workspace_pack
+    file_persistence: rumi_workspace_pack
+    data_analysis: rumi_data_analysis_pack
+    document_understanding: rumi_document_intelligence_pack
+    citation_ledger: rumi_evidence_dossier_pack
+    artifact_app_runtime: rumi_artifact_app_runtime_pack

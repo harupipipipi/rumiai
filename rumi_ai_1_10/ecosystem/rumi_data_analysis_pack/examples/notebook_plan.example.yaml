@@ -1,0 +1,13 @@
+example_id: rumi_data_analysis.examples.notebook_plan
+preset: reproducible_notebook_plan
+title: Plan a reproducible churn notebook
+goal: Build a notebook outline for churn exploration using local exported tables.
+inputs:
+  files: [local_exports/customers.csv, local_exports/events.csv]
+  audience: product_leadership
+constraints:
+  network: none
+  notebook_execution: approval_required
+deliverable:
+  type: notebook_outline_and_recipe
+  required_sections: [objective, data_inventory, cleaning, exploration, charts, conclusion, reproducibility_status]

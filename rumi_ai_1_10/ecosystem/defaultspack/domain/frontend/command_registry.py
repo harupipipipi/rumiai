@@ -20,6 +20,8 @@ ALLOWED_RUMI_FUNCTIONS = {
     "ai_set_thinking_level",
     "ai_get_effective_thinking_level",
     "ai_normalize_thinking_level",
+    "ai_get_deepthink_enabled",
+    "ai_set_deepthink_enabled",
 }
 
 # pack_block execution type: lets a manifest-defined slash command dispatch to a
@@ -116,7 +118,10 @@ class SlashCommandRegistry:
             if isinstance(builtin_result, dict) and builtin_result.get("status") == "error":
                 return builtin_result
             if builtin_result is not None:
-                return ok({"command": self._public_command(command), "executed": True, "result": builtin_result})
+                payload = {"command": self._public_command(command), "executed": True, "result": builtin_result}
+                if isinstance(builtin_result, dict) and str(builtin_result.get("message") or "").strip():
+                    payload["message"] = str(builtin_result.get("message") or "")
+                return ok(payload)
             return error("rumi_function command is not allowlisted", "INVALID_COMMAND")
 
         if execution_type == "chat_action":
@@ -326,6 +331,11 @@ class SlashCommandRegistry:
                     str(args.get("model_id") or args.get("model") or ""),
                     str(args.get("level") or args.get("thinking_level") or ""),
                 )
+            if function_id == "ai_get_deepthink_enabled":
+                return service.get_deepthink_enabled()
+            if function_id == "ai_set_deepthink_enabled":
+                enabled = args.get("enabled")
+                return service.set_deepthink_enabled(enabled if isinstance(enabled, bool) else None)
         except Exception as exc:
             return error(str(exc), "EXECUTION_FAILED")
         return None

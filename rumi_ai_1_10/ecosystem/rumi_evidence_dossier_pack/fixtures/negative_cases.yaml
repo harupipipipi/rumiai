@@ -1,0 +1,12 @@
+negative_cases:
+  cases:
+  - id: uncited_claim_block
+    given: Block export with missing citation
+    expected: citation_block_handoff_packet
+  blocked_by_default:
+  - export verified dossier with uncited claims
+  - hide unresolved contradictions
+  - retrieve sources directly
+  - render final documents directly
+  - score model outputs directly
+  expected_behavior: block_or_handoff_without_external_action

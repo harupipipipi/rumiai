@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 
@@ -409,6 +409,8 @@ type SettingsModelOption = {
   notes?: string;
 };
 
+const MODEL_PICKER_QUERY_RESULT_LIMIT = 60;
+
 function modelFieldOptionToOption(option: NonNullable<SettingsSection["fields"][number]["options"]>[number]): SettingsModelOption {
   return {
     value: String(option.value ?? ""),
@@ -501,6 +503,30 @@ function dedupeModelOptions(options: SettingsModelOption[]): SettingsModelOption
   return deduped;
 }
 
+export function buildVisibleModelOptions({
+  options,
+  selected,
+  remoteOptions,
+  query,
+}: {
+  options: SettingsModelOption[];
+  selected?: SettingsModelOption | null;
+  remoteOptions?: SettingsModelOption[];
+  query?: string;
+}): SettingsModelOption[] {
+  const trimmedQuery = String(query ?? "").trim();
+  const localMatches = trimmedQuery
+    ? options.filter((option) => modelOptionMatchesSearch(option, trimmedQuery))
+    : options;
+  const merged = dedupeModelOptions([
+    ...(selected ? [selected] : []),
+    ...localMatches,
+    ...(remoteOptions ?? []),
+  ]);
+  if (!trimmedQuery) return merged;
+  return merged.slice(0, MODEL_PICKER_QUERY_RESULT_LIMIT);
+}
+
 function modelOptionBadges(option: SettingsModelOption): string[] {
   const badges: string[] = [];
   if (option.configured) badges.push("設定済み");
@@ -541,40 +567,58 @@ function SettingsModelSearchSelect({
   const [remoteResults, setRemoteResults] = useState<ModelSearchItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const searchRequestSeq = useRef(0);
   const trimmedQuery = query.trim();
+  const remoteOptions = useMemo(
+    () => remoteResults.map(modelSearchItemToOption),
+    [remoteResults],
+  );
   const selected = options.find((option) => option.value === value || option.qualified_model_id === value)
-    ?? remoteResults.map(modelSearchItemToOption).find((option) => option.value === value || option.qualified_model_id === value)
+    ?? remoteOptions.find((option) => option.value === value || option.qualified_model_id === value)
     ?? (value ? { value, label: value } : null);
 
   useEffect(() => {
     if (!open) return;
+    searchRequestSeq.current += 1;
+    const requestSeq = searchRequestSeq.current;
+    if (!trimmedQuery) {
+      setRemoteResults([]);
+      setBusy(false);
+      setError("");
+      return;
+    }
+    let disposed = false;
     const timer = window.setTimeout(() => {
       setBusy(true);
       setError("");
-      settingsApiResources.searchModels({ query: query.trim(), max_results: 30 })
+      settingsApiResources.searchModels({ query: trimmedQuery, max_results: 30 })
         .then((result) => {
+          if (disposed || requestSeq !== searchRequestSeq.current) return;
           setRemoteResults(result.models ?? []);
         })
         .catch((searchError: unknown) => {
+          if (disposed || requestSeq !== searchRequestSeq.current) return;
           setRemoteResults([]);
           setError(searchError instanceof Error ? searchError.message : "モデル検索に失敗しました");
         })
-        .finally(() => setBusy(false));
-    }, query.trim() ? 160 : 0);
-    return () => window.clearTimeout(timer);
-  }, [open, query]);
+        .finally(() => {
+          if (!disposed && requestSeq === searchRequestSeq.current) setBusy(false);
+        });
+    }, 160);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, trimmedQuery]);
 
   const visibleOptions = useMemo(() => {
-    const localMatches = trimmedQuery
-      ? options.filter((option) => modelOptionMatchesSearch(option, trimmedQuery))
-      : options;
-    const merged = dedupeModelOptions([
-      ...(selected ? [selected] : []),
-      ...localMatches,
-      ...remoteResults.map(modelSearchItemToOption),
-    ]);
-    return merged.slice(0, 40);
-  }, [trimmedQuery, options, remoteResults, selected]);
+    return buildVisibleModelOptions({
+      options,
+      selected,
+      remoteOptions,
+      query: trimmedQuery,
+    });
+  }, [trimmedQuery, options, remoteOptions, selected]);
 
   return (
     <div className="relative">
@@ -679,26 +723,43 @@ function ModelAllowlistField({
   const [remoteResults, setRemoteResults] = useState<ModelSearchItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const searchRequestSeq = useRef(0);
   const selectedModels = parseModelAllowlist(value, fallback);
   const selectedSet = useMemo(() => new Set(selectedModels), [selectedModels]);
   const trimmedQuery = query.trim();
 
   useEffect(() => {
     if (!open) return;
+    searchRequestSeq.current += 1;
+    const requestSeq = searchRequestSeq.current;
+    if (!trimmedQuery) {
+      setRemoteResults([]);
+      setBusy(false);
+      setError("");
+      return;
+    }
+    let disposed = false;
     const timer = window.setTimeout(() => {
       setBusy(true);
       setError("");
       settingsApiResources.searchModels({ query: trimmedQuery, max_results: 50 })
         .then((result) => {
+          if (disposed || requestSeq !== searchRequestSeq.current) return;
           setRemoteResults(result.models ?? []);
         })
         .catch((searchError: unknown) => {
+          if (disposed || requestSeq !== searchRequestSeq.current) return;
           setRemoteResults([]);
           setError(searchError instanceof Error ? searchError.message : "モデル検索に失敗しました");
         })
-        .finally(() => setBusy(false));
-    }, trimmedQuery ? 160 : 0);
-    return () => window.clearTimeout(timer);
+        .finally(() => {
+          if (!disposed && requestSeq === searchRequestSeq.current) setBusy(false);
+        });
+    }, 160);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+    };
   }, [open, trimmedQuery]);
 
   const candidateOptions = useMemo(() => {
@@ -1256,6 +1317,8 @@ const BUILTIN_API_PROVIDER_IDS: string[] = [
   "moonshotai",
   "nvidia",
   "ollama",
+  "opencode-go",
+  "opencode-zen",
   "openai",
   "openai_compatible",
   "openrouter",

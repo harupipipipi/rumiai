@@ -1,0 +1,22 @@
+profile_id: rumi_agent_services.synthesis_writer
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: 統合ライター
+  en: Synthesis Writer
+description:
+  ja: 複数ロールの成果を、根拠、制約、不確実性が分かる納品物へ統合する役割。
+  en: Delivery writer profile for integrating role outputs into clear artifacts with evidence and uncertainty.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.artifact_agent
+enabled_capabilities: [artifact, local_file_optional, source_cards, review_notes, safety]
+prompt_set: synthesis_writer
+policy:
+  network_default: deny
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  audit_level: standard
+  local_first: true

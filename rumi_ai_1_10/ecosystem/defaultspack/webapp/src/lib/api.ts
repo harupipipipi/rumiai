@@ -1,5 +1,7 @@
 import type { ToolPreviewItem } from "../components/ToolPreview";
+import type { AuthorityApprovalScope } from "./authorityApproval";
 
+const PANEL_CSRF_STORAGE_KEY = "rumi-panel-csrf";
 const DEFAULTSPACK_CSRF_STORAGE_KEY = "rumi-defaultspack-csrf";
 
 export type ChatContentBlock = {
@@ -37,6 +39,27 @@ export type ChatAttachment = {
   source?: "local_file" | "workspace";
   sourcePath?: string;
 };
+
+export class ChatStreamInterruptedError extends Error {
+  partialText: string;
+  thinkingText: string;
+  sawActivity: boolean;
+
+  constructor(
+    message: string,
+    details: {
+      partialText?: string;
+      thinkingText?: string;
+      sawActivity?: boolean;
+    } = {},
+  ) {
+    super(message);
+    this.name = "ChatStreamInterruptedError";
+    this.partialText = details.partialText ?? "";
+    this.thinkingText = details.thinkingText ?? "";
+    this.sawActivity = details.sawActivity === true;
+  }
+}
 
 export type BrowserScreenshot = {
   id: string;
@@ -143,6 +166,77 @@ export type CodingApprovalDecision = {
   reason?: string;
 };
 
+export type AuthorityApprovalDecision = {
+  request_id: string;
+  approved: boolean;
+  scope: AuthorityApprovalScope;
+  token?: string;
+  expires_at?: string | null;
+  principal_id?: string;
+  permission_id?: string;
+  config?: Record<string, unknown>;
+  resource?: Record<string, unknown>;
+  related_approvals?: AuthorityApprovalDecision[];
+};
+
+export type AuthorityUiOperator = {
+  version: number;
+  kind: "ui_operator";
+  origin: string;
+  window_label: string;
+  request_id: string;
+  issued_at: number;
+  expires_at: number;
+  nonce: string;
+  signature: string;
+};
+
+export type AuthorityRequestDisplayMetadata = {
+  title?: string;
+  summary?: string;
+  permission_id?: string;
+  permission_label?: string;
+  provider_id?: string | null;
+  api_id?: string | null;
+  model_id?: string | null;
+  function_id?: string | null;
+  pack_id?: string | null;
+  app_display_name?: string | null;
+  provider_display_name?: string | null;
+  model_display_name?: string | null;
+  endpoint_url?: string | null;
+  endpoint_host?: string | null;
+  endpoint_path?: string | null;
+  credential_label?: string | null;
+  access_summary?: string | null;
+  risk_level?: string;
+  audit_text?: string;
+};
+
+export type AuthorityRequest = {
+  request_id: string;
+  status: "pending" | "approved" | "denied" | "expired" | string;
+  principal_id: string;
+  permission_id: string;
+  resource: Record<string, unknown>;
+  reason: string;
+  risk_level: string;
+  created_at: string;
+  expires_at?: string | null;
+  conversation_id?: string | null;
+  profile_id?: string | null;
+  node_id?: string | null;
+  graph_id?: string | null;
+  display_metadata?: AuthorityRequestDisplayMetadata;
+  allowed_scopes?: AuthorityApprovalScope[];
+};
+
+export type AuthorityRequestsResponse = {
+  requests: AuthorityRequest[];
+  pending: AuthorityRequest[];
+  count: number;
+};
+
 export type CodingCheckpoint = {
   snapshot_id: string;
   path?: string;
@@ -151,6 +245,48 @@ export type CodingCheckpoint = {
   created_at?: string;
   metadata?: Record<string, unknown>;
   [key: string]: unknown;
+};
+
+export type RumiLogEvent = {
+  event_id: string;
+  created_at: string;
+  kind: string;
+  actor_id?: string;
+  agent_role?: string;
+  session_id?: string;
+  status?: string;
+  message?: string;
+  branch?: string;
+  commit_hash?: string;
+  remote?: string;
+  paths?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type RumiLogSummary = {
+  total: number;
+  by_kind?: Record<string, number>;
+  by_status?: Record<string, number>;
+  agent_ids?: string[];
+  commit_count?: number;
+  push_count?: number;
+  plan_count?: number;
+  task_count?: number;
+  conversation_count?: number;
+  mention_count?: number;
+  last_event_at?: string | null;
+  last_commit_hash?: string | null;
+};
+
+export type RumiLogResponse = {
+  rumi_dir: string;
+  events_path?: string;
+  event?: RumiLogEvent;
+  events: RumiLogEvent[];
+  summary: RumiLogSummary;
+  created?: boolean;
+  workspace_id?: string | null;
+  workspace_root?: string | null;
 };
 
 export type CodingDiffResponse = {
@@ -230,6 +366,7 @@ export type CompanyAgent = {
   allowed_tools?: string[];
   context_limit?: number;
   aliases?: string[];
+  system_prompt?: string;
   status?: string;
   metadata?: Record<string, unknown>;
   created_at?: string;
@@ -289,6 +426,159 @@ export type CompanyTask = {
   updated_at?: string;
 };
 
+export type CompanyRunLink = {
+  link_id: string;
+  company_id: string;
+  task_id?: string | null;
+  thread_id?: string | null;
+  message_id?: string | null;
+  agent_id: string;
+  run_id: string;
+  status: string;
+  heartbeat_at?: string | null;
+  agent_run?: {
+    status?: string | null;
+    model?: string | null;
+    result_preview?: string;
+    error?: string | null;
+    conversation?: CompanyRunConversationMessage[];
+    updated_at?: string | null;
+  };
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CompanyRunConversationMessage = {
+  role: string;
+  label?: string;
+  content: string;
+  is_error?: boolean;
+};
+
+export type KanbanBoardScopeType = "conversation" | "workspace" | "company" | "group" | "global";
+
+export type KanbanBoardScope = {
+  type: KanbanBoardScopeType;
+  id: string;
+};
+
+export type KanbanPriority = "low" | "normal" | "high" | "urgent" | string;
+
+export type KanbanChecklistItem = {
+  id: string;
+  title: string;
+  done: boolean;
+};
+
+export type KanbanBoard = {
+  board_id: string;
+  scope_type: KanbanBoardScopeType;
+  scope_id: string;
+  title: string;
+  metadata?: Record<string, unknown>;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type KanbanColumn = {
+  column_id: string;
+  board_id: string;
+  title: string;
+  position: number;
+  done?: boolean | number;
+  wip_limit?: number | null;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type KanbanCard = {
+  card_id: string;
+  board_id: string;
+  column_id: string;
+  position: number;
+  title: string;
+  description?: string | null;
+  priority?: KanbanPriority;
+  assignee?: string | null;
+  due_at?: string | null;
+  labels?: string[];
+  checklist?: KanbanChecklistItem[];
+  depends_on?: string[];
+  blocked_by?: string[];
+  source_type?: string;
+  source_id?: string | null;
+  conversation_id?: string | null;
+  workspace_id?: string | null;
+  company_id?: string | null;
+  agent_run_id?: string | null;
+  agent_session_id?: string | null;
+  agent_status?: string | null;
+  branch?: string | null;
+  pr_url?: string | null;
+  metadata?: Record<string, unknown>;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type KanbanEvent = {
+  event_id?: string;
+  board_id?: string;
+  card_id?: string | null;
+  event_type?: string;
+  actor_type?: string;
+  actor_id?: string | null;
+  payload?: Record<string, unknown>;
+  created_at?: number;
+  [key: string]: unknown;
+};
+
+export type KanbanBoardResponse = {
+  board: KanbanBoard;
+  columns: KanbanColumn[];
+  cards: KanbanCard[];
+  events?: KanbanEvent[];
+  imported?: {
+    conversation_id?: string;
+    card_ids?: string[];
+    conversation?: Record<string, unknown>;
+    extraction?: Record<string, unknown>;
+  };
+};
+
+export type KanbanMovePayload = {
+  column_id: string;
+  before_card_id?: string | null;
+  after_card_id?: string | null;
+  position?: number;
+};
+
+export type KanbanImportConversationPayload = {
+  conversation_id: string;
+  column_id?: string | null;
+  title?: string;
+  model?: string;
+  workspace_id?: string | null;
+  company_id?: string | null;
+  use_ai?: boolean;
+};
+
+export type CompanyInboxItem = {
+  inbox_id: string;
+  company_id: string;
+  agent_id: string;
+  message_id?: string | null;
+  task_id?: string | null;
+  run_id?: string | null;
+  kind: string;
+  status: string;
+  priority?: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type CompanyInboundRoute = {
   id: string;
   provider?: string;
@@ -324,8 +614,57 @@ export type CompanyRecord = {
 export type CompanyStatusResponse = {
   bootstrapped: boolean;
   company_id: string;
+  conversation_id?: string;
   company?: CompanyRecord | null;
+  runtime?: Record<string, number>;
   storage_file?: string;
+};
+
+export type RemoteTaskCreateRequest = {
+  input: string;
+  title?: string;
+  company_id?: string;
+  target_agent_ids?: string[];
+  priority?: "low" | "normal" | "high" | string;
+  dispatch?: boolean;
+  client?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type RemoteTaskSnapshot = {
+  remote_task_id: string;
+  company_id: string;
+  task_id: string;
+  message_id?: string;
+  thread_id?: string;
+  state: string;
+  task?: Record<string, unknown>;
+  routes?: Array<Record<string, unknown>>;
+  run_links?: Array<Record<string, unknown>>;
+  agent_runs?: Array<Record<string, unknown>>;
+  inbox?: Array<Record<string, unknown>>;
+  waiting_approvals?: Array<Record<string, unknown>>;
+  updated_at?: string;
+  next_poll_ms?: number;
+};
+
+export type RemoteTaskEvent = {
+  cursor: string;
+  type: string;
+  message?: string;
+  task_id?: string;
+  run_id?: string;
+  agent_id?: string;
+  status?: string;
+  created_at?: string;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type RemoteTaskEventsResponse = {
+  events: RemoteTaskEvent[];
+  next_cursor?: string;
+  next_poll_ms?: number;
 };
 
 export type P2PSettings = {
@@ -955,6 +1294,7 @@ type ApiEnvelope<T> = ApiOk<T> | ApiError;
 
 type SendMessageOptions = {
   thinking_level?: string | null;
+  deepthink_enabled?: boolean;
   tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
   parallel_tool_calls?: boolean;
   tool_policy?: Record<string, unknown>;
@@ -1142,6 +1482,8 @@ function generateCsrfToken(): string {
 
 function getDefaultspackCsrfToken(): string {
   const storage = sessionStorageOrNull();
+  const panelToken = storage?.getItem(PANEL_CSRF_STORAGE_KEY);
+  if (panelToken?.trim()) return panelToken;
   const stored = storage?.getItem(DEFAULTSPACK_CSRF_STORAGE_KEY);
   if (stored) return stored;
   const token = generateCsrfToken();
@@ -1252,6 +1594,35 @@ function withQuery(path: string, params?: Record<string, unknown>): string {
   return suffix ? `${path}?${suffix}` : path;
 }
 
+export async function createRemoteTask(input: RemoteTaskCreateRequest): Promise<RemoteTaskSnapshot> {
+  return request<RemoteTaskSnapshot>("/api/remote/tasks", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getRemoteTask(taskId: string): Promise<RemoteTaskSnapshot> {
+  return request<RemoteTaskSnapshot>(`/api/remote/tasks/${encodeURIComponent(taskId)}`, { cache: "no-store" });
+}
+
+export async function listRemoteTaskEvents(taskId: string, after?: string): Promise<RemoteTaskEventsResponse> {
+  return request<RemoteTaskEventsResponse>(
+    withQuery(`/api/remote/tasks/${encodeURIComponent(taskId)}/events`, { after }),
+    { cache: "no-store" },
+  );
+}
+
+export async function cancelRemoteTask(taskId: string, reason?: string): Promise<RemoteTaskSnapshot> {
+  return request<RemoteTaskSnapshot>(`/api/remote/tasks/${encodeURIComponent(taskId)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+}
+
+export async function getRemoteHostStatus(): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>("/api/remote/host/status", { cache: "no-store" });
+}
+
 export function arrayFromRecord<T>(value: Record<string, T> | T[] | undefined | null): T[] {
   if (Array.isArray(value)) return value;
   if (value && typeof value === "object") return Object.values(value);
@@ -1272,6 +1643,7 @@ function messageRequestBody(
     tools: Array.isArray(options?.tools) ? options.tools : undefined,
     params: {
       thinking_level: options?.thinking_level ?? undefined,
+      deepthink_enabled: options?.deepthink_enabled ?? undefined,
       tool_choice: options?.tool_choice ?? undefined,
       parallel_tool_calls: options?.parallel_tool_calls ?? undefined,
       tool_policy: options?.tool_policy ?? undefined,
@@ -1290,6 +1662,9 @@ async function readStreamEvents(
   const decoder = new TextDecoder();
   let buffer = "";
   let finalMessage: ChatMessage | null = null;
+  let partialText = "";
+  let thinkingText = "";
+  let sawActivity = false;
 
   const streamErrorMessage = (value: ChatStreamError | undefined): string => {
     if (typeof value === "string" && value.trim()) return value;
@@ -1320,8 +1695,10 @@ async function readStreamEvents(
     }
     handlers.onEvent?.(event);
     if (event.type === "delta") {
+      partialText += event.delta;
       handlers.onDelta?.(event.delta);
     } else if (event.type === "thinking_delta") {
+      thinkingText += event.delta;
       handlers.onThinkingDelta?.(event.delta);
     } else if (event.type === "user_message" && event.message) {
       handlers.onUserMessage?.(event.message);
@@ -1330,24 +1707,43 @@ async function readStreamEvents(
       handlers.onMessage?.(event.message);
     } else if (event.type === "error") {
       throw new Error(streamErrorMessage(event.error));
+    } else {
+      sawActivity = true;
     }
   };
 
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-    const packets = buffer.split(/\r?\n\r?\n/);
-    buffer = packets.pop() ?? "";
-    for (const packet of packets) {
-      consumePacket(packet);
+  const interruptionError = (message: string): Error => {
+    if (partialText.trim() || thinkingText.trim() || sawActivity) {
+      return new ChatStreamInterruptedError(message, {
+        partialText,
+        thinkingText,
+        sawActivity,
+      });
     }
-    if (done) break;
+    return new Error(message);
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      const packets = buffer.split(/\r?\n\r?\n/);
+      buffer = packets.pop() ?? "";
+      for (const packet of packets) {
+        consumePacket(packet);
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) {
+      consumePacket(buffer);
+    }
+  } catch (errorValue) {
+    if (errorValue instanceof ChatStreamInterruptedError) throw errorValue;
+    throw interruptionError(errorValue instanceof Error ? errorValue.message : "defaultspack stream failed");
   }
-  if (buffer.trim()) {
-    consumePacket(buffer);
-  }
+
   if (!finalMessage) {
-    throw new Error("defaultspack stream ended before a final response arrived");
+    throw interruptionError("defaultspack stream ended before a final response arrived");
   }
   return finalMessage;
 }
@@ -1465,7 +1861,9 @@ export const api = {
   },
 
   listModelProfiles() {
-    return request<{ profiles: ModelProfile[]; count: number }>("/api/ai/profiles");
+    return request<{ profiles: ModelProfile[]; count: number }>("/api/ai/profiles", {
+      cache: "no-store",
+    });
   },
 
   searchModels(filters: Record<string, unknown>) {
@@ -1524,6 +1922,21 @@ export const api = {
     return request<{ written: boolean }>("/api/ui/clipboard", {
       method: "POST",
       body: JSON.stringify({ content }),
+    });
+  },
+
+  reportClientEvent(payload: {
+    source?: string;
+    category?: string;
+    level?: string;
+    message: string;
+    fingerprint?: string;
+    conversation_id?: string;
+    detail?: unknown;
+  }) {
+    return request<{ recorded: boolean; diagnostic_id?: string }>("/api/ui/client-events", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 
@@ -1883,17 +2296,38 @@ export const api = {
     });
   },
 
-  getCompanyStatus(companyId?: string) {
+  getCompanyStatus(options?: string | { companyId?: string | null; conversationId?: string | null; bootstrap?: boolean }) {
+    const query = typeof options === "string"
+      ? { company_id: options }
+      : {
+          company_id: options?.companyId,
+          conversation_id: options?.conversationId,
+          bootstrap: options?.bootstrap,
+        };
     return request<CompanyStatusResponse>(
-      withQuery("/api/company/status", { company_id: companyId }),
+      withQuery("/api/company/status", query),
       { cache: "no-store" },
     );
   },
 
-  bootstrapCompanyWorkspace(metadata?: Record<string, unknown>) {
+  createRemoteTask,
+
+  getRemoteTask,
+
+  listRemoteTaskEvents,
+
+  cancelRemoteTask,
+
+  getRemoteHostStatus,
+
+  bootstrapCompanyWorkspace(metadata?: Record<string, unknown>, options?: { conversationId?: string | null; scope?: "conversation" | "default" }) {
     return request<{ bootstrapped: boolean; company: CompanyRecord }>("/api/company/bootstrap", {
       method: "POST",
-      body: JSON.stringify(metadata ? { metadata } : {}),
+      body: JSON.stringify({
+        ...(metadata ? { metadata } : {}),
+        ...(options?.conversationId ? { conversation_id: options.conversationId } : {}),
+        ...(options?.scope ? { scope: options.scope } : {}),
+      }),
     });
   },
 
@@ -1992,6 +2426,138 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ company_id: companyId, task_id: taskId, policy }),
     });
+  },
+
+  listCompanyRuns(companyId: string, options?: { agent_id?: string; task_id?: string; status?: string; limit?: number }) {
+    return request<{ runs: CompanyRunLink[]; total: number }>(
+      withQuery(`/api/company/${encodeURIComponent(companyId)}/runs`, { company_id: companyId, ...options }),
+      { cache: "no-store" },
+    );
+  },
+
+  kanbanGetOrCreateBoard(scope: KanbanBoardScope) {
+    return request<KanbanBoardResponse>(
+      withQuery("/api/kanban/boards", {
+        scope_type: scope.type,
+        scope_id: scope.id,
+        bootstrap: true,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  kanbanGetBoard(boardId: string) {
+    return request<KanbanBoardResponse>(
+      `/api/kanban/boards/${encodeURIComponent(boardId)}`,
+      { cache: "no-store" },
+    );
+  },
+
+  kanbanCreateCard(boardId: string, payload: Partial<KanbanCard>) {
+    return request<KanbanCard>(`/api/kanban/boards/${encodeURIComponent(boardId)}/cards`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  kanbanUpdateCard(cardId: string, updates: Partial<KanbanCard>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ updates }),
+    });
+  },
+
+  kanbanMoveCard(cardId: string, payload: KanbanMovePayload) {
+    return request<KanbanBoardResponse>(`/api/kanban/cards/${encodeURIComponent(cardId)}/move`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  kanbanDeleteCard(cardId: string) {
+    return request<{ deleted: boolean; card_id?: string }>(`/api/kanban/cards/${encodeURIComponent(cardId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  kanbanCreateColumn(boardId: string, payload: Partial<KanbanColumn>) {
+    return request<KanbanColumn>(`/api/kanban/boards/${encodeURIComponent(boardId)}/columns`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  kanbanUpdateColumn(columnId: string, updates: Partial<KanbanColumn>) {
+    return request<KanbanColumn>(`/api/kanban/columns/${encodeURIComponent(columnId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ updates }),
+    });
+  },
+
+  kanbanDeleteColumn(columnId: string) {
+    return request<{ deleted: boolean; column_id?: string }>(`/api/kanban/columns/${encodeURIComponent(columnId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  kanbanStartAgent(cardId: string, payload?: Record<string, unknown>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}/agent/start`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  kanbanGetAgentStatus(cardId: string) {
+    return request<KanbanCard>(
+      `/api/kanban/cards/${encodeURIComponent(cardId)}/agent/status`,
+      { cache: "no-store" },
+    );
+  },
+
+  kanbanMarkAgentReady(cardId: string, payload?: Record<string, unknown>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}/agent/ready`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  kanbanApplyAgent(cardId: string, payload?: Record<string, unknown>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}/agent/apply`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  kanbanDismissAgent(cardId: string, payload?: Record<string, unknown>) {
+    return request<KanbanCard>(`/api/kanban/cards/${encodeURIComponent(cardId)}/agent/dismiss`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  kanbanSyncRuns(boardId: string) {
+    return request<KanbanBoardResponse>(`/api/kanban/boards/${encodeURIComponent(boardId)}/sync-runs`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  kanbanImportConversation(boardId: string, payload: KanbanImportConversationPayload) {
+    return request<KanbanBoardResponse>(`/api/kanban/boards/${encodeURIComponent(boardId)}/import-conversation`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  listCompanyAgentInbox(companyId: string, agentId: string, options?: { status?: string; kind?: string; limit?: number }) {
+    return request<{ inbox: CompanyInboxItem[]; total: number }>(
+      withQuery(`/api/company/${encodeURIComponent(companyId)}/agents/${encodeURIComponent(agentId)}/inbox`, {
+        company_id: companyId,
+        agent_id: agentId,
+        ...options,
+      }),
+      { cache: "no-store" },
+    );
   },
 
   listCompanyInboundRoutes(companyId: string) {
@@ -2306,6 +2872,60 @@ export const api = {
     });
   },
 
+  listAuthorityRequests(options?: { status?: "all" | "pending" | "approved" | "denied" | "expired" | string }) {
+    return request<AuthorityRequestsResponse>(
+      withQuery("/api/authority/requests", { status: options?.status ?? "all" }),
+      { cache: "no-store" },
+    );
+  },
+
+  getAuthorityRequest(requestId: string) {
+    return request<AuthorityRequest>(
+      `/api/authority/requests/${encodeURIComponent(requestId)}`,
+      { cache: "no-store" },
+    );
+  },
+
+  approveAuthorityApproval(
+    requestId: string,
+    options?: {
+      scope?: AuthorityApprovalScope;
+      config?: Record<string, unknown>;
+      expires_in_seconds?: number;
+      related_permissions?: string[];
+      ui_operator?: AuthorityUiOperator;
+    },
+  ) {
+    return request<AuthorityApprovalDecision>(`/api/authority/requests/${encodeURIComponent(requestId)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({
+        scope: options?.scope ?? "once",
+        config: options?.config,
+        expires_in_seconds: options?.expires_in_seconds,
+        related_permissions: options?.related_permissions,
+        ui_operator: options?.ui_operator,
+      }),
+    });
+  },
+
+  denyAuthorityApproval(
+    requestId: string,
+    reasonOrOptions?: string | { reason?: string; persist?: boolean; ui_operator?: AuthorityUiOperator },
+    persist?: boolean,
+  ) {
+    const options = typeof reasonOrOptions === "object" && reasonOrOptions !== null
+      ? reasonOrOptions
+      : { reason: reasonOrOptions, persist };
+    return request<Record<string, unknown>>(`/api/authority/requests/${encodeURIComponent(requestId)}/deny`, {
+      method: "POST",
+      body: JSON.stringify({
+        reason: options.reason,
+        persist: Boolean(options.persist),
+        ui_operator: options.ui_operator,
+      }),
+    });
+  },
+
   listCodingCheckpoints(options?: { workspace_id?: string | null; limit?: number }) {
     return request<{ checkpoints: CodingCheckpoint[]; workspace_id?: string | null; workspace_root?: string | null }>(
       withQuery("/api/coding/checkpoints", { workspace_id: options?.workspace_id, limit: options?.limit }),
@@ -2326,6 +2946,48 @@ export const api = {
         body: JSON.stringify(payload ?? {}),
       },
     );
+  },
+
+  listRumiLogs(options?: { workspace_id?: string | null; limit?: number; kind?: string | string[] | null }) {
+    return request<RumiLogResponse>(
+      withQuery("/api/coding/rumi-log", {
+        workspace_id: options?.workspace_id,
+        limit: options?.limit,
+        kind: options?.kind,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  appendRumiLog(payload: {
+    workspace_id?: string | null;
+    kind?: string;
+    actor_id?: string;
+    agent_role?: string;
+    session_id?: string;
+    status?: string;
+    message?: string;
+    branch?: string;
+    commit_hash?: string;
+    remote?: string;
+    paths?: string[];
+    mentions?: string[];
+    task_id?: string;
+    task_title?: string;
+    task_status?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<RumiLogResponse>("/api/coding/rumi-log", {
+      method: "POST",
+      body: JSON.stringify({ action: "append", ...payload }),
+    });
+  },
+
+  seedRumiLogPlan(payload?: { workspace_id?: string | null }) {
+    return request<RumiLogResponse>("/api/coding/rumi-log", {
+      method: "POST",
+      body: JSON.stringify({ action: "seed_local_plan", ...(payload ?? {}) }),
+    });
   },
 
   restoreCodingSnapshot(snapshotId: string, options?: {

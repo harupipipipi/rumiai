@@ -1,0 +1,11 @@
+example_id: rumi_model_evals.examples.minimax_opencode_smoke
+preset: opencode_zen_minimax_smoke
+title: Review MiniMax through OpenCode Zen smoke evidence
+goal: Define and review a tiny provider smoke suite for MiniMax/OpenCode Zen without embedding credentials.
+constraints:
+  network: explicit_runtime_approval_required
+  credentials: runtime_supplied_only
+  no_secrets_in_outputs: true
+deliverable:
+  type: provider_smoke_evidence
+  required_sections: [provider_refs, smoke_checks, cost_latency_notes, flakiness_notes, route_recommendation]

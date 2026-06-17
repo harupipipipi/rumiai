@@ -1,0 +1,25 @@
+evidence_ledger_schema:
+  required_records:
+  - record_id
+  - source_evidence_id
+  - source_type
+  - source_span
+  - claim_id
+  - claim_type
+  - owner_surface
+  - handoff_owner
+  - review_state
+  allowed_claim_types:
+  - meeting_prebrief
+  - decision_record
+  - action_item
+  - follow_up_draft
+  - recap_claim
+  - open_question
+  completion_rules:
+    every_record_has_evidence: true
+    every_action_has_owner_or_unknown_marker: true
+    every_followup_is_draft_only: true
+    every_recap_claim_links_to_evidence: true
+    adjacent_execution_requires_handoff: true
+    no_runtime_grant_created: true

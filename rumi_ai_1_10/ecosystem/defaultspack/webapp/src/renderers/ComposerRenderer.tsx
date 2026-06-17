@@ -33,11 +33,12 @@ import type {
   AppMode,
   ToolGroup,
 } from "./types";
-import type { ModelCommandCandidate, ModelProfile } from "../lib/api";
+import type { ModelCommandCandidate, ModelProfile, ModelSearchItem } from "../lib/api";
 import { CodingWorkspaceBadge } from "../components/coding/CodingWorkspaceBadge";
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
+import { chatComposerResources } from "../features/chat/resources/chatComposerResources";
 import { fileToAttachment } from "../lib/attachments";
 import { composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
@@ -108,7 +109,6 @@ const COMPOSER_CHROME_WIDTHS = {
   icon: { basis: "2rem", min: "2rem", max: "2rem" },
   mode: { basis: "auto", min: "2rem", max: "7rem", shrink: 1 },
   badge: { basis: "auto", min: "0", max: "11rem", shrink: 1 },
-  model: { basis: "11.5rem", min: "11.5rem", max: "11.5rem", shrink: 0 },
   thinking: { basis: "5.25rem", min: "5.25rem", max: "5.25rem", shrink: 0 },
   status: { basis: "auto", min: "2.5rem", shrink: 0 },
   send: { basis: "2rem", min: "2rem", max: "2rem" },
@@ -116,6 +116,11 @@ const COMPOSER_CHROME_WIDTHS = {
 } satisfies Record<string, ComposerChromeWidth>;
 
 const COMPOSER_CONTROL_SURFACE_CLASSNAME = "rumi-composer-control-surface flex h-[36px] min-w-0 items-center rounded-[1rem] border border-zinc-700/40 bg-zinc-800/40 px-2.5";
+const COMPOSER_MODEL_CONTROL_MIN_CH = 9;
+const COMPOSER_MODEL_CONTROL_MAX_CH = 18;
+const COMPOSER_MODEL_CONTROL_CHROME_CH = 6;
+const NEW_CONVERSATION_TEXTAREA_MIN_HEIGHT = 22;
+const NEW_CONVERSATION_TEXTAREA_MAX_HEIGHT = 72;
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 const MODEL_STATUS_POPOVER_WIDTH = 240;
 const MODEL_STATUS_POPOVER_HEIGHT = 176;
@@ -128,6 +133,14 @@ export function composerChromeWidgetStyle(width: ComposerChromeWidth): CSSProper
     minWidth: width.min,
     maxWidth: width.max,
   };
+}
+
+function fitComposerTextareaHeight(textarea: HTMLTextAreaElement, minHeight: number, maxHeight: number) {
+  textarea.style.height = "auto";
+  const contentHeight = textarea.scrollHeight;
+  const nextHeight = Math.min(Math.max(contentHeight, minHeight), maxHeight);
+  textarea.style.height = `${nextHeight}px`;
+  textarea.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
 }
 
 function SendButtonIcon({ className = "" }: { className?: string }) {
@@ -435,6 +448,8 @@ const API_KEY_PROVIDER_IDS = new Set([
   "groq",
   "longcat",
   "mistral",
+  "opencode-go",
+  "opencode-zen",
   "openai",
   "openai_compatible",
   "openrouter",
@@ -492,10 +507,25 @@ function thinkingCommandMatch(input: string): { query: string } | null {
 
 function compactProfileName(name: string): string {
   return name
-    .replace(/^GPT-/i, "")
+    .replace(/^GPT[\s-]+/i, "")
     .replace(/^Claude\s+/i, "")
     .replace(/\s*\(.*?\)\s*/g, " ")
     .trim();
+}
+
+export function composerModelControlWidth(modelName: string): ComposerChromeWidth {
+  const compactName = compactProfileName(modelName) || "model";
+  const nameLength = Array.from(compactName).length;
+  const basisCh = Math.min(
+    COMPOSER_MODEL_CONTROL_MAX_CH,
+    Math.max(COMPOSER_MODEL_CONTROL_MIN_CH, nameLength + COMPOSER_MODEL_CONTROL_CHROME_CH),
+  );
+  return {
+    basis: `${basisCh}ch`,
+    min: "5.5rem",
+    max: "12rem",
+    shrink: 1,
+  };
 }
 
 function steerStatusLabel(status: string | undefined): string {
@@ -560,6 +590,36 @@ function modelProfileSearchText(profile: ModelProfile): string {
     ...(profile.capability_tags ?? []),
     ...(profile.recommended_roles ?? []),
   ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function modelSearchItemToProfile(item: ModelSearchItem): ModelProfile {
+  const providerId = String(item.provider_id ?? "").trim();
+  const modelId = String(item.model_id ?? "").trim();
+  const profileId = String(item.profile_id ?? item.qualified_model_id ?? (providerId && modelId ? `${providerId}/${modelId}` : "")).trim();
+  const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : undefined;
+  const rawMaxContext = Number((metadata as Record<string, unknown> | undefined)?.max_context ?? NaN);
+  return {
+    profile_id: profileId,
+    qualified_model_id: String(item.qualified_model_id ?? profileId).trim() || profileId,
+    display_name: String(item.display_name ?? item.label ?? profileId).trim() || profileId,
+    provider_id: providerId,
+    provider_display_name: String(item.provider_display_name ?? providerId).trim() || providerId,
+    model_id: modelId,
+    max_context: Number.isFinite(rawMaxContext) ? rawMaxContext : undefined,
+    max_context_tokens: Number.isFinite(rawMaxContext) ? rawMaxContext : undefined,
+    supports_thinking: item.supports_thinking,
+    supports_vision: item.supports_vision,
+    supports_image_input: item.supports_image_input,
+    supports_tool_calling: item.supports_tool_calling,
+    supports_fast: item.supports_fast,
+    speed_tier: item.speed_tier,
+    quality_tier: item.quality_tier,
+    cost_tier: item.cost_tier,
+    knowledge_level: item.knowledge_level,
+    capability_tags: item.capability_tags,
+    availability: item.availability,
+    metadata,
+  };
 }
 
 export function filterModelProfilesBySearch(profiles: ModelProfile[], search: string): ModelProfile[] {
@@ -839,22 +899,60 @@ function ModelDropdown({
   selectedProfile: ModelProfile | null;
   isGenerating: boolean;
   placement?: "above" | "below";
-  onSelect: (profileId: string) => void;
+  onSelect: (profile: ModelProfile) => void;
   onClose: () => void;
 }) {
   const [search, setSearch] = useState("");
+  const [remoteProfiles, setRemoteProfiles] = useState<ModelProfile[]>([]);
+  const searchRequestSeqRef = useRef(0);
+  const trimmedSearch = search.trim();
   const filtered = useMemo(() => filterModelProfilesBySearch(profiles, search), [profiles, search]);
+
+  useEffect(() => {
+    searchRequestSeqRef.current += 1;
+    const requestSeq = searchRequestSeqRef.current;
+    if (!trimmedSearch) {
+      setRemoteProfiles([]);
+      return;
+    }
+    let disposed = false;
+    const timer = window.setTimeout(() => {
+      chatComposerResources.searchModels({ query: trimmedSearch, max_results: 30 })
+        .then((result) => {
+          if (disposed || requestSeq !== searchRequestSeqRef.current) return;
+          setRemoteProfiles((result.models ?? []).map(modelSearchItemToProfile));
+        })
+        .catch(() => {
+          if (disposed || requestSeq !== searchRequestSeqRef.current) return;
+          setRemoteProfiles([]);
+        });
+    }, 160);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+    };
+  }, [trimmedSearch]);
+
+  const visibleProfiles = useMemo(() => {
+    const byId = new Map<string, ModelProfile>();
+    for (const profile of [...filtered, ...remoteProfiles]) {
+      const key = profile.profile_id || profile.qualified_model_id || `${profile.provider_id ?? ""}/${profile.model_id ?? ""}`;
+      if (!key || byId.has(key)) continue;
+      byId.set(key, profile);
+    }
+    return [...byId.values()];
+  }, [filtered, remoteProfiles]);
 
   const groupedByProvider = useMemo(() => {
     const map = new Map<string, ModelProfile[]>();
-    for (const profile of filtered) {
+    for (const profile of visibleProfiles) {
       const provider = profile.provider_id ?? "other";
       const list = map.get(provider) ?? [];
       list.push(profile);
       map.set(provider, list);
     }
     return [...map.entries()];
-  }, [filtered]);
+  }, [visibleProfiles]);
 
   return (
     <>
@@ -898,7 +996,7 @@ function ModelDropdown({
                       event.dataTransfer.effectAllowed = "copy";
                     }}
                     onClick={() => {
-                      onSelect(profile.profile_id);
+                      onSelect(profile);
                       onClose();
                     }}
                     className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left transition-colors hover:bg-zinc-800/80 disabled:opacity-50 ${
@@ -1330,14 +1428,14 @@ export function ComposerRenderer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const chromeWidgetNodeMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
-  const chromeWidgetPositionMapRef = useRef<Map<string, { left: number; top: number }>>(new Map());
-  const chromeWidgetCleanupTimersRef = useRef<Map<string, number>>(new Map());
-  const hasMeasuredChromeWidgetLayoutRef = useRef(false);
   const submitPointerHandledRef = useRef(false);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
   const chromeButtonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const profileName = profileDisplayName(selectedProfile);
+  const compactSelectedProfileName = compactProfileName(profileName);
   const selectedProviderLabel = profileProviderLabel(selectedProfile);
+  const selectedModelRouteLabel = modelRouteReason(selectedProfile) || selectedProviderLabel;
+  const modelControlWidth = composerModelControlWidth(profileName);
   const visibleModelStatusIndicators = modelStatusIndicators.filter(Boolean);
   const levels = selectedProfile?.supports_thinking
     ? selectedProfile.thinking_levels?.length
@@ -1523,6 +1621,23 @@ export function ComposerRenderer({
     syncTextareaSelection();
   }, [syncTextareaSelection]);
 
+  const resizeNewConversationTextarea = useCallback(
+    (textarea: HTMLTextAreaElement | null = textareaRef.current) => {
+      if (!textarea) return;
+      if (!isNewConversation) {
+        textarea.style.height = "";
+        textarea.style.overflowY = "";
+        return;
+      }
+      fitComposerTextareaHeight(
+        textarea,
+        NEW_CONVERSATION_TEXTAREA_MIN_HEIGHT,
+        NEW_CONVERSATION_TEXTAREA_MAX_HEIGHT,
+      );
+    },
+    [isNewConversation],
+  );
+
   const requestModelProfileSelect = useCallback(
     (profileId: string) => {
       const profile = selectableProfiles.find((item) => (
@@ -1609,6 +1724,10 @@ export function ComposerRenderer({
         : { start: nextStart, end: nextEnd };
     });
   }, [input.length]);
+
+  useIsomorphicLayoutEffect(() => {
+    resizeNewConversationTextarea();
+  }, [input, resizeNewConversationTextarea]);
 
   useEffect(() => {
     setSelectedModelCandidateIndex((current) => {
@@ -2055,14 +2174,6 @@ export function ComposerRenderer({
     }
   }, [openModelStatusId, visibleModelStatusIndicators]);
 
-  useEffect(() => () => {
-    if (typeof window === "undefined") return;
-    for (const timeoutId of chromeWidgetCleanupTimersRef.current.values()) {
-      window.clearTimeout(timeoutId);
-    }
-    chromeWidgetCleanupTimersRef.current.clear();
-  }, []);
-
   const chromeWidgets: ComposerChromeWidgetSpec[] = [
     {
       id: "file-attach",
@@ -2203,10 +2314,10 @@ export function ComposerRenderer({
       slot: "trailing",
       order: 10,
       mobile: "hide",
-      width: COMPOSER_CHROME_WIDTHS.model,
+      width: modelControlWidth,
       className: "rumi-composer-dock-control",
       render: () => (
-        <div className={`${COMPOSER_CONTROL_SURFACE_CLASSNAME} rumi-model-control gap-2`}>
+        <div className={`${COMPOSER_CONTROL_SURFACE_CLASSNAME} rumi-model-control w-full gap-2`}>
           <div
             title={contextTitle}
             className="h-3.5 w-3.5 flex-shrink-0 rounded-full p-[2px]"
@@ -2224,11 +2335,11 @@ export function ComposerRenderer({
               onClick={() => setModelDropdownOpen((v) => !v)}
               className="flex w-full min-w-0 items-center gap-1 text-[12px] font-medium text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-50"
             >
-              <span className="min-w-0 flex-1 truncate">{compactProfileName(profileName)}</span>
+              <span className="min-w-0 flex-1 truncate" title={profileName}>{compactSelectedProfileName}</span>
               <ChevronDown size={12} className={`flex-shrink-0 transition-transform ${modelDropdownOpen ? "rotate-180" : ""}`} />
             </button>
-            <span className="block truncate text-[10px] leading-none text-zinc-500">
-              {modelRouteReason(selectedProfile) || selectedProviderLabel}
+            <span className="block max-w-full truncate text-[10px] leading-none text-zinc-500" title={selectedModelRouteLabel}>
+              {selectedModelRouteLabel}
             </span>
             {modelDropdownOpen && (
               <ModelDropdown
@@ -2236,7 +2347,7 @@ export function ComposerRenderer({
                 selectedProfile={selectedProfile}
                 isGenerating={isGenerating}
                 placement={isNewConversation ? "below" : "above"}
-                onSelect={requestModelProfileSelect}
+                onSelect={(profile) => requestModelProfileSelect(profile.profile_id)}
                 onClose={() => setModelDropdownOpen(false)}
               />
             )}
@@ -2339,80 +2450,6 @@ export function ComposerRenderer({
   const newConversationTopRightWidgets = leadingChromeWidgets.filter((widget) => widget.id === "voice-input");
   const newConversationSendWidgets = trailingChromeWidgets.filter((widget) => widget.id === "send");
   const newConversationTrailingWidgets = trailingChromeWidgets.filter((widget) => widget.id !== "send");
-  const animatedDockWidgetIds = (isNewConversation ? newConversationTrailingWidgets : trailingChromeWidgets).map((widget) => widget.id);
-  const animatedDockLayoutSignature = [
-    animatedDockWidgetIds.join("|"),
-    profileName,
-    selectedProviderLabel,
-    thinkingLevel ?? "",
-    levels.join("|"),
-    visibleModelStatusIndicators.map((indicator) => indicator.id).join("|"),
-  ].join("::");
-
-  useIsomorphicLayoutEffect(() => {
-    if (typeof window === "undefined") return;
-    const nextPositions = new Map<string, { left: number; top: number }>();
-
-    for (const widgetId of animatedDockWidgetIds) {
-      const node = chromeWidgetNodeMapRef.current.get(widgetId);
-      if (!node) continue;
-      const rect = node.getBoundingClientRect();
-      nextPositions.set(widgetId, { left: rect.left, top: rect.top });
-    }
-
-    if (!hasMeasuredChromeWidgetLayoutRef.current) {
-      chromeWidgetPositionMapRef.current = nextPositions;
-      hasMeasuredChromeWidgetLayoutRef.current = true;
-      return;
-    }
-
-    for (const [widgetId, nextPosition] of nextPositions.entries()) {
-      const node = chromeWidgetNodeMapRef.current.get(widgetId);
-      if (!node) continue;
-      const previousPosition = chromeWidgetPositionMapRef.current.get(widgetId);
-      const existingTimer = chromeWidgetCleanupTimersRef.current.get(widgetId);
-      if (existingTimer) {
-        window.clearTimeout(existingTimer);
-        chromeWidgetCleanupTimersRef.current.delete(widgetId);
-      }
-
-      const finishAnimation = () => {
-        if (chromeWidgetNodeMapRef.current.get(widgetId) !== node) return;
-        node.style.transition = "";
-        node.style.transform = "";
-        node.style.opacity = "";
-      };
-
-      if (!previousPosition) {
-        node.style.transition = "none";
-        node.style.opacity = "0";
-        node.style.transform = "translateX(10px)";
-        void node.getBoundingClientRect();
-        node.style.transition = "transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease";
-        node.style.opacity = "1";
-        node.style.transform = "translateX(0)";
-        chromeWidgetCleanupTimersRef.current.set(widgetId, window.setTimeout(finishAnimation, 260));
-        continue;
-      }
-
-      const deltaX = previousPosition.left - nextPosition.left;
-      const deltaY = previousPosition.top - nextPosition.top;
-      if (Math.abs(deltaX) < 0.5 && Math.abs(deltaY) < 0.5) {
-        finishAnimation();
-        continue;
-      }
-
-      node.style.transition = "none";
-      node.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
-      node.style.opacity = "1";
-      void node.getBoundingClientRect();
-      node.style.transition = "transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease";
-      node.style.transform = "translate(0px, 0px)";
-      chromeWidgetCleanupTimersRef.current.set(widgetId, window.setTimeout(finishAnimation, 280));
-    }
-
-    chromeWidgetPositionMapRef.current = nextPositions;
-  }, [animatedDockLayoutSignature, animatedDockWidgetIds]);
 
   return (
     <div
@@ -2743,10 +2780,10 @@ export function ComposerRenderer({
           {isNewConversation ? (
             <div className="grid gap-1.5">
               <div className="rumi-composer-main-panel grid min-h-[46px] grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-[1.4rem] border border-white/20 bg-[#242423] px-4 py-1">
-              <div className="self-center">
-                {newConversationInlineLeadingWidgets.map((widget) => (
-                  <ComposerChromeWidget key={widget.id} widget={widget} />
-                ))}
+                <div className="self-center">
+                  {newConversationInlineLeadingWidgets.map((widget) => (
+                    <ComposerChromeWidget key={widget.id} widget={widget} />
+                  ))}
                 </div>
                 <div className="relative min-w-0 self-center">
                   <ComposerMentionOverlay
@@ -2754,14 +2791,17 @@ export function ComposerRenderer({
                     mentionLookup={composerMentionLookup}
                     cursorPosition={textareaSelection.start}
                     showCaret={textareaFocused && textareaSelection.start === textareaSelection.end}
-                    className="h-[22px] text-[16px] font-medium leading-[22px]"
+                    className="rumi-composer-input-new-overlay text-[16px] font-medium leading-[22px]"
                   />
                   <textarea
                     ref={textareaRef}
                     autoFocus
                     rows={1}
                     value={input}
-                    onChange={(event) => handleInputChange(event.target.value)}
+                    onChange={(event) => {
+                      resizeNewConversationTextarea(event.currentTarget);
+                      handleInputChange(event.currentTarget.value);
+                    }}
                     placeholder={
                       isSteerMode
                         ? "実行中のAIへステアを入力..."
@@ -2769,7 +2809,7 @@ export function ComposerRenderer({
                         ? "コーディング指示を入力... (@ でtool/ファイル)"
                         : placeholder
                     }
-                    className={`rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel h-[22px] min-h-[22px] w-full max-h-[72px] select-text resize-none overflow-hidden border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[22px] text-transparent outline-none placeholder:text-zinc-500 ${
+                    className={`rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[22px] w-full max-h-[72px] select-text resize-none overflow-x-hidden overflow-y-hidden border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[22px] text-transparent outline-none placeholder:text-zinc-500 ${
                       input ? "caret-transparent" : "caret-zinc-100"
                     }`}
                     onFocus={() => {

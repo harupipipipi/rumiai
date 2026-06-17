@@ -1,0 +1,18 @@
+example:
+  id: board_update_deck
+  pack_id: rumi_office_authoring_pack
+  scenario: A board update deck is planned with story arc, slide records, speaker
+    notes, and workspace render handoff.
+  input_refs:
+  - workspace_ref:case-file
+  evidence_refs:
+  - evidence:review-note
+  - evidence:source-fragment
+  handoff_owner: rumi_workspace_pack
+  review_gate: all_blocking_checks
+  expected_result: reviewed_handoff_packet
+  must_not:
+  - external_action
+  - runtime_execution
+  - secret_material
+  status: ready_for_owner_handoff

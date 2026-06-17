@@ -1,0 +1,21 @@
+preset:
+  id: handoff_review
+  pack_id: rumi_document_intelligence_pack
+  mode: document_handoff_readiness
+  description: Prepare a document-intelligence handoff only after citation, redline, and privacy gates are complete.
+  require_evidence: true
+  require_overlap_check: true
+  required_assets:
+    - schemas/redline_handoff.schema.json
+    - catalog/redline_operation_tests.yaml
+    - coordination/subagent_review_roster.yaml
+  handoff_targets:
+    workspace_artifacts: rumi_workspace_pack
+    external_research: rumi_research_pack
+    scan_or_media_analysis: rumi_multimodal_media_pack
+    sensitive_review: rumi_security_review_pack
+  output_contract:
+    - handoff_target_pack
+    - acceptance_notes
+    - page_span_evidence_map
+    - privacy_review_status

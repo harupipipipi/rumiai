@@ -78,10 +78,11 @@ defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin�
 | capability/profile/preset を使いたい | `capabilities/`, `profiles/local_agent.profile.yaml`, `presets/local_only_safe.preset.yaml` |
 | frontend の次タスクを見たい | `docs/frontend_todo.md` |
 | ブラウザに返す実ファイルの置き場を見たい | `ui/` |
+| Browser Companion extension を見たい | `browser_extensions/rumi_browser_companion/` |
 | HTTP エンドポイントを見たい | `docs/chat.md`, `transport/http.py` |
 | viewer 経由の起動フローを知りたい | `../../docs/rumi_viewer_start.md` |
 
-`webapp/` は `dont_push_this_file/luxe-chat` を土台にしつつ、`defaultspack` の `/api/chat/...`、`/api/ui/...`、`/api/health` に接続する standalone frontend の source です。`npm run build` の出力先は `ui/` で、HTTP サーバーはその build 済み asset を `/` と `/static/...` で配信します。
+`webapp/` は `rumi DP` の standalone frontend source です。`defaultspack` の `/api/chat/...`、`/api/ui/...`、`/api/health` に接続します。`npm run build` の出力先は `ui/` で、HTTP サーバーはその build 済み asset を `/` と `/static/...` で配信します。
 
 ## AI Agent Service Defaults
 
@@ -94,6 +95,9 @@ defaultspack includes local-first building blocks inspired by Codex, Claude Code
 - The default local profile is `profiles/local_agent.profile.yaml`.
 
 Start with `docs/local_agent_implementation_plan.md` for the roadmap and `docs/ui_agent_experience_design.md` for the right-sidebar/widget experience.
+
+For install/onboarding parity checks against Genspark, Manus, Cline, Hermes,
+and OpenClaw, see `docs/competitive_agent_install_eval.md`.
 
 ## defaults が提供しないもの
 

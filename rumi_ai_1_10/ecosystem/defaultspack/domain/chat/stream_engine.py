@@ -29,9 +29,18 @@ from blocks.chat.send import (
     _tool_visibility_message,
 )
 from domain.ai_client.bridge_plan import PlannedProviderRequest
+from domain.ai_client.run_seal import (
+    RunSealPolicy,
+    RunSealService,
+    apply_visible_text_to_response,
+    append_run_seal_retry_note,
+    build_run_seal_policy,
+    response_has_structured_output,
+)
 from domain.ai_client.provider_compiler.registry import compile_complete, compiler_for_api_family
 from domain.ai_client.provider_trace import redact_sensitive_value, write_provider_trace
-from domain.ai_client.client import AIClient
+from domain.ai_client.client import AIClient, AuthorityApprovalRequired
+from domain.ai_client.authority_resource import build_provider_authority_resource, provider_authority_reason
 from domain.ai_client.gateway import LLMGateway
 from domain.chat.cancellation import get_chat_cancellation_registry
 from domain.chat.ir_legacy_adapter import (
@@ -44,6 +53,8 @@ from domain.chat.public_metadata import compact_provider_planning
 from domain.chat.run_request import PreparedChatRun, prepare_chat_run
 from domain.chat.tool_call_accumulator import ToolCallAccumulator
 from domain.chat.store import ChatStore
+from domain.kanban.chat_sync import sync_conversation_kanban
+from domain.context_engine.compressor import ContextCompressor
 from domain.dev.inspector import Inspector
 from domain.stream.events import run_event, to_legacy_chat_stream_event
 from domain.tool.executor import ToolExecutor
@@ -55,6 +66,7 @@ class _ChatCancelled(Exception):
 
 
 _APPROVAL_WAITING_TEXT = "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。"
+_AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。"
 
 
 def _tool_display_group(tool_name: str) -> dict[str, str]:
@@ -149,6 +161,30 @@ def _should_emit_model_routing_status(model_routing: dict[str, Any] | None) -> b
     return bool(selected and original and selected != original)
 
 
+def _provider_visible_params(params: dict[str, Any] | None) -> dict[str, Any]:
+    clean = dict(params or {})
+    clean.pop("_authority_context", None)
+    return clean
+
+
+def _authority_context_token_for_permission(context: dict[str, Any], permission_id: str) -> tuple[str, str]:
+    permission_id = str(permission_id or "").strip()
+    tokens = context.get("approval_tokens") if isinstance(context, dict) else None
+    if isinstance(tokens, dict):
+        raw = tokens.get(permission_id)
+        if isinstance(raw, dict):
+            request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+            token = str(raw.get("approval_token") or raw.get("token") or "").strip()
+            if request_id and token:
+                return request_id, token
+    context_permission = str(context.get("permission_id") or "").strip() if isinstance(context, dict) else ""
+    if context_permission and context_permission != permission_id:
+        return "", ""
+    request_id = str(context.get("request_id") or "").strip() if isinstance(context, dict) else ""
+    token = str(context.get("approval_token") or "").strip() if isinstance(context, dict) else ""
+    return request_id, token
+
+
 def _normalize_tool_call_name_and_arguments(
     tool_name: str,
     arguments: dict[str, Any],
@@ -180,7 +216,9 @@ def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, An
         return None
     payload = followup.get("payload") if isinstance(followup.get("payload"), dict) else None
     if payload is None:
-        payload = followup.get("arguments") if isinstance(followup.get("arguments"), dict) else {}
+        payload = followup.get("arguments") if isinstance(followup.get("arguments"), dict) else None
+    if payload is None:
+        return None
     arguments = dict(payload or {})
     raw_action = str(followup.get("action") or "").strip()
     operation = str(followup.get("operation") or "").strip()
@@ -340,13 +378,35 @@ def _approval_waiting_response(
     }
 
 
+def _authority_waiting_response(
+    model: str,
+    approval_request: dict[str, Any],
+    params: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "content": [{"type": "text", "text": _AUTHORITY_WAITING_TEXT}],
+        "finish_reason": "authority_approval_required",
+        "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        "metadata": {
+            "model": model,
+            "pendingAuthorityApproval": approval_request,
+            "thinking_level": params.get("thinking_level"),
+        },
+        "events": list(events),
+    }
+
+
 class _InlineThoughtFilter:
-    _open_tag = "<thought>"
-    _close_tag = "</thought>"
+    _tag_pairs = (
+        ("<thought>", "</thought>"),
+        ("<think>", "</think>"),
+    )
 
     def __init__(self) -> None:
         self._buffer = ""
         self._in_thought = False
+        self._active_close_tag = ""
         self._thought_parts: list[str] = []
         self._streamed_thought_len = 0
 
@@ -355,21 +415,24 @@ class _InlineThoughtFilter:
         visible = []
         while self._buffer:
             if self._in_thought:
-                close_index = self._buffer.find(self._close_tag)
+                close_index = self._buffer.find(self._active_close_tag)
                 if close_index == -1:
                     self._thought_parts.append(self._buffer)
                     self._buffer = ""
                     break
                 self._thought_parts.append(self._buffer[:close_index])
-                self._buffer = self._buffer[close_index + len(self._close_tag):]
+                self._buffer = self._buffer[close_index + len(self._active_close_tag):]
                 self._in_thought = False
+                self._active_close_tag = ""
                 continue
 
-            open_index = self._buffer.find(self._open_tag)
-            if open_index != -1:
+            tag_match = self._next_open_tag(self._buffer)
+            if tag_match is not None:
+                open_index, open_tag, close_tag = tag_match
                 visible.append(self._buffer[:open_index])
-                self._buffer = self._buffer[open_index + len(self._open_tag):]
+                self._buffer = self._buffer[open_index + len(open_tag):]
                 self._in_thought = True
+                self._active_close_tag = close_tag
                 continue
 
             keep = self._partial_open_tag_suffix_len(self._buffer)
@@ -403,11 +466,25 @@ class _InlineThoughtFilter:
 
     @classmethod
     def _partial_open_tag_suffix_len(cls, text: str) -> int:
-        max_len = min(len(text), len(cls._open_tag) - 1)
-        for size in range(max_len, 0, -1):
-            if cls._open_tag.startswith(text[-size:]):
-                return size
-        return 0
+        keep = 0
+        for open_tag, _ in cls._tag_pairs:
+            max_len = min(len(text), len(open_tag) - 1)
+            for size in range(max_len, 0, -1):
+                if open_tag.startswith(text[-size:]):
+                    keep = max(keep, size)
+                    break
+        return keep
+
+    @classmethod
+    def _next_open_tag(cls, text: str) -> tuple[int, str, str] | None:
+        best: tuple[int, str, str] | None = None
+        for open_tag, close_tag in cls._tag_pairs:
+            index = text.find(open_tag)
+            if index == -1:
+                continue
+            if best is None or index < best[0]:
+                best = (index, open_tag, close_tag)
+        return best
 
 
 class _AssistantDraft:
@@ -838,6 +915,7 @@ class ChatRunEngine:
                     message="Failed to add assistant message",
                 )
                 return
+            sync_conversation_kanban(prepared.conversation_id, reason="stream_completed")
             draft_completed = True
 
             yield self._emit(
@@ -1057,7 +1135,27 @@ class ChatRunEngine:
             self._raise_if_cancelled()
             for event in self._inject_conversation_steer(prepared.conversation_id, working_messages):
                 yield event
-            response, tool_uses = yield from self._model_turn(prepared, working_messages, draft)
+            try:
+                response, tool_uses = yield from self._model_turn(prepared, working_messages, draft)
+            except AuthorityApprovalRequired as exc:
+                approval_request = exc.decision.to_approval_event()
+                approval_event = self._emit(
+                    "approval_requested",
+                    data=approval_request,
+                    message=_AUTHORITY_WAITING_TEXT,
+                    phase="approval_requested",
+                    requires_approval=True,
+                    authority=True,
+                )
+                self._sync_draft(draft, force=True)
+                yield approval_event
+                response = _authority_waiting_response(
+                    prepared.model,
+                    approval_request,
+                    prepared.params,
+                    events=list(self._activity_events),
+                )
+                tool_uses = []
             if tool_uses and step_index >= tool_limit:
                 response = {
                     "content": [{"type": "text", "text": _tool_limit_message(tool_limit, tool_uses)}],
@@ -1154,30 +1252,16 @@ class ChatRunEngine:
         messages: list[dict[str, Any]],
         draft: _AssistantDraft | None,
     ) -> Iterator[tuple[dict[str, Any], list[dict[str, Any]]]]:
+        seal_policy = self._run_seal_policy(prepared)
+        if seal_policy.enabled:
+            return (yield from self._model_turn_with_run_seal(prepared, messages, draft, seal_policy))
         if not self._stream_mode:
-            response = self._complete_turn(prepared, messages)
-            return response, _tool_use_blocks(response)
+            return (yield from self._model_turn_via_complete(prepared, messages, draft))
         if prepared.provider_tools and not self._provider_supports_stream_tool_calls(prepared.model):
-            response = self._complete_turn(prepared, messages)
-            tool_uses = _tool_use_blocks(response)
-            if not tool_uses:
-                text = self._response_text(response)
-                if text:
-                    self._text_parts.append(text)
-                    yield self._emit("content_delta", data={"delta": text}, message="content delta")
-                    self._sync_draft(draft, thinking_state="completed")
-            return response, tool_uses
+            return (yield from self._model_turn_via_complete(prepared, messages, draft))
 
         if not self._gateway.supports_stream(prepared.model):
-            response = self._complete_turn(prepared, messages)
-            tool_uses = _tool_use_blocks(response)
-            if not tool_uses:
-                text = self._response_text(response)
-                if text:
-                    self._text_parts.append(text)
-                    yield self._emit("content_delta", data={"delta": text}, message="content delta")
-                    self._sync_draft(draft, thinking_state="completed")
-            return response, tool_uses
+            return (yield from self._model_turn_via_complete(prepared, messages, draft))
 
         thought_filter = _InlineThoughtFilter()
         accumulator = ToolCallAccumulator()
@@ -1192,6 +1276,7 @@ class ChatRunEngine:
                         "messages": messages,
                         "tools": prepared.provider_tools,
                         "params": prepared.params,
+                        "authority_context": prepared.request_context.get("authority", {}),
                     }
                 )
                 self._raise_if_cancelled()
@@ -1259,6 +1344,8 @@ class ChatRunEngine:
                         finish_reason = str(chunk.get("finish_reason") or "stop")
                         usage = chunk.get("usage", usage) if isinstance(chunk.get("usage"), dict) else usage
                 break
+            except AuthorityApprovalRequired:
+                raise
             except Exception as exc:
                 self._raise_if_cancelled()
                 message_text = "AI request failed: " + str(exc)
@@ -1336,6 +1423,101 @@ class ChatRunEngine:
             }
         return response, tool_uses
 
+    def _model_turn_via_complete(
+        self,
+        prepared: PreparedChatRun,
+        messages: list[dict[str, Any]],
+        draft: _AssistantDraft | None,
+    ) -> Iterator[tuple[dict[str, Any], list[dict[str, Any]]]]:
+        response = self._complete_turn(prepared, messages)
+        tool_uses = _tool_use_blocks(response)
+        if not tool_uses and self._stream_mode:
+            text = self._response_text(response)
+            if text:
+                self._text_parts.append(text)
+                yield self._emit("content_delta", data={"delta": text}, message="content delta")
+                self._sync_draft(draft, thinking_state="completed")
+        return response, tool_uses
+
+    def _model_turn_with_run_seal(
+        self,
+        prepared: PreparedChatRun,
+        messages: list[dict[str, Any]],
+        draft: _AssistantDraft | None,
+        seal_policy: RunSealPolicy,
+    ) -> Iterator[tuple[dict[str, Any], list[dict[str, Any]]]]:
+        del draft
+        service = RunSealService.default()
+        working_messages = list(messages)
+        attempts = 0
+        compacted = False
+        while True:
+            self._raise_if_cancelled()
+            sealed = service.prepare_messages(run_id=self._run_id or prepared.request_id, messages=working_messages)
+            response = self._complete_turn(prepared, sealed.messages)
+            tool_uses = _tool_use_blocks(response)
+            if tool_uses:
+                return response, tool_uses
+            check = service.verify_and_strip(
+                text=self._response_text(response),
+                seal=sealed.seal,
+            )
+            if check.ok:
+                if check.thinking_transcript and not "".join(self._thinking_transcript_parts).strip():
+                    self._thinking_transcript_parts.append(check.thinking_transcript)
+                response = self._run_seal_success_response(
+                    response,
+                    seal=sealed.seal,
+                    attempts=attempts + 1,
+                    compacted=compacted,
+                    visible_text=check.visible_text,
+                    had_interior_seal=check.had_interior_seal,
+                    thinking_transcript=check.thinking_transcript,
+                )
+                if self._stream_mode and check.visible_text:
+                    self._text_parts.append(check.visible_text)
+                    yield self._emit("content_delta", data={"delta": check.visible_text}, message="content delta")
+                return response, []
+            should_compact = self._should_compact_after_run_seal_failure(
+                prepared,
+                working_messages,
+                finish_reason=str(response.get("finish_reason") or ""),
+                attempts=attempts,
+            )
+            if should_compact and not compacted and seal_policy.compact_on_failure:
+                compacted = True
+                attempts += 1
+                working_messages = self._compact_messages_for_run_seal(prepared, working_messages)
+                yield self._emit(
+                    "status",
+                    data={"attempt": attempts, "reason": check.reason, "finish_reason": response.get("finish_reason")},
+                    message="応答検証に失敗したため文脈を圧縮して再実行します",
+                    phase="run_seal_compact",
+                )
+                continue
+            if attempts < seal_policy.max_retries:
+                attempts += 1
+                working_messages = append_run_seal_retry_note(working_messages, sealed.seal)
+                yield self._emit(
+                    "status",
+                    data={"attempt": attempts, "reason": check.reason},
+                    message="応答検証に失敗したため再生成します",
+                    phase="run_seal_retry",
+                )
+                continue
+            if not compacted and seal_policy.compact_on_failure:
+                compacted = True
+                attempts += 1
+                working_messages = self._compact_messages_for_run_seal(prepared, working_messages)
+                yield self._emit(
+                    "status",
+                    data={"attempt": attempts, "reason": check.reason},
+                    message="応答検証に失敗したため文脈を圧縮して再実行します",
+                    phase="run_seal_compact",
+                )
+                continue
+            raise RuntimeError("AI response failed internal validation after retry and compact.")
+
     def _complete_turn(self, prepared: PreparedChatRun, messages: list[dict[str, Any]]) -> dict[str, Any]:
         try:
             if self._use_provider_compiler(prepared):
@@ -1348,7 +1530,10 @@ class ChatRunEngine:
                     prepared.params,
                     prepared.call_handler,
                     allow_retry=True,
+                    authority_context=prepared.request_context.get("authority", {}),
                 )
+        except AuthorityApprovalRequired:
+            raise
         except RuntimeError as exc:
             if self._tool_logs:
                 response = _ai_error_after_tool_use_response(str(exc))
@@ -1370,9 +1555,10 @@ class ChatRunEngine:
                     prepared.model,
                     messages,
                     prepared.provider_tools,
-                    retry_params,
+                    _provider_visible_params(retry_params),
                     prepared.call_handler,
                     allow_retry=False,
+                    authority_context=prepared.request_context.get("authority", {}),
                 )
                 if isinstance(retry_response, dict) and (
                     self._response_text(retry_response).strip() or _tool_use_blocks(retry_response)
@@ -1392,6 +1578,7 @@ class ChatRunEngine:
                 prepared.params,
                 prepared.call_handler,
                 allow_retry=True,
+                authority_context=prepared.request_context.get("authority", {}),
             )
         provider, model_name = self._gateway.resolve_provider(prepared.model)
         caps = dict(prepared.provider_capabilities or {})
@@ -1405,7 +1592,13 @@ class ChatRunEngine:
         api_family = str(caps.get("api_family") or "")
         if compiler_for_api_family(api_family) is None or not callable(getattr(provider, "_request_json", None)):
             return self._gateway.complete(
-                {"model": prepared.model, "messages": messages, "tools": prepared.provider_tools, "params": prepared.params}
+                {
+                    "model": prepared.model,
+                    "messages": messages,
+                    "tools": prepared.provider_tools,
+                    "params": prepared.params,
+                    "authority_context": prepared.request_context.get("authority", {}),
+                }
             )
         planned = PlannedProviderRequest(
             ir=legacy_standard_messages_to_ir(messages, prepared.conversation_id),
@@ -1416,6 +1609,12 @@ class ChatRunEngine:
             metadata=dict(prepared.provider_planning.get("metadata") or {}),
         )
         compiled = compile_complete(planned)
+        self._check_authority_for_compiled_provider(
+            prepared,
+            provider=provider,
+            provider_id=str(caps.get("provider_id") or ""),
+            model_name=model_name,
+        )
         raw = provider._request_json(compiled.path, compiled.body)
         parser = compiler_for_api_family(compiled.api_family)
         response_ir = parser.parse_response(raw, compiled)
@@ -1428,6 +1627,66 @@ class ChatRunEngine:
         }
         response["metadata"] = metadata
         return response
+
+    @staticmethod
+    def _check_authority_for_compiled_provider(
+        prepared: PreparedChatRun,
+        *,
+        provider: Any,
+        provider_id: str,
+        model_name: str,
+    ) -> None:
+        provider_id = str(provider_id or "").strip()
+        if provider_id in {"", "stub", "rumi"}:
+            return
+        from domain.ai_client.authority_gate import provider_requires_authority
+
+        if not provider_requires_authority(provider_id, provider=provider, api_id="legacy"):
+            return
+        from core_runtime.authority import get_authority_service
+
+        context = prepared.request_context.get("authority") if isinstance(prepared.request_context, dict) else {}
+        context = dict(context) if isinstance(context, dict) else {}
+        service = get_authority_service()
+        checks = [
+            ("model.invoke", "model"),
+            ("api_key.use", "api_key"),
+            ("network.egress", "network"),
+        ]
+        if _authority_context_token_for_permission(context, "model.invoke")[1]:
+            missing_related = [
+                item
+                for item in checks
+                if item[0] != "model.invoke" and not _authority_context_token_for_permission(context, item[0])[1]
+            ]
+            if missing_related:
+                checks = missing_related + [item for item in checks if item not in missing_related]
+        for permission_id, resource_kind in checks:
+            request_id, approval_token = _authority_context_token_for_permission(context, permission_id)
+            resource = build_provider_authority_resource(
+                permission_id=permission_id,
+                resource_kind=resource_kind,
+                provider_id=provider_id,
+                api_id="legacy",
+                model_id=model_name,
+                model_ref=prepared.model,
+                provider=provider,
+                stream=False,
+            )
+            decision = service.check(
+                principal_id=str(context.get("principal_id") or "defaultspack"),
+                permission_id=permission_id,
+                resource=resource,
+                reason=provider_authority_reason(permission_id, resource),
+                conversation_id=context.get("conversation_id"),
+                profile_id=context.get("profile_id"),
+                node_id=context.get("node_id"),
+                graph_id=context.get("graph_id"),
+                request_id=request_id or context.get("request_id"),
+                approval_token=approval_token,
+            )
+            if not decision.allowed:
+                raise AuthorityApprovalRequired(decision)
 
     def _replay_approval_followup_if_present(
         self,
@@ -1531,7 +1790,12 @@ class ChatRunEngine:
         # to replay it. ``invoke_args`` (with token) is only handed to the
         # actual tool executor below.
         display_args = {k: v for k, v in invoke_args.items() if k != "approval_token"}
-        tool_call_id = "replay_" + gen_id()
+        tool_call_id = str(
+            followup.get("tool_call_id")
+            or details.get("tool_call_id")
+            or request_id
+            or gen_id()
+        ).strip()
 
         # Mark we have started this synthetic tool call before emitting any event
         # so subsequent hooks treat it as a single deterministic execution.
@@ -1700,7 +1964,6 @@ class ChatRunEngine:
                 "request_id": request_id,
             }
         return None
-
     def _execute_tool(
         self,
         prepared: PreparedChatRun,
@@ -1790,6 +2053,7 @@ class ChatRunEngine:
                     **({"transcript": "".join(self._thinking_transcript_parts)} if self._thinking_transcript_parts else {}),
                 },
                 "thinking_level": prepared.params.get("thinking_level"),
+                "deepthink_enabled": bool(prepared.params.get("deepthink_enabled")),
                 "model_routing": dict(prepared.model_routing or {}),
                 "chat_references": dict(prepared.chat_references or {}),
                 "ir": {"schema_version": prepared.ir_schema_version},
@@ -1971,6 +2235,7 @@ class ChatRunEngine:
         call_handler: Any,
         *,
         allow_retry: bool,
+        authority_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         attempts = _ai_retry_attempts(params) if allow_retry else 1
         last_error = "AI request failed"
@@ -1993,8 +2258,16 @@ class ChatRunEngine:
                         return response.get("data", {})
                     return response
                 return self._gateway.complete(
-                    {"model": model, "messages": messages, "tools": tools or [], "params": params or {}}
+                    {
+                        "model": model,
+                        "messages": messages,
+                        "tools": tools or [],
+                        "params": params or {},
+                        "authority_context": authority_context or {},
+                    }
                 )
+            except AuthorityApprovalRequired:
+                raise
             except Exception as exc:
                 last_error = str(exc)
                 if attempt_index >= attempts - 1 or not _is_retryable_ai_error(last_error):
@@ -2193,9 +2466,12 @@ class ChatRunEngine:
                         "model": prepared.model,
                         "messages": messages,
                         "tools": tools,
-                        "params": _params_without_thinking(prepared.params),
+                        "params": _provider_visible_params(_params_without_thinking(prepared.params)),
+                        "authority_context": prepared.request_context.get("authority", {}),
                     }
                 )
+            except AuthorityApprovalRequired:
+                raise
             except Exception:
                 continue
             if not isinstance(response, dict):
@@ -2213,6 +2489,105 @@ class ChatRunEngine:
             metadata.setdefault("attached_tool_count", len(prepared.provider_tools))
             metadata.setdefault("attached_tools", list(prepared.tools_called))
             metadata["thinking_level"] = prepared.params.get("thinking_level")
+            metadata["deepthink_enabled"] = bool(prepared.params.get("deepthink_enabled"))
             response["metadata"] = metadata
             return response
         return None
+
+    @staticmethod
+    def _run_seal_policy(prepared: PreparedChatRun) -> RunSealPolicy:
+        policy = build_run_seal_policy(
+            params=prepared.params,
+            profile_policy=prepared.request_context.get("profile_policy") if isinstance(prepared.request_context, dict) else None,
+        )
+        if not policy.enabled:
+            return policy
+        if response_has_structured_output(prepared.params) and not policy.allow_structured_output:
+            return RunSealPolicy(
+                enabled=False,
+                max_retries=policy.max_retries,
+                compact_on_failure=policy.compact_on_failure,
+                allow_structured_output=policy.allow_structured_output,
+                stream_tail_chars=policy.stream_tail_chars,
+            )
+        return policy
+
+    def _should_compact_after_run_seal_failure(
+        self,
+        prepared: PreparedChatRun,
+        messages: list[dict[str, Any]],
+        *,
+        finish_reason: str,
+        attempts: int,
+    ) -> bool:
+        if finish_reason == "length":
+            return True
+        if attempts >= 1:
+            return True
+        context_window = int(
+            (prepared.provider_capabilities or {}).get("max_context")
+            or (prepared.provider_capabilities or {}).get("max_context_tokens")
+            or 0
+        )
+        if context_window <= 0:
+            return False
+        return ContextCompressor().should_compact(
+            messages,
+            context_window=context_window,
+            threshold=0.85,
+            reserve_tokens=max(2048, int(context_window * 0.10)),
+        )
+
+    def _compact_messages_for_run_seal(
+        self,
+        prepared: PreparedChatRun,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        result = ContextCompressor().compact(
+            messages,
+            metadata={
+                "run_id": self._run_id or prepared.request_id,
+                "conversation_id": prepared.conversation_id,
+                "goal": prepared.user_text,
+            },
+        )
+        replacement_history = result.get("replacement_history")
+        return list(replacement_history) if isinstance(replacement_history, list) and replacement_history else list(messages)
+
+    @staticmethod
+    def _run_seal_success_response(
+        response: dict[str, Any],
+        *,
+        seal: Any,
+        attempts: int,
+        compacted: bool,
+        visible_text: str,
+        had_interior_seal: bool,
+        thinking_transcript: str,
+    ) -> dict[str, Any]:
+        updated = apply_visible_text_to_response(response, visible_text)
+        metadata = dict(updated.get("metadata") or {})
+        if thinking_transcript:
+            existing_thinking = metadata.get("thinking") if isinstance(metadata.get("thinking"), dict) else {}
+            existing_transcript = str(existing_thinking.get("transcript") or "").strip()
+            combined_transcript = existing_transcript or thinking_transcript
+            if existing_transcript and thinking_transcript not in existing_transcript:
+                combined_transcript = existing_transcript + "\n\n" + thinking_transcript
+            metadata["thinking"] = {
+                **existing_thinking,
+                "state": "completed",
+                "transcript": combined_transcript,
+                "source": str(existing_thinking.get("source") or "inline_reasoning_tag"),
+            }
+        metadata["run_seal"] = {
+            "enabled": True,
+            "ok": True,
+            "attempts": attempts,
+            "compacted": compacted,
+            "system_hash": getattr(seal, "system_hash", ""),
+            "finish_reason": updated.get("finish_reason"),
+            "had_interior_seal": had_interior_seal,
+            "had_inline_reasoning": bool(thinking_transcript),
+        }
+        updated["metadata"] = metadata
+        return updated

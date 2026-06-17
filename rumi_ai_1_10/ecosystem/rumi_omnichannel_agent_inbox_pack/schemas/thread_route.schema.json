@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/thread_route.schema.json",
+  "title": "Thread Route",
+  "description": "Deterministic thread route decision without work execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "route_id",
+    "thread_id",
+    "target_agent",
+    "acl_id",
+    "decision",
+    "idempotency_key",
+    "audit_ref",
+    "idempotency_scope",
+    "replay_policy",
+    "execution_effect",
+    "remote_input_can_execute"
+  ],
+  "properties": {
+    "route_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "thread_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_agent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "acl_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "route",
+        "block",
+        "needs_review"
+      ]
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "audit_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "idempotency_scope": {
+      "type": "string",
+      "enum": [
+        "thread",
+        "thread_identity",
+        "thread_identity_acl"
+      ]
+    },
+    "replay_policy": {
+      "type": "string",
+      "const": "same_idempotency_key_returns_existing_decision"
+    },
+    "execution_effect": {
+      "type": "string",
+      "const": "handoff_only"
+    },
+    "remote_input_can_execute": {
+      "type": "boolean",
+      "const": false
+    }
+  }
+}

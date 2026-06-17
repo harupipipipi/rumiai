@@ -1,0 +1,35 @@
+{
+  "catalog_id": "rumi_memory_knowledge_pack.surfaces",
+  "version": "1.0.0",
+  "description": "UI/runtime surface names and ownership notes for memory and knowledge work.",
+  "surfaces": [
+    {
+      "id": "memory.recall_panel",
+      "label": "Recall Panel",
+      "purpose": "Show recalled session context with evidence links and confidence labels.",
+      "owner": "implementation_pack",
+      "pack_contract": "rumi_memory_knowledge_pack"
+    },
+    {
+      "id": "memory.profile_review_queue",
+      "label": "Profile Review Queue",
+      "purpose": "Review proposed user-profile memory updates before any runtime write.",
+      "owner": "implementation_pack",
+      "pack_contract": "rumi_memory_knowledge_pack"
+    },
+    {
+      "id": "knowledge.project_board",
+      "label": "Project Knowledge Board",
+      "purpose": "Display project decisions, conventions, stale facts, and linked evidence.",
+      "owner": "implementation_pack",
+      "pack_contract": "rumi_memory_knowledge_pack"
+    },
+    {
+      "id": "memory.skill_proposal_queue",
+      "label": "Skill Proposal Queue",
+      "purpose": "Review suggested skill creation or improvement before any skill file changes.",
+      "owner": "implementation_pack",
+      "pack_contract": "rumi_memory_knowledge_pack"
+    }
+  ]
+}

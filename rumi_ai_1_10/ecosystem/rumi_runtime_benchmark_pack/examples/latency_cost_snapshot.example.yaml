@@ -1,0 +1,21 @@
+example:
+  id: latency_cost_snapshot
+  pack_id: rumi_runtime_benchmark_pack
+  workflow: capture_benchmark_plan
+  intent: Summarize a local ten-run agent loop benchmark with latency, token, cost, seed, and replay evidence.
+  sampling_plan: comparison_ten_run
+  seed: 4242
+  evidence:
+    - environment_descriptor_id
+    - benchmark_seed
+    - sample_count
+    - cost_latency_table
+    - replay_evidence
+  handoff: none_until_model_quality_scoring_is_requested
+  expected_result:
+    decision: directional_runtime_comparison_only
+    deliverables:
+      - median_latency_summary
+      - estimated_cost_summary
+      - sample_size_limitations
+      - reproducibility_ledger_entry

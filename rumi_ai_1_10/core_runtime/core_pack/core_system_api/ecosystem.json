@@ -1,0 +1,114 @@
+{
+  "pack_id": "core_system_api",
+  "pack_identity": "core:rumi/system-api",
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": []
+  },
+  "metadata": {
+    "name": "Core System API",
+    "description": "Builtin system API routes served through the shared api_routes table.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": true
+  },
+  "dependencies": {},
+  "components": {},
+  "pre_auth_routes": [],
+  "api_routes": [
+    {
+      "method": "GET",
+      "path": "/api/packs",
+      "handler": "_get_all_packs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/packs/pending",
+      "handler": "_get_pending_packs"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/packs/{pack_id}/status",
+      "handler": "_get_pack_status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/containers",
+      "handler": "_get_containers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/privileges",
+      "handler": "_get_privileges"
+    },
+    {
+      "method": "GET",
+      "path": "/api/docker/status",
+      "handler": "_get_docker_status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/network/list",
+      "handler": "_network_list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/secrets",
+      "handler": "_secrets_list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/stores",
+      "handler": "_stores_list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/stores/shared",
+      "handler": "_stores_shared_list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/units",
+      "handler": "_api_units_list",
+      "pass_query": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/capability/blocked",
+      "handler": "_capability_list_blocked"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capability/grants",
+      "handler": "_api_capability_grants",
+      "pass_query": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/capability/requests",
+      "handler": "_api_capability_requests",
+      "pass_query": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/pip/blocked",
+      "handler": "_pip_list_blocked"
+    },
+    {
+      "method": "GET",
+      "path": "/api/pip/requests",
+      "handler": "_api_pip_requests",
+      "pass_query": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/flows",
+      "handler": "_get_flow_list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/routes",
+      "handler": "_get_registered_routes"
+    }
+  ]
+}

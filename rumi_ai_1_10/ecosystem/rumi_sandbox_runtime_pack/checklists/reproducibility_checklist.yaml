@@ -1,0 +1,24 @@
+checklist_id: rumi_sandbox_runtime.reproducibility.v1
+owner: rumi_sandbox_runtime_pack
+purpose: Checklist for making sandbox jobs reproducible without embedding executable code.
+required_items:
+  - source_refs_recorded
+  - runtime_boundary_recorded
+  - dependency_install_policy_recorded
+  - environment_variables_redacted
+  - network_state_recorded
+  - command_shape_recorded
+  - expected_outputs_recorded
+  - cleanup_policy_recorded
+  - rerun_blockers_recorded
+review_outcomes:
+  reproducible:
+    criteria: all_required_items_present_and_no_secret_values
+  partially_reproducible:
+    criteria: missing_external_inputs_or_runtime_owner_evidence
+  not_reproducible:
+    criteria: missing_command_shape_or_unredacted_secret_risk
+handoff_policy:
+  missing_runtime_owner_evidence: handoff_to_defaultspack_tool_owner
+  release_or_deploy_job: handoff_to_rumi_devops_release_pack
+  high_risk_secret_mount: handoff_to_rumi_security_review_pack

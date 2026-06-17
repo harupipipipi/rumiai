@@ -1,0 +1,22 @@
+handoff_matrix:
+  pack_id: rumi_code_migration_pack
+  pack_boundary_rule: owner_surface_wins_then_explicit_handoff
+  items:
+  - surface: cli_ide_execution
+    resolution: handoff_to_rumi_code_ide_pack
+  - surface: file_editing_patch_execution
+    resolution: handoff_to_rumi_code_ide_pack
+  - surface: subagent_pr_execution
+    resolution: handoff_to_rumi_subagent_pr_manager_pack
+  - surface: release_deploy_runbooks
+    resolution: handoff_to_rumi_devops_release_pack
+  - surface: security_findings
+    resolution: handoff_to_rumi_security_review_pack
+  - surface: model_scoring
+    resolution: handoff_to_rumi_model_evals_pack
+  - surface: runtime_telemetry
+    resolution: handoff_to_rumi_observability_pack
+  - surface: migration_planning_contract
+    resolution: owned_by_rumi_code_migration_pack
+  - surface: tool_aliases
+    resolution: prefer_explicit_pack_namespace

@@ -10,12 +10,18 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
+from domain.components.manifest import DomainComponent  # noqa: E402
 from domain.components.registry import DomainComponentRegistry, build_domain_component_roots  # noqa: E402
 from domain.frontend.registry import FrontendRegistry  # noqa: E402
 from transport.registry import build_fallback_http_routes, component_http_route_specs  # noqa: E402
 
 
 class _FakeServer:
+    def __getattr__(self, name):
+        if str(name).startswith("_handle_authority_"):
+            return lambda *_args, **_kwargs: {"status": "ok"}
+        raise AttributeError(name)
+
     def _invoke_fallback_block(self, *args, **kwargs):
         return {"status": "ok", "args": args, "kwargs": kwargs}
 
@@ -74,3 +80,75 @@ def test_ui_catalog_exposes_component_route_and_surface_metadata():
     assert ("POST", "/api/integrations/line/webhook") in route_pairs
     assert ("GET", "/api/ui/catalog") in route_pairs
     assert "component-manifests" in sidebar_ids
+
+
+def test_component_route_specs_reject_shared_root_source_pack_spoof(tmp_path):
+    manifest_path = tmp_path / "shared" / "transports" / "pwn" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    component = DomainComponent(
+        category="transports",
+        component_id="pwn",
+        manifest={
+            "id": "pwn",
+            "category": "transports",
+            "kind": "transport",
+            "version": "1",
+            "status": "stable",
+            "source_pack_id": "defaultspack",
+            "routes": [
+                {
+                    "method": "GET",
+                    "path": "/pwn-shared-spoof",
+                    "block_module": "blocks.ui.catalog",
+                }
+            ],
+        },
+        manifest_path=manifest_path,
+        source_pack_id="",
+    )
+
+    class _Registry:
+        def list(self):
+            return [component]
+
+    with patch("transport.registry.get_domain_component_registry", return_value=_Registry()):
+        assert component_http_route_specs() == []
+
+
+def test_component_route_specs_reject_untrusted_block_modules(tmp_path):
+    manifest_path = tmp_path / "evil" / "domain" / "transports" / "pwn" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    component = DomainComponent(
+        category="transports",
+        component_id="pwn",
+        manifest={
+            "id": "pwn",
+            "category": "transports",
+            "kind": "transport",
+            "version": "1",
+            "status": "stable",
+            "source_pack_id": "evil_pack",
+            "routes": [
+                {
+                    "method": "GET",
+                    "path": "/pwn-autovalidator",
+                    "block_module": "ecosystem.evil_pack.blocks.pwn",
+                }
+            ],
+        },
+        manifest_path=manifest_path,
+        source_pack_id="evil_pack",
+    )
+
+    class _Registry:
+        def list(self):
+            return [component]
+
+    with patch("transport.registry.get_domain_component_registry", return_value=_Registry()):
+        assert component_http_route_specs() == []
+        routes = build_fallback_http_routes(_FakeServer())
+
+    assert not any(
+        method == "GET" and "pwn-autovalidator" in compiled.pattern
+        for method, compiled, *_rest in routes
+    )

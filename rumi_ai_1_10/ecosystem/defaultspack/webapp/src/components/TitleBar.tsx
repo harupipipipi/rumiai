@@ -23,7 +23,16 @@ type TitleBarProps = {
   appIcon?: string;
 };
 
-export function TitleBar({ appName = "Console", appIcon }: TitleBarProps) {
+function displayAppName(value: string | undefined): string {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  const legacyConsoleName = ["rumi", "console"].join(" ");
+  if (!normalized || normalized === "console" || normalized === legacyConsoleName) {
+    return "rumi DP";
+  }
+  return value ?? "rumi DP";
+}
+
+export function TitleBar({ appName = "rumi DP", appIcon }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [isTauri, setIsTauri] = useState(false);
 
@@ -74,7 +83,7 @@ export function TitleBar({ appName = "Console", appIcon }: TitleBarProps) {
     <div
       onMouseDown={handleDrag}
       onDoubleClick={handleDoubleClick}
-      className="h-8 flex items-center justify-between bg-[#09090b] border-b border-zinc-800/60 select-none flex-shrink-0 cursor-default"
+      className="rumi-ambient h-8 flex items-center justify-between bg-[#09090b] border-b border-zinc-800/60 select-none flex-shrink-0 cursor-default rumi-anim-fade-down"
     >
       {/* Left: App icon + name */}
       <div className="flex items-center gap-2 px-3 flex-1 pointer-events-none">
@@ -86,7 +95,7 @@ export function TitleBar({ appName = "Console", appIcon }: TitleBarProps) {
           </div>
         )}
         <span className="text-[11px] font-medium text-zinc-500">
-          {appName}
+          {displayAppName(appName)}
         </span>
       </div>
 
@@ -95,19 +104,22 @@ export function TitleBar({ appName = "Console", appIcon }: TitleBarProps) {
         <div className="flex items-center h-full">
           <button
             onClick={handleMinimize}
-            className="h-full px-3 flex items-center justify-center text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
+            aria-label="Minimize window"
+            className="rumi-luxe-tap h-full px-3 flex items-center justify-center text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-300 transition-all duration-200 ease-out"
           >
             <Minus size={12} />
           </button>
           <button
             onClick={handleMaximize}
-            className="h-full px-3 flex items-center justify-center text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
+            aria-label={isMaximized ? "Restore window" : "Maximize window"}
+            className="rumi-luxe-tap h-full px-3 flex items-center justify-center text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-300 transition-all duration-200 ease-out"
           >
             {isMaximized ? <Copy size={10} /> : <Square size={10} />}
           </button>
           <button
             onClick={handleClose}
-            className="h-full px-3 flex items-center justify-center text-zinc-500 hover:bg-red-600 hover:text-white transition-colors"
+            aria-label="Close window"
+            className="rumi-luxe-tap h-full px-3 flex items-center justify-center text-zinc-500 hover:bg-red-600 hover:text-white transition-all duration-200 ease-out"
           >
             <X size={12} />
           </button>

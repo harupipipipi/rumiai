@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -26,12 +26,12 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Globe, Terminal, MessageSquare, Plus, ChevronRight, Settings,
-  GripVertical, FolderOpen, Folder, PanelLeftOpen, X,
+  GripVertical, FolderOpen, Folder, KanbanSquare, PanelLeftOpen, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
-import { HISTORY_CHAT_DROP_MIME, historyChatDragPayload } from '../lib/historyComposer';
+import { HISTORY_CHAT_DROP_MIME, HISTORY_CHAT_KANBAN_DROP_EVENT, historyChatDragPayload } from '../lib/historyComposer';
 import type { CodingWorkspaceRecord } from '../lib/api';
 import { ConversationPinStarMenu } from './history/ConversationPinStarMenu';
 import { ConversationSearchBar } from './history/ConversationSearchBar';
@@ -170,6 +170,43 @@ function chatCompanyId(chat: ChatItem): string {
 function chatWorkspaceId(chat: ChatItem): string {
   const metadata = chat.metadata ?? {};
   return String(chat.workspaceId ?? metadata.workspace_id ?? metadata.workspaceId ?? "").trim();
+}
+
+function chatGroupId(chat: ChatItem): string {
+  const metadata = chat.metadata ?? {};
+  return String(metadata.group_id ?? metadata.groupId ?? "").trim();
+}
+
+type ClientPoint = { x: number; y: number };
+
+function clientPointFromEvent(event: Event | null | undefined): ClientPoint | null {
+  const pointer = event as (Event & { clientX?: number; clientY?: number; touches?: TouchList; changedTouches?: TouchList }) | null | undefined;
+  if (!pointer) return null;
+  if (typeof pointer.clientX === "number" && typeof pointer.clientY === "number") {
+    return { x: pointer.clientX, y: pointer.clientY };
+  }
+  const touch = pointer.touches?.[0] ?? pointer.changedTouches?.[0];
+  if (touch) return { x: touch.clientX, y: touch.clientY };
+  return null;
+}
+
+function kanbanColumnIdAtPoint(point: ClientPoint): string | null {
+  const elements = document.elementsFromPoint(point.x, point.y);
+  for (const element of elements) {
+    const column = element.closest<HTMLElement>("[data-kanban-column-id]");
+    if (column?.dataset.kanbanColumnId) return column.dataset.kanbanColumnId;
+  }
+  return null;
+}
+
+function dispatchHistoryChatKanbanDrop(chat: ChatItem, columnId: string): void {
+  const payload = historyChatDragPayload({ ...chat, groupId: chatGroupId(chat) || undefined });
+  window.dispatchEvent(new CustomEvent(HISTORY_CHAT_KANBAN_DROP_EVENT, {
+    detail: {
+      columnId,
+      rawPayload: JSON.stringify(payload),
+    },
+  }));
 }
 
 function isCompanyChat(chat: ChatItem): boolean {
@@ -326,7 +363,7 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
         },
         {
           id: 'group-company',
-          title: 'Company',
+          title: 'Team',
           isCollapsed: false,
           chats: metadataBuckets.company,
           subGroups: [],
@@ -619,7 +656,7 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onCopyCh
         {...listeners}
         draggable
         onDragStart={(event) => {
-          const payload = historyChatDragPayload(chat);
+          const payload = historyChatDragPayload({ ...chat, groupId: chatGroupId(chat) || undefined });
           event.dataTransfer.setData(HISTORY_CHAT_DROP_MIME, JSON.stringify(payload));
           event.dataTransfer.setData("text/plain", chat.title);
           event.dataTransfer.effectAllowed = "copyMove";
@@ -669,6 +706,11 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onCopyCh
             isActive ? "text-zinc-100" : "text-zinc-300 group-hover/chat:text-zinc-100"
           )}>{chat.title}</span>
         )}
+        {!isEditing && chat.date && (
+          <span className="ml-auto hidden shrink-0 font-mono text-[10px] leading-none text-zinc-600 opacity-0 transition-opacity group-hover/chat:inline group-hover/chat:opacity-100 group-focus-within/chat:inline group-focus-within/chat:opacity-100">
+            {chat.date}
+          </span>
+        )}
         <ConversationPinStarMenu
           isPinned={chat.isPinned}
           isStarred={chat.isStarred}
@@ -717,10 +759,11 @@ interface SubGroupProps {
   onToggleStarred?: (chat: ChatItem) => void;
   onToggleChatChildren: (chatId: string) => void;
   isChatChildrenExpanded: (chatId: string) => boolean;
+  onGroupHeaderClick: (group: ChatGroup) => void;
   depth: number;
 }
 
-function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCollapse, onRenameGroup, onUngroup, onCopyChatId, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, depth }: SubGroupProps) {
+function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCollapse, onRenameGroup, onUngroup, onCopyChatId, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, onGroupHeaderClick, depth }: SubGroupProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -769,7 +812,7 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
       <div
         className="flex h-7 items-center gap-1 px-1 rounded-[3px] hover:bg-zinc-800/50 cursor-default group/folder"
         style={{ paddingLeft: `${depth * 14 + 4}px` }}
-        onClick={() => onToggleCollapse(group.id)}
+        onClick={() => onGroupHeaderClick(group)}
       >
         <ChevronRight size={13} className={cn("text-zinc-600 transition-transform duration-200 flex-shrink-0", !group.isCollapsed && "rotate-90")} />
         {group.isCollapsed
@@ -854,6 +897,7 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
               onToggleStarred={onToggleStarred}
               onToggleChatChildren={onToggleChatChildren}
               isChatChildrenExpanded={isChatChildrenExpanded}
+              onGroupHeaderClick={onGroupHeaderClick}
               depth={depth + 1}
             />
           ))}
@@ -882,12 +926,13 @@ interface DroppableColumnProps {
   onToggleStarred?: (chat: ChatItem) => void;
   onToggleChatChildren: (chatId: string) => void;
   isChatChildrenExpanded: (chatId: string) => boolean;
+  onGroupHeaderClick: (group: ChatGroup) => void;
   isDraggedOver: boolean;
   isDragging: boolean;
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, onCopyChatId, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
+function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, onCopyChatId, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, onGroupHeaderClick, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -915,7 +960,7 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
     >
       {/* Header */}
       <div
-        onClick={() => onToggleCollapse(group.id)}
+        onClick={() => onGroupHeaderClick(group)}
         className={cn(
           "h-7 flex items-center px-2 border-b border-zinc-900/70 justify-between hover:bg-zinc-900/50 transition-colors cursor-pointer group/colheader",
           isDraggedOver && !isDragging && "bg-emerald-500/15"
@@ -1015,6 +1060,7 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
               onToggleStarred={onToggleStarred}
               onToggleChatChildren={onToggleChatChildren}
               isChatChildrenExpanded={isChatChildrenExpanded}
+              onGroupHeaderClick={onGroupHeaderClick}
               depth={0}
             />
           ))}
@@ -1087,6 +1133,9 @@ interface HistoryBoardProps {
   onNewTask: (options?: HistoryBoardNewTaskOptions) => void;
   onCalendarOpen?: () => void;
   isCalendarActive?: boolean;
+  onKanbanOpen?: () => void;
+  onGroupKanbanOpen?: (group: ChatGroup) => void;
+  isKanbanActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onCopyChatId?: (chatId: string) => void;
@@ -1290,6 +1339,9 @@ export function HistoryBoard({
   onNewTask,
   onCalendarOpen,
   isCalendarActive = false,
+  onKanbanOpen,
+  onGroupKanbanOpen,
+  isKanbanActive = false,
   onSettingsClick,
   onChatMetadataChange,
   onCopyChatId,
@@ -1336,6 +1388,7 @@ export function HistoryBoard({
   const [activeChat, setActiveChat] = useState<ChatItem | null>(null);
   const [overColumnId, setOverColumnId] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<string | null>(null);
+  const activeDragStartPointRef = useRef<ClientPoint | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -1348,9 +1401,11 @@ export function HistoryBoard({
     if (active.data.current?.type === 'ColumnDrag') {
       setActiveColumnDrag(active.data.current.group);
       setActiveType('ColumnDrag');
+      activeDragStartPointRef.current = null;
     } else if (active.data.current?.type === 'Chat') {
       setActiveChat(active.data.current.chat);
       setActiveType('Chat');
+      activeDragStartPointRef.current = clientPointFromEvent(event.activatorEvent);
     }
   };
 
@@ -1423,6 +1478,19 @@ export function HistoryBoard({
   // --- Drag End ---
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
+    const draggedChat = active.data.current?.type === 'Chat' ? active.data.current.chat as ChatItem : null;
+    const dragStartPoint = activeDragStartPointRef.current;
+    if (draggedChat && dragStartPoint) {
+      const finalPoint = {
+        x: dragStartPoint.x + event.delta.x,
+        y: dragStartPoint.y + event.delta.y,
+      };
+      const kanbanColumnId = kanbanColumnIdAtPoint(finalPoint);
+      if (kanbanColumnId) {
+        dispatchHistoryChatKanbanDrop(draggedChat, kanbanColumnId);
+      }
+    }
+    activeDragStartPointRef.current = null;
     setActiveColumnDrag(null);
     setActiveChat(null);
     setOverColumnId(null);
@@ -1499,6 +1567,14 @@ export function HistoryBoard({
 
   const handleToggleCollapse = (id: string) => {
     setGroups(prev => mapGroups(prev, g => g.id === id ? { ...g, isCollapsed: !g.isCollapsed } : g));
+  };
+
+  const handleGroupHeaderClick = (group: ChatGroup) => {
+    if (searchQuery.trim() && onGroupKanbanOpen) {
+      onGroupKanbanOpen(group);
+      return;
+    }
+    handleToggleCollapse(group.id);
   };
 
   const handleNewTaskInGroup = (groupId: string) => {
@@ -1831,6 +1907,20 @@ export function HistoryBoard({
           >
             <WarmActionIcon kind="calendar" size="sm" iconClassName="h-3.5 w-3.5" />
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              onKanbanOpen?.();
+            }}
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+              isKanbanActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
+            )}
+            title="Kanban"
+            aria-label="Kanban"
+          >
+            <KanbanSquare size={14} />
+          </button>
         </div>
 
         <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5 py-2">
@@ -1912,7 +2002,7 @@ export function HistoryBoard({
         {/* Top action bar */}
         <div className="flex flex-col gap-1 px-4 py-4 flex-shrink-0">
           <div className="flex h-8 items-center justify-between gap-2 px-2.5">
-            <span className="text-xs font-semibold tracking-wide text-zinc-400">Console</span>
+            <span className="text-xs font-semibold tracking-wide text-zinc-400">rumi DP</span>
             {onMinimize && (
               <button
                 type="button"
@@ -1960,7 +2050,23 @@ export function HistoryBoard({
           >
             <WarmActionIcon kind="calendar" size="sm" />
             <span className="truncate">Calendar</span>
-            <span className="ml-auto text-[10px] text-zinc-600">{chatItems.length}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onKanbanOpen?.();
+            }}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
+              isKanbanActive
+                ? "bg-zinc-800/80 text-zinc-100"
+                : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
+            )}
+            title="Kanban"
+            aria-expanded={isKanbanActive}
+          >
+            <KanbanSquare size={15} className="shrink-0 text-zinc-500" />
+            <span className="truncate">Kanban</span>
           </button>
           <ConversationSearchBar value={searchQuery} resultCount={visibleChatCount} onChange={setSearchQuery} />
           <ConversationTagFilter tags={allTags} activeTag={activeTag} onChange={setActiveTag} />
@@ -1987,6 +2093,7 @@ export function HistoryBoard({
                     onToggleStarred={onChatMetadataChange ? handleToggleStarred : undefined}
                     onToggleChatChildren={handleToggleChatChildren}
                     isChatChildrenExpanded={isChatChildrenExpanded}
+                    onGroupHeaderClick={handleGroupHeaderClick}
                     isDraggedOver={overColumnId === group.id}
                     isDragging={activeColumnDrag?.id === group.id}
                     dragHandleProps={dragHandleProps}

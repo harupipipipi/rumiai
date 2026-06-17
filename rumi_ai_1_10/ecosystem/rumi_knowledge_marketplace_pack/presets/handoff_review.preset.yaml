@@ -1,0 +1,36 @@
+preset_id: rumi_knowledge_marketplace.handoff_review
+profile: rumi_knowledge_marketplace.marketplace_curator
+features:
+  local_first: true
+  evidence_required: true
+  owner_boundary_check: true
+handoff_targets:
+  bundle_catalog:
+    owner_pack: rumi_pack_suite_pack
+    required_evidence:
+      - card_id
+      - trust_status
+      - bundle_scope
+      - provenance_ledger_entry
+  trust_review:
+    owner_pack: rumi_security_review_pack
+    required_evidence:
+      - permission_summary
+      - blacklist_status
+      - suspicious_indicator
+  learned_skills:
+    owner_pack: rumi_memory_knowledge_pack
+    required_evidence:
+      - source_ref
+      - content_digest
+      - learned_skill_scope
+  connector_cards:
+    owner_pack: rumi_connector_gateway_pack
+    required_evidence:
+      - required_permissions
+      - network_requirement
+      - secret_requirement
+review_steps:
+  - keep install candidate review separate from runtime connector or skill execution
+  - attach provenance ledger evidence before handoff
+  - mark status blocked when blacklist policy names an unresolved blocker

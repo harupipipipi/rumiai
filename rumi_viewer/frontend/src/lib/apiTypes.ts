@@ -52,6 +52,95 @@ export interface ApiDashboard {
   flows: { total: number };
   kernel: { status: string; uptime: number | null };
   profile: { username: string; language: string; icon: string | null } | null;
+  supervisor?: ApiSupervisorDashboard | null;
+}
+
+export interface ApiSupervisorRouterLayer {
+  id: string;
+  label: string;
+  kind: string;
+  priority: number;
+  status: string;
+  capabilities: string[];
+}
+
+export interface ApiSupervisorRouter {
+  policy: string;
+  structured_first: boolean;
+  computer_use_role: string;
+  preferred_order: string[];
+  fallback_order: string[];
+  operation_layers: ApiSupervisorRouterLayer[];
+  fallback_layers: ApiSupervisorRouterLayer[];
+  computer_driver_order: Record<string, string[]>;
+}
+
+export interface ApiSupervisorSandboxProvider {
+  id: string;
+  label: string;
+  tier: string;
+  default: boolean;
+  user_burden: string;
+  install_required: boolean;
+  providers: string[];
+  capabilities: string[];
+  artifacts: string[];
+}
+
+export interface ApiSupervisorSession {
+  run_id: string;
+  agent_id: string | null;
+  task: string;
+  status: string;
+  updated_at: string | null;
+  heartbeat_at: string | null;
+  risk: string;
+  screen: {
+    available: boolean;
+    provider?: string | null;
+    url?: string | null;
+    screenshot_url?: string | null;
+  };
+  replay: {
+    available: boolean;
+    url?: string | null;
+  };
+  artifacts: {
+    screenshots: number;
+    logs: number;
+    diffs: number;
+    traces: number;
+  };
+}
+
+export interface ApiSupervisorEvent {
+  run_id: string;
+  event_type: string;
+  created_at: string;
+  payload: Record<string, unknown>;
+}
+
+export interface ApiSupervisorDashboard {
+  router: ApiSupervisorRouter;
+  sandbox_providers: ApiSupervisorSandboxProvider[];
+  runtime_templates: Array<Record<string, unknown>>;
+  metrics: {
+    available: boolean;
+    active_runs: number;
+    waiting_approvals: number;
+    stale_runs: number;
+    failed_runs: number;
+    screen_sessions: number;
+    replay_ready: number;
+    artifact_streams: string[];
+  };
+  sessions: ApiSupervisorSession[];
+  selected_session: ApiSupervisorSession | null;
+  recent_events: ApiSupervisorEvent[];
+  event_schema: Array<{ type: string; description: string }>;
+  storage_targets: Record<string, string>;
+  action_buttons: string[];
+  security_guardrails: string[];
 }
 
 /** GET /api/panel/settings/profile → data.profile */

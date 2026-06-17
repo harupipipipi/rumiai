@@ -1,0 +1,25 @@
+task:
+  title: Local market scan
+  preset: rumi_research_pack.deep_research_report
+  goal: Build a cited market scan from supplied notes and local source files.
+  inputs:
+    research_question: Which customer segments are best supported by the supplied discovery notes?
+    local_sources:
+      - workspace/research/customer_interviews.md
+      - workspace/research/segment_notes.md
+      - workspace/research/pricing_observations.md
+    audience: product_strategy_review
+  output:
+    folder: workspace/research_outputs/market_scan
+    artifacts:
+      - type: research_report
+        path: market_scan_report.md
+      - type: evidence_cards
+        path: evidence_cards.yaml
+      - type: source_manifest
+        path: source_manifest.yaml
+      - type: claim_trace
+        path: claim_trace.yaml
+  workflow: local_deep_research_report
+  review:
+    checks: [central_claims_need_evidence, unresolved_contradictions_visible]

@@ -30,12 +30,13 @@ from domain.external.response_planner import ResponsePlanner
 from domain.external.source_store import ExternalSourceStore
 from domain.external.targeting import origin_from_external_event
 from domain.frontend.command_registry import SlashCommandRegistry
-from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
 from domain.integrations.line.approval_commands import (
     LINE_APPROVAL_COMMAND_IDS,
     handle_line_approval_command,
     pending_approval_count,
 )
+from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
+from domain.integrations.line.addressing import decide_line_addressing
 from domain.webhook.endpoint import WebhookEndpoint
 from domain.webhook.endpoint_resolver import ProviderEndpointResolver
 
@@ -44,9 +45,13 @@ _LOGGER = logging.getLogger(__name__)
 _LINE_WEBHOOK_ACK_TEXT = "\u5c4a\u3044\u305f\u3088\uff01"
 _LINE_LONG_TASK_NOTICE_TEXT = "40秒たちました。まだ処理中です。完了したらpush/postで送ります。"
 _LINE_SHORT_ERROR_TEXT = "エラーが出ました。少し後で再送してね。"
+_LINE_REPLY_DEADLINE_SECONDS = 60
+_LINE_REPLY_DEADLINE_PROMPT = (
+    "LINE reply tokens expire about 1 minute after the webhook event. "
+    "Keep the answer concise, finish within that deadline, and use the LINE reply response path when available."
+)
 _LINE_REPLY_GUIDANCE_PROMPT = (
     "LINE replyは短命・1回のみ。最終回答はreply用に短く書く。"
-    "長くかかりそうなら始める前に一度許可を取る。"
     "返信しない判断なら一度だけ「replyで送れます。送りますか？」と確認。"
     "期限切れ/使用済みならpushを提案。"
 )
@@ -112,10 +117,19 @@ def _handle_event(
         external_event.metadata["model"] = model
     mentioned = _line_message_mentions_bot(event, destination=destination)
     require_group_mention = _require_line_group_mention(endpoint, external_event)
+    addressing = decide_line_addressing(
+        event,
+        external_event,
+        endpoint=endpoint,
+        mentioned=mentioned,
+    )
+    addressed = bool(addressing.get("addressed"))
     external_event.metadata["line_mention"] = {
         "mentioned": mentioned,
         "require_group_mention": require_group_mention,
+        "addressed": addressed,
     }
+    external_event.metadata["line_addressing"] = addressing
     origin = origin_from_external_event(external_event)
     source_record = ExternalSourceStore().record_origin(origin, verified=verified)
     external_event.metadata["origin"] = origin.as_dict()
@@ -129,16 +143,15 @@ def _handle_event(
     runtime_context.setdefault("source_record", source_record)
     runtime_context = _apply_endpoint_response_context(runtime_context, endpoint)
     _apply_hook_context(runtime_context, hook_settings, endpoint=endpoint)
+    runtime_context = _apply_line_reply_deadline_context(runtime_context, origin)
     linked_conversation_id = chat_linked_conversation_id(runtime_context)
     if linked_conversation_id:
         runtime_context.setdefault("conversation_id", linked_conversation_id)
         external_event.metadata["linked_conversation_id"] = linked_conversation_id
     policy = AudiencePolicyRegistry().resolve(endpoint.audience_policy_id, event=external_event)
-    command_result = None
 
-    # Slash commands are a safe bootstrap path in LINE groups: the source may not
-    # be enabled yet, and LINE mention metadata is often absent for plain "/..."
-    # messages. Keep signature/rate/message-type policy, but allow this source.
+    # Slash commands bootstrap LINE groups before a source has been enabled or
+    # mentioned. Keep signature/rate/message-type policy, but allow this source.
     if _line_slash_command_requested(event, hook_settings):
         command_policy = _allow_current_source(policy, external_event)
         command_decision = AudiencePolicy(command_policy).evaluate(external_event, mentioned=True)
@@ -166,11 +179,15 @@ def _handle_event(
         reply = _send_response_plan(chat_link_result["response_plan"], external_event, context=runtime_context)
         return {**chat_link_result, "reply": reply}
 
+    if require_group_mention and not addressed:
+        return _line_addressing_ignored_result(external_event, addressing)
     reaction = _line_reaction_decision(event, external_event, hook_settings)
     if require_group_mention:
         policy = _require_audience_mention(policy)
-        policy = _allow_current_scope(policy, external_event)
-    effective_mentioned = mentioned or bool(reaction.get("treat_as_mention"))
+        source = source_record.get("source") if isinstance(source_record, dict) else None
+        if isinstance(source, dict) and source.get("enabled"):
+            policy = _allow_current_scope(policy, external_event)
+    effective_mentioned = addressed if require_group_mention else (mentioned or bool(reaction.get("treat_as_mention")))
     decision = AudiencePolicy(policy).evaluate(external_event, mentioned=effective_mentioned)
     if not decision.allowed:
         return _policy_denied_result(external_event, decision)
@@ -192,7 +209,7 @@ def _handle_event(
             audience_policy=policy,
             audience_decision=decision,
             context=runtime_context,
-            mentioned=mentioned,
+            mentioned=addressed if require_group_mention else mentioned,
         ), acknowledgement)
     return _with_line_acknowledgement(_dispatch_line_event(
         external_event,
@@ -200,7 +217,7 @@ def _handle_event(
         audience_policy=policy,
         audience_decision=decision,
         context=runtime_context,
-        mentioned=mentioned,
+        mentioned=addressed if require_group_mention else mentioned,
     ), acknowledgement)
 
 
@@ -226,10 +243,7 @@ def _dispatch_line_event(
         envelope_overrides = chat_link_envelope_overrides(context)
         if envelope_overrides:
             dispatch_kwargs["envelope_overrides"] = envelope_overrides
-        result = dispatch_external_event(
-            external_event,
-            **dispatch_kwargs,
-        )
+        result = dispatch_external_event(external_event, **dispatch_kwargs)
         if result.get("status") == "error":
             reply = _send_line_error_notice(external_event, context=context)
             return {**result, "reply": reply}
@@ -539,32 +553,6 @@ def _line_model_command(endpoint: WebhookEndpoint, hook_settings: dict[str, Any]
     return "一致するモデルが見つかりません。\n/model gpt のように短めに打つと候補を出します。"
 
 
-def _line_change_command(external_event, context: dict[str, Any], arg_text: str) -> str:
-    result = handle_chat_link_message(external_event, context, f"/change {arg_text}".strip())
-    return str((result or {}).get("assistant_text") or CHAT_LINK_PROMPT)
-
-
-def _line_chat_id_arg(arg_text: str) -> str:
-    text = str(arg_text or "").strip()
-    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
-        text = text[1:-1].strip()
-    return text
-
-
-def _linked_line_conversation_id(context: dict[str, Any]) -> str:
-    return chat_linked_conversation_id(context)
-
-
-def _line_envelope_overrides(context: dict[str, Any]) -> dict[str, Any] | None:
-    return chat_link_envelope_overrides(context)
-
-
-def _line_context_source(context: dict[str, Any]) -> dict[str, Any]:
-    record = context.get("source_record") if isinstance(context.get("source_record"), dict) else {}
-    source = record.get("source") if isinstance(record.get("source"), dict) else record
-    return source if isinstance(source, dict) else {}
-
-
 def _set_line_endpoint_model(endpoint: WebhookEndpoint, model: str, hook_settings: dict[str, Any]) -> str:
     model = str(model or "").strip()
     if not model:
@@ -667,11 +655,6 @@ def _persist_line_hook_model(model: str) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _frontend_settings_path() -> Path:
-    override = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", "").strip()
-    return Path(override) if override else Path(__file__).resolve().parents[3] / "user_data" / "shared" / "frontend_settings.json"
-
-
 def _line_help_text(commands: list[dict[str, Any]]) -> str:
     lines = ["使えるLINEコマンド:"]
     for command in commands:
@@ -725,6 +708,7 @@ def _line_status_text(
         f"source push: {'on' if source.get('allow_push') else 'off'}",
         f"group mention required: {'on' if mention.get('require_group_mention') else 'off'}",
         f"mentioned: {'yes' if mention.get('mentioned') else 'no'}",
+        f"addressed: {'yes' if mention.get('addressed') else 'no'}",
         f"policy: {decision_text}, default {policy_default}",
         f"send mode: {output.get('output_send_mode') or 'reply_to_origin'}",
         f"reply fallback: {'auto post' if hook_settings.get('line_auto_post_on_reply_failure') else 'ask/log'}",
@@ -899,8 +883,7 @@ def _apply_external_output_context(runtime_context: dict[str, Any]) -> None:
 
 
 def _frontend_external_output_settings() -> dict[str, Any]:
-    override = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", "").strip()
-    path = Path(override) if override else Path(__file__).resolve().parents[3] / "user_data" / "shared" / "frontend_settings.json"
+    path = _frontend_settings_path()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -911,9 +894,13 @@ def _frontend_external_output_settings() -> dict[str, Any]:
     return dict(output)
 
 
-def _frontend_hook_settings() -> dict[str, Any]:
+def _frontend_settings_path() -> Path:
     override = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", "").strip()
-    path = Path(override) if override else Path(__file__).resolve().parents[3] / "user_data" / "shared" / "frontend_settings.json"
+    return Path(override) if override else Path(__file__).resolve().parents[3] / "user_data" / "shared" / "frontend_settings.json"
+
+
+def _frontend_hook_settings() -> dict[str, Any]:
+    path = _frontend_settings_path()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -1011,14 +998,13 @@ def _line_trigger_llm_client(model: str):
                 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 
                 selected_model = ModelRuntimeSettingsService().get_preferred_model()
-            response = AIClient().complete(
+            return AIClient().complete(
                 selected_model,
                 payload.get("messages") if isinstance(payload.get("messages"), list) else [],
                 [],
                 {"temperature": 0, "response_format": {"type": "json_object"}},
             )
-            return response
-        except Exception as exc:  # fail open so LINE does not silently miss users when the judge model is unavailable
+        except Exception as exc:
             return {"action": "fire", "send_response": True, "reason": f"auto trigger model unavailable: {exc}"}
 
     return decide
@@ -1031,6 +1017,17 @@ def _policy_denied_result(external_event, decision) -> Dict[str, Any]:
         "policy": decision.as_dict(),
         "event": external_event.as_dict(),
         "reply": {"sent": False, "reason": "audience policy denied"},
+    }
+
+
+def _line_addressing_ignored_result(external_event, addressing: dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "status": "ignored",
+        "assistant_text": "",
+        "reason": "LINE group/room message was not addressed to Rumi",
+        "event": external_event.as_dict(),
+        "line_addressing": dict(addressing or {}),
+        "reply": {"sent": False, "reason": "message not addressed to Rumi"},
     }
 
 
@@ -1144,12 +1141,12 @@ def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: 
     response_tool_policy = response.get("tool_policy") if isinstance(response.get("tool_policy"), dict) else {}
     if response_tool_policy:
         tool_policy.update(response_tool_policy)
-    if _truthy(
-        response.get("auto_approve")
-        or response.get("auto_approve_computer_use")
-        or response.get("yolo_mode")
-    ):
-        tool_policy["yolo_mode"] = True
+    # LINE webhook events are external, remote-origin input.  Endpoint response
+    # configuration must not translate "auto approve" aliases into yolo_mode
+    # for computer/browser tools, because yolo_mode bypasses the local approval
+    # token checks for screenshots and desktop input.  Operators can still set
+    # other explicit tool_policy fields above, but inbound LINE response presets
+    # cannot auto-approve computer use on behalf of a remote sender.
     if tool_policy:
         updated["profile_policy"] = tool_policy
 
@@ -1170,6 +1167,24 @@ def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: 
             },
         )
 
+    return updated
+
+
+def _apply_line_reply_deadline_context(runtime_context: dict[str, Any], origin) -> dict[str, Any]:
+    updated = dict(runtime_context or {})
+    if not getattr(origin, "can_reply", False):
+        return updated
+    updated.setdefault("line_reply_deadline_seconds", _LINE_REPLY_DEADLINE_SECONDS)
+    expires_at = getattr(origin, "reply_expires_at_ms", None)
+    if isinstance(expires_at, int):
+        updated.setdefault("line_reply_expires_at_ms", expires_at)
+    existing_suffix = str(updated.get("external_prompt_suffix") or "").strip()
+    if _LINE_REPLY_DEADLINE_PROMPT not in existing_suffix:
+        updated["external_prompt_suffix"] = (
+            existing_suffix + "\n" + _LINE_REPLY_DEADLINE_PROMPT
+            if existing_suffix
+            else _LINE_REPLY_DEADLINE_PROMPT
+        )
     return updated
 
 
@@ -1299,7 +1314,8 @@ def _require_line_group_mention(endpoint: WebhookEndpoint, external_event) -> bo
 
 def _line_mention_policy_default() -> Any:
     try:
-        data = json.loads(_frontend_settings_path().read_text(encoding="utf-8"))
+        path = _frontend_settings_path()
+        data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return True
     if not isinstance(data, dict):

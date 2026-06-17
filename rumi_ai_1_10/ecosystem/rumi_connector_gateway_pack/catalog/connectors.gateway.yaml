@@ -1,0 +1,15 @@
+catalog_id: rumi_connector_gateway.connectors
+schema_version: 1
+connector_classes:
+  - class_id: messaging
+    examples: [slack, discord, telegram, signal, whatsapp]
+    default_trust: untrusted_inbound
+  - class_id: productivity
+    examples: [gmail, google_drive, google_docs, google_sheets, google_slides, notion]
+    default_trust: scoped_user_data
+  - class_id: developer
+    examples: [github, gitlab, linear, jira]
+    default_trust: mixed_user_and_untrusted_content
+  - class_id: calendar_contacts
+    examples: [calendar, contacts]
+    default_trust: sensitive_personal_data

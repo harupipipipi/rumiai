@@ -53,16 +53,16 @@ sys.modules.setdefault("rumi_ai_1_10.core_runtime.audit_logger", _dummy_audit)
 # ---------------------------------------------------------------------------
 # テスト対象インポート
 # ---------------------------------------------------------------------------
-from rumi_ai_1_10.core_runtime.di_container import (  # noqa: E402
+from core_runtime.di_container import (  # noqa: E402
     DIContainer,
     get_container,
     reset_container,
 )
-from rumi_ai_1_10.core_runtime.diagnostics import Diagnostics  # noqa: E402
-from rumi_ai_1_10.core_runtime.install_journal import InstallJournal  # noqa: E402
-from rumi_ai_1_10.core_runtime.interface_registry import InterfaceRegistry  # noqa: E402
-from rumi_ai_1_10.core_runtime.event_bus import EventBus  # noqa: E402
-from rumi_ai_1_10.core_runtime.component_lifecycle import ComponentLifecycleExecutor  # noqa: E402
+from core_runtime.diagnostics import Diagnostics  # noqa: E402
+from core_runtime.install_journal import InstallJournal  # noqa: E402
+from core_runtime.interface_registry import InterfaceRegistry  # noqa: E402
+from core_runtime.event_bus import EventBus  # noqa: E402
+from core_runtime.component_lifecycle import ComponentLifecycleExecutor  # noqa: E402
 
 
 # ======================================================================
@@ -199,35 +199,35 @@ class TestKernelDIFallback:
     """Kernel をデフォルト引数で生成した際に DI 経由のインスタンスが使われること"""
 
     def test_kernel_default_diagnostics_from_di(self):
-        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        from core_runtime.kernel_core import KernelCore
         k = KernelCore()
         c = get_container()
         assert isinstance(k.diagnostics, Diagnostics)
         assert k.diagnostics is c.get("diagnostics")
 
     def test_kernel_default_install_journal_from_di(self):
-        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        from core_runtime.kernel_core import KernelCore
         k = KernelCore()
         c = get_container()
         assert isinstance(k.install_journal, InstallJournal)
         assert k.install_journal is c.get("install_journal")
 
     def test_kernel_default_interface_registry_from_di(self):
-        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        from core_runtime.kernel_core import KernelCore
         k = KernelCore()
         c = get_container()
         assert isinstance(k.interface_registry, InterfaceRegistry)
         assert k.interface_registry is c.get("interface_registry")
 
     def test_kernel_default_event_bus_from_di(self):
-        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        from core_runtime.kernel_core import KernelCore
         k = KernelCore()
         c = get_container()
         assert isinstance(k.event_bus, EventBus)
         assert k.event_bus is c.get("event_bus")
 
     def test_kernel_default_lifecycle_is_valid(self):
-        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        from core_runtime.kernel_core import KernelCore
         k = KernelCore()
         assert isinstance(k.lifecycle, ComponentLifecycleExecutor)
         assert k.lifecycle.diagnostics is k.diagnostics
@@ -242,7 +242,7 @@ class TestKernelExplicitArgs:
     """Kernel に明示的に引数を渡した場合、DI ではなく渡したものが使われること"""
 
     def test_explicit_diagnostics(self):
-        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        from core_runtime.kernel_core import KernelCore
         my_diag = Diagnostics()
         k = KernelCore(diagnostics=my_diag)
         assert k.diagnostics is my_diag
@@ -250,25 +250,25 @@ class TestKernelExplicitArgs:
         assert k.diagnostics is not c.get("diagnostics")
 
     def test_explicit_install_journal(self):
-        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        from core_runtime.kernel_core import KernelCore
         my_ij = InstallJournal()
         k = KernelCore(install_journal=my_ij)
         assert k.install_journal is my_ij
 
     def test_explicit_interface_registry(self):
-        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        from core_runtime.kernel_core import KernelCore
         my_ir = InterfaceRegistry()
         k = KernelCore(interface_registry=my_ir)
         assert k.interface_registry is my_ir
 
     def test_explicit_event_bus(self):
-        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        from core_runtime.kernel_core import KernelCore
         my_eb = EventBus()
         k = KernelCore(event_bus=my_eb)
         assert k.event_bus is my_eb
 
     def test_explicit_lifecycle(self):
-        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        from core_runtime.kernel_core import KernelCore
         my_diag = Diagnostics()
         my_ij = InstallJournal()
         my_lc = ComponentLifecycleExecutor(diagnostics=my_diag, install_journal=my_ij)
@@ -277,14 +277,14 @@ class TestKernelExplicitArgs:
 
     def test_explicit_diagnostics_propagates_to_lifecycle(self):
         """明示的に渡した diagnostics が lifecycle にも反映されること"""
-        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        from core_runtime.kernel_core import KernelCore
         my_diag = Diagnostics()
         k = KernelCore(diagnostics=my_diag)
         assert k.lifecycle.diagnostics is my_diag
 
     def test_backward_compat_kernel_class(self):
         """Kernel クラス（kernel.py）経由でも後方互換が維持されること"""
-        from rumi_ai_1_10.core_runtime.kernel import Kernel
+        from core_runtime.kernel import Kernel
         my_diag = Diagnostics()
         k = Kernel(diagnostics=my_diag)
         assert k.diagnostics is my_diag

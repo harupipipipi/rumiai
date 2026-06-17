@@ -1,0 +1,20 @@
+profile_id: rumi_workspace_pack.workspace_background_operator
+version: rumi.profile.v1
+kind: runtime_profile
+locale: en
+display_name:
+  ja: ワークスペースバックグラウンド実行
+  en: Workspace Background Operator
+enabled_capabilities:
+  - workspace.job.enqueue
+  - workspace.job.status
+  - workspace.bundle.export
+  - workspace.pdf.compose
+prompt_set: workspace_background_jobs
+policy:
+  mode: background
+  require_job_plan_before_enqueue: true
+  destructive_changes_require_approval: true
+  status_updates: concise
+  artifact_manifest_required: true
+ui_panels: [job_timeline, artifact_tree, export_queue, logs]

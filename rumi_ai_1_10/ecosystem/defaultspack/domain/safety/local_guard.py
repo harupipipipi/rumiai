@@ -9,6 +9,12 @@ LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 SENSITIVE_CODING_PATHS = {
     "/api/coding/approvals",
+    # File routes expose workspace metadata or file contents. They must not be
+    # readable from arbitrary browser origins, even when they are read-only.
+    "/api/coding/files",
+    "/api/coding/files/read",
+    "/api/coding/files/search",
+    "/api/coding/files/diff",
     "/api/coding/files/write",
     "/api/coding/files/create",
     "/api/coding/files/delete",
@@ -32,10 +38,13 @@ SENSITIVE_CODING_PATHS = {
 
 METHOD_SENSITIVE_CODING_PATHS = {
     "/api/coding/git/branch": {"POST"},
+    "/api/coding/rumi-log": {"POST"},
     "/api/coding/workspaces": {"POST"},
 }
 
 SENSITIVE_LOCAL_PATHS = {
+    "/api/authority/requests",
+    "/api/authority/test/request",
     "/api/browser/artifacts",
     "/api/tools/browser-computer",
     "/api/tools/create",
@@ -50,10 +59,14 @@ METHOD_SENSITIVE_LOCAL_PATHS = {
 }
 
 SENSITIVE_LOCAL_PREFIXES = (
+    "/api/authority/",
     "/api/container/",
+    "/api/agent/self-improvement/",
+    "/api/memory/memo/",
 )
 
 METHOD_SENSITIVE_LOCAL_PREFIXES = (
+    ("/api/authority/requests/", {"POST", "DELETE"}, ()),
     ("/api/tools/", {"PUT", "DELETE"}, ("/api/tools/browser-companion/bridge/",)),
     ("/api/tools/", {"POST"}, ("/api/tools/browser-companion/bridge/", "/api/tools/invoke")),
 )

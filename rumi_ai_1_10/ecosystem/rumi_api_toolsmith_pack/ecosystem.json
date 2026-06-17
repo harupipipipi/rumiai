@@ -1,0 +1,102 @@
+{
+  "pack_id": "rumi_api_toolsmith_pack",
+  "pack_identity": "rumi:ecosystem/rumi_api_toolsmith_pack",
+  "display_name": "Rumi API Toolsmith Pack",
+  "version": "0.1.0",
+  "description": "Declarative API, OpenAPI, GraphQL, webhook, and tool-schema review workflow pack.",
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "spec",
+      "policy",
+      "evidence",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": [],
+  "host_execution": false,
+  "metadata": {
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "registers_tools": false,
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_connector_gateway_pack",
+        "reason": "Connector delivery owner; this pack only creates declarative API tool review evidence."
+      },
+      {
+        "pack_id": "rumi_mcp_gateway_pack",
+        "reason": "MCP server registration owner; this pack only defines handoff-ready schemas."
+      },
+      {
+        "pack_id": "rumi_security_review_pack",
+        "reason": "Auth, secret, PII, and destructive-operation review owner."
+      },
+      {
+        "pack_id": "rumi_sandbox_runtime_pack",
+        "reason": "Mock execution owner; this pack only records mock-test evidence requirements."
+      }
+    ],
+    "owner_surfaces": [
+      "openapi_tool_generation",
+      "graphql_operation_mapping",
+      "webhook_contracts",
+      "mock_server_tests",
+      "openapi_schema_review",
+      "graphql_variable_contracts",
+      "webhook_signature_policy_review",
+      "mock_test_evidence"
+    ],
+    "asset_index": {
+      "catalogs": [
+        "catalog/api_toolsmith_workflows.yaml"
+      ],
+      "specs": [
+        "specs/openapi_schema_review.yaml",
+        "specs/graphql_operation_review.yaml",
+        "specs/webhook_contract_review.yaml"
+      ],
+      "policies": [
+        "policies/api_tool_safety.policy.yaml"
+      ],
+      "evidence_ledgers": [
+        "evidence/mock_test_evidence.schema.yaml"
+      ],
+      "examples": [
+        "examples/openapi_to_tool.example.yaml",
+        "examples/graphql_action_map.example.yaml",
+        "examples/webhook_contract_test.example.yaml"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "readme": [
+        "README.md"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "profiles": [
+        "profiles/api_toolsmith.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/api_toolsmith.system.md"
+      ]
+    }
+  }
+}

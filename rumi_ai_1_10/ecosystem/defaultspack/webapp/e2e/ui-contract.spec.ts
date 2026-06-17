@@ -145,6 +145,22 @@ const opencodeProfile = {
   availability: { configured: true },
 };
 
+const opencodeZenProfile = {
+  profile_id: "opencode-zen/minimax-m3-free",
+  qualified_model_id: "opencode-zen/minimax-m3-free",
+  provider_id: "opencode-zen",
+  provider_display_name: "OpenCode Zen",
+  model_id: "minimax-m3-free",
+  display_name: "MiniMax M3 Free via OpenCode Zen",
+  max_context: 200_000,
+  max_context_tokens: 200_000,
+  supports_thinking: true,
+  supports_tool_calling: true,
+  supports_vision: true,
+  local: false,
+  availability: { configured: false, status: "requires_api_key" },
+};
+
 const sidebarItems = [
   {
     id: "web_search",
@@ -172,7 +188,7 @@ const sidebarItems = [
   {
     id: "scheduler",
     label: "Scheduler",
-    category: "system",
+    category: "tool",
     description: "Schedule and trigger controls.",
     ui: { item_icon: "calendar" },
     panel: {
@@ -239,7 +255,7 @@ const settingsValues = {
     show_widgets: true,
   },
   sidebar: {
-    pinned_item_ids: ["web_search"],
+    pinned_item_ids: ["web_search", "scheduler"],
     starred_item_ids: [],
     custom_tool_tags: {},
   },
@@ -347,7 +363,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     }
 
     if (path === "/api/ai/profiles") {
-      return fulfill(route, { profiles: [smokeProfile, googleProfile, opencodeProfile], count: 3 });
+      return fulfill(route, { profiles: [smokeProfile, googleProfile, opencodeProfile, opencodeZenProfile], count: 4 });
     }
 
     if (path === "/api/chat/conversations" && method === "GET") {
@@ -563,16 +579,18 @@ test("composer at mention selects tools and skills and sends mention metadata", 
   await composer.fill("Use @web");
   const mentions = page.getByTestId("composer-at-mention-candidates");
   await expect(mentions).toBeVisible();
-  await expect(mentions).toContainText("@web_search");
+  await expect(mentions).toContainText("@Web Search");
+  await expect(mentions).toContainText("web_search");
 
-  await page.getByRole("option", { name: /@web_search/ }).click();
+  await page.getByRole("option", { name: /web_search|@web search/i }).click();
   await expect(composer).toHaveValue("Use @web_search ");
   await expect(page.locator(".rumi-composer-frame")).toContainText("Web Search");
 
   await composer.pressSequentially("@live");
   await expect(mentions).toBeVisible();
-  await expect(mentions).toContainText("@feedback/live-review");
-  await page.getByRole("option", { name: /@feedback\/live-review/ }).click();
+  await expect(mentions).toContainText("@Live Review");
+  await expect(mentions).toContainText("feedback/live-review");
+  await page.getByRole("option", { name: /feedback\/live-review|@live review/i }).click();
   await expect(composer).toHaveValue("Use @web_search @feedback/live-review ");
   await expect(page.locator(".rumi-composer-frame")).toContainText("Live Review");
 
@@ -664,11 +682,25 @@ test("model picker search supports @provider filters", async ({ page }) => {
   const search = page.getByPlaceholder("モデルを検索... @google");
   await search.fill("@opencode");
   await expect(page.getByText("Qwen3.5 Plus via OpenCode Go")).toBeVisible();
+  await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
   await expect(page.getByText("Gemini 2.5 Flash")).toBeHidden();
+
+  await search.fill("@opencode zen");
+  await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
+  await expect(page.getByText("Qwen3.5 Plus via OpenCode Go")).toBeHidden();
 
   await search.fill("@google flash");
   await expect(page.getByText("Gemini 2.5 Flash")).toBeVisible();
   await expect(page.getByText("Qwen3.5 Plus via OpenCode Go")).toBeHidden();
+});
+
+test("model picker keeps unconfigured opencode zen visible for first-run setup", async ({ page }) => {
+  await openDefaultspack(page);
+
+  await page.getByRole("button", { name: /Stub Default/ }).click();
+  const search = page.getByPlaceholder("モデルを検索... @google");
+  await search.fill("minimax");
+  await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
 });
 
 test("preview pane opens from the chat canvas peek", async ({ page }) => {
@@ -684,7 +716,10 @@ test("preview pane opens from the chat canvas peek", async ({ page }) => {
 test("calendar action renders a scheduler preview", async ({ page }) => {
   await openDefaultspack(page);
 
-  await page.getByTitle("Scheduler").click();
+  await page.locator('button[title="Tool manager"]').click();
+  const toolManagerSearch = page.getByPlaceholder("Tool managerで検索");
+  await toolManagerSearch.fill("scheduler");
+  await page.getByTestId("tool-manager-candidates").getByRole("button", { name: /Scheduler/ }).first().click();
   await expect(page.getByText("Calendar and trigger smoke surface.")).toBeVisible();
   await page.locator('button[title="Calendar"]').last().click();
 
@@ -711,7 +746,7 @@ test("calendar mode opens quick add and renders new tasks in blue", async ({ pag
   await page.getByLabel("今日").click();
   await page.getByTestId(`calendar-day-${dayKey}`).click();
   await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toBeVisible();
-  await page.getByTestId(`calendar-day-${nextDayKey}`).click();
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toBeHidden();
   await expect(page.getByRole("dialog", { name: `${nextDayLabel}に追加` })).toBeHidden();
   await page.getByTestId(`calendar-day-${nextDayKey}`).click();

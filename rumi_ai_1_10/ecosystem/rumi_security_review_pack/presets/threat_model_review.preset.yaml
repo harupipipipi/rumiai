@@ -1,0 +1,16 @@
+preset_id: rumi_security_review.threat_model_review
+pack_id: rumi_security_review_pack
+title: Threat Model Review
+profile: rumi_security_review.security_reviewer
+catalogs:
+  - catalog/review_controls.yaml
+  - catalog/risk_taxonomy.yaml
+focus:
+  - assets
+  - trust_boundaries
+  - attacker_goals
+  - mitigations
+  - residual_risk
+output:
+  finding_schema: catalog/finding_schema.json
+  signoff_required: false

@@ -1,0 +1,18 @@
+example:
+  id: health_note
+  pack_id: rumi_agent_continuity_pack
+  scenario: A health note summarizes staleness risk, context budget state, and handoff
+    readiness for a human reviewer.
+  input_refs:
+  - workspace_ref:case-file
+  evidence_refs:
+  - evidence:review-note
+  - evidence:source-fragment
+  handoff_owner: rumi_observability_pack
+  review_gate: all_blocking_checks
+  expected_result: reviewed_handoff_packet
+  must_not:
+  - external_action
+  - runtime_execution
+  - secret_material
+  status: ready_for_owner_handoff

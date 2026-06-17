@@ -1,0 +1,7 @@
+preset_id: rumi_multimodal_media.image_asset_brief
+profile: rumi_multimodal_media.agent
+workflow: image_brief_to_reviewed_asset
+features:
+  prompt_plan: required
+  asset_ledger: required
+  variants: 3

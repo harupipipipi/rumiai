@@ -3,16 +3,18 @@ import type { FormEvent, MutableRefObject, ReactNode } from "react";
 import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ConversationSteerItem, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import type { ComposerCommandItem } from "../lib/api";
-import type { ChatItem, HistoryBoardNewTaskOptions } from "../components/HistoryBoard";
+import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 import type { LocaleSetting } from "../lib/i18n";
 import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
+import type { WorkspaceTab, WorkspaceTabKind } from "../components/WorkspaceTabs";
 
 export type { ComposerCommandItem } from "../lib/api";
 
 export type ChatUiMessage = {
   id: string;
   conversationId?: string;
+  createdAt?: number;
   role: "user" | "agent";
   content: ChatContentBlock[];
   rawText: string;
@@ -26,6 +28,13 @@ export type ChatUiMessage = {
     thinkingTranscript?: string;
     attachedToolCount?: number;
     pendingApproval?: Record<string, unknown>;
+    pendingAuthorityApproval?: Record<string, unknown>;
+    authorityFollowup?: Record<string, unknown>;
+    chatDisplay?: {
+      hidden?: boolean;
+      reason?: string;
+      [key: string]: unknown;
+    };
   };
   events?: ChatActivityEvent[];
   toolLogs?: ToolLogEntry[];
@@ -88,6 +97,9 @@ export type HistoryBoardRendererProps = {
   onNewTask: (options?: HistoryBoardNewTaskOptions) => void;
   onCalendarOpen?: () => void;
   isCalendarActive?: boolean;
+  onKanbanOpen?: () => void;
+  onGroupKanbanOpen?: (group: ChatGroup) => void;
+  isKanbanActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onCopyChatId?: (chatId: string) => void;
@@ -220,10 +232,15 @@ export type RightSidebarRendererProps = {
   toolFilterEntries?: ToolFilterEntry[];
   runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
   yoloMode?: boolean;
+  workspaceTabs?: WorkspaceTab[];
+  activeWorkspaceTabId?: string | null;
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
   onOpenSettingsSection?: (sectionId: string) => void;
   onToggleYolo?: () => void;
+  onWorkspaceTabSelect?: (tabId: string) => void;
+  onWorkspaceTabClose?: (tabId: string) => void;
+  onWorkspaceTabCreate?: (kind: WorkspaceTabKind) => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;

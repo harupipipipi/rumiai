@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import sys
 from typing import Any, Dict, Iterable, List, Optional
 
 from ...extensions.loading import import_entrypoint
@@ -326,8 +327,8 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "base_url_envs": [],
         "catalog_only": False,
         "supports_invoke": True,
-        "default_model": "default",
-        "capabilities": ["chat", "routing", "meta"],
+        "default_model": "rumi",
+        "capabilities": ["chat", "routing", "meta", "review_chain", "tool_calls", "thinking"],
     },
 }
 
@@ -336,6 +337,62 @@ _CURATED_PROVIDER_MODELS: Dict[str, List[Dict[str, Any]]] = {
         {"model_id": "default", "name": "Stub Default Model", "type": "chat"},
         {"model_id": "fast", "name": "Stub Fast Model", "type": "chat"},
         {"model_id": "large", "name": "Stub Large Model", "type": "chat"},
+    ],
+    "rumi": [
+        {
+            "model_id": "rumi",
+            "name": "Rumi",
+            "display_name": "Rumi",
+            "type": "chat",
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "capabilities": ["chat", "routing", "review_chain", "tool_calls", "thinking"],
+            "metadata": {
+                "process_model": True,
+                "model_pack_ref": "modelpack/rumi",
+                "base_model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "intended_base_model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "resolved_base_model": "runtime-selected",
+                "fallback_reason": "rumi/auto uses active provider fallback when the intended base model is unavailable",
+                "fallback_policy": "active_provider_fallback",
+                "notes": "Rumi process model built on MiMo V2.5 Pro with explicit reasoning brief, review chain, freshness, trace, watchdog, and escalation policy.",
+            },
+        },
+        {
+            "model_id": "auto",
+            "name": "Rumi Auto",
+            "display_name": "Rumi Auto",
+            "type": "chat",
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "capabilities": ["chat", "routing", "review_chain", "tool_calls", "thinking"],
+            "metadata": {
+                "process_model": True,
+                "model_pack_ref": "modelpack/rumi",
+                "intended_base_model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "resolved_base_model": "runtime-selected",
+                "fallback_policy": "active_provider_fallback",
+            },
+        },
+        {
+            "model_id": "mimo",
+            "name": "Rumi MiMo V2.5 Pro",
+            "display_name": "Rumi MiMo",
+            "type": "chat",
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "capabilities": ["chat", "routing", "review_chain", "tool_calls", "thinking"],
+            "metadata": {
+                "process_model": True,
+                "model_pack_ref": "modelpack/rumi",
+                "intended_base_model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "resolved_base_model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "fallback_policy": "requires_intended_base_model",
+            },
+        },
     ],
     "groq": [
         {"model_id": "openai/gpt-oss-120b", "name": "GPT OSS 120B via Groq", "type": "reasoning"},
@@ -447,6 +504,7 @@ _BEST_MODEL_BY_PROVIDER = {
     "openrouter": "tencent/hy3-preview:free",
     "gitlawb-opengateway": "mimo-v2.5-pro",
     "opencode-go": "kimi-k2.6",
+    "opencode-zen": "minimax-m3-free",
     "deepseek": "deepseek-chat",
     "perplexity": "sonar-pro",
     "together": "llama-3.1-70b-instruct-turbo",
@@ -458,7 +516,7 @@ _BEST_MODEL_BY_PROVIDER = {
     "vllm": "deepseek-r1",
     "llamacpp": "local-gguf",
     "openai_compatible": "custom-model",
-    "rumi": "default",
+    "rumi": "rumi",
 }
 
 
@@ -796,6 +854,7 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
 def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]:
     provider_id = str(entry.get("provider_id", "")).strip()
     credential_required = bool(entry.get("credential_required", True))
+    default_base_url = str(entry.get("default_base_url", "") or "").strip()
     if provider_id and provider_has_oauth_connection(provider_id):
         return True, "browser_oauth"
     if provider_id and provider_has_api_key(provider_id):
@@ -807,9 +866,11 @@ def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]
         for env_name in entry.get("base_url_envs", []):
             if _truthy_env(env_name):
                 return True, env_name
-    if entry.get("kind") == "local" and entry.get("default_base_url"):
+    if not credential_required and default_base_url.startswith("local://"):
+        return True, "builtin_local_provider"
+    if entry.get("kind") == "local" and default_base_url:
         return True, "default_local_endpoint"
-    if not credential_required and entry.get("default_base_url"):
+    if not credential_required and default_base_url:
         return True, "no_key_gateway"
     if entry["provider_id"] == "stub":
         return True, "builtin"
@@ -1237,9 +1298,21 @@ def _instantiate_manifest_provider(manifest: Dict[str, Any]):
             model_manifests=_load_model_manifests(provider_id),
         )
     if entrypoint:
-        provider_cls = import_entrypoint(entrypoint)
+        provider_cls = _import_provider_entrypoint(entrypoint)
         return provider_cls()
     return None
+
+
+def _import_provider_entrypoint(entrypoint: str):
+    raw = str(entrypoint or "").strip()
+    if ":" not in raw:
+        return import_entrypoint(raw)
+    module_name, attr_name = raw.split(":", 1)
+    if module_name.startswith("domain.ai_client.providers."):
+        legacy_module = sys.modules.get(module_name)
+        if legacy_module is not None and hasattr(legacy_module, attr_name):
+            return getattr(legacy_module, attr_name)
+    return import_entrypoint(raw)
 
 
 def detect_available_providers():

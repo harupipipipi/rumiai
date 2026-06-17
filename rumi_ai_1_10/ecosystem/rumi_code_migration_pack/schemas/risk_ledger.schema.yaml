@@ -1,0 +1,40 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://rumi.local/schemas/risk_ledger.schema.json
+title: Risk Ledger
+description: Code migration planning contract schema.
+type: object
+additionalProperties: false
+required:
+- risk_id
+- impact
+- likelihood
+- detection_signal
+- mitigation
+- owner
+- escalation_path
+- rollback_linkage
+properties:
+  risk_id:
+    type: string
+    minLength: 1
+  impact:
+    type: string
+    minLength: 1
+  likelihood:
+    type: string
+    minLength: 1
+  detection_signal:
+    type: string
+    minLength: 1
+  mitigation:
+    type: string
+    minLength: 1
+  owner:
+    type: string
+    minLength: 1
+  escalation_path:
+    type: string
+    minLength: 1
+  rollback_linkage:
+    type: string
+    minLength: 1

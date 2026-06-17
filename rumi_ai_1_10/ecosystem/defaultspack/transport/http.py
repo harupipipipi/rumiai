@@ -858,6 +858,140 @@ class DefaultsHttpServer:
             "permissions": permissions,
         })
 
+    @staticmethod
+    def _authority_http_error(result, default_code="AUTHORITY_ERROR"):
+        response = error(str(result.get("error") or "authority request failed"), default_code)
+        response["_http_status"] = int(result.get("status_code") or 400)
+        return response
+
+    def _handle_authority_requests(self, request_data, path_params):
+        del path_params
+        try:
+            from core_runtime.authority import get_authority_service
+
+            return ok(get_authority_service().list_requests(str(request_data.get("status") or "all")))
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+
+    def _handle_authority_request(self, request_data, path_params):
+        del request_data
+        request_id = str((path_params or {}).get("request_id") or "").strip()
+        try:
+            from core_runtime.authority import get_authority_service
+
+            result = get_authority_service().get_request(request_id)
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+        if not result.get("success"):
+            return self._authority_http_error(result, "AUTHORITY_NOT_FOUND")
+        return ok(result.get("request"))
+
+    def _handle_authority_test_request(self, request_data, path_params):
+        del path_params
+        if str(os.environ.get("RUMI_AUTHORITY_TEST_ENDPOINT") or "").strip().lower() not in {"1", "true", "yes"}:
+            response = error("authority test endpoint is disabled", "AUTHORITY_TEST_DISABLED")
+            response["_http_status"] = 404
+            return response
+
+        def clean_string(key, fallback):
+            value = str(request_data.get(key) or fallback).strip()
+            return value or fallback
+
+        resource = {
+            "kind": "model",
+            "provider_id": clean_string("provider_id", "openai"),
+            "api_id": clean_string("api_id", "authority-window-smoke"),
+            "model_id": clean_string("model_id", "gpt-5.4-test"),
+            "stream": bool(request_data.get("stream", True)),
+        }
+        for key in (
+            "model_ref",
+            "pack_id",
+            "app_display_name",
+            "provider_display_name",
+            "model_display_name",
+            "credential_label",
+            "endpoint_url",
+            "endpoint_path",
+            "domain",
+            "transport",
+            "provider_transport",
+            "provider_kind",
+        ):
+            value = str(request_data.get(key) or "").strip()
+            if value:
+                resource[key] = value
+        if request_data.get("port") is not None:
+            try:
+                resource["port"] = int(request_data.get("port"))
+            except (TypeError, ValueError):
+                pass
+        if request_data.get("input_tokens") is not None:
+            try:
+                resource["input_tokens"] = max(0, int(request_data.get("input_tokens")))
+            except (TypeError, ValueError):
+                pass
+
+        profile_id = clean_string("profile_id", "authority-test")
+        node_id = clean_string("node_id", "approval-window")
+        conversation_id = str(request_data.get("conversation_id") or "").strip() or None
+        reason = str(request_data.get("reason") or "Authority approval window smoke test").strip()
+        try:
+            from core_runtime.authority import get_authority_service
+
+            decision = get_authority_service().check(
+                principal_id="",
+                permission_id="model.invoke",
+                resource=resource,
+                reason=reason,
+                conversation_id=conversation_id,
+                profile_id=profile_id,
+                node_id=node_id,
+            )
+            data = decision.to_dict()
+            data["approval_url"] = f"/approval?request_id={decision.request_id}" if decision.request_id else None
+            return ok(data)
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+
+    def _handle_authority_approve(self, request_data, path_params):
+        request_id = str((path_params or {}).get("request_id") or "").strip()
+        config = request_data.get("config") if isinstance(request_data.get("config"), dict) else None
+        ui_operator = request_data.get("ui_operator") if isinstance(request_data.get("ui_operator"), dict) else None
+        try:
+            from core_runtime.authority import get_authority_service
+
+            result = get_authority_service().approve_request(
+                request_id,
+                scope=str(request_data.get("scope") or "once"),
+                config=config,
+                expires_in_seconds=request_data.get("expires_in_seconds"),
+                ui_operator=ui_operator,
+            )
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+        if not result.get("success"):
+            return self._authority_http_error(result)
+        return ok(result)
+
+    def _handle_authority_deny(self, request_data, path_params):
+        request_id = str((path_params or {}).get("request_id") or "").strip()
+        ui_operator = request_data.get("ui_operator") if isinstance(request_data.get("ui_operator"), dict) else None
+        try:
+            from core_runtime.authority import get_authority_service
+
+            result = get_authority_service().deny_request(
+                request_id,
+                reason=str(request_data.get("reason") or ""),
+                persist=bool(request_data.get("persist") or request_data.get("remember")),
+                ui_operator=ui_operator,
+            )
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+        if not result.get("success"):
+            return self._authority_http_error(result)
+        return ok(result)
+
     def _handle_health(self, request_data, path_params):
         return ok({
             "status": "healthy",
@@ -946,18 +1080,25 @@ _SENSITIVE_CODING_PATHS = set(SENSITIVE_CODING_PATHS) | set(METHOD_SENSITIVE_COD
 
 _SENSITIVE_INTEGRATION_PATHS = {
     "/api/integrations/secrets",
+    "/api/integrations/p2p/events",
     "/api/external/tokens",
     "/api/external/sources",
+    "/api/recording/devices",
+    "/api/recording/capture",
 }
 _SENSITIVE_INTEGRATION_METHOD_PATHS = {
     "/api/external/templates": {"POST", "PUT", "DELETE"},
 }
 _SENSITIVE_INTEGRATION_PREFIXES = (
+    "/api/p2p",
     "/api/webhooks/endpoints",
     "/api/webhooks/public-urls",
 )
 _SENSITIVE_CHAT_PATH_RE = re.compile(
     r"^/v1/conversations/[^/]+/run-results/[^/]+/browser-screenshots$"
+)
+_SENSITIVE_HUMAN_OPERATOR_PATH_RE = re.compile(
+    r"^/api/human-operator/conversations/[^/]+/sessions/[^/]+(?:/messages)?$"
 )
 
 _LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -991,11 +1132,52 @@ def _is_sensitive_http_path(path):
         or path in _SENSITIVE_INTEGRATION_METHOD_PATHS
         or _matches_sensitive_prefix(path)
         or _SENSITIVE_CHAT_PATH_RE.match(path) is not None
+        or _SENSITIVE_HUMAN_OPERATOR_PATH_RE.match(path) is not None
     )
 
 
 def _is_allowed_sensitive_origin(origin):
     return _local_origin_allowed(origin)
+
+
+def _header_value(headers, name):
+    if not headers:
+        return ""
+    try:
+        value = headers.get(name, "")
+    except AttributeError:
+        value = ""
+    if value:
+        return str(value)
+    lowered = str(name).lower()
+    try:
+        items = headers.items()
+    except AttributeError:
+        return ""
+    for key, value in items:
+        if str(key).lower() == lowered:
+            return str(value)
+    return ""
+
+
+def _is_browser_accessible_api_path(path):
+    normalized = str(path or "")
+    return (
+        normalized == "/api"
+        or normalized.startswith("/api/")
+        or normalized == "/v1"
+        or normalized.startswith("/v1/")
+    )
+
+
+def _browser_api_origin_error(method, path, headers, client_address=None):
+    del method, client_address
+    if not _is_browser_accessible_api_path(path):
+        return None
+    origin = _header_value(headers, "Origin")
+    if origin and not _is_allowed_sensitive_origin(origin):
+        return (403, "origin not allowed for local defaultspack API", "ORIGIN_DENIED")
+    return None
 
 
 def _configured_local_auth_token():
@@ -1085,6 +1267,12 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                         "API_ROUTE_NOT_ALLOWED",
                     ),
                 )
+                return
+            origin_error = _browser_api_origin_error(
+                method, path, self.headers, self.client_address
+            )
+            if origin_error:
+                self._send_json(origin_error[0], error(origin_error[1], origin_error[2]))
                 return
             sensitive_error = self._sensitive_request_error(method, path)
             if sensitive_error:
@@ -1219,22 +1407,35 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             return (403, "local auth token is not configured", "AUTH_REQUIRED")
         if not provided or not hmac.compare_digest(provided, expected):
             return (401, "local auth token required", "AUTH_REQUIRED")
-        if method.upper() in {"POST", "PUT", "DELETE"} and origin and not self.headers.get("X-Rumi-CSRF", "").strip():
+        if (
+            method.upper() in {"POST", "PUT", "DELETE"}
+            and origin
+            and not self.headers.get("X-Rumi-CSRF", "").strip()
+        ):
             return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
         return None
 
     def _send_cors_headers(self):
         path = self.path.split("?")[0]
-        if _is_sensitive_http_path(path):
-            origin = self.headers.get("Origin", "")
+        origin = _header_value(self.headers, "Origin")
+        if _is_sensitive_http_path(path) or _is_browser_accessible_api_path(path):
             if _is_allowed_sensitive_origin(origin):
                 if origin:
                     self.send_header("Access-Control-Allow-Origin", origin)
                     self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Rumi-CSRF, X-Rumi-Approval")
+            self.send_header(
+                "Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"
+            )
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Content-Type, Authorization, X-Rumi-CSRF, X-Rumi-Approval",
+            )
             return
-        self.send_header("Access-Control-Allow-Origin", "*")
+        if origin and _is_allowed_sensitive_origin(origin):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        elif not origin:
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Rumi-CSRF")
 

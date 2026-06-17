@@ -1,0 +1,12 @@
+example:
+  id: openapi_to_tool
+  pack_id: rumi_api_toolsmith_pack
+  workflow: derive_tool_schema_from_api_spec
+  intent: Review a local OpenAPI billing export endpoint and draft a read-only Rumi tool schema while flagging POST, PATCH, and DELETE operations for handoff.
+  evidence:
+    - spec_url_or_path
+    - operation_ids
+    - mock_response_fixture
+    - auth_boundary
+  handoff: handoff_to_rumi_mcp_gateway_pack
+  expected_result: openapi_schema_review_with_mock_evidence_and_destructive_method_handoff

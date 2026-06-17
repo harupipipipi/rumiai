@@ -1,0 +1,42 @@
+workflows:
+  items:
+  - id: trace_to_runbook
+    inputs:
+    - local_evidence
+    required_schema:
+    - schemas/trace_evidence_record.schema.json
+    outputs:
+    - review_record
+    - runbook_template
+    - handoff_packet
+    execution: declarative_only
+    promotion_requires_human_approval: true
+  - id: chat_to_checklist
+    inputs:
+    - local_evidence
+    required_schema:
+    - schemas/trace_evidence_record.schema.json
+    outputs:
+    - review_record
+    - handoff_packet
+    execution: declarative_only
+    promotion_requires_human_approval: true
+  - id: approved_recipe_handoff
+    inputs:
+    - local_evidence
+    required_schema:
+    - schemas/trace_evidence_record.schema.json
+    - schemas/sop_mining_record.schema.json
+    outputs:
+    - review_record
+    - handoff_packet
+    execution: declarative_only
+    promotion_requires_human_approval: true
+  default_execution: no_runtime_action
+  blocked_actions:
+  - automation_execution
+  - browser_control
+  - computer_control
+  - schedule_creation
+  - live_trace_capture
+  - run_ledger_storage

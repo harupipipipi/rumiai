@@ -594,6 +594,24 @@ def test_discord_ping_and_agent_engine_queue_multiple_tool_calls(monkeypatch):
     assert [call["tool_name"] for call in execution.queued_tool_calls] == ["todo"]
 
 
+def test_agent_engine_extracts_text_from_thinking_content_blocks():
+    from domain.agent.engine import AgentEngine
+
+    parsed = AgentEngine()._parse_ai_response(
+        {
+            "status": "ok",
+            "data": {
+                "content": [
+                    {"type": "thinking", "thinking": "hidden chain"},
+                    {"type": "text", "text": "社員レポート本文"},
+                ]
+            },
+        }
+    )
+
+    assert parsed == {"type": "text", "content": "社員レポート本文"}
+
+
 def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.stream import run
@@ -1462,7 +1480,7 @@ def test_browser_computer_screenshot_falls_back_to_window_capture_when_rect_capt
         "_capture_target",
         lambda payload: {
             "app": "Google Chrome",
-            "title": "defaultspack luxe shell",
+            "title": "rumi DP",
             "window_id": 3023,
             "capture_rect": {"x": 0, "y": 37, "width": 1470, "height": 919},
         },
@@ -3843,12 +3861,18 @@ def test_sensitive_routes_do_not_use_wildcard_cors():
     assert _is_sensitive_http_path("/api/coding/terminal/exec") is True
     assert _is_sensitive_http_path("/api/coding/files/write") is True
     assert _is_sensitive_http_path("/api/coding/approvals") is True
+    assert _is_sensitive_http_path("/api/authority/requests/auth_1/approve") is True
     assert _is_sensitive_http_path("/api/browser/artifacts") is True
     assert _is_sensitive_http_path("/api/coding/agent/sessions") is True
     assert _is_sensitive_http_path("/api/integrations/secrets") is True
+    assert _is_sensitive_http_path("/api/agent/self-improvement/status") is True
+    assert _is_sensitive_http_path("/api/agent/self-improvement/run") is True
     assert _is_sensitive_http_path("/v1/conversations/c1/run-results/r1/browser-screenshots") is True
+    assert _is_sensitive_http_path("/api/coding/files") is True
+    assert _is_sensitive_http_path("/api/coding/files/read") is True
+    assert _is_sensitive_http_path("/api/coding/files/search") is True
+    assert _is_sensitive_http_path("/api/coding/files/diff") is True
     assert _is_sensitive_http_path("/api/chat/conversations/c1/run-results/r1/browser-screenshots") is False
-    assert _is_sensitive_http_path("/api/coding/files/read") is False
 
 
 def test_http_signal_wait_continues_after_non_interrupt_signal(monkeypatch):
@@ -4108,6 +4132,26 @@ def test_research_providers_use_shared_source_schema():
     assert reddit.search("hello", allow_network=False).network_enabled is False
 
 
+def test_external_web_provider_parses_duckduckgo_lite_results():
+    from domain.research.providers import ExternalWebProvider
+
+    seen_urls = []
+    html = """
+    <html>
+      <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fdocs&amp;rut=abc" class='result-link'>Example Docs</a>
+      <td class='result-snippet'>Useful docs snippet.</td>
+    </html>
+    """
+    provider = ExternalWebProvider(fetcher=lambda url, timeout: seen_urls.append(url) or html)
+
+    result = provider.search("example docs", allow_network=True)
+
+    assert "/lite/?" in seen_urls[0]
+    assert result.sources[0]["title"] == "Example Docs"
+    assert result.sources[0]["url"] == "https://example.com/docs"
+    assert result.sources[0]["summary"] == "Useful docs snippet."
+
+
 def test_external_web_provider_rejects_private_network_urls():
     from domain.research.providers import ExternalWebProvider
 
@@ -4171,7 +4215,7 @@ def test_browser_computer_controller_gates_desktop_actions():
     assert controller.run("computer.move", {"x": 1, "y": 2, "dry_run": True})["requires_approval"] is False
     approval = controller.run("computer.click", {"x": 1, "y": 2})
     assert approval["requires_approval"] is True
-    assert approval["approval_token"]
+    assert "approval_token" not in approval
     assert controller.run("computer.click", {"x": 1, "y": 2, "approved": True})["requires_approval"] is True
 
 
@@ -5132,7 +5176,8 @@ def test_browser_open_url_approval_payload_target_app_runs_foreground(tmp_path, 
 
     result = controller.run(
         "browser.open_url",
-        {**approval["payload"], "approval_token": approval["approval_token"]},
+        dict(approval["payload"]),
+        yolo_mode=True,
     )
 
     assert result["opened"] is True
@@ -5674,7 +5719,8 @@ def test_browser_computer_manages_persistent_profiles_and_cookie_jars(tmp_path):
     assert approval["requires_approval"] is True
     deleted = controller.run(
         "browser.cookies.delete",
-        {"profile_id": "work-login", "name": "sid", "approval_token": approval["approval_token"]},
+        {"profile_id": "work-login", "name": "sid"},
+        yolo_mode=True,
     )
     assert deleted["deleted"] == 1
 
@@ -5730,7 +5776,8 @@ def test_browser_profile_cache_and_cookie_clear_are_approval_gated(tmp_path):
     assert approval["requires_approval"] is True
     cleared = controller.run(
         "browser.profile.clear_cache",
-        {"profile_id": "managed", "approval_token": approval["approval_token"]},
+        {"profile_id": "managed"},
+        yolo_mode=True,
     )
     assert cleared["removed"]
     assert not cache_file.exists()
@@ -5742,8 +5789,8 @@ def test_browser_profile_cache_and_cookie_clear_are_approval_gated(tmp_path):
         {
             "profile_id": "managed",
             "include_managed": True,
-            "approval_token": cookie_approval["approval_token"],
         },
+        yolo_mode=True,
     )
     assert str(cookie_file) in cleared_cookies["removed"]
     assert not cookie_file.exists()
