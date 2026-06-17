@@ -60,7 +60,7 @@ def test_template_projector_builds_stable_catalog_metadata():
     assert "rumi.backend.model_routing.default:model_router_service" in projected_ids
 
     model_section = next(section for section in catalog["settings_sections"] if section["id"] == "models")
-    model_field = next(field for field in model_section["fields"] if field["id"] == "model_select")
+    model_field = next(field for field in model_section["fields"] if field["id"] == "preferred_model")
     assert model_field["piece_id"] == "model_select"
     assert model_field["template_id"] == "rumi.model_selector.default"
     assert model_field["projected_id"] == "rumi.model_selector.default:model_select"

@@ -140,12 +140,14 @@ export function collectApiProviderOptions(
     : [...builtinProviderIds, ...builtinExternalProviderIds];
   const collected = new Map<string, ApiProviderOption>();
 
-  for (const providerId of builtinProviderIds) {
-    collected.set(providerId, { provider_id: providerId, label: providerId, kind: "llm", builtin: true });
-  }
-  if (options.includeExternalBuiltins !== false) {
-    for (const providerId of builtinExternalProviderIds) {
-      collected.set(providerId, { provider_id: providerId, label: providerId, kind: "custom", builtin: true });
+  if (providers.length === 0) {
+    for (const providerId of builtinProviderIds) {
+      collected.set(providerId, { provider_id: providerId, label: providerId, kind: "llm", builtin: true });
+    }
+    if (options.includeExternalBuiltins !== false) {
+      for (const providerId of builtinExternalProviderIds) {
+        collected.set(providerId, { provider_id: providerId, label: providerId, kind: "custom", builtin: true });
+      }
     }
   }
   for (const provider of providers) {

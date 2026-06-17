@@ -1654,7 +1654,7 @@ class FrontendRegistry:
         sections.extend(self._config_list(ui_surfaces, "settings_sections"))
         sections.extend(self._config_list(extensions, "settings_sections"))
 
-        return sections
+        return self._suppress_template_owned_base_settings(sections, template_catalog)
 
     def _chat_renderers(
         self,
@@ -2243,7 +2243,112 @@ class FrontendRegistry:
                 str(diagnostic.get("message") or ""),
                 str(diagnostic.get("source") or diagnostic.get("source_path") or "template_catalog"),
             )
-        return sections
+        return self._hydrate_dynamic_settings_fields(sections)
+
+    @staticmethod
+    def _template_settings_field_ids(template_catalog: dict[str, Any] | None) -> set[tuple[str, str]]:
+        if not isinstance(template_catalog, dict):
+            return set()
+        owned: set[tuple[str, str]] = set()
+        sections = template_catalog.get("settings_sections")
+        if not isinstance(sections, list):
+            return owned
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_id = str(section.get("id") or "").strip()
+            if not section_id:
+                continue
+            fields = section.get("fields")
+            if not isinstance(fields, list):
+                continue
+            for field in fields:
+                if not isinstance(field, dict):
+                    continue
+                field_id = str(field.get("id") or "").strip()
+                if field_id:
+                    owned.add((section_id, field_id))
+        return owned
+
+    def _suppress_template_owned_base_settings(
+        self,
+        sections: list[dict[str, Any]],
+        template_catalog: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        template_owned = self._template_settings_field_ids(template_catalog)
+        if not template_owned:
+            return sections
+        filtered_sections: list[dict[str, Any]] = []
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_id = str(section.get("id") or "").strip()
+            fields = section.get("fields")
+            if not section_id or not isinstance(fields, list):
+                filtered_sections.append(section)
+                continue
+            next_section = dict(section)
+            next_section["fields"] = [
+                field
+                for field in fields
+                if not (
+                    isinstance(field, dict)
+                    and (section_id, str(field.get("id") or "").strip()) in template_owned
+                )
+            ]
+            filtered_sections.append(next_section)
+        return filtered_sections
+
+    def _hydrate_dynamic_settings_fields(self, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        provider_rows: list[dict[str, Any]] | None = None
+        model_options: list[dict[str, Any]] | None = None
+        model_route_options: list[dict[str, Any]] | None = None
+        hydrated_sections: list[dict[str, Any]] = []
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_id = str(section.get("id") or "").strip()
+            fields = section.get("fields")
+            if not isinstance(fields, list):
+                hydrated_sections.append(section)
+                continue
+            next_section = dict(section)
+            next_fields: list[dict[str, Any]] = []
+            for field in fields:
+                if not isinstance(field, dict):
+                    continue
+                item = dict(field)
+                field_id = str(item.get("id") or "").strip()
+                field_type = str(item.get("type") or "").strip()
+                if section_id == "models" and field_id == "preferred_model":
+                    if model_options is None:
+                        model_options = self._model_options()
+                    item["options"] = model_options
+                    item.setdefault("type", "model_select")
+                    item.setdefault("renderer", "model_select")
+                elif str(item.get("type") or "").strip() == "model_select":
+                    if model_options is None:
+                        model_options = self._model_options()
+                    item.setdefault("options", model_options)
+                if section_id == "models" and field_id == "model_api_routes":
+                    if model_route_options is None:
+                        model_route_options = self._model_route_options()
+                    if provider_rows is None:
+                        provider_rows = provider_key_status(pack_root=self._pack_root)
+                    item["options"] = model_route_options
+                    item["api_keys"] = provider_rows
+                    item.setdefault("type", "model_api_routes")
+                    item.setdefault("renderer", "model_routing")
+                if section_id == "apis" and (field_id == "api_keys" or field_type == "api_key_setup"):
+                    if provider_rows is None:
+                        provider_rows = provider_key_status(pack_root=self._pack_root)
+                    item["api_keys"] = provider_rows
+                    item.setdefault("type", "api_key_setup")
+                    item.setdefault("renderer", "api_key_setup")
+                next_fields.append(item)
+            next_section["fields"] = next_fields
+            hydrated_sections.append(next_section)
+        return hydrated_sections
 
     def _diagnostics(
         self,
@@ -3046,15 +3151,15 @@ class FrontendRegistry:
             {
                 "provider_id": "cloudflare_quick_tunnel",
                 "local_url": "http://127.0.0.1:8766",
-                "route_path": self._route_for_input_provider(str(external_input.get("input_provider") or "line")),
+                "route_path": self._route_for_input_provider(str(external_input.get("input_provider") or "line"), input_templates),
             },
         )
         if isinstance(external_input.get("public_url_launcher"), dict):
             public_url_launcher = external_input["public_url_launcher"]
             public_url_launcher.setdefault("provider_id", "cloudflare_quick_tunnel")
             public_url_launcher.setdefault("local_url", "http://127.0.0.1:8766")
-            public_url_launcher["route_path"] = self._route_for_input_provider(str(external_input.get("input_provider") or "line"))
-        external_input["provider_route_copy"] = self._provider_route_copy()
+            public_url_launcher["route_path"] = self._route_for_input_provider(str(external_input.get("input_provider") or "line"), input_templates)
+        external_input["provider_route_copy"] = self._provider_route_copy(input_templates)
         external_input["input_template_summary"] = self._template_summary(input_templates)
         external_input["input_profile_summary"] = ", ".join(profile.id for profile in input_profiles) or "No profiles"
         external_input.setdefault("include_source_context", True)
@@ -3169,7 +3274,18 @@ class FrontendRegistry:
         return options or [{"value": "", "label": "No templates"}]
 
     @staticmethod
-    def _provider_route_copy() -> str:
+    def _provider_route_copy(templates: list[Any] | None = None) -> str:
+        lines: list[str] = []
+        for item in templates or []:
+            if not isinstance(item, dict):
+                continue
+            provider = str(item.get("provider") or "").strip()
+            route = FrontendRegistry._template_route(item)
+            if provider and route:
+                label = str(item.get("display_name") or item.get("id") or provider).strip()
+                lines.append(f"{provider.upper()} {label}: {route}")
+        if lines:
+            return "\n".join(dict.fromkeys(lines))
         return "\n".join(
             [
                 "LINE: /api/integrations/line/webhook",
@@ -3266,15 +3382,9 @@ class FrontendRegistry:
         values["output_template_id"] = template_id
         if template.get("output_profile_id"):
             values["output_profile_id"] = str(template.get("output_profile_id"))
-        mode_by_template = {
-            "line.output.default": "reply_to_origin",
-            "discord.output.bot_channel": "discord_bot_channel",
-            "discord.output.webhook": "discord_webhook_url",
-            "slack.output.default": "slack_channel",
-            "generic.output.webhook": "generic_webhook",
-        }
-        if template_id in mode_by_template:
-            values.setdefault("output_send_mode", mode_by_template[template_id])
+        mode = self._output_mode_for_template(template)
+        if mode:
+            values.setdefault("output_send_mode", mode)
 
     def _external_sources_summary(self) -> str:
         try:
@@ -3326,8 +3436,39 @@ class FrontendRegistry:
         return None
 
     @staticmethod
-    def _route_for_input_provider(provider: str) -> str:
+    def _template_route(template: dict[str, Any]) -> str:
+        endpoint = template.get("endpoint") if isinstance(template.get("endpoint"), dict) else {}
+        route = str(endpoint.get("route") or "").strip()
+        if route:
+            return route
+        routes = endpoint.get("routes")
+        if isinstance(routes, list):
+            return str(next((item for item in routes if str(item or "").strip()), "")).strip()
+        return ""
+
+    @staticmethod
+    def _output_mode_for_template(template: dict[str, Any]) -> str:
+        response = template.get("response") if isinstance(template.get("response"), dict) else {}
+        default_response = template.get("default_response") if isinstance(template.get("default_response"), dict) else {}
+        return str(
+            template.get("output_send_mode")
+            or template.get("send_mode")
+            or response.get("mode")
+            or default_response.get("mode")
+            or ""
+        ).strip()
+
+    @staticmethod
+    def _route_for_input_provider(provider: str, templates: list[Any] | None = None) -> str:
         provider = provider.strip().lower()
+        for item in templates or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("provider") or "").strip().lower() != provider:
+                continue
+            route = FrontendRegistry._template_route(item)
+            if route:
+                return route
         if provider == "discord":
             return "/api/integrations/discord/interactions"
         if provider == "slack":

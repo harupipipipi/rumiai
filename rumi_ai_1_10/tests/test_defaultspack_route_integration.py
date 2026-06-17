@@ -98,6 +98,12 @@ def test_template_function_routes_join_canonical_transport_registry():
     assert canonical[("POST", "/api/context/token-estimate")].function_name == (
         "defaultspack:context_token_estimate"
     )
+    provider_key_route = canonical[("POST", "/api/ai/provider-key")]
+    assert provider_key_route.function_name == "defaultspack:ai_set_provider_key"
+    assert provider_key_route.sensitive is True
+    external_template_route = canonical[("POST", "/api/external/templates")]
+    assert external_template_route.function_name == "defaultspack:external_io_upsert_custom_template"
+    assert external_template_route.sensitive is True
 
 
 def test_pack_api_dispatches_defaultspack_interface_routes(monkeypatch):

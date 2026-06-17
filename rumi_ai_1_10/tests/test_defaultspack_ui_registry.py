@@ -151,16 +151,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(catalog["settings"]["values"]["general"]["language"], "ja")
         models_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "models")
         models_field_ids = {field["id"] for field in models_section["fields"]}
-        self.assertIn("model_api_routes", models_field_ids)
-        route_field = next(field for field in models_section["fields"] if field["id"] == "model_api_routes")
-        self.assertEqual(route_field["type"], "model_api_routes")
-        self.assertIsInstance(route_field.get("options"), list)
-        self.assertTrue(route_field["options"])
-        self.assertIn("api_keys", route_field)
-        apis_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "apis")
-        apis_field_ids = {field["id"] for field in apis_section["fields"]}
-        self.assertIn("api_keys", apis_field_ids)
-        self.assertNotIn("model_api_routes", apis_field_ids)
+        self.assertEqual(len(models_field_ids), len(models_section["fields"]))
         self.assertIn("operations_company", section_ids)
         self.assertIn("mimo_coding_company", section_ids)
         self.assertIn("mimo-coding-company", sidebar_ids)
@@ -188,6 +179,53 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("ai_chat", binding_part_ids)
         self.assertEqual(catalog["app"]["icon"], "/static/assets/icons/defaultspack-icon.png")
         self.assertEqual(catalog["diagnostics"], [])
+
+    def test_default_template_settings_fields_replace_legacy_base_fields(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with patch("domain.frontend.registry.AIClient") as mock_client:
+            mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+            catalog = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT).build_catalog()
+
+        section_ids = {section["id"] for section in catalog["settings"]["sections"]}
+        self.assertIn("calendar", section_ids)
+
+        tools_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "tools")
+        tools_field_ids = {field["id"] for field in tools_section["fields"]}
+        self.assertEqual(len(tools_field_ids), len(tools_section["fields"]))
+        tool_assist_field = next(field for field in tools_section["fields"] if field["id"] == "tool_assist_mode")
+        self.assertEqual(tool_assist_field["template_id"], "rumi.composer.default")
+        self.assertIn("vector", {option["value"] for option in tool_assist_field["options"]})
+
+        models_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "models")
+        models_field_ids = {field["id"] for field in models_section["fields"]}
+        self.assertEqual(len(models_field_ids), len(models_section["fields"]))
+        preferred_model_field = next(field for field in models_section["fields"] if field["id"] == "preferred_model")
+        self.assertEqual(preferred_model_field["type"], "model_select")
+        self.assertEqual(preferred_model_field["template_id"], "rumi.model_selector.default")
+        self.assertIn("model_api_routes", models_field_ids)
+        route_field = next(field for field in models_section["fields"] if field["id"] == "model_api_routes")
+        self.assertEqual(route_field["type"], "model_api_routes")
+        self.assertEqual(route_field["template_id"], "rumi.backend.model_routing.default")
+        self.assertIsInstance(route_field.get("options"), list)
+        self.assertTrue(route_field["options"])
+        self.assertIn("api_keys", route_field)
+
+        apis_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "apis")
+        apis_field_ids = {field["id"] for field in apis_section["fields"]}
+        self.assertEqual(len(apis_field_ids), len(apis_section["fields"]))
+        self.assertIn("api_keys", apis_field_ids)
+        api_keys_field = next(field for field in apis_section["fields"] if field["id"] == "api_keys")
+        self.assertEqual(api_keys_field["type"], "api_key_setup")
+        self.assertEqual(api_keys_field["template_id"], "rumi.api_keys.default")
+        self.assertNotIn("model_api_routes", apis_field_ids)
+
+        calendar_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "calendar")
+        self.assertTrue(calendar_section["fields"])
+        self.assertTrue(all(field.get("template_id") == "rumi.calendar.default" for field in calendar_section["fields"]))
+        commands_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "commands")
+        command_field = next(field for field in commands_section["fields"] if field["id"] == "show_advanced_commands")
+        self.assertEqual(command_field["template_id"], "rumi.composer.default")
 
     def test_catalog_merges_template_shell_projection_and_catalog_buckets(self):
         from domain.frontend.registry import FrontendRegistry

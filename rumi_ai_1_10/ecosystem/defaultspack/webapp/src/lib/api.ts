@@ -1354,6 +1354,7 @@ export type UICatalog = {
   tool_policies?: TemplateToolPolicy[];
   context_policies?: TemplateContextPolicy[];
   composer_widgets?: TemplateCatalogMetadataItem[];
+  external_io_templates?: TemplateCatalogMetadataItem[];
   extension_points: Array<{
     id: string;
     path: string;
@@ -1384,17 +1385,30 @@ export function mergeComposerCommands(
   catalogCommands: ComposerCommandItem[] = [],
 ): ComposerCommandItem[] {
   const merged: ComposerCommandItem[] = [];
-  const seen = new Set<string>();
+  const indexByKey = new Map<string, number>();
 
-  const append = (command: ComposerCommandItem) => {
+  const upsert = (command: ComposerCommandItem, source: "backend" | "catalog") => {
     const keys = commandIdentityKeys(command);
-    if (keys.some((key) => seen.has(key))) return;
+    const existingIndex = keys.map((key) => indexByKey.get(key)).find((index) => index !== undefined);
+    if (existingIndex !== undefined) {
+      if (source === "catalog") {
+        const existing = merged[existingIndex];
+        merged[existingIndex] = {
+          ...existing,
+          ...command,
+          execution: command.execution ?? existing.execution,
+        };
+        commandIdentityKeys(merged[existingIndex]).forEach((key) => indexByKey.set(key, existingIndex));
+      }
+      return;
+    }
     merged.push(command);
-    keys.forEach((key) => seen.add(key));
+    const nextIndex = merged.length - 1;
+    keys.forEach((key) => indexByKey.set(key, nextIndex));
   };
 
-  backendCommands.forEach(append);
-  catalogCommands.forEach(append);
+  backendCommands.forEach((command) => upsert(command, "backend"));
+  catalogCommands.forEach((command) => upsert(command, "catalog"));
   return merged;
 }
 

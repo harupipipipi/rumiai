@@ -42,7 +42,14 @@
       "part_id": "settings",
       "label": "Provider",
       "default": "openrouter",
-      "data_source": "ai_providers"
+      "data_source": "ai_providers",
+      "options": [
+        {"value": "line", "label": "LINE", "provider_id": "line", "kind": "custom", "builtin": true},
+        {"value": "discord", "label": "Discord", "provider_id": "discord", "kind": "custom", "builtin": true},
+        {"value": "slack", "label": "Slack", "provider_id": "slack", "kind": "custom", "builtin": true},
+        {"value": "generic", "label": "Generic", "provider_id": "generic", "kind": "custom", "builtin": true},
+        {"value": "web", "label": "Web", "provider_id": "web", "kind": "custom", "builtin": true}
+      ]
     },
     {
       "id": "api_key_setup",
@@ -50,14 +57,23 @@
       "slot": "apis",
       "order": 13,
       "section_id": "apis",
+      "field_id": "api_keys",
       "type": "api_key_setup",
       "renderer": "api_key_setup",
       "component": "SettingsFieldRendererHost",
       "part_id": "settings",
-      "label": "API Key Setup",
+      "label": "API Keys / Tokens",
       "default": [],
       "data_source": "provider_key_status",
-      "write_route": "/api/ui/settings"
+      "write_route": "/api/ui/settings",
+      "options": [
+        {"value": "line", "label": "LINE", "provider_id": "line", "kind": "custom", "builtin": true},
+        {"value": "discord", "label": "Discord", "provider_id": "discord", "kind": "custom", "builtin": true},
+        {"value": "slack", "label": "Slack", "provider_id": "slack", "kind": "custom", "builtin": true},
+        {"value": "generic", "label": "Generic", "provider_id": "generic", "kind": "custom", "builtin": true},
+        {"value": "web", "label": "Web", "provider_id": "web", "kind": "custom", "builtin": true}
+      ],
+      "help": "provider を選び、名前と値を貼って Save。LINE / Discord / Slack を選ぶと外部送信側の token としても自動で利用できます。"
     },
     {
       "id": "api_key_field_renderer",
@@ -79,6 +95,8 @@
       "role": "data_source",
       "data_source": "provider_key_status",
       "function_id": "ai_get_provider_key_status",
+      "permission_id": "api_key.use",
+      "handler_ref": "blocks.ai.provider_key:run",
       "route_path": "/api/ai/provider-key",
       "method": "GET",
       "returns": "configured provider key summaries only"
@@ -90,11 +108,16 @@
       "role": "action",
       "action_id": "ai_set_provider_api_key",
       "function_id": "ai_set_provider_key",
+      "permission_id": "api_key.use",
       "handler_ref": "blocks.ai.provider_key:run",
+      "route_path": "/api/ai/provider-key",
+      "method": "POST",
       "default_args": {
         "_method": "POST"
       },
-      "requires_approval": true
+      "requires_approval": true,
+      "pre_auth": true,
+      "sensitive": true
     },
     {
       "id": "provider_key_store_service",

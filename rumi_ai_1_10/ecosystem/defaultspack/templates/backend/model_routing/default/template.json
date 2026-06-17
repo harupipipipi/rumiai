@@ -39,10 +39,24 @@
       "component": "SettingsFieldRendererHost",
       "part_id": "settings",
       "field_types": [
-        "model_select",
-        "provider_select",
-        "api_key_setup"
+        "model_api_routes"
       ]
+    },
+    {
+      "id": "model_api_routes",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 34,
+      "section_id": "models",
+      "type": "model_api_routes",
+      "renderer": "model_routing",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Model API Variants",
+      "default": "",
+      "data_source": "selectable_model_profiles",
+      "api_key_source": "provider_key_status",
+      "help": "モデルごとに使う API key を選びます。複数選んだら、各 API key ごとに別 model variant として composer に並びます。"
     },
     {
       "id": "model_route_data_source",
@@ -51,6 +65,7 @@
       "role": "data_source",
       "data_source": "model_route_options",
       "function_id": "ai_route_model",
+      "permission_id": "model.invoke",
       "handler_ref": "blocks.ai.route_model:run",
       "route_path": "/api/ai/models/route",
       "method": "POST",
@@ -63,6 +78,7 @@
       "role": "action",
       "action_id": "ai_route_model",
       "function_id": "ai_route_model",
+      "permission_id": "model.invoke",
       "handler_ref": "blocks.ai.route_model:run",
       "requires_approval": false
     },

@@ -37,6 +37,7 @@
       "role": "data_source",
       "data_source": "external_io_template_catalog",
       "function_id": "external_io_template_catalog",
+      "permission_id": "external_io.configure",
       "handler_ref": "blocks.external.templates:run",
       "route_path": "/api/external/templates",
       "method": "GET",
@@ -49,11 +50,16 @@
       "role": "action",
       "action_id": "external_io_upsert_custom_template",
       "function_id": "external_io_upsert_custom_template",
+      "permission_id": "external_io.configure",
       "handler_ref": "blocks.external.templates:run",
+      "route_path": "/api/external/templates",
+      "method": "POST",
       "default_args": {
         "_method": "POST"
       },
-      "requires_approval": true
+      "requires_approval": true,
+      "pre_auth": true,
+      "sensitive": true
     },
     {
       "id": "external_io_configure_permission",
@@ -348,6 +354,9 @@
           "Keep push fallback off by default; enable push only for saved sources or explicit targets."
         ],
         "output_profile_id": "line.default",
+        "response": {
+          "mode": "reply_to_origin"
+        },
         "required_setup": {
           "any_of": [
             {
@@ -402,6 +411,9 @@
           "Rumi sends with allowed_mentions.parse=[] for safety."
         ],
         "output_profile_id": "discord.bot_channel",
+        "response": {
+          "mode": "discord_bot_channel"
+        },
         "required_setup": {
           "any_of": [
             {
@@ -444,6 +456,9 @@
           "No Bot Token or local Discord gateway is required for this output mode."
         ],
         "output_profile_id": "discord.webhook",
+        "response": {
+          "mode": "discord_webhook_url"
+        },
         "required_setup": {
           "any_of": [
             {
@@ -480,6 +495,9 @@
         "display_name": "Slack Output",
         "summary": "Send messages through Slack Web API to a channel_id/thread_ts.",
         "output_profile_id": "slack.default",
+        "response": {
+          "mode": "slack_channel"
+        },
         "required_setup": {
           "any_of": [
             {
@@ -522,6 +540,9 @@
         "display_name": "Generic Webhook Output",
         "summary": "Send a provider-neutral JSON response to a callback URL.",
         "output_profile_id": "generic.webhook",
+        "response": {
+          "mode": "generic_webhook"
+        },
         "fields": [
           {
             "id": "callback_url",

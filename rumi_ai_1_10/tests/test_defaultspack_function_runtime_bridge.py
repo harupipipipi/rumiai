@@ -102,6 +102,38 @@ def test_bridge_forwards_timeout_seconds_to_capability_executor():
     assert request["timeout_seconds"] == 120
 
 
+def test_bridge_forwards_sanitized_request_context_to_capability_executor():
+    from domain.function_runtime.bridge import invoke_function
+
+    executor = MagicMock()
+    executor.execute.return_value = SimpleNamespace(
+        success=True,
+        output={"status": "ok", "data": {}},
+        error=None,
+        error_type=None,
+    )
+
+    with patch("core_runtime.di_container.get_container", return_value=_FakeContainer(executor)):
+        result = invoke_function(
+            "defaultspack:external_io_upsert_custom_template",
+            {"id": "demo"},
+            {
+                "request_id": "req-approved",
+                "_tool_server_approved": True,
+                "approval_id": "approval-1",
+                "unsafe_nested": {"secret": "drop"},
+            },
+        )
+
+    assert result == {"status": "ok", "data": {}}
+    _principal_id, request = executor.execute.call_args.args
+    assert request["context"] == {
+        "request_id": "req-approved",
+        "_tool_server_approved": True,
+        "approval_id": "approval-1",
+    }
+
+
 def test_high_risk_defaultspack_function_rejects_unapproved_external_caller():
     from core_runtime.capability_executor import CapabilityExecutor
     from core_runtime.function_registry import FunctionRegistry

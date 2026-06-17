@@ -78,7 +78,7 @@ test("slash command parsing can be disabled by template feature flags", () => {
   assert.equal(parseSlashCommandInput("/context-txt handoff", commands)?.command.id, "context_txt");
 });
 
-test("composer command merge keeps backend execution shape while adding catalog commands", () => {
+test("composer command merge lets template catalog override backend command shape", () => {
   const backendCommands: ComposerCommandItem[] = [
     {
       id: "goal",
@@ -113,8 +113,9 @@ test("composer command merge keeps backend execution shape while adding catalog 
   ];
 
   const merged = mergeComposerCommands(backendCommands, catalogCommands);
-  assert.deepEqual(merged.map((command) => command.id), ["goal", "context_txt"]);
-  assert.deepEqual(merged[0].execution, backendCommands[0].execution);
+  assert.deepEqual(merged.map((command) => command.id), ["goal_template", "context_txt"]);
+  assert.deepEqual(merged[0].execution, catalogCommands[0].execution);
+  assert.equal(parseSlashCommandInput("/goal frontend handoff", merged)?.command.id, "goal_template");
   assert.equal(parseSlashCommandInput("/context-txt frontend handoff", merged)?.command.id, "context_txt");
 });
 

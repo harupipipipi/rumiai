@@ -21,7 +21,16 @@ import {
 } from "./settings/fieldRendererRegistry";
 import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
 
-const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry(builtinSettingsFieldRendererEntries);
+const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry([
+  ...builtinSettingsFieldRendererEntries,
+  {
+    id: "builtin-settings-model-routing",
+    types: ["model_api_routes"],
+    renderers: ["model_routing", "model_api_routes", "ModelApiRoutesSettingsField"],
+    component: "ModelApiRoutesSettingsField",
+    render: ModelApiRoutesSettingsFieldRenderer,
+  },
+]);
 
 function formatReadonlyValue(value: unknown, fallback: unknown): string {
   const resolved = value ?? fallback ?? "";
@@ -1773,7 +1782,7 @@ function SettingsField({
         setRouteInlineAddOpen(false);
       };
       control = (
-        <div className="space-y-4">
+        <div className="space-y-4" data-settings-renderer="model_routing">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.42fr)]">
             <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">Model</span>
@@ -2722,6 +2731,10 @@ function SettingsField({
 }
 
 function SettingsFieldFallback(props: SettingsFieldRendererProps) {
+  return <SettingsField {...props} field={props.field as SettingsSection["fields"][number]} />;
+}
+
+function ModelApiRoutesSettingsFieldRenderer(props: SettingsFieldRendererProps) {
   return <SettingsField {...props} field={props.field as SettingsSection["fields"][number]} />;
 }
 

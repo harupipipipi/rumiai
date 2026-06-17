@@ -310,6 +310,7 @@ def _settings_section_for_field(template: RumiTemplate, piece: TemplatePiece) ->
         "template_id": template.id,
         "origin": _origin(template, piece),
         "trust_level": _value(template.trust_level),
+        "_synthetic_field_section": True,
         "_source": _source(template),
     }
 
@@ -405,12 +406,19 @@ def _merge_settings_sections(sections: list[dict[str, Any]]) -> tuple[list[dict[
         for key, value in section.items():
             if key == "fields":
                 continue
+            if section.get("_synthetic_field_section"):
+                continue
             if value not in (None, "", [], {}):
                 current[key] = deepcopy(value)
         fields = [*current.get("fields", []), *(field for field in section.get("fields", []) if isinstance(field, dict))]
         current["fields"], field_diagnostics = _merge_settings_fields(fields, section_id=section_id)
         diagnostics.extend(field_diagnostics)
-    return [merged[section_id] for section_id in order], diagnostics
+    result: list[dict[str, Any]] = []
+    for section_id in order:
+        section = merged[section_id]
+        section.pop("_synthetic_field_section", None)
+        result.append(section)
+    return result, diagnostics
 
 
 def merge_settings_sections(sections: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

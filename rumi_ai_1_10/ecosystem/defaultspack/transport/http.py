@@ -1386,6 +1386,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _sensitive_request_error(self, method, path):
+        route_sensitive = self._route_metadata_sensitive(method, path)
         coding_error = require_local_guard(
             path,
             method,
@@ -1396,7 +1397,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             return coding_error
         if _is_sensitive_coding_path(path):
             return None
-        if not _requires_sensitive_http_auth(method, path):
+        if not (route_sensitive or _requires_sensitive_http_auth(method, path)):
             return None
         origin = self.headers.get("Origin", "")
         if not _is_allowed_sensitive_origin(origin):
@@ -1414,6 +1415,28 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         ):
             return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
         return None
+
+    def _route_metadata_sensitive(self, method, path):
+        method = str(method or "").upper()
+        path = str(path or "")
+        for entry in getattr(self, "_routes", []):
+            try:
+                route_method, compiled, handler = entry[0], entry[1], entry[2]
+            except Exception:
+                continue
+            if str(route_method or "").upper() != method:
+                continue
+            try:
+                matched = compiled.match(path)
+            except Exception:
+                matched = None
+            if not matched:
+                continue
+            return bool(
+                getattr(handler, "__rumi_route_sensitive__", False)
+                or getattr(handler, "__rumi_route_pre_auth__", False)
+            )
+        return False
 
     def _send_cors_headers(self):
         path = self.path.split("?")[0]

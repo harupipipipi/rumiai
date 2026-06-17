@@ -41,7 +41,7 @@ class HttpRouteSpec:
                 ).strip()
             except Exception:
                 resolved_function_id = ""
-        if self.block_module and not resolved_legacy_block:
+        if self.block_module and not resolved_legacy_block and not resolved_function_id:
             resolved_legacy_block = str(self.block_module).strip()
         if resolved_function_id and not self.function_name:
             object.__setattr__(self, "function_name", resolved_function_id)
@@ -242,7 +242,10 @@ def template_http_route_specs(defaultspack_root: str | Path | None = None) -> Li
     try:
         from domain.function_runtime.template_specs import template_route_items
     except Exception:
-        return []
+        try:
+            from ecosystem.defaultspack.domain.function_runtime.template_specs import template_route_items
+        except Exception:
+            return []
     specs: List[HttpRouteSpec] = []
     for item in template_route_items(defaultspack_root):
         function_id = str(item.get("function_id") or "").strip()
@@ -256,7 +259,10 @@ def template_http_route_specs(defaultspack_root: str | Path | None = None) -> Li
                 pattern,
                 function_id=function_id,
                 function_name=f"defaultspack:{function_id}",
+                block_module=str(item.get("block_module") or "").strip(),
                 defaults=dict(item.get("default_args") or {}),
+                pre_auth=bool(item.get("pre_auth")),
+                sensitive=bool(item.get("sensitive")),
             )
         )
     return specs
@@ -265,9 +271,9 @@ def template_http_route_specs(defaultspack_root: str | Path | None = None) -> Li
 def template_route_diagnostics(defaultspack_root: str | Path | None = None) -> list[dict[str, str]]:
     diagnostics: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
-    base_routes = {
+    flow_routes = {
         (spec.method, spec.pattern)
-        for spec in _dedupe_http_route_specs([flow_http_route_specs(), list(_FALLBACK_HTTP_ROUTE_SPECS)])
+        for spec in flow_http_route_specs()
     }
     for spec in template_http_route_specs(defaultspack_root):
         key = (spec.method, spec.pattern)
@@ -280,12 +286,12 @@ def template_route_diagnostics(defaultspack_root: str | Path | None = None) -> l
                     "source": "RumiTemplate function route_path",
                 }
             )
-        elif key in base_routes:
+        elif key in flow_routes:
             diagnostics.append(
                 {
                     "level": "info",
                     "code": "template_route_shadowed_by_builtin",
-                    "message": f"template route {spec.method} {spec.pattern} is already provided by a builtin route",
+                    "message": f"template route {spec.method} {spec.pattern} is already provided by a flow route",
                     "source": "RumiTemplate function route_path",
                 }
             )
@@ -448,20 +454,15 @@ def canonical_http_route_specs(*, include_always_available: bool = True) -> list
     """
     flow_specs = flow_http_route_specs()
     fallback_specs = list(_FALLBACK_HTTP_ROUTE_SPECS)
-    base_specs = _dedupe_http_route_specs([flow_specs, fallback_specs])
+    template_specs = template_http_route_specs()
+    base_specs = _dedupe_http_route_specs([flow_specs, template_specs, fallback_specs])
     existing = {(spec.method, spec.pattern) for spec in base_specs}
-    template_specs = [
-        spec
-        for spec in template_http_route_specs()
-        if (spec.method, spec.pattern) not in existing
-    ]
-    existing.update((spec.method, spec.pattern) for spec in template_specs)
     component_specs = [
         spec
         for spec in _component_route_specs()
         if (spec.method, spec.pattern) not in existing
     ]
-    groups = [base_specs, template_specs, component_specs]
+    groups = [base_specs, component_specs]
     if include_always_available:
         groups.append(list(_ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS))
     return _dedupe_http_route_specs(groups)
@@ -955,7 +956,7 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
                 path_params,
                 *,
                 function_name=spec.function_name or spec.function_id,
-                fallback_block_module=spec.legacy_block_module or spec.fallback_block_module,
+                fallback_block_module=spec.legacy_block_module or spec.fallback_block_module or spec.block_module,
                 path_inject=dict(spec.path_inject),
                 route_defaults=dict(spec.defaults),
                 route_method=spec.method,
@@ -1005,6 +1006,8 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
             handler = getattr(server, spec.handler_name)
         try:
             setattr(handler, "__rumi_route_pattern__", spec.pattern)
+            setattr(handler, "__rumi_route_sensitive__", bool(spec.sensitive))
+            setattr(handler, "__rumi_route_pre_auth__", bool(spec.pre_auth))
         except Exception:
             pass
         routes.append((spec.method, compiled, handler, "fallback", dict(spec.path_inject)))

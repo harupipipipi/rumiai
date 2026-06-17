@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,11 @@ def _template_catalog(defaultspack_root: str | None = None) -> dict[str, Any]:
         projectors = importlib.import_module("domain.templates.projectors")
         build_template_catalog = getattr(projectors, "build_template_catalog", None)
     except Exception:
-        return {}
+        try:
+            projectors = importlib.import_module("ecosystem.defaultspack.domain.templates.projectors")
+            build_template_catalog = getattr(projectors, "build_template_catalog", None)
+        except Exception:
+            return {}
     if not callable(build_template_catalog):
         return {}
     try:
@@ -39,11 +44,18 @@ def _template_catalog(defaultspack_root: str | None = None) -> dict[str, Any]:
 def template_function_specs(defaultspack_root: str | Path | None = None) -> dict[str, FunctionSpec]:
     root = str(defaultspack_root) if defaultspack_root is not None else None
     catalog = _template_catalog(root)
+    declared_permission_ids = set(template_permission_items(defaultspack_root).keys())
     specs: dict[str, FunctionSpec] = {}
+    registered_permission_ids: set[str] = set()
     for item in _iter_template_function_items(catalog):
-        spec = _spec_from_template_item(item)
+        spec = _spec_from_template_item(item, declared_permission_ids=declared_permission_ids)
         if spec is None or spec.function_id in specs:
             continue
+        if spec.permission_id:
+            if spec.permission_id in registered_permission_ids:
+                spec = replace(spec, permission_id=None)
+            else:
+                registered_permission_ids.add(spec.permission_id)
         specs[spec.function_id] = spec
     return specs
 
@@ -58,6 +70,38 @@ def template_function_manifests(defaultspack_root: str | Path | None = None) -> 
         ] = True
         manifests[function_id] = manifest
     return manifests
+
+
+def template_permission_items(defaultspack_root: str | Path | None = None) -> dict[str, dict[str, Any]]:
+    root = str(defaultspack_root) if defaultspack_root is not None else None
+    catalog = _template_catalog(root)
+    permissions: dict[str, dict[str, Any]] = {}
+    values = catalog.get("permissions")
+    if not isinstance(values, list):
+        return permissions
+    for item in values:
+        if not isinstance(item, dict) or not _is_builtin_template_item(item):
+            continue
+        permission_id = str(item.get("permission_id") or item.get("id") or "").strip()
+        if permission_id:
+            permissions[permission_id] = dict(item)
+    return permissions
+
+
+def template_backend_service_items(defaultspack_root: str | Path | None = None) -> dict[str, dict[str, Any]]:
+    root = str(defaultspack_root) if defaultspack_root is not None else None
+    catalog = _template_catalog(root)
+    services: dict[str, dict[str, Any]] = {}
+    values = catalog.get("backend_services")
+    if not isinstance(values, list):
+        return services
+    for item in values:
+        if not isinstance(item, dict) or not _is_builtin_template_item(item):
+            continue
+        service_id = str(item.get("service_id") or item.get("id") or "").strip()
+        if service_id:
+            services[service_id] = dict(item)
+    return services
 
 
 def register_template_functions(registry: Any, defaultspack_root: str | Path | None = None) -> int:
@@ -97,6 +141,8 @@ def template_route_items(defaultspack_root: str | Path | None = None) -> list[di
                 "path": route_path,
                 "block_module": block_module,
                 "default_args": _default_args(item),
+                "pre_auth": bool(item.get("pre_auth")),
+                "sensitive": bool(item.get("sensitive")),
                 "template_id": item.get("template_id"),
                 "piece_id": item.get("piece_id"),
                 "projected_id": item.get("projected_id"),
@@ -124,7 +170,11 @@ def _iter_template_function_items(catalog: dict[str, Any]) -> list[dict[str, Any
     return items
 
 
-def _spec_from_template_item(item: dict[str, Any]) -> FunctionSpec | None:
+def _spec_from_template_item(
+    item: dict[str, Any],
+    *,
+    declared_permission_ids: set[str] | None = None,
+) -> FunctionSpec | None:
     if not _is_builtin_template_item(item):
         return None
     function_id = _function_id(item)
@@ -133,6 +183,9 @@ def _spec_from_template_item(item: dict[str, Any]) -> FunctionSpec | None:
     block_module = _block_module_from_item(item)
     handler_ref = _handler_ref(item)
     if block_module is None:
+        return None
+    permission_id = _permission_id(item)
+    if permission_id and declared_permission_ids is not None and permission_id not in declared_permission_ids:
         return None
     role = str(item.get("role") or "").strip()
     risk = _risk(item, role=role)
@@ -147,7 +200,7 @@ def _spec_from_template_item(item: dict[str, Any]) -> FunctionSpec | None:
         requires=_requires(item, function_id=function_id, risk=risk),
         caller_requires=_caller_requires(item, risk=risk),
         input_schema=_input_schema(item),
-        permission_id=_permission_id(item),
+        permission_id=permission_id,
     )
 
 
@@ -217,6 +270,10 @@ def _tags(item: dict[str, Any], *, role: str) -> tuple[str, ...]:
 
 
 def _requires(item: dict[str, Any], *, function_id: str, risk: str) -> tuple[str, ...]:
+    declared = item.get("requires")
+    if isinstance(declared, list):
+        values = [str(entry).strip() for entry in declared if str(entry or "").strip()]
+        return tuple(dict.fromkeys(values))
     permission_id = _permission_id(item)
     if permission_id:
         return (permission_id,) if risk != "low" else ()

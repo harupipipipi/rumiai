@@ -1,0 +1,215 @@
+{
+  "id": "rumi.calendar.default",
+  "kind": "frontend",
+  "version": "1.0.0",
+  "status": "active",
+  "trust_level": "builtin",
+  "capabilities": {
+    "provides": [
+      "rumi.calendar.settings"
+    ],
+    "requires": [],
+    "permissions": []
+  },
+  "metadata": {
+    "title": "Default Calendar Settings",
+    "template_kind": "frontend_template",
+    "local_first": true,
+    "description": "Declarative settings metadata for the local calendar workspace."
+  },
+  "pieces": [
+    {
+      "id": "calendar_settings_section",
+      "kind": "settings_section",
+      "order": 18,
+      "section_id": "calendar",
+      "label": "Calendar",
+      "description": "カレンダー画面のクリック追加、週表示、予定色を調整します。",
+      "fields": []
+    },
+    {
+      "id": "quick_add_enabled",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 19,
+      "section_id": "calendar",
+      "type": "toggle",
+      "label": "Click To Add",
+      "default": true,
+      "help": "日付セルをクリックした時に、新規追加カードを開きます。"
+    },
+    {
+      "id": "default_item_type",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 20,
+      "section_id": "calendar",
+      "type": "select",
+      "label": "Default Item Type",
+      "default": "task",
+      "options": [
+        {"value": "task", "label": "Task / 青"},
+        {"value": "event", "label": "Event / 緑"},
+        {"value": "reminder", "label": "Reminder / グレー"}
+      ],
+      "help": "新規追加カードで最初に選ばれる種類です。"
+    },
+    {
+      "id": "default_time",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 21,
+      "section_id": "calendar",
+      "type": "text",
+      "label": "Default Time",
+      "default": "09:00",
+      "help": "新規追加カードの初期時刻です。例: 09:00 / 午前9:00"
+    },
+    {
+      "id": "time_slot_minutes",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 22,
+      "section_id": "calendar",
+      "type": "select",
+      "label": "Time Slot Minutes",
+      "default": 15,
+      "options": [
+        {"value": 15, "label": "15 minutes"},
+        {"value": 30, "label": "30 minutes"},
+        {"value": 60, "label": "60 minutes"}
+      ],
+      "help": "時刻ドロップダウンの刻み幅です。"
+    },
+    {
+      "id": "show_time_picker",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 23,
+      "section_id": "calendar",
+      "type": "toggle",
+      "label": "Show Time Picker",
+      "default": true,
+      "help": "時刻入力時にスクロール式の候補を表示します。"
+    },
+    {
+      "id": "agent_task_default",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 24,
+      "section_id": "calendar",
+      "type": "toggle",
+      "label": "Agent Task Default",
+      "default": false,
+      "help": "Task作成時に、AI agent実行の候補を初期ONにします。"
+    },
+    {
+      "id": "agent_model",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 25,
+      "section_id": "calendar",
+      "type": "model_select",
+      "renderer": "model_select",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Agent Model",
+      "default": "",
+      "data_source": "selectable_model_profiles",
+      "help": "空なら設定済みの非embeddingモデルを自動選択します。例: google/gemini-2.5-flash"
+    },
+    {
+      "id": "agent_current_chat",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 26,
+      "section_id": "calendar",
+      "type": "toggle",
+      "label": "Run In Current Chat",
+      "default": false,
+      "help": "ONなら予定時刻に現在の会話へ送信します。OFFなら独立したagent実行にします。"
+    },
+    {
+      "id": "week_start",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 27,
+      "section_id": "calendar",
+      "type": "select",
+      "label": "Week Starts On",
+      "default": "sunday",
+      "options": [
+        {"value": "sunday", "label": "Sunday"},
+        {"value": "monday", "label": "Monday"}
+      ],
+      "help": "月表示の左端の曜日を選びます。"
+    },
+    {
+      "id": "show_outside_days",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 28,
+      "section_id": "calendar",
+      "type": "toggle",
+      "label": "Show Outside Days",
+      "default": true,
+      "help": "前月/翌月の日付を薄く表示します。"
+    },
+    {
+      "id": "dim_weekends",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 29,
+      "section_id": "calendar",
+      "type": "toggle",
+      "label": "Dim Weekends",
+      "default": true,
+      "help": "土日セルをほんの少し暗くします。"
+    },
+    {
+      "id": "task_color",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 30,
+      "section_id": "calendar",
+      "type": "select",
+      "label": "Task Color",
+      "default": "blue",
+      "options": [
+        {"value": "blue", "label": "Blue"},
+        {"value": "cyan", "label": "Cyan"},
+        {"value": "slate", "label": "Slate"}
+      ],
+      "help": "Taskバーの色。既定は青です。"
+    },
+    {
+      "id": "event_color",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 31,
+      "section_id": "calendar",
+      "type": "select",
+      "label": "Event Color",
+      "default": "green",
+      "options": [
+        {"value": "green", "label": "Green"},
+        {"value": "blue", "label": "Blue"},
+        {"value": "slate", "label": "Slate"}
+      ],
+      "help": "Eventバーの色。既定は緑です。"
+    },
+    {
+      "id": "max_items_per_day",
+      "kind": "settings_field",
+      "slot": "calendar",
+      "order": 32,
+      "section_id": "calendar",
+      "type": "number",
+      "label": "Visible Items / Day",
+      "default": 3,
+      "min": 1,
+      "max": 6,
+      "help": "1日に表示する予定バーの上限です。"
+    }
+  ]
+}

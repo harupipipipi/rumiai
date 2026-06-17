@@ -142,7 +142,14 @@
         "tool_choice": "auto",
         "parallel_tool_calls": true,
         "default_enabled_tools": [],
-        "default_disabled_tools": []
+        "default_disabled_tools": [],
+        "settings_defaults": {
+          "section_id": "tools",
+          "keep_selected_tools_after_send": true,
+          "tool_assist_mode": "all",
+          "tool_assist_limit": 8,
+          "default_target": ""
+        }
       }
     },
     {
@@ -172,6 +179,90 @@
         "widget_kind": "tool_toggle",
         "enabled": true
       }
+    },
+    {
+      "id": "tools_settings_section",
+      "kind": "settings_section",
+      "order": 57,
+      "section_id": "tools",
+      "label": "Tools",
+      "description": "Tool composer defaults and selection behavior.",
+      "fields": []
+    },
+    {
+      "id": "tool_default_target",
+      "kind": "settings_field",
+      "slot": "tools",
+      "order": 57,
+      "section_id": "tools",
+      "field_id": "default_target",
+      "type": "text",
+      "label": "Default Target",
+      "default": "",
+      "help": "Backcompat value for tool UIs that still read a shared default_target.",
+      "advanced": true
+    },
+    {
+      "id": "keep_selected_tools_after_send",
+      "kind": "settings_field",
+      "slot": "tools",
+      "order": 57,
+      "section_id": "tools",
+      "type": "toggle",
+      "label": "Keep Selected Tools",
+      "default": true,
+      "help": "Keep composer tool selections after a message is sent."
+    },
+    {
+      "id": "tool_assist_mode",
+      "kind": "settings_field",
+      "slot": "tools",
+      "order": 58,
+      "section_id": "tools",
+      "type": "select",
+      "label": "Tool Assist",
+      "default": "all",
+      "options": [
+        {"value": "all", "label": "All tools: expose every tool"},
+        {"value": "auto", "label": "Auto: always tools plus relevant vector matches"},
+        {"value": "vector", "label": "Vector: recommend relevant tools"},
+        {"value": "off", "label": "Off: only manually selected tools"}
+      ],
+      "help": "既定ではすべての tool を AI に渡します。Auto は常時読み込み宣言の tool と、入力文に関連する vector tool だけを渡します。"
+    },
+    {
+      "id": "tool_assist_limit",
+      "kind": "settings_field",
+      "slot": "tools",
+      "order": 59,
+      "section_id": "tools",
+      "type": "number",
+      "label": "Tool Assist Limit",
+      "default": 8,
+      "min": 1,
+      "max": 24,
+      "help": "Vector が AI に推薦する tool 数の上限です。",
+      "advanced": true
+    },
+    {
+      "id": "commands_settings_section",
+      "kind": "settings_section",
+      "order": 60,
+      "section_id": "commands",
+      "label": "Commands",
+      "description": "Slash command visibility and command palette behavior.",
+      "fields": []
+    },
+    {
+      "id": "show_advanced_commands",
+      "kind": "settings_field",
+      "slot": "commands",
+      "order": 61,
+      "section_id": "commands",
+      "type": "toggle",
+      "label": "Show Advanced Commands",
+      "default": false,
+      "help": "Advanced slash commandsを候補に含めます。hidden command は直接入力か将来の管理UI向けです。"
     }
   ]
 }

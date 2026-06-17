@@ -47,7 +47,9 @@ export function registeredApiRows(providers: ApiProviderRow[]): ApiProviderRow[]
 }
 
 export function modelSelectTargetFieldId(field: SettingsFieldRendererProps["field"]): string {
-  return field.id === "preferred_model" ? field.id : "preferred_model";
+  const target = String((field as Record<string, unknown>).target_field_id ?? "").trim();
+  if (target) return target;
+  return field.id === "model_select" ? "preferred_model" : field.id;
 }
 
 export function apiKeySetupTargetFieldId(field: SettingsFieldRendererProps["field"]): string {

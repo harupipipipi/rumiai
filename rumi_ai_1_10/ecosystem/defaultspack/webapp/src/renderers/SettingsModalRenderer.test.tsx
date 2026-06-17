@@ -147,7 +147,7 @@ test("SettingsModalRenderer renders template model_select with searchable model 
           label: "Models",
           fields: [
             {
-              id: "preferred_model_template",
+              id: "preferred_model",
               label: "Preferred Model",
               type: "model_select",
               options: [
@@ -225,6 +225,65 @@ test("SettingsModalRenderer renders template api_key_setup with setup control", 
   assert.match(html, /openai:main:\*\*\*/);
   assert.match(html, /placeholder="openai API key"/);
   assert.match(html, />Save</);
+});
+
+test("SettingsModalRenderer renders template model_api_routes through registered model routing renderer", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "models",
+          label: "Models",
+          fields: [
+            {
+              id: "model_api_routes",
+              label: "Model API Variants",
+              type: "model_api_routes",
+              renderer: "model_routing",
+              options: [
+                {
+                  value: "google/gemini-2.5-flash",
+                  label: "Gemini 2.5 Flash",
+                  provider_id: "google",
+                  model_id: "gemini-2.5-flash",
+                  configured: true,
+                },
+              ],
+              api_keys: [
+                {
+                  provider_id: "google",
+                  label: "Google",
+                  apis: [{ api_id: "main", name: "main", configured: true }],
+                },
+              ],
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        models: {
+          preferred_model: "google/gemini-2.5-flash",
+          model_api_routes: "google/gemini-2.5-flash: google/main",
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="model_routing"/);
+  assert.match(html, /Gemini 2\.5 Flash/);
+  assert.match(html, /google\/main/);
 });
 
 test("Settings > Tools contains detailed tool settings", () => {
