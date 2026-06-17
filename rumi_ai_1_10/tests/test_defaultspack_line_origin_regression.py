@@ -142,6 +142,32 @@ def _link_line_source_to_chat(
     return conversation
 
 
+def _reset_line_approval_store(monkeypatch, tmp_path):
+    from domain.safety import approval  # noqa: E402
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_DB_PATH", str(tmp_path / "approval.sqlite3"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH", str(tmp_path / "approval_secret"))
+    approval.reset_approval_state_for_tests()
+    return approval
+
+
+def _create_line_tool_approval(approval, conversation_id: str, *, action: str = "computer.click") -> dict[str, Any]:
+    args = {"action": action, "payload": {"normalized_x": 0.5, "normalized_y": 0.8, "physical": True}}
+    return approval.create_approval_request(
+        action,
+        "high",
+        args,
+        details={
+            "tool_name": "browser_computer",
+            "action": action,
+            "function_id": action,
+            "pack_id": "defaultspack",
+            "conversation_id": conversation_id,
+            "arguments": args,
+        },
+    )
+
+
 def test_line_route_uses_endpoint_enabled_flag(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
@@ -388,6 +414,139 @@ def test_line_group_slash_status_bypasses_disabled_source_and_missing_mention(mo
     assert "group mention required: on" in sent_text
     assert saved is not None
     assert saved["enabled"] is False
+
+
+def test_line_approvals_slash_command_lists_pending_for_linked_chat(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    conversation = _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="UapprovalList")
+    approval = _reset_line_approval_store(monkeypatch, tmp_path)
+    request = _create_line_tool_approval(approval, conversation["id"])
+    sent_plans: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        LineResponseAdapter,
+        "send",
+        lambda self, plan, event=None, context=None: sent_plans.append(plan) or {"sent": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-approvals",
+                "replyToken": "reply-approvals",
+                "source": {"type": "user", "userId": "UapprovalList"},
+                "message": {"id": "m1", "type": "text", "text": "/approvals"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    sent_text = sent_plans[0]["messages"][0]["text"]
+    assert result["data"]["events"][0]["line_command"]["name"] == "approvals"
+    assert "承認待ち:" in sent_text
+    assert request["request_id"][-8:] in sent_text
+    assert "browser_computer" in sent_text
+    assert "/approve" in sent_text
+
+
+def test_line_approve_slash_command_approves_and_continues_linked_chat(monkeypatch, tmp_path):
+    from blocks.chat import send as chat_send  # noqa: E402
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    conversation = _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="UapprovalApprove")
+    approval = _reset_line_approval_store(monkeypatch, tmp_path)
+    request = _create_line_tool_approval(approval, conversation["id"])
+    captured: dict[str, Any] = {}
+
+    def fake_send_run(request_input, context):
+        captured["request"] = request_input
+        captured["context"] = context
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-approved",
+                "content": [{"type": "text", "text": "続行しました"}],
+            },
+        }
+
+    sent_plans: list[dict[str, Any]] = []
+    monkeypatch.setattr(chat_send, "run", fake_send_run)
+    monkeypatch.setattr(
+        LineResponseAdapter,
+        "send",
+        lambda self, plan, event=None, context=None: sent_plans.append(plan) or {"sent": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-approve",
+                "replyToken": "reply-approve",
+                "source": {"type": "user", "userId": "UapprovalApprove"},
+                "message": {"id": "m1", "type": "text", "text": f"/approve {request['request_id'][-8:]}"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    stored = approval.get_approval_request(request["request_id"])
+    followup = captured["request"]["message"]["metadata"]["approval_followup"]
+    sent_text = sent_plans[0]["messages"][0]["text"]
+    assert result["data"]["events"][0]["line_command"]["name"] == "approve"
+    assert stored["status"] == "approved"
+    assert captured["request"]["conversation_id"] == conversation["id"]
+    assert captured["request"]["tools"] == ["browser_computer"]
+    assert captured["request"]["params"]["tool_choice"] == "required"
+    assert followup["request_id"] == request["request_id"]
+    assert followup["tool_name"] == "browser_computer"
+    assert followup["approval_token"]
+    assert followup["payload"]["action"] == "computer.click"
+    assert "許可しました" in sent_text
+    assert "続行しました" in sent_text
+
+
+def test_line_deny_slash_command_denies_pending_approval(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    conversation = _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="UapprovalDeny")
+    approval = _reset_line_approval_store(monkeypatch, tmp_path)
+    request = _create_line_tool_approval(approval, conversation["id"])
+    sent_plans: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        LineResponseAdapter,
+        "send",
+        lambda self, plan, event=None, context=None: sent_plans.append(plan) or {"sent": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-deny",
+                "replyToken": "reply-deny",
+                "source": {"type": "user", "userId": "UapprovalDeny"},
+                "message": {"id": "m1", "type": "text", "text": f"/deny {request['request_id'][-8:]} 今はやめる"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    stored = approval.get_approval_request(request["request_id"])
+    sent_text = sent_plans[0]["messages"][0]["text"]
+    assert result["data"]["events"][0]["line_command"]["name"] == "deny"
+    assert stored["status"] == "denied"
+    assert "拒否しました" in sent_text
 
 
 def test_line_change_slash_command_links_source_to_existing_chat(monkeypatch, tmp_path):

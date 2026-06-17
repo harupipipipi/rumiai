@@ -31,6 +31,11 @@ from domain.external.source_store import ExternalSourceStore
 from domain.external.targeting import origin_from_external_event
 from domain.frontend.command_registry import SlashCommandRegistry
 from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
+from domain.integrations.line.approval_commands import (
+    LINE_APPROVAL_COMMAND_IDS,
+    handle_line_approval_command,
+    pending_approval_count,
+)
 from domain.webhook.endpoint import WebhookEndpoint
 from domain.webhook.endpoint_resolver import ProviderEndpointResolver
 
@@ -400,6 +405,16 @@ def _handle_line_command(
                 model=_line_response_model(endpoint, hook_settings),
             )
             text_response = str((chat_link_result or {}).get("assistant_text") or CHAT_LINK_PROMPT)
+        elif command_id in LINE_APPROVAL_COMMAND_IDS:
+            progress = _start_line_progress_notice(external_event, context) if command_id == "approve" else _ProgressNotice(None)
+            try:
+                approval_result = handle_line_approval_command(command_id, arg_text, context)
+            except Exception:
+                _LOGGER.exception("LINE approval command failed")
+                approval_result = {"assistant_text": _LINE_SHORT_ERROR_TEXT}
+            finally:
+                progress.cancel()
+            text_response = str(approval_result.get("assistant_text") or "承認コマンドを処理できませんでした。")
         else:
             args = _line_command_args(command, arg_text)
             result = registry.execute(
@@ -667,7 +682,7 @@ def _line_help_text(commands: list[dict[str, Any]]) -> str:
         alias_text = f" ({', '.join('/' + alias for alias in aliases)})" if aliases else ""
         label = str(command.get("label") or "").strip()
         lines.append(f"/{primary}{alias_text} - {label}")
-    lines.append("高リスク/画面操作系はLINEでは案内のみ返します。")
+    lines.append("承認: /approvals、/approve <id>、/deny <id>")
     return text_limit("\n".join(lines), 5000)
 
 
@@ -685,6 +700,7 @@ def _line_status_text(
     source_record = context.get("source_record") if isinstance(context.get("source_record"), dict) else {}
     source = source_record.get("source") if isinstance(source_record.get("source"), dict) else {}
     linked_chat_id = chat_linked_conversation_id(context)
+    pending_approvals = pending_approval_count(context)
     output = _frontend_external_output_settings()
     token_configured = _line_channel_access_token_configured()
     mention = external_event.metadata.get("line_mention") if isinstance(external_event.metadata, dict) else {}
@@ -703,6 +719,7 @@ def _line_status_text(
         f"trigger: {hook_settings.get('response_trigger_mode') or 'always'} / prefix {hook_settings.get('trigger_prefix') or '#'}",
         f"judge model: {hook_settings.get('trigger_model') or 'inherit'}",
         f"chatid: {linked_chat_id or '(default)'}",
+        f"pending approvals: {pending_approvals}",
         f"source: {origin.source_type} {_short_id(origin.source_id)}",
         f"source enabled: {'on' if source.get('enabled') else 'off'}",
         f"source push: {'on' if source.get('allow_push') else 'off'}",

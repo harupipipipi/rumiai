@@ -431,13 +431,40 @@
   {
     "id": "approvals",
     "name": "approvals",
+    "aliases": ["approval", "pending"],
     "label": "Approvals",
-    "description": "Open approval center.",
+    "description": "Open approval center or list pending approvals from external chat.",
     "category": "settings",
     "visibility": "advanced",
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
     "execution": { "type": "frontend", "action": "open_approvals" }
+  },
+  {
+    "id": "approve",
+    "name": "approve",
+    "aliases": ["allow", "ok"],
+    "label": "Approve",
+    "description": "Approve a pending operation from an external chat.",
+    "category": "settings",
+    "visibility": "advanced",
+    "risk": "medium",
+    "modes": ["chat", "coding", "agent"],
+    "args": [{ "name": "request", "type": "string", "required": false }],
+    "execution": { "type": "frontend", "action": "approve_pending_operation" }
+  },
+  {
+    "id": "deny",
+    "name": "deny",
+    "aliases": ["reject", "no"],
+    "label": "Deny",
+    "description": "Deny a pending operation from an external chat.",
+    "category": "settings",
+    "visibility": "advanced",
+    "risk": "medium",
+    "modes": ["chat", "coding", "agent"],
+    "args": [{ "name": "request", "type": "string", "required": false }],
+    "execution": { "type": "frontend", "action": "deny_pending_operation" }
   },
   {
     "id": "usage",
