@@ -52,6 +52,29 @@ TRUSTED_SHELL_RENDERER_MODULE_PREFIXES = (
     "/static/assets/renderers/",
     "/static/user_renderers/",
 )
+TOOL_POLICY_BOOL_FIELDS = ("toggleable", "parallel_tool_calls")
+TOOL_POLICY_LIST_FIELDS = (
+    "default_enabled_tools",
+    "default_disabled_tools",
+    "selected_tools",
+    "allowed_tools",
+    "disabled_tools",
+)
+TOOL_POLICY_SHAPE_FIELDS = {
+    *TOOL_POLICY_BOOL_FIELDS,
+    *TOOL_POLICY_LIST_FIELDS,
+    "tool_choice",
+    "params",
+}
+TOOL_CHOICE_VALUES = {"auto", "none", "required"}
+METADATA_ONLY_EXECUTABLE_REF_FIELDS = (
+    "handler",
+    "handler_ref",
+    "entrypoint",
+    "execution",
+    "module",
+    "qualified_name",
+)
 
 
 @dataclass
@@ -150,6 +173,9 @@ def _validate_references(template: RumiTemplate) -> list[TemplateDiagnostic]:
     renderer_types: set[str] = set(BUILTIN_SETTINGS_FIELD_RENDERERS)
     shell_renderer_ids: set[str] = set(BUILTIN_SHELL_RENDERERS)
     shell_region_ids: set[str] = set(BUILTIN_SHELL_REGIONS)
+    composer_input_ids: set[str] = set()
+    context_policy_ids: set[str] = set()
+    tool_policy_ids: set[str] = set()
     permission_ids: set[str] = set()
     action_ids: dict[str, str] = {}
     data_source_ids: dict[str, str] = {}
@@ -164,6 +190,15 @@ def _validate_references(template: RumiTemplate) -> list[TemplateDiagnostic]:
             region_id = _piece_payload_id(piece, "region", "region_id", "shell_region_id")
             if region_id:
                 shell_region_ids.add(region_id)
+        elif kind == TemplatePieceKind.COMPOSER_INPUT.value:
+            for input_id in _payload_ids(_piece_payload(piece, "input"), piece, "input_id"):
+                composer_input_ids.add(input_id)
+        elif kind == TemplatePieceKind.CONTEXT_POLICY.value:
+            for policy_id in _payload_ids(_piece_payload(piece, "policy"), piece, "policy_id", "mode"):
+                context_policy_ids.add(policy_id)
+        elif kind == TemplatePieceKind.TOOL_POLICY.value:
+            for policy_id in _payload_ids(_tool_policy_payload(piece), piece, "policy_id", "tool_policy_id"):
+                tool_policy_ids.add(policy_id)
 
     for index, piece in enumerate(template.pieces):
         kind = _value(piece.kind)
@@ -227,6 +262,21 @@ def _validate_references(template: RumiTemplate) -> list[TemplateDiagnostic]:
 
         if kind == TemplatePieceKind.CONTEXT_POLICY.value:
             diagnostics.extend(_validate_context_policy(template, piece, index))
+
+        if kind == TemplatePieceKind.TOOL_POLICY.value:
+            diagnostics.extend(_validate_tool_policy(template, piece, index))
+
+        if kind == TemplatePieceKind.AI_INPUT.value:
+            diagnostics.extend(
+                _validate_ai_input(
+                    template,
+                    piece,
+                    index,
+                    composer_input_ids=composer_input_ids,
+                    context_policy_ids=context_policy_ids,
+                    tool_policy_ids=tool_policy_ids,
+                )
+            )
 
         if kind == TemplatePieceKind.PERMISSION.value:
             permission_id = str(piece.data.get("permission_id") or piece.id or "").strip()
@@ -602,6 +652,208 @@ def _validate_context_policy(
     ]
 
 
+def _validate_tool_policy(
+    template: RumiTemplate,
+    piece: Any,
+    index: int,
+) -> list[TemplateDiagnostic]:
+    diagnostics: list[TemplateDiagnostic] = []
+    diagnostics.extend(_validate_nested_object(template, piece, index, "policy"))
+    diagnostics.extend(_validate_nested_object(template, piece, index, "tool_policy"))
+
+    data = _tool_policy_payload(piece)
+    policy_id = _payload_id(data, piece, "policy_id", "tool_policy_id")
+    if not policy_id:
+        diagnostics.append(
+            _piece_diagnostic(
+                template,
+                piece,
+                index,
+                code="template.reference.tool_policy_missing_id",
+                message="tool_policy must include an id or policy_id",
+                field="id",
+                nested_key=_tool_policy_nested_key(piece),
+            )
+        )
+
+    if not any(field in data for field in TOOL_POLICY_SHAPE_FIELDS):
+        diagnostics.append(
+            _piece_diagnostic(
+                template,
+                piece,
+                index,
+                code="template.reference.tool_policy_empty",
+                message="tool_policy must declare at least one policy field",
+                field="policy",
+                nested_key=_tool_policy_nested_key(piece),
+            )
+        )
+
+    for field_name in TOOL_POLICY_BOOL_FIELDS:
+        if field_name in data and not isinstance(data.get(field_name), bool):
+            diagnostics.append(
+                _piece_diagnostic(
+                    template,
+                    piece,
+                    index,
+                    code="template.reference.tool_policy_invalid_boolean",
+                    message=f"tool_policy.{field_name} must be boolean",
+                    field=field_name,
+                    nested_key=_tool_policy_nested_key(piece),
+                )
+            )
+
+    for field_name in TOOL_POLICY_LIST_FIELDS:
+        if field_name in data and not _is_string_list(data.get(field_name)):
+            diagnostics.append(
+                _piece_diagnostic(
+                    template,
+                    piece,
+                    index,
+                    code="template.reference.tool_policy_invalid_string_list",
+                    message=f"tool_policy.{field_name} must be a list of non-empty strings",
+                    field=field_name,
+                    nested_key=_tool_policy_nested_key(piece),
+                )
+            )
+
+    if "tool_choice" in data and not _valid_tool_choice(data.get("tool_choice")):
+        diagnostics.append(
+            _piece_diagnostic(
+                template,
+                piece,
+                index,
+                code="template.reference.tool_policy_invalid_tool_choice",
+                message="tool_policy.tool_choice must be auto, none, required, or a JSON object",
+                field="tool_choice",
+                nested_key=_tool_policy_nested_key(piece),
+            )
+        )
+
+    if "params" in data and not isinstance(data.get("params"), dict):
+        diagnostics.append(
+            _piece_diagnostic(
+                template,
+                piece,
+                index,
+                code="template.reference.tool_policy_invalid_params",
+                message="tool_policy.params must be an object",
+                field="params",
+                nested_key=_tool_policy_nested_key(piece),
+            )
+        )
+
+    diagnostics.extend(
+        _diagnose_metadata_executable_refs(
+            template,
+            piece,
+            index,
+            data,
+            nested_key=_tool_policy_nested_key(piece),
+            code="template.reference.tool_policy_executable_ref",
+            label="tool_policy",
+        )
+    )
+    return diagnostics
+
+
+def _validate_ai_input(
+    template: RumiTemplate,
+    piece: Any,
+    index: int,
+    *,
+    composer_input_ids: set[str],
+    context_policy_ids: set[str],
+    tool_policy_ids: set[str],
+) -> list[TemplateDiagnostic]:
+    diagnostics: list[TemplateDiagnostic] = []
+    diagnostics.extend(_validate_nested_object(template, piece, index, "input"))
+    diagnostics.extend(_validate_nested_object(template, piece, index, "ai_input"))
+
+    data = _ai_input_payload(piece)
+    composer_refs = _reference_list(data, "composer_input", "composer_input_id")
+    context_refs = _reference_list(data, "context_policy", "context_policy_id")
+    tool_policy_refs = _reference_list(data, "tool_policy", "tool_policy_id")
+
+    if not (composer_refs or context_refs or tool_policy_refs or "params" in data):
+        diagnostics.append(
+            _piece_diagnostic(
+                template,
+                piece,
+                index,
+                code="template.reference.ai_input_missing_binding",
+                message="ai_input must reference composer_input, context_policy, tool_policy, or params",
+                field="input",
+                nested_key=_ai_input_nested_key(piece),
+            )
+        )
+
+    if "params" in data and not isinstance(data.get("params"), dict):
+        diagnostics.append(
+            _piece_diagnostic(
+                template,
+                piece,
+                index,
+                code="template.reference.ai_input_invalid_params",
+                message="ai_input.params must be an object",
+                field="params",
+                nested_key=_ai_input_nested_key(piece),
+            )
+        )
+
+    diagnostics.extend(
+        _diagnose_unknown_references(
+            template,
+            piece,
+            index,
+            refs=composer_refs,
+            declared_ids=composer_input_ids,
+            code="template.reference.ai_input_unknown_composer_input",
+            label="composer_input",
+            field="composer_input",
+            nested_key=_ai_input_nested_key(piece),
+        )
+    )
+    diagnostics.extend(
+        _diagnose_unknown_references(
+            template,
+            piece,
+            index,
+            refs=context_refs,
+            declared_ids=context_policy_ids,
+            code="template.reference.ai_input_unknown_context_policy",
+            label="context_policy",
+            field="context_policy",
+            nested_key=_ai_input_nested_key(piece),
+        )
+    )
+    diagnostics.extend(
+        _diagnose_unknown_references(
+            template,
+            piece,
+            index,
+            refs=tool_policy_refs,
+            declared_ids=tool_policy_ids,
+            code="template.reference.ai_input_unknown_tool_policy",
+            label="tool_policy",
+            field="tool_policy",
+            nested_key=_ai_input_nested_key(piece),
+        )
+    )
+    diagnostics.extend(
+        _diagnose_metadata_executable_refs(
+            template,
+            piece,
+            index,
+            data,
+            nested_key=_ai_input_nested_key(piece),
+            code="template.reference.ai_input_executable_ref",
+            label="ai_input",
+        )
+    )
+    return diagnostics
+
+
 def _field_renderer_types(data: dict[str, Any]) -> set[str]:
     raw = data.get("field_types")
     if isinstance(raw, list):
@@ -657,6 +909,28 @@ def _piece_payload(piece: Any, nested_key: str) -> dict[str, Any]:
     return dict(piece.data)
 
 
+def _ai_input_payload(piece: Any) -> dict[str, Any]:
+    nested = piece.data.get("ai_input")
+    if isinstance(nested, dict):
+        return dict(nested)
+    return _piece_payload(piece, "input")
+
+
+def _tool_policy_payload(piece: Any) -> dict[str, Any]:
+    nested = piece.data.get("tool_policy")
+    if isinstance(nested, dict):
+        return dict(nested)
+    return _piece_payload(piece, "policy")
+
+
+def _ai_input_nested_key(piece: Any) -> str:
+    return "ai_input" if isinstance(piece.data.get("ai_input"), dict) else "input"
+
+
+def _tool_policy_nested_key(piece: Any) -> str:
+    return "tool_policy" if isinstance(piece.data.get("tool_policy"), dict) else "policy"
+
+
 def _piece_payload_id(piece: Any, nested_key: str, *aliases: str) -> str:
     return _payload_id(_piece_payload(piece, nested_key), piece, *aliases)
 
@@ -669,12 +943,132 @@ def _payload_id(data: dict[str, Any], piece: Any, *aliases: str) -> str:
     return str(piece.id or "").strip()
 
 
+def _payload_ids(data: dict[str, Any], piece: Any, *aliases: str) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+    for key in (*aliases, "id", "name"):
+        value = str(data.get(key) or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ids.append(value)
+    piece_id = str(piece.id or "").strip()
+    if piece_id and piece_id not in seen:
+        ids.append(piece_id)
+    return ids
+
+
 def _first_string(data: dict[str, Any], *keys: str) -> str:
     for key in keys:
         value = str(data.get(key) or "").strip()
         if value:
             return value
     return ""
+
+
+def _reference_list(data: dict[str, Any], *keys: str) -> list[str]:
+    refs: list[str] = []
+    seen: set[str] = set()
+    for key in keys:
+        value = data.get(key)
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            if not isinstance(item, str):
+                continue
+            ref = item.strip()
+            if not ref or ref in seen:
+                continue
+            seen.add(ref)
+            refs.append(ref)
+    return refs
+
+
+def _is_string_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) and item.strip() for item in value)
+
+
+def _valid_tool_choice(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip() in TOOL_CHOICE_VALUES
+    return isinstance(value, dict)
+
+
+def _validate_nested_object(
+    template: RumiTemplate,
+    piece: Any,
+    index: int,
+    nested_key: str,
+) -> list[TemplateDiagnostic]:
+    if nested_key not in piece.data or isinstance(piece.data.get(nested_key), dict):
+        return []
+    return [
+        TemplateDiagnostic(
+            code="template.reference.invalid_nested_payload",
+            message=f"{nested_key} must be an object",
+            template_id=template.id,
+            piece_id=piece.id or None,
+            path=f"/pieces/{index}/{nested_key}",
+            source_path=str(template.source_path) if template.source_path else None,
+        )
+    ]
+
+
+def _diagnose_unknown_references(
+    template: RumiTemplate,
+    piece: Any,
+    index: int,
+    *,
+    refs: list[str],
+    declared_ids: set[str],
+    code: str,
+    label: str,
+    field: str,
+    nested_key: str,
+) -> list[TemplateDiagnostic]:
+    diagnostics: list[TemplateDiagnostic] = []
+    for ref in refs:
+        if ref in declared_ids:
+            continue
+        diagnostics.append(
+            _piece_diagnostic(
+                template,
+                piece,
+                index,
+                code=code,
+                message=f"ai_input references unknown {label}: {ref}",
+                field=field,
+                nested_key=nested_key,
+            )
+        )
+    return diagnostics
+
+
+def _diagnose_metadata_executable_refs(
+    template: RumiTemplate,
+    piece: Any,
+    index: int,
+    data: dict[str, Any],
+    *,
+    nested_key: str,
+    code: str,
+    label: str,
+) -> list[TemplateDiagnostic]:
+    diagnostics: list[TemplateDiagnostic] = []
+    for field_name in METADATA_ONLY_EXECUTABLE_REF_FIELDS:
+        if field_name not in data:
+            continue
+        diagnostics.append(
+            _piece_diagnostic(
+                template,
+                piece,
+                index,
+                code=code,
+                message=f"{label} is metadata/policy only and cannot declare executable {field_name}",
+                field=field_name,
+                nested_key=nested_key,
+            )
+        )
+    return diagnostics
 
 
 def _piece_diagnostic(

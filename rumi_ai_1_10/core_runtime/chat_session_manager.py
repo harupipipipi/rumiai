@@ -11,6 +11,7 @@ Does NOT modify ChatStore itself.
 import time
 import copy
 import uuid
+from typing import Any, Callable
 
 
 def _gen_id():
@@ -23,13 +24,46 @@ def _now_ms():
 
 class SessionManager:
     _instance = None
+    _chat_store_factory: Callable[[], Any] | None = None
 
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         if cls.__dict__.get("_instance") is None:
             cls._instance = super().__new__(cls)
             cls._instance._sessions = {}
             cls._instance._active_session_id = None
         return cls._instance
+
+    def __init__(self, chat_store_factory: Callable[[], Any] | None = None):
+        if chat_store_factory is not None:
+            self._chat_store_factory = chat_store_factory
+
+    @classmethod
+    def with_dependencies(
+        cls,
+        *,
+        chat_store_factory: Callable[[], Any] | None = None,
+    ) -> type["SessionManager"]:
+        dependencies = {
+            key: value
+            for key, value in {"chat_store_factory": chat_store_factory}.items()
+            if value is not None
+        }
+
+        class BoundSessionManager(cls):
+            def __init__(self, *args: Any, **kwargs: Any):
+                for key, value in dependencies.items():
+                    kwargs.setdefault(key, value)
+                super().__init__(*args, **kwargs)
+
+        BoundSessionManager.__name__ = cls.__name__
+        BoundSessionManager.__qualname__ = cls.__qualname__
+        BoundSessionManager.__module__ = cls.__module__
+        return BoundSessionManager
+
+    def _chat_store(self):
+        if self._chat_store_factory is None:
+            raise RuntimeError("chat_store_dependency_missing")
+        return self._chat_store_factory()
 
     # ----------------------------------------------------------
     # Session CRUD
@@ -143,9 +177,7 @@ class SessionManager:
         if session is None:
             return None
         # Verify conversation exists
-        from domain.chat.store import ChatStore
-
-        store = ChatStore()
+        store = self._chat_store()
         conv = store.get_conversation(conversation_id)
         if conv is None:
             raise ValueError("conversation_not_found")
@@ -187,9 +219,7 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if session is None:
             return None
-        from domain.chat.store import ChatStore
-
-        store = ChatStore()
+        store = self._chat_store()
         conversations = []
         for cid in session["conversation_ids"]:
             conv = store.get_conversation(cid)

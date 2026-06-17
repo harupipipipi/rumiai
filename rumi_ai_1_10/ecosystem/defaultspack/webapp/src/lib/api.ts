@@ -1202,6 +1202,47 @@ export type TemplateContextPolicy = {
   metadata?: Record<string, unknown>;
 };
 
+export type TemplateToolPolicy = {
+  id: string;
+  label?: string;
+  description?: string;
+  toggleable?: boolean;
+  default_enabled_tools?: string[];
+  default_disabled_tools?: string[];
+  allowed_tools?: string[];
+  denied_tools?: string[];
+  tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
+  parallel_tool_calls?: boolean;
+  params?: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateAiInput = {
+  id: string;
+  label?: string;
+  description?: string;
+  composer_input?: string;
+  composer_input_id?: string;
+  context_policy?: string;
+  context_policy_id?: string;
+  tool_policy?: string;
+  tool_policy_id?: string;
+  widgets?: string[];
+  params?: Record<string, unknown>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
 export type TemplateCatalogMetadataItem = {
   id?: string;
   label?: string;
@@ -1309,6 +1350,8 @@ export type UICatalog = {
   skills?: SkillCatalogItem[];
   commands?: ComposerCommandItem[];
   composer_inputs?: TemplateComposerInput[];
+  ai_inputs?: TemplateAiInput[];
+  tool_policies?: TemplateToolPolicy[];
   context_policies?: TemplateContextPolicy[];
   composer_widgets?: TemplateCatalogMetadataItem[];
   extension_points: Array<{

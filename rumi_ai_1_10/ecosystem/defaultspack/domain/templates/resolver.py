@@ -245,7 +245,7 @@ def _resolve_pointer_parent(raw: Any, pointer: str) -> tuple[Any, str]:
 
 def _get_child(current: Any, token: str) -> Any:
     if isinstance(current, list):
-        return current[int(token)]
+        return current[_list_index(token, len(current))]
     if isinstance(current, dict):
         return current[token]
     raise TypeError("pointer traversed a scalar value")
@@ -253,7 +253,7 @@ def _get_child(current: Any, token: str) -> Any:
 
 def _replace_value(parent: Any, token: str, value: Any) -> None:
     if isinstance(parent, list):
-        parent[int(token)] = value
+        parent[_list_index(token, len(parent))] = value
     else:
         if token not in parent:
             raise KeyError(token)
@@ -265,16 +265,26 @@ def _add_value(parent: Any, token: str, value: Any) -> None:
         if token == "-":
             parent.append(value)
         else:
-            parent.insert(int(token), value)
+            parent.insert(_list_index(token, len(parent), allow_end=True), value)
     else:
         parent[token] = value
 
 
 def _remove_value(parent: Any, token: str) -> None:
     if isinstance(parent, list):
-        del parent[int(token)]
+        del parent[_list_index(token, len(parent))]
     else:
         del parent[token]
+
+
+def _list_index(token: str, length: int, *, allow_end: bool = False) -> int:
+    if not token.isdigit():
+        raise IndexError(f"invalid list index: {token}")
+    index = int(token)
+    upper_bound = length if allow_end else length - 1
+    if index > upper_bound:
+        raise IndexError(f"list index out of range: {token}")
+    return index
 
 
 def _unescape_pointer(token: str) -> str:

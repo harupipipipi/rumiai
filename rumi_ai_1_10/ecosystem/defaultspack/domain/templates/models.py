@@ -17,6 +17,8 @@ class TemplatePieceKind(str, Enum):
     COMPOSER_COMMAND = "composer_command"
     COMPOSER_INPUT = "composer_input"
     COMPOSER_WIDGET = "composer_widget"
+    AI_INPUT = "ai_input"
+    TOOL_POLICY = "tool_policy"
     SIDEBAR_ITEM = "sidebar_item"
     CHAT_RENDERER = "chat_renderer"
     SHELL_REGION = "shell_region"

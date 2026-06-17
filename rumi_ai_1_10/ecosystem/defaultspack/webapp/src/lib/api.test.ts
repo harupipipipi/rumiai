@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
+import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateComposerWidgetsForInput, templateToolPolicySettings } from "./templateAiInput";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
 
@@ -130,6 +131,105 @@ test("composer command feedback surfaces pack block result messages and paths", 
     }),
     "Command wrote /tmp/rumi/context.txt",
   );
+});
+
+test("template ai input selects composer and tool policy metadata", () => {
+  const catalog = {
+    ai_inputs: [
+      {
+        id: "default_ai_input",
+        composer_input: "default_composer",
+        tool_policy: "agent_tools",
+        modes: ["agent" as const],
+      },
+    ],
+    composer_inputs: [
+      { id: "default_composer", placeholder: "Ask Rumi" },
+    ],
+    tool_policies: [
+      {
+        id: "agent_tools",
+        policy: {
+          default_enabled_tools: ["web_search"],
+          default_disabled_tools: ["terminal"],
+          allowed_tools: ["web_search", "local_file"],
+          denied_tools: ["browser_computer"],
+          tool_choice: "auto",
+          parallel_tool_calls: true,
+        },
+      },
+    ],
+  };
+
+  const aiInput = selectTemplateAiInput(catalog as any, "agent");
+  const composerInput = selectTemplateComposerInput(catalog as any, "agent", aiInput);
+  const toolPolicy = selectTemplateToolPolicy(catalog as any, "agent", aiInput);
+  const settings = templateToolPolicySettings(toolPolicy);
+
+  assert.equal(aiInput?.id, "default_ai_input");
+  assert.equal(composerInput?.id, "default_composer");
+  assert.equal(toolPolicy?.id, "agent_tools");
+  assert.deepEqual(settings.defaultEnabledToolIds, ["web_search"]);
+  assert.deepEqual(settings.defaultDisabledToolIds, ["terminal"]);
+  assert.deepEqual(settings.allowedToolIds, ["web_search", "local_file"]);
+  assert.deepEqual(settings.deniedToolIds, ["browser_computer"]);
+  assert.equal(settings.toolChoice, "auto");
+  assert.equal(settings.parallelToolCalls, true);
+});
+
+test("template composer widgets become safe tool toggle widgets", () => {
+  const catalog = {
+    composer_widgets: [
+      {
+        id: "web_search_toggle",
+        widget: {
+          tool_id: "web_search",
+          label: "Web",
+          widget_kind: "tool_toggle",
+        },
+      },
+      {
+        id: "unsafe_endpoint",
+        widget: {
+          label: "Unsafe",
+          widget_kind: "button",
+          action: { type: "call_endpoint", endpoint: "/api/anything" },
+        },
+      },
+    ],
+  };
+
+  const widgets = templateComposerWidgetsForInput(
+    catalog as any,
+    null,
+    null,
+    [{ id: "web_search", label: "Web Search", category: "tool" }],
+  );
+
+  assert.equal(widgets.length, 1);
+  assert.deepEqual(widgets[0], {
+    id: "web_search_toggle",
+    type: "tool",
+    label: "Web",
+    description: undefined,
+    enabled: true,
+    widgetKind: "tool_toggle",
+    action: { type: "toggle_tool", tool_id: "web_search" },
+    sourceItemId: "web_search",
+    icon: undefined,
+    metadata: {
+      source: "template_catalog_widget",
+      template_id: null,
+      piece_id: null,
+      widget_id: "web_search_toggle",
+      tool: {
+        id: "web_search",
+        label: "Web Search",
+        category: "tool",
+        tags: [],
+      },
+    },
+  });
 });
 
 test("ultra yolo restore state returns to the previous yolo mode", () => {

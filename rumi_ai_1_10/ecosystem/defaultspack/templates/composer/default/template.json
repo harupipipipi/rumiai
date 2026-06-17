@@ -131,6 +131,47 @@
         "source": "conversation_context",
         "delivery": "composer_command"
       }
+    },
+    {
+      "id": "default_tool_policy",
+      "kind": "tool_policy",
+      "order": 55,
+      "policy": {
+        "id": "default_tools",
+        "toggleable": true,
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "default_enabled_tools": [],
+        "default_disabled_tools": []
+      }
+    },
+    {
+      "id": "default_ai_input",
+      "kind": "ai_input",
+      "order": 56,
+      "input": {
+        "id": "default_ai_input",
+        "composer_input": "default_composer",
+        "context_policy": "materialize_txt",
+        "tool_policy": "default_tools",
+        "widgets": [
+          "web_search_toggle"
+        ],
+        "params": {}
+      }
+    },
+    {
+      "id": "web_search_toggle",
+      "kind": "composer_widget",
+      "order": 57,
+      "widget": {
+        "id": "web_search_toggle",
+        "tool_id": "web_search",
+        "label": "Web Search",
+        "description": "Toggle web search for this AI input.",
+        "widget_kind": "tool_toggle",
+        "enabled": false
+      }
     }
   ]
 }

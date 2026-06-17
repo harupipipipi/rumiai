@@ -100,6 +100,8 @@ class FrontendRegistry:
             "template_diagnostics": template_catalog.get("template_diagnostics", []),
             "commands": template_catalog.get("commands", []),
             "composer_inputs": template_catalog.get("composer_inputs", []),
+            "ai_inputs": template_catalog.get("ai_inputs", []),
+            "tool_policies": template_catalog.get("tool_policies", []),
             "composer_widgets": template_catalog.get("composer_widgets", []),
             "context_policies": template_catalog.get("context_policies", []),
             "shell_regions": template_catalog.get("shell_regions", []),
@@ -2151,7 +2153,8 @@ class FrontendRegistry:
 
     def _template_catalog_metadata(self) -> dict[str, Any]:
         try:
-            build_template_catalog = importlib.import_module("domain.templates.projectors").build_template_catalog
+            template_projectors = importlib.import_module("domain.templates.projectors")
+            build_template_catalog = template_projectors.build_template_catalog
             catalog = build_template_catalog(defaultspack_root=self._pack_root)
         except Exception as exc:
             self._add_diagnostic(
@@ -2183,65 +2186,37 @@ class FrontendRegistry:
 
     @staticmethod
     def _empty_template_catalog() -> dict[str, Any]:
-        return {
-            "templates": [],
-            "field_renderers": [],
-            "data_sources": [],
-            "actions": [],
-            "backend_services": [],
-            "api_routes": [],
-            "permissions": [],
-            "template_diagnostics": [],
-            "settings_sections": [],
-            "component_bindings": [],
-            "sidebar_items": [],
-            "chat_renderers": [],
-            "commands": [],
-            "composer_inputs": [],
-            "composer_widgets": [],
-            "context_policies": [],
-            "shell_regions": [],
-            "shell_renderers": [],
-        }
+        try:
+            return importlib.import_module("domain.templates.projectors").empty_template_catalog()
+        except Exception:
+            return {"template_diagnostics": []}
 
     def _merge_settings_sections(
         self,
         base_sections: list[dict[str, Any]],
         extra_sections: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        merged: dict[str, dict[str, Any]] = {}
-        order: list[str] = []
-        for section in [*base_sections, *extra_sections]:
-            if not isinstance(section, dict):
-                continue
-            section_id = str(section.get("id") or "").strip()
-            if not section_id:
-                continue
-            if section_id not in merged:
-                current = deepcopy(section)
-                current["fields"] = self._dedupe_by_key(
-                    [field for field in current.get("fields", []) if isinstance(field, dict)],
-                    "id",
-                )
-                merged[section_id] = current
-                order.append(section_id)
-                continue
-            current = merged[section_id]
-            for key, value in section.items():
-                if key == "fields":
-                    continue
-                if key in current and current.get(key) not in (None, "", [], {}):
-                    continue
-                if value not in (None, "", [], {}):
-                    current[key] = deepcopy(value)
-            current["fields"] = self._dedupe_by_key(
-                [
-                    *[field for field in current.get("fields", []) if isinstance(field, dict)],
-                    *[field for field in section.get("fields", []) if isinstance(field, dict)],
-                ],
-                "id",
+        try:
+            merge_settings_sections = importlib.import_module("domain.templates.projectors").merge_settings_sections
+            sections, diagnostics = merge_settings_sections([*base_sections, *extra_sections])
+        except Exception as exc:
+            self._add_diagnostic(
+                "warning",
+                "template_settings_merge_failed",
+                f"failed to merge template settings sections: {exc}",
+                "domain/templates/projectors",
             )
-        return [merged[section_id] for section_id in order]
+            return [section for section in [*base_sections, *extra_sections] if isinstance(section, dict)]
+        for diagnostic in diagnostics:
+            if not isinstance(diagnostic, dict):
+                continue
+            self._add_diagnostic(
+                str(diagnostic.get("level") or diagnostic.get("severity") or "warning"),
+                str(diagnostic.get("code") or "template_settings_diagnostic"),
+                str(diagnostic.get("message") or ""),
+                str(diagnostic.get("source") or diagnostic.get("source_path") or "template_catalog"),
+            )
+        return sections
 
     def _diagnostics(
         self,

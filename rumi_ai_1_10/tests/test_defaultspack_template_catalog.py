@@ -11,6 +11,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.frontend.registry import FrontendRegistry  # noqa: E402
 from domain.templates import ResolvedTemplate, build_template_catalog, parse_template, project_resolved_templates  # noqa: E402
+from domain.templates.projectors import empty_template_catalog  # noqa: E402
 
 
 def _field_types(sections: list[dict]) -> set[str]:
@@ -95,6 +96,79 @@ def test_template_catalog_projects_composer_surface_pieces():
     assert all(item["projected_id"].startswith("rumi.composer.default:") for item in projected)
     assert all(item["origin"]["template_id"] == "rumi.composer.default" for item in projected)
     assert all(item["_source"].endswith("templates/composer/default/template.json") for item in projected)
+
+
+def test_empty_template_catalog_exposes_ai_input_and_tool_policy_buckets():
+    catalog = empty_template_catalog()
+    other = empty_template_catalog()
+
+    assert "ai_inputs" in catalog
+    assert "tool_policies" in catalog
+    catalog["ai_inputs"].append({"id": "mutated"})
+    assert other["ai_inputs"] == []
+
+
+def test_template_catalog_projects_ai_input_and_tool_policy_metadata():
+    parsed = parse_template(
+        {
+            "id": "template.ai.input",
+            "kind": "frontend",
+            "version": "1.0.0",
+            "status": "active",
+            "pieces": [
+                {
+                    "id": "chat_composer_piece",
+                    "kind": "composer_input",
+                    "input": {"id": "chat_composer", "region_id": "composer", "renderer": "composer"},
+                },
+                {
+                    "id": "chat_context_piece",
+                    "kind": "context_policy",
+                    "policy": {"id": "chat_context", "mode": "materialize_txt"},
+                },
+                {
+                    "id": "chat_tools_piece",
+                    "kind": "tool_policy",
+                    "policy": {
+                        "id": "chat_tools",
+                        "toggleable": True,
+                        "default_enabled_tools": ["web_search"],
+                        "default_disabled_tools": ["terminal_exec"],
+                        "tool_choice": "auto",
+                        "parallel_tool_calls": True,
+                        "params": {"max_tool_count": 4},
+                    },
+                },
+                {
+                    "id": "chat_ai_input_piece",
+                    "kind": "ai_input",
+                    "input": {
+                        "id": "chat_ai_input",
+                        "composer_input": "chat_composer",
+                        "context_policy": "chat_context",
+                        "tool_policy": "chat_tools",
+                        "params": {"thinking_level": "medium"},
+                    },
+                },
+            ],
+        }
+    )
+    assert parsed.ok
+    assert parsed.template is not None
+
+    catalog = project_resolved_templates([ResolvedTemplate(template=parsed.template)])
+
+    ai_input = next(item for item in catalog["ai_inputs"] if item["id"] == "chat_ai_input")
+    tool_policy = next(item for item in catalog["tool_policies"] if item["id"] == "chat_tools")
+    assert ai_input["composer_input"] == "chat_composer"
+    assert ai_input["context_policy"] == "chat_context"
+    assert ai_input["tool_policy"] == "chat_tools"
+    assert ai_input["projected_id"] == "template.ai.input:chat_ai_input_piece"
+    assert tool_policy["default_enabled_tools"] == ["web_search"]
+    assert tool_policy["default_disabled_tools"] == ["terminal_exec"]
+    assert tool_policy["parallel_tool_calls"] is True
+    assert tool_policy["origin"]["template_id"] == "template.ai.input"
+    assert not catalog["template_diagnostics"]
 
 
 def test_frontend_catalog_merges_template_metadata_without_dropping_existing_keys():

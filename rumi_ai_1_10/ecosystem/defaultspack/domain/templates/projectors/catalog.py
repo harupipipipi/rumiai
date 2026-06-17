@@ -25,6 +25,8 @@ CATALOG_KEYS = (
     "commands",
     "composer_inputs",
     "composer_widgets",
+    "ai_inputs",
+    "tool_policies",
     "shell_regions",
     "shell_renderers",
     "context_policies",
@@ -37,7 +39,7 @@ def build_template_catalog(
     defaultspack_root: str | Path | None = None,
     roots: list[str | Path] | None = None,
 ) -> dict[str, Any]:
-    catalog = _empty_catalog()
+    catalog = empty_template_catalog()
     registry, diagnostics = build_template_registry(
         [str(root) for root in roots] if roots is not None else None,
         defaultspack_root=str(defaultspack_root) if defaultspack_root is not None else None,
@@ -56,7 +58,7 @@ def build_template_catalog(
 
 
 def project_resolved_templates(resolved_templates: list[ResolvedTemplate]) -> dict[str, Any]:
-    catalog = _empty_catalog()
+    catalog = empty_template_catalog()
     for resolved in resolved_templates:
         template = resolved.template
         if template is None:
@@ -88,6 +90,8 @@ def project_resolved_templates(resolved_templates: list[ResolvedTemplate]) -> di
         "commands",
         "composer_inputs",
         "composer_widgets",
+        "ai_inputs",
+        "tool_policies",
         "shell_regions",
         "shell_renderers",
         "context_policies",
@@ -151,6 +155,10 @@ def _project_piece(catalog: dict[str, Any], template: RumiTemplate, piece: Templ
         catalog["composer_inputs"].append(_composer_input(template, piece))
     elif kind == "composer_widget":
         catalog["composer_widgets"].append(_metadata_item(template, piece, default_id=piece.id))
+    elif kind == "ai_input":
+        catalog["ai_inputs"].append(_ai_input(template, piece))
+    elif kind == "tool_policy":
+        catalog["tool_policies"].append(_tool_policy(template, piece))
     elif kind == "shell_region":
         catalog["shell_regions"].append(_shell_region(template, piece))
     elif kind == "shell_renderer":
@@ -235,6 +243,21 @@ def _shell_renderer(template: RumiTemplate, piece: TemplatePiece) -> dict[str, A
 def _context_policy(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
     data = _piece_payload(piece, "policy")
     return _metadata_item_from_data(template, piece, data, default_id=_payload_id(data, piece, "policy_id", "mode"))
+
+
+def _ai_input(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
+    data = _ai_input_payload(piece)
+    return _metadata_item_from_data(template, piece, data, default_id=_payload_id(data, piece, "ai_input_id", "input_id"))
+
+
+def _tool_policy(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
+    data = _tool_policy_payload(piece)
+    return _metadata_item_from_data(
+        template,
+        piece,
+        data,
+        default_id=_payload_id(data, piece, "policy_id", "tool_policy_id"),
+    )
 
 
 def _settings_section(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
@@ -378,6 +401,10 @@ def _merge_settings_sections(sections: list[dict[str, Any]]) -> tuple[list[dict[
     return [merged[section_id] for section_id in order], diagnostics
 
 
+def merge_settings_sections(sections: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    return _merge_settings_sections(sections)
+
+
 def _merge_settings_fields(
     fields: list[dict[str, Any]],
     *,
@@ -477,7 +504,7 @@ def _diagnostic_to_dict(diagnostic: TemplateDiagnostic) -> dict[str, Any]:
     }
 
 
-def _empty_catalog() -> dict[str, Any]:
+def empty_template_catalog() -> dict[str, Any]:
     return {key: [] for key in CATALOG_KEYS}
 
 
@@ -511,6 +538,20 @@ def _piece_payload(piece: TemplatePiece, nested_key: str) -> dict[str, Any]:
     if isinstance(nested, dict):
         return deepcopy(nested)
     return deepcopy(piece.data)
+
+
+def _ai_input_payload(piece: TemplatePiece) -> dict[str, Any]:
+    nested = piece.data.get("ai_input")
+    if isinstance(nested, dict):
+        return deepcopy(nested)
+    return _piece_payload(piece, "input")
+
+
+def _tool_policy_payload(piece: TemplatePiece) -> dict[str, Any]:
+    nested = piece.data.get("tool_policy")
+    if isinstance(nested, dict):
+        return deepcopy(nested)
+    return _piece_payload(piece, "policy")
 
 
 def _payload_id(data: dict[str, Any], piece: TemplatePiece, *aliases: str) -> str:

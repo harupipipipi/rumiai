@@ -94,3 +94,31 @@ def test_resolver_reports_missing_dependencies_capabilities_and_duplicate_pieces
     assert "template.capability.missing" in codes
     assert "template.piece.duplicate_id" in codes
     assert not resolved.ok
+
+
+def test_resolver_rejects_invalid_list_add_patch_indices():
+    registry = TemplateRegistry()
+    _register(
+        registry,
+        {
+            "id": "patched.template",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "pieces": [{"id": "anchor", "kind": "function"}],
+            "patches": [
+                {"op": "add", "path": "/pieces/-1", "value": {"id": "negative", "kind": "function"}},
+                {"op": "add", "path": "/pieces/99", "value": {"id": "past_end", "kind": "function"}},
+            ],
+        },
+    )
+
+    resolved = resolve_template("patched.template", registry)
+
+    assert resolved.template is not None
+    assert [piece.id for piece in resolved.template.pieces] == ["anchor"]
+    failures = [diagnostic for diagnostic in resolved.diagnostics if diagnostic.code == "template.patch.apply_failed"]
+    assert len(failures) == 2
+    assert any("invalid list index: -1" in diagnostic.message for diagnostic in failures)
+    assert any("list index out of range: 99" in diagnostic.message for diagnostic in failures)
+    assert not resolved.ok

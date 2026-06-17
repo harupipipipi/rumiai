@@ -83,6 +83,60 @@ def test_parse_template_accepts_composer_shell_and_context_piece_kinds():
     }
 
 
+def test_parse_template_accepts_ai_input_and_tool_policy_piece_kinds():
+    raw = {
+        "id": "ai.input.template",
+        "kind": "frontend",
+        "version": "1.0.0",
+        "status": "active",
+        "pieces": [
+            {
+                "id": "composer_input",
+                "kind": "composer_input",
+                "input": {"id": "default_composer", "region_id": "composer", "renderer": "composer"},
+            },
+            {
+                "id": "context_policy",
+                "kind": "context_policy",
+                "policy": {"id": "materialize_txt", "mode": "materialize_txt"},
+            },
+            {
+                "id": "tool_policy",
+                "kind": "tool_policy",
+                "policy": {
+                    "id": "chat_tools",
+                    "toggleable": True,
+                    "default_enabled_tools": ["web_search"],
+                    "default_disabled_tools": ["terminal_exec"],
+                    "tool_choice": {"type": "function", "function": {"name": "write_file"}},
+                    "parallel_tool_calls": False,
+                    "params": {"max_tool_count": 1},
+                },
+            },
+            {
+                "id": "ai_input",
+                "kind": "ai_input",
+                "input": {
+                    "id": "default_ai_input",
+                    "composer_input": "default_composer",
+                    "context_policy": "materialize_txt",
+                    "tool_policy": "chat_tools",
+                    "params": {"thinking_level": "low"},
+                },
+            },
+        ],
+    }
+
+    result = parse_template(raw)
+
+    assert result.ok
+    assert result.template is not None
+    assert {piece.kind for piece in result.template.pieces} >= {
+        TemplatePieceKind.AI_INPUT,
+        TemplatePieceKind.TOOL_POLICY,
+    }
+
+
 def test_parse_template_reports_required_and_enum_errors():
     result = parse_template(
         {
@@ -186,6 +240,64 @@ def test_reference_validation_reports_composer_shell_and_context_errors():
     assert "template.reference.shell_renderer_missing_local_trust" in codes
     assert "template.reference.shell_region_unknown_renderer" in codes
     assert "template.reference.context_policy_missing_mode" in codes
+    assert not result.ok
+
+
+def test_reference_validation_reports_ai_input_and_tool_policy_errors():
+    result = parse_template(
+        {
+            "id": "bad.ai.input.refs",
+            "kind": "frontend",
+            "version": "1.0.0",
+            "status": "active",
+            "pieces": [
+                {
+                    "id": "bad_tool_policy",
+                    "kind": "tool_policy",
+                    "policy": {
+                        "id": "bad_tools",
+                        "toggleable": "yes",
+                        "default_enabled_tools": ["web_search", 3],
+                        "default_disabled_tools": "terminal_exec",
+                        "tool_choice": "manual",
+                        "parallel_tool_calls": "true",
+                        "params": [],
+                        "handler_ref": "domain.bad:run",
+                    },
+                },
+                {
+                    "id": "empty_tool_policy",
+                    "kind": "tool_policy",
+                    "policy": {"id": "empty_tools"},
+                },
+                {
+                    "id": "bad_ai_input",
+                    "kind": "ai_input",
+                    "input": {
+                        "id": "bad_ai_input",
+                        "composer_input": "missing_composer",
+                        "context_policy": "missing_context",
+                        "tool_policy": "missing_tools",
+                        "params": [],
+                        "entrypoint": "domain.bad:start",
+                    },
+                },
+            ],
+        }
+    )
+
+    codes = {diagnostic.code for diagnostic in result.diagnostics}
+    assert "template.reference.tool_policy_invalid_boolean" in codes
+    assert "template.reference.tool_policy_invalid_string_list" in codes
+    assert "template.reference.tool_policy_invalid_tool_choice" in codes
+    assert "template.reference.tool_policy_invalid_params" in codes
+    assert "template.reference.tool_policy_executable_ref" in codes
+    assert "template.reference.tool_policy_empty" in codes
+    assert "template.reference.ai_input_invalid_params" in codes
+    assert "template.reference.ai_input_unknown_composer_input" in codes
+    assert "template.reference.ai_input_unknown_context_policy" in codes
+    assert "template.reference.ai_input_unknown_tool_policy" in codes
+    assert "template.reference.ai_input_executable_ref" in codes
     assert not result.ok
 
 

@@ -15,15 +15,20 @@ class TemplateRegistry:
     def register(self, template: RumiTemplate, *, validate: bool = True) -> list[TemplateDiagnostic]:
         diagnostics: list[TemplateDiagnostic] = []
         if template.id in self._templates:
+            existing = self._templates[template.id]
             diagnostics.append(
                 TemplateDiagnostic(
                     code="template.registry.duplicate_template",
-                    message=f"template id already registered: {template.id}",
-                    severity="warning",
+                    message=(
+                        f"duplicate template id rejected: {template.id}; "
+                        f"existing source={existing.source_path}, duplicate source={template.source_path}"
+                    ),
                     template_id=template.id,
                     source_path=str(template.source_path) if template.source_path else None,
                 )
             )
+            self._diagnostics[template.id].extend(diagnostics)
+            return diagnostics
         if validate:
             diagnostics.extend(validate_template(template))
         self._templates[template.id] = template

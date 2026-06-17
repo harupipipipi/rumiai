@@ -13,6 +13,7 @@ from domain.templates import (  # noqa: E402
     TemplateRegistry,
     TemplateRoot,
     TemplateTrustLevel,
+    build_template_registry,
     default_template_roots,
     discover_templates,
     load_template_file,
@@ -44,7 +45,12 @@ def test_registry_register_list_and_get():
     assert [template.id for template in registry.list(status="active")] == ["template.one"]
 
     duplicate_diagnostics = registry.register(_template("template.one"))
-    assert any(diagnostic.code == "template.registry.duplicate_template" for diagnostic in duplicate_diagnostics)
+    duplicate = next(
+        diagnostic
+        for diagnostic in duplicate_diagnostics
+        if diagnostic.code == "template.registry.duplicate_template"
+    )
+    assert duplicate.severity == "error"
 
 
 def test_discovery_reads_template_json_and_keeps_json_parse_errors_as_diagnostics(tmp_path):
@@ -81,3 +87,33 @@ def test_default_roots_are_stable_and_missing_roots_are_ok(tmp_path):
         TemplateRoot(tmp_path / "user_data" / "shared" / "templates", TemplateTrustLevel.USER),
     ]
     assert discover_templates(defaultspack_root=tmp_path).templates == []
+
+
+def test_user_template_cannot_override_builtin_with_same_id(tmp_path):
+    builtin = tmp_path / "templates" / "shared" / "template.json"
+    user = tmp_path / "user_data" / "shared" / "templates" / "shared" / "template.json"
+    builtin.parent.mkdir(parents=True)
+    user.parent.mkdir(parents=True)
+    template = {
+        "id": "shared.template",
+        "kind": "pack",
+        "version": "1.0.0",
+        "status": "active",
+        "pieces": [{"id": "fn", "kind": "function"}],
+    }
+    builtin.write_text(json.dumps({**template, "metadata": {"source": "builtin"}}), encoding="utf-8")
+    user.write_text(json.dumps({**template, "metadata": {"source": "user"}}), encoding="utf-8")
+
+    registry, diagnostics = build_template_registry(defaultspack_root=str(tmp_path))
+
+    registered = registry.get("shared.template")
+    assert registered is not None
+    assert registered.trust_level == TemplateTrustLevel.BUILTIN
+    assert registered.metadata["source"] == "builtin"
+    duplicate = next(
+        diagnostic
+        for diagnostic in diagnostics
+        if diagnostic.code == "template.registry.duplicate_template"
+    )
+    assert duplicate.severity == "error"
+    assert duplicate.source_path == str(user)

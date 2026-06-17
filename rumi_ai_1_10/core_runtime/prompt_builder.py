@@ -33,12 +33,51 @@ from __future__ import annotations
 import copy
 import re
 import uuid
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from domain.prompt.template import PromptTemplate
+from collections.abc import Callable
+from typing import Any
 
 __all__ = ["PromptBuilder", "evaluate_condition"]
+
+
+_VAR_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
+
+
+class _CorePromptTemplate:
+    def __init__(
+        self,
+        name: str = "",
+        description: str = "",
+        variables: list[dict] | None = None,
+        body: str = "",
+        metadata: dict | None = None,
+    ):
+        self.name = name
+        self.description = description
+        self.variables: list[dict] = list(variables or [])
+        self.body = body
+        self.metadata: dict = dict(metadata or {})
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "variables": copy.deepcopy(self.variables),
+            "body": self.body,
+            "metadata": copy.deepcopy(self.metadata),
+        }
+
+
+def _render_template(template: str, variables: dict | None = None) -> str:
+    if not variables:
+        return template
+
+    def _replace(match: re.Match) -> str:
+        key = match.group(1)
+        if key in variables:
+            return str(variables[key])
+        return match.group(0)
+
+    return _VAR_PATTERN.sub(_replace, template)
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +162,10 @@ class PromptBuilder:
         name: str = "",
         description: str = "",
         metadata: dict | None = None,
+        *,
+        prompt_template_factory: Callable[..., Any] | None = None,
+        prompt_manager_factory: Callable[[], Any] | None = None,
+        render_func: Callable[[str, dict | None], str] | None = None,
     ):
         self.name = name
         self.description = description
@@ -130,6 +173,38 @@ class PromptBuilder:
         self._sections: dict[str, dict] = {}
         self._variables: dict[str, Any] = {}
         self._parent_name: str | None = None
+        self._prompt_template_factory = prompt_template_factory
+        self._prompt_manager_factory = prompt_manager_factory
+        self._render_func = render_func
+
+    @classmethod
+    def with_dependencies(
+        cls,
+        *,
+        prompt_template_factory: Callable[..., Any] | None = None,
+        prompt_manager_factory: Callable[[], Any] | None = None,
+        render_func: Callable[[str, dict | None], str] | None = None,
+    ) -> type["PromptBuilder"]:
+        dependencies = {
+            key: value
+            for key, value in {
+                "prompt_template_factory": prompt_template_factory,
+                "prompt_manager_factory": prompt_manager_factory,
+                "render_func": render_func,
+            }.items()
+            if value is not None
+        }
+
+        class BoundPromptBuilder(cls):
+            def __init__(self, *args: Any, **kwargs: Any):
+                for key, value in dependencies.items():
+                    kwargs.setdefault(key, value)
+                super().__init__(*args, **kwargs)
+
+        BoundPromptBuilder.__name__ = cls.__name__
+        BoundPromptBuilder.__qualname__ = cls.__qualname__
+        BoundPromptBuilder.__module__ = cls.__module__
+        return BoundPromptBuilder
 
     # -- セクション操作 -------------------------------------------------------
 
@@ -292,8 +367,10 @@ class PromptBuilder:
         if not self._parent_name:
             return {}
 
-        from domain.prompt.manager import get_manager
-        manager = get_manager()
+        if self._prompt_manager_factory is None:
+            return {}
+
+        manager = self._prompt_manager_factory()
         parent = manager.get_prompt_by_name(self._parent_name)
         if parent is None:
             return {}
@@ -337,7 +414,7 @@ class PromptBuilder:
             merged[sid] = copy.deepcopy(sec)
         return sorted(merged.values(), key=lambda s: s["order"])
 
-    def build(self, context_variables: dict | None = None) -> "PromptTemplate":
+    def build(self, context_variables: dict | None = None) -> Any:
         """全セクションをマージ・条件評価・レンダリングして PromptTemplate を生成する。
 
         Args:
@@ -375,9 +452,8 @@ class PromptBuilder:
         if self._parent_name:
             meta["parent"] = self._parent_name
 
-        from domain.prompt.template import PromptTemplate
-
-        return PromptTemplate(
+        template_factory = self._prompt_template_factory or _CorePromptTemplate
+        return template_factory(
             name=self.name,
             description=self.description,
             variables=variable_defs,
@@ -398,9 +474,8 @@ class PromptBuilder:
         if context_variables:
             all_vars.update(context_variables)
 
-        from domain.prompt.renderer import render as render_template
-
         template = self.build(context_variables)
+        render_template = self._render_func or _render_template
         return render_template(template.body, all_vars)
 
     # -- シリアライズ --------------------------------------------------------
@@ -465,7 +540,6 @@ def _extract_variable_defs(body: str, known_values: dict) -> list[dict]:
     Returns:
         [{"name": str, "type": str, "default": Any, "required": bool}, ...]
     """
-    from domain.prompt.template import _VAR_PATTERN
     found_names = _VAR_PATTERN.findall(body)
     seen: set[str] = set()
     result: list[dict] = []

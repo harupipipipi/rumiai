@@ -36,6 +36,7 @@ import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
+import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateComposerWidgetsForInput, templateToolPolicySettings } from "./lib/templateAiInput";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
@@ -2318,10 +2319,42 @@ function ChatApp() {
   const spotlightShortcutEnabled = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_enabled, true);
   const spotlightShortcutTextInput = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_text_input, true);
   const spotlightShortcutLabel = spotlightShortcutEnabled ? shortcutLabel(spotlightShortcut) : "Off";
+  const composerMode = mode as ComposerCommandMode;
+  const templateAiInputMetadata = useMemo(
+    () => selectTemplateAiInput(catalog, composerMode),
+    [catalog, composerMode],
+  );
+  const composerInputMetadata = useMemo(
+    () => selectTemplateComposerInput(catalog, composerMode, templateAiInputMetadata),
+    [catalog, composerMode, templateAiInputMetadata],
+  );
+  const templateToolPolicyMetadata = useMemo(
+    () => selectTemplateToolPolicy(catalog, composerMode, templateAiInputMetadata),
+    [catalog, composerMode, templateAiInputMetadata],
+  );
+  const activeTemplateToolPolicy = useMemo(
+    () => templateToolPolicySettings(templateToolPolicyMetadata),
+    [templateToolPolicyMetadata],
+  );
   const disabledToolIds = settingList(settingsValues.tools?.disabled_tool_ids);
   const hiddenToolIds = settingList(settingsValues.tools?.hidden_tool_ids);
-  const disabledToolIdSet = useMemo(() => new Set(disabledToolIds), [disabledToolIds]);
+  const templateDisabledToolIds = useMemo(
+    () => [...new Set([
+      ...activeTemplateToolPolicy.defaultDisabledToolIds,
+      ...activeTemplateToolPolicy.deniedToolIds,
+    ])],
+    [activeTemplateToolPolicy.defaultDisabledToolIds, activeTemplateToolPolicy.deniedToolIds],
+  );
+  const effectiveDisabledToolIds = useMemo(
+    () => [...new Set([...disabledToolIds, ...templateDisabledToolIds])],
+    [disabledToolIds, templateDisabledToolIds],
+  );
+  const disabledToolIdSet = useMemo(() => new Set(effectiveDisabledToolIds), [effectiveDisabledToolIds]);
   const hiddenToolIdSet = useMemo(() => new Set(hiddenToolIds), [hiddenToolIds]);
+  const templateAllowedToolIdSet = useMemo(
+    () => new Set(activeTemplateToolPolicy.allowedToolIds),
+    [activeTemplateToolPolicy.allowedToolIds],
+  );
   const sidebarItems: SidebarItem[] = useMemo(
     () => rawSidebarItems.filter((item) => item.category !== "tool" || !hiddenToolIdSet.has(item.id)),
     [hiddenToolIdSet, rawSidebarItems],
@@ -2339,9 +2372,21 @@ function ChatApp() {
   const deepthinkEnabled = parseCommandBoolean(settingsValues.models?.deepthink_enabled, false);
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = useMemo(
-    () => composerExtensionItems(sidebarItems).filter((item) => !disabledToolIdSet.has(item.id)),
-    [disabledToolIdSet, sidebarItems],
+    () => composerExtensionItems(sidebarItems)
+      .filter((item) => !disabledToolIdSet.has(item.id))
+      .filter((item) => templateAllowedToolIdSet.size === 0 || templateAllowedToolIdSet.has(item.id)),
+    [disabledToolIdSet, sidebarItems, templateAllowedToolIdSet],
   );
+  const templateComposerWidgets = useMemo(
+    () => templateComposerWidgetsForInput(catalog, templateAiInputMetadata, composerInputMetadata, composerExtensions),
+    [catalog, templateAiInputMetadata, composerInputMetadata, composerExtensions],
+  );
+  const activeDroppedWidgets = useMemo(() => {
+    const byId = new Map<string, DroppedWidget>();
+    for (const widget of templateComposerWidgets) byId.set(widget.id, widget);
+    for (const widget of droppedWidgets) byId.set(widget.id, widget);
+    return Array.from(byId.values());
+  }, [droppedWidgets, templateComposerWidgets]);
   const composerSkills = useMemo<ComposerSkillItem[]>(() => (
     (catalog?.skills ?? []).map((skill) => ({
       id: skill.id,
@@ -2497,13 +2542,6 @@ function ChatApp() {
         enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
       }));
   }, [activeProfile, commandCatalog, deepthinkEnabled, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, ultraYoloMode, yoloMode]);
-  const composerInputMetadata = useMemo(() => {
-    const inputs = catalog?.composer_inputs ?? [];
-    return inputs.find((item) => (
-      item.enabled !== false
-      && (!item.modes?.length || item.modes.includes(mode as ComposerCommandMode))
-    )) ?? null;
-  }, [catalog?.composer_inputs, mode]);
   const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
@@ -2558,6 +2596,22 @@ function ChatApp() {
       return next.length === current.length ? current : next;
     });
   }, [composerExtensions, setStoredSelectedToolIds]);
+
+  useEffect(() => {
+    const validIds = new Set(composerExtensions.map((tool) => tool.id));
+    const defaults = activeTemplateToolPolicy.defaultEnabledToolIds.filter((toolId) => validIds.has(toolId));
+    if (defaults.length === 0) return;
+    setStoredSelectedToolIds((current) => {
+      let changed = false;
+      const next = [...current];
+      for (const toolId of defaults) {
+        if (next.includes(toolId)) continue;
+        next.push(toolId);
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [activeTemplateToolPolicy.defaultEnabledToolIds, composerExtensions, setStoredSelectedToolIds]);
 
   const updatePendingRequests = (updater: (current: Record<string, PendingChatRequest>) => Record<string, PendingChatRequest>) => {
     setPendingRequests((current) => {
@@ -3959,7 +4013,7 @@ function ChatApp() {
   };
 
   const handleWidgetToggle = (widgetId: string) => {
-    const widget = droppedWidgets.find((candidate) => candidate.id === widgetId);
+    const widget = activeDroppedWidgets.find((candidate) => candidate.id === widgetId);
     if (widget?.widgetKind === "tool_toggle" || widget?.type === "tool") {
       const toolId = widget.sourceItemId || widgetId;
       const item = composerExtensions.find((candidate) => candidate.id === toolId);
@@ -4074,7 +4128,7 @@ function ChatApp() {
         tool_policy: {
           ...((yoloMode || ultraYoloMode) ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
-          ...(disabledToolIds.length ? { disabled_tools: disabledToolIds } : {}),
+          ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
           ...(approvalToolIds.length ? { selected_tools: approvalToolIds } : {}),
         },
         tools: approvalToolIds.length ? approvalToolIds : undefined,
@@ -4465,9 +4519,9 @@ function ChatApp() {
     const submittedToolIdSet = new Set(submittedToolIds);
     const composerToolById = new Map(composerExtensions.map((item) => [item.id, item]));
     const composerSkillById = new Map(composerSkills.map((item) => [item.id, item]));
-    const droppedWidgetToolIds = new Set(droppedWidgets.map((widget) => widget.sourceItemId || widget.id));
+    const droppedWidgetToolIds = new Set(activeDroppedWidgets.map((widget) => widget.sourceItemId || widget.id));
     const droppedWidgetSkillIds = new Set(
-      droppedWidgets
+      activeDroppedWidgets
         .filter((widget) => widget.type === "skill" || widget.widgetKind === "skill_prompt")
         .map((widget) => widget.sourceItemId || widget.id),
     );
@@ -4482,7 +4536,7 @@ function ChatApp() {
       .filter((item): item is ComposerSkillItem => Boolean(item))
       .filter((item) => !droppedWidgetSkillIds.has(item.id))
       .map((item) => composerSkillMentionWidget(item));
-    const submittedDroppedWidgets = [...droppedWidgets, ...mentionedToolWidgets, ...mentionedSkillWidgets];
+    const submittedDroppedWidgets = [...activeDroppedWidgets, ...mentionedToolWidgets, ...mentionedSkillWidgets];
     const selectedToolLabels = submittedToolIds.map((toolId) => composerToolById.get(toolId)?.label || toolId);
     const activeContextForSubmit = workspaceContextFromConversation(activeConversation);
     const groupIdForSubmit = pendingNewTaskContext?.groupId ?? activeContextForSubmit.groupId;
@@ -4816,17 +4870,29 @@ function ChatApp() {
           }
         : {};
       const shouldSendExplicitToolSelection = submittedToolIds.length > 0;
+      const templatePolicyPayload = {
+        ...(templateAiInputMetadata?.id ? { ai_input_id: templateAiInputMetadata.id } : {}),
+        ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
+        ...(activeTemplateToolPolicy.id ? { template_tool_policy_id: activeTemplateToolPolicy.id } : {}),
+        ...(activeTemplateToolPolicy.allowedToolIds.length ? { tool_allowlist: activeTemplateToolPolicy.allowedToolIds } : {}),
+        ...(activeTemplateToolPolicy.deniedToolIds.length ? { tool_denylist: activeTemplateToolPolicy.deniedToolIds } : {}),
+        ...(activeTemplateToolPolicy.defaultEnabledToolIds.length ? { default_enabled_tools: activeTemplateToolPolicy.defaultEnabledToolIds } : {}),
+        ...(activeTemplateToolPolicy.defaultDisabledToolIds.length ? { default_disabled_tools: activeTemplateToolPolicy.defaultDisabledToolIds } : {}),
+      };
+      const requestedToolChoice = submittedToolIds.length > 0 ? "required" : activeTemplateToolPolicy.toolChoice;
 
       await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         deepthink_enabled: deepthinkEnabled,
-        tool_choice: submittedToolIds.length > 0 ? "required" : undefined,
+        tool_choice: requestedToolChoice,
+        parallel_tool_calls: activeTemplateToolPolicy.parallelToolCalls,
         tool_policy: {
+          ...templatePolicyPayload,
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,
           ...mimoCodingPolicy,
           ...(isCodingWorkspaceSubmit && workspaceIdForSubmit ? { workspace_id: workspaceIdForSubmit } : {}),
-          ...(disabledToolIds.length ? { disabled_tools: disabledToolIds } : {}),
+          ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
@@ -4852,6 +4918,9 @@ function ChatApp() {
             workspace_label: workspaceLabelForSubmit,
             workspace_root: workspaceRootForSubmit,
           } : {}),
+          ...(templateAiInputMetadata?.id ? { ai_input_id: templateAiInputMetadata.id } : {}),
+          ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
+          ...(activeTemplateToolPolicy.id ? { template_tool_policy_id: activeTemplateToolPolicy.id } : {}),
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
           ...(submittedSkillIds.length ? { skills: submittedSkillIds, skill_mentions: submittedSkillIds.map((skillId) => ({ id: skillId, label: composerSkillById.get(skillId)?.label ?? skillId })) } : {}),
@@ -5053,7 +5122,7 @@ function ChatApp() {
       codingWorkspaces={codingWorkspaces}
       selectedCodingWorkspaceId={effectiveWorkspaceId}
       attachedFiles={attachedFiles}
-      droppedWidgets={droppedWidgets}
+      droppedWidgets={activeDroppedWidgets}
       selectedToolIds={selectedToolIds}
       keyboardButtonNavigation={keyboardButtonNavigation}
       steerStatus={modelSteerStatus}

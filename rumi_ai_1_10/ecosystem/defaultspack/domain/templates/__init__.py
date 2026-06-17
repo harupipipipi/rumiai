@@ -25,7 +25,7 @@ from .resolver import (
 )
 from .security import assess_template_security, is_safe_template
 from .validation import TemplateValidationResult, has_errors, parse_template, validate_template
-from .projectors import build_template_catalog, project_resolved_templates
+from .projectors import build_template_catalog, empty_template_catalog, merge_settings_sections, project_resolved_templates
 
 __all__ = [
     "ResolvedTemplate",
@@ -52,9 +52,11 @@ __all__ = [
     "diagnose_template_dependencies",
     "diagnostics_have_errors",
     "discover_templates",
+    "empty_template_catalog",
     "has_errors",
     "is_safe_template",
     "load_template_file",
+    "merge_settings_sections",
     "merge_template_pieces",
     "migrate_template_dict",
     "parse_template",
