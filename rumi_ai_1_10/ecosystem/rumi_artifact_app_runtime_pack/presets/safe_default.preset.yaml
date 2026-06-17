@@ -1,0 +1,5 @@
+preset:
+  id: safe_default
+  mode: draft_only
+  network: none
+  external_actions: blocked

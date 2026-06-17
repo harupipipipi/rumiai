@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,13 +15,40 @@ from ecosystem.defaultspack.domain.tool.security import is_trusted_pack_id
 class HttpRouteSpec:
     method: str
     pattern: str
-    block_module: str = ""
-    function_name: str = ""
+    function_id: str = ""
+    legacy_block_module: str = ""
     flow_id: str = ""
-    fallback_block_module: str = ""
     handler_name: str = ""
     path_inject: Dict[str, str] = field(default_factory=dict)
     defaults: Dict[str, Any] = field(default_factory=dict)
+    pre_auth: bool = False
+    sensitive: bool = False
+    block_module: str = ""
+    function_name: str = ""
+    fallback_block_module: str = ""
+
+    def __post_init__(self) -> None:
+        resolved_function_id = str(self.function_id or self.function_name or "").strip()
+        resolved_legacy_block = str(
+            self.legacy_block_module or self.fallback_block_module or ""
+        ).strip()
+        if self.block_module and not resolved_function_id:
+            try:
+                from domain.function_runtime.registry import function_id_for_block_module
+
+                resolved_function_id = str(
+                    function_id_for_block_module(self.block_module) or ""
+                ).strip()
+            except Exception:
+                resolved_function_id = ""
+        if self.block_module and not resolved_legacy_block:
+            resolved_legacy_block = str(self.block_module).strip()
+        if resolved_function_id and not self.function_name:
+            object.__setattr__(self, "function_name", resolved_function_id)
+        if resolved_legacy_block and not self.fallback_block_module:
+            object.__setattr__(self, "fallback_block_module", resolved_legacy_block)
+        object.__setattr__(self, "function_id", resolved_function_id)
+        object.__setattr__(self, "legacy_block_module", resolved_legacy_block)
 
 
 _ROUTE_PARAM_RE = re.compile(r"\{(\w+)\}")
@@ -134,6 +162,13 @@ def _component_route_specs() -> List[HttpRouteSpec]:
             method = str(route.get("method") or "").strip().upper()
             pattern = str(route.get("path") or route.get("pattern") or "").strip()
             block_module = str(route.get("block_module") or "").strip()
+            function_id = str(
+                route.get("function_id")
+                or route.get("function_name")
+                or route.get("qualified_name")
+                or route.get("function")
+                or ""
+            ).strip()
             function_name = str(
                 route.get("function_name")
                 or route.get("qualified_name")
@@ -144,8 +179,15 @@ def _component_route_specs() -> List[HttpRouteSpec]:
             fallback_block_module = str(
                 route.get("fallback_block_module") or route.get("fallback_block") or ""
             ).strip()
+            legacy_block_module = str(route.get("legacy_block_module") or "").strip()
             handler_name = str(route.get("handler_name") or "").strip()
-            if not method or not pattern or not (block_module or function_name or flow_id or handler_name):
+            if not method or not pattern or not (
+                block_module
+                or function_id
+                or function_name
+                or flow_id
+                or handler_name
+            ):
                 continue
             if not _component_route_target_allowed(
                 source_pack_id=source_pack_id,
@@ -160,6 +202,8 @@ def _component_route_specs() -> List[HttpRouteSpec]:
                 HttpRouteSpec(
                     method,
                     pattern,
+                    function_id=function_id,
+                    legacy_block_module=legacy_block_module,
                     block_module=block_module,
                     function_name=function_name,
                     flow_id=flow_id,
@@ -198,14 +242,94 @@ def _defaultspack_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _read_flow_yaml(path: Path) -> dict[str, Any]:
+def _read_yaml(path: Path) -> dict[str, Any]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return {}
     try:
         import yaml
 
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        data = yaml.safe_load(text)
     except Exception:
+        if path.name == "legacy_http_routes.yaml":
+            return _read_legacy_routes_yaml_without_pyyaml(text)
         return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _read_legacy_routes_yaml_without_pyyaml(text: str) -> dict[str, Any]:
+    """Parse the simple legacy route allowlist when PyYAML is unavailable."""
+    routes: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    in_legacy_routes = False
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].rstrip()
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("- "):
+            if not in_legacy_routes:
+                continue
+            if current:
+                routes.append(current)
+            current = {}
+            stripped = stripped[2:].strip()
+            if not stripped:
+                continue
+        elif not line.startswith(" "):
+            in_legacy_routes = stripped == "legacy_routes:"
+            continue
+        if not in_legacy_routes:
+            continue
+        if current is None or ":" not in stripped:
+            continue
+        key, value = stripped.split(":", 1)
+        current[key.strip()] = value.strip().strip("\"'")
+    if current:
+        routes.append(current)
+    return {"legacy_routes": routes} if routes else {}
+
+
+def _read_flow_yaml(path: Path) -> dict[str, Any]:
+    return _read_yaml(path)
+
+
+def _legacy_http_routes_path() -> Path:
+    return _defaultspack_root() / "docs" / "legacy_http_routes.yaml"
+
+
+@lru_cache(maxsize=1)
+def load_legacy_http_route_allowlist() -> dict[tuple[str, str, str], dict[str, Any]]:
+    data = _read_yaml(_legacy_http_routes_path())
+    allowlist: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for route in data.get("legacy_routes") or []:
+        if not isinstance(route, dict):
+            continue
+        method = str(route.get("method") or "").strip().upper()
+        pattern = str(route.get("pattern") or "").strip()
+        legacy_block_module = str(route.get("legacy_block_module") or "").strip()
+        if not method or not pattern or not legacy_block_module:
+            continue
+        allowlist[(method, pattern, legacy_block_module)] = route
+    return allowlist
+
+
+def require_legacy_route_allowlisted(spec: HttpRouteSpec) -> None:
+    legacy_block_module = str(spec.legacy_block_module or "").strip()
+    if not legacy_block_module:
+        return
+    key = (
+        str(spec.method or "").upper(),
+        str(spec.pattern or "").strip(),
+        legacy_block_module,
+    )
+    if key in load_legacy_http_route_allowlist():
+        return
+    raise ValueError(
+        "legacy HTTP route is not allowlisted: "
+        f"{key[0]} {key[1]} -> {legacy_block_module}"
+    )
 
 
 def flow_http_route_specs() -> List[HttpRouteSpec]:
@@ -536,6 +660,24 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/agent/org/{id}/instruct", block_module="blocks.agent.org.instruct", path_inject={"id": "id"}),
     HttpRouteSpec("POST", "/api/agent/org/{id}/report", block_module="blocks.agent.org.report", path_inject={"id": "id"}),
     HttpRouteSpec("POST", "/api/agent/org/{id}/transfer", block_module="blocks.agent.org.transfer_context", path_inject={"id": "id"}),
+    HttpRouteSpec("GET", "/api/kanban/boards", block_module="blocks.kanban.api", defaults={"action": "list_boards"}),
+    HttpRouteSpec("POST", "/api/kanban/boards/bootstrap", block_module="blocks.kanban.api", defaults={"action": "bootstrap_board"}),
+    HttpRouteSpec("GET", "/api/kanban/boards/{board_id}", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "get_board"}),
+    HttpRouteSpec("PUT", "/api/kanban/boards/{board_id}", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "update_board"}),
+    HttpRouteSpec("POST", "/api/kanban/boards/{board_id}/cards", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "create_card"}),
+    HttpRouteSpec("POST", "/api/kanban/boards/{board_id}/columns", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "create_column"}),
+    HttpRouteSpec("POST", "/api/kanban/boards/{board_id}/sync-runs", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "sync_runs"}),
+    HttpRouteSpec("POST", "/api/kanban/boards/{board_id}/import-conversation", block_module="blocks.kanban.api", path_inject={"board_id": "board_id"}, defaults={"action": "import_conversation"}),
+    HttpRouteSpec("PUT", "/api/kanban/cards/{card_id}", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "update_card"}),
+    HttpRouteSpec("DELETE", "/api/kanban/cards/{card_id}", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "delete_card"}),
+    HttpRouteSpec("POST", "/api/kanban/cards/{card_id}/move", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "move_card"}),
+    HttpRouteSpec("POST", "/api/kanban/cards/{card_id}/agent/start", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "agent_start"}),
+    HttpRouteSpec("GET", "/api/kanban/cards/{card_id}/agent/status", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "agent_status"}),
+    HttpRouteSpec("POST", "/api/kanban/cards/{card_id}/agent/ready", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "agent_ready"}),
+    HttpRouteSpec("POST", "/api/kanban/cards/{card_id}/agent/apply", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "agent_apply"}),
+    HttpRouteSpec("POST", "/api/kanban/cards/{card_id}/agent/dismiss", block_module="blocks.kanban.api", path_inject={"card_id": "card_id"}, defaults={"action": "agent_dismiss"}),
+    HttpRouteSpec("PUT", "/api/kanban/columns/{column_id}", block_module="blocks.kanban.api", path_inject={"column_id": "column_id"}, defaults={"action": "update_column"}),
+    HttpRouteSpec("DELETE", "/api/kanban/columns/{column_id}", block_module="blocks.kanban.api", path_inject={"column_id": "column_id"}, defaults={"action": "delete_column"}),
     HttpRouteSpec("GET", "/api/capabilities", block_module="blocks.capability.list"),
     HttpRouteSpec("GET", "/api/capabilities/{id}", block_module="blocks.capability.manifest", path_inject={"id": "capability_id"}),
     HttpRouteSpec("GET", "/api/coding/context", block_module="blocks.coding.context"),
@@ -599,20 +741,20 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/prompts/compact", block_module="blocks.prompt.compact_prompt"),
     HttpRouteSpec("GET", "/api/tools", block_module="blocks.tool.list"),
     HttpRouteSpec("GET", "/api/tools/names", block_module="blocks.tool.names"),
-    HttpRouteSpec("GET", "/api/defaultspack/modules", function_name="defaultspack:management_list_modules"),
-    HttpRouteSpec("GET", "/api/defaultspack/modules/{id}", function_name="defaultspack:management_get_module", path_inject={"id": "module_id"}),
-    HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/enable", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "enabled"}),
-    HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/disable", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "disabled"}),
-    HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/reload", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "enabled", "reason": "manual_reload"}),
-    HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/rollback", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "disabled", "reason": "manual_rollback"}),
-    HttpRouteSpec("GET", "/api/defaultspack/migration/status", function_name="defaultspack:management_get_migration_status"),
-    HttpRouteSpec("GET", "/api/defaultspack/pack-requests", function_name="defaultspack:pack_request_list"),
-    HttpRouteSpec("GET", "/api/defaultspack/pack-requests/{id}", function_name="defaultspack:pack_request_get", path_inject={"id": "request_id"}),
-    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/request-extension", function_name="defaultspack:pack_request_request_extension"),
-    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/forced-patch", function_name="defaultspack:pack_request_forced_patch"),
-    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/{id}/approve", function_name="defaultspack:pack_request_review", path_inject={"id": "request_id"}, defaults={"decision": "approve"}),
-    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/{id}/reject", function_name="defaultspack:pack_request_review", path_inject={"id": "request_id"}, defaults={"decision": "reject"}),
-    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/{id}/rollback", function_name="defaultspack:pack_request_rollback", path_inject={"id": "request_id"}),
+    HttpRouteSpec("GET", "/api/defaultspack/modules", function_id="management_list_modules", function_name="defaultspack:management_list_modules"),
+    HttpRouteSpec("GET", "/api/defaultspack/modules/{id}", function_id="management_get_module", function_name="defaultspack:management_get_module", path_inject={"id": "module_id"}),
+    HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/enable", function_id="management_set_module_state", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "enabled"}),
+    HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/disable", function_id="management_set_module_state", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "disabled"}),
+    HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/reload", function_id="management_set_module_state", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "enabled", "reason": "manual_reload"}),
+    HttpRouteSpec("POST", "/api/defaultspack/modules/{id}/rollback", function_id="management_set_module_state", function_name="defaultspack:management_set_module_state", path_inject={"id": "module_id"}, defaults={"state": "disabled", "reason": "manual_rollback"}),
+    HttpRouteSpec("GET", "/api/defaultspack/migration/status", function_id="management_get_migration_status", function_name="defaultspack:management_get_migration_status"),
+    HttpRouteSpec("GET", "/api/defaultspack/pack-requests", function_id="pack_request_list", function_name="defaultspack:pack_request_list"),
+    HttpRouteSpec("GET", "/api/defaultspack/pack-requests/{id}", function_id="pack_request_get", function_name="defaultspack:pack_request_get", path_inject={"id": "request_id"}),
+    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/request-extension", function_id="pack_request_request_extension", function_name="defaultspack:pack_request_request_extension"),
+    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/forced-patch", function_id="pack_request_forced_patch", function_name="defaultspack:pack_request_forced_patch"),
+    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/{id}/approve", function_id="pack_request_review", function_name="defaultspack:pack_request_review", path_inject={"id": "request_id"}, defaults={"decision": "approve"}),
+    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/{id}/reject", function_id="pack_request_review", function_name="defaultspack:pack_request_review", path_inject={"id": "request_id"}, defaults={"decision": "reject"}),
+    HttpRouteSpec("POST", "/api/defaultspack/pack-requests/{id}/rollback", function_id="pack_request_rollback", function_name="defaultspack:pack_request_rollback", path_inject={"id": "request_id"}),
     HttpRouteSpec("GET", "/api/tools/mcp", block_module="blocks.tool.mcp_list"),
     HttpRouteSpec("POST", "/api/tools/mcp", block_module="blocks.tool.mcp_registry"),
     HttpRouteSpec("DELETE", "/api/tools/mcp", block_module="blocks.tool.mcp_registry"),
@@ -682,6 +824,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/ui/commands", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/commands/execute", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/clipboard", block_module="blocks.ui.clipboard"),
+    HttpRouteSpec("POST", "/api/ui/client-events", block_module="blocks.ui.client_events"),
     HttpRouteSpec("GET", "/api/ui/conversations/{id}/preview", block_module="blocks.ui.conversation_preview", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("POST", "/api/ui/select-directory", block_module="blocks.ui.select_directory"),
 ]
@@ -722,13 +865,14 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
     ]
     for spec in ordered_specs:
         compiled = compile_http_route_pattern(spec.pattern)
+        require_legacy_route_allowlisted(spec)
         if spec.flow_id:
             def _handler(
                 request_data,
                 path_params,
                 *,
                 flow_id=spec.flow_id,
-                fallback_block_module=spec.fallback_block_module,
+                fallback_block_module=spec.legacy_block_module or spec.fallback_block_module,
                 path_inject=dict(spec.path_inject),
                 route_defaults=dict(spec.defaults),
                 route_method=spec.method,
@@ -744,13 +888,13 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
                     fallback_block_module=fallback_block_module,
                 )
             handler = _handler
-        elif spec.function_name:
+        elif spec.function_id:
             def _handler(
                 request_data,
                 path_params,
                 *,
-                function_name=spec.function_name,
-                fallback_block_module=spec.fallback_block_module,
+                function_name=spec.function_name or spec.function_id,
+                fallback_block_module=spec.legacy_block_module or spec.fallback_block_module,
                 path_inject=dict(spec.path_inject),
                 route_defaults=dict(spec.defaults),
                 route_method=spec.method,
@@ -758,20 +902,30 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
                 payload = dict(request_data or {})
                 payload.update(route_defaults)
                 payload["_method"] = route_method
-                return server._invoke_function_route(
-                    function_name,
-                    payload,
-                    path_params,
-                    path_inject,
-                    fallback_block_module=fallback_block_module,
-                )
+                function_route = getattr(server, "_invoke_function_route", None)
+                if callable(function_route):
+                    return function_route(
+                        function_name,
+                        payload,
+                        path_params,
+                        path_inject,
+                        fallback_block_module=fallback_block_module,
+                    )
+                if fallback_block_module:
+                    return server._invoke_fallback_block(
+                        fallback_block_module,
+                        payload,
+                        path_params,
+                        path_inject,
+                    )
+                raise AttributeError("_invoke_function_route")
             handler = _handler
-        elif spec.block_module:
+        elif spec.legacy_block_module or spec.block_module:
             def _handler(
                 request_data,
                 path_params,
                 *,
-                block_module=spec.block_module,
+                block_module=spec.legacy_block_module or spec.block_module,
                 path_inject=dict(spec.path_inject),
                 route_defaults=dict(spec.defaults),
                 route_method=spec.method,

@@ -1,0 +1,36 @@
+review_checklist:
+  minimum_pass: all_blocking_items
+  items:
+  - id: append_only_event_log
+    question: Run events are append-only and sequence ordered.
+    blocking: true
+  - id: checkpoint_resume_review
+    question: Resume from checkpoints requires human review.
+    blocking: true
+  - id: intervention_future_only
+    question: Redirect and cancel never rewrite past events.
+    blocking: true
+  - id: no_tool_execution
+    question: Tool, browser, desktop, and schedule actions are handoffs only.
+    blocking: true
+  - id: deterministic_replay
+    question: The same ordered event log yields the same replay digest.
+    blocking: true
+  - id: run_board_readability
+    question: Run-board UI exposes status, approvals, and blocked states.
+    blocking: true
+  - id: handoff_owner_named
+    question: Every adjacent action names an owner pack.
+    blocking: true
+  - id: defaultspack_not_promoted
+    question: Promotion remains false until durable runtime evidence exists.
+    blocking: true
+  - id: no_credentials_or_network
+    question: Pack has no credentials, no required network, and no executable code.
+    blocking: true
+  - id: defaultspack_promotion_false
+    question: Promotion remains false until evidence is accepted.
+    blocking: true
+  - id: asset_index_complete
+    question: Every pack file is indexed.
+    blocking: true

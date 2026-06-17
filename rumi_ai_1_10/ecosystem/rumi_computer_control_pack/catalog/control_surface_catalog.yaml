@@ -1,0 +1,93 @@
+version: rumi.computer_control.catalog.v1
+pack_id: rumi_computer_control_pack
+network_default: none
+
+surfaces:
+  - id: macos_desktop
+    description: Host desktop, menu bar, windows, system dialogs, and foreground app state.
+    evidence_before_action:
+      - current screenshot or accessibility observation
+      - foreground app name when available
+      - intended target control
+      - expected state change
+    state_changing_actions:
+      - click
+      - drag
+      - type_text
+      - hotkey
+      - paste
+      - app_switch
+
+  - id: browser_window
+    description: Browser surface as seen through host desktop context.
+    owner_boundary: rumi_browser_automation_pack owns browser automation playbooks and DOM navigation.
+    evidence_before_action:
+      - active browser or tab context
+      - page title or URL when visible and safe
+      - screenshot evidence
+      - whether action affects remote state
+
+  - id: terminal_session
+    description: Terminal panes, shell prompts, command output, and local/remote backend identity.
+    evidence_before_action:
+      - prompt or session label
+      - working directory when visible or known
+      - backend classification
+      - whether command is read-only or state-changing
+
+  - id: messaging_gateway
+    description: Local messaging or CLI gateway surfaces inspired by Hermes-style messaging and CLI gateways.
+    evidence_before_action:
+      - recipient or target channel
+      - draft text
+      - send/submit confirmation boundary
+
+action_classes:
+  read_only_observation:
+    examples:
+      - screenshot
+      - foreground_app_check
+      - window_title_check
+      - terminal_output_read
+    approval_default: no_new_grant
+
+  reversible_local_action:
+    examples:
+      - focus_window
+      - scroll
+      - select_text
+    approval_default: runtime_policy
+
+  state_changing_local_action:
+    examples:
+      - type_text
+      - click_button
+      - paste_clipboard
+      - run_local_command
+    approval_default: explicit_evidence_and_runtime_approval
+
+  high_risk_action:
+    examples:
+      - send_message
+      - submit_form
+      - delete_file
+      - install_package
+      - deploy_or_publish
+      - remote_command
+    approval_default: explicit_user_request_and_runtime_approval
+
+evidence_classes:
+  - screenshot
+  - foreground_app_context
+  - target_control_description
+  - current_window_or_tab
+  - terminal_backend
+  - sandbox_host_boundary
+  - expected_state_change
+  - rollback_or_escape_path
+
+overlap_boundaries:
+  defaultspack: grants, approval, audit, and runtime routing
+  rumi_browser_automation_pack: browser navigation and DOM/browser QA playbooks
+  rumi_security_review_pack: permission, privacy, and grant-risk review
+  rumi_agent_services_pack: multi-agent service coordination and handoff topology

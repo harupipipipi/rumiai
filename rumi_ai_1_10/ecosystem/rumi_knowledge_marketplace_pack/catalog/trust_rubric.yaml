@@ -1,0 +1,44 @@
+version: rumi.knowledge_marketplace.trust_rubric.v1
+pack_id: rumi_knowledge_marketplace_pack
+network_default: none
+
+rubric_levels:
+  - id: unreviewed
+    install_allowed: false
+    required_evidence:
+      - source_ref
+      - publisher_identity
+      - permission_summary
+  - id: repository_reviewed
+    install_allowed: true
+    required_evidence:
+      - reviewer
+      - content_digest
+      - permission_summary
+      - provenance_ledger_entry
+  - id: trusted
+    install_allowed: true
+    required_evidence:
+      - repeated_review_history
+      - no_open_security_flags
+      - documented_owner
+  - id: blocked
+    install_allowed: false
+    required_evidence:
+      - blacklist_reason
+      - reviewer
+      - appeal_or_recheck_path
+
+score_dimensions:
+  - publisher_reputation
+  - permission_minimality
+  - provenance_completeness
+  - documentation_quality
+  - maintenance_signal
+  - security_review_status
+
+handoff_policy:
+  suspicious_or_high_risk: rumi_security_review_pack
+  learned_skill_memory: rumi_memory_knowledge_pack
+  connector_card_execution: rumi_connector_gateway_pack
+  bundle_catalog: rumi_pack_suite_pack

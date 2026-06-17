@@ -1,0 +1,58 @@
+{
+  "pack_id": "rumi_research_pack",
+  "pack_identity": "rumi:ecosystem/rumi_research_pack",
+  "version": "1.0.0",
+  "metadata": {
+    "name": "Rumi Research Pack",
+    "description": "Declarative local-first deep research, evidence, source quality, and citation workflow pack for Rumi-native research agents.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "inspired_by": [
+      "ChatGPT Deep Research-style synthesis",
+      "Genspark-style research reports",
+      "Gemini and Claude citation workflows"
+    ],
+    "declarative_only": true,
+    "required_secrets": [],
+    "network_policy": "none_by_default"
+  },
+  "vocabulary": {
+    "types": [
+      "research_capability_catalog",
+      "research_evidence_model",
+      "research_profile",
+      "research_preset",
+      "research_workflow_recipe"
+    ]
+  },
+  "components": {
+    "research_catalog": {
+      "type": "research_capability_catalog",
+      "id": "research_catalog",
+      "path": "catalog",
+      "connectivity": {
+        "provides": [
+          "rumi.research.capabilities",
+          "rumi.research.evidence_schema",
+          "rumi.research.source_quality",
+          "rumi.research.workflow_recipes",
+          "rumi.research.citation_styles"
+        ],
+        "requires": []
+      }
+    },
+    "research_profiles": {
+      "type": "research_profile",
+      "id": "research_profiles",
+      "path": "profiles",
+      "connectivity": {
+        "provides": ["rumi.research.profiles"],
+        "requires": ["rumi.research.capabilities"]
+      }
+    }
+  },
+  "load_order": [
+    "research_capability_catalog:research_catalog",
+    "research_profile:research_profiles"
+  ]
+}

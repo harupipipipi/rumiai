@@ -1,0 +1,39 @@
+policy_id: rumi_business_ops.approval_risk_matrix
+schema_version: 1
+risk_levels: [low, medium, high, blocked]
+approval_matrix:
+  external_message_send:
+    default_risk: medium
+    approval_required: true
+    owner_pack: rumi_connector_gateway_pack
+    evidence_required: [draft_text, recipient_context, business_reason]
+  crm_field_update:
+    default_risk: high
+    approval_required: true
+    owner_pack: rumi_connector_gateway_pack
+    evidence_required: [field_name, proposed_value, source_context]
+  scheduled_followup:
+    default_risk: medium
+    approval_required: true
+    owner_pack: rumi_workflow_scheduler_pack
+    evidence_required: [schedule_time, recipient_or_channel, message_or_task_summary]
+  procurement_recommendation:
+    default_risk: high
+    approval_required: true
+    owner_pack: rumi_workspace_pack
+    evidence_required: [requirements, scoring_table, source_notes, decision_rationale]
+  internal_brief_draft:
+    default_risk: low
+    approval_required: false
+    owner_pack: rumi_workspace_pack
+    evidence_required: [audience, objective, assumptions]
+blocked_without_explicit_user_instruction:
+  - contract_signature
+  - payment_authorization
+  - legal_commitment
+  - hr_action
+  - credential_or_secret_handling
+review_rules:
+  all_high_risk_items_need_human_review: true
+  connector_actions_never_executed_by_this_pack: true
+  approval_state_must_be_recorded_in_handoff_ledger: true

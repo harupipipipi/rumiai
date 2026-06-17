@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/dial_approval.schema.json",
+  "title": "Dial Approval",
+  "description": "Contract schema for Dial Approval.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "approval_id",
+    "call_task_id",
+    "approved_number_alias",
+    "approved_script_id",
+    "approval_state",
+    "approver_role",
+    "expires_at",
+    "audit_evidence_ids",
+    "human_confirmation"
+  ],
+  "properties": {
+    "approval_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "call_task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approved_number_alias": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approved_script_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approval_state": {
+      "type": "string",
+      "enum": [
+        "approved",
+        "rejected",
+        "expired"
+      ]
+    },
+    "approver_role": {
+      "type": "string",
+      "enum": [
+        "user",
+        "workspace_admin",
+        "compliance_reviewer"
+      ]
+    },
+    "expires_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "audit_evidence_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "human_confirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "confirmed_by_human",
+        "confirmed_at",
+        "approval_scope",
+        "consent_disclosure_reviewed",
+        "never_call_checked"
+      ],
+      "properties": {
+        "confirmed_by_human": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confirmed_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approval_scope": {
+          "type": "string",
+          "const": "single_provider_handoff_packet"
+        },
+        "consent_disclosure_reviewed": {
+          "type": "boolean",
+          "const": true
+        },
+        "never_call_checked": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    }
+  }
+}

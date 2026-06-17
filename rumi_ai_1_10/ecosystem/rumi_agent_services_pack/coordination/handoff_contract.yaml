@@ -1,0 +1,44 @@
+contract_id: rumi.agent_services.handoff.v1
+required_fields:
+  - handoff_id
+  - source_role
+  - target_role
+  - objective
+  - scope
+  - inputs
+  - expected_outputs
+  - constraints
+  - approval_needs
+  - done_when
+optional_fields:
+  - source_cards
+  - files_allowed
+  - files_excluded
+  - commands_allowed
+  - network_allowed
+  - uncertainty
+  - risks
+  - user_visible_notes
+completion_payload:
+  required_fields:
+    - handoff_id
+    - target_role
+    - summary
+    - outputs
+    - evidence
+    - open_questions
+    - verification
+    - risks
+  evidence_policy:
+    research: cite_sources_or_mark_uncited
+    coding: include_files_changed_and_tests
+    browser: include_url_or_local_target_and_observation_time
+    review: include_findings_or_explicit_no_findings
+approval_policy:
+  default: inherit_runtime_policy
+  never_delegate:
+    - credential_entry
+    - financial_transaction
+    - destructive_file_operation
+    - public_post_or_message_send
+    - git_push

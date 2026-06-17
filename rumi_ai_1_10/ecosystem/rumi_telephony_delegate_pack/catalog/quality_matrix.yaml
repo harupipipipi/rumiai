@@ -1,0 +1,88 @@
+quality_matrix:
+  minimum_pass: all_blocking_checks
+  fail_states:
+  - missing_evidence
+  - boundary_violation
+  - unsafe_external_action
+  - unreviewed_handoff
+  checks:
+  - id: script_present
+    blocking: true
+    description: A script must exist before mock provider handoff.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: consent_disclosure_present
+    blocking: true
+    description: Opening disclosure and consent question are required.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: never_call_checked
+    blocking: true
+    description: Never-call list screening is mandatory.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: approval_state_approved
+    blocking: true
+    description: Only approved approval records can hand off to a provider.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: approved_number_matches
+    blocking: true
+    description: Human approval must match target alias.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: disallowed_intent_aborts
+    blocking: true
+    description: Disallowed purposes never produce provider handoff.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: consent_decline_aborts
+    blocking: true
+    description: Declined consent forces an aborted session packet with takeover required.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: transcript_pii_redacted
+    blocking: true
+    description: Configured PII classes are replaced before handoff.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: takeover_owner_present
+    blocking: true
+    description: Escalation packets name a human or owner pack.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note
+  - id: takeover_abort_required
+    blocking: true
+    description: Safety-triggered escalation records set abort_required before handoff.
+    review_evidence:
+    - fixture
+    - schema
+    - workflow
+    - human_review_note

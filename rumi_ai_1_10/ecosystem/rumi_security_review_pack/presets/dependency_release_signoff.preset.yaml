@@ -1,0 +1,18 @@
+preset_id: rumi_security_review.dependency_release_signoff
+pack_id: rumi_security_review_pack
+title: Dependency And Release Security Signoff
+profile: rumi_security_review.security_reviewer
+focus:
+  - dependency_manifest_changes
+  - lockfile_changes
+  - remote_installer_risk
+  - unresolved_findings
+  - accepted_risks
+  - release_scope
+rules:
+  fetch_remote_vulnerability_data: false
+  require_local_evidence: true
+  override_release_owner: false
+output:
+  finding_schema: catalog/finding_schema.json
+  signoff_required: true

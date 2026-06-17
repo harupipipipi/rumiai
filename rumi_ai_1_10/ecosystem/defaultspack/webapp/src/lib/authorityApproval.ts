@@ -26,7 +26,8 @@ function isAuthorityApprovalEvent(event: Record<string, unknown>): boolean {
     event.authority
     || event.approval_kind === "authority"
     || event.permission_id === "model.invoke"
-    || event.permission_id === "api_key.use",
+    || event.permission_id === "api_key.use"
+    || event.permission_id === "network.egress",
   );
 }
 
@@ -83,6 +84,21 @@ export function authorityApprovalConfig(approval: AuthorityApprovalResource): Re
 
 export function authorityApprovalTitle(approval: AuthorityApprovalResource): string {
   const resource = approval.resource ?? {};
+  const app = typeof resource.app_display_name === "string" ? resource.app_display_name : "";
+  const providerDisplay = typeof resource.provider_display_name === "string" ? resource.provider_display_name : "";
+  const modelDisplay = typeof resource.model_display_name === "string" ? resource.model_display_name : "";
+  const endpoint = typeof resource.endpoint_url === "string" ? resource.endpoint_url : "";
+  if (app || providerDisplay || modelDisplay || endpoint) {
+    const provider = providerDisplay || (typeof resource.provider_id === "string" ? resource.provider_id : "");
+    const providerSubject = provider.toLowerCase().endsWith("provider") ? provider : provider && `${provider} provider`;
+    const credential = typeof resource.credential_label === "string" && resource.credential_label
+      ? resource.credential_label
+      : "API key";
+    if (endpoint) {
+      return `${[app, providerSubject].filter(Boolean).join(" / ")} に ${credential} の使用と ${endpoint} へのアクセスを許可しますか？`;
+    }
+    return [app, providerSubject].filter(Boolean).join(" / ") || endpoint || approval.permissionId;
+  }
   const provider = typeof resource.provider_id === "string" ? resource.provider_id : "";
   const api = typeof resource.api_id === "string" ? resource.api_id : "";
   const model = typeof resource.model_id === "string" ? resource.model_id : "";
@@ -102,7 +118,7 @@ export function authorityApprovalRuntimeContent(approval: AuthorityApproval, tok
   };
   return [
     "The user approved the pending model/API authority request.",
-    "Continue the conversation by retrying the same model/API request once.",
+    "Continue the conversation by retrying the same model/API request once with the approved provider, API key use, and network access context.",
     "Do not ask the user for the same authority approval again unless a new request id is produced.",
     `Authority request id: ${approval.requestId}`,
     `Permission: ${approval.permissionId}`,

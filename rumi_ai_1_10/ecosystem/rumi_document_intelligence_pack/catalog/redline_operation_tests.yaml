@@ -1,0 +1,47 @@
+version: rumi.document_intelligence.redline_operation_tests.v1
+pack_id: rumi_document_intelligence_pack
+network_default: none
+
+operation_tests:
+  - id: insert_clause_with_citation
+    operation: insert
+    requires:
+      - target_page_span
+      - quote_digest
+      - citation_trace
+      - privacy_class
+    expected_flags:
+      - citation_if_claim_added
+  - id: delete_liability_clause
+    operation: delete
+    requires:
+      - source_page_span
+      - quote_digest
+      - risk_if_removed
+      - human_review_flag
+    expected_flags:
+      - legal_obligation_changed
+      - liability
+  - id: replace_payment_amount
+    operation: replace
+    requires:
+      - source_page_span
+      - target_page_span
+      - quote_digest
+      - semantic_delta
+    expected_flags:
+      - date_or_amount_changed
+  - id: format_heading_only
+    operation: format
+    requires:
+      - affected_page_span
+      - quote_digest
+      - confirmation_no_semantic_change
+    expected_flags:
+      - formatting_only
+
+test_contract:
+  all_operations_require_page_span: true
+  all_operations_require_quote_digest: true
+  high_risk_operations_require_human_review: true
+  privacy_review_required_before_handoff: true

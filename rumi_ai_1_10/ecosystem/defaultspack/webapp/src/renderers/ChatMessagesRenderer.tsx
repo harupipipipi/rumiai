@@ -1,5 +1,5 @@
 import { AlertTriangle, Check, ChevronRight, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -29,6 +29,10 @@ const LOG_PREVIEW_MIN_CHARS = 1200;
 const LOG_PREVIEW_MAX_CHARS = 2200;
 const LOG_PREVIEW_HEAD_CHARS = 1300;
 const LOG_PREVIEW_TAIL_CHARS = 620;
+const AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。";
+const AUTHORITY_FOLLOWUP_TEXT = "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。";
+const AUTHORITY_PENDING_TITLE = "承認待ち";
+const AUTHORITY_PENDING_DETAIL = "別ウィンドウで承認してください";
 const markdownPlugins = [remarkGfm];
 const LOG_LIKE_TOKENS = [
   "\\n",
@@ -267,9 +271,67 @@ function messageVisibleText(message: ChatMessagesRendererProps["messages"][numbe
   return blockText || String(message.rawText ?? "").trim();
 }
 
+function messageMetadataRecord(message: ChatMessagesRendererProps["messages"][number]): Record<string, unknown> {
+  return isRecord(message.metadata) ? message.metadata as Record<string, unknown> : {};
+}
+
+function metadataChildRecord(message: ChatMessagesRendererProps["messages"][number], ...keys: string[]): Record<string, unknown> | null {
+  const metadata = messageMetadataRecord(message);
+  for (const key of keys) {
+    const value = metadata[key];
+    if (isRecord(value)) return value;
+  }
+  return null;
+}
+
+function isAuthorityPermissionId(value: unknown): boolean {
+  return value === "model.invoke" || value === "api_key.use" || value === "network.egress";
+}
+
+function authorityWaitingRequestId(message: ChatMessagesRendererProps["messages"][number]): string {
+  const pending = metadataChildRecord(message, "pendingAuthorityApproval", "pending_authority_approval");
+  const metadataRequestId = String(pending?.request_id ?? pending?.approval_request_id ?? "").trim();
+  if (metadataRequestId) return metadataRequestId;
+
+  for (const event of message.events ?? []) {
+    if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
+    const requestId = String(event.request_id ?? event.approval_request_id ?? "").trim();
+    const isAuthority = Boolean(
+      event.authority
+      || event.approval_kind === "authority"
+      || isAuthorityPermissionId(event.permission_id),
+    );
+    if (isAuthority && requestId) return requestId;
+  }
+  return "";
+}
+
+export function isHiddenAuthorityFollowupMessage(message: ChatMessagesRendererProps["messages"][number]): boolean {
+  if (message.role !== "user") return false;
+  const followup = metadataChildRecord(message, "authorityFollowup", "authority_followup");
+  const chatDisplay = metadataChildRecord(message, "chatDisplay", "chat_display");
+  const requestId = String(followup?.request_id ?? followup?.approval_request_id ?? "").trim();
+  const hasAuthorityMarker = Boolean(requestId && isAuthorityPermissionId(followup?.permission_id));
+  const text = messageVisibleText(message);
+  if (chatDisplay?.hidden === true && chatDisplay.reason === "authority_followup" && hasAuthorityMarker) return true;
+  return text === AUTHORITY_FOLLOWUP_TEXT && hasAuthorityMarker;
+}
+
+export function isAuthorityWaitingMessage(message: ChatMessagesRendererProps["messages"][number]): boolean {
+  return (
+    message.role === "agent"
+    && messageVisibleText(message) === AUTHORITY_WAITING_TEXT
+    && Boolean(authorityWaitingRequestId(message) || metadataChildRecord(message, "pendingAuthorityApproval", "pending_authority_approval"))
+  );
+}
+
 export function isAwaitingStreamFinalMessage(message: ChatMessagesRendererProps["messages"][number]): boolean {
   const thinkingLabel = String(message.metadata?.thinkingLabel ?? "").trim().toLowerCase();
   return thinkingLabel === "streaming" || thinkingLabel === "running";
+}
+
+export function visibleChatMessages(messages: ChatMessagesRendererProps["messages"]): ChatMessagesRendererProps["messages"] {
+  return messages.filter((message) => !isHiddenAuthorityFollowupMessage(message));
 }
 
 export function shouldShowEmptyResponseWarning(
@@ -306,6 +368,18 @@ export function messageCopyText(message: ChatMessagesRendererProps["messages"][n
     .join("\n\n")
     .trim();
   return blockText || String(message.rawText ?? "").trim();
+}
+
+export function formatMessageTimestamp(value: unknown): string {
+  const timestamp = timestampMs(value);
+  if (timestamp === null) return "";
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(timestamp);
 }
 
 async function writeClipboardText(text: string): Promise<void> {
@@ -351,6 +425,7 @@ function MessageActionBar({
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
   const text = messageCopyText(message);
+  const timestampLabel = formatMessageTimestamp(message.createdAt);
   const actions: Array<{
     id: string;
     label: string;
@@ -404,6 +479,11 @@ function MessageActionBar({
           </button>
         );
       })}
+      {timestampLabel && (
+        <span className="ml-1 shrink-0 font-mono text-[10px] leading-none text-zinc-600 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+          {timestampLabel}
+        </span>
+      )}
     </div>
   );
 }
@@ -556,6 +636,9 @@ function activityPhase(status: string | null | undefined, toolNames: string[]): 
   }
   if (text.includes("handoff") || text.includes("移動")) {
     return { label: "移動準備中", detail: status || "新しい会話を準備しています" };
+  }
+  if (text.includes("許可しました") || text.includes("承認済み")) {
+    return { label: "再開しています", detail: status || "承認済みのリクエストを続行しています" };
   }
   if (toolNames.length > 0 || text.includes("tool") || text.includes("実行")) {
     const summary = summarizePendingToolNames(toolNames).summary;
@@ -897,6 +980,16 @@ function BrowserScreenshotStrip({
   );
 }
 
+function AuthorityPendingNotice() {
+  return (
+    <div className="inline-flex max-w-full items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100">
+      <Clock size={14} className="shrink-0 text-amber-300" />
+      <span className="shrink-0 font-semibold">{AUTHORITY_PENDING_TITLE}</span>
+      <span className="min-w-0 text-amber-100/80">{AUTHORITY_PENDING_DETAIL}</span>
+    </div>
+  );
+}
+
 function ToolActivityToggle({
   isOpen,
   onToggle,
@@ -1059,6 +1152,8 @@ export function ChatMessagesRenderer({
   const [imagePreview, setImagePreview] = useState<ImagePreviewRequest | null>(null);
   const [openToolActivityByMessageId, setOpenToolActivityByMessageId] = useState<Record<string, boolean | undefined>>({});
   const hasRunningToolActivity = showActivityInMessages && messages.some((message) => message.role === "agent" && hasRunningToolActivityMessage(message));
+  const visibleMessages = useMemo(() => visibleChatMessages(messages), [messages]);
+  const hasAuthorityPendingMessage = useMemo(() => visibleMessages.some(isAuthorityWaitingMessage), [visibleMessages]);
   const activityNow = useActivityNow(hasRunningToolActivity);
 
   return (
@@ -1074,13 +1169,14 @@ export function ChatMessagesRenderer({
       ) : (
         <div className="flex-1 overflow-x-hidden overflow-y-auto px-5 py-3 md:px-8 lg:px-10 xl:px-12">
           <div className="mx-auto w-full max-w-6xl min-w-0 space-y-4">
-            {messages.map((message) => {
+            {visibleMessages.map((message) => {
               const toolActivity = showActivityInMessages && message.role === "agent"
                 ? toolActivityStateForMessage(message, activityNow)
                 : null;
               const isToolActivityOpen = toolActivity
                 ? openToolActivityByMessageId[message.id] ?? toolActivity.hasRunningItems
                 : false;
+              const isAuthorityPending = isAuthorityWaitingMessage(message);
               const toggleToolActivity = () => {
                 if (!toolActivity) return;
                 setOpenToolActivityByMessageId((current) => {
@@ -1147,7 +1243,11 @@ export function ChatMessagesRenderer({
                       )}
 
                       <div className="rumi-message-content markdown-body min-w-0 max-w-full select-text space-y-4 overflow-x-hidden break-words leading-relaxed">
-                        {message.content.length > 0 && (messageVisibleText(message) || message.content.some((block) => String(block.type ?? "text") !== "text"))
+                        {isAuthorityPending
+                          ? (
+                              <AuthorityPendingNotice />
+                            )
+                          : message.content.length > 0 && (messageVisibleText(message) || message.content.some((block) => String(block.type ?? "text") !== "text"))
                           ? message.content.map((block, index) => (
                               <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} onOpenImagePreview={setImagePreview} />
                             ))
@@ -1173,7 +1273,7 @@ export function ChatMessagesRenderer({
               );
             })}
 
-            {isGenerating && (
+            {isGenerating && !hasAuthorityPendingMessage && (
               <div className="flex gap-3">
                 <div className="text-zinc-400 text-[13px] flex flex-col gap-1 mt-1.5">
                   <RumiActivityLoading status={pendingStatus} toolNames={pendingToolNames} startedAt={pendingStartedAt} compact />

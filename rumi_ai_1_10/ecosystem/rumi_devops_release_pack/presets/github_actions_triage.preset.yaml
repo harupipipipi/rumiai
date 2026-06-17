@@ -1,0 +1,19 @@
+id: rumi_devops_release_pack.github_actions_triage
+name: GitHub Actions Triage
+profile: rumi_devops_release_pack.ci_triage
+intent: Diagnose GitHub Actions failures from workflow files, local commands, and approved logs.
+platform_awareness:
+  - github_actions
+network_default: none
+evidence_inputs:
+  - workflow yaml path
+  - local test command
+  - exported job log
+  - changed files
+outputs:
+  - failing job and step
+  - likely cause
+  - rerun recommendation
+  - code-pack handoff if source edits are needed
+overlap_notes:
+  rumi_code_ide_pack: owns source changes after triage identifies a code fix

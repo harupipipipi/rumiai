@@ -1,0 +1,21 @@
+preset:
+  id: safe_default
+  pack_id: rumi_runtime_benchmark_pack
+  mode: local_reproducibility_first
+  description: Capture reproducibility evidence before comparing latency, cost, or reliability.
+  require_evidence: true
+  require_overlap_check: true
+  required_assets:
+    - specs/environment_descriptor.yaml
+    - schemas/metric_record.schema.json
+    - catalog/reproducibility_ledger.yaml
+  output_contract:
+    - environment_descriptor_id
+    - seed
+    - sample_count
+    - replay_evidence
+    - missing_reproducibility_fields
+  blocked_defaults:
+    - live_network_benchmark_without_request
+    - secret_capture
+    - p95_claim_from_smoke_sample

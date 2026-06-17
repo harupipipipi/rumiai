@@ -68,6 +68,7 @@ _SECRET_KEY_EXACT = {
     "secretaccesskey",
 }
 _SECRET_KEY_SUFFIXES = ("token", "secret", "password", "passwd", "cookie", "credential", "credentials")
+_RESOURCE_HASH_IGNORED_KEYS = frozenset({"stream"})
 
 
 def _normalized_resource_key(key: str) -> str:
@@ -169,6 +170,8 @@ class AuthorityRequestStore:
 
     def resource_hash(self, resource: dict[str, Any]) -> str:
         safe_resource = self._safe_resource(resource)
+        for key in _RESOURCE_HASH_IGNORED_KEYS:
+            safe_resource.pop(key, None)
         return hashlib.sha256(_canonical_json(safe_resource).encode("utf-8")).hexdigest()
 
     @staticmethod

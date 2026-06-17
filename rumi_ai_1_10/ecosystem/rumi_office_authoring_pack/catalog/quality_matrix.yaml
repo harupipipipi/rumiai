@@ -1,0 +1,25 @@
+quality_matrix:
+  pack_id: rumi_office_authoring_pack
+  minimum_pass: all_blocking_checks
+  checks:
+  - id: citation_gate
+    blocking: true
+    evidence: citation_gate_evidence_ref
+  - id: layout_gate
+    blocking: true
+    evidence: layout_gate_evidence_ref
+  - id: formula_dependency_gate
+    blocking: true
+    evidence: formula_dependency_gate_evidence_ref
+  - id: accessibility_gate
+    blocking: true
+    evidence: accessibility_gate_evidence_ref
+  - id: export_manifest_only
+    blocking: true
+    evidence: export_manifest_only_evidence_ref
+  - id: owner_handoff_named
+    blocking: true
+    evidence: owner_handoff_named_evidence_ref
+  - id: asset_index_complete
+    blocking: true
+    evidence: asset_index_complete_evidence_ref

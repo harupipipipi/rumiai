@@ -1,0 +1,59 @@
+{
+  "pack_id": "rumi_workflow_scheduler_pack",
+  "display_name": "Rumi Workflow Scheduler Pack",
+  "description": "Optional declarative local-first workflow scheduler pack for recurring tasks, monitors, wakeups, follow-ups, cron-like schedules, delivery handoffs, retry policy, evidence, and stop conditions.",
+  "target_pack_id": "rumi_workflow_scheduler_pack",
+  "version": "1.0.0",
+  "compatibility": {
+    "target_pack_version": ">=1.0.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "marketplace": {
+    "id": "rumi.workflow_scheduler_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "workflow-scheduler",
+    "optional": true
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "conflicts_with": [],
+  "overlap_policy": {
+    "defaultspack_scheduler": "route_hint_only_do_not_override",
+    "app_automation_tool": "delegate_execution_when_available",
+    "rumi_agent_services_pack": "complement_recurring_service_cadence",
+    "rumi_connector_gateway_pack": "complement_delivery_handoff_contracts",
+    "rumi_devops_release_pack": "complement_release_wakeups_without_gate_override",
+    "notes": [
+      "This pack defines schedule contracts and does not install or execute automations.",
+      "Defaultspack and app automation tools keep approval, audit, and execution ownership.",
+      "Connector, agent service, and release packs keep their own routing and policy authority."
+    ]
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Scheduling contracts should remain optional and must not become implicit automation, delivery, or approval authority."
+  },
+  "conflict_notes": [
+    "This pack complements defaultspack scheduler and app automation surfaces; it does not replace them.",
+    "This pack complements rumi_agent_services_pack, rumi_connector_gateway_pack, and rumi_devops_release_pack by defining schedule contracts only.",
+    "Owner packs and runtime policy remain the enforcement boundary."
+  ],
+  "security_notes": [
+    "No secrets, executable scheduler code, network connector code, message delivery code, or remote endpoints are embedded.",
+    "Network is none by default and all schedule records are local metadata until an owner surface accepts them."
+  ]
+}

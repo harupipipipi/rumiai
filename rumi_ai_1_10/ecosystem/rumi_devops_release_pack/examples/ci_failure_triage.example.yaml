@@ -1,0 +1,14 @@
+id: rumi_devops_release_pack.examples.ci_failure_triage
+profile: rumi_devops_release_pack.ci_triage
+preset: rumi_devops_release_pack.github_actions_triage
+task: Triage a failing GitHub Actions job from an exported log and local workflow file.
+expected_agent_steps:
+  - inspect workflow path and job name
+  - extract first relevant error from provided log
+  - compare with local test command or changed files
+  - classify likely code, test, dependency, or infrastructure cause
+  - hand off source edits to rumi_code_ide_pack when needed
+safety_notes:
+  - network none by default
+  - do not rerun remote jobs without approval
+  - redact secret-like log values

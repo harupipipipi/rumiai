@@ -1,0 +1,164 @@
+{
+  "pack_id": "rumi_agent_continuity_pack",
+  "pack_identity": "rumi:ecosystem/rumi_agent_continuity_pack",
+  "version": "1.0.0",
+  "display_name": "Rumi Agent Continuity Pack",
+  "description": "Declarative continuity packets for long-running agent restarts, compaction handoffs, attention drift recovery, and resume evidence.",
+  "author": {
+    "name": "rumi-ai"
+  },
+  "license": "MIT",
+  "vocabulary": {
+    "types": [
+      "capability_provider",
+      "policy_provider",
+      "profile_provider",
+      "schema_contract"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "runtime": {
+    "type": "declarative_pack"
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": [],
+  "host_execution": false,
+  "metadata": {
+    "runtime_type": "declarative_setup_pack",
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "declarative_only": true,
+    "consumes_existing_sources_only": true,
+    "output_effect": "restart_evidence_and_handoff_only",
+    "defaultspack_promotion_eligible": false,
+    "owner_surfaces": [
+      "continuity_packet_contract",
+      "restart_evidence_packet",
+      "compaction_handoff_packet",
+      "attention_drift_recovery_note",
+      "run_summary_for_resume",
+      "continuity_artifact_manifest",
+      "branch_resume_packet",
+      "agent_health_note"
+    ],
+    "non_owner_surfaces": [
+      "run boards live run events checkpoints interventions replay indexes",
+      "memory objects recall storage knowledge updates skill learning",
+      "metrics telemetry run ledgers cost latency postmortems",
+      "schedules monitors wakeups retries recurring follow-ups",
+      "file artifact persistence and export",
+      "git branch creation switching push"
+    ],
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_agent_workroom_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      },
+      {
+        "pack_id": "rumi_memory_knowledge_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      },
+      {
+        "pack_id": "rumi_observability_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      },
+      {
+        "pack_id": "rumi_workflow_scheduler_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      },
+      {
+        "pack_id": "rumi_workspace_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      },
+      {
+        "pack_id": "defaultspack",
+        "reason": "Adjacent owner named by handoff policy."
+      },
+      {
+        "pack_id": "rumi_code_ide_pack",
+        "reason": "Adjacent owner named by handoff policy."
+      }
+    ],
+    "asset_index": {
+      "root": [
+        "README.md",
+        "asset_index.json",
+        "asset_index.yaml"
+      ],
+      "catalog": [
+        "catalog/handoff_matrix.yaml",
+        "catalog/quality_matrix.yaml",
+        "catalog/taxonomy.yaml",
+        "catalog/workflows.yaml"
+      ],
+      "checklists": [
+        "checklists/review.checklist.yaml"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md",
+        "docs/overlap_policy.md"
+      ],
+      "examples": [
+        "examples/attention_drift_recovery.example.yaml",
+        "examples/branch_resume_packet.example.yaml",
+        "examples/compaction_handoff.example.yaml",
+        "examples/health_note.example.yaml",
+        "examples/long_running_agent_resume.example.yaml"
+      ],
+      "fixtures": [
+        "fixtures/contract_fixture.yaml",
+        "fixtures/negative_cases.yaml"
+      ],
+      "ledgers": [
+        "ledgers/continuity_evidence_ledger.schema.yaml"
+      ],
+      "policies": [
+        "policies/compaction_handoff.policy.yaml",
+        "policies/continuity_safety.policy.yaml",
+        "policies/handoff.policy.yaml",
+        "policies/safety.policy.yaml"
+      ],
+      "presets": [
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml",
+        "presets/safe_default.preset.yaml"
+      ],
+      "profiles": [
+        "profiles/continuity_reviewer.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/continuity_reviewer.system.md"
+      ],
+      "schemas": [
+        "schemas/attention_drift_recovery.schema.json",
+        "schemas/branch_resume_packet.schema.json",
+        "schemas/compaction_handoff.schema.json",
+        "schemas/continuity_artifact_manifest.schema.json",
+        "schemas/continuity_packet.schema.json",
+        "schemas/health_note.schema.json",
+        "schemas/restart_evidence.schema.json",
+        "schemas/run_summary.schema.json"
+      ],
+      "templates": [
+        "templates/handoff.template.md",
+        "templates/review_report.template.md",
+        "templates/ui_contract.template.md"
+      ]
+    }
+  },
+  "capabilities": [
+    "rumi_agent_continuity_pack.continuity_packet_contract",
+    "rumi_agent_continuity_pack.restart_evidence_packet",
+    "rumi_agent_continuity_pack.compaction_handoff_packet",
+    "rumi_agent_continuity_pack.attention_drift_recovery_note",
+    "rumi_agent_continuity_pack.run_summary_for_resume",
+    "rumi_agent_continuity_pack.continuity_artifact_manifest"
+  ]
+}

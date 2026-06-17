@@ -1,0 +1,48 @@
+profile_id: rumi_computer_control_pack.macos_desktop_operator
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+
+display_name:
+  ja: macOS Desktop Operator
+  en: macOS Desktop Operator
+
+description:
+  ja: macOS アプリ操作、スクリーンショット、キーボード/マウス操作の証跡優先プロファイル。
+  en: Evidence-first profile for macOS app workflows, screenshots, keyboard, and mouse operations.
+
+default_graph: defaultspack.coding_workspace
+default_flow: agent_chat
+
+surfaces:
+  preferred: desktop
+  enabled:
+    - desktop
+    - cli
+
+prompt_layers:
+  system:
+    - prompts/desktop_control.system.md
+    - prompts/evidence_before_action.system.md
+
+policies:
+  - policies/evidence_first_control.policy.yaml
+  - policies/sandbox_host_boundary.policy.yaml
+
+catalogs:
+  - catalog/control_surface_catalog.yaml
+  - catalog/local_gateway_evidence.json
+
+policy:
+  network_default: none
+  computer_actions_require_evidence: true
+  state_changing_actions_require_approval: true
+  audit_level: detailed
+
+metadata:
+  pack_id: rumi_computer_control_pack
+  category: computer_control
+  owns:
+    - desktop evidence contract
+    - foreground app context
+    - keyboard mouse playbooks

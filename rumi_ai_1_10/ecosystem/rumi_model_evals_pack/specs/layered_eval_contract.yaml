@@ -1,0 +1,53 @@
+spec_id: rumi.model_evals.layered_eval_contract.v1
+description: Layered eval suite contract inspired by contract, smoke, and e2e evaluation practice.
+required_layers:
+  - contract
+  - smoke
+  - e2e
+layers:
+  contract:
+    purpose: Validate model/provider interface without relying on full workflow success.
+    checks:
+      - request_shape
+      - response_shape
+      - streaming_envelope
+      - refusal_shape
+      - error_envelope
+      - tool_call_schema
+      - safety_boundary
+    network: none_or_fixture
+  smoke:
+    purpose: Detect broken provider credentials, model ids, latency spikes, response format drift, and basic safety regressions.
+    checks:
+      - provider_auth_external
+      - model_id_available
+      - tiny_prompt_response
+      - max_latency_budget
+      - cost_capture_optional
+      - unsafe_prompt_baseline
+    network: explicit_runtime_approval_required
+  e2e:
+    purpose: Evaluate task workflows with observable outputs and grader criteria.
+    task_families:
+      - coding
+      - agent_service
+      - data_analysis
+      - research
+      - tool_use
+    checks:
+      - task_completion
+      - evidence_quality
+      - tool_use_correctness
+      - safety_policy
+      - cost_latency
+      - reproducibility
+suite_fields:
+  required:
+    - suite_id
+    - target_provider
+    - target_model
+    - task_family
+    - layers
+    - metrics
+    - evidence_policy
+    - promotion_gate

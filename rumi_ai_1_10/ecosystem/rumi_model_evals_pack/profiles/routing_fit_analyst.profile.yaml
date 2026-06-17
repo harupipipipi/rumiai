@@ -1,0 +1,22 @@
+profile_id: rumi_model_evals.routing_fit_analyst
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: ルーティング適性分析
+  en: Routing Fit Analyst
+description:
+  ja: pass@k、pass^k、flakiness、cost、latency、safetyからタスク別モデル適性を評価する役割。
+  en: Analyst profile for converting eval metrics into task-family model fit and routing recommendations.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.local_agent
+enabled_capabilities: [pass_k_metrics, flakiness_review, model_fit_matrix, cost_latency_evidence]
+prompt_set: routing_fit_analyst
+policy:
+  network_default: none
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  audit_level: strict
+  local_first: true

@@ -1,0 +1,14 @@
+preset_id: chatgpt_data_analysis_local
+name: ChatGPT Data Analysis Style Local Session
+profile: rumi_data_analysis.csv_sheet_analyst
+inspired_by: [ChatGPT data analysis]
+enabled_capabilities: [data_intake, csv_profile, data_cleaning, chart_design, analysis_audit]
+ui_panels: [chat, data_profile, cleaning_recipe, chart_specs, audit_trail]
+behavior: [inspect_first, reversible_cleaning, caveats_visible, chart_candidates]
+policy:
+  network_default: none
+  file_write_requires_approval: true
+  terminal_requires_approval: true
+task_defaults:
+  output:
+    type: analysis_summary_with_chart_specs

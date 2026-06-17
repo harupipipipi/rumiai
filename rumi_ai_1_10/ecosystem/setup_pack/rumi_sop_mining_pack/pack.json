@@ -1,0 +1,89 @@
+{
+  "pack_id": "rumi_sop_mining_pack",
+  "display_name": "Rumi SOP Mining Pack",
+  "description": "Declarative trace-to-SOP, checklist, runbook, and human-approved workflow recipe pack.",
+  "target_pack_id": "rumi_sop_mining_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "compatibility": {
+    "python": ">=3.9",
+    "platforms": [
+      "macos",
+      "linux",
+      "windows"
+    ]
+  },
+  "overlap_policy": {
+    "automation_execution": "blocked_handoff_to_runtime_owner_after_human_approval",
+    "browser_control": "blocked_handoff_to_rumi_browser_automation_pack",
+    "computer_control": "blocked_handoff_to_rumi_computer_control_pack",
+    "browser_or_desktop_control": "blocked_handoff_to_rumi_computer_control_pack",
+    "schedule_creation": "blocked_handoff_to_rumi_workflow_scheduler_pack",
+    "scheduled_jobs": "blocked_handoff_to_rumi_workflow_scheduler_pack",
+    "live_trace_capture": "blocked_handoff_to_rumi_observability_pack",
+    "run_ledger_storage": "blocked_handoff_to_rumi_observability_pack",
+    "tool_creation_or_invocation": "blocked_handoff_to_rumi_default_tools_pack",
+    "unsafe_trace_review": "handoff_to_rumi_security_review_pack",
+    "sop_extraction": "owned_by_rumi_sop_mining_pack",
+    "trace_schema": "owned_by_rumi_sop_mining_pack",
+    "redaction_policy": "owned_by_rumi_sop_mining_pack",
+    "human_approval_gate": "owned_by_rumi_sop_mining_pack",
+    "runbook_template": "owned_by_rumi_sop_mining_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Rumi SOP Mining Pack is a declarative domain contract pack; promotion is blocked until runtime owners prove the adjacent execution and audit evidence outside this pack.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required",
+      "promotion_requires_real_world_success_cases"
+    ],
+    "promotion_blockers": [
+      "no_automation_execution_runtime",
+      "does_not_control_browsers",
+      "does_not_control_computers",
+      "does_not_create_schedules_or_jobs",
+      "does_not_store_long_term_observability_ledgers",
+      "does_not_create_or_invoke_tools",
+      "requires_trace_redaction_review",
+      "requires_human_approval_before_recipe_use",
+      "observability_trace_storage_owned_elsewhere"
+    ],
+    "promotion_evidence_required": [
+      "redacted_trace_contract_cases",
+      "human_approval_gate_cases",
+      "sop_evidence_link_cases"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.sop_mining_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "process-mining",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools."
+  ]
+}

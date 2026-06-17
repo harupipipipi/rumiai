@@ -3,8 +3,16 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from functions._tool_common import RUMI_ROOT  # noqa: F401 - imported for sys.path setup
+PACK_ROOT = Path(__file__).resolve().parents[2]
+pack_root_text = str(PACK_ROOT)
+if pack_root_text not in sys.path:
+    sys.path.insert(0, pack_root_text)
+from functions._tool_common import DEFAULTSPACK_ROOT, RUMI_ROOT  # noqa: F401 - imported for sys.path setup
+
+defaultspack_root_text = str(DEFAULTSPACK_ROOT)
+if defaultspack_root_text in sys.path:
+    sys.path.remove(defaultspack_root_text)
+sys.path.insert(0, defaultspack_root_text)
 
 try:
     from ecosystem.defaultspack.domain.host_bridge.computer_router import run_computer_action

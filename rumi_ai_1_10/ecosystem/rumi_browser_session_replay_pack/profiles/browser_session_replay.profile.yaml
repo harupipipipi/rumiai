@@ -1,0 +1,7 @@
+profile:
+  id: browser_session_replay
+  pack_id: rumi_browser_session_replay_pack
+  mode: review_and_handoff
+  review_contract:
+    external_actions: handoff_only
+    secrets: none

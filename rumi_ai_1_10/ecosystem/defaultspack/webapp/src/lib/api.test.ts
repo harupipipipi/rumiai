@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { api, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { ChatStreamInterruptedError, api, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { catalogProfileIdForSelection, frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
@@ -203,6 +203,75 @@ test("catalogProfileIdForSelection follows memo profile before falling back to m
   assert.equal(catalogProfileIdForSelection("stub/default", null), "stub/default");
 });
 
+test("kanban API methods use first-class board and card routes", async () => {
+  const requests: Array<{ input: string; init?: RequestInit }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({ input: String(input), init });
+    if (String(input).startsWith("/api/kanban/boards?")) {
+      return new Response(JSON.stringify({
+        status: "ok",
+        data: {
+          board: {
+            board_id: "board-1",
+            scope_type: "conversation",
+            scope_id: "conv 1",
+            title: "Chat board",
+          },
+          columns: [],
+          cards: [],
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (String(input).endsWith("/import-conversation")) {
+      return new Response(JSON.stringify({
+        status: "ok",
+        data: {
+          board: {
+            board_id: "board-1",
+            scope_type: "conversation",
+            scope_id: "conv 1",
+            title: "Chat board",
+          },
+          columns: [],
+          cards: [{ card_id: "card-imported", board_id: "board-1", column_id: "col-1", position: 1000, title: "Imported" }],
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        card_id: "card-1",
+        board_id: "board-1",
+        column_id: "col-1",
+        position: 1000,
+        title: "Fix UI",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const board = await api.kanbanGetOrCreateBoard({ type: "conversation", id: "conv 1" });
+    const card = await api.kanbanCreateCard("board-1", { title: "Fix UI", column_id: "col-1" });
+    const imported = await api.kanbanImportConversation("board-1", { conversation_id: "conv 1", column_id: "col-1" });
+
+    assert.equal(board.board.board_id, "board-1");
+    assert.equal(card.card_id, "card-1");
+    assert.equal(imported.cards[0]?.card_id, "card-imported");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requests[0]?.input, "/api/kanban/boards?scope_type=conversation&scope_id=conv+1&bootstrap=true");
+  assert.equal(requests[0]?.init?.cache, "no-store");
+  assert.equal(requests[1]?.input, "/api/kanban/boards/board-1/cards");
+  assert.equal(requests[1]?.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(requests[1]?.init?.body ?? "{}")), { title: "Fix UI", column_id: "col-1" });
+  assert.equal(requests[2]?.input, "/api/kanban/boards/board-1/import-conversation");
+  assert.equal(requests[2]?.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(requests[2]?.init?.body ?? "{}")), { conversation_id: "conv 1", column_id: "col-1" });
+});
+
 test("defaultspack API errors include status and recovery context", () => {
   const message = explainDefaultspackApiError(403, {
     code: "FORBIDDEN",
@@ -299,6 +368,86 @@ test("sendMessage preserves an empty selected tools filter", async () => {
   assert.deepEqual(requestBody?.tools, []);
   assert.deepEqual(requestBody?.params?.tool_policy, { selected_tools: [] });
   assert.deepEqual(requestBody?.message?.metadata, { selected_tools: [] });
+});
+
+test("sendMessage preserves authority followup display metadata", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        id: "m-authority-followup",
+        role: "assistant",
+        content: "ok",
+        created_at: 1,
+        conversation_id: "c1",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.sendMessage("c1", "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。", {
+      metadata: {
+        authority_followup: {
+          request_id: "approval-1",
+          permission_id: "model.invoke",
+          approval_token: "token-1",
+          hidden: true,
+        },
+        chat_display: {
+          hidden: true,
+          reason: "authority_followup",
+        },
+        runtime_content: "continue with approved authority",
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody?.message?.metadata?.authority_followup, {
+    request_id: "approval-1",
+    permission_id: "model.invoke",
+    approval_token: "token-1",
+    hidden: true,
+  });
+  assert.deepEqual(requestBody?.message?.metadata?.chat_display, {
+    hidden: true,
+    reason: "authority_followup",
+  });
+  assert.equal(requestBody?.message?.metadata?.runtime_content, "continue with approved authority");
+});
+
+test("approveAuthorityApproval serializes bundled related permissions", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        request_id: "approval-1",
+        approved: true,
+        scope: "once",
+        token: "token-1",
+        permission_id: "model.invoke",
+        related_approvals: [],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.approveAuthorityApproval("approval-1", {
+      scope: "once",
+      related_permissions: ["api_key.use"],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody?.related_permissions, ["api_key.use"]);
 });
 
 test("searchConversations serializes spotlight search filters", async () => {
@@ -712,8 +861,34 @@ test("streamMessage rejects streams without a final message", async () => {
   try {
     await assert.rejects(
       api.streamMessage("c1", "hello"),
-      /ended before a final response/,
+      (error) => error instanceof ChatStreamInterruptedError && error.partialText === "partial",
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("reportClientEvent posts diagnostics to the UI contract endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestBody = "";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = String(init?.body ?? "");
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { recorded: true, diagnostic_id: "diag-1" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.reportClientEvent({
+      category: "window_error",
+      message: "Renderer crashed",
+    });
+    assert.equal(requestUrl, "/api/ui/client-events");
+    assert.match(requestBody, /Renderer crashed/);
+    assert.equal(result.recorded, true);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -845,6 +1020,37 @@ test("unsafe API headers replace blank CSRF values", () => {
   const headers = defaultspackApiHeaders("POST", { "X-Rumi-CSRF": " " });
 
   assert.ok(headers.get("X-Rumi-CSRF")?.trim());
+});
+
+test("unsafe API headers prefer panel session CSRF when present", () => {
+  const previousDescriptor = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const values = new Map<string, string>([
+    ["rumi-panel-csrf", "panel-csrf-from-bootstrap"],
+    ["rumi-defaultspack-csrf", "local-defaultspack-csrf"],
+  ]);
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+    },
+  });
+
+  try {
+    const headers = defaultspackApiHeaders("PUT");
+    assert.equal(headers.get("X-Rumi-CSRF"), "panel-csrf-from-bootstrap");
+  } finally {
+    if (previousDescriptor) {
+      Object.defineProperty(globalThis, "sessionStorage", previousDescriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, "sessionStorage");
+    }
+  }
 });
 
 test("browserComputer calls dedicated browser-computer endpoint", async () => {

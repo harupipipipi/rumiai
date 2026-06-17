@@ -1,0 +1,14 @@
+preset:
+  id: safe_default
+  purpose: Use local evidence and no implicit external action.
+  required_assets:
+  - schemas
+  - policies
+  - checklists
+  defaults:
+    network: none
+    grant_effect: none
+    human_review: true
+    trace_capture: none
+    runtime_action: none
+    promotion_requires_approval_record: true

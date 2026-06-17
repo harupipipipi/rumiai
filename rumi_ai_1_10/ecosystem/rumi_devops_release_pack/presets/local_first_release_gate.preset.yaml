@@ -1,0 +1,19 @@
+id: rumi_devops_release_pack.local_first_release_gate
+name: Local-First Release Gate
+profile: rumi_devops_release_pack.release_manager
+intent: Decide release readiness using local evidence by default.
+network_default: none
+evidence_inputs:
+  - git diff summary
+  - local test output
+  - changelog or release note draft
+  - local runbook
+outputs:
+  - ready
+  - blocked
+  - needs approval
+  - missing evidence
+behavior:
+  - no_live_state_without_request
+  - no_deploy_execution
+  - explicit_risk_register

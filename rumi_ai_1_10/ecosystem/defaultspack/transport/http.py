@@ -906,6 +906,28 @@ class DefaultsHttpServer:
             "model_id": clean_string("model_id", "gpt-5.4-test"),
             "stream": bool(request_data.get("stream", True)),
         }
+        for key in (
+            "model_ref",
+            "pack_id",
+            "app_display_name",
+            "provider_display_name",
+            "model_display_name",
+            "credential_label",
+            "endpoint_url",
+            "endpoint_path",
+            "domain",
+            "transport",
+            "provider_transport",
+            "provider_kind",
+        ):
+            value = str(request_data.get(key) or "").strip()
+            if value:
+                resource[key] = value
+        if request_data.get("port") is not None:
+            try:
+                resource["port"] = int(request_data.get("port"))
+            except (TypeError, ValueError):
+                pass
         if request_data.get("input_tokens") is not None:
             try:
                 resource["input_tokens"] = max(0, int(request_data.get("input_tokens")))

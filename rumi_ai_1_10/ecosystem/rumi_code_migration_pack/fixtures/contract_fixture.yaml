@@ -1,0 +1,10 @@
+fixture:
+  migration_id: migration_framework_upgrade_001
+  inventory: inventory:mixed-web-api
+  codemod_plan: codemod:imports-v2
+  pr_shards:
+  - shard:frontend
+  - shard:backend
+  - shard:docs
+  rollback_plan: rollback:framework-v1
+  handoff_owner: rumi_code_ide_pack

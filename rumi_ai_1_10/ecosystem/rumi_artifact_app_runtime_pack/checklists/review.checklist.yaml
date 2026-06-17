@@ -1,0 +1,36 @@
+review_checklist:
+  minimum_pass: all_blocking_items
+  items:
+  - id: network_denied_by_default
+    question: Artifact manifests deny network by default.
+    blocking: true
+  - id: first_tool_call_approval
+    question: First tool/MCP/API call requires explicit approval.
+    blocking: true
+  - id: sandbox_owner_named
+    question: Sandbox runtime owner is named for render execution.
+    blocking: true
+  - id: workspace_handoff_for_storage
+    question: State and export persistence hand off to workspace.
+    blocking: true
+  - id: rollback_parent_present
+    question: Rollback records point to parent version or explicitly root.
+    blocking: true
+  - id: error_boundary_safe_fallback
+    question: Errors produce safe fallback rather than execution.
+    blocking: true
+  - id: no_direct_execution
+    question: The pack never executes artifact code.
+    blocking: true
+  - id: asset_index_complete
+    question: Every artifact is listed in metadata and file index.
+    blocking: true
+  - id: no_credentials_or_network
+    question: Pack has no credentials, no required network, and no executable code.
+    blocking: true
+  - id: defaultspack_promotion_false
+    question: Promotion remains false until evidence is accepted.
+    blocking: true
+  - id: asset_index_complete
+    question: Every pack file is indexed.
+    blocking: true

@@ -1,0 +1,11 @@
+id: genspark_workspace
+name: Genspark-like Workspace Report
+profile: rumi_workspace_pack.workspace_artifact_agent
+enabled_capabilities:
+  - workspace.document.create
+  - workspace.chart.render
+  - workspace.pdf.compose
+  - workspace.bundle.export
+ui_panels: [chat, source_cards, artifact_tree, preview, export_queue]
+behavior: [source_synthesis, report_generation, chart_generation, pdf_export, bundle_delivery]
+default_outputs: [report_docx, report_pdf, chart_assets, artifact_manifest]

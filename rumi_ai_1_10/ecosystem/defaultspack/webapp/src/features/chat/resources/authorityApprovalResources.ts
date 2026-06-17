@@ -15,6 +15,7 @@ export const authorityApprovalResources = {
     options: {
       scope: AuthorityApprovalScope;
       config: Record<string, unknown>;
+      related_permissions?: string[];
       ui_operator: AuthorityUiOperator;
     },
   ) {

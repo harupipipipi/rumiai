@@ -1,0 +1,14 @@
+id: rumi_devops_release_pack.examples.release_notes_evidence
+profile: rumi_devops_release_pack.release_manager
+preset: rumi_devops_release_pack.local_first_release_gate
+task: Draft release notes and a release gate summary from local change evidence.
+expected_agent_steps:
+  - inspect local change summary
+  - gather test and verification evidence
+  - draft user-visible and operational release notes
+  - identify missing evidence and release blockers
+  - produce deploy runbook skeleton
+safety_notes:
+  - do not deploy
+  - do not infer live status without evidence
+  - keep owner names as roles where possible

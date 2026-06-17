@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/participant.schema.json",
+  "title": "Participant",
+  "description": "Contract schema for Participant.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "participant_id",
+    "segment",
+    "consent_state",
+    "redaction_state",
+    "allowed_use",
+    "source_system"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "consent_state": {
+            "const": "revoked"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "redaction_state": {
+            "const": "raw_blocked"
+          },
+          "allowed_use": {
+            "contains": {
+              "const": "do_not_use"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "participant_id": {
+      "type": "string",
+      "pattern": "^participant_[a-z0-9_]+$"
+    },
+    "segment": {
+      "type": "string",
+      "minLength": 1
+    },
+    "consent_state": {
+      "type": "string",
+      "enum": [
+        "granted",
+        "limited",
+        "revoked",
+        "unknown"
+      ]
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": [
+        "raw_blocked",
+        "redacted",
+        "aggregate_only"
+      ]
+    },
+    "allowed_use": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "synthesis",
+          "quote_with_review",
+          "aggregate_only",
+          "do_not_use"
+        ]
+      }
+    },
+    "source_system": {
+      "type": "string",
+      "enum": [
+        "local_transcript",
+        "survey_export",
+        "support_feedback",
+        "manual_note"
+      ]
+    }
+  }
+}

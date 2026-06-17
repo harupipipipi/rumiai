@@ -40,6 +40,7 @@ from domain.ai_client.run_seal import (
 from domain.ai_client.provider_compiler.registry import compile_complete, compiler_for_api_family
 from domain.ai_client.provider_trace import redact_sensitive_value, write_provider_trace
 from domain.ai_client.client import AIClient, AuthorityApprovalRequired
+from domain.ai_client.authority_resource import build_provider_authority_resource, provider_authority_reason
 from domain.ai_client.gateway import LLMGateway
 from domain.chat.cancellation import get_chat_cancellation_registry
 from domain.chat.ir_legacy_adapter import (
@@ -52,6 +53,7 @@ from domain.chat.public_metadata import compact_provider_planning
 from domain.chat.run_request import PreparedChatRun, prepare_chat_run
 from domain.chat.tool_call_accumulator import ToolCallAccumulator
 from domain.chat.store import ChatStore
+from domain.kanban.chat_sync import sync_conversation_kanban
 from domain.context_engine.compressor import ContextCompressor
 from domain.dev.inspector import Inspector
 from domain.stream.events import run_event, to_legacy_chat_stream_event
@@ -157,6 +159,30 @@ def _should_emit_model_routing_status(model_routing: dict[str, Any] | None) -> b
     selected = str(model_routing.get("selected_model") or "")
     original = str(model_routing.get("original_model") or "")
     return bool(selected and original and selected != original)
+
+
+def _provider_visible_params(params: dict[str, Any] | None) -> dict[str, Any]:
+    clean = dict(params or {})
+    clean.pop("_authority_context", None)
+    return clean
+
+
+def _authority_context_token_for_permission(context: dict[str, Any], permission_id: str) -> tuple[str, str]:
+    permission_id = str(permission_id or "").strip()
+    tokens = context.get("approval_tokens") if isinstance(context, dict) else None
+    if isinstance(tokens, dict):
+        raw = tokens.get(permission_id)
+        if isinstance(raw, dict):
+            request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+            token = str(raw.get("approval_token") or raw.get("token") or "").strip()
+            if request_id and token:
+                return request_id, token
+    context_permission = str(context.get("permission_id") or "").strip() if isinstance(context, dict) else ""
+    if context_permission and context_permission != permission_id:
+        return "", ""
+    request_id = str(context.get("request_id") or "").strip() if isinstance(context, dict) else ""
+    token = str(context.get("approval_token") or "").strip() if isinstance(context, dict) else ""
+    return request_id, token
 
 
 def _normalize_tool_call_name_and_arguments(
@@ -889,6 +915,7 @@ class ChatRunEngine:
                     message="Failed to add assistant message",
                 )
                 return
+            sync_conversation_kanban(prepared.conversation_id, reason="stream_completed")
             draft_completed = True
 
             yield self._emit(
@@ -1528,7 +1555,7 @@ class ChatRunEngine:
                     prepared.model,
                     messages,
                     prepared.provider_tools,
-                    retry_params,
+                    _provider_visible_params(retry_params),
                     prepared.call_handler,
                     allow_retry=False,
                     authority_context=prepared.request_context.get("authority", {}),
@@ -1621,29 +1648,42 @@ class ChatRunEngine:
         context = prepared.request_context.get("authority") if isinstance(prepared.request_context, dict) else {}
         context = dict(context) if isinstance(context, dict) else {}
         service = get_authority_service()
-        checks = (
-            ("model.invoke", "model", "Model invocation: {}/{}".format(provider_id, model_name)),
-            ("api_key.use", "api_key", "Provider API key use: {}/legacy".format(provider_id)),
-        )
-        for permission_id, resource_kind, reason in checks:
+        checks = [
+            ("model.invoke", "model"),
+            ("api_key.use", "api_key"),
+            ("network.egress", "network"),
+        ]
+        if _authority_context_token_for_permission(context, "model.invoke")[1]:
+            missing_related = [
+                item
+                for item in checks
+                if item[0] != "model.invoke" and not _authority_context_token_for_permission(context, item[0])[1]
+            ]
+            if missing_related:
+                checks = missing_related + [item for item in checks if item not in missing_related]
+        for permission_id, resource_kind in checks:
+            request_id, approval_token = _authority_context_token_for_permission(context, permission_id)
+            resource = build_provider_authority_resource(
+                permission_id=permission_id,
+                resource_kind=resource_kind,
+                provider_id=provider_id,
+                api_id="legacy",
+                model_id=model_name,
+                model_ref=prepared.model,
+                provider=provider,
+                stream=False,
+            )
             decision = service.check(
                 principal_id=str(context.get("principal_id") or "defaultspack"),
                 permission_id=permission_id,
-                resource={
-                    "kind": resource_kind,
-                    "provider_id": provider_id,
-                    "api_id": "legacy",
-                    "model_id": str(model_name or ""),
-                    "model_ref": prepared.model,
-                    "stream": False,
-                },
-                reason=reason,
+                resource=resource,
+                reason=provider_authority_reason(permission_id, resource),
                 conversation_id=context.get("conversation_id"),
                 profile_id=context.get("profile_id"),
                 node_id=context.get("node_id"),
                 graph_id=context.get("graph_id"),
-                request_id=context.get("request_id"),
-                approval_token=context.get("approval_token"),
+                request_id=request_id or context.get("request_id"),
+                approval_token=approval_token,
             )
             if not decision.allowed:
                 raise AuthorityApprovalRequired(decision)
@@ -2013,6 +2053,7 @@ class ChatRunEngine:
                     **({"transcript": "".join(self._thinking_transcript_parts)} if self._thinking_transcript_parts else {}),
                 },
                 "thinking_level": prepared.params.get("thinking_level"),
+                "deepthink_enabled": bool(prepared.params.get("deepthink_enabled")),
                 "model_routing": dict(prepared.model_routing or {}),
                 "chat_references": dict(prepared.chat_references or {}),
                 "ir": {"schema_version": prepared.ir_schema_version},
@@ -2425,7 +2466,7 @@ class ChatRunEngine:
                         "model": prepared.model,
                         "messages": messages,
                         "tools": tools,
-                        "params": _params_without_thinking(prepared.params),
+                        "params": _provider_visible_params(_params_without_thinking(prepared.params)),
                         "authority_context": prepared.request_context.get("authority", {}),
                     }
                 )
@@ -2448,6 +2489,7 @@ class ChatRunEngine:
             metadata.setdefault("attached_tool_count", len(prepared.provider_tools))
             metadata.setdefault("attached_tools", list(prepared.tools_called))
             metadata["thinking_level"] = prepared.params.get("thinking_level")
+            metadata["deepthink_enabled"] = bool(prepared.params.get("deepthink_enabled"))
             response["metadata"] = metadata
             return response
         return None

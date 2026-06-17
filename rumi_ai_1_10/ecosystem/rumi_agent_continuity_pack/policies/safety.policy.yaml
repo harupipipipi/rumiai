@@ -1,0 +1,15 @@
+policy:
+  pack_id: rumi_agent_continuity_pack
+  default_mode: restart_evidence_and_handoff_only
+  blocked_by_default:
+  - runtime action
+  - file mutation
+  - memory writes
+  - metrics collection
+  - schedule creation
+  - branch mutation
+  - checkpoint ownership
+  - replay index ownership
+  - artifact persistence
+  external_effect: handoff_packet_only
+  network_policy: none_by_default

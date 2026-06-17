@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/channel_message.schema.json",
+  "title": "Channel Message",
+  "description": "Normalized inbound channel payload.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "message_id",
+    "channel",
+    "external_thread_id",
+    "sender_ref",
+    "payload_summary",
+    "ingress_owner",
+    "received_at_state"
+  ],
+  "properties": {
+    "message_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "slack",
+        "gmail",
+        "sms",
+        "voice",
+        "web",
+        "discord",
+        "manual"
+      ]
+    },
+    "external_thread_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sender_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ingress_owner": {
+      "type": "string",
+      "const": "external_connector_gateway_owner"
+    },
+    "received_at_state": {
+      "type": "string",
+      "enum": [
+        "known",
+        "unknown"
+      ]
+    }
+  }
+}

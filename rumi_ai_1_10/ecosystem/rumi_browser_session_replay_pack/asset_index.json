@@ -1,0 +1,79 @@
+{
+  "asset_index": {
+    "pack_id": "rumi_browser_session_replay_pack",
+    "categories": {
+      "root": [
+        "README.md",
+        "asset_index.json",
+        "asset_index.yaml"
+      ],
+      "catalog": [
+        "catalog/evidence_bundle_contract.yaml",
+        "catalog/handoff_matrix.yaml",
+        "catalog/quality_matrix.yaml",
+        "catalog/replay_event_taxonomy.yaml",
+        "catalog/taxonomy.yaml",
+        "catalog/workflows.yaml"
+      ],
+      "checklists": [
+        "checklists/review.checklist.yaml"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md",
+        "docs/overlap_policy.md"
+      ],
+      "examples": [
+        "examples/checkout_selector_drift.example.yaml",
+        "examples/login_failure_trace.example.yaml",
+        "examples/private_dashboard_replay_review.example.yaml",
+        "examples/redacted_bug_replay_manifest.example.yaml"
+      ],
+      "fixtures": [
+        "fixtures/contract_fixture.yaml",
+        "fixtures/negative_cases.yaml"
+      ],
+      "ledgers": [
+        "ledgers/replay_evidence_ledger.schema.yaml"
+      ],
+      "policies": [
+        "policies/handoff.policy.yaml",
+        "policies/replay_safety_boundary.policy.yaml",
+        "policies/safety.policy.yaml",
+        "policies/session_replay_redaction.policy.yaml"
+      ],
+      "presets": [
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml",
+        "presets/safe_default.preset.yaml"
+      ],
+      "profiles": [
+        "profiles/browser_session_replay.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/browser_session_replay.system.md"
+      ],
+      "schemas": [
+        "schemas/browser_event_evidence.schema.json",
+        "schemas/browser_session_trace.schema.json",
+        "schemas/dom_snapshot_evidence.schema.json",
+        "schemas/redaction_review_receipt.schema.json",
+        "schemas/replay_manifest.schema.json",
+        "schemas/screenshot_evidence.schema.json",
+        "schemas/selector_drift_report.schema.json"
+      ],
+      "templates": [
+        "templates/handoff.template.md",
+        "templates/review_report.template.md",
+        "templates/ui_contract.template.md"
+      ]
+    },
+    "invariants": {
+      "external_actions_are_handoffs": true,
+      "defaultspack_promotion_eligible": false,
+      "declarative_only": true
+    }
+  }
+}

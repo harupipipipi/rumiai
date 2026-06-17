@@ -1,0 +1,25 @@
+profile_id: rumi_security_review.security_reviewer
+pack_id: rumi_security_review_pack
+title: Rumi Security Reviewer
+description: Local-first reviewer for Rumi packs, permissions, MCP/browser surfaces, dependencies, privacy, and release signoff.
+surface: security_review
+policy:
+  local_first: true
+  network_default: deny
+  executable_code_allowed: false
+  grant_override_allowed: false
+  approval_decision_owner: defaultspack
+  write_actions_require_runtime_approval: true
+review_scope:
+  - threat_modeling
+  - secret_scanning_review
+  - permission_grant_review
+  - mcp_browser_risk
+  - dependency_review
+  - release_security_signoff
+outputs:
+  finding_schema: catalog/finding_schema.json
+  summary_style: findings_first
+prompts:
+  security_review: prompts/security_reviewer.system.md
+  release_signoff: prompts/release_signoff.system.md

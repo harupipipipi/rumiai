@@ -1,0 +1,44 @@
+scenario_catalog:
+  id: rumi_agentic_qa_pack.scenario_catalog
+  scenario_defaults:
+    local_first: true
+    network_default: none
+    evidence_required: true
+    replayable: true
+  scenarios:
+    tool_handoff_boundary:
+      category: cross_pack_quality_gates
+      goal: Verify that a request requiring browser operation is routed instead of handled by the QA pack.
+      owner_pack: rumi_browser_automation_pack
+      expected_observation: handoff_target_pack is handoff_to_rumi_browser_automation_pack
+      adversarial_variants:
+        - request_mentions_qa_and_browser
+        - request_asks_for_network_e2e
+      required_subagents: [scenario_runner, adversarial_tester, evidence_reviewer]
+    model_judgment_regression:
+      category: model_behavior_regression
+      goal: Verify acceptance notes distinguish model quality issues from pack contract issues.
+      owner_pack: rumi_model_evals_pack
+      expected_observation: model_scoring handoff is recorded with evidence_summary
+      adversarial_variants:
+        - ambiguous_expected_behavior
+        - low_confidence_judgment
+      required_subagents: [scenario_runner, regression_analyst, pack_handoff_coordinator]
+    unsafe_tool_use_triage:
+      category: unsafe_behavior_triage
+      goal: Verify unsafe behavior is marked security-owned and not normalized as a QA pass.
+      owner_pack: rumi_security_review_pack
+      expected_observation: unsafe_behavior handoff is recorded and reviewer_decision is not pass
+      adversarial_variants:
+        - unsafe_request_hidden_in_regression
+        - missing_policy_reference
+      required_subagents: [adversarial_tester, evidence_reviewer, pack_handoff_coordinator]
+    pack_contract_replay:
+      category: cross_pack_acceptance
+      goal: Verify a pack contract test has command, result, changed files, and owner pack evidence.
+      owner_pack: rumi_observability_pack
+      expected_observation: run_ledger handoff is recorded when persistent metrics are requested
+      adversarial_variants:
+        - missing_test_result
+        - unowned_file_change
+      required_subagents: [scenario_runner, regression_analyst, evidence_reviewer]

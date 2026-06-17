@@ -1,0 +1,41 @@
+{
+  "version": "rumi.document_intelligence.citation_trace.schema.v1",
+  "pack_id": "rumi_document_intelligence_pack",
+  "type": "object",
+  "required": [
+    "claim_id",
+    "document_type",
+    "source_document_id",
+    "page_span",
+    "quote_digest",
+    "evidence_type",
+    "privacy_class"
+  ],
+  "properties": {
+    "claim_id": {"type": "string"},
+    "document_type": {"type": "string"},
+    "source_document_id": {"type": "string"},
+    "page_span": {
+      "type": "object",
+      "required": ["page_start", "page_end"],
+      "properties": {
+        "page_start": {"type": "integer", "minimum": 1},
+        "page_end": {"type": "integer", "minimum": 1},
+        "span_start_hint": {"type": "string"},
+        "span_end_hint": {"type": "string"}
+      }
+    },
+    "quote_digest": {
+      "type": "object",
+      "required": ["mode", "digest"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["short_quote", "paraphrase", "table_value", "redacted"]},
+        "digest": {"type": "string"},
+        "redaction_reason": {"type": "string"}
+      }
+    },
+    "evidence_type": {"type": "string"},
+    "privacy_class": {"type": "string"},
+    "missing_evidence_reason": {"type": "string"}
+  }
+}

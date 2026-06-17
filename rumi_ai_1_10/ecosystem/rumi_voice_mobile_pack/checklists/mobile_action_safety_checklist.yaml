@@ -1,0 +1,23 @@
+checklist_id: rumi_voice_mobile.mobile_action_safety.v1
+owner: rumi_voice_mobile_pack
+purpose: Safety checklist before any voice-derived mobile or device action is handed off.
+required_items:
+  - transcript_ref_present
+  - interpreted_intent_confirmed
+  - action_target_recorded
+  - recipient_or_device_recorded
+  - consent_ref_recorded
+  - destructive_or_external_send_flagged
+  - quiet_hours_checked_for_notifications
+  - owner_pack_handoff_recorded
+  - receipt_schema_ref_recorded
+approval_rules:
+  low_risk_note_capture: user_review_required
+  notification_send: explicit_channel_consent_required
+  repeated_notification: schedule_owner_review_required
+  device_or_desktop_action: explicit_confirmation_required
+  destructive_or_public_action: security_review_required
+outputs:
+  - action_safety_decision
+  - required_handoff
+  - receipt_requirements

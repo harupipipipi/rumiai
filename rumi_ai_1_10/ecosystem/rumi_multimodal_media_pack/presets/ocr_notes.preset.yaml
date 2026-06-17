@@ -1,0 +1,6 @@
+preset_id: rumi_multimodal_media.ocr_notes
+profile: rumi_multimodal_media.agent
+workflow: ocr_to_structured_notes
+features:
+  uncertain_regions: flag
+  preserve_page_order: true

@@ -1,0 +1,7 @@
+profile:
+  id: continuity_reviewer
+  pack_id: rumi_agent_continuity_pack
+  mode: review_and_handoff
+  review_contract:
+    external_actions: handoff_only
+    secrets: none

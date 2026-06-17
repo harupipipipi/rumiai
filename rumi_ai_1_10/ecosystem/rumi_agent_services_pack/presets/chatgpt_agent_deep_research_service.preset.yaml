@@ -1,0 +1,17 @@
+id: chatgpt_agent_deep_research_service
+name: ChatGPT Agent + Deep Research Style Service
+profile: rumi_agent_services.service_director
+workflow: deep_research_report
+enabled_capabilities: [intake, planning, deep_research, browser_operator, artifact_delivery, safety_review]
+ui_panels: [chat, plan, tool_calls, source_cards, artifacts]
+behavior: [service_director_loop, evidence_first, browser_optional, final_review]
+policy:
+  network_default: deny
+  browser_requires_approval: true
+task_defaults:
+  output:
+    type: markdown_report
+  source_policy:
+    local_sources: preferred
+    official_docs: preferred
+    web: optional_with_approval

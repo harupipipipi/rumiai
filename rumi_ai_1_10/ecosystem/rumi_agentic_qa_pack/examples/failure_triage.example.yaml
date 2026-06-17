@@ -1,0 +1,12 @@
+example:
+  id: failure_triage
+  pack_id: rumi_agentic_qa_pack
+  workflow: triage_regression_evidence
+  intent: Triage a failing scenario by comparing expected and actual observations, then record the right owner pack for follow-up.
+  evidence:
+    - scenario_id
+    - expected_observation
+    - actual_observation
+    - triage_owner_pack
+  handoff: handoff_to_rumi_security_review_pack_when_failure_is_unsafe_behavior
+  expected_result: failure_triage_report_with_severity_owner_pack_and_local_evidence
