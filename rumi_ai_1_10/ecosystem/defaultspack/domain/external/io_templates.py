@@ -57,18 +57,14 @@ class ExternalIOTemplateRegistry:
     def list_templates(self, *, direction: str | None = None) -> list[ExternalIOTemplate]:
         wanted = str(direction or "").strip().lower()
         templates: list[ExternalIOTemplate] = []
-        for directory, origin in self._template_dirs():
-            for path in sorted(directory.glob("*.template.yaml")):
-                template = self._load(path, origin=origin)
-                if template is None:
-                    continue
-                if wanted and template.direction != wanted:
-                    continue
-                templates.append(template)
+        templates.extend(self._load_yaml_templates(self.pack_root / "external_io_templates", origin="builtin"))
+        templates.extend(self._template_catalog_templates())
+        templates.extend(self._load_yaml_templates(self.custom_templates_dir, origin="custom"))
         deduped: dict[str, ExternalIOTemplate] = {}
         for template in templates:
             deduped[template.id] = template
-        return sorted(deduped.values(), key=self._sort_key)
+        values = [template for template in deduped.values() if not wanted or template.direction == wanted]
+        return sorted(values, key=self._sort_key)
 
     def catalog(self) -> dict[str, Any]:
         templates = [template.as_dict() for template in self.list_templates()]
@@ -115,6 +111,39 @@ class ExternalIOTemplateRegistry:
             (self.pack_root / "external_io_templates", "builtin"),
             (self.custom_templates_dir, "custom"),
         ]
+
+    def _load_yaml_templates(self, directory: Path, *, origin: str) -> list[ExternalIOTemplate]:
+        templates: list[ExternalIOTemplate] = []
+        for path in sorted(directory.glob("*.template.yaml")):
+            template = self._load(path, origin=origin)
+            if template is not None:
+                templates.append(template)
+        return templates
+
+    def _template_catalog_templates(self) -> list[ExternalIOTemplate]:
+        try:
+            from domain.templates.projectors import build_template_catalog
+        except Exception:
+            return []
+        try:
+            catalog = build_template_catalog(defaultspack_root=self.pack_root)
+        except Exception:
+            return []
+        items = catalog.get("external_io_templates")
+        if not isinstance(items, list):
+            return []
+        templates: list[ExternalIOTemplate] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            template = ExternalIOTemplate.from_dict(
+                item,
+                origin="template",
+                path=str(item.get("_source") or item.get("path") or ""),
+            )
+            if self._validate(template) == "":
+                templates.append(template)
+        return templates
 
     @staticmethod
     def _load(path: Path, *, origin: str) -> ExternalIOTemplate | None:

@@ -1,0 +1,568 @@
+{
+  "id": "rumi.external_io.default",
+  "kind": "integration",
+  "version": "1.0.0",
+  "status": "active",
+  "trust_level": "builtin",
+  "capabilities": {
+    "provides": [
+      "rumi.external_io",
+      "rumi.external_io.templates"
+    ],
+    "requires": [],
+    "permissions": [
+      "external_io.configure",
+      "external_io.send"
+    ]
+  },
+  "metadata": {
+    "title": "Default External IO Templates",
+    "template_kind": "integration_template",
+    "local_first": true,
+    "description": "Declarative external input/output provider templates for LINE, Discord, Slack, generic webhooks, and custom adapters."
+  },
+  "pieces": [
+    {
+      "id": "external_io_registry_service",
+      "kind": "backend_service",
+      "order": 10,
+      "service_id": "external_io_template_registry",
+      "entrypoint": "domain.external.io_templates.ExternalIOTemplateRegistry",
+      "lifecycle": "local"
+    },
+    {
+      "id": "external_io_catalog_source",
+      "kind": "function",
+      "order": 11,
+      "role": "data_source",
+      "data_source": "external_io_template_catalog",
+      "function_id": "external_io_template_catalog",
+      "route_path": "/api/external/templates",
+      "method": "GET",
+      "returns": "external input/output templates projected from RumiTemplate plus user custom templates"
+    },
+    {
+      "id": "external_io_upsert_template_action",
+      "kind": "function",
+      "order": 12,
+      "role": "action",
+      "action_id": "external_io_upsert_custom_template",
+      "function_id": "external_io_upsert_custom_template",
+      "handler_ref": "domain.external.io_templates:ExternalIOTemplateRegistry.upsert_custom",
+      "requires_approval": true
+    },
+    {
+      "id": "external_io_configure_permission",
+      "kind": "permission",
+      "order": 13,
+      "permission_id": "external_io.configure",
+      "scope": "external_io",
+      "reason": "External IO setup can store provider routes, profiles, or custom templates."
+    },
+    {
+      "id": "external_io_send_permission",
+      "kind": "permission",
+      "order": 14,
+      "permission_id": "external_io.send",
+      "scope": "external_io",
+      "reason": "External output templates may dispatch messages through provider APIs or webhooks."
+    },
+    {
+      "id": "line_input_default_template",
+      "kind": "external_io_template",
+      "order": 20,
+      "template": {
+        "id": "line.input.default",
+        "direction": "input",
+        "provider": "line",
+        "display_name": "LINE Input",
+        "summary": "Configure a LINE Messaging API channel webhook and reply to the source conversation.",
+        "setup_steps": [
+          "Select LINE Input.",
+          "Generate a Cloudflare Quick Tunnel URL for /api/integrations/line/webhook.",
+          "Paste the generated URL into LINE Messaging API Webhook URL.",
+          "Save the Messaging API Channel Secret and Channel Access Token in External Tokens.",
+          "Enable the line-main endpoint after checking the source rules.",
+          "Rumi replies with replyToken to the source user/group/room; no destination ID entry is needed for immediate replies."
+        ],
+        "input_profile_id": "line.default",
+        "endpoint": {
+          "id": "line-main",
+          "kind": "line",
+          "route": "/api/integrations/line/webhook",
+          "security": {
+            "mode": "provider_signature"
+          }
+        },
+        "tokens": [
+          {
+            "kind": "channel_secret",
+            "label": "Messaging API Channel Secret"
+          },
+          {
+            "kind": "channel_access_token",
+            "label": "Messaging API Channel Access Token"
+          }
+        ],
+        "default_response": {
+          "mode": "same_response",
+          "include_source_context": true,
+          "source_context_format": "${provider} input."
+        },
+        "response_prompt": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "id": "line_input_computer_use_template",
+      "kind": "external_io_template",
+      "order": 21,
+      "template": {
+        "id": "line.input.computer_use",
+        "direction": "input",
+        "provider": "line",
+        "display_name": "LINE Computer Use",
+        "summary": "Configure a LINE webhook that routes text into Gemma and replies through Google Chrome computer use in LINE Biz.",
+        "setup_steps": [
+          "Select LINE Computer Use.",
+          "Generate a Cloudflare Quick Tunnel URL for /api/integrations/line/webhook.",
+          "Paste the generated URL into the LINE Messaging API Webhook URL field.",
+          "Save the Messaging API Channel Secret and Channel Access Token in External Tokens.",
+          "Save a Google API key and choose google/gemma-4-31b-it.",
+          "Set the LINE Biz chat URL and keep the target Google Chrome window visible on the desktop during replies.",
+          "Enable the line-main endpoint after checking the source rules."
+        ],
+        "input_profile_id": "line.computer_use",
+        "endpoint": {
+          "id": "line-main",
+          "kind": "line",
+          "route": "/api/integrations/line/webhook",
+          "security": {
+            "mode": "provider_signature"
+          }
+        },
+        "conversation": {
+          "strategy": "external_key",
+          "model": "google/gemma-4-31b-it"
+        },
+        "response": {
+          "mode": "computer_use_line_biz"
+        },
+        "tokens": [
+          {
+            "kind": "channel_secret",
+            "label": "Messaging API Channel Secret"
+          },
+          {
+            "kind": "channel_access_token",
+            "label": "Messaging API Channel Access Token"
+          }
+        ],
+        "fields": [
+          {
+            "id": "line_biz_chat_url",
+            "label": "LINE Biz Chat URL",
+            "secret": false
+          },
+          {
+            "id": "google_api_key",
+            "label": "Google API Key",
+            "secret": true
+          }
+        ],
+        "default_response": {
+          "mode": "store_only"
+        },
+        "response_prompt": {
+          "enabled": true,
+          "preset": "computer_use_line_biz"
+        }
+      }
+    },
+    {
+      "id": "discord_input_default_template",
+      "kind": "external_io_template",
+      "order": 22,
+      "template": {
+        "id": "discord.input.default",
+        "direction": "input",
+        "provider": "discord",
+        "display_name": "Discord Input",
+        "summary": "Receive Discord interactions/events through a public URL and normalize them to Rumi input.",
+        "setup_steps": [
+          "Select Discord Input.",
+          "Use /api/integrations/discord/interactions for slash commands or /api/integrations/discord/events for message events.",
+          "Save Discord Public Key for interaction signature verification.",
+          "Save Bot Token only when the PC/Rumi bot-channel mode should post to a channel."
+        ],
+        "input_profile_id": "discord.default",
+        "endpoint": {
+          "id": "discord-main",
+          "kind": "discord",
+          "routes": [
+            "/api/integrations/discord/interactions",
+            "/api/integrations/discord/events"
+          ],
+          "security": {
+            "mode": "provider_signature"
+          }
+        },
+        "tokens": [
+          {
+            "kind": "public_key",
+            "label": "Public Key"
+          },
+          {
+            "kind": "application_id",
+            "label": "Application ID"
+          },
+          {
+            "kind": "bot_token",
+            "label": "Bot Token"
+          }
+        ],
+        "default_response": {
+          "mode": "same_response",
+          "include_source_context": true,
+          "source_context_format": "${provider} input."
+        },
+        "response_prompt": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "id": "slack_input_default_template",
+      "kind": "external_io_template",
+      "order": 23,
+      "template": {
+        "id": "slack.input.default",
+        "direction": "input",
+        "provider": "slack",
+        "display_name": "Slack Input",
+        "summary": "Receive Slack Events API callbacks through a public URL and normalize them to Rumi input.",
+        "setup_steps": [
+          "Select Slack Input.",
+          "Generate a public URL for /api/integrations/slack/events.",
+          "Paste it into Slack Events Request URL.",
+          "Save Signing Secret and Bot Token in External Tokens.",
+          "Rumi replies to channel/thread with thread_ts when available."
+        ],
+        "input_profile_id": "slack.default",
+        "endpoint": {
+          "id": "slack-main",
+          "kind": "slack",
+          "route": "/api/integrations/slack/events",
+          "security": {
+            "mode": "provider_signature"
+          }
+        },
+        "tokens": [
+          {
+            "kind": "signing_secret",
+            "label": "Signing Secret"
+          },
+          {
+            "kind": "bot_token",
+            "label": "Bot Token"
+          },
+          {
+            "kind": "app_token",
+            "label": "App Token"
+          }
+        ],
+        "default_response": {
+          "mode": "same_response",
+          "include_source_context": true,
+          "source_context_format": "${provider} input."
+        },
+        "response_prompt": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "id": "custom_input_template",
+      "kind": "external_io_template",
+      "order": 24,
+      "template": {
+        "id": "custom.input",
+        "direction": "input",
+        "provider": "custom",
+        "display_name": "Custom Input",
+        "summary": "Add a custom input provider by registering here or dropping profile/template files into user_data/shared.",
+        "extension_paths": {
+          "templates": "user_data/shared/external_io_templates",
+          "input_profiles": "user_data/shared/input_profiles"
+        },
+        "response_prompt": {
+          "enabled": true,
+          "mode": "plan_only",
+          "allowed_actions": [
+            "reply_text",
+            "store_only",
+            "summarize_then_reply",
+            "run_browser_use",
+            "run_computer_use",
+            "run_python",
+            "run_tool"
+          ],
+          "tools": {
+            "browser_use": {
+              "enabled": true
+            },
+            "computer_use": {
+              "enabled": true,
+              "requires_approval": true
+            },
+            "python": {
+              "enabled": true,
+              "sandbox": true
+            },
+            "external_send": {
+              "enabled": true,
+              "requires_approval": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "line_output_default_template",
+      "kind": "external_io_template",
+      "order": 30,
+      "template": {
+        "id": "line.output.default",
+        "direction": "output",
+        "provider": "line",
+        "display_name": "LINE Output",
+        "summary": "Reply to the LINE source conversation with replyToken, or explicitly push to a saved/entered userId, groupId, or roomId.",
+        "setup_steps": [
+          "Paste the Messaging API Channel Access Token into External Tokens with provider=line.",
+          "Use replyToken from incoming LINE events for immediate source-conversation replies.",
+          "Keep push fallback off by default; enable push only for saved sources or explicit targets."
+        ],
+        "output_profile_id": "line.default",
+        "required_setup": {
+          "any_of": [
+            {
+              "fields": [
+                "channel_access_token",
+                "reply_token"
+              ]
+            },
+            {
+              "fields": [
+                "channel_access_token",
+                "target_id"
+              ]
+            }
+          ]
+        },
+        "tokens": [
+          {
+            "kind": "channel_access_token",
+            "label": "Messaging API Channel Access Token"
+          }
+        ],
+        "fields": [
+          {
+            "id": "reply_token",
+            "label": "Reply Token",
+            "secret": false
+          },
+          {
+            "id": "target_id",
+            "label": "Explicit userId / groupId / roomId",
+            "secret": false
+          }
+        ],
+        "capabilities_profile": "line"
+      }
+    },
+    {
+      "id": "discord_output_bot_channel_template",
+      "kind": "external_io_template",
+      "order": 31,
+      "template": {
+        "id": "discord.output.bot_channel",
+        "direction": "output",
+        "provider": "discord",
+        "display_name": "Discord Output (Bot + Channel)",
+        "summary": "PC/Rumi server mode: use a Discord Bot Token plus Channel ID to post messages.",
+        "setup_steps": [
+          "Choose Discord Output (Bot + Channel).",
+          "Paste Bot Token into External Tokens with provider=discord and kind=Bot Token.",
+          "Paste Channel ID into Target / Channel ID.",
+          "Rumi sends with allowed_mentions.parse=[] for safety."
+        ],
+        "output_profile_id": "discord.bot_channel",
+        "required_setup": {
+          "any_of": [
+            {
+              "fields": [
+                "bot_token",
+                "channel_id"
+              ]
+            }
+          ]
+        },
+        "tokens": [
+          {
+            "kind": "bot_token",
+            "label": "Bot Token"
+          }
+        ],
+        "fields": [
+          {
+            "id": "channel_id",
+            "label": "Channel ID",
+            "secret": false
+          }
+        ],
+        "capabilities_profile": "discord"
+      }
+    },
+    {
+      "id": "discord_output_webhook_template",
+      "kind": "external_io_template",
+      "order": 32,
+      "template": {
+        "id": "discord.output.webhook",
+        "direction": "output",
+        "provider": "discord",
+        "display_name": "Discord Output (Webhook URL)",
+        "summary": "Channel webhook mode: paste a Discord channel Webhook URL and send without a bot token.",
+        "setup_steps": [
+          "Choose Discord Output (Webhook URL).",
+          "Paste the channel Webhook URL into External Tokens with provider=discord and kind=Webhook URL.",
+          "No Bot Token or local Discord gateway is required for this output mode."
+        ],
+        "output_profile_id": "discord.webhook",
+        "required_setup": {
+          "any_of": [
+            {
+              "fields": [
+                "webhook_url"
+              ]
+            }
+          ]
+        },
+        "tokens": [
+          {
+            "kind": "webhook_url",
+            "label": "Webhook URL"
+          }
+        ],
+        "fields": [
+          {
+            "id": "webhook_url",
+            "label": "Webhook URL",
+            "secret": true
+          }
+        ],
+        "capabilities_profile": "discord"
+      }
+    },
+    {
+      "id": "slack_output_default_template",
+      "kind": "external_io_template",
+      "order": 33,
+      "template": {
+        "id": "slack.output.default",
+        "direction": "output",
+        "provider": "slack",
+        "display_name": "Slack Output",
+        "summary": "Send messages through Slack Web API to a channel_id/thread_ts.",
+        "output_profile_id": "slack.default",
+        "required_setup": {
+          "any_of": [
+            {
+              "fields": [
+                "bot_token",
+                "channel_id"
+              ]
+            }
+          ]
+        },
+        "tokens": [
+          {
+            "kind": "bot_token",
+            "label": "Bot Token"
+          }
+        ],
+        "fields": [
+          {
+            "id": "channel_id",
+            "label": "Channel ID",
+            "secret": false
+          },
+          {
+            "id": "thread_ts",
+            "label": "Thread TS",
+            "secret": false
+          }
+        ],
+        "capabilities_profile": "slack"
+      }
+    },
+    {
+      "id": "generic_output_webhook_template",
+      "kind": "external_io_template",
+      "order": 34,
+      "template": {
+        "id": "generic.output.webhook",
+        "direction": "output",
+        "provider": "generic",
+        "display_name": "Generic Webhook Output",
+        "summary": "Send a provider-neutral JSON response to a callback URL.",
+        "output_profile_id": "generic.webhook",
+        "fields": [
+          {
+            "id": "callback_url",
+            "label": "Callback URL",
+            "secret": true
+          }
+        ],
+        "capabilities_profile": "generic"
+      }
+    },
+    {
+      "id": "custom_output_template",
+      "kind": "external_io_template",
+      "order": 35,
+      "template": {
+        "id": "custom.output",
+        "direction": "output",
+        "provider": "custom",
+        "display_name": "Custom Output",
+        "summary": "Add custom output by registering a template, an output profile, or a tool-backed sender.",
+        "extension_paths": {
+          "templates": "user_data/shared/external_io_templates",
+          "output_profiles": "user_data/shared/output_profiles"
+        },
+        "tools": [
+          "external_send"
+        ]
+      }
+    },
+    {
+      "id": "external_templates_route_contract",
+      "kind": "test_contract",
+      "order": 40,
+      "contract_id": "defaultspack.template.external_io.catalog",
+      "route_metadata": {
+        "method": "GET",
+        "path": "/api/external/templates",
+        "block_module": "blocks.external.templates",
+        "diagnostic": "Transport route is registered by defaultspack chat/http setup; this template owns the catalog metadata and provider template declarations."
+      },
+      "assertions": [
+        "catalog.external_io_templates includes line.input.default",
+        "external_io_template_catalog prefers origin=template for builtin provider templates",
+        "user_data/shared/external_io_templates custom YAML remains an override layer"
+      ]
+    }
+  ]
+}

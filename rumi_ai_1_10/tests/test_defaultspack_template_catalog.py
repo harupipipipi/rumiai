@@ -31,6 +31,8 @@ def test_template_projector_builds_stable_catalog_metadata():
     assert "rumi.api_keys.default" in template_ids
     assert "rumi.backend.model_routing.default" in template_ids
     assert "rumi.composer.default" in template_ids
+    assert "rumi.external_io.default" in template_ids
+    assert "rumi.backend.prompt_compaction.default" in template_ids
 
     assert _field_types(catalog["settings_sections"]) >= {"model_select", "provider_select", "api_key_setup"}
     assert any("model_select" in renderer.get("field_types", []) for renderer in catalog["field_renderers"])
@@ -38,12 +40,16 @@ def test_template_projector_builds_stable_catalog_metadata():
     assert any(item.get("action_id") == "ai_set_preferred_model" for item in catalog["actions"])
     assert any(item.get("data_source") == "provider_key_status" for item in catalog["data_sources"])
     assert any(item.get("service_id") == "model_router" for item in catalog["backend_services"])
+    assert any(item.get("service_id") == "external_io_template_registry" for item in catalog["backend_services"])
+    assert any(item.get("service_id") == "prompt_compactor" for item in catalog["backend_services"])
     assert catalog["api_routes"] == []
     assert any(
         item.get("route_metadata", {}).get("path") == "/api/ai/models/route"
         for item in catalog["test_contracts"]
     )
     assert any(item.get("permission_id") == "api_key.use" for item in catalog["permissions"])
+    assert any(item.get("permission_id") == "external_io.configure" for item in catalog["permissions"])
+    assert any(item.get("permission_id") == "context.compact" for item in catalog["permissions"])
     assert not catalog["template_diagnostics"]
 
     projected_ids = {
@@ -104,8 +110,30 @@ def test_empty_template_catalog_exposes_ai_input_and_tool_policy_buckets():
 
     assert "ai_inputs" in catalog
     assert "tool_policies" in catalog
+    assert "external_io_templates" in catalog
     catalog["ai_inputs"].append({"id": "mutated"})
     assert other["ai_inputs"] == []
+    assert other["external_io_templates"] == []
+
+
+def test_template_catalog_projects_external_io_and_prompt_compaction_bundles():
+    catalog = build_template_catalog(defaultspack_root=DEFAULTSPACK_ROOT)
+
+    external_template = next(item for item in catalog["external_io_templates"] if item["id"] == "line.input.default")
+    compact_command = next(item for item in catalog["commands"] if item.get("id") == "compact_context")
+    compact_policy = next(item for item in catalog["context_policies"] if item.get("id") == "long_context_txt")
+    token_source = next(item for item in catalog["data_sources"] if item.get("data_source") == "context_token_estimate")
+    compact_action = next(item for item in catalog["actions"] if item.get("action_id") == "compact_context")
+
+    assert external_template["origin"] == "template"
+    assert external_template["template_id"] == "rumi.external_io.default"
+    assert external_template["provider"] == "line"
+    assert external_template["endpoint"]["route"] == "/api/integrations/line/webhook"
+    assert external_template["projected_id"] == "rumi.external_io.default:line_input_default_template"
+    assert compact_command["execution"]["qualified_name"] == "defaultspack:context.compact"
+    assert compact_policy["format"] == "text/plain"
+    assert token_source["route_path"] == "/api/context/token-estimate"
+    assert compact_action["route_path"] == "/api/context/compact"
 
 
 def test_template_catalog_projects_ai_input_and_tool_policy_metadata():
@@ -205,6 +233,7 @@ def test_frontend_catalog_merges_template_metadata_without_dropping_existing_key
     assert "commands" in catalog
     assert "composer_inputs" in catalog
     assert "context_policies" in catalog
+    assert "external_io_templates" in catalog
     assert "shell_regions" in catalog
     assert "shell_renderers" in catalog
 
@@ -213,7 +242,9 @@ def test_frontend_catalog_merges_template_metadata_without_dropping_existing_key
     assert composer_input["template_id"] == "rumi.composer.default"
     assert composer_input["region_id"] == "composer"
     assert any(item["id"] == "context_txt" for item in catalog["commands"])
+    assert any(item["id"] == "compact_context" for item in catalog["commands"])
     assert any(item["id"] == "materialize_txt" for item in catalog["context_policies"])
+    assert any(item["id"] == "line.input.default" for item in catalog["external_io_templates"])
     composer_region = next(item for item in catalog["shell"]["layout"]["regions"] if item["id"] == "composer")
     composer_renderer = next(item for item in catalog["shell"]["renderers"] if item["id"] == "composer")
     assert composer_region["template_id"] == "rumi.composer.default"

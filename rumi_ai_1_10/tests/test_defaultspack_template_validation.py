@@ -199,6 +199,34 @@ def test_reference_validation_reports_missing_renderers_permissions_and_route_me
     assert not result.ok
 
 
+def test_reference_validation_reports_external_io_template_shape_errors():
+    result = parse_template(
+        {
+            "id": "bad.external.io",
+            "kind": "integration",
+            "version": "1.0.0",
+            "status": "active",
+            "pieces": [
+                {
+                    "id": "bad_external",
+                    "kind": "external_io_template",
+                    "template": {
+                        "id": "",
+                        "direction": "sideways",
+                        "provider": "",
+                    },
+                }
+            ],
+        }
+    )
+
+    codes = {diagnostic.code for diagnostic in result.diagnostics}
+    assert "template.reference.external_io_template_missing_id" in codes
+    assert "template.reference.external_io_template_invalid_direction" in codes
+    assert "template.reference.external_io_template_missing_provider" in codes
+    assert not result.ok
+
+
 def test_reference_validation_reports_composer_shell_and_context_errors():
     result = parse_template(
         {

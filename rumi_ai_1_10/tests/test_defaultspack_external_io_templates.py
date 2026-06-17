@@ -39,6 +39,8 @@ def test_builtin_external_io_templates_split_input_and_output():
     assert discord_webhook["copy_paste_setup"]["output_profile_id"] == "discord.webhook"
     assert discord_webhook["copy_paste_setup"]["fields"][0]["paste"] is True
     line_input = next(item for item in catalog["input"] if item["id"] == "line.input.default")
+    assert line_input["origin"] == "template"
+    assert line_input["template_id"] == "rumi.external_io.default"
     assert line_input["copy_paste_setup"]["routes"] == ["/api/integrations/line/webhook"]
     assert line_input["copy_paste_setup"]["public_url"]["provider"] == "cloudflare_quick_tunnel"
     assert line_input["copy_paste_setup"]["public_url"]["route_path"] == "/api/integrations/line/webhook"

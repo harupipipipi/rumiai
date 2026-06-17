@@ -263,6 +263,9 @@ def _validate_references(template: RumiTemplate) -> list[TemplateDiagnostic]:
         if kind == TemplatePieceKind.CONTEXT_POLICY.value:
             diagnostics.extend(_validate_context_policy(template, piece, index))
 
+        if kind == TemplatePieceKind.EXTERNAL_IO_TEMPLATE.value:
+            diagnostics.extend(_validate_external_io_template(template, piece, index))
+
         if kind == TemplatePieceKind.TOOL_POLICY.value:
             diagnostics.extend(_validate_tool_policy(template, piece, index))
 
@@ -650,6 +653,56 @@ def _validate_context_policy(
             nested_key="policy",
         )
     ]
+
+
+def _validate_external_io_template(
+    template: RumiTemplate,
+    piece: Any,
+    index: int,
+) -> list[TemplateDiagnostic]:
+    diagnostics: list[TemplateDiagnostic] = []
+    diagnostics.extend(_validate_nested_object(template, piece, index, "template"))
+    data = _piece_payload(piece, "template")
+    template_id = str(data.get("template_id") or data.get("id") or data.get("name") or "").strip()
+    direction = str(data.get("direction") or "").strip().lower()
+    provider = str(data.get("provider") or "").strip()
+    if not template_id:
+        diagnostics.append(
+            _piece_diagnostic(
+                template,
+                piece,
+                index,
+                code="template.reference.external_io_template_missing_id",
+                message="external_io_template must include id or template_id",
+                field="id",
+                nested_key="template",
+            )
+        )
+    if direction not in {"input", "output"}:
+        diagnostics.append(
+            _piece_diagnostic(
+                template,
+                piece,
+                index,
+                code="template.reference.external_io_template_invalid_direction",
+                message="external_io_template.direction must be input or output",
+                field="direction",
+                nested_key="template",
+            )
+        )
+    if not provider:
+        diagnostics.append(
+            _piece_diagnostic(
+                template,
+                piece,
+                index,
+                code="template.reference.external_io_template_missing_provider",
+                message="external_io_template.provider is required",
+                field="provider",
+                nested_key="template",
+            )
+        )
+    return diagnostics
 
 
 def _validate_tool_policy(

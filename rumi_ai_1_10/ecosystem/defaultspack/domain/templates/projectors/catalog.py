@@ -30,6 +30,7 @@ CATALOG_KEYS = (
     "shell_regions",
     "shell_renderers",
     "context_policies",
+    "external_io_templates",
     "test_contracts",
 )
 
@@ -95,6 +96,7 @@ def project_resolved_templates(resolved_templates: list[ResolvedTemplate]) -> di
         "shell_regions",
         "shell_renderers",
         "context_policies",
+        "external_io_templates",
         "test_contracts",
     ):
         catalog[key] = _dedupe_by_id(catalog[key])
@@ -165,6 +167,8 @@ def _project_piece(catalog: dict[str, Any], template: RumiTemplate, piece: Templ
         catalog["shell_renderers"].append(_shell_renderer(template, piece))
     elif kind == "context_policy":
         catalog["context_policies"].append(_context_policy(template, piece))
+    elif kind == "external_io_template":
+        catalog["external_io_templates"].append(_external_io_template(template, piece))
     elif kind == "backend_service":
         catalog["backend_services"].append(_metadata_item(template, piece, default_id=piece.id))
     elif kind == "api_route":
@@ -243,6 +247,14 @@ def _shell_renderer(template: RumiTemplate, piece: TemplatePiece) -> dict[str, A
 def _context_policy(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
     data = _piece_payload(piece, "policy")
     return _metadata_item_from_data(template, piece, data, default_id=_payload_id(data, piece, "policy_id", "mode"))
+
+
+def _external_io_template(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
+    data = _piece_payload(piece, "template")
+    item = _metadata_item_from_data(template, piece, data, default_id=_payload_id(data, piece, "template_id"))
+    item.setdefault("template_origin", item.get("origin") or _origin(template, piece))
+    item["origin"] = "template"
+    return item
 
 
 def _ai_input(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
