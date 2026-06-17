@@ -235,7 +235,7 @@ def test_prompt_input(input_data: dict[str, Any] | None = None) -> dict[str, Any
         }
     )
     usage = dict(active.get("summary") if isinstance(active.get("summary"), dict) else {})
-    tool_catalog = _tool_catalog()
+    tool_catalog = _tool_catalog(data, usage.get("segments", []))
     selected_tool_records = _selected_tool_records(tool_catalog, selected_tools)
     skill_eval = _evaluate_studio_skills(data, user_text=user_text, selected_tools=selected_tools)
     matched_skills = skill_eval.get("matched", []) if isinstance(skill_eval, dict) else []
@@ -691,22 +691,41 @@ def _estimate_tokens(text: str) -> int:
         return max(1, len(str(text or "")) // 4) if text else 0
 
 
-def _tool_catalog() -> list[dict[str, Any]]:
-    try:
-        from domain.tool.registry import ToolRegistry
-
-        return [tool for tool in ToolRegistry().list_tools() if isinstance(tool, dict)]
-    except Exception:
-        return []
+def _tool_catalog(data: dict[str, Any], segments: list[Any]) -> list[dict[str, Any]]:
+    tools_by_id: dict[str, dict[str, Any]] = {}
+    for raw_tool in data.get("tools") or data.get("available_tools") or []:
+        if not isinstance(raw_tool, dict):
+            continue
+        tool_id = str(raw_tool.get("tool_id") or raw_tool.get("name") or "").strip()
+        if tool_id:
+            tools_by_id[tool_id] = dict(raw_tool)
+    for segment in segments:
+        if not isinstance(segment, dict) or segment.get("kind") != "tool-schema":
+            continue
+        signal = segment.get("tool_signal") if isinstance(segment.get("tool_signal"), dict) else {}
+        tool_id = str(signal.get("tool_id") or segment.get("prompt_id") or "").strip()
+        if not tool_id:
+            continue
+        tools_by_id.setdefault(
+            tool_id,
+            {
+                "tool_id": tool_id,
+                "name": signal.get("tool_name") or tool_id,
+                "display_name": signal.get("display_name") or signal.get("tool_name") or tool_id,
+                "description": signal.get("description") or segment.get("description") or segment.get("explanation") or "",
+                "metadata": {
+                    "source_pack_id": signal.get("source_pack_id") or "",
+                    "skills": signal.get("skills") or [],
+                    "skill_triggers": signal.get("skill_triggers") or [],
+                },
+            },
+        )
+    return sorted(tools_by_id.values(), key=lambda item: str(item.get("tool_id") or item.get("name") or ""))
 
 
 def _tool_candidates(*, prompt_body: str, user_text: str, tools: list[dict[str, Any]]) -> dict[str, Any]:
-    try:
-        from domain.chat.tool_recommender import search_tools
-    except Exception:
-        return {"combined": [], "from_prompt": [], "from_input": []}
-    prompt_hits = search_tools(prompt_body, tools, limit=8, threshold=0.05) if prompt_body.strip() else []
-    input_hits = search_tools(user_text, tools, limit=8, threshold=0.05) if user_text.strip() else []
+    prompt_hits = _search_tools(prompt_body, tools, limit=8, threshold=0.05) if prompt_body.strip() else []
+    input_hits = _search_tools(user_text, tools, limit=8, threshold=0.05) if user_text.strip() else []
     combined: dict[str, dict[str, Any]] = {}
     for source, items in (("prompt", prompt_hits), ("input", input_hits)):
         for item in items if isinstance(items, list) else []:
@@ -732,22 +751,130 @@ def _tool_candidates(*, prompt_body: str, user_text: str, tools: list[dict[str, 
 
 
 def _evaluate_studio_skills(data: dict[str, Any], *, user_text: str, selected_tools: list[str]) -> dict[str, Any]:
-    skills = data.get("skills") if isinstance(data.get("skills"), list) else None
+    skills = data.get("skills") if isinstance(data.get("skills"), list) else []
     context = data.get("request_context") if isinstance(data.get("request_context"), dict) else {}
     skill_context = {**context, "studio_test": True}
     forced_skills = _string_list(data.get("skills_forced") or data.get("selected_skills"))
-    if forced_skills:
-        skill_context["skills"] = forced_skills
-    try:
-        from domain.skill_trigger import RuntimeSkillTriggerService
-
-        return RuntimeSkillTriggerService(skills).evaluate(
-            user_text=user_text,
-            tool_names=selected_tools,
-            context=skill_context,
-        )
-    except Exception:
+    if skill_context.get("disable_runtime_skill_triggers") is True:
         return {"matched": [], "instructions": ""}
+    return _evaluate_inline_skills(
+        skills,
+        user_text=user_text,
+        selected_tools=selected_tools,
+        forced_skills=forced_skills,
+    )
+
+
+def _search_tools(
+    text: str,
+    tools: list[dict[str, Any]],
+    *,
+    limit: int,
+    threshold: float,
+) -> list[dict[str, Any]]:
+    query_tokens = _match_tokens(text)
+    if not query_tokens:
+        return []
+    scored: list[tuple[float, str, dict[str, Any]]] = []
+    for tool in tools:
+        tool_id = str(tool.get("tool_id") or tool.get("name") or "").strip()
+        if not tool_id:
+            continue
+        haystack = " ".join(
+            [
+                tool_id,
+                str(tool.get("name") or ""),
+                str(tool.get("display_name") or ""),
+                str(tool.get("description") or ""),
+                " ".join(_string_list(tool.get("skills"))),
+                " ".join(_string_list((tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}).get("skill_triggers"))),
+            ]
+        )
+        tool_tokens = _match_tokens(haystack)
+        if not tool_tokens:
+            continue
+        overlap = query_tokens.intersection(tool_tokens)
+        exact_boost = 0.25 if tool_id.casefold() in str(text or "").casefold() else 0.0
+        score = (len(overlap) / max(len(query_tokens), 1)) + exact_boost
+        if score >= threshold:
+            scored.append((score, tool_id, tool))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [
+        {
+            "tool_id": tool_id,
+            "name": str(tool.get("name") or tool_id),
+            "display_name": str(tool.get("display_name") or tool.get("name") or tool_id),
+            "description": str(tool.get("description") or ""),
+            "score": score,
+            "prompt_can_call_tool": False,
+        }
+        for score, tool_id, tool in scored[: max(1, limit)]
+    ]
+
+
+def _evaluate_inline_skills(
+    skills: list[Any],
+    *,
+    user_text: str,
+    selected_tools: list[str],
+    forced_skills: list[str],
+) -> dict[str, Any]:
+    text = str(user_text or "").casefold()
+    tool_set = {str(item or "").strip() for item in selected_tools if str(item or "").strip()}
+    forced = {_normalize_skill_ref(item) for item in forced_skills}
+    matched: list[dict[str, Any]] = []
+    for raw_skill in skills:
+        if not isinstance(raw_skill, dict):
+            continue
+        skill_id = str(raw_skill.get("id") or raw_skill.get("name") or "").strip()
+        if not skill_id:
+            continue
+        aliases = {_normalize_skill_ref(value) for value in [skill_id, skill_id.rsplit("/", 1)[-1], raw_skill.get("display_name"), raw_skill.get("name")]}
+        metadata = raw_skill.get("metadata") if isinstance(raw_skill.get("metadata"), dict) else {}
+        aliases.update(_normalize_skill_ref(value) for value in _string_list(raw_skill.get("aliases") or metadata.get("aliases")))
+        triggers = _string_list(raw_skill.get("triggers") or raw_skill.get("keywords") or metadata.get("triggers"))
+        applies_to = _string_list(raw_skill.get("applies_to_tools") or raw_skill.get("tool_ids") or metadata.get("applies_to_tools"))
+        forced_hit = bool(forced.intersection(aliases))
+        trigger_hit = forced_hit or not triggers or any(str(trigger).casefold() in text for trigger in triggers)
+        tool_hit = forced_hit or not applies_to or bool(tool_set.intersection(applies_to))
+        if not (trigger_hit and tool_hit):
+            continue
+        instruction = _skill_instruction(raw_skill)
+        if not instruction:
+            continue
+        matched.append(
+            {
+                "id": skill_id,
+                "display_name": str(raw_skill.get("display_name") or skill_id),
+                "triggers": triggers,
+                "applies_to_tools": applies_to,
+                "instruction": instruction,
+            }
+        )
+    if not matched:
+        return {"matched": [], "instructions": ""}
+    lines = [
+        "Runtime skill instructions matched this turn. These are active system-level instructions for this turn; follow them unless they conflict with higher-priority safety or user instructions:"
+    ]
+    lines.extend("- {}: {}".format(item.get("id"), str(item.get("instruction") or "").strip()) for item in matched)
+    return {"matched": matched, "instructions": "\n".join(lines).strip()}
+
+
+def _skill_instruction(skill: dict[str, Any]) -> str:
+    for container in (skill, skill.get("metadata") if isinstance(skill.get("metadata"), dict) else {}, skill.get("config") if isinstance(skill.get("config"), dict) else {}):
+        for key in ("instructions", "instruction", "system_prompt", "prompt", "feedback"):
+            value = container.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return str(skill.get("description") or "").strip()
+
+
+def _normalize_skill_ref(value: Any) -> str:
+    return str(value or "").strip().casefold().replace(" ", "-").replace("_", "-")
+
+
+def _match_tokens(value: str) -> set[str]:
+    return {part.casefold() for part in re.findall(r"[A-Za-z0-9_.:-]+|[\u3040-\u30ff\u3400-\u9fff]+", str(value or "")) if part.strip()}
 
 
 def _selected_tool_records(tools: list[dict[str, Any]], selected_tools: list[str]) -> list[dict[str, Any]]:
