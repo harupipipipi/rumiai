@@ -135,6 +135,10 @@ export function composerChromeWidgetStyle(width: ComposerChromeWidth): CSSProper
   };
 }
 
+export function shouldMeasureComposerDockWidget(widgetId: string): boolean {
+  return widgetId === "model-picker";
+}
+
 function fitComposerTextareaHeight(textarea: HTMLTextAreaElement, minHeight: number, maxHeight: number) {
   textarea.style.height = "auto";
   const contentHeight = textarea.scrollHeight;
@@ -1427,7 +1431,7 @@ export function ComposerRenderer({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
-  const chromeWidgetNodeMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const modelPickerNodeRef = useRef<HTMLDivElement | null>(null);
   const submitPointerHandledRef = useRef(false);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
   const chromeButtonTabIndex = keyboardButtonNavigation ? undefined : -1;
@@ -1598,7 +1602,7 @@ export function ComposerRenderer({
 
   const updateComposerPopoverAnchor = useCallback(() => {
     if (typeof window === "undefined") return;
-    const modelPickerNode = chromeWidgetNodeMapRef.current.get("model-picker");
+    const modelPickerNode = modelPickerNodeRef.current;
     const anchorRect = modelPickerNode?.getBoundingClientRect() ?? textareaRef.current?.getBoundingClientRect() ?? null;
     setComposerPopoverStyle(modelCandidatePopupStyleForAnchor(anchorRect, window.innerWidth));
   }, []);
@@ -1656,10 +1660,9 @@ export function ComposerRenderer({
     [needsApiKey, onModelProfileSelect, selectableProfiles],
   );
 
-  const registerChromeWidgetNode = useCallback((widgetId: string, node: HTMLDivElement | null) => {
-    const nodeMap = chromeWidgetNodeMapRef.current;
-    if (node) nodeMap.set(widgetId, node);
-    else nodeMap.delete(widgetId);
+  const registerMeasuredDockWidgetNode = useCallback((widgetId: string, node: HTMLDivElement | null) => {
+    if (!shouldMeasureComposerDockWidget(widgetId)) return;
+    modelPickerNodeRef.current = node;
   }, []);
 
   const saveProviderApiKey = useCallback(
@@ -2847,7 +2850,9 @@ export function ComposerRenderer({
                       <ComposerChromeWidget
                         key={widget.id}
                         widget={widget}
-                        onNodeChange={registerChromeWidgetNode}
+                        onNodeChange={
+                          shouldMeasureComposerDockWidget(widget.id) ? registerMeasuredDockWidgetNode : undefined
+                        }
                       />
                     ))}
                   </div>
@@ -2936,7 +2941,9 @@ export function ComposerRenderer({
                   <ComposerChromeWidget
                     key={widget.id}
                     widget={widget}
-                    onNodeChange={registerChromeWidgetNode}
+                    onNodeChange={
+                      shouldMeasureComposerDockWidget(widget.id) ? registerMeasuredDockWidgetNode : undefined
+                    }
                   />
                 ))}
               </div>
