@@ -3,10 +3,12 @@ import {
   Braces,
   Check,
   Code2,
-  Eye,
+  Cpu,
   FileText,
   FlaskConical,
   History,
+  Info,
+  Languages,
   ListFilter,
   Lock,
   Play,
@@ -24,28 +26,30 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { PromptUsageSegmentCard } from "../components/prompts/PromptUsageSegmentCard";
 import { statusBadgeClass, tokenText } from "../components/prompts/promptSegmentView";
-import { api, type PromptStudioData, type PromptStudioPrompt, type PromptStudioTestResult, type PromptUsageSegment } from "../lib/api";
+import { api, type ModelProfile, type PromptStudioData, type PromptStudioPrompt, type PromptStudioTestResult, type PromptUsageSegment } from "../lib/api";
 import { cn } from "../lib/cn";
+import { normalizeLocale, t, type LocaleSetting } from "../lib/i18n";
 
-type StudioTab = "editor" | "test" | "preview" | "diff" | "usage" | "variables";
+type InspectorTab = "selected" | "test" | "diff" | "usage" | "variables";
 type PromptFilter = "all" | "active" | "editable" | "readonly" | "overrides";
 
-const tabs: Array<{ id: StudioTab; label: string; icon: typeof Code2 }> = [
-  { id: "editor", label: "Editor", icon: Code2 },
-  { id: "test", label: "Test", icon: FlaskConical },
-  { id: "preview", label: "Preview", icon: Eye },
-  { id: "diff", label: "Diff", icon: ListFilter },
-  { id: "usage", label: "Usage", icon: FileText },
-  { id: "variables", label: "Variables", icon: Braces },
+const inspectorTabs: Array<{ id: InspectorTab; labelKey: Parameters<typeof t>[1]; icon: typeof Code2 }> = [
+  { id: "selected", labelKey: "promptStudio.tab.selected", icon: Info },
+  { id: "test", labelKey: "promptStudio.tab.test", icon: FlaskConical },
+  { id: "diff", labelKey: "promptStudio.tab.diff", icon: ListFilter },
+  { id: "usage", labelKey: "promptStudio.tab.usage", icon: FileText },
+  { id: "variables", labelKey: "promptStudio.tab.variables", icon: Braces },
 ];
 
-const filters: Array<{ id: PromptFilter; label: string }> = [
-  { id: "all", label: "All" },
-  { id: "active", label: "Active" },
-  { id: "editable", label: "Editable" },
-  { id: "readonly", label: "Read-only" },
-  { id: "overrides", label: "Overrides" },
+const filters: Array<{ id: PromptFilter; labelKey: Parameters<typeof t>[1] }> = [
+  { id: "all", labelKey: "promptStudio.filter.all" },
+  { id: "active", labelKey: "promptStudio.filter.active" },
+  { id: "editable", labelKey: "promptStudio.filter.editable" },
+  { id: "readonly", labelKey: "promptStudio.filter.readonly" },
+  { id: "overrides", labelKey: "promptStudio.filter.overrides" },
 ];
+
+const PROMPT_STUDIO_LOCALE_KEY = "rumi.promptStudio.locale";
 
 function searchParam(name: string): string {
   try {
@@ -53,6 +57,25 @@ function searchParam(name: string): string {
   } catch {
     return "";
   }
+}
+
+function storedPromptStudioLocale(fallback: LocaleSetting): LocaleSetting {
+  const urlLocale = searchParam("locale");
+  if (urlLocale === "ja" || urlLocale === "en" || urlLocale === "auto") return urlLocale;
+  try {
+    const stored = window.localStorage.getItem(PROMPT_STUDIO_LOCALE_KEY);
+    if (stored === "ja" || stored === "en" || stored === "auto") return stored;
+  } catch {
+    // localStorage may be unavailable in tests or privacy modes.
+  }
+  return fallback || "auto";
+}
+
+function setUrlParam(name: string, value: string) {
+  const url = new URL(window.location.href);
+  if (value) url.searchParams.set(name, value);
+  else url.searchParams.delete(name);
+  window.history.replaceState({ ...window.history.state, [name]: value }, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 function promptKey(prompt?: PromptStudioPrompt | null): string {
@@ -103,6 +126,25 @@ function splitCsvList(value: string): string[] {
     .filter((item, index, items) => items.indexOf(item) === index);
 }
 
+function modelProfileLabel(profile?: ModelProfile | null): string {
+  if (!profile) return "";
+  return String(profile.disambiguated_name || profile.display_name || profile.qualified_model_id || profile.profile_id || "").trim();
+}
+
+function modelProfileModel(profile?: ModelProfile | null): string {
+  if (!profile) return "";
+  return String(profile.qualified_model_id || profile.profile_id || profile.model_id || "").trim();
+}
+
+function modelProfileSubtitle(profile?: ModelProfile | null): string {
+  if (!profile) return "";
+  return [
+    profile.provider_display_name || profile.provider_id,
+    profile.model_id,
+    profile.supports_tool_calling ? "tools" : "",
+  ].filter(Boolean).join(" / ");
+}
+
 function verdictTone(status?: string): string {
   if (status === "matched" || status === "selected" || status === "candidate") return "border-emerald-500/25 bg-emerald-500/10 text-emerald-100";
   if (status === "idle" || status === "not-selected" || status === "none") return "border-zinc-800 bg-zinc-950/70 text-zinc-400";
@@ -139,19 +181,28 @@ function PromptStudioTestPanel({
   result,
   testInput,
   testTools,
+  modelProfiles,
+  selectedModelProfileId,
+  locale,
   busy,
   onInputChange,
   onToolsChange,
+  onModelChange,
   onRun,
 }: {
   result: PromptStudioTestResult | null;
   testInput: string;
   testTools: string;
+  modelProfiles: ModelProfile[];
+  selectedModelProfileId: string;
+  locale: LocaleSetting;
   busy: string | null;
   onInputChange: (value: string) => void;
   onToolsChange: (value: string) => void;
+  onModelChange: (value: string) => void;
   onRun: () => void;
 }) {
+  const msg = (key: Parameters<typeof t>[1], values: Record<string, string | number> = {}) => t(locale, key, values);
   const verdicts = result?.verdicts ?? [];
   const matchedSkills = result?.matched_skills ?? [];
   const selectedToolSegments = result?.selected_tool_segments ?? [];
@@ -159,15 +210,37 @@ function PromptStudioTestPanel({
   const candidates = result?.tool_candidates?.combined ?? [];
   const analysis = recordFromUnknown(result?.prompt_tool_analysis);
   const segments = result?.segments ?? [];
+  const selectedModelProfile = modelProfiles.find((profile) => profile.profile_id === selectedModelProfileId) ?? null;
   const focusedToolSegments = [...selectedToolSegments, ...candidateSegments].filter((segment, index, items) => (
     items.findIndex((item) => item.id === segment.id && item.status === segment.status) === index
   ));
   return (
     <div className="grid gap-3">
       <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-        <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <div className="grid items-start gap-3">
           <div className="min-w-0">
-            <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600" htmlFor="prompt-studio-test-input">Test Input</label>
+            <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600" htmlFor="prompt-studio-test-model">{msg("promptStudio.testModel")}</label>
+            <select
+              id="prompt-studio-test-model"
+              value={selectedModelProfileId}
+              onChange={(event) => onModelChange(event.target.value)}
+              className="mt-2 h-9 w-full rounded-lg border border-zinc-800 bg-black/25 px-3 text-xs text-zinc-200 outline-none focus:border-zinc-600"
+            >
+              <option value="">{msg("promptStudio.modelFallback")}</option>
+              {modelProfiles.map((profile) => (
+                <option key={profile.profile_id} value={profile.profile_id}>
+                  {modelProfileLabel(profile)}
+                </option>
+              ))}
+            </select>
+            <div className="mt-1 flex items-center gap-1.5 text-[10px] text-zinc-600">
+              <Cpu size={11} />
+              <span className="min-w-0 truncate">{selectedModelProfile ? modelProfileSubtitle(selectedModelProfile) : msg("promptStudio.modelFallback")}</span>
+            </div>
+            <p className="mt-2 rounded-md border border-cyan-500/15 bg-cyan-500/5 p-2 text-[11px] leading-relaxed text-cyan-100/80">{msg("promptStudio.modelBoundary")}</p>
+          </div>
+          <div className="min-w-0">
+            <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600" htmlFor="prompt-studio-test-input">{msg("promptStudio.testInput")}</label>
             <textarea
               id="prompt-studio-test-input"
               value={testInput}
@@ -176,7 +249,7 @@ function PromptStudioTestPanel({
             />
           </div>
           <div className="min-w-0">
-            <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600" htmlFor="prompt-studio-test-tools">Selected Tools</label>
+            <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600" htmlFor="prompt-studio-test-tools">{msg("promptStudio.selectedTools")}</label>
             <textarea
               id="prompt-studio-test-tools"
               value={testTools}
@@ -188,10 +261,10 @@ function PromptStudioTestPanel({
             type="button"
             onClick={onRun}
             disabled={busy === "test"}
-            className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-cyan-200 px-3 text-xs font-semibold text-cyan-950 hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50 lg:mt-6 lg:w-auto"
+            className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-cyan-200 px-3 text-xs font-semibold text-cyan-950 hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Play size={13} />
-            Run Test
+            {msg("promptStudio.runTest")}
           </button>
         </div>
       </section>
@@ -210,7 +283,7 @@ function PromptStudioTestPanel({
           <section className="grid gap-3 xl:grid-cols-2">
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
               <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="text-xs font-semibold text-zinc-100">Skill Matches</div>
+                <div className="text-xs font-semibold text-zinc-100">{msg("promptStudio.skillMatches")}</div>
                 <span className="font-mono text-[10px] text-zinc-600">{matchedSkills.length}</span>
               </div>
               <div className="grid gap-2">
@@ -223,7 +296,7 @@ function PromptStudioTestPanel({
                     </div>
                   </div>
                 ))}
-                {!matchedSkills.length && <div className="rounded-md border border-dashed border-zinc-800 p-4 text-center text-xs text-zinc-500">No skill prompt matched.</div>}
+                {!matchedSkills.length && <div className="rounded-md border border-dashed border-zinc-800 p-4 text-center text-xs text-zinc-500">{msg("promptStudio.noSkillMatch")}</div>}
               </div>
               {result.skill_instructions && (
                 <pre className="mt-3 max-h-44 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/25 p-3 font-mono text-[12px] leading-relaxed text-zinc-300">{result.skill_instructions}</pre>
@@ -232,28 +305,28 @@ function PromptStudioTestPanel({
 
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
               <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="text-xs font-semibold text-zinc-100">Tool Decision</div>
-                <span className="font-mono text-[10px] text-zinc-600">{candidates.length} candidates</span>
+                <div className="text-xs font-semibold text-zinc-100">{msg("promptStudio.toolDecision")}</div>
+                <span className="font-mono text-[10px] text-zinc-600">{msg("promptStudio.candidates", { count: candidates.length })}</span>
               </div>
               <div className="rounded-md border border-zinc-800/80 bg-black/20 px-2 py-1.5 text-xs leading-relaxed text-zinc-300">
                 {String(analysis.decision_boundary || "Prompt text can suggest relevance, but cannot attach or execute tools.")}
               </div>
               <div className="mt-2 grid gap-2">
                 {candidates.slice(0, 5).map((candidate) => <ToolCandidateCard key={String(candidate.tool_id || candidate.name)} item={candidate} />)}
-                {!candidates.length && <div className="rounded-md border border-dashed border-zinc-800 p-4 text-center text-xs text-zinc-500">No local tool candidate matched.</div>}
+                {!candidates.length && <div className="rounded-md border border-dashed border-zinc-800 p-4 text-center text-xs text-zinc-500">{msg("promptStudio.noToolCandidate")}</div>}
               </div>
             </div>
           </section>
 
           <section className="grid gap-2">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600">Test Model Input</div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600">{msg("promptStudio.testModelInput")}</div>
               <span className="font-mono text-[10px] text-zinc-600">{segments.length} segments</span>
             </div>
             {focusedToolSegments.map((segment) => <PromptUsageSegmentCard key={`${segment.id}-${segment.status}-test-focus`} segment={segment} />)}
             {segments.filter((segment) => segment.kind === "skill").map((segment) => <PromptUsageSegmentCard key={`${segment.id}-${segment.status}-test-skill`} segment={segment} />)}
             {!focusedToolSegments.length && !segments.some((segment) => segment.kind === "skill") && (
-              <div className="rounded-lg border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">No focused skill or tool-schema segment for this test.</div>
+              <div className="rounded-lg border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">{msg("promptStudio.noFocusedSegment")}</div>
             )}
           </section>
         </>
@@ -275,17 +348,21 @@ function promptUsageForPrompt(prompt: PromptStudioPrompt | null | undefined, seg
 function updateStudioUrl(profileId: string, conversationId: string, promptId: string) {
   const url = new URL(window.location.href);
   url.pathname = "/prompts";
-  url.search = "";
+  for (const name of ["profile_id", "conversation_id", "prompt_id"]) {
+    url.searchParams.delete(name);
+  }
   if (profileId) url.searchParams.set("profile_id", profileId);
   if (conversationId) url.searchParams.set("conversation_id", conversationId);
   if (promptId) url.searchParams.set("prompt_id", promptId);
   window.history.replaceState({ promptId }, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-export function PromptStudio() {
+export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {}) {
   const initialProfileId = searchParam("profile_id");
   const initialConversationId = searchParam("conversation_id");
   const initialPromptId = searchParam("prompt_id");
+  const initialModelProfileId = searchParam("model_profile_id") || searchParam("model");
+  const [studioLocale, setStudioLocale] = useState<LocaleSetting>(() => storedPromptStudioLocale(locale));
   const [profileId, setProfileId] = useState(initialProfileId);
   const [conversationId] = useState(initialConversationId);
   const [selectedId, setSelectedId] = useState(initialPromptId);
@@ -293,16 +370,20 @@ export function PromptStudio() {
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<PromptFilter>("all");
-  const [tab, setTab] = useState<StudioTab>("editor");
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("selected");
   const [diffText, setDiffText] = useState("");
   const [lintResult, setLintResult] = useState<Record<string, unknown> | null>(null);
   const [compactResult, setCompactResult] = useState<Record<string, unknown> | null>(null);
   const [testInput, setTestInput] = useState("計算 QA: 12 * 8 を一文で確認して。");
   const [testTools, setTestTools] = useState("");
+  const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
+  const [selectedModelProfileId, setSelectedModelProfileId] = useState(initialModelProfileId);
   const [testResult, setTestResult] = useState<PromptStudioTestResult | null>(null);
   const [busy, setBusy] = useState<string | null>("load");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const resolvedLocale = normalizeLocale(studioLocale);
+  const msg = useCallback((key: Parameters<typeof t>[1], values: Record<string, string | number> = {}) => t(studioLocale, key, values), [studioLocale]);
 
   const loadStudio = useCallback((promptId?: string) => {
     setBusy("load");
@@ -324,13 +405,30 @@ export function PromptStudio() {
         setError(null);
         updateStudioUrl(result.profile_id, conversationId, nextPromptId);
       })
-      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Prompt Studio could not be loaded."))
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : msg("promptStudio.errorLoad")))
       .finally(() => setBusy(null));
-  }, [conversationId, profileId]);
+  }, [conversationId, msg, profileId]);
 
   useEffect(() => {
     loadStudio(initialPromptId);
   }, [initialPromptId, loadStudio]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api.listModelProfiles()
+      .then((result) => {
+        if (cancelled) return;
+        const profiles = [...(result.profiles ?? [])].sort((left, right) => modelProfileLabel(left).localeCompare(modelProfileLabel(right)));
+        setModelProfiles(profiles);
+        setSelectedModelProfileId((current) => current || profiles[0]?.profile_id || "");
+      })
+      .catch(() => {
+        if (!cancelled) setModelProfiles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const selectedPrompt = useMemo(() => {
     const selected = data?.selected_prompt;
@@ -359,6 +457,11 @@ export function PromptStudio() {
   const canEditDirectly = Boolean(selectedPrompt) && selectedPrompt?.editable !== false && !selectedPrompt?.read_only;
   const canOverridePrompt = Boolean(selectedPrompt?.read_only) && selectedPrompt?.override_allowed !== false;
   const canWriteDraft = canEditDirectly || canOverridePrompt;
+  const selectedModelProfile = useMemo(
+    () => modelProfiles.find((profile) => profile.profile_id === selectedModelProfileId) ?? null,
+    [modelProfiles, selectedModelProfileId],
+  );
+  const selectedModel = modelProfileModel(selectedModelProfile) || selectedModelProfileId;
 
   useEffect(() => {
     const toolId = String(signalTool.tool_id || signalTool.tool_name || "").trim();
@@ -389,7 +492,7 @@ export function PromptStudio() {
     const nextId = promptKey(prompt);
     setSelectedId(nextId);
     setDraft(promptBody(prompt));
-    setTab("editor");
+    setInspectorTab("selected");
     setDiffText("");
     setCompactResult(null);
     setTestResult(null);
@@ -405,10 +508,10 @@ export function PromptStudio() {
     void api.diffPrompt({ profile_id: profileId || undefined, prompt_id: promptId, draft })
       .then((result) => {
         setDiffText(result.diff || "No changes.");
-        setTab("diff");
+        setInspectorTab("diff");
         setError(null);
       })
-      .catch((diffError) => setError(diffError instanceof Error ? diffError.message : "Prompt diff failed."))
+      .catch((diffError) => setError(diffError instanceof Error ? diffError.message : msg("promptStudio.errorDiff")))
       .finally(() => setBusy(null));
   };
 
@@ -417,10 +520,10 @@ export function PromptStudio() {
     void api.lintPrompt({ prompt: draft })
       .then((result) => {
         setLintResult(result);
-        setTab("variables");
+        setInspectorTab("variables");
         setError(null);
       })
-      .catch((lintError) => setError(lintError instanceof Error ? lintError.message : "Prompt lint failed."))
+      .catch((lintError) => setError(lintError instanceof Error ? lintError.message : msg("promptStudio.errorLint")))
       .finally(() => setBusy(null));
   };
 
@@ -429,10 +532,9 @@ export function PromptStudio() {
     void api.compactPrompt({ prompt: draft })
       .then((result) => {
         setCompactResult(result);
-        setTab("preview");
         setError(null);
       })
-      .catch((compactError) => setError(compactError instanceof Error ? compactError.message : "Prompt compact failed."))
+      .catch((compactError) => setError(compactError instanceof Error ? compactError.message : msg("promptStudio.errorCompact")))
       .finally(() => setBusy(null));
   };
 
@@ -446,13 +548,15 @@ export function PromptStudio() {
       draft,
       user_text: testInput,
       selected_tools: splitCsvList(testTools),
+      model_profile_id: selectedModelProfileId || undefined,
+      model: selectedModel || undefined,
     })
       .then((result) => {
         setTestResult(result);
-        setTab("test");
+        setInspectorTab("test");
         setError(null);
       })
-      .catch((testError) => setError(testError instanceof Error ? testError.message : "Prompt Studio test failed."))
+      .catch((testError) => setError(testError instanceof Error ? testError.message : msg("promptStudio.errorTest")))
       .finally(() => setBusy(null));
   };
 
@@ -467,10 +571,10 @@ export function PromptStudio() {
       : api.savePrompt({ profile_id: profileId || undefined, prompt_id: promptId, body: draft, reason: "studio_save" });
     void request
       .then(() => {
-        setNotice(forceOverride || selectedPrompt?.read_only ? "Profile override saved." : "Prompt saved.");
+        setNotice(forceOverride || selectedPrompt?.read_only ? msg("promptStudio.noticeOverrideSaved") : msg("promptStudio.noticePromptSaved"));
         loadStudio(promptId);
       })
-      .catch((saveError) => setError(saveError instanceof Error ? saveError.message : "Prompt save failed."))
+      .catch((saveError) => setError(saveError instanceof Error ? saveError.message : msg("promptStudio.errorSave")))
       .finally(() => setBusy(null));
   };
 
@@ -480,10 +584,10 @@ export function PromptStudio() {
     setBusy(`rollback:${versionId}`);
     void api.rollbackPrompt({ profile_id: profileId || undefined, prompt_id: promptId, version_id: versionId })
       .then(() => {
-        setNotice("Prompt rolled back.");
+        setNotice(msg("promptStudio.noticeRolledBack"));
         loadStudio(promptId);
       })
-      .catch((rollbackError) => setError(rollbackError instanceof Error ? rollbackError.message : "Prompt rollback failed."))
+      .catch((rollbackError) => setError(rollbackError instanceof Error ? rollbackError.message : msg("promptStudio.errorRollback")))
       .finally(() => setBusy(null));
   };
 
@@ -499,11 +603,27 @@ export function PromptStudio() {
       enabled,
     })
       .then(() => {
-        setNotice(enabled ? "Prompt enabled." : "Prompt disabled.");
+        setNotice(enabled ? msg("promptStudio.noticeEnabled") : msg("promptStudio.noticeDisabled"));
         loadStudio(promptKey(selectedPrompt));
       })
-      .catch((toggleError) => setError(toggleError instanceof Error ? toggleError.message : "Prompt toggle failed."))
+      .catch((toggleError) => setError(toggleError instanceof Error ? toggleError.message : msg("promptStudio.errorToggle")))
       .finally(() => setBusy(null));
+  };
+
+  const changeStudioLocale = (nextLocale: LocaleSetting) => {
+    setStudioLocale(nextLocale);
+    try {
+      window.localStorage.setItem(PROMPT_STUDIO_LOCALE_KEY, nextLocale);
+    } catch {
+      // localStorage is optional for this control.
+    }
+    setUrlParam("locale", nextLocale);
+  };
+
+  const changeModelProfile = (nextProfileId: string) => {
+    setSelectedModelProfileId(nextProfileId);
+    setNotice(null);
+    setUrlParam("model_profile_id", nextProfileId);
   };
 
   const goBack = () => {
@@ -518,27 +638,43 @@ export function PromptStudio() {
     <div className="flex h-screen min-h-0 flex-col bg-[#09090b] text-zinc-300">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800/70 bg-zinc-950/80 px-3 backdrop-blur">
         <div className="flex min-w-0 items-center gap-2">
-          <button type="button" onClick={goBack} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100" aria-label="Back to chat">
+          <button type="button" onClick={goBack} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100" aria-label={msg("promptStudio.back")}>
             <ArrowLeft size={16} />
           </button>
           <div className="flex min-w-0 items-center gap-2">
             <SlidersHorizontal size={16} className="shrink-0 text-cyan-300" />
-            <h1 className="truncate text-sm font-semibold text-zinc-100">Prompt Studio</h1>
+            <h1 className="truncate text-sm font-semibold text-zinc-100">{msg("promptStudio.title")}</h1>
             <span className="hidden rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500 sm:inline">
               {profileId || "defaultspack.startup"}
             </span>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <button type="button" onClick={() => loadStudio(selectedId)} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100" aria-label="Refresh Prompt Studio">
+          <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950 p-0.5" aria-label="Prompt Studio language">
+            <Languages size={13} className="ml-1 text-zinc-600" />
+            {(["ja", "en"] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => changeStudioLocale(item)}
+                className={cn(
+                  "rounded-md px-1.5 py-0.5 text-[10px] font-semibold",
+                  resolvedLocale === item ? "bg-cyan-500/15 text-cyan-100" : "text-zinc-500 hover:text-zinc-200",
+                )}
+              >
+                {item.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => loadStudio(selectedId)} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100" aria-label={msg("promptStudio.refresh")}>
             <RefreshCw size={15} className={cn(busy === "load" && "animate-spin")} />
           </button>
-          <button type="button" onClick={runDiff} disabled={!selectedPrompt || busy === "diff" || !canWriteDraft} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-cyan-200 disabled:opacity-40" aria-label="Diff prompt">
+          <button type="button" onClick={runDiff} disabled={!selectedPrompt || busy === "diff" || !canWriteDraft} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-cyan-200 disabled:opacity-40" aria-label={msg("promptStudio.diff")} title={msg("promptStudio.diff")}>
             <ListFilter size={15} />
           </button>
           <button type="button" onClick={() => saveDraft(false)} disabled={!selectedPrompt || !isDirty || Boolean(busy) || !canWriteDraft} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45">
             <Save size={13} />
-            {selectedPrompt?.read_only ? (canOverridePrompt ? "Override" : "Read-only") : "Save"}
+            {selectedPrompt?.read_only ? (canOverridePrompt ? msg("promptStudio.override") : msg("promptStudio.readOnly")) : msg("promptStudio.save")}
           </button>
         </div>
       </header>
@@ -550,7 +686,7 @@ export function PromptStudio() {
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-[292px_minmax(0,1fr)_340px] overflow-hidden max-[1050px]:grid-cols-[260px_minmax(0,1fr)] max-[780px]:grid-cols-1">
+      <div className="grid min-h-0 flex-1 grid-cols-[292px_minmax(0,1fr)_390px] overflow-hidden max-[1100px]:grid-cols-[260px_minmax(0,1fr)] max-[780px]:grid-cols-1">
         <aside className="flex min-h-0 flex-col border-r border-zinc-800/70 bg-zinc-950/55 max-[780px]:max-h-[34vh] max-[780px]:border-b max-[780px]:border-r-0">
           <div className="border-b border-zinc-800/70 p-3">
             <div className="relative">
@@ -559,7 +695,7 @@ export function PromptStudio() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 pl-8 pr-3 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
-                placeholder="Search prompts"
+                placeholder={msg("promptStudio.searchPlaceholder")}
               />
             </div>
             <div className="mt-2 flex flex-wrap gap-1">
@@ -575,7 +711,7 @@ export function PromptStudio() {
                       : "border-zinc-800 bg-zinc-900/45 text-zinc-500 hover:text-zinc-200",
                   )}
                 >
-                  {item.label}
+                  {msg(item.labelKey)}
                 </button>
               ))}
             </div>
@@ -607,11 +743,11 @@ export function PromptStudio() {
                     <span className="rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[9px] text-zinc-500">{displaySource(prompt)}</span>
                     {isOverride(prompt) && <span className="rounded border border-cyan-500/25 bg-cyan-500/10 px-1.5 py-0.5 text-[9px] text-cyan-200">override</span>}
                   </div>
-                  <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-zinc-500">{prompt.description || prompt.preview || "Prompt"}</p>
+                  <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-zinc-500">{prompt.description || prompt.preview || msg("promptStudio.promptFallback")}</p>
                 </button>
               );
             })}
-            {!prompts.length && <div className="rounded-lg border border-dashed border-zinc-800 p-4 text-center text-xs text-zinc-500">No prompts match.</div>}
+            {!prompts.length && <div className="rounded-lg border border-dashed border-zinc-800 p-4 text-center text-xs text-zinc-500">{msg("promptStudio.noPrompts")}</div>}
           </div>
         </aside>
 
@@ -626,49 +762,41 @@ export function PromptStudio() {
                   </span>
                   <span className="rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-500">{tokenText(selectedPrompt?.tokens)}</span>
                 </div>
-                <p className="mt-1 truncate text-xs text-zinc-500">{selectedPrompt?.description || selectedPrompt?.source || "Prompt source"}</p>
+                <p className="mt-1 truncate text-xs text-zinc-500">{selectedPrompt?.description || selectedPrompt?.source || msg("promptStudio.promptFallback")}</p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <button type="button" onClick={runLint} disabled={!selectedPrompt || busy === "lint"} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-40" aria-label="Lint prompt">
+                <button type="button" onClick={runLint} disabled={!selectedPrompt || busy === "lint"} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-40" aria-label={msg("promptStudio.lint")} title={msg("promptStudio.lint")}>
                   <ShieldCheck size={15} />
                 </button>
-                <button type="button" onClick={runTest} disabled={!selectedPrompt || busy === "test"} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-cyan-200 disabled:opacity-40" aria-label="Run Studio test">
+                <button type="button" onClick={runTest} disabled={!selectedPrompt || busy === "test"} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-cyan-200 disabled:opacity-40" aria-label={msg("promptStudio.runTest")} title={msg("promptStudio.runTest")}>
                   <FlaskConical size={15} />
                 </button>
-                <button type="button" onClick={runCompact} disabled={!selectedPrompt || busy === "compact" || !canWriteDraft} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-40" aria-label="Compact prompt">
+                <button type="button" onClick={runCompact} disabled={!selectedPrompt || busy === "compact" || !canWriteDraft} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-40" aria-label={msg("promptStudio.compactPrompt")} title={msg("promptStudio.compactPrompt")}>
                   <Wand2 size={15} />
                 </button>
-                <button type="button" onClick={() => saveDraft(true)} disabled={!selectedPrompt || Boolean(busy) || (!canOverridePrompt && !canEditDirectly)} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-cyan-200 disabled:opacity-40" aria-label="Create profile override">
+                <button type="button" onClick={() => saveDraft(true)} disabled={!selectedPrompt || Boolean(busy) || (!canOverridePrompt && !canEditDirectly)} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-cyan-200 disabled:opacity-40" aria-label={msg("promptStudio.createOverride")} title={msg("promptStudio.createOverride")}>
                   <SlidersHorizontal size={15} />
                 </button>
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap gap-1">
-              {tabs.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setTab(item.id)}
-                    className={cn(
-                      "inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium",
-                      tab === item.id
-                        ? "border-zinc-600 bg-zinc-900 text-zinc-100"
-                        : "border-zinc-800 bg-zinc-950/60 text-zinc-500 hover:text-zinc-200",
-                    )}
-                  >
-                    <Icon size={13} />
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto p-4">
-            {tab === "editor" && (
+            <div className="grid min-h-full gap-3">
+              {compactSuggestion && (
+                <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs font-semibold text-cyan-100">{msg("promptStudio.compactedDraft")}</div>
+                    <button type="button" onClick={() => setDraft(compactSuggestion)} className="rounded-md bg-cyan-200 px-2 py-1 text-[11px] font-semibold text-cyan-950">
+                      {msg("promptStudio.apply")}
+                    </button>
+                  </div>
+                  <pre className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-cyan-50">{compactSuggestion}</pre>
+                </div>
+              )}
+              <label className="sr-only" htmlFor="prompt-studio-editor">{msg("promptStudio.editor")}</label>
               <textarea
+                id="prompt-studio-editor"
                 value={draft}
                 onChange={(event) => {
                   setDraft(event.target.value);
@@ -676,102 +804,19 @@ export function PromptStudio() {
                 }}
                 readOnly={!canWriteDraft}
                 spellCheck={false}
+                placeholder={msg("promptStudio.editorPlaceholder")}
                 className={cn(
-                  "min-h-[calc(100vh-210px)] w-full resize-none rounded-lg border border-zinc-800 bg-zinc-950/75 p-4 font-mono text-[13px] leading-relaxed text-zinc-200 outline-none focus:border-zinc-600",
+                  "min-h-[calc(100vh-185px)] w-full resize-none rounded-lg border border-zinc-800 bg-zinc-950/75 p-4 font-mono text-[13px] leading-relaxed text-zinc-200 outline-none focus:border-zinc-600",
                   !canWriteDraft && "cursor-default text-zinc-400 focus:border-zinc-800",
                 )}
               />
-            )}
-
-            {tab === "preview" && (
-              <div className="grid gap-3">
-                {compactSuggestion && (
-                  <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-xs font-semibold text-cyan-100">Compacted Draft</div>
-                      <button type="button" onClick={() => setDraft(compactSuggestion)} className="rounded-md bg-cyan-200 px-2 py-1 text-[11px] font-semibold text-cyan-950">
-                        Apply
-                      </button>
-                    </div>
-                    <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-cyan-50">{compactSuggestion}</pre>
-                  </div>
-                )}
-                <pre className="min-h-[calc(100vh-240px)] whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950/75 p-4 font-mono text-[13px] leading-relaxed text-zinc-200">
-                  {draft || "Empty prompt."}
-                </pre>
-              </div>
-            )}
-
-            {tab === "test" && (
-              <PromptStudioTestPanel
-                result={testResult}
-                testInput={testInput}
-                testTools={testTools}
-                busy={busy}
-                onInputChange={(value) => {
-                  setTestInput(value);
-                  setNotice(null);
-                }}
-                onToolsChange={(value) => {
-                  setTestTools(value);
-                  setNotice(null);
-                }}
-                onRun={runTest}
-              />
-            )}
-
-            {tab === "diff" && (
-              <pre className="min-h-[calc(100vh-210px)] whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950/75 p-4 font-mono text-[12px] leading-relaxed text-zinc-300">
-                {diffText || "Run diff to compare the draft against its base prompt."}
-              </pre>
-            )}
-
-            {tab === "usage" && (
-              <div className="grid gap-3">
-                <section className="grid gap-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600">Selected Prompt Usage</div>
-                  {promptSegments.map((segment) => <PromptUsageSegmentCard key={`${segment.id}-${segment.status}-selected`} segment={segment} />)}
-                  {!promptSegments.length && <div className="rounded-lg border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">No recorded usage for this prompt in the active graph.</div>}
-                </section>
-                <section className="grid gap-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600">Current Model Input</div>
-                    <span className="font-mono text-[10px] text-zinc-600">{activeSegments.length} segments</span>
-                  </div>
-                  {activeSegments.map((segment) => <PromptUsageSegmentCard key={`${segment.id}-${segment.status}-all`} segment={segment} />)}
-                  {!activeSegments.length && <div className="rounded-lg border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">No model input segments are available.</div>}
-                </section>
-              </div>
-            )}
-
-            {tab === "variables" && (
-              <div className="grid gap-3">
-                <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-                  <h3 className="text-xs font-semibold text-zinc-100">Variables</h3>
-                  <pre className="mt-2 overflow-auto rounded-md bg-black/25 p-3 font-mono text-[12px] text-zinc-300">{variables.length ? prettyJson(variables) : "[]"}</pre>
-                </section>
-                <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-                  <h3 className="text-xs font-semibold text-zinc-100">Validation</h3>
-                  <pre className="mt-2 overflow-auto rounded-md bg-black/25 p-3 font-mono text-[12px] text-zinc-300">{prettyJson(validation)}</pre>
-                </section>
-                <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-                  <h3 className="text-xs font-semibold text-zinc-100">Lint</h3>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {lintWarnings.map((warning, index) => (
-                      <span key={`${String(warning)}-${index}`} className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-100">{String(warning)}</span>
-                    ))}
-                    {!lintWarnings.length && <span className="rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-100">clean</span>}
-                  </div>
-                  <pre className="mt-2 overflow-auto rounded-md bg-black/25 p-3 font-mono text-[12px] text-zinc-300">{prettyJson(lint)}</pre>
-                </section>
-              </div>
-            )}
+            </div>
           </div>
         </main>
 
-        <aside className="flex min-h-0 flex-col border-l border-zinc-800/70 bg-zinc-950/55 max-[1050px]:col-span-2 max-[1050px]:max-h-[38vh] max-[1050px]:border-l-0 max-[1050px]:border-t max-[780px]:col-span-1">
+        <aside className="flex min-h-0 flex-col border-l border-zinc-800/70 bg-zinc-950/55 max-[1100px]:col-span-2 max-[1100px]:max-h-[46vh] max-[1100px]:border-l-0 max-[1100px]:border-t max-[780px]:col-span-1">
           <div className="flex items-center justify-between border-b border-zinc-800/70 px-4 py-3">
-            <div className="text-sm font-semibold text-zinc-100">Inspector</div>
+            <div className="text-sm font-semibold text-zinc-100">{msg("promptStudio.inspector")}</div>
             {selectedPrompt?.active_edge_id && (
               <button
                 type="button"
@@ -787,135 +832,239 @@ export function PromptStudio() {
               </button>
             )}
           </div>
+          <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-zinc-800/70 px-3 py-2">
+            {inspectorTabs.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setInspectorTab(item.id)}
+                  className={cn(
+                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs font-medium",
+                    inspectorTab === item.id
+                      ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-100"
+                      : "border-zinc-800 bg-zinc-950/60 text-zinc-500 hover:text-zinc-200",
+                  )}
+                >
+                  <Icon size={13} />
+                  {msg(item.labelKey)}
+                </button>
+              );
+            })}
+          </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            <div className="grid gap-3">
-              <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-100">
-                  <FileText size={13} className="text-cyan-300" />
-                  Source
-                </div>
-                <dl className="space-y-2 text-[11px]">
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-zinc-500">Type</dt>
-                    <dd className="text-right text-zinc-200">{displaySource(selectedPrompt)}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-zinc-500">Editable</dt>
-                    <dd className="text-right text-zinc-200">{selectedPrompt?.editable ? "yes" : canOverridePrompt ? "override only" : "inspect only"}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-zinc-500">Tokens</dt>
-                    <dd className="text-right text-zinc-200">{tokenText(selectedPrompt?.tokens)}</dd>
-                  </div>
-                </dl>
-              </section>
-
-              <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-100">
-                  <ShieldCheck size={13} className="text-emerald-300" />
-                  Safety Boundary
-                </div>
-                <div className="grid gap-1.5">
-                  {safetySummary && <p className="mb-1 text-[11px] leading-relaxed text-zinc-400">{safetySummary}</p>}
-                  {Object.entries(Object.keys(safety).length ? safety : {
-                    passive_text_only: true,
-                    can_grant_permissions: false,
-                    can_call_tools: false,
-                    can_mutate_chat_state: false,
-                  }).filter(([key]) => key !== "summary").map(([key, value]) => (
-                    <div key={key} className="flex items-center justify-between gap-2 text-[11px]">
-                      <span className="text-zinc-500">{key.replace(/_/g, " ")}</span>
-                      <span className={value === true ? "text-emerald-300" : "text-zinc-400"}>{value === true ? "yes" : value === false ? "no" : String(value)}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-100">
-                  <SlidersHorizontal size={13} className="text-cyan-300" />
-                  Activation
-                </div>
-                <div className="space-y-2 text-[11px] text-zinc-500">
-                  <div className="flex items-center justify-between gap-2">
-                    <span>State</span>
-                    <span className={cn("rounded border px-1.5 py-0.5", statusBadgeClass(selectedPrompt?.activation_state))}>{selectedPrompt?.activation_state || "available"}</span>
-                  </div>
-                  <div className="break-all font-mono text-zinc-600">{selectedPrompt?.active_edge_id || "no active edge"}</div>
-                  <p className="leading-relaxed">{selectedPrompt?.active_reason || "Available in Prompt Studio."}</p>
-                  {selectedPrompt?.input_role && <p className="leading-relaxed text-zinc-400">{selectedPrompt.input_role}</p>}
-                  {selectedPrompt?.source_priority && <p className="leading-relaxed">{selectedPrompt.source_priority}</p>}
-                </div>
-              </section>
-
-              {(Object.keys(signalTool).length > 0 || Object.keys(signalSkill).length > 0) && (
+            {inspectorTab === "selected" && (
+              <div className="grid gap-3">
                 <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
                   <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-100">
-                    <Wand2 size={13} className="text-violet-300" />
-                    Tool / Skill Signal
+                    <Info size={13} className="text-cyan-300" />
+                    {msg("promptStudio.selectedPrompt")}
                   </div>
-                  <div className="space-y-2 text-[11px] text-zinc-500">
-                    {Object.entries(signalTool).map(([key, value]) => (
-                      <div key={key} className="flex justify-between gap-3">
-                        <span>{key.replace(/_/g, " ")}</span>
-                        <span className="min-w-0 truncate text-right text-zinc-300">{formatInspectorValue(value)}</span>
-                      </div>
-                    ))}
-                    {Object.entries(signalSkill).map(([key, value]) => (
-                      <div key={key} className="flex justify-between gap-3">
-                        <span>{key.replace(/_/g, " ")}</span>
-                        <span className="min-w-0 truncate text-right text-zinc-300">{formatInspectorValue(value)}</span>
+                  <div className="space-y-1 text-[11px] text-zinc-500">
+                    <div className="truncate text-sm font-semibold text-zinc-100">{selectedPrompt?.name || "Prompt"}</div>
+                    <div className="break-all font-mono text-[10px] text-zinc-600">{promptKey(selectedPrompt) || "prompt"}</div>
+                    <p className="leading-relaxed">{selectedPrompt?.description || selectedPrompt?.preview || msg("promptStudio.promptFallback")}</p>
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-100">
+                    <FileText size={13} className="text-cyan-300" />
+                    {msg("promptStudio.source")}
+                  </div>
+                  <dl className="space-y-2 text-[11px]">
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-zinc-500">{msg("promptStudio.type")}</dt>
+                      <dd className="text-right text-zinc-200">{displaySource(selectedPrompt)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-zinc-500">{msg("promptStudio.editable")}</dt>
+                      <dd className="text-right text-zinc-200">{selectedPrompt?.editable ? msg("promptStudio.yes") : canOverridePrompt ? msg("promptStudio.overrideOnly") : msg("promptStudio.inspectOnly")}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-zinc-500">{msg("promptStudio.tokens")}</dt>
+                      <dd className="text-right text-zinc-200">{tokenText(selectedPrompt?.tokens)}</dd>
+                    </div>
+                  </dl>
+                </section>
+
+                <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-100">
+                    <ShieldCheck size={13} className="text-emerald-300" />
+                    {msg("promptStudio.safetyBoundary")}
+                  </div>
+                  <div className="grid gap-1.5">
+                    {safetySummary && <p className="mb-1 text-[11px] leading-relaxed text-zinc-400">{safetySummary}</p>}
+                    {Object.entries(Object.keys(safety).length ? safety : {
+                      passive_text_only: true,
+                      can_grant_permissions: false,
+                      can_call_tools: false,
+                      can_mutate_chat_state: false,
+                    }).filter(([key]) => key !== "summary").map(([key, value]) => (
+                      <div key={key} className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="text-zinc-500">{key.replace(/_/g, " ")}</span>
+                        <span className={value === true ? "text-emerald-300" : "text-zinc-400"}>{value === true ? msg("promptStudio.yes") : value === false ? msg("promptStudio.no") : String(value)}</span>
                       </div>
                     ))}
                   </div>
                 </section>
-              )}
 
-              <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-100">
-                  <History size={13} className="text-zinc-300" />
-                  Source Chain
-                </div>
-                <div className="grid gap-2">
-                  {sourceChain.map((source, index) => (
-                    <div key={index} className="rounded-md border border-zinc-800 bg-black/20 p-2 text-[11px] text-zinc-400">
-                      <pre className="whitespace-pre-wrap break-all font-mono">{prettyJson(source)}</pre>
+                <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-100">
+                    <SlidersHorizontal size={13} className="text-cyan-300" />
+                    {msg("promptStudio.activation")}
+                  </div>
+                  <div className="space-y-2 text-[11px] text-zinc-500">
+                    <div className="flex items-center justify-between gap-2">
+                      <span>{msg("promptStudio.state")}</span>
+                      <span className={cn("rounded border px-1.5 py-0.5", statusBadgeClass(selectedPrompt?.activation_state))}>{selectedPrompt?.activation_state || "available"}</span>
                     </div>
-                  ))}
-                  {!sourceChain.length && <div className="text-[11px] text-zinc-600">No source chain recorded.</div>}
-                </div>
-              </section>
+                    <div className="break-all font-mono text-zinc-600">{selectedPrompt?.active_edge_id || msg("promptStudio.noActiveEdge")}</div>
+                    <p className="leading-relaxed">{selectedPrompt?.active_reason || msg("promptStudio.availableInStudio")}</p>
+                    {selectedPrompt?.input_role && <p className="leading-relaxed text-zinc-400">{selectedPrompt.input_role}</p>}
+                    {selectedPrompt?.source_priority && <p className="leading-relaxed">{selectedPrompt.source_priority}</p>}
+                  </div>
+                </section>
 
-              <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-100">
-                  <RotateCcw size={13} className="text-zinc-300" />
-                  Versions
-                </div>
-                <div className="grid gap-2">
-                  {versions.map((version) => (
-                    <div key={version.version_id} className="rounded-md border border-zinc-800 bg-black/20 p-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="truncate font-mono text-[10px] text-zinc-300">{version.version_id}</div>
-                          <div className="mt-1 text-[10px] text-zinc-600">{version.created_at || version.scope}</div>
+                {(Object.keys(signalTool).length > 0 || Object.keys(signalSkill).length > 0) && (
+                  <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                    <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-100">
+                      <Wand2 size={13} className="text-violet-300" />
+                      {msg("promptStudio.toolSkillSignal")}
+                    </div>
+                    <div className="space-y-2 text-[11px] text-zinc-500">
+                      {Object.entries(signalTool).map(([key, value]) => (
+                        <div key={key} className="flex justify-between gap-3">
+                          <span>{key.replace(/_/g, " ")}</span>
+                          <span className="min-w-0 truncate text-right text-zinc-300">{formatInspectorValue(value)}</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => rollback(version.version_id)}
-                          disabled={busy === `rollback:${version.version_id}`}
-                          className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-40"
-                          aria-label="Rollback prompt version"
-                        >
-                          <RotateCcw size={13} />
-                        </button>
-                      </div>
-                      {version.reason && <div className="mt-1 text-[10px] text-zinc-500">{version.reason}</div>}
+                      ))}
+                      {Object.entries(signalSkill).map(([key, value]) => (
+                        <div key={key} className="flex justify-between gap-3">
+                          <span>{key.replace(/_/g, " ")}</span>
+                          <span className="min-w-0 truncate text-right text-zinc-300">{formatInspectorValue(value)}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                  {!versions.length && <div className="text-[11px] text-zinc-600">No saved versions yet.</div>}
-                </div>
-              </section>
-            </div>
+                  </section>
+                )}
+
+                <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-100">
+                    <History size={13} className="text-zinc-300" />
+                    {msg("promptStudio.sourceChain")}
+                  </div>
+                  <div className="grid gap-2">
+                    {sourceChain.map((source, index) => (
+                      <div key={index} className="rounded-md border border-zinc-800 bg-black/20 p-2 text-[11px] text-zinc-400">
+                        <pre className="whitespace-pre-wrap break-all font-mono">{prettyJson(source)}</pre>
+                      </div>
+                    ))}
+                    {!sourceChain.length && <div className="text-[11px] text-zinc-600">{msg("promptStudio.noSourceChain")}</div>}
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-100">
+                    <RotateCcw size={13} className="text-zinc-300" />
+                    {msg("promptStudio.versions")}
+                  </div>
+                  <div className="grid gap-2">
+                    {versions.map((version) => (
+                      <div key={version.version_id} className="rounded-md border border-zinc-800 bg-black/20 p-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate font-mono text-[10px] text-zinc-300">{version.version_id}</div>
+                            <div className="mt-1 text-[10px] text-zinc-600">{version.created_at || version.scope}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => rollback(version.version_id)}
+                            disabled={busy === `rollback:${version.version_id}`}
+                            className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-40"
+                            aria-label="Rollback prompt version"
+                          >
+                            <RotateCcw size={13} />
+                          </button>
+                        </div>
+                        {version.reason && <div className="mt-1 text-[10px] text-zinc-500">{version.reason}</div>}
+                      </div>
+                    ))}
+                    {!versions.length && <div className="text-[11px] text-zinc-600">{msg("promptStudio.noVersions")}</div>}
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {inspectorTab === "test" && (
+              <PromptStudioTestPanel
+                result={testResult}
+                testInput={testInput}
+                testTools={testTools}
+                modelProfiles={modelProfiles}
+                selectedModelProfileId={selectedModelProfileId}
+                locale={studioLocale}
+                busy={busy}
+                onInputChange={(value) => {
+                  setTestInput(value);
+                  setNotice(null);
+                }}
+                onToolsChange={(value) => {
+                  setTestTools(value);
+                  setNotice(null);
+                }}
+                onModelChange={changeModelProfile}
+                onRun={runTest}
+              />
+            )}
+
+            {inspectorTab === "diff" && (
+              <pre className="min-h-[18rem] whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950/75 p-4 font-mono text-[12px] leading-relaxed text-zinc-300">
+                {diffText || msg("promptStudio.diffEmpty")}
+              </pre>
+            )}
+
+            {inspectorTab === "usage" && (
+              <div className="grid gap-3">
+                <section className="grid gap-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600">{msg("promptStudio.selectedPromptUsage")}</div>
+                  {promptSegments.map((segment) => <PromptUsageSegmentCard key={`${segment.id}-${segment.status}-selected`} segment={segment} />)}
+                  {!promptSegments.length && <div className="rounded-lg border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">{msg("promptStudio.noRecordedUsage")}</div>}
+                </section>
+                <section className="grid gap-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600">{msg("promptStudio.currentModelInput")}</div>
+                    <span className="font-mono text-[10px] text-zinc-600">{activeSegments.length} segments</span>
+                  </div>
+                  {activeSegments.map((segment) => <PromptUsageSegmentCard key={`${segment.id}-${segment.status}-all`} segment={segment} />)}
+                  {!activeSegments.length && <div className="rounded-lg border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">{msg("promptStudio.noModelInputSegments")}</div>}
+                </section>
+              </div>
+            )}
+
+            {inspectorTab === "variables" && (
+              <div className="grid gap-3">
+                <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                  <h3 className="text-xs font-semibold text-zinc-100">{msg("promptStudio.variables")}</h3>
+                  <pre className="mt-2 overflow-auto rounded-md bg-black/25 p-3 font-mono text-[12px] text-zinc-300">{variables.length ? prettyJson(variables) : "[]"}</pre>
+                </section>
+                <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                  <h3 className="text-xs font-semibold text-zinc-100">{msg("promptStudio.validation")}</h3>
+                  <pre className="mt-2 overflow-auto rounded-md bg-black/25 p-3 font-mono text-[12px] text-zinc-300">{prettyJson(validation)}</pre>
+                </section>
+                <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                  <h3 className="text-xs font-semibold text-zinc-100">{msg("promptStudio.lint")}</h3>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {lintWarnings.map((warning, index) => (
+                      <span key={`${String(warning)}-${index}`} className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-100">{String(warning)}</span>
+                    ))}
+                    {!lintWarnings.length && <span className="rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-100">{msg("promptStudio.clean")}</span>}
+                  </div>
+                  <pre className="mt-2 overflow-auto rounded-md bg-black/25 p-3 font-mono text-[12px] text-zinc-300">{prettyJson(lint)}</pre>
+                </section>
+              </div>
+            )}
           </div>
         </aside>
       </div>

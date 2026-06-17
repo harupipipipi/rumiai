@@ -214,6 +214,8 @@ def test_prompt_input(input_data: dict[str, Any] | None = None) -> dict[str, Any
     prompt_id = str(data.get("prompt_id") or data.get("name") or "").strip()
     user_text = str(data.get("user_text") or data.get("message") or data.get("input") or "").strip()
     conversation_id = str(data.get("conversation_id") or "").strip()
+    model_profile_id = str(data.get("model_profile_id") or data.get("model") or "").strip()
+    model = str(data.get("model") or model_profile_id or "").strip()
     selected_tools = _string_list(data.get("selected_tools") if "selected_tools" in data else data.get("tools"))
     prompt_body = str(
         data.get("draft")
@@ -230,6 +232,7 @@ def test_prompt_input(input_data: dict[str, Any] | None = None) -> dict[str, Any
                 **request_context,
                 "message": user_text,
                 "user_text": user_text,
+                **({"model": model} if model else {}),
                 "studio_test": True,
             },
         }
@@ -280,9 +283,13 @@ def test_prompt_input(input_data: dict[str, Any] | None = None) -> dict[str, Any
         "profile_id": profile_id,
         "prompt_id": prompt_id,
         "conversation_id": conversation_id,
+        "model_profile_id": model_profile_id,
+        "model": model,
         "input": {
             "user_text": user_text,
             "selected_tools": selected_tools,
+            "model_profile_id": model_profile_id,
+            "model": model,
         },
         "summary": usage,
         "segments": segments,

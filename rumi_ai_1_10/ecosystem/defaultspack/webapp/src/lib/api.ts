@@ -135,7 +135,11 @@ export type PromptStudioTestResult = {
   input?: {
     user_text?: string;
     selected_tools?: string[];
+    model_profile_id?: string;
+    model?: string;
   };
+  model_profile_id?: string;
+  model?: string;
   summary?: PromptUsageSummary;
   segments?: PromptUsageSegment[];
   matched_skills?: Record<string, unknown>[];
@@ -1989,6 +1993,8 @@ export const api = {
     draft?: string;
     user_text?: string;
     selected_tools?: string[];
+    model_profile_id?: string;
+    model?: string;
   }) {
     return request<PromptStudioTestResult>("/api/prompts/test", {
       method: "POST",

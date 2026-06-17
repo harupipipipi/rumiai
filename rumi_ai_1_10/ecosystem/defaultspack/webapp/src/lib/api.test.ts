@@ -433,6 +433,8 @@ test("testPromptStudio posts draft input and selected tools", async () => {
       draft: "Use the calculator when arithmetic is requested.",
       user_text: "計算して",
       selected_tools: ["calculator"],
+      model_profile_id: "openai/gpt-5.1",
+      model: "openai/gpt-5.1",
     });
   } finally {
     globalThis.fetch = originalFetch;
@@ -445,6 +447,8 @@ test("testPromptStudio posts draft input and selected tools", async () => {
     draft: "Use the calculator when arithmetic is requested.",
     user_text: "計算して",
     selected_tools: ["calculator"],
+    model_profile_id: "openai/gpt-5.1",
+    model: "openai/gpt-5.1",
   });
 });
 

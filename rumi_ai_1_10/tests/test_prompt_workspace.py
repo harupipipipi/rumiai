@@ -250,6 +250,7 @@ def test_prompt_studio_testbench_matches_skill_and_tool_schema(monkeypatch, tmp_
             "draft": "For arithmetic requests, use the calculator tool only after normal tool approval.",
             "user_text": "計算 QA: 12 * 8 を一文で確認して。",
             "selected_tools": ["calculator"],
+            "model_profile_id": "openai/gpt-5.1",
             "skills": [
                 {
                     "id": "qa/math-skill",
@@ -265,6 +266,8 @@ def test_prompt_studio_testbench_matches_skill_and_tool_schema(monkeypatch, tmp_
     skill_segment = next(item for item in result["segments"] if item["kind"] == "skill")
 
     assert result["matched_skills"][0]["id"] == "qa/math-skill"
+    assert result["model_profile_id"] == "openai/gpt-5.1"
+    assert result["input"]["model_profile_id"] == "openai/gpt-5.1"
     assert skill_segment["skill_signal"]["matched"][0]["id"] == "qa/math-skill"
     assert result["selected_tool_segments"][0]["tool_signal"]["tool_id"] == "calculator"
     assert result["prompt_tool_analysis"]["prompt_can_call_tool"] is False
