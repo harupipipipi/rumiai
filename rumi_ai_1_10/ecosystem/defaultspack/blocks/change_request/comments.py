@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from blocks._common import error, ok
-from domain.change_request import ChangeRequestService
+from blocks.change_request._helpers import invalid_input_response, not_found_response, service, service_error_response
 
 
 def run(input_data, context=None):
@@ -10,22 +10,18 @@ def run(input_data, context=None):
     cr_id = str(input_data.get("id") or "").strip()
     comment_id = str(input_data.get("comment_id") or input_data.get("thread_id") or "").strip()
     method = str(input_data.get("_method") or ("PATCH" if comment_id else "GET")).upper()
-    service = ChangeRequestService()
+    change_requests = service()
     try:
         if method == "GET":
-            record = service.get(cr_id)
+            record = change_requests.get(cr_id)
             if record is None:
-                result = error("change request not found", code="CHANGE_REQUEST_NOT_FOUND")
-                result["_http_status"] = 404
-                return result
+                return not_found_response()
             if comment_id:
                 comments = record.get("comments") if isinstance(record.get("comments"), list) else []
                 for comment in comments:
                     if isinstance(comment, dict) and comment.get("id") == comment_id:
                         return ok({"comment": comment, "change_request": record})
-                result = error("review comment not found", code="CHANGE_REQUEST_COMMENT_NOT_FOUND")
-                result["_http_status"] = 404
-                return result
+                return not_found_response("review comment not found", code="CHANGE_REQUEST_COMMENT_NOT_FOUND")
             return ok(
                 {
                     "change_request": record,
@@ -34,17 +30,15 @@ def run(input_data, context=None):
                 }
             )
         if method == "POST":
-            return ok(service.add_comment(cr_id, input_data))
+            return ok(change_requests.add_comment(cr_id, input_data))
         if method in {"PATCH", "PUT"}:
             if not comment_id:
                 return error("'comment_id' is required", code="INVALID_INPUT")
-            return ok(service.update_comment(cr_id, comment_id, input_data))
+            return ok(change_requests.update_comment(cr_id, comment_id, input_data))
         return error("unsupported method", code="METHOD_NOT_ALLOWED")
     except KeyError:
-        result = error("change request or review comment not found", code="CHANGE_REQUEST_NOT_FOUND")
-        result["_http_status"] = 404
-        return result
+        return not_found_response("change request or review comment not found")
     except ValueError as exc:
-        return error(str(exc), code="INVALID_INPUT")
+        return invalid_input_response(exc)
     except Exception as exc:
-        return error(str(exc), code="CHANGE_REQUEST_ERROR")
+        return service_error_response(exc)

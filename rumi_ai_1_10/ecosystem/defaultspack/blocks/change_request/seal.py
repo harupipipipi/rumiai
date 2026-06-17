@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from blocks._common import error, ok
-from domain.change_request import ChangeRequestService
+from blocks._common import ok
+from blocks.change_request._helpers import not_found_response, service, service_error_response
 
 
 def run(input_data, context=None):
     del context
     input_data = input_data or {}
     try:
-        return ok({"seal": ChangeRequestService().commit_seal(str(input_data.get("id") or ""))})
+        return ok({"seal": service().commit_seal(str(input_data.get("id") or ""))})
     except KeyError:
-        result = error("change request not found", code="CHANGE_REQUEST_NOT_FOUND")
-        result["_http_status"] = 404
-        return result
+        return not_found_response()
     except Exception as exc:
-        return error(str(exc), code="CHANGE_REQUEST_ERROR")
+        return service_error_response(exc)

@@ -19,6 +19,7 @@ import {
   previewInbox,
   previewMessages,
   previewRuns,
+  subagentTeamPreviewDataReason,
   removeReconciledLocalSubagentMessages,
   shortId,
   subagentMessageClientId,
@@ -57,6 +58,36 @@ test("subagent team workspace metadata carries the backend guard marker", () => 
   assert.equal(hasSubagentTeamWorkspaceMarker({ surface: "subagent_team_workspace" }), true);
   assert.equal(hasSubagentTeamWorkspaceMarker({ subagent_team: true }), true);
   assert.equal(hasSubagentTeamWorkspaceMarker({ surface: "main_chat" }), false);
+});
+
+test("preview data reason separates preview workspace from empty API data", () => {
+  const emptySnapshot = {
+    agents: [],
+    channels: [],
+    messages: [],
+    tasks: [],
+    runs: [],
+    inboxItems: [],
+  };
+
+  assert.equal(subagentTeamPreviewDataReason(emptySnapshot), "preview_workspace");
+  assert.equal(
+    subagentTeamPreviewDataReason({
+      ...emptySnapshot,
+      activeCompanyId: "company-1",
+      company: { id: "company-1", name: "API Team" },
+    }),
+    "empty_api_data",
+  );
+  assert.equal(
+    subagentTeamPreviewDataReason({
+      ...emptySnapshot,
+      activeCompanyId: "company-1",
+      company: { id: "company-1", name: "API Team" },
+      agents: previewAgents.slice(0, 1),
+    }),
+    null,
+  );
 });
 
 test("subagent message client ids round-trip through metadata", () => {

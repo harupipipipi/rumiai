@@ -4,7 +4,7 @@ import os
 
 from blocks._common import error, ok
 from blocks.coding._approval import approval_invalid_response, approval_required, is_server_approved
-from domain.change_request import ChangeRequestService
+from blocks.change_request._helpers import invalid_input_response, not_found_response, service, service_error_response
 from domain.safety.audit import record_attempt, record_execution, record_failure
 
 
@@ -34,18 +34,16 @@ def run(input_data, context=None):
             return invalid
         return ok(approval_required(operation, "high", args=input_data, id=cr_id, message=input_data.get("message")))
     try:
-        result = ChangeRequestService().commit(cr_id, input_data)
+        result = service().commit(cr_id, input_data)
         if result.get("committed"):
             record_execution(operation, "high", {"id": cr_id}, commit_hash=(result.get("commit") or {}).get("commit_hash"))
         else:
             record_failure(operation, "high", str(result.get("reason") or "blocked"), {"id": cr_id})
         return ok(result)
     except KeyError:
-        result = error("change request not found", code="CHANGE_REQUEST_NOT_FOUND")
-        result["_http_status"] = 404
-        return result
+        return not_found_response()
     except ValueError as exc:
-        return error(str(exc), code="INVALID_INPUT")
+        return invalid_input_response(exc)
     except Exception as exc:
         record_failure(operation, "high", str(exc), {"id": cr_id})
-        return error(str(exc), code="CHANGE_REQUEST_ERROR")
+        return service_error_response(exc)

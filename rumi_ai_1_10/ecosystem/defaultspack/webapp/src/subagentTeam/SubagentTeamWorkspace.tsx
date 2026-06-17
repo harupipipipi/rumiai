@@ -67,6 +67,7 @@ import {
   previewTasks,
   removeReconciledLocalSubagentMessages,
   shortId,
+  subagentTeamPreviewDataReason,
   subagentTreeItemsForMode,
   subagentTeamWorkspaceMetadata,
   type AgentActivity,
@@ -1010,21 +1011,25 @@ export function SubagentTeamWorkspace({
     void loadWorkspace(null);
   }, [activeConversationId, loadWorkspace]);
 
-  const isPreviewWorkspace = !activeCompanyId && !company;
-  const hasLoadedTeamData = agents.length > 0
-    || channels.length > 0
-    || messages.length > 0
-    || tasks.length > 0
-    || runs.length > 0
-    || inboxItems.length > 0;
-  const usePreviewData = isPreviewWorkspace || !hasLoadedTeamData;
+  const previewDataReason = subagentTeamPreviewDataReason({
+    activeCompanyId,
+    company,
+    agents,
+    channels,
+    messages,
+    tasks,
+    runs,
+    inboxItems,
+  });
+  const isPreviewWorkspace = previewDataReason === "preview_workspace";
+  const isUsingPreviewFallbackData = previewDataReason !== null;
   const visibleCompany = company ?? companies.find((item) => item.id === activeCompanyId) ?? previewCompany;
-  const visibleAgents = usePreviewData ? previewAgents : agents;
-  const visibleChannels = usePreviewData ? previewChannels : channels;
-  const visibleMessages = usePreviewData ? previewMessages : messages;
-  const visibleTasks = usePreviewData ? previewTasks : tasks;
-  const visibleRuns = usePreviewData ? previewRuns : runs;
-  const visibleInbox = usePreviewData ? previewInbox : inboxItems;
+  const visibleAgents = isUsingPreviewFallbackData ? previewAgents : agents;
+  const visibleChannels = isUsingPreviewFallbackData ? previewChannels : channels;
+  const visibleMessages = isUsingPreviewFallbackData ? previewMessages : messages;
+  const visibleTasks = isUsingPreviewFallbackData ? previewTasks : tasks;
+  const visibleRuns = isUsingPreviewFallbackData ? previewRuns : runs;
+  const visibleInbox = isUsingPreviewFallbackData ? previewInbox : inboxItems;
   const allMessages = useMemo(
     () => [
       ...visibleMessages,

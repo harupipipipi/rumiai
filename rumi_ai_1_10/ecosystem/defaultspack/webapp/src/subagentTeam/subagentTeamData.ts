@@ -49,6 +49,30 @@ export type SubagentOpenPreview = {
   error?: string;
 };
 
+export type SubagentTeamPreviewDataReason = "preview_workspace" | "empty_api_data";
+
+export type SubagentTeamDataSnapshot = {
+  activeCompanyId?: string | null;
+  company?: CompanyRecord | null;
+  agents: readonly CompanyAgent[];
+  channels: readonly CompanyChannel[];
+  messages: readonly CompanyMessage[];
+  tasks: readonly CompanyTask[];
+  runs: readonly CompanyRunLink[];
+  inboxItems: readonly CompanyInboxItem[];
+};
+
+export function subagentTeamPreviewDataReason(snapshot: SubagentTeamDataSnapshot): SubagentTeamPreviewDataReason | null {
+  if (!snapshot.activeCompanyId && !snapshot.company) return "preview_workspace";
+  const hasLoadedTeamData = snapshot.agents.length > 0
+    || snapshot.channels.length > 0
+    || snapshot.messages.length > 0
+    || snapshot.tasks.length > 0
+    || snapshot.runs.length > 0
+    || snapshot.inboxItems.length > 0;
+  return hasLoadedTeamData ? null : "empty_api_data";
+}
+
 export const fallbackFileTreeItems: SubagentTreeItem[] = [
   { id: "workspace", nodeId: "workspace", depth: 0, label: "workspace", kind: "folder", mode: "files", source: "fallback" },
   { id: "src", nodeId: "src", depth: 1, label: "src", kind: "folder", mode: "files", source: "fallback" },
