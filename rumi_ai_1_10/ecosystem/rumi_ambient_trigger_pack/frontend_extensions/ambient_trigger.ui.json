@@ -16,6 +16,23 @@
       "default_enabled": true
     }
   ],
+  "actions": [
+    {
+      "id": "ambient.test_send.hello",
+      "type": "ambient_trigger_test",
+      "label": "テスト送信",
+      "button_label": "テスト送信",
+      "description": "Send a fixed hello message through the ambient router to verify model permission, approval, and response flow without camera or audio.",
+      "source": "hook",
+      "trigger": "external_hook",
+      "mode": "preset_text",
+      "action_id": "chat.message",
+      "input_text": "hello",
+      "requires": ["ambient.trigger.dispatch"],
+      "approval_aware": true,
+      "local_first": true
+    }
+  ],
   "install_prompt": {
     "title": "このpackはマイク/カメラを要求しています",
     "body": "Rumi側の host.microphone.capture / host.camera.capture / ambient.trigger.dispatch 許可は、OSのマイク/カメラ許可とは別に管理されます。",

@@ -6,6 +6,7 @@ import {
   parseAmbientFinalAnswerPayload,
   type AmbientFinalAnswerPayload,
 } from "./finalAnswerBridge";
+import { ambientOperationLabels } from "./ambientUiState";
 
 const FRONT_ON_FINAL_STORAGE_KEY = "rumi.ambient.frontOnFinal";
 const READOUT_ENABLED_STORAGE_KEY = "rumi.ambient.readoutEnabled";
@@ -81,7 +82,7 @@ export function useFinalAnswerBridge({
     if (!text || text === lastFinalAnswerRef.current) return null;
     lastFinalAnswerRef.current = text;
     setLastFinalAnswer(text);
-    onMessage("AIの回答が届きました。");
+    onMessage(`${ambientOperationLabels.done}: AIの回答が届きました。`);
     if (readoutEnabled && !pinchRecording) {
       speakFinalAnswer(text);
     }

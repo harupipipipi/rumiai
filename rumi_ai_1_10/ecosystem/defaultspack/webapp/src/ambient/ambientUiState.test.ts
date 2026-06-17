@@ -5,12 +5,16 @@ import {
   AMBIENT_CAMERA_PERMISSION,
   AMBIENT_MIC_PERMISSION,
   ambientCopyJa,
+  ambientOperationLabels,
+  ambientPendingInputLabel,
   deriveAmbientUiState,
+  looksLikeAmbientAudioFilenamePlaceholder,
   osPermissionBucket,
   rumiPermissionBucket,
   type AmbientRuntimeStatus,
 } from "./ambientUiState";
-import type { AmbientStatus } from "./ambientTriggerClient";
+import { AMBIENT_TEST_SEND_ACTION_ID, ambientTestActionPayload, ambientTestSendAction } from "./ambientTestActions";
+import type { AmbientPendingApproval, AmbientStatus } from "./ambientTriggerClient";
 
 function status(options?: {
   rumi?: Partial<Record<string, boolean>>;
@@ -94,4 +98,56 @@ test("permission buckets keep denied and blocked distinct from missing setup", (
   blocked.permissions.rumi[AMBIENT_CAMERA_PERMISSION].status = "blocked";
   assert.equal(rumiPermissionBucket(blocked, AMBIENT_CAMERA_PERMISSION), "blocked");
   assert.equal(deriveAmbientUiState(blocked, "off"), "blocked");
+});
+
+test("ambient copy uses concrete recording and send state labels", () => {
+  assert.deepEqual(Object.values(ambientOperationLabels), [
+    "録音中",
+    "文字起こし中",
+    "送信中",
+    "承認待ち",
+    "返答待ち",
+    "完了",
+    "失敗",
+  ]);
+  assert.match(ambientCopyJa.gestureShort, /OKマーク/);
+  assert.match(ambientCopyJa.states.monitoring.body, /指を開くと送信/);
+  assert.doesNotMatch(JSON.stringify(ambientCopyJa), /指をくっつけ/);
+});
+
+test("ambient pending audio label never exposes generated audio filenames as input", () => {
+  const pendingAudio = {
+    request_id: "ambient_ai_send_1",
+    input_preview: "音声入力: ambient-pinch-123456.webm",
+    has_audio: true,
+    attachment_count: 1,
+  } as AmbientPendingApproval;
+  const pendingTranscript = {
+    ...pendingAudio,
+    input_preview: "文字起こし: hello",
+  } as AmbientPendingApproval;
+
+  assert.equal(looksLikeAmbientAudioFilenamePlaceholder(pendingAudio.input_preview ?? ""), true);
+  assert.equal(ambientPendingInputLabel(pendingAudio), "録音音声（文字起こし待ち）");
+  assert.equal(ambientPendingInputLabel(pendingTranscript), "文字起こし: hello");
+});
+
+test("ambient hello test action builds a declared preset_text event", () => {
+  assert.equal(ambientTestSendAction.id, AMBIENT_TEST_SEND_ACTION_ID);
+  assert.equal(ambientTestSendAction.buttonLabel, "テスト送信");
+  assert.equal(ambientTestSendAction.inputText, "hello");
+
+  const payload = ambientTestActionPayload(ambientTestSendAction, "conv-test");
+
+  assert.equal(payload.source, "hook");
+  assert.equal(payload.trigger, "external_hook");
+  assert.equal(payload.mode, "preset_text");
+  assert.equal(payload.action_id, "chat.message");
+  assert.equal(payload.input_text, "hello");
+  assert.equal(payload.conversation_id, "conv-test");
+  assert.deepEqual(payload.metadata, {
+    panel: "ambient_mini_window",
+    test_action_id: AMBIENT_TEST_SEND_ACTION_ID,
+    preset: "hello",
+  });
 });

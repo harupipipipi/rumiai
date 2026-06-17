@@ -780,7 +780,7 @@ const ambientApprovalPermissionRows = [
   {
     permissionId: AMBIENT_MIC_PERMISSION,
     label: "マイク入力",
-    detail: "指をくっつけている間の録音に使う実入力",
+    detail: "OKマークで録音している間に使う実入力",
     badge: "実入力",
     className: "border-rose-400/40 text-rose-100",
     dotClassName: "bg-rose-300",
@@ -798,7 +798,7 @@ const ambientApprovalPermissionRows = [
   {
     permissionId: "ambient.trigger.dispatch",
     label: "音声をAIに送る",
-    detail: "指を離した後、録音を入力としてdispatch",
+    detail: "OKマークを開いた後、録音を入力としてdispatch",
     badge: "送信",
     className: "border-violet-400/40 text-violet-100",
     dotClassName: "bg-violet-300",

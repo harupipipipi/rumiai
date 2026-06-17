@@ -25,6 +25,8 @@ import {
   AMBIENT_OS_PERMISSIONS,
   AMBIENT_REQUIRED_PERMISSIONS,
   ambientCopyJa,
+  ambientOperationLabels,
+  ambientPendingInputLabel,
   ambientPermissionLabels,
   deriveAmbientUiState,
   grantedPermissionCount,
@@ -35,6 +37,7 @@ import {
   type AmbientRuntimeStatus,
   type AmbientUiState,
 } from "./ambientUiState";
+import { ambientTestActionPayload, ambientTestSendAction } from "./ambientTestActions";
 import { startHandLandmarkerLoop, type HandTrackingFrame } from "./mediaPipeHandLandmarker";
 import type { PinchState } from "./gesturePinchDetector";
 import { ChatPickerDialog, RoutingSettings } from "./AmbientRoutingSettings";
@@ -329,10 +332,11 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     const transcript = stopPinchSpeechRecognition();
     setPinchTranscriptPreview("");
     setPinchDetectorStatus("sending");
+    setMessage(`${ambientOperationLabels.sending}: 録音音声をAIへ送っています。`);
     try {
       const recording = await recorder.stop();
       if (recording.size <= 0) {
-        setMessage("録音が空でした。もう一度お試しください。");
+        setMessage(`${ambientOperationLabels.failed}: 録音が空でした。もう一度お試しください。`);
         setPinchDetectorStatus("tracking");
         return;
       }
@@ -341,7 +345,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         trigger: "pinch",
         mode: "dispatch_audio",
         action_id: "chat.message",
-        input_text: transcript ? `音声入力の文字起こし:\n${transcript}` : "OKマークで録音した音声を入力として処理してください。",
+        input_text: transcript ? `文字起こし:\n${transcript}` : "録音音声を送信しました。文字起こしはまだありません。音声を確認して返答してください。",
         conversation_id: conversationIdRef.current || undefined,
         confidence: state.confidence,
         duration_ms: recording.durationMs,
@@ -356,7 +360,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         attachments: [
           {
             id: `ambient-audio-${Date.now()}`,
-            name: `ambient-pinch-${Date.now()}.${recording.extension}`,
+            name: `ok-mark-recording.${recording.extension}`,
             type: recording.mimeType,
             size: recording.size,
             duration_ms: recording.durationMs,
@@ -368,12 +372,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           },
         ],
       });
-      setMessage(ambientResultMessage(result, "音声をAIに送信しました。"));
+      setMessage(ambientResultMessage(result, "録音音声をAIに送信しました。"));
       onOpenInputRef.current?.("");
       focusComposer();
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "送信できませんでした。録音は保存されていません。");
+      setMessage(`${ambientOperationLabels.failed}: ${error instanceof Error ? error.message : "送信できませんでした。録音は保存されていません。"}`);
     } finally {
       setPinchDetectorStatus("tracking");
     }
@@ -411,7 +415,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     pinchTranscriptRef.current = "";
     setPinchTranscriptPreview("");
     setPinchDetectorStatus("recording");
-    setMessage("録音中。OKマークを崩すと送ります。");
+    setMessage(`${ambientOperationLabels.recording}: OKマークを作ったまま話してください。指を開くと送信します。`);
     try {
       const recorder = await startPinchAudioRecorder(selectedMicId || undefined);
       pinchRecorderRef.current = recorder;
@@ -443,7 +447,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       setPinchRecording(false);
       setRecordingStartedAt(null);
       setPinchDetectorStatus("tracking");
-      setMessage(error instanceof Error ? error.message : "録音を開始できませんでした。");
+      setMessage(`${ambientOperationLabels.failed}: ${error instanceof Error ? error.message : "録音を開始できませんでした。"}`);
     }
   }, [allOsPermissionsGranted, allRumiPermissionsGranted, rumiApprovalPending, selectedMicId]);
 
@@ -642,7 +646,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         await refreshDevices();
       }
       return ambientTriggerClient.startMonitor({ voice_wake: true, gesture_pinch: true });
-    }, "待機中です。指をくっつけると録音します。");
+    }, "待機中です。OKマークで録音開始、指を開くと送信します。");
   }
 
   async function stopMonitoring() {
@@ -754,33 +758,22 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     }
   }
 
-  async function submitPresetText(text: string) {
+  async function submitTestAction() {
     if (!allRumiPermissionsGranted || rumiApprovalPending) {
       setExpanded(true);
-      setMessage("Rumiの許可がそろってから定型文を送れます。");
+      setMessage(`${ambientOperationLabels.approvalPending}: Rumiの許可がそろってからテスト送信できます。`);
       return;
     }
     setBusy(true);
-    setMessage(null);
+    setMessage(`${ambientOperationLabels.sending}: ${ambientTestSendAction.inputText} をテスト送信しています。`);
     try {
-      const result = await ambientTriggerClient.submitEvent({
-        source: "hook",
-        trigger: "external_hook",
-        mode: "preset_text",
-        action_id: "chat.message",
-        input_text: text,
-        conversation_id: conversationIdRef.current || undefined,
-        metadata: {
-          panel: "ambient_mini_window",
-          preset: text,
-        },
-      });
-      setMessage(ambientResultMessage(result, `${text} を送信しました。`));
+      const result = await ambientTriggerClient.submitEvent(ambientTestActionPayload(ambientTestSendAction, conversationIdRef.current));
+      setMessage(ambientResultMessage(result, `${ambientTestSendAction.inputText} をAIに送信しました。`));
       onOpenInputRef.current?.("");
       focusComposer();
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "定型文を送信できませんでした。");
+      setMessage(`${ambientOperationLabels.failed}: ${error instanceof Error ? error.message : "テスト送信できませんでした。"}`);
       await refresh().catch(() => undefined);
     } finally {
       setBusy(false);
@@ -799,7 +792,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       focusComposer();
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "送信を許可できませんでした。");
+      setMessage(`${ambientOperationLabels.failed}: ${error instanceof Error ? error.message : "送信を許可できませんでした。"}`);
       await refresh().catch(() => undefined);
     } finally {
       setBusy(false);
@@ -816,7 +809,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       setMessage(String(result.status ?? "") === "denied" ? "送信を破棄しました。" : String(result.reason ?? "送信を破棄しました。"));
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "送信待ちを破棄できませんでした。");
+      setMessage(`${ambientOperationLabels.failed}: ${error instanceof Error ? error.message : "送信待ちを破棄できませんでした。"}`);
       await refresh().catch(() => undefined);
     } finally {
       setBusy(false);
@@ -970,7 +963,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           </button>
           {rumiApprovalPending && (
             <div className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-2 py-2 text-[11px] leading-5 text-amber-50">
-              Rumiの承認ウィンドウで確認中です。合図待ち、録音、音声待機は承認が終わるまで停止します。
+              {ambientOperationLabels.approvalPending}: Rumiの承認ウィンドウで確認中です。合図待ち、録音、音声待機は承認が終わるまで停止します。
             </div>
           )}
           {pendingApproval && (
@@ -978,7 +971,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
               <div className="flex min-w-0 items-center gap-2">
                 <Shield size={13} className="shrink-0" />
                 <span className="min-w-0 flex-1 truncate">
-                  AI送信待ち: {pendingApproval.input_preview || (pendingApproval.has_audio ? "録音" : "入力")}
+                  {ambientOperationLabels.approvalPending}: {ambientPendingInputLabel(pendingApproval)}
                 </span>
                 {typeof pendingApproval.pending_count === "number" && pendingApproval.pending_count > 1 && (
                   <span className="shrink-0 rounded border border-amber-200/25 px-1.5 py-0.5 text-[10px]">{pendingApproval.pending_count}</span>
@@ -1000,7 +993,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             <div className="flex items-center gap-2 rounded-lg border border-red-300/25 bg-red-400/10 px-2 py-1.5 text-[11px] text-red-50">
               <Mic size={13} className="shrink-0" />
               <span className="min-w-0 flex-1 truncate">
-                {pinchTranscriptPreview ? `文字起こし中: ${pinchTranscriptPreview}` : "録音中。文字起こしできる環境ではテキストも送ります。"}
+                {pinchTranscriptPreview
+                  ? `${ambientOperationLabels.transcribing}: ${pinchTranscriptPreview}`
+                  : `${ambientOperationLabels.recording}: 文字起こしはまだ確定していません。`}
               </span>
             </div>
           )}
@@ -1044,15 +1039,17 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           )}
           {allRumiPermissionsGranted && (
             <div className="flex items-center gap-2 rounded-lg border border-zinc-800/70 bg-zinc-950/45 px-2 py-1.5">
-              <span className="shrink-0 text-[11px] text-zinc-500">定型</span>
+              <span className="shrink-0 text-[11px] text-zinc-500">確認</span>
               <button
                 type="button"
-                onClick={() => void submitPresetText("hello")}
+                onClick={() => void submitTestAction()}
                 disabled={busy || rumiApprovalPending}
                 className="ambient-mini-button h-7 px-2"
+                title={`${ambientTestSendAction.label}: ${ambientTestSendAction.inputText}`}
               >
                 <MessageSquare size={13} />
-                hello
+                {ambientTestSendAction.buttonLabel}
+                <span className="font-mono text-[10px] text-zinc-400">{ambientTestSendAction.inputText}</span>
               </button>
             </div>
           )}
@@ -1454,10 +1451,10 @@ function landmarkPercent(value: number): number {
 
 function recognitionMonitorLabel(status: string, hasHand: boolean, recording: boolean, recordingSeconds: number): string {
   if (recording) return `録音中 ${formatRecordingTime(recordingSeconds)}・OKマークを崩すと送信`;
-  if (status === "sending") return "AIに送信中";
+  if (status === "sending") return "送信中";
   if (status === "loading") return "合図の認識を準備中";
   if (status === "unavailable") return "合図待ちを開始できません";
-  if (hasHand) return "手を認識中・OKマークで録音";
+  if (hasHand) return "手を認識中・OKマークで録音開始";
   return "手をカメラに入れてください";
 }
 
@@ -1483,15 +1480,15 @@ function ambientResultMessage(result: Record<string, unknown>, fallback: string)
   const status = String(result.status ?? "");
   const reason = String(result.reason ?? "");
   if (status === "approval_required") {
-    return "AIへ送る前に確認待ちです。";
+    return `${ambientOperationLabels.approvalPending}: AIへ送る前に確認が必要です。`;
   }
   if (status === "not_found") {
-    return "送信待ちは見つかりませんでした。";
+    return `${ambientOperationLabels.failed}: 送信待ちは見つかりませんでした。`;
   }
   if (status === "ok" || reason === "trigger_dispatched") {
-    return fallback;
+    return `${ambientOperationLabels.waitingResponse}: ${fallback} 返答を待っています。`;
   }
-  return String(result.reason ?? result.status ?? fallback);
+  return `${ambientOperationLabels.failed}: ${String(result.reason ?? result.status ?? fallback)}`;
 }
 
 function focusComposer() {

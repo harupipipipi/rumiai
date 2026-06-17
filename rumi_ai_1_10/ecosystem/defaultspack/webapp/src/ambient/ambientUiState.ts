@@ -1,4 +1,4 @@
-import type { AmbientPermissionId, AmbientStatus } from "./ambientTriggerClient";
+import type { AmbientPendingApproval, AmbientPermissionId, AmbientStatus } from "./ambientTriggerClient";
 
 export const AMBIENT_MIC_PERMISSION = "host.microphone.capture" satisfies AmbientPermissionId;
 export const AMBIENT_CAMERA_PERMISSION = "host.camera.capture" satisfies AmbientPermissionId;
@@ -40,6 +40,16 @@ export type AmbientUiState =
   | "blocked"
   | "error";
 
+export const ambientOperationLabels = {
+  recording: "録音中",
+  transcribing: "文字起こし中",
+  sending: "送信中",
+  approvalPending: "承認待ち",
+  waitingResponse: "返答待ち",
+  done: "完了",
+  failed: "失敗",
+} as const;
+
 type AmbientStateCopy = {
   badge: string;
   headline: string;
@@ -67,7 +77,7 @@ export const ambientPermissionLabels: Record<string, string> = {
 export const ambientCopyJa = {
   title: "合図待ち",
   subtitle: "指で録音",
-  gestureShort: "OKマークを作ると録音します。崩すと送ります。",
+  gestureShort: "OKマークで録音開始、指を開くと送信します。",
   privacyShort: "音声・映像は保存しません",
   auditShort: "履歴には使った時刻と結果だけ残します",
   states: {
@@ -95,14 +105,14 @@ export const ambientCopyJa = {
     readyOff: {
       badge: "停止中",
       headline: "合図待ちは停止中です",
-      body: "OKマークを作ると録音します",
+      body: "OKマークで録音開始、指を開くと送信します",
       primary: "合図待ちを開始",
       tone: "zinc",
     },
     monitoring: {
       badge: "使用中",
       headline: "合図を待っています",
-      body: "OKマークを作ると録音します",
+      body: "OKマークで録音開始、指を開くと送信します",
       primary: "停止する",
       tone: "emerald",
     },
@@ -306,6 +316,23 @@ export function permissionBucketLabel(bucket: AmbientPermissionBucket): string {
     default:
       return "未確認";
   }
+}
+
+export function ambientPendingInputLabel(pending: AmbientPendingApproval | null | undefined): string {
+  if (!pending) return "入力内容を確認中";
+  const preview = String(pending.input_preview ?? "").trim();
+  if (preview && !looksLikeAmbientAudioFilenamePlaceholder(preview)) return preview;
+  if (pending.has_audio) return "録音音声（文字起こし待ち）";
+  if (pending.attachment_count && pending.attachment_count > 0) return "添付あり（内容確認待ち）";
+  return "入力内容を確認中";
+}
+
+export function looksLikeAmbientAudioFilenamePlaceholder(value: string): boolean {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  const audioFile = /(?:^|[\s:：])[\w.-]*ambient-pinch-[\w.-]+\.(?:webm|wav|m4a|mp3|ogg)\b/i;
+  if (audioFile.test(text)) return true;
+  return /^音声入力\s*[:：]\s*.+\.(?:webm|wav|m4a|mp3|ogg)\b/i.test(text);
 }
 
 function normalizePermissionStatus(value: string | undefined, fallback: AmbientPermissionBucket): AmbientPermissionBucket {
