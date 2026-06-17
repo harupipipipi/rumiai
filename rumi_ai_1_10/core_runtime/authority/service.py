@@ -603,7 +603,9 @@ class AuthorityService:
         for resource_key, config_key in RESOURCE_CONFIG_FIELDS:
             value = str(resource.get(resource_key) or "").strip()
             if value:
-                config[config_key] = [value]
+                values = config.setdefault(config_key, [])
+                if value not in values:
+                    values.append(value)
         if resource.get("stream"):
             config["allow_stream"] = True
         if resource.get("port") is not None:

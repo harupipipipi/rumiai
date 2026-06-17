@@ -38,6 +38,7 @@ def check_host_intent_authority(
     )
     event = decision.to_dict()
     if decision.approval_required:
+        resource = intent.resource()
         event = decision.to_approval_event()
         event.update(
             {
@@ -48,6 +49,7 @@ def check_host_intent_authority(
                 "typed_confirmation_required": bool(
                     definition.typed_confirmation_required if definition is not None else False
                 ),
+                "confirmation_phrase": resource.get("confirmation_phrase"),
             }
         )
     return event

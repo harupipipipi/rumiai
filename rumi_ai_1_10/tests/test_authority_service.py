@@ -456,6 +456,85 @@ def test_authority_persistent_approval_keeps_resource_constraints(tmp_path, monk
     assert denied.approval_required is True
 
 
+def test_authority_persistent_host_grant_unions_resource_action_fields(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "host_intent",
+        "host_action": "host.process.open_url",
+        "operation": "host.process.open_url.preview",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="host.process.open_url",
+        resource=resource,
+        profile_id="work",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="profile",
+        config={"host_actions": ["host.process.open_url.preview", "host.process.open_url"]},
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is True
+    assert approval["config"] == {
+        "host_actions": ["host.process.open_url", "host.process.open_url.preview"],
+    }
+
+    grant = grants.get_grant("profile:work")
+    assert grant is not None
+    assert grant.permissions["host.process.open_url"].config == approval["config"]
+
+    host_action_allowed = service.check(
+        principal_id="profile:work",
+        permission_id="host.process.open_url",
+        resource={"kind": "host_intent", "host_action": "host.process.open_url"},
+        profile_id="work",
+    )
+    operation_allowed = service.check(
+        principal_id="profile:work",
+        permission_id="host.process.open_url",
+        resource={"kind": "host_intent", "operation": "host.process.open_url.preview"},
+        profile_id="work",
+    )
+    unrelated_denied = service.check(
+        principal_id="profile:work",
+        permission_id="host.process.open_url",
+        resource={"kind": "host_intent", "operation": "host.process.launch_app"},
+        profile_id="work",
+    )
+
+    assert host_action_allowed.allowed is True
+    assert operation_allowed.allowed is True
+    assert unrelated_denied.allowed is False
+    assert unrelated_denied.approval_required is True
+
+
+def test_authority_persistent_host_grant_dedupes_matching_action_fields(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "host_intent",
+        "host_action": "host.process.open_url",
+        "operation": "host.process.open_url",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="host.process.open_url",
+        resource=resource,
+        profile_id="work",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="profile",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is True
+    assert approval["config"] == {"host_actions": ["host.process.open_url"]}
+
+
 def test_authority_approve_requires_signed_ui_operator(tmp_path, monkeypatch):
     service, _, store = _service(tmp_path, monkeypatch)
     decision = service.check(

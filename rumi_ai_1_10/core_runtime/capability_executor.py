@@ -1115,6 +1115,7 @@ class CapabilityExecutor:
             principal_id=principal_id,
             request_id=request_id,
             start_time=start_time,
+            request_context=request_context,
         )
         if host_boundary_resp is not None:
             self._audit(
@@ -1464,6 +1465,7 @@ class CapabilityExecutor:
             principal_id=principal_id,
             request_id=request_id,
             start_time=start_time,
+            request_context=request_context,
         )
         if host_boundary_resp is not None:
             self._audit(
@@ -1634,10 +1636,14 @@ class CapabilityExecutor:
         if not isinstance(manifest, dict):
             manifest = {}
         calling_convention = str(getattr(entry, "calling_convention", "") or "").strip()
+        configured_host_entry = bool(
+            getattr(entry, "host_execution", False)
+            and (getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None))
+        )
         return bool(
             manifest.get("host_operation")
             or manifest.get("host_execution") is True
-            or getattr(entry, "host_execution", False)
+            or configured_host_entry
             or calling_convention == "python_host"
         )
 
@@ -1648,11 +1654,9 @@ class CapabilityExecutor:
         principal_id: str,
         request_id: str,
         start_time: float,
-    ) -> CapabilityResponse:
-        phrase_seed = hashlib.sha256(
-            f"{getattr(entry, 'qualified_name', '')}:{request_id}:{time.time_ns()}".encode("utf-8")
-        ).hexdigest()[:4].upper()
-        phrase = f"RUMI-HOST-{phrase_seed}"
+        request_context: dict[str, Any] | None = None,
+    ) -> CapabilityResponse | None:
+        phrase = self._host_confirmation_phrase_for_entry(entry)
         manifest = getattr(entry, "manifest", None)
         resource = {
             "kind": "critical_host_function",
@@ -1662,17 +1666,25 @@ class CapabilityExecutor:
             "calling_convention": getattr(entry, "calling_convention", None),
             "host_operation": manifest.get("host_operation") if isinstance(manifest, dict) else None,
             "confirmation_phrase": phrase,
+            "typed_confirmation_required": True,
         }
         try:
             from .authority import get_authority_service
 
+            authority_request_id, approval_token = self._authority_context_token_for_permission(
+                request_context,
+                "host.process.exec_guarded",
+            )
             decision = get_authority_service().check(
                 principal_id=principal_id,
                 permission_id="host.process.exec_guarded",
                 resource=resource,
                 reason="Direct host execution requires typed confirmation",
-                request_id=request_id or None,
+                request_id=authority_request_id or request_id or None,
+                approval_token=approval_token or None,
             )
+            if decision.allowed and not decision.approval_required:
+                return None
             event = decision.to_approval_event() if decision.approval_required else decision.to_dict()
         except Exception:
             event = {
@@ -1704,6 +1716,7 @@ class CapabilityExecutor:
         principal_id: str,
         request_id: str,
         start_time: float,
+        request_context: dict[str, Any] | None = None,
     ) -> CapabilityResponse | None:
         pack_id = str(getattr(entry, "pack_id", "") or "").strip()
         if self._is_host_capability_pack(pack_id):
@@ -1715,7 +1728,66 @@ class CapabilityExecutor:
             principal_id=principal_id,
             request_id=request_id,
             start_time=start_time,
+            request_context=request_context,
         )
+
+    @staticmethod
+    def _host_confirmation_phrase_for_entry(entry) -> str:
+        manifest = getattr(entry, "manifest", None)
+        manifest = manifest if isinstance(manifest, dict) else {}
+        seed = "|".join(
+            str(value or "").strip()
+            for value in (
+                getattr(entry, "pack_id", ""),
+                getattr(entry, "function_id", ""),
+                getattr(entry, "qualified_name", ""),
+                getattr(entry, "calling_convention", ""),
+                manifest.get("host_operation"),
+            )
+        )
+        digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8].upper()
+        return f"RUMI-HOST-{digest}"
+
+    @staticmethod
+    def _authority_context_token_for_permission(
+        request_context: dict[str, Any] | None,
+        permission_id: str,
+    ) -> tuple[str, str]:
+        permission_id = str(permission_id or "").strip()
+        if not permission_id or not isinstance(request_context, dict):
+            return "", ""
+
+        def from_mapping(raw: Any) -> tuple[str, str]:
+            if not isinstance(raw, dict):
+                return "", ""
+            if str(raw.get("permission_id") or "").strip() not in {"", permission_id}:
+                return "", ""
+            authority_request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+            token = str(raw.get("approval_token") or raw.get("token") or "").strip()
+            if authority_request_id and token:
+                return authority_request_id, token
+            return "", ""
+
+        for container in (request_context.get("authority"), request_context):
+            if not isinstance(container, dict):
+                continue
+            approvals = container.get("approval_tokens")
+            if isinstance(approvals, dict):
+                direct = from_mapping(approvals.get(permission_id))
+                if direct != ("", ""):
+                    return direct
+            approvals_list = container.get("approvals")
+            if isinstance(approvals, list):
+                approvals_list = approvals
+            if isinstance(approvals_list, list):
+                for item in approvals_list:
+                    direct = from_mapping(item)
+                    if direct != ("", ""):
+                        return direct
+            direct = from_mapping(container)
+            if direct != ("", ""):
+                return direct
+        return "", ""
 
     def _response_after_host_intent_handling(
         self,

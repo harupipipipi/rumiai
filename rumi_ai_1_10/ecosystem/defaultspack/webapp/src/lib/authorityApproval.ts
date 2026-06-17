@@ -17,6 +17,15 @@ type AuthorityApprovalResource = {
   resource: Record<string, unknown>;
 };
 
+export function authorityApprovalRiskTone(riskLevel?: string): string {
+  const normalized = String(riskLevel ?? "").trim().toLowerCase();
+  if (normalized === "critical") return "border-red-400/60 bg-red-600/20 text-red-100 ring-1 ring-red-500/25";
+  if (normalized === "high") return "border-red-500/35 bg-red-500/10 text-red-200";
+  if (normalized === "medium") return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+  if (normalized === "low") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+  return "border-sky-500/30 bg-sky-500/10 text-sky-200";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -79,7 +88,8 @@ export function authorityApprovalConfig(approval: AuthorityApprovalResource): Re
   if (functionId) config.function_ids = [functionId];
   if (packId) config.pack_ids = [packId];
   if (domain) config.domains = [domain];
-  if (hostAction || operation) config.host_actions = [hostAction || operation];
+  const hostActions = Array.from(new Set([hostAction, operation].filter(Boolean)));
+  if (hostActions.length) config.host_actions = hostActions;
   if (typeof resource.caller_pack_id === "string" && resource.caller_pack_id.trim()) {
     config.caller_pack_ids = [resource.caller_pack_id.trim()];
   }

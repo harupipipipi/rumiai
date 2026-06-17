@@ -161,6 +161,10 @@ def _authority_followup_for_operation(context: dict[str, Any], operation: str) -
     raw_authority = context.get("authority")
     authority: dict[str, Any] = raw_authority if isinstance(raw_authority, dict) else {}
     approvals = authority.get("approvals") or authority.get("approval_tokens")
+    if isinstance(approvals, dict):
+        item = approvals.get(operation)
+        if isinstance(item, dict):
+            return str(item.get("request_id") or "") or None, str(item.get("approval_token") or "") or None
     if isinstance(approvals, list):
         for item in approvals:
             if not isinstance(item, dict):
