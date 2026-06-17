@@ -2854,6 +2854,24 @@ export default function App() {
       .catch((updateError) => setError(updateError instanceof Error ? updateError.message : "会話メタデータの更新に失敗しました。"));
   };
 
+  const copyChatIdToClipboard = useCallback(async (conversationId: string | null | undefined) => {
+    const chatId = String(conversationId ?? "").trim();
+    if (!chatId) {
+      setError("コピーするchatidがありません。");
+      return;
+    }
+    if (!navigator.clipboard?.writeText) {
+      setError("この環境ではクリップボードにコピーできません。");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(chatId);
+      setError(null);
+    } catch {
+      setError("chatidのコピーに失敗しました。");
+    }
+  }, []);
+
   const closeSpotlight = () => {
     setIsSpotlightOpen(false);
     setSpotlightQuery("");
@@ -3960,19 +3978,14 @@ export default function App() {
     setError(null);
     try {
       let result: unknown;
+      let clipboardText: string | null = null;
       if (action.id === "conversation.export") {
         if (!activeConversationId) throw new Error("エクスポートする会話がありません。");
         result = await api.exportConversation(activeConversationId, String(action.payload?.format ?? "markdown"));
       } else if (action.id === "conversation.share") {
-        if (!activeConversationId) throw new Error("共有する会話がありません。");
-        const exported = await api.exportConversation(activeConversationId, "markdown");
-        result = await api.createShare({
-          target_type: "conversation",
-          target_id: activeConversationId,
-          title: activeChatTitle,
-          content: exported.content,
-          visibility: "local",
-        });
+        if (!activeConversationId) throw new Error("コピーするchatidがありません。");
+        clipboardText = activeConversationId;
+        result = { copied: true, chatid: activeConversationId };
       } else if (action.id === "artifacts.list") {
         result = await api.listArtifacts();
       } else if (action.id === "research.web") {
@@ -4038,7 +4051,7 @@ export default function App() {
       }
       pushActionPreview(action, action.label, result);
       const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-      void navigator.clipboard?.writeText(text).catch(() => undefined);
+      void navigator.clipboard?.writeText(clipboardText ?? text).catch(() => undefined);
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "サイドバー操作に失敗しました。");
     }
@@ -4574,6 +4587,7 @@ export default function App() {
               isCalendarActive={isCalendarMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
+              onCopyChatId={(chatId) => void copyChatIdToClipboard(chatId)}
               onMinimize={() => setIsHistoryMinimized(true)}
             />
           </div>
@@ -4599,6 +4613,7 @@ export default function App() {
               isCalendarActive={isCalendarMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
+              onCopyChatId={(chatId) => void copyChatIdToClipboard(chatId)}
               onRestore={() => setIsHistoryMinimized(false)}
               isCompact
             />
@@ -4613,9 +4628,11 @@ export default function App() {
             {showRegion("chat_header") && !isCalendarMode && (
               <Renderers.chatHeader
                 title={activeChatTitle}
+                conversationId={activeConversationId}
                 showPreview={effectiveShowPreview}
                 canShowPreview={showRegion("activity_preview") && canShowCanvas}
                 canOpenSettings={showRegion("settings_modal")}
+                onCopyChatId={() => void copyChatIdToClipboard(activeConversationId)}
                 onTogglePreview={() => {
                   if (canShowCanvas) setShowPreview((value) => !value);
                 }}

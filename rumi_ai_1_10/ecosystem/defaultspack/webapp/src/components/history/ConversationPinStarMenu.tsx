@@ -1,14 +1,16 @@
-import { MoreHorizontal, Pin, PinOff, Star } from "lucide-react";
+import { Copy, MoreHorizontal, Pin, PinOff, Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 export function ConversationPinStarMenu({
   isPinned = false,
   isStarred = false,
+  onCopyChatId,
   onTogglePinned,
   onToggleStarred,
 }: {
   isPinned?: boolean;
   isStarred?: boolean;
+  onCopyChatId?: () => void;
   onTogglePinned?: () => void;
   onToggleStarred?: () => void;
 }) {
@@ -30,7 +32,7 @@ export function ConversationPinStarMenu({
     <div ref={ref} className="relative flex flex-shrink-0 items-center gap-0.5">
       {isPinned && <Pin size={10} className="text-sky-300" />}
       {isStarred && <Star size={10} className="fill-current text-amber-300" />}
-      {(onTogglePinned || onToggleStarred) && (
+      {(onCopyChatId || onTogglePinned || onToggleStarred) && (
         <button
           type="button"
           onClick={(event) => {
@@ -48,6 +50,19 @@ export function ConversationPinStarMenu({
           className="absolute right-0 top-full rumi-layer-global-overlay mt-1 w-36 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 shadow-xl"
           onClick={(event) => event.stopPropagation()}
         >
+          {onCopyChatId && (
+            <button
+              type="button"
+              onClick={() => {
+                onCopyChatId();
+                setOpen(false);
+              }}
+              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] text-zinc-300 hover:bg-zinc-800"
+            >
+              <Copy size={12} />
+              Copy chatid
+            </button>
+          )}
           {onTogglePinned && (
             <button
               type="button"

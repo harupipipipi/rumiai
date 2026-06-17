@@ -564,6 +564,7 @@ interface SortableChatItemProps {
   activeChatId: string | null;
   onChatSelect: (chatId: string) => void;
   onRename: (id: string, newTitle: string) => void;
+  onCopyChatId?: (chatId: string) => void;
   onTogglePinned?: (chat: ChatItem) => void;
   onToggleStarred?: (chat: ChatItem) => void;
   onToggleChildren: (chatId: string) => void;
@@ -571,7 +572,7 @@ interface SortableChatItemProps {
   depth?: number;
 }
 
-function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onTogglePinned, onToggleStarred, onToggleChildren, isChildrenExpanded, depth = 0 }: SortableChatItemProps) {
+function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onCopyChatId, onTogglePinned, onToggleStarred, onToggleChildren, isChildrenExpanded, depth = 0 }: SortableChatItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(chat.title);
   const children = chat.children ?? [];
@@ -671,6 +672,7 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
         <ConversationPinStarMenu
           isPinned={chat.isPinned}
           isStarred={chat.isStarred}
+          onCopyChatId={onCopyChatId ? () => onCopyChatId(chat.id) : undefined}
           onTogglePinned={onTogglePinned ? () => onTogglePinned(chat) : undefined}
           onToggleStarred={onToggleStarred ? () => onToggleStarred(chat) : undefined}
         />
@@ -684,6 +686,7 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
               activeChatId={activeChatId}
               onChatSelect={onChatSelect}
               onRename={onRename}
+              onCopyChatId={onCopyChatId}
               onTogglePinned={onTogglePinned}
               onToggleStarred={onToggleStarred}
               onToggleChildren={onToggleChildren}
@@ -709,6 +712,7 @@ interface SubGroupProps {
   onToggleCollapse: (id: string) => void;
   onRenameGroup: (id: string, newTitle: string) => void;
   onUngroup: (groupId: string) => void;
+  onCopyChatId?: (chatId: string) => void;
   onTogglePinned?: (chat: ChatItem) => void;
   onToggleStarred?: (chat: ChatItem) => void;
   onToggleChatChildren: (chatId: string) => void;
@@ -716,7 +720,7 @@ interface SubGroupProps {
   depth: number;
 }
 
-function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCollapse, onRenameGroup, onUngroup, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, depth }: SubGroupProps) {
+function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCollapse, onRenameGroup, onUngroup, onCopyChatId, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, depth }: SubGroupProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -826,6 +830,7 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
                 activeChatId={activeChatId}
                 onChatSelect={onChatSelect}
                 onRename={onChatRename}
+                onCopyChatId={onCopyChatId}
                 onTogglePinned={onTogglePinned}
                 onToggleStarred={onToggleStarred}
                 onToggleChildren={onToggleChatChildren}
@@ -844,6 +849,7 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
               onToggleCollapse={onToggleCollapse}
               onRenameGroup={onRenameGroup}
               onUngroup={onUngroup}
+              onCopyChatId={onCopyChatId}
               onTogglePinned={onTogglePinned}
               onToggleStarred={onToggleStarred}
               onToggleChatChildren={onToggleChatChildren}
@@ -871,6 +877,7 @@ interface DroppableColumnProps {
   onToggleCollapse: (id: string) => void;
   onChatRename: (chatId: string, newTitle: string) => void;
   onUngroup: (groupId: string) => void;
+  onCopyChatId?: (chatId: string) => void;
   onTogglePinned?: (chat: ChatItem) => void;
   onToggleStarred?: (chat: ChatItem) => void;
   onToggleChatChildren: (chatId: string) => void;
@@ -880,7 +887,7 @@ interface DroppableColumnProps {
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
+function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, onCopyChatId, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -984,6 +991,7 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
                 activeChatId={activeChatId}
                 onChatSelect={onChatSelect}
                 onRename={onChatRename}
+                onCopyChatId={onCopyChatId}
                 onTogglePinned={onTogglePinned}
                 onToggleStarred={onToggleStarred}
                 onToggleChildren={onToggleChatChildren}
@@ -1002,6 +1010,7 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
               onToggleCollapse={onToggleCollapse}
               onRenameGroup={onRename}
               onUngroup={onUngroup}
+              onCopyChatId={onCopyChatId}
               onTogglePinned={onTogglePinned}
               onToggleStarred={onToggleStarred}
               onToggleChatChildren={onToggleChatChildren}
@@ -1080,6 +1089,7 @@ interface HistoryBoardProps {
   isCalendarActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
+  onCopyChatId?: (chatId: string) => void;
   onMinimize?: () => void;
   onRestore?: () => void;
   isCompact?: boolean;
@@ -1282,6 +1292,7 @@ export function HistoryBoard({
   isCalendarActive = false,
   onSettingsClick,
   onChatMetadataChange,
+  onCopyChatId,
   onMinimize,
   onRestore,
   isCompact = false,
@@ -1971,6 +1982,7 @@ export function HistoryBoard({
                     onToggleCollapse={handleToggleCollapse}
                     onChatRename={handleRenameChat}
                     onUngroup={handleUngroup}
+                    onCopyChatId={onCopyChatId}
                     onTogglePinned={onChatMetadataChange ? handleTogglePinned : undefined}
                     onToggleStarred={onChatMetadataChange ? handleToggleStarred : undefined}
                     onToggleChatChildren={handleToggleChatChildren}

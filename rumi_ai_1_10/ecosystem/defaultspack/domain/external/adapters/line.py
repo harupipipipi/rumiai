@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import time
 from typing import Any
+from urllib.parse import urlparse
 
 from domain.external.response_adapter import ResponseAdapter
 from domain.external.targeting import ExternalOrigin, origin_from_external_event
@@ -14,15 +16,20 @@ class LineResponseAdapter(ResponseAdapter):
     def send(self, plan: dict[str, Any], *, event=None, context: dict[str, Any] | None = None) -> dict[str, Any]:
         if not _external_reply_allowed(plan):
             return {"sent": False, "reason": "external reply suppressed by response prompt policy"}
-        messages = _line_text_messages(plan)
+        messages = _line_messages(plan)
         if not messages:
-            return {"sent": False, "reason": "missing text"}
+            return {"sent": False, "reason": "missing LINE messages"}
         mode = _send_mode(plan, context)
         origin = origin_from_external_event(event) if event is not None else _origin_from_context(context)
         if mode == "reply_to_origin":
             if not origin.can_reply or not origin.reply_token:
-                return {"sent": False, "reason": "missing reply token", "mode": mode, "origin": origin.as_dict()}
-            return self.send_reply_messages(origin.reply_token, messages)
+                return _reply_unavailable_result("missing reply token", mode, origin, context, messages)
+            if _reply_expired(origin):
+                return _reply_unavailable_result("LINE reply token expired; push/post is recommended", mode, origin, context, messages)
+            result = self.send_reply_messages(origin.reply_token, messages)
+            if _reply_token_invalid(result):
+                return _reply_unavailable_result("LINE reply token expired or already used; push/post is recommended", mode, origin, context, messages, reply_result=result)
+            return result
         if mode == "push_to_origin":
             if not _push_allowed(context, origin):
                 return {"sent": False, "reason": "push not allowed", "mode": mode, "origin": origin.as_dict()}
@@ -40,7 +47,7 @@ class LineResponseAdapter(ResponseAdapter):
         messages = _text_to_messages(text)
         return self.send_reply_messages(reply_token, messages)
 
-    def send_reply_messages(self, reply_token: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+    def send_reply_messages(self, reply_token: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
         token = read_external_token("line", kind="channel_access_token")
         if not token:
             return {"sent": False, "reason": "LINE channel access token not configured"}
@@ -57,7 +64,7 @@ class LineResponseAdapter(ResponseAdapter):
         messages = _text_to_messages(text)
         return self.send_push_messages(target_id, messages)
 
-    def send_push_messages(self, target_id: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+    def send_push_messages(self, target_id: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
         token = read_external_token("line", kind="channel_access_token")
         if not token:
             return {"sent": False, "reason": "LINE channel access token not configured"}
@@ -82,25 +89,123 @@ def _external_reply_allowed(plan: dict[str, Any]) -> bool:
     return True
 
 
-def _line_text_messages(plan: dict[str, Any]) -> list[dict[str, str]]:
+def _line_messages(plan: dict[str, Any]) -> list[dict[str, Any]]:
     raw_messages = plan.get("messages") if isinstance(plan.get("messages"), list) else []
-    messages: list[dict[str, str]] = []
+    messages: list[dict[str, Any]] = []
     for message in raw_messages:
         if not isinstance(message, dict):
             continue
-        if str(message.get("type") or "text") != "text":
+        message_type = str(message.get("type") or "text")
+        if message_type == "text":
+            text = str(message.get("text") or "").strip()
+            if text:
+                messages.append({"type": "text", "text": text[:5000]})
+        elif message_type == "image":
+            image = _line_image_message(message)
+            if image:
+                messages.append(image)
+        if len(messages) >= 5:
+            return messages
+    raw_files = plan.get("files") if isinstance(plan.get("files"), list) else []
+    for item in raw_files:
+        if not isinstance(item, dict):
             continue
-        text = str(message.get("text") or "").strip()
-        if text:
-            messages.append({"type": "text", "text": text[:5000]})
+        image = _line_image_message(item)
+        if image:
+            messages.append(image)
         if len(messages) >= 5:
             break
     return messages
 
 
-def _text_to_messages(text: str) -> list[dict[str, str]]:
+def _line_image_message(item: dict[str, Any]) -> dict[str, str] | None:
+    mime = str(item.get("mime_type") or item.get("mime") or "").strip().lower()
+    if mime and mime not in {"image/jpeg", "image/png"}:
+        return None
+    image_url = item.get("image_url") if isinstance(item.get("image_url"), dict) else {}
+    original = str(
+        item.get("originalContentUrl")
+        or item.get("original_content_url")
+        or item.get("url")
+        or item.get("href")
+        or image_url.get("url")
+        or ""
+    ).strip()
+    preview = str(item.get("previewImageUrl") or item.get("preview_image_url") or item.get("preview_url") or original).strip()
+    if not (_public_https_url(original) and _public_https_url(preview)):
+        return None
+    return {
+        "type": "image",
+        "originalContentUrl": original[:1000],
+        "previewImageUrl": preview[:1000],
+    }
+
+
+def _public_https_url(value: str) -> bool:
+    try:
+        parsed = urlparse(str(value or "").strip())
+    except ValueError:
+        return False
+    return parsed.scheme == "https" and bool(parsed.netloc)
+
+
+def _text_to_messages(text: str) -> list[dict[str, Any]]:
     cleaned = str(text or "").strip()
     return [{"type": "text", "text": cleaned[:5000]}] if cleaned else []
+
+
+def _reply_expired(origin: ExternalOrigin) -> bool:
+    if not origin.reply_expires_at_ms:
+        return False
+    return int(time.time() * 1000) >= int(origin.reply_expires_at_ms)
+
+
+def _reply_token_invalid(result: dict[str, Any]) -> bool:
+    if bool(result.get("sent")):
+        return False
+    response = result.get("provider_response") if isinstance(result.get("provider_response"), dict) else {}
+    status = int(response.get("status") or 0)
+    body = response.get("body") if isinstance(response.get("body"), dict) else {}
+    message = str(body.get("message") or body.get("error") or body).lower()
+    return status == 400 and "reply token" in message and ("invalid" in message or "expired" in message or "used" in message)
+
+
+def _reply_unavailable_result(
+    reason: str,
+    mode: str,
+    origin: ExternalOrigin,
+    context: dict[str, Any] | None,
+    messages: list[dict[str, Any]],
+    *,
+    reply_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "sent": False,
+        "reason": reason,
+        "mode": mode,
+        "origin": origin.as_dict(),
+        "error_code": "LINE_REPLY_TOKEN_UNAVAILABLE",
+        "post_recommended": True,
+        "recommendation": "reply期限切れ/使用済みです。LINE push/postを使ってください。",
+    }
+    if reply_result is not None:
+        result["reply"] = reply_result
+    if _auto_post_on_reply_failure(context):
+        if not _push_allowed({**(context or {}), "allow_push": True}, origin):
+            result["post"] = {"sent": False, "reason": "push target unavailable", "mode": "push_to_origin"}
+            return result
+        result["post"] = LineResponseAdapter().send_push_messages(origin.source_id, messages)
+        result["sent"] = bool(result["post"].get("sent"))
+        result["mode"] = "reply_failed_auto_post"
+    return result
+
+
+def _auto_post_on_reply_failure(context: dict[str, Any] | None) -> bool:
+    context = context if isinstance(context, dict) else {}
+    if bool(context.get("line_auto_post_on_reply_failure") or context.get("auto_post_on_reply_failure")):
+        return True
+    settings = context.get("hook_settings") if isinstance(context.get("hook_settings"), dict) else {}
+    return bool(settings.get("line_auto_post_on_reply_failure") or settings.get("auto_post_on_reply_failure"))
 
 
 def _send_mode(plan: dict[str, Any], context: dict[str, Any] | None) -> str:

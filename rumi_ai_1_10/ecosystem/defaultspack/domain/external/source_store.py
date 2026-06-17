@@ -70,6 +70,14 @@ class ExternalSourceStore:
             "label": str(current.get("label") or f"{origin.provider} {origin.source_type} {origin.source_id}"),
             "verified_last_seen": bool(verified),
         }
+        for preserved_key in (
+            "linked_conversation_id",
+            "linked_conversation_title",
+            "linked_at",
+            "linked_by_actor_id",
+        ):
+            if current.get(preserved_key) not in (None, ""):
+                item[preserved_key] = current[preserved_key]
         sources[key] = item
         self._data["sources"] = sources
         self._save()
@@ -99,6 +107,46 @@ class ExternalSourceStore:
             current["allow_push"] = bool(allow_push)
         if label is not None:
             current["label"] = str(label)
+        current["updated_at"] = _now_ms()
+        sources[key] = current
+        self._data["sources"] = sources
+        self._save()
+        return {"success": True, "key": key, "source": dict(current)}
+
+    def set_linked_conversation(
+        self,
+        provider: str,
+        source_type: str,
+        source_id: str,
+        conversation_id: str | None,
+        *,
+        title: str | None = None,
+        actor_id: str | None = None,
+        enabled: bool | None = None,
+    ) -> dict[str, Any]:
+        key = external_source_key(provider, source_type, source_id)
+        sources = self._sources()
+        current = dict(sources.get(key) or {})
+        if not current:
+            return {"success": False, "error": "external source not found", "key": key}
+        cleaned_id = str(conversation_id or "").strip()
+        if cleaned_id:
+            current["linked_conversation_id"] = cleaned_id
+            if title is not None:
+                current["linked_conversation_title"] = str(title)
+            if actor_id is not None:
+                current["linked_by_actor_id"] = str(actor_id)
+            current["linked_at"] = _now_ms()
+            if enabled is not None:
+                current["enabled"] = bool(enabled)
+        else:
+            for field in (
+                "linked_conversation_id",
+                "linked_conversation_title",
+                "linked_at",
+                "linked_by_actor_id",
+            ):
+                current.pop(field, None)
         current["updated_at"] = _now_ms()
         sources[key] = current
         self._data["sources"] = sources

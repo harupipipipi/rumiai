@@ -141,12 +141,28 @@ def _send_direct_message(
 ) -> dict[str, Any]:
     from blocks.chat.send import run as send_run
 
+    source = envelope.source if isinstance(envelope.source, dict) else {}
+    envelope_metadata = dict(envelope.metadata)
+    envelope_metadata.setdefault("source", source)
+    runtime_metadata = _runtime_metadata(context)
+    display_text = cleaned_text
+    runtime_text = apply_external_source_context(display_text, envelope, source=source, metadata=envelope_metadata)
+    runtime_text = apply_external_runtime_prompt(runtime_text, context)
+    local_providers = {"internal", "local", "subagent", "delegate"}
+    message_source = (
+        str(source.get("kind") or "input_dispatcher")
+        if provider in local_providers
+        else "external_integration"
+    )
     metadata = {
-        "source": str((envelope.source if isinstance(envelope.source, dict) else {}).get("kind") or "input_dispatcher"),
+        "source": message_source,
         "external": {
             "provider": provider,
             "event_id": event_id,
-            **_runtime_metadata(context),
+            **envelope_metadata,
+            **runtime_metadata,
+            "source_text": display_text,
+            **({"runtime_content": runtime_text} if runtime_text != display_text else {}),
         },
     }
     if envelope.attachments:

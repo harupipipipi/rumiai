@@ -676,7 +676,7 @@ export type SidebarFieldOption = {
 export type SidebarField = {
   id: string;
   label: string;
-  type: "text" | "textarea" | "number" | "toggle" | "select" | "color" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url" | "model_api_routes";
+  type: "text" | "textarea" | "number" | "toggle" | "select" | "color" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url" | "model_api_routes" | "hook_status";
   default?: unknown;
   required?: boolean;
   help?: string;

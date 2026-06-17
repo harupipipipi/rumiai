@@ -624,9 +624,17 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("external_input", sections)
         self.assertIn("external_output", sections)
         self.assertIn("external_custom", sections)
+        self.assertIn("hook", sections)
         self.assertNotIn("external_inputs", sections)
+        hook_fields = {field["id"]: field for field in sections["hook"]["fields"]}
         input_fields = {field["id"]: field for field in sections["external_input"]["fields"]}
         output_fields = {field["id"]: field for field in sections["external_output"]["fields"]}
+        self.assertEqual(hook_fields["hook_status_summary"]["type"], "hook_status")
+        self.assertEqual(hook_fields["answer_model"]["type"], "select")
+        self.assertEqual(hook_fields["trigger_model"]["type"], "select")
+        self.assertEqual(hook_fields["response_trigger_mode"]["type"], "select")
+        self.assertEqual(hook_fields["line_auto_post_on_reply_failure"]["type"], "toggle")
+        self.assertEqual(hook_fields["line_model"]["advanced"], True)
         self.assertEqual(input_fields["input_setup_guide"]["type"], "readonly")
         self.assertEqual(input_fields["input_provider"]["type"], "select")
         self.assertEqual(input_fields["input_template_id"]["type"], "select")
@@ -644,6 +652,11 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertNotIn("textarea", {field["type"] for field in input_fields.values()})
         self.assertNotIn("textarea", {field["type"] for field in output_fields.values()})
         self.assertEqual(sections["external_custom"]["fields"][-1]["type"], "textarea")
+        self.assertTrue(values["hook"]["enabled"])
+        self.assertEqual(values["hook"]["response_trigger_mode"], "always")
+        self.assertEqual(values["hook"]["trigger_prefix"], "#")
+        self.assertFalse(values["hook"]["line_auto_post_on_reply_failure"])
+        self.assertIn("line:", values["hook"]["hook_status_summary"])
         self.assertTrue(values["external_input"]["include_source_context"])
         self.assertEqual(values["external_input"]["default_response_mode"], "same_response")
         self.assertEqual(values["external_input"]["input_provider"], "line")
@@ -662,11 +675,20 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         updated = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT)._refresh_derived_settings(
             {
                 **values,
+                "hook": {
+                    **values["hook"],
+                    "response_trigger_mode": "auto",
+                    "line_auto_post_on_reply_failure": True,
+                    "line_progress_notice_seconds": 80,
+                },
                 "external_input": {**values["external_input"], "input_provider": "slack", "input_endpoint_id": "slack-main"},
                 "external_output": {**values["external_output"], "output_provider": "discord"},
             }
         )
 
+        self.assertEqual(updated["hook"]["response_trigger_mode"], "auto")
+        self.assertTrue(updated["hook"]["line_auto_post_on_reply_failure"])
+        self.assertEqual(updated["hook"]["line_progress_notice_seconds"], 55)
         self.assertEqual(updated["external_input"]["input_template_id"], "slack.input.default")
         self.assertEqual(updated["external_input"]["public_url_launcher"]["route_path"], "/api/integrations/slack/events")
         self.assertEqual(updated["external_output"]["output_template_id"], "discord.output.bot_channel")
