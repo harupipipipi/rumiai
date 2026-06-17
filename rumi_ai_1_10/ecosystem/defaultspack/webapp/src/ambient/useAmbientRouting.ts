@@ -28,6 +28,7 @@ export function useAmbientRouting({
   const [routingGroupId, setRoutingGroupId] = useState("gesture");
   const [routingGroupTitle, setRoutingGroupTitle] = useState("Gesture");
   const [routingModel, setRoutingModel] = useState("");
+  const [aiSendApprovalRequired, setAiSendApprovalRequired] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
   const [modelResults, setModelResults] = useState<ModelSearchItem[]>([]);
   const [modelLoading, setModelLoading] = useState(false);
@@ -40,8 +41,10 @@ export function useAmbientRouting({
     setRoutingGroupId(routing.group_id || "gesture");
     setRoutingGroupTitle(routing.group_title || "Gesture");
     setRoutingModel(routing.model || "");
+    setAiSendApprovalRequired(routing.ai_send_approval_required);
   }, [
     conversationId,
+    status?.routing?.ai_send_approval_required,
     status?.routing?.conversation_id,
     status?.routing?.group_enabled,
     status?.routing?.group_id,
@@ -86,6 +89,7 @@ export function useAmbientRouting({
       group_id: routingGroupId,
       group_title: routingGroupTitle,
       model: routingModel,
+      ai_send_approval_required: aiSendApprovalRequired,
       ...patch,
     }, conversationId || null);
     setRoutingMode(next.mode);
@@ -94,6 +98,7 @@ export function useAmbientRouting({
     setRoutingGroupId(next.group_id || "gesture");
     setRoutingGroupTitle(next.group_title || "Gesture");
     setRoutingModel(next.model || "");
+    setAiSendApprovalRequired(next.ai_send_approval_required);
     setBusy(true);
     try {
       const configured = await ambientTriggerClient.configure(next);
@@ -138,6 +143,7 @@ export function useAmbientRouting({
     setRoutingGroupTitle,
     routingModel,
     setRoutingModel,
+    aiSendApprovalRequired,
     modelQuery,
     setModelQuery,
     modelResults,

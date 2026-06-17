@@ -199,6 +199,7 @@ def _default_state() -> dict[str, Any]:
             "group_id": "gesture",
             "group_title": "Gesture",
             "model": "",
+            "ai_send_approval_required": False,
         },
         "voice_enrollment": None,
         "last_trigger": None,
@@ -244,6 +245,13 @@ def _normalized_routing(value: dict[str, Any]) -> dict[str, Any]:
     group_id = _clean_optional_string(value.get("group_id")) or "gesture"
     group_title = _clean_optional_string(value.get("group_title")) or "Gesture"
     model = _clean_optional_string(value.get("model")) or ""
+    ai_send_approval_required = _coerce_bool(
+        value.get(
+            "ai_send_approval_required",
+            value.get("require_ai_send_approval", value.get("send_requires_approval", False)),
+        ),
+        False,
+    )
     return {
         "mode": mode,
         "conversation_id": conversation_id,
@@ -251,6 +259,7 @@ def _normalized_routing(value: dict[str, Any]) -> dict[str, Any]:
         "group_id": group_id,
         "group_title": group_title,
         "model": model,
+        "ai_send_approval_required": ai_send_approval_required,
     }
 
 

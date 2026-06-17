@@ -45,6 +45,7 @@ export type AmbientStatus = {
   allowed_actions?: string[];
   input_aliases?: Record<string, string>;
   routing?: AmbientRoutingConfig;
+  pending_approval?: AmbientPendingApproval | null;
 };
 
 export type AmbientRoutingMode = "selected_chat" | "startup_new_chat" | "always_new_chat";
@@ -57,6 +58,23 @@ export type AmbientRoutingConfig = {
   group_title?: string | null;
   model?: string | null;
   session_conversation_id?: string | null;
+  ai_send_approval_required?: boolean | string | null;
+};
+
+export type AmbientPendingApproval = {
+  request_id: string;
+  source?: string;
+  trigger?: string;
+  mode?: string;
+  action_id?: string;
+  input_preview?: string;
+  has_text?: boolean;
+  attachment_count?: number;
+  has_audio?: boolean;
+  conversation_id?: string | null;
+  created_at?: string | null;
+  expires_at?: string | null;
+  pending_count?: number;
 };
 
 export type AmbientEventPayload = {
@@ -149,6 +167,20 @@ export const ambientTriggerClient = {
     return requestJson<Record<string, unknown>>("/api/ambient/events", {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+  },
+
+  approvePendingApproval(requestId: string) {
+    return requestJson<Record<string, unknown>>("/api/ambient/approval/approve", {
+      method: "POST",
+      body: JSON.stringify({ request_id: requestId }),
+    });
+  },
+
+  denyPendingApproval(requestId: string, reason?: string) {
+    return requestJson<Record<string, unknown>>("/api/ambient/approval/deny", {
+      method: "POST",
+      body: JSON.stringify({ request_id: requestId, reason }),
     });
   },
 };

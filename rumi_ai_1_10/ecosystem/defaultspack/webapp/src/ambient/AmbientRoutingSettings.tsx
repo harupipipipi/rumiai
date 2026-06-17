@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronUp, Loader2, MessageSquare, RefreshCcw, Search, X } from "lucide-react";
+import { ChevronUp, Loader2, MessageSquare, RefreshCcw, Search, ShieldCheck, X } from "lucide-react";
 
 import { HistoryBoard, type ChatItem } from "../components/HistoryBoard";
 import type { ModelSearchItem } from "../lib/api";
@@ -20,6 +20,7 @@ export function RoutingSettings({
   modelResults,
   modelLoading,
   needsNewChatSettings,
+  aiSendApprovalRequired,
   onModeChange,
   onPickChat,
   onGroupEnabledChange,
@@ -30,6 +31,7 @@ export function RoutingSettings({
   onModelCommit,
   onModelQueryChange,
   onModelSearch,
+  onAiSendApprovalRequiredChange,
 }: {
   busy: boolean;
   mode: AmbientRoutingMode;
@@ -43,6 +45,7 @@ export function RoutingSettings({
   modelResults: ModelSearchItem[];
   modelLoading: boolean;
   needsNewChatSettings: boolean;
+  aiSendApprovalRequired: boolean;
   onModeChange: (mode: AmbientRoutingMode) => void;
   onPickChat: () => void;
   onGroupEnabledChange: (enabled: boolean) => void;
@@ -53,6 +56,7 @@ export function RoutingSettings({
   onModelCommit: (model: string) => void;
   onModelQueryChange: (value: string) => void;
   onModelSearch: () => void;
+  onAiSendApprovalRequiredChange: (enabled: boolean) => void;
 }) {
   const [modelChangeOpen, setModelChangeOpen] = useState(false);
   const modelLabel = model ? modelLabelFromId(model) : "未指定";
@@ -117,6 +121,23 @@ export function RoutingSettings({
           )}
         </div>
       )}
+      <button
+        type="button"
+        onClick={() => onAiSendApprovalRequiredChange(!aiSendApprovalRequired)}
+        disabled={busy}
+        className={cn(
+          "flex h-8 w-full items-center justify-between rounded-md border px-2 text-[11px] transition",
+          aiSendApprovalRequired
+            ? "border-amber-300/35 bg-amber-400/10 text-amber-50"
+            : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
+        )}
+      >
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <ShieldCheck size={13} />
+          <span className="truncate">AI送信前に確認</span>
+        </span>
+        <span className="shrink-0 font-semibold">{aiSendApprovalRequired ? "有効" : "無効"}</span>
+      </button>
       <div className="space-y-1.5 rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10px] font-semibold text-zinc-500">送信モデル</span>

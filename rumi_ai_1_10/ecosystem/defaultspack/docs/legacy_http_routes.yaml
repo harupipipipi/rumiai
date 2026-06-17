@@ -2373,6 +2373,20 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: POST
+  pattern: /api/ambient/approval/approve
+  legacy_block_module: blocks.ambient.approval
+  replacement_function_id: ''
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/approval/deny
+  legacy_block_module: blocks.ambient.approval
+  replacement_function_id: ''
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
   pattern: /api/ambient/permissions/grant
   legacy_block_module: blocks.ambient.permissions
   replacement_function_id: ambient_permission_grant

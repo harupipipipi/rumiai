@@ -151,6 +151,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     setRoutingGroupTitle,
     routingModel,
     setRoutingModel,
+    aiSendApprovalRequired,
     modelQuery,
     setModelQuery,
     modelResults,
@@ -198,6 +199,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const allOsPermissionsGranted = useMemo(() => hasAllOsPermissions(status), [status]);
   const rumiApprovalPending = rumiApprovalOpen && !allRumiPermissionsGranted;
   const surfaceTitle = standalone && window.location.pathname === "/finger-recording" ? ambientCopyJa.subtitle : ambientCopyJa.title;
+  const pendingApproval = status?.pending_approval ?? null;
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -366,7 +368,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           },
         ],
       });
-      setMessage(String(result.reason ?? result.status ?? "音声をAIに送信しました。"));
+      setMessage(ambientResultMessage(result, "音声をAIに送信しました。"));
       onOpenInputRef.current?.("");
       focusComposer();
       await refresh();
@@ -752,6 +754,75 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     }
   }
 
+  async function submitPresetText(text: string) {
+    if (!allRumiPermissionsGranted || rumiApprovalPending) {
+      setExpanded(true);
+      setMessage("Rumiの許可がそろってから定型文を送れます。");
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await ambientTriggerClient.submitEvent({
+        source: "hook",
+        trigger: "external_hook",
+        mode: "preset_text",
+        action_id: "chat.message",
+        input_text: text,
+        conversation_id: conversationIdRef.current || undefined,
+        metadata: {
+          panel: "ambient_mini_window",
+          preset: text,
+        },
+      });
+      setMessage(ambientResultMessage(result, `${text} を送信しました。`));
+      onOpenInputRef.current?.("");
+      focusComposer();
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "定型文を送信できませんでした。");
+      await refresh().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approvePendingApproval() {
+    const requestId = pendingApproval?.request_id;
+    if (!requestId) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await ambientTriggerClient.approvePendingApproval(requestId);
+      setMessage(ambientResultMessage(result, "AIへ送信しました。"));
+      onOpenInputRef.current?.("");
+      focusComposer();
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "送信を許可できませんでした。");
+      await refresh().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function denyPendingApproval() {
+    const requestId = pendingApproval?.request_id;
+    if (!requestId) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await ambientTriggerClient.denyPendingApproval(requestId, "user_cancelled");
+      setMessage(String(result.status ?? "") === "denied" ? "送信を破棄しました。" : String(result.reason ?? "送信を破棄しました。"));
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "送信待ちを破棄できませんでした。");
+      await refresh().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handlePrimaryAction() {
     switch (uiState) {
       case "setupNeeded":
@@ -902,6 +973,29 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
               Rumiの承認ウィンドウで確認中です。合図待ち、録音、音声待機は承認が終わるまで停止します。
             </div>
           )}
+          {pendingApproval && (
+            <div className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-2 py-2 text-[11px] leading-5 text-amber-50">
+              <div className="flex min-w-0 items-center gap-2">
+                <Shield size={13} className="shrink-0" />
+                <span className="min-w-0 flex-1 truncate">
+                  AI送信待ち: {pendingApproval.input_preview || (pendingApproval.has_audio ? "録音" : "入力")}
+                </span>
+                {typeof pendingApproval.pending_count === "number" && pendingApproval.pending_count > 1 && (
+                  <span className="shrink-0 rounded border border-amber-200/25 px-1.5 py-0.5 text-[10px]">{pendingApproval.pending_count}</span>
+                )}
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => void approvePendingApproval()} disabled={busy} className="ambient-mini-button border-emerald-300/35 text-emerald-100">
+                  <Check size={13} />
+                  送信
+                </button>
+                <button type="button" onClick={() => void denyPendingApproval()} disabled={busy} className="ambient-mini-button">
+                  <X size={13} />
+                  破棄
+                </button>
+              </div>
+            </div>
+          )}
           {pinchRecording && (
             <div className="flex items-center gap-2 rounded-lg border border-red-300/25 bg-red-400/10 px-2 py-1.5 text-[11px] text-red-50">
               <Mic size={13} className="shrink-0" />
@@ -946,6 +1040,20 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                   {modelLabelFromId(routingModel)}
                 </span>
               )}
+            </div>
+          )}
+          {allRumiPermissionsGranted && (
+            <div className="flex items-center gap-2 rounded-lg border border-zinc-800/70 bg-zinc-950/45 px-2 py-1.5">
+              <span className="shrink-0 text-[11px] text-zinc-500">定型</span>
+              <button
+                type="button"
+                onClick={() => void submitPresetText("hello")}
+                disabled={busy || rumiApprovalPending}
+                className="ambient-mini-button h-7 px-2"
+              >
+                <MessageSquare size={13} />
+                hello
+              </button>
             </div>
           )}
           <div className="flex items-center justify-between gap-2 text-[11px] leading-4 text-zinc-500">
@@ -1039,6 +1147,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                     groupId={routingGroupId}
                     groupTitle={routingGroupTitle}
                     model={routingModel}
+                    aiSendApprovalRequired={aiSendApprovalRequired}
                     modelQuery={modelQuery}
                     modelResults={modelResults}
                     modelLoading={modelLoading}
@@ -1053,6 +1162,10 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                     onModelCommit={(model) => void saveRouting({ model }, model ? "送信モデルを保存しました。" : "モデル指定を外しました。")}
                     onModelQueryChange={setModelQuery}
                     onModelSearch={() => void searchRoutingModels()}
+                    onAiSendApprovalRequiredChange={(enabled) => void saveRouting(
+                      { ai_send_approval_required: enabled },
+                      enabled ? "AIへ送る前に確認します。" : "AIへすぐ送る設定にしました。",
+                    )}
                   />
                 )}
                 <label className="block text-[11px] text-zinc-500">
@@ -1364,6 +1477,21 @@ function formatRecordingTime(seconds: number): string {
 
 function isAmbientStatus(value: unknown): value is AmbientStatus {
   return Boolean(value && typeof value === "object" && "ambient_monitor" in value);
+}
+
+function ambientResultMessage(result: Record<string, unknown>, fallback: string): string {
+  const status = String(result.status ?? "");
+  const reason = String(result.reason ?? "");
+  if (status === "approval_required") {
+    return "AIへ送る前に確認待ちです。";
+  }
+  if (status === "not_found") {
+    return "送信待ちは見つかりませんでした。";
+  }
+  if (status === "ok" || reason === "trigger_dispatched") {
+    return fallback;
+  }
+  return String(result.reason ?? result.status ?? fallback);
 }
 
 function focusComposer() {

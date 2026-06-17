@@ -10,6 +10,7 @@ export type NormalizedAmbientRouting = {
   group_id: string;
   group_title: string;
   model: string;
+  ai_send_approval_required: boolean;
 };
 
 export function normalizeRouting(value: AmbientRoutingConfig | null | undefined, fallbackConversationId: string | null): NormalizedAmbientRouting {
@@ -23,6 +24,7 @@ export function normalizeRouting(value: AmbientRoutingConfig | null | undefined,
     group_id: cleanOptionalText(value?.group_id) ?? "gesture",
     group_title: cleanOptionalText(value?.group_title) ?? "Gesture",
     model: cleanOptionalText(value?.model) ?? "",
+    ai_send_approval_required: cleanBool(value?.ai_send_approval_required, false),
   };
 }
 

@@ -293,6 +293,101 @@ def test_selected_chat_routing_passes_saved_model_as_turn_param(monkeypatch, tmp
     assert envelope.params["model"] == "opencode-go/kimi-k2.6"
 
 
+def test_ai_send_approval_mode_holds_ambient_input_until_server_approval(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    router.grant_permission("ambient.trigger.dispatch")
+    router.configure({"routing": {"ai_send_approval_required": True}})
+
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": "hi"}) as submit:
+        pending = router.submit_event(
+            {
+                "source": "hook",
+                "trigger": "external_hook",
+                "mode": "preset_text",
+                "action_id": "chat.message",
+                "input_text": "hello",
+                "approved": True,
+            }
+        )
+
+        assert pending["status"] == "approval_required"
+        assert pending["reason"] == "ambient.ai_send_approval_required"
+        assert pending["client_approved_flag_ignored"] is True
+        submit.assert_not_called()
+
+        request_id = pending["approval_request_id"]
+        status = router.status()
+        assert status["routing"]["ai_send_approval_required"] is True
+        assert status["pending_approval"]["request_id"] == request_id
+        assert status["pending_approval"]["input_preview"] == "hello"
+
+        approved = router.approve_pending(request_id)
+
+    assert approved["status"] == "ok"
+    envelope = submit.call_args.args[0]
+    assert envelope.input == "hello"
+    assert envelope.delivery["action_id"] == "chat.message"
+    assert envelope.metadata["ambient"]["approval_request_id"] == request_id
+    assert router.status()["pending_approval"] is None
+
+
+def test_ai_send_approval_pending_summary_does_not_expose_audio_data(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+    router.configure({"routing": {"ai_send_approval_required": True}})
+
+    with patch("domain.ambient.router.submit_input") as submit:
+        pending = router.submit_event(_pinch_audio_payload())
+
+    assert pending["status"] == "approval_required"
+    submit.assert_not_called()
+    summary = router.status()["pending_approval"]
+    assert summary["has_audio"] is True
+    assert summary["attachment_count"] == 1
+    assert "data:audio" not in json.dumps(summary)
+    assert "AAAA" not in json.dumps(summary)
+
+
+def test_ambient_preset_hello_uses_submit_input_path_without_approval_mode(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    router.grant_permission("ambient.trigger.dispatch")
+
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": "hi"}) as submit:
+        result = router.submit_event(
+            {
+                "source": "hook",
+                "trigger": "external_hook",
+                "mode": "preset_text",
+                "action_id": "chat.message",
+                "input_text": "hello",
+            }
+        )
+
+    assert result["status"] == "ok"
+    envelope = submit.call_args.args[0]
+    assert envelope.input == "hello"
+    assert envelope.source["provider"] == "ambient"
+    assert envelope.delivery["action_id"] == "chat.message"
+
+
 def test_approval_gesture_is_audited_without_dispatch(monkeypatch, tmp_path):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
@@ -460,13 +555,18 @@ def test_ambient_store_migrates_legacy_gesture_release_threshold(monkeypatch, tm
 
 def test_ambient_routes_and_functions_are_registered():
     from domain.function_runtime.registry import block_module_for, default_args_for, get_spec
-    from transport.registry import canonical_http_route_specs
+    from transport.registry import canonical_http_route_specs, load_legacy_http_route_allowlist
 
     routes = {(route.method, route.pattern, route.block_module) for route in canonical_http_route_specs()}
+    legacy_routes = load_legacy_http_route_allowlist()
     assert ("GET", "/api/ambient/status", "blocks.ambient.status") in routes
     assert ("POST", "/api/ambient/monitor/start", "blocks.ambient.monitor") in routes
     assert ("POST", "/api/ambient/config", "blocks.ambient.config") in routes
     assert ("POST", "/api/ambient/events", "blocks.ambient.event_submit") in routes
+    assert ("POST", "/api/ambient/approval/approve", "blocks.ambient.approval") in routes
+    assert ("POST", "/api/ambient/approval/deny", "blocks.ambient.approval") in routes
+    assert ("POST", "/api/ambient/approval/approve", "blocks.ambient.approval") in legacy_routes
+    assert ("POST", "/api/ambient/approval/deny", "blocks.ambient.approval") in legacy_routes
     assert ("POST", "/api/ambient/permissions/check", "blocks.ambient.permissions") in routes
     assert ("GET", "/host-permissions", "") in routes
     assert block_module_for("ambient_event_submit") == "blocks.ambient.event_submit"

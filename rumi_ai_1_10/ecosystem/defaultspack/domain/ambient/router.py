@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 import time
+import uuid
 from typing import Any
 
 from domain.chat.store import ChatStore
@@ -25,6 +27,7 @@ PINCH_RECORD_START_MODES = {"record_audio_start", "hold_to_record_start", "start
 PINCH_RECORD_RELEASE_MODES = {"record_audio_release", "dispatch_audio", "submit_recording", "stop_voice_capture"}
 APPROVAL_GESTURE_MODES = {"approval_approve", "approval_reject", "swipe_approve", "swipe_reject"}
 ROUTING_MODES = {"selected_chat", "startup_new_chat", "always_new_chat"}
+AI_SEND_APPROVAL_TTL_SECONDS = 5 * 60
 
 ALLOWED_ACTIONS = {
     "chat.message",
@@ -36,6 +39,7 @@ ALLOWED_ACTIONS = {
 }
 
 _SESSION_CONVERSATION_IDS: dict[str, str] = {}
+_PENDING_AI_SEND_APPROVALS: dict[str, dict[str, Any]] = {}
 
 
 class AmbientTriggerRouter:
@@ -52,6 +56,7 @@ class AmbientTriggerRouter:
         state["audit_tail"] = self.audit.tail(10)
         state["allowed_actions"] = sorted(ALLOWED_ACTIONS)
         state["input_aliases"] = dict(ACTION_ALIASES)
+        state["pending_approval"] = self._latest_pending_summary()
         return state
 
     def start_monitor(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -95,12 +100,60 @@ class AmbientTriggerRouter:
         state["audit_tail"] = self.audit.tail(10)
         state["allowed_actions"] = sorted(ALLOWED_ACTIONS)
         state["input_aliases"] = dict(ACTION_ALIASES)
+        state["pending_approval"] = self._latest_pending_summary()
         return state
+
+    def approve_pending(self, request_id: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        del context
+        pending = self._pop_pending(request_id)
+        if pending is None:
+            return {
+                "status": "not_found",
+                "reason": "ambient.ai_send_approval_not_found",
+                "request_id": str(request_id or ""),
+            }
+        event = pending["event"]
+        action_id = str(pending.get("action_id") or self._action_id(event))
+        self._record(
+            event,
+            "approved",
+            "ambient.ai_send_approval_accepted",
+            action_id=action_id,
+            approval_request_id=pending["request_id"],
+        )
+        return self._dispatch(
+            event,
+            action_id,
+            copy.deepcopy(pending.get("context") if isinstance(pending.get("context"), dict) else {}),
+            state=copy.deepcopy(pending.get("state") if isinstance(pending.get("state"), dict) else self.store.read()),
+            attachments=copy.deepcopy(pending.get("attachments") if isinstance(pending.get("attachments"), list) else []),
+            require_approval=False,
+            approval_request_id=pending["request_id"],
+        )
+
+    def deny_pending(self, request_id: str, reason: str = "") -> dict[str, Any]:
+        pending = self._pop_pending(request_id)
+        if pending is None:
+            return {
+                "status": "not_found",
+                "reason": "ambient.ai_send_approval_not_found",
+                "request_id": str(request_id or ""),
+            }
+        event = pending["event"]
+        action_id = str(pending.get("action_id") or self._action_id(event))
+        return self._record(
+            event,
+            "denied",
+            "ambient.ai_send_approval_denied",
+            action_id=action_id,
+            approval_request_id=pending["request_id"],
+            denied_reason=str(reason or "").strip(),
+        )
 
     def submit_event(self, payload: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
         event = AmbientTriggerEvent.from_payload(payload)
         state = self.store.read()
-        if not bool(state.get("ambient_monitor", {}).get("enabled")):
+        if not bool(state.get("ambient_monitor", {}).get("enabled")) and not self._event_can_run_without_monitor(event):
             return self._record(event, "ignored", "ambient_monitor.disabled")
 
         service = self._service_for_event(state, event)
@@ -199,11 +252,22 @@ class AmbientTriggerRouter:
         *,
         state: dict[str, Any],
         attachments: list[dict[str, Any]] | None = None,
+        require_approval: bool = True,
+        approval_request_id: str | None = None,
     ) -> dict[str, Any]:
         if action_id not in ALLOWED_ACTIONS:
             return self._record(event, "denied", "ambient.action_not_allowed", action_id=action_id)
         attachments = attachments or []
         input_text = event.input_text or self._default_input_text(event, attachments)
+        if require_approval and self._requires_ai_send_approval(state):
+            return self._queue_ai_send_approval(
+                event,
+                action_id,
+                context,
+                state=state,
+                attachments=attachments,
+                input_text=input_text,
+            )
         target_conversation_id = self._target_conversation_id(event, context, state)
         routing = state.get("routing") if isinstance(state.get("routing"), dict) else {}
         model = str(routing.get("model") or "").strip()
@@ -237,6 +301,14 @@ class AmbientTriggerRouter:
                         "source": event.source,
                         "trigger": event.trigger,
                         "mode": event.mode,
+                        **(
+                            {
+                                "approval_request_id": approval_request_id,
+                                "ai_send_approval": "approved",
+                            }
+                            if approval_request_id
+                            else {}
+                        ),
                         "metadata": event.metadata,
                     }
                 )
@@ -247,10 +319,132 @@ class AmbientTriggerRouter:
         )
         result = submit_input(envelope, context)
         status = str(result.get("status") if isinstance(result, dict) else "ok")
-        audit = self._record(event, status, "trigger_dispatched", action_id=action_id, dispatch_result=result)
+        audit = self._record(
+            event,
+            status,
+            "trigger_dispatched",
+            action_id=action_id,
+            approval_request_id=approval_request_id,
+            dispatch_result=result,
+        )
         if isinstance(result, dict):
             audit["dispatch"] = result
         return audit
+
+    def _requires_ai_send_approval(self, state: dict[str, Any]) -> bool:
+        routing = state.get("routing") if isinstance(state.get("routing"), dict) else {}
+        return _coerce_bool(routing.get("ai_send_approval_required"), False)
+
+    def _queue_ai_send_approval(
+        self,
+        event: AmbientTriggerEvent,
+        action_id: str,
+        context: dict[str, Any],
+        *,
+        state: dict[str, Any],
+        attachments: list[dict[str, Any]],
+        input_text: str,
+    ) -> dict[str, Any]:
+        now = time.time()
+        request_id = f"ambient_ai_send_{uuid.uuid4().hex}"
+        pending = {
+            "request_id": request_id,
+            "store_path": self._store_path_key(),
+            "event": event,
+            "action_id": action_id,
+            "context": copy.deepcopy(context if isinstance(context, dict) else {}),
+            "state": copy.deepcopy(state if isinstance(state, dict) else {}),
+            "attachments": copy.deepcopy(attachments),
+            "input_text": str(input_text or ""),
+            "created_at_epoch": now,
+            "expires_at_epoch": now + AI_SEND_APPROVAL_TTL_SECONDS,
+            "created_at": _epoch_iso(now),
+        }
+        self._prune_pending()
+        _PENDING_AI_SEND_APPROVALS[request_id] = pending
+        return self._record(
+            event,
+            "approval_required",
+            "ambient.ai_send_approval_required",
+            action_id=action_id,
+            approval_request_id=request_id,
+            client_approved_flag_ignored="approved" in event.payload,
+            pending_approval=self._pending_summary(pending),
+        )
+
+    def _latest_pending_summary(self) -> dict[str, Any] | None:
+        self._prune_pending()
+        store_path = self._store_path_key()
+        pending = [
+            item for item in _PENDING_AI_SEND_APPROVALS.values()
+            if item.get("store_path") == store_path
+        ]
+        if not pending:
+            return None
+        pending.sort(key=lambda item: float(item.get("created_at_epoch") or 0), reverse=True)
+        summary = self._pending_summary(pending[0])
+        summary["pending_count"] = len(pending)
+        return summary
+
+    def _pop_pending(self, request_id: str) -> dict[str, Any] | None:
+        self._prune_pending()
+        request_id = str(request_id or "").strip()
+        pending = _PENDING_AI_SEND_APPROVALS.get(request_id)
+        if pending is None or pending.get("store_path") != self._store_path_key():
+            return None
+        now = time.time()
+        if float(pending.get("expires_at_epoch") or 0) <= now:
+            _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
+            event = pending.get("event")
+            if isinstance(event, AmbientTriggerEvent):
+                self._record(
+                    event,
+                    "ignored",
+                    "ambient.ai_send_approval_expired",
+                    action_id=str(pending.get("action_id") or ""),
+                    approval_request_id=request_id,
+                )
+            return None
+        return _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
+
+    def _prune_pending(self) -> None:
+        now = time.time()
+        expired = [
+            request_id
+            for request_id, pending in _PENDING_AI_SEND_APPROVALS.items()
+            if float(pending.get("expires_at_epoch") or 0) <= now
+        ]
+        for request_id in expired:
+            _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
+
+    def _pending_summary(self, pending: dict[str, Any]) -> dict[str, Any]:
+        event = pending.get("event")
+        attachments = pending.get("attachments") if isinstance(pending.get("attachments"), list) else []
+        state = pending.get("state") if isinstance(pending.get("state"), dict) else {}
+        context = pending.get("context") if isinstance(pending.get("context"), dict) else {}
+        routing = state.get("routing") if isinstance(state.get("routing"), dict) else {}
+        input_text = str(pending.get("input_text") or "")
+        return {
+            "request_id": str(pending.get("request_id") or ""),
+            "source": event.source if isinstance(event, AmbientTriggerEvent) else "",
+            "trigger": event.trigger if isinstance(event, AmbientTriggerEvent) else "",
+            "mode": event.mode if isinstance(event, AmbientTriggerEvent) else "",
+            "action_id": str(pending.get("action_id") or ""),
+            "input_preview": _preview(input_text),
+            "has_text": bool(input_text.strip()),
+            "attachment_count": len(attachments),
+            "has_audio": any(_is_audio_attachment(item) for item in attachments if isinstance(item, dict)),
+            "conversation_id": (
+                _clean_string(event.payload.get("conversation_id")) if isinstance(event, AmbientTriggerEvent) else ""
+            )
+            or _clean_string(context.get("conversation_id"))
+            or _clean_string(routing.get("conversation_id")),
+            "created_at": pending.get("created_at"),
+            "expires_at": _epoch_iso(float(pending.get("expires_at_epoch") or time.time())),
+        }
+
+    def _store_path_key(self) -> str:
+        return str(self.store.path)
 
     def _target_conversation_id(
         self,
@@ -328,6 +522,9 @@ class AmbientTriggerRouter:
         if event.trigger in {"pinch", "gesture_choice", "approval_gesture"}:
             return services.get("gesture_wake_monitor") if isinstance(services.get("gesture_wake_monitor"), dict) else None
         return None
+
+    def _event_can_run_without_monitor(self, event: AmbientTriggerEvent) -> bool:
+        return event.source == "hook" and event.trigger == "external_hook" and event.mode == "preset_text"
 
     def _cooldown_reason(self, state: dict[str, Any]) -> str:
         service = state.get("services", {}).get("gesture_wake_monitor", {})
@@ -414,3 +611,14 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         if normalized in {"0", "false", "no", "off"}:
             return False
     return default
+
+
+def _preview(value: str, limit: int = 120) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "..."
+
+
+def _epoch_iso(value: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(value))
