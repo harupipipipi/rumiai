@@ -9,6 +9,7 @@ import {
   deleteStartupProfile,
   duplicateStartupProfile,
   fetchStartupProfiles,
+  launchDefaultspackDesktop,
   launchStartupProfile,
   removePackFromStartupProfile,
   setStartupProfileNodeOverride,
@@ -307,7 +308,13 @@ export function Dashboard() {
       if (!response.restart_requested) {
         await refreshProfiles(editProfileId);
       }
-      setSuccessFeedback(response.restart_requested ? 'Profile launched. Kernel restart handoff was requested.' : 'Profile launched.');
+      try {
+        await launchDefaultspackDesktop();
+      } catch (desktopError) {
+        setErrorFeedback(`Profile launched, but Defaultspack desktop did not open: ${translateActionError(desktopError, 'open Defaultspack desktop')}`);
+        return;
+      }
+      setSuccessFeedback(response.restart_requested ? 'Profile launched. Kernel restart handoff was requested. Defaultspack window opened.' : 'Profile launched. Defaultspack window opened.');
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'launch this profile'));
     } finally { setActionState(null); }
