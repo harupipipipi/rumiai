@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from core_runtime.host_permissions import normalize_host_permission_id
+from core_runtime.host_permissions import get_host_permission_definition, normalize_host_permission_id
 
 
 HOST_INTENT_TYPES = frozenset({"host_intent", "host_stream_intent"})
@@ -70,7 +70,7 @@ class HostIntent:
         )
 
     def resource(self) -> dict[str, Any]:
-        return {
+        resource = {
             "kind": "host_intent",
             "operation": self.operation,
             "host_action": self.operation,
@@ -82,6 +82,11 @@ class HostIntent:
             "stream_config": dict(self.stream),
             "stream_enabled": self.is_stream,
         }
+        definition = get_host_permission_definition(self.operation)
+        if definition is not None and definition.typed_confirmation_required:
+            resource["typed_confirmation_required"] = True
+            resource["confirmation_phrase"] = _host_intent_confirmation_phrase(self)
+        return resource
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -102,3 +107,18 @@ class HostIntent:
 
 def is_host_intent_payload(value: Any) -> bool:
     return isinstance(value, dict) and str(value.get("type") or "").strip() in HOST_INTENT_TYPES
+
+
+def _host_intent_confirmation_phrase(intent: HostIntent) -> str:
+    seed = "|".join(
+        str(value or "").strip()
+        for value in (
+            intent.operation,
+            intent.caller_pack_id,
+            intent.caller_function_id,
+            intent.host_function_id,
+            intent.args_hash,
+        )
+    )
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8].upper()
+    return f"RUMI-HOST-{digest}"

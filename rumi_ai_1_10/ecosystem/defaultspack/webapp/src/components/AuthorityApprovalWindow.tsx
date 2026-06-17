@@ -15,6 +15,7 @@ import {
 import { authorityApprovalResources, type AuthorityApprovalDecision, type AuthorityRequest } from "../features/chat/resources/authorityApprovalResources";
 import {
   authorityApprovalConfig,
+  authorityApprovalRiskTone,
   authorityApprovalRuntimeContent,
   authorityApprovalTitle,
   type AuthorityApproval,
@@ -384,9 +385,7 @@ export function AuthorityApprovalWindow() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={cn(
                     "rounded border px-2 py-1 text-[11px] font-medium",
-                    request.risk_level === "high"
-                      ? "border-red-500/30 bg-red-500/10 text-red-200"
-                      : "border-sky-500/30 bg-sky-500/10 text-sky-200",
+                    authorityApprovalRiskTone(request.risk_level),
                   )}>
                     {request.risk_level || "authority"}
                   </span>

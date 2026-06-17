@@ -11,41 +11,112 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-HOST_FUNCTION_ID_OVERRIDES = {
-    "host.accessibility.read": "host_accessibility_snapshot",
-    "host.accessibility.mutate": "host_accessibility_action",
-    "host.file.read_user_selected": "host_file_read_selected",
-    "host.file.write_user_selected": "host_file_write_selected",
-}
+
+def _host_mediator_generator():
+    generator_path = (
+        ROOT
+        / "ecosystem"
+        / "rumi_host_capabilities_pack"
+        / "scripts"
+        / "generate_host_mediator_functions.py"
+    )
+    spec = importlib.util.spec_from_file_location("generate_host_mediator_functions", generator_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 
 def _host_permission_registry() -> dict[str, dict]:
     return json.loads((ROOT / "core_runtime" / "host_permissions" / "default_registry.json").read_text())
 
 
 def _host_function_id_for_operation(operation: str) -> str:
-    return HOST_FUNCTION_ID_OVERRIDES.get(operation, operation.replace(".", "_"))
+    return _host_mediator_generator().host_function_id_for_operation(operation)
 
 
 def _expected_host_mediator_functions() -> dict[str, str]:
+    return _host_mediator_generator().expected_host_mediator_functions(_host_permission_registry())
+
+
+class _HmacKey:
+    def get_active_key(self) -> str:
+        return "host-boundary-authority-test-key-" + ("x" * 32)
+
+
+def _authority_service(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_AUTHORITY_MODE", "enforce")
+    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "panel-bootstrap-test-secret-" + ("p" * 32))
+    from core_runtime.authority.request_store import AuthorityRequestStore
+    from core_runtime.authority.service import AuthorityService
+
+    store = AuthorityRequestStore(tmp_path / "authority", hmac_key_manager=_HmacKey())
+    return AuthorityService(request_store=store)
+
+
+def _ui_operator(request_id: str):
+    from core_runtime.authority.ui_operator import sign_ui_operator
+
+    return sign_ui_operator(request_id, nonce="nonce-" + request_id)
+
+
+def _direct_host_entry():
+    return SimpleNamespace(
+        pack_id="third_party_pack",
+        function_id="run_shell",
+        qualified_name="third_party_pack.run_shell",
+        permission_id="third_party_pack.run_shell",
+        calling_convention="python_host",
+        host_execution=True,
+        manifest={"host_operation": "shell.exec"},
+        vocab_aliases=[],
+        requires=[],
+        caller_requires=[],
+        function_dir=None,
+        main_py_path=None,
+        entrypoint="main.py:run",
+        is_builtin=False,
+    )
+
+
+def _authority_context(permission_id: str, request_id: str, token: str) -> dict:
     return {
-        _host_function_id_for_operation(operation): operation
-        for operation in _host_permission_registry()
+        "authority": {
+            "approval_tokens": {
+                permission_id: {
+                    "request_id": request_id,
+                    "approval_token": token,
+                    "permission_id": permission_id,
+                }
+            }
+        }
     }
 
 
+def _executor_for_direct_host_retry():
+    from core_runtime.capability_executor import CapabilityExecutor, CapabilityResponse
+
+    executor = CapabilityExecutor()
+    executor._initialized = True
+    executor._approval_manager = None
+    executor._audit = lambda *args, **kwargs: None
+    executor._check_entry_trust = lambda *args, **kwargs: None
+    executor._is_trusted_builtin_pack = lambda *args, **kwargs: True
+    executor._trusted_builtin_pack_path_verdict = lambda *args, **kwargs: True
+    executor._is_core_builtin_trust_bypass_entry = lambda *args, **kwargs: False
+    executor._grant_manager = SimpleNamespace(
+        check=lambda *args, **kwargs: SimpleNamespace(allowed=True, reason="granted", config={})
+    )
+    executor._execute_host_function = lambda **kwargs: CapabilityResponse(
+        success=True,
+        output={"executed": True},
+        latency_ms=0,
+    )
+    return executor
+
+
 def _host_mediator_main_template(function_id: str, operation: str, stream_allowed: bool) -> str:
-    return f'''from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from _host_mediator import run_host_mediator
-
-
-def run(context, args):
-    return run_host_mediator(context, args, function_id="{function_id}", operation="{operation}", stream_allowed={stream_allowed})
-'''
+    return _host_mediator_generator().render_host_mediator_main(function_id, operation, stream_allowed)
 
 
 def test_host_permission_registry_normalizes_ambient_aliases():
@@ -194,7 +265,9 @@ def test_host_capabilities_pack_defines_standard_mediator_functions():
     registry = _host_permission_registry()
     ecosystem = json.loads((pack_root / "ecosystem.json").read_text())
     expected_functions = _expected_host_mediator_functions()
+    generator = _host_mediator_generator()
 
+    assert generator.check_generated_files() == []
     assert ecosystem["host_functions"] == {
         function_id: {
             "operation": operation,
@@ -216,8 +289,9 @@ def test_host_capabilities_pack_defines_standard_mediator_functions():
         assert manifest["function_id"] == function_id
         assert manifest["host_execution"] is False
         assert manifest["calling_convention"] == "subprocess"
-        assert manifest["requires_approval"] is True
-        assert manifest["caller_requires"] == ["user.approved.high_risk"]
+        approval_required = bool(registry[operation].get("approval_required", True))
+        assert manifest["requires_approval"] is approval_required
+        assert manifest["caller_requires"] == (["user.approved.high_risk"] if approval_required else [])
         assert operation in manifest["requires"]
         assert manifest["risk"] == registry[operation]["risk_level"]
         assert manifest["risk_level"] == registry[operation]["risk_level"]
@@ -385,6 +459,61 @@ def test_host_intent_executor_dispatches_approved_stream_to_viewer_broker(monkey
     assert captured["execution_token"]["conversation_id"] == "conv-1"
 
 
+def test_host_intent_exec_guarded_has_confirmation_phrase_and_approves(tmp_path, monkeypatch):
+    from core_runtime.host_intent.executor import HostIntentExecutor
+
+    service = _authority_service(tmp_path, monkeypatch)
+    monkeypatch.setattr("core_runtime.host_intent.executor.get_authority_service", lambda: service)
+    payload = {
+        "type": "host_intent",
+        "operation": "host.process.exec_guarded",
+        "args": {"argv": ["/bin/echo", "hello"]},
+        "caller": {
+            "pack_id": "third_party_pack",
+            "function_id": "run_shell",
+        },
+        "host_function_id": "host_process_exec_guarded",
+    }
+
+    first = HostIntentExecutor().handle(
+        payload,
+        principal_id="third_party_pack",
+        caller_pack_id="third_party_pack",
+        caller_function_id="run_shell",
+        request_context={"conversation_id": "conv-1"},
+    )
+
+    assert first["status"] == "approval_required"
+    phrase = first["resource"]["confirmation_phrase"]
+    assert phrase.startswith("RUMI-HOST-")
+    assert first["confirmation_phrase"] == phrase
+    request_view = service.get_request(first["request_id"])["request"]
+    assert request_view["resource"]["confirmation_phrase"] == phrase
+    assert request_view["display_metadata"]["confirmation_phrase"] == phrase
+
+    approved = service.approve_request(
+        first["request_id"],
+        scope="once",
+        config={"confirmation_text": phrase},
+        ui_operator=_ui_operator(first["request_id"]),
+    )
+    assert approved["success"] is True
+
+    retry = HostIntentExecutor().handle(
+        payload,
+        principal_id="third_party_pack",
+        caller_pack_id="third_party_pack",
+        caller_function_id="run_shell",
+        request_context={
+            "conversation_id": "conv-1",
+            **_authority_context("host.process.exec_guarded", first["request_id"], approved["token"]),
+        },
+    )
+
+    assert retry["success"] is True
+    assert retry["status"] in {"prepared", "executed"}
+
+
 def test_direct_host_function_from_non_host_pack_becomes_critical_authority_request(monkeypatch):
     from core_runtime.authority.models import AuthorityDecision
     from core_runtime.capability_executor import CapabilityExecutor
@@ -432,6 +561,115 @@ def test_direct_host_function_from_non_host_pack_becomes_critical_authority_requ
     assert response.output["permission_id"] == "host.process.exec_guarded"
     assert response.output["typed_confirmation_required"] is True
     assert authority.calls[0]["permission_id"] == "host.process.exec_guarded"
+
+
+def test_direct_host_boundary_consumes_approved_retry_token(tmp_path, monkeypatch):
+    from core_runtime.capability_executor import CapabilityExecutor
+
+    service = _authority_service(tmp_path, monkeypatch)
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
+    executor = CapabilityExecutor()
+    entry = _direct_host_entry()
+
+    response = executor._host_boundary_response_if_needed(
+        entry=entry,
+        principal_id="third_party_pack",
+        request_id="run-1",
+        start_time=time.time(),
+    )
+    assert response is not None
+    phrase = response.output["confirmation_phrase"]
+    approved = service.approve_request(
+        response.output["request_id"],
+        scope="once",
+        config={"confirmation_text": phrase},
+        ui_operator=_ui_operator(response.output["request_id"]),
+    )
+    assert approved["success"] is True
+
+    followup = executor._host_boundary_response_if_needed(
+        entry=entry,
+        principal_id="third_party_pack",
+        request_id="run-2",
+        start_time=time.time(),
+        request_context=_authority_context(
+            "host.process.exec_guarded",
+            response.output["request_id"],
+            approved["token"],
+        ),
+    )
+
+    assert followup is None
+
+
+def test_unified_execute_direct_host_approved_retry_reaches_execution(tmp_path, monkeypatch):
+    service = _authority_service(tmp_path, monkeypatch)
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
+    executor = _executor_for_direct_host_retry()
+    entry = _direct_host_entry()
+
+    first = executor._unified_execute(entry, "third_party_pack", {"args": {}, "request_id": "run-1"}, time.time())
+    assert first.error_type == "critical_host_confirmation_required"
+    approved = service.approve_request(
+        first.output["request_id"],
+        scope="once",
+        config={"confirmation_text": first.output["confirmation_phrase"]},
+        ui_operator=_ui_operator(first.output["request_id"]),
+    )
+    assert approved["success"] is True
+
+    retry = executor._unified_execute(
+        entry,
+        "third_party_pack",
+        {
+            "args": {},
+            "request_id": "run-2",
+            "context": _authority_context("host.process.exec_guarded", first.output["request_id"], approved["token"]),
+        },
+        time.time(),
+    )
+
+    assert retry.success is True
+    assert retry.output == {"executed": True}
+
+
+def test_function_call_direct_host_approved_retry_reaches_execution(tmp_path, monkeypatch):
+    service = _authority_service(tmp_path, monkeypatch)
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
+    executor = _executor_for_direct_host_retry()
+    entry = _direct_host_entry()
+    executor._function_registry = SimpleNamespace(
+        get=lambda qualified_name: entry if qualified_name == entry.qualified_name else None,
+        resolve_by_alias=lambda qualified_name: None,
+    )
+
+    first = executor._execute_function_call(
+        "third_party_pack",
+        {"qualified_name": entry.qualified_name, "args": {}, "request_id": "run-1"},
+        time.time(),
+    )
+    assert first.error_type == "critical_host_confirmation_required"
+    approved = service.approve_request(
+        first.output["request_id"],
+        scope="once",
+        config={"confirmation_text": first.output["confirmation_phrase"]},
+        ui_operator=_ui_operator(first.output["request_id"]),
+    )
+    assert approved["success"] is True
+
+    retry = executor._execute_function_call(
+        "third_party_pack",
+        {
+            "qualified_name": entry.qualified_name,
+            "args": {},
+            "request_id": "run-2",
+            "context": _authority_context("host.process.exec_guarded", first.output["request_id"], approved["token"]),
+        },
+        time.time(),
+    )
+
+    assert retry.success is True
+    assert retry.output == {"executed": True}
 
 
 def test_host_capabilities_pack_direct_host_functions_are_exempt_from_extra_boundary():
