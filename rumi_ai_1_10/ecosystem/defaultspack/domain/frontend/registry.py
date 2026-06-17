@@ -62,7 +62,7 @@ class FrontendRegistry:
         ]
         sidebar_items = self._filter_frontend_items(sidebar_items, selected_frontend_ids)
         settings_sections = self._merge_settings_sections(
-            self._settings_sections(ui_surfaces, extensions),
+            self._settings_sections(ui_surfaces, extensions, template_catalog=template_catalog),
             template_catalog.get("settings_sections", []),
         )
         settings_sections = self._filter_frontend_items(settings_sections, selected_frontend_ids)
@@ -117,7 +117,7 @@ class FrontendRegistry:
         ui_surfaces = self._load_ui_surfaces()
         return {
             "sections": self._merge_settings_sections(
-                self._settings_sections(ui_surfaces, self._load_extensions()),
+                self._settings_sections(ui_surfaces, self._load_extensions(), template_catalog=template_catalog),
                 template_catalog.get("settings_sections", []),
             ),
             "values": self._read_settings(),
@@ -741,10 +741,12 @@ class FrontendRegistry:
         self,
         ui_surfaces: list[dict[str, Any]],
         extensions: list[dict[str, Any]],
+        *,
+        template_catalog: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        template_catalog = external_io_template_catalog(self._pack_root)
-        input_templates = template_catalog.get("input") if isinstance(template_catalog.get("input"), list) else []
-        output_templates = template_catalog.get("output") if isinstance(template_catalog.get("output"), list) else []
+        external_template_catalog = self._external_io_template_catalog(template_catalog)
+        input_templates = external_template_catalog.get("input") if isinstance(external_template_catalog.get("input"), list) else []
+        output_templates = external_template_catalog.get("output") if isinstance(external_template_catalog.get("output"), list) else []
         input_profile_options = self._input_profile_options()
         output_profile_options = self._output_profile_options()
         sections = [
@@ -2192,6 +2194,12 @@ class FrontendRegistry:
         except Exception:
             return {"template_diagnostics": []}
 
+    def _external_io_template_catalog(self, template_catalog: dict[str, Any] | None = None) -> dict[str, Any]:
+        template_items = None
+        if isinstance(template_catalog, dict) and isinstance(template_catalog.get("external_io_templates"), list):
+            template_items = [item for item in template_catalog["external_io_templates"] if isinstance(item, dict)]
+        return external_io_template_catalog(self._pack_root, template_items=template_items)
+
     def _merge_settings_sections(
         self,
         base_sections: list[dict[str, Any]],
@@ -2993,9 +3001,10 @@ class FrontendRegistry:
         ).list_endpoints()
         input_profiles = InputProfileRegistry(self._pack_root).list_profiles()
         output_profiles = OutputProfileRegistry(self._pack_root).list_profiles()
-        template_catalog = external_io_template_catalog(self._pack_root)
-        input_templates = template_catalog.get("input") if isinstance(template_catalog.get("input"), list) else []
-        output_templates = template_catalog.get("output") if isinstance(template_catalog.get("output"), list) else []
+        template_catalog = self._template_catalog_metadata()
+        external_template_catalog = self._external_io_template_catalog(template_catalog)
+        input_templates = external_template_catalog.get("input") if isinstance(external_template_catalog.get("input"), list) else []
+        output_templates = external_template_catalog.get("output") if isinstance(external_template_catalog.get("output"), list) else []
         enabled_count = sum(1 for endpoint in endpoints if endpoint.get("enabled"))
         self._sync_external_input_selection(external_input, input_templates, endpoints=endpoints)
         self._sync_external_output_selection(external_output, output_templates)
@@ -3062,7 +3071,7 @@ class FrontendRegistry:
         external_output.setdefault("response_summary", "Prompt decisions create action plans; tools/adapters execute after policy checks.")
         external_output.setdefault("response_prompt_preset", "same_source_reply")
         external_output.setdefault("public_url_summary", "Providers: static, cloudflare_quick_tunnel")
-        extension_paths = template_catalog.get("extension_paths") if isinstance(template_catalog.get("extension_paths"), dict) else {}
+        extension_paths = external_template_catalog.get("extension_paths") if isinstance(external_template_catalog.get("extension_paths"), dict) else {}
         external_custom["custom_template_path"] = str(extension_paths.get("templates") or external_custom.get("custom_template_path") or "")
         external_custom["custom_profile_paths"] = ", ".join(
             item

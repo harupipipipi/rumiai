@@ -51,14 +51,15 @@ class ExternalIOTemplate:
 
 
 class ExternalIOTemplateRegistry:
-    def __init__(self, pack_root: Path | None = None) -> None:
+    def __init__(self, pack_root: Path | None = None, template_items: list[dict[str, Any]] | None = None) -> None:
         self.pack_root = pack_root or Path(__file__).resolve().parents[2]
+        self.template_items = [item for item in (template_items or []) if isinstance(item, dict)]
 
     def list_templates(self, *, direction: str | None = None) -> list[ExternalIOTemplate]:
         wanted = str(direction or "").strip().lower()
         templates: list[ExternalIOTemplate] = []
         templates.extend(self._load_yaml_templates(self.pack_root / "external_io_templates", origin="builtin"))
-        templates.extend(self._template_catalog_templates())
+        templates.extend(self._template_item_templates())
         templates.extend(self._load_yaml_templates(self.custom_templates_dir, origin="custom"))
         deduped: dict[str, ExternalIOTemplate] = {}
         for template in templates:
@@ -120,22 +121,9 @@ class ExternalIOTemplateRegistry:
                 templates.append(template)
         return templates
 
-    def _template_catalog_templates(self) -> list[ExternalIOTemplate]:
-        try:
-            from domain.templates.projectors import build_template_catalog
-        except Exception:
-            return []
-        try:
-            catalog = build_template_catalog(defaultspack_root=self.pack_root)
-        except Exception:
-            return []
-        items = catalog.get("external_io_templates")
-        if not isinstance(items, list):
-            return []
+    def _template_item_templates(self) -> list[ExternalIOTemplate]:
         templates: list[ExternalIOTemplate] = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
+        for item in self.template_items:
             template = ExternalIOTemplate.from_dict(
                 item,
                 origin="template",
@@ -174,8 +162,12 @@ class ExternalIOTemplateRegistry:
         return (origin_rank, direction_rank, provider_rank, template.id)
 
 
-def external_io_template_catalog(pack_root: Path | None = None) -> dict[str, Any]:
-    return ExternalIOTemplateRegistry(pack_root).catalog()
+def external_io_template_catalog(
+    pack_root: Path | None = None,
+    *,
+    template_items: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return ExternalIOTemplateRegistry(pack_root, template_items=template_items).catalog()
 
 
 def _safe_filename(value: str) -> str:

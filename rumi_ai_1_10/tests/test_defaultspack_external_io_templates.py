@@ -11,10 +11,15 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.external.io_templates import ExternalIOTemplateRegistry  # noqa: E402
 from domain.external.output_profile_registry import OutputProfileRegistry  # noqa: E402
+from domain.templates.projectors import build_template_catalog  # noqa: E402
 
 
 def test_builtin_external_io_templates_split_input_and_output():
-    catalog = ExternalIOTemplateRegistry(DEFAULTSPACK_ROOT).catalog()
+    template_catalog = build_template_catalog(defaultspack_root=DEFAULTSPACK_ROOT)
+    catalog = ExternalIOTemplateRegistry(
+        DEFAULTSPACK_ROOT,
+        template_items=template_catalog["external_io_templates"],
+    ).catalog()
     input_ids = {item["id"] for item in catalog["input"]}
     output_ids = {item["id"] for item in catalog["output"]}
 
