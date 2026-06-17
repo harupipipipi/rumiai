@@ -296,4 +296,7 @@ domains:
     may_import:
     - domain/coding
     path: domain/workspace
-exceptions: []
+exceptions:
+- from: chat
+  import: domain/tool_policy
+  file: domain/chat/run_request.py
