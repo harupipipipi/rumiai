@@ -742,9 +742,11 @@ class CapabilityExecutor:
             return True
         if not pack_id.startswith(_CORE_PACK_ID_PREFIX):
             return False
+        if self._entry_path_looks_like_ecosystem_pack(entry, pack_id):
+            return False
         if pack_id in self._core_function_handlers:
             return True
-        return not self._entry_path_looks_like_ecosystem_pack(entry, pack_id)
+        return True
 
     def _trusted_builtin_pack_path_verdict(self, pack_id: str, pack_root_hint=None) -> bool | None:
         """Return True/False for an existing path hint, or None when no path evidence exists."""
@@ -1080,9 +1082,11 @@ class CapabilityExecutor:
             "binary",
             "command",
         }
-        # Unified FunctionRegistry execution preserves the legacy capability
-        # boundary: every principal x permission dispatch requires a grant.
-        grant_required = True
+        grant_required = (
+            bool(getattr(entry, "legacy_grant_required", False))
+            or entry_grant_config is not None
+            or host_grant_required
+        )
         grant_config = dict(entry_grant_config or {})
         if grant_required:
             if self._grant_manager is None:
@@ -1571,11 +1575,29 @@ class CapabilityExecutor:
         *,
         principal_is_trusted_builtin=None,
     ):
-        del principal_id, caller_requires, request_context, principal_is_trusted_builtin
-        # ``caller_requires`` is a runtime trust boundary. Request context is
-        # pack/user-controlled at this layer, so it must not satisfy high-risk
-        # approval requirements.
-        return False
+        del principal_id, principal_is_trusted_builtin
+        if not self._caller_requires_high_risk_approval_only(caller_requires):
+            return False
+        if not isinstance(request_context, dict):
+            return False
+        token = str(request_context.get("_tool_server_approval_token") or "").strip()
+        operation = str(request_context.get("_tool_server_approval_operation") or "").strip()
+        args_hash = str(request_context.get("_tool_server_approval_args_hash") or "").strip()
+        if not token or not operation or not args_hash:
+            return False
+        try:
+            from domain.safety import approval
+        except Exception:
+            return False
+        verification = approval.verify_execution_token(
+            token,
+            operation,
+            args_hash,
+            pack_id=str(request_context.get("_tool_server_approval_pack_id") or ""),
+            conversation_id=str(request_context.get("_tool_server_approval_conversation_id") or ""),
+            consume=False,
+        )
+        return bool(getattr(verification, "valid", False))
 
     @staticmethod
     def _caller_requires_high_risk_approval_only(caller_requires):

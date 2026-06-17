@@ -7,6 +7,7 @@ from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from .security import is_trusted_pack_id, requires_approval_for_security, unsupported_execution_reason
 from domain.tool_policy.audit import audit_tool_policy
 from domain.tool_policy.internal_context import (
+    internal_tool_decision,
     internal_tool_decision_allows,
     mark_tool_server_approval_context,
     seal_tool_context,
@@ -795,7 +796,7 @@ class ToolExecutor:
             return approval_error
 
         def finish_handler_result(result):
-            if isinstance(result, dict) and not result.get("is_error"):
+            if isinstance(result, dict) and not result.get("is_error") and _requires_approval(tool_def):
                 consume_error = self._consume_deferred_tool_approval(next_context)
                 if consume_error is not None:
                     return consume_error
@@ -855,7 +856,7 @@ class ToolExecutor:
         self._current_local_tool_def = tool_def
         try:
             result = self._execute_local(tool_name, arguments, context)
-            if isinstance(result, dict) and not result.get("is_error"):
+            if isinstance(result, dict) and not result.get("is_error") and _requires_approval(tool_def):
                 consume_error = self._consume_deferred_tool_approval(context)
                 if consume_error is not None:
                     return consume_error
@@ -1977,9 +1978,10 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         mark_tool_server_approval_context(next_context)
         return next_context, None
     if _context_has_tool_server_approval(next_context):
-        approval_error = _attach_policy_approval_token(next_context, tool_def, arguments)
-        if approval_error is not None:
-            return next_context, approval_error
+        if not str(next_context.get("_tool_server_approval_token") or "").strip():
+            approval_error = _attach_policy_approval_token(next_context, tool_def, arguments)
+            if approval_error is not None:
+                return next_context, approval_error
         return next_context, None
     token = _approval_token_from_context(next_context, tool_def, arguments, *extra_lookup_keys) or _approval_token_from_arguments(arguments)
     if not token:
@@ -2178,6 +2180,9 @@ def _is_shell_or_git(tool_def):
 
 
 def _is_policy_allow_context(context):
+    decision = internal_tool_decision(context)
+    if decision and decision.get("source") == "approval_token":
+        return False
     return internal_tool_decision_allows(context)
 
 
