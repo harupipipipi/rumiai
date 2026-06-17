@@ -341,7 +341,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         trigger: "pinch",
         mode: "dispatch_audio",
         action_id: "chat.message",
-        input_text: transcript ? `音声入力の文字起こし:\n${transcript}` : "指をくっつけている間に録音した音声を入力として処理してください。",
+        input_text: transcript ? `音声入力の文字起こし:\n${transcript}` : "OKマークで録音した音声を入力として処理してください。",
         conversation_id: conversationIdRef.current || undefined,
         confidence: state.confidence,
         duration_ms: recording.durationMs,
@@ -411,7 +411,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     pinchTranscriptRef.current = "";
     setPinchTranscriptPreview("");
     setPinchDetectorStatus("recording");
-    setMessage("録音中。指を離すと送ります。");
+    setMessage("録音中。OKマークを崩すと送ります。");
     try {
       const recorder = await startPinchAudioRecorder(selectedMicId || undefined);
       pinchRecorderRef.current = recorder;
@@ -1453,11 +1453,11 @@ function landmarkPercent(value: number): number {
 }
 
 function recognitionMonitorLabel(status: string, hasHand: boolean, recording: boolean, recordingSeconds: number): string {
-  if (recording) return `録音中 ${formatRecordingTime(recordingSeconds)}・離すと送信`;
+  if (recording) return `録音中 ${formatRecordingTime(recordingSeconds)}・OKマークを崩すと送信`;
   if (status === "sending") return "AIに送信中";
   if (status === "loading") return "合図の認識を準備中";
   if (status === "unavailable") return "合図待ちを開始できません";
-  if (hasHand) return "手を認識中・つまむと録音";
+  if (hasHand) return "手を認識中・OKマークで録音";
   return "手をカメラに入れてください";
 }
 

@@ -67,7 +67,7 @@ export const ambientPermissionLabels: Record<string, string> = {
 export const ambientCopyJa = {
   title: "合図待ち",
   subtitle: "指で録音",
-  gestureShort: "親指と人差し指をつまむと録音します。離すと送ります。",
+  gestureShort: "OKマークを作ると録音します。崩すと送ります。",
   privacyShort: "音声・映像は保存しません",
   auditShort: "履歴には使った時刻と結果だけ残します",
   states: {
@@ -95,20 +95,20 @@ export const ambientCopyJa = {
     readyOff: {
       badge: "停止中",
       headline: "合図待ちは停止中です",
-      body: "親指と人差し指をつまむと録音します",
+      body: "OKマークを作ると録音します",
       primary: "合図待ちを開始",
       tone: "zinc",
     },
     monitoring: {
       badge: "使用中",
       headline: "合図を待っています",
-      body: "親指と人差し指をつまむと録音します",
+      body: "OKマークを作ると録音します",
       primary: "停止する",
       tone: "emerald",
     },
     recording: {
       badge: "録音中",
-      headline: "録音中。指を離すと送ります。",
+      headline: "録音中。OKマークを崩すと送ります。",
       body: "録音データは保存しません",
       primary: "キャンセル",
       tone: "red",
@@ -130,7 +130,7 @@ export const ambientCopyJa = {
     denied: {
       badge: "許可が拒否されています",
       headline: "マイクまたはカメラが拒否されています",
-      body: "設定から許可してください。許可後は親指と人差し指をつまむと録音します",
+      body: "設定から許可してください。許可後はOKマークで録音します",
       primary: "許可を開く",
       tone: "red",
     },

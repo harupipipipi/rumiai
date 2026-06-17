@@ -538,6 +538,7 @@ def test_ambient_store_migrates_legacy_gesture_release_threshold(monkeypatch, tm
         json.dumps({
             "services": {
                 "gesture_wake_monitor": {
+                    "detector": "thumb_tip_index_tip_distance_v1",
                     "release_threshold": 0.38,
                 },
             },
@@ -551,6 +552,7 @@ def test_ambient_store_migrates_legacy_gesture_release_threshold(monkeypatch, tm
     state = AmbientStore().read()
 
     assert state["services"]["gesture_wake_monitor"]["release_threshold"] == 0.46
+    assert state["services"]["gesture_wake_monitor"]["detector"] == "ok_mark_thumb_index_open_fingers_v1"
 
 
 def test_ambient_routes_and_functions_are_registered():

@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import {
   GesturePinchDetector,
   fingerChoiceFromLandmarks,
+  isOkMarkPose,
   normalizedThumbIndexDistance,
+  type Handedness,
   type HandLandmark,
 } from "./gesturePinchDetector";
 
@@ -34,26 +36,125 @@ function indexOnlyLandmarks(indexTipX: number, indexTipY = 0.42): HandLandmark[]
   return items;
 }
 
+function okMarkLandmarks(hand: Exclude<Handedness, "Unknown"> = "Right"): HandLandmark[] {
+  const items: HandLandmark[] = [
+    { x: 0.5, y: 0.78, z: 0 },
+    { x: 0.4, y: 0.64, z: 0 },
+    { x: 0.36, y: 0.55, z: 0 },
+    { x: 0.38, y: 0.48, z: 0 },
+    { x: 0.42, y: 0.44, z: 0 },
+    { x: 0.44, y: 0.52, z: 0 },
+    { x: 0.4, y: 0.46, z: 0 },
+    { x: 0.41, y: 0.42, z: 0 },
+    { x: 0.44, y: 0.43, z: 0 },
+    { x: 0.5, y: 0.48, z: 0 },
+    { x: 0.52, y: 0.34, z: 0 },
+    { x: 0.53, y: 0.22, z: 0 },
+    { x: 0.54, y: 0.1, z: 0 },
+    { x: 0.56, y: 0.5, z: 0 },
+    { x: 0.59, y: 0.38, z: 0 },
+    { x: 0.61, y: 0.27, z: 0 },
+    { x: 0.63, y: 0.16, z: 0 },
+    { x: 0.62, y: 0.54, z: 0 },
+    { x: 0.66, y: 0.43, z: 0 },
+    { x: 0.68, y: 0.34, z: 0 },
+    { x: 0.7, y: 0.24, z: 0 },
+  ];
+  return hand === "Right" ? items : mirrorLandmarks(items);
+}
+
+function closePinchWithoutOkPosture(): HandLandmark[] {
+  const items = okMarkLandmarks("Right").map((landmark) => ({ ...landmark }));
+  items[10] = { x: 0.52, y: 0.56, z: 0 };
+  items[11] = { x: 0.5, y: 0.61, z: 0 };
+  items[12] = { x: 0.48, y: 0.58, z: 0 };
+  items[14] = { x: 0.57, y: 0.58, z: 0 };
+  items[15] = { x: 0.56, y: 0.63, z: 0 };
+  items[16] = { x: 0.54, y: 0.6, z: 0 };
+  items[18] = { x: 0.63, y: 0.6, z: 0 };
+  items[19] = { x: 0.62, y: 0.65, z: 0 };
+  items[20] = { x: 0.6, y: 0.62, z: 0 };
+  return items;
+}
+
+function fistLandmarks(): HandLandmark[] {
+  const items = closePinchWithoutOkPosture();
+  items[6] = { x: 0.45, y: 0.58, z: 0 };
+  items[7] = { x: 0.46, y: 0.61, z: 0 };
+  items[8] = { x: 0.43, y: 0.46, z: 0 };
+  return items;
+}
+
+function spreadThumbIndex(landmarkItems: HandLandmark[]): HandLandmark[] {
+  const items = landmarkItems.map((landmark) => ({ ...landmark }));
+  items[8] = { ...items[8], x: items[8].x + 0.2 };
+  return items;
+}
+
+function mirrorLandmarks(landmarkItems: HandLandmark[]): HandLandmark[] {
+  return landmarkItems.map((landmark) => ({ ...landmark, x: 1 - landmark.x }));
+}
+
 test("normalizedThumbIndexDistance uses thumb tip and index tip over hand scale", () => {
   assert.ok(Math.abs(normalizedThumbIndexDistance(landmarks(0.55)) - 0.1) < 0.0001);
 });
 
-test("pinch detector triggers after a held close thumb/index pose", () => {
+test("ok mark detector accepts left and right hand postures", () => {
+  for (const hand of ["Left", "Right"] as const) {
+    const detector = new GesturePinchDetector({ pinchStartMs: 0 });
+    const pose = okMarkLandmarks(hand);
+    assert.equal(isOkMarkPose(pose), true);
+    const triggered = detector.updateFromLandmarks({ landmarks: pose, now: 1000, handedness: hand });
+    assert.equal(triggered.triggered, true);
+    assert.equal(triggered.active, true);
+    assert.equal(triggered.hand, hand);
+  }
+});
+
+test("ok mark detector triggers after a held ok posture", () => {
   const detector = new GesturePinchDetector({ pinchStartMs: 300, cooldownMs: 1500 });
-  assert.equal(detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 1000 }).reason, "pinch_candidate");
-  const triggered = detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 1320, handedness: "Right" });
+  assert.equal(detector.updateFromLandmarks({ landmarks: okMarkLandmarks(), now: 1000 }).reason, "ok_mark_candidate");
+  const triggered = detector.updateFromLandmarks({ landmarks: okMarkLandmarks(), now: 1320, handedness: "Right" });
   assert.equal(triggered.triggered, true);
   assert.equal(triggered.active, true);
   assert.equal(triggered.hand, "Right");
 });
 
+test("close thumb-index pinch without ok posture is rejected", () => {
+  const detector = new GesturePinchDetector({ pinchStartMs: 0 });
+  const pose = closePinchWithoutOkPosture();
+  assert.equal(isOkMarkPose(pose), false);
+  const state = detector.updateFromLandmarks({ landmarks: pose, now: 1000 });
+  assert.equal(state.triggered, false);
+  assert.equal(state.active, false);
+  assert.equal(state.reason, "ok_mark_posture_missing");
+});
+
+test("fist-like close pose is rejected", () => {
+  const detector = new GesturePinchDetector({ pinchStartMs: 0 });
+  const state = detector.updateFromLandmarks({ landmarks: fistLandmarks(), now: 1000 });
+  assert.equal(state.triggered, false);
+  assert.equal(state.active, false);
+  assert.equal(isOkMarkPose(fistLandmarks()), false);
+});
+
 test("pinch detector releases and observes cooldown before retriggering", () => {
   const detector = new GesturePinchDetector({ pinchStartMs: 0, pinchReleaseMs: 100, cooldownMs: 1500 });
-  assert.equal(detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 1000 }).triggered, true);
-  detector.updateFromLandmarks({ landmarks: landmarks(0.8), now: 1120 });
-  assert.equal(detector.updateFromLandmarks({ landmarks: landmarks(0.8), now: 1230 }).reason, "pinch_released");
-  assert.equal(detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 1240 }).reason, "cooldown");
-  assert.equal(detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 2601 }).triggered, true);
+  assert.equal(detector.updateFromLandmarks({ landmarks: okMarkLandmarks(), now: 1000 }).triggered, true);
+  detector.updateFromLandmarks({ landmarks: spreadThumbIndex(okMarkLandmarks()), now: 1120 });
+  assert.equal(detector.updateFromLandmarks({ landmarks: spreadThumbIndex(okMarkLandmarks()), now: 1230 }).reason, "pinch_released");
+  assert.equal(detector.updateFromLandmarks({ landmarks: okMarkLandmarks(), now: 1240 }).reason, "cooldown");
+  assert.equal(detector.updateFromLandmarks({ landmarks: okMarkLandmarks(), now: 2601 }).triggered, true);
+});
+
+test("broken ok posture releases with compatible pinch_released reason", () => {
+  const detector = new GesturePinchDetector({ pinchStartMs: 0, pinchReleaseMs: 100 });
+  assert.equal(detector.updateFromLandmarks({ landmarks: okMarkLandmarks(), now: 1000 }).triggered, true);
+  detector.updateFromLandmarks({ landmarks: closePinchWithoutOkPosture(), now: 1120 });
+  const released = detector.updateFromLandmarks({ landmarks: closePinchWithoutOkPosture(), now: 1230 });
+  assert.equal(released.reason, "pinch_released");
+  assert.equal(released.active, false);
+  assert.equal(released.releasedAt, 1230);
 });
 
 test("pinch detector does not release when tracking confidence briefly drops", () => {
@@ -63,27 +164,27 @@ test("pinch detector does not release when tracking confidence briefly drops", (
     minHandConfidence: 0.6,
     minTrackingConfidence: 0.6,
   });
-  assert.equal(detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 1000 }).triggered, true);
+  assert.equal(detector.updateFromLandmarks({ landmarks: okMarkLandmarks(), now: 1000 }).triggered, true);
   const lowConfidence = detector.updateFromLandmarks({
-    landmarks: landmarks(0.8),
+    landmarks: spreadThumbIndex(okMarkLandmarks()),
     handPresenceConfidence: 0.2,
     trackingConfidence: 0.2,
     now: 1300,
   });
   assert.equal(lowConfidence.active, true);
   assert.equal(lowConfidence.reason, "low_confidence");
-  const stillPinched = detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 1450 });
+  const stillPinched = detector.updateFromLandmarks({ landmarks: okMarkLandmarks(), now: 1450 });
   assert.equal(stillPinched.active, true);
   assert.notEqual(stillPinched.reason, "pinch_released");
 });
 
 test("pinch detector does not release on a brief missing-landmark frame while active", () => {
   const detector = new GesturePinchDetector({ pinchStartMs: 0, pinchReleaseMs: 100 });
-  assert.equal(detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 1000 }).triggered, true);
+  assert.equal(detector.updateFromLandmarks({ landmarks: okMarkLandmarks(), now: 1000 }).triggered, true);
   const missing = detector.updateFromLandmarks({ landmarks: [], now: 1300 });
   assert.equal(missing.active, true);
   assert.equal(missing.reason, "missing_landmarks");
-  const stillPinched = detector.updateFromLandmarks({ landmarks: landmarks(0.55), now: 1450 });
+  const stillPinched = detector.updateFromLandmarks({ landmarks: okMarkLandmarks(), now: 1450 });
   assert.equal(stillPinched.active, true);
   assert.notEqual(stillPinched.reason, "pinch_released");
 });

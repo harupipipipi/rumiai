@@ -164,7 +164,7 @@ def _default_state() -> dict[str, Any]:
             "gesture_wake_monitor": {
                 "enabled": True,
                 "status": "paused",
-                "detector": "thumb_tip_index_tip_distance_v1",
+                "detector": "ok_mark_thumb_index_open_fingers_v1",
                 "pinch_threshold": 0.28,
                 "release_threshold": 0.46,
                 "cooldown_ms": 1500,
@@ -329,6 +329,8 @@ def _migrate_legacy_gesture_thresholds(state: dict[str, Any]) -> None:
         release_threshold = 0.0
     if release_threshold <= 0.38:
         service["release_threshold"] = 0.46
+    if service.get("detector") == "thumb_tip_index_tip_distance_v1":
+        service["detector"] = "ok_mark_thumb_index_open_fingers_v1"
 
 
 def _migrate_legacy_hooks(state: dict[str, Any]) -> None:

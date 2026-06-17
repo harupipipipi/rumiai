@@ -67,6 +67,16 @@ const DEFAULTS = {
   minTrackingConfidence: 0.6,
 };
 
+const OK_MARK_FINGERS = ["middle", "ring", "pinky"] as const;
+const OK_MARK_MIN_OPEN_FINGERS = 2;
+const OK_MARK_MIN_TIP_MCP_DISTANCE = 0.38;
+const OK_MARK_TIP_PIP_EXTENSION_MARGIN = 0.12;
+const OK_MARK_TIP_DIP_EXTENSION_MARGIN = 0.04;
+const OK_MARK_WRIST_EXTENSION_MARGIN = 0.06;
+
+type FingerName = "index" | "middle" | "ring" | "pinky";
+type OkMarkFingerName = typeof OK_MARK_FINGERS[number];
+
 export class GesturePinchDetector {
   private active = false;
   private candidateStartedAt: number | null = null;
@@ -125,8 +135,9 @@ export class GesturePinchDetector {
       };
     }
 
+    const startOkMark = okMarkPostureFromLandmarks(frame.landmarks, normalizedDistance, options.pinchStartThreshold);
     if (!this.active) {
-      if (normalizedDistance < options.pinchStartThreshold) {
+      if (startOkMark.ok) {
         this.candidateStartedAt ??= now;
         const heldMs = now - this.candidateStartedAt;
         const cooldownReady = now - this.lastTriggeredAt >= options.cooldownMs;
@@ -141,13 +152,18 @@ export class GesturePinchDetector {
             startedAt: this.candidateStartedAt,
           };
         }
-        return this.state(frame, normalizedDistance, confidence, choiceState ? "choice_candidate" : cooldownReady ? "pinch_candidate" : "cooldown");
+        return this.state(frame, normalizedDistance, confidence, cooldownReady ? "ok_mark_candidate" : "cooldown");
+      }
+      if (startOkMark.thumbIndexClose) {
+        this.candidateStartedAt = null;
+        return this.state(frame, normalizedDistance, confidence, choiceState ? "choice_candidate" : "ok_mark_posture_missing");
       }
       this.candidateStartedAt = null;
       return this.state(frame, normalizedDistance, confidence, choiceState ? "choice_candidate" : undefined);
     }
 
-    if (normalizedDistance > options.pinchReleaseThreshold) {
+    const releaseOkMark = okMarkPostureFromLandmarks(frame.landmarks, normalizedDistance, options.pinchReleaseThreshold);
+    if (!releaseOkMark.ok) {
       this.releaseStartedAt ??= now;
       if (now - this.releaseStartedAt >= options.pinchReleaseMs) {
         this.active = false;
@@ -264,13 +280,16 @@ export function updateFromLandmarks(
 export function normalizedThumbIndexDistance(landmarks: HandLandmark[]): number {
   const thumbTip = landmarks[4];
   const indexTip = landmarks[8];
-  const wrist = landmarks[0];
-  const middleMcp = landmarks[9];
-  if (!thumbTip || !indexTip || !wrist || !middleMcp) return Number.POSITIVE_INFINITY;
+  if (!thumbTip || !indexTip) return Number.POSITIVE_INFINITY;
   const pinchDistance = distance(thumbTip, indexTip);
-  const handScale = distance(wrist, middleMcp);
-  if (handScale <= 0) return Number.POSITIVE_INFINITY;
+  const handScale = handScaleFromLandmarks(landmarks);
+  if (!Number.isFinite(handScale)) return Number.POSITIVE_INFINITY;
   return pinchDistance / handScale;
+}
+
+export function isOkMarkPose(landmarks: HandLandmark[], thumbIndexThreshold = DEFAULTS.pinchStartThreshold): boolean {
+  const normalizedDistance = normalizedThumbIndexDistance(landmarks);
+  return okMarkPostureFromLandmarks(landmarks, normalizedDistance, thumbIndexThreshold).ok;
 }
 
 export function fingerChoiceFromLandmarks(landmarks: HandLandmark[]): FingerChoice | null {
@@ -292,17 +311,68 @@ export function extendedFingerCount(landmarks: HandLandmark[]): number {
     .length;
 }
 
-function isFingerExtended(landmarks: HandLandmark[], finger: "index" | "middle" | "ring" | "pinky"): boolean {
-  const indices = {
-    index: [8, 6],
-    middle: [12, 10],
-    ring: [16, 14],
-    pinky: [20, 18],
-  }[finger];
-  const tip = landmarks[indices[0]];
-  const pip = landmarks[indices[1]];
+function okMarkPostureFromLandmarks(
+  landmarks: HandLandmark[],
+  normalizedDistance: number,
+  thumbIndexThreshold: number,
+): { ok: boolean; thumbIndexClose: boolean; openFingerCount: number } {
+  const handScale = handScaleFromLandmarks(landmarks);
+  const thumbIndexClose = Number.isFinite(normalizedDistance) && normalizedDistance < thumbIndexThreshold;
+  if (!thumbIndexClose || !Number.isFinite(handScale)) {
+    return { ok: false, thumbIndexClose, openFingerCount: 0 };
+  }
+  const openFingerCount = OK_MARK_FINGERS.filter((finger) => isOkMarkFingerOpen(landmarks, finger, handScale)).length;
+  return {
+    ok: openFingerCount >= OK_MARK_MIN_OPEN_FINGERS,
+    thumbIndexClose,
+    openFingerCount,
+  };
+}
+
+function isOkMarkFingerOpen(landmarks: HandLandmark[], finger: OkMarkFingerName, handScale: number): boolean {
+  const joints = fingerJoints(finger);
+  const wrist = landmarks[0];
+  const mcp = landmarks[joints.mcp];
+  const pip = landmarks[joints.pip];
+  const dip = landmarks[joints.dip];
+  const tip = landmarks[joints.tip];
+  if (!wrist || !mcp || !pip || !dip || !tip || handScale <= 0) return false;
+  const tipMcp = distance(tip, mcp) / handScale;
+  const pipMcp = distance(pip, mcp) / handScale;
+  const dipMcp = distance(dip, mcp) / handScale;
+  const tipWrist = distance(tip, wrist) / handScale;
+  const pipWrist = distance(pip, wrist) / handScale;
+  return (
+    tipMcp >= OK_MARK_MIN_TIP_MCP_DISTANCE
+    && tipMcp - pipMcp >= OK_MARK_TIP_PIP_EXTENSION_MARGIN
+    && tipMcp - dipMcp >= OK_MARK_TIP_DIP_EXTENSION_MARGIN
+    && tipWrist - pipWrist >= OK_MARK_WRIST_EXTENSION_MARGIN
+  );
+}
+
+function isFingerExtended(landmarks: HandLandmark[], finger: FingerName): boolean {
+  const joints = fingerJoints(finger);
+  const tip = landmarks[joints.tip];
+  const pip = landmarks[joints.pip];
   if (!tip || !pip) return false;
   return tip.y < pip.y - 0.035;
+}
+
+function fingerJoints(finger: FingerName): { mcp: number; pip: number; dip: number; tip: number } {
+  return {
+    index: { mcp: 5, pip: 6, dip: 7, tip: 8 },
+    middle: { mcp: 9, pip: 10, dip: 11, tip: 12 },
+    ring: { mcp: 13, pip: 14, dip: 15, tip: 16 },
+    pinky: { mcp: 17, pip: 18, dip: 19, tip: 20 },
+  }[finger];
+}
+
+function handScaleFromLandmarks(landmarks: HandLandmark[]): number {
+  const wrist = landmarks[0];
+  const middleMcp = landmarks[9];
+  if (!wrist || !middleMcp) return Number.POSITIVE_INFINITY;
+  const handScale = distance(wrist, middleMcp);
+  return handScale > 0 ? handScale : Number.POSITIVE_INFINITY;
 }
 
 function distance(left: HandLandmark, right: HandLandmark): number {
