@@ -961,15 +961,23 @@ class DefaultsHttpServer:
         request_id = str((path_params or {}).get("request_id") or "").strip()
         config = request_data.get("config") if isinstance(request_data.get("config"), dict) else None
         ui_operator = request_data.get("ui_operator") if isinstance(request_data.get("ui_operator"), dict) else None
+        related_permissions = request_data.get("related_permissions")
+        if not isinstance(related_permissions, list):
+            related_permissions = []
+        approval_kwargs = {
+            "scope": str(request_data.get("scope") or "once"),
+            "config": config,
+            "expires_in_seconds": request_data.get("expires_in_seconds"),
+            "ui_operator": ui_operator,
+        }
+        if related_permissions:
+            approval_kwargs["related_permissions"] = [str(item) for item in related_permissions]
         try:
             from core_runtime.authority import get_authority_service
 
             result = get_authority_service().approve_request(
                 request_id,
-                scope=str(request_data.get("scope") or "once"),
-                config=config,
-                expires_in_seconds=request_data.get("expires_in_seconds"),
-                ui_operator=ui_operator,
+                **approval_kwargs,
             )
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
