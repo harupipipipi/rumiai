@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 from copy import deepcopy
 from pathlib import Path
@@ -27,6 +28,14 @@ from domain.external.token_store import external_token_status
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
 from transport.registry import component_http_route_specs, component_route_diagnostics
+
+
+def _default_local_rumi_url() -> str:
+    port = str(os.environ.get("RUMI_DEFAULTSPACK_PORT") or os.environ.get("DEFAULTS_HTTP_PORT") or "8766").strip()
+    host = str(os.environ.get("DEFAULTS_HTTP_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    if host in {"0.0.0.0", "::"}:
+        host = "127.0.0.1"
+    return f"http://{host}:{port or '8766'}"
 
 
 class FrontendRegistry:
@@ -636,6 +645,7 @@ class FrontendRegistry:
         ui_surfaces: list[dict[str, Any]],
         extensions: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        default_local_url = _default_local_rumi_url()
         template_catalog = external_io_template_catalog(self._pack_root)
         input_templates = template_catalog.get("input") if isinstance(template_catalog.get("input"), list) else []
         output_templates = template_catalog.get("output") if isinstance(template_catalog.get("output"), list) else []
@@ -1237,7 +1247,7 @@ class FrontendRegistry:
                         "type": "public_url",
                         "default": {
                             "provider_id": "cloudflare_quick_tunnel",
-                            "local_url": "http://127.0.0.1:8766",
+                            "local_url": default_local_url,
                             "route_path": "/api/integrations/line/webhook",
                         },
                         "help": "LINE/Slack/DiscordのWebhook URL欄へ貼る一時公開URLを発行します。Cloudflareはprovider実装の1つです。",
@@ -2294,6 +2304,7 @@ class FrontendRegistry:
         return self._refresh_derived_settings(values)
 
     def _default_settings(self) -> dict[str, Any]:
+        default_local_url = _default_local_rumi_url()
         return {
             "general": {
                 "composer_placeholder": "メッセージを入力...",
@@ -2387,7 +2398,7 @@ class FrontendRegistry:
                 "input_endpoint_id": "line-main",
                 "public_url_launcher": {
                     "provider_id": "cloudflare_quick_tunnel",
-                    "local_url": "http://127.0.0.1:8766",
+                    "local_url": default_local_url,
                     "route_path": "/api/integrations/line/webhook",
                 },
                 "provider_route_copy": (
@@ -2986,14 +2997,16 @@ class FrontendRegistry:
             "public_url_launcher",
             {
                 "provider_id": "cloudflare_quick_tunnel",
-                "local_url": "http://127.0.0.1:8766",
+                "local_url": _default_local_rumi_url(),
                 "route_path": self._route_for_input_provider(str(external_input.get("input_provider") or "line")),
             },
         )
         if isinstance(external_input.get("public_url_launcher"), dict):
             public_url_launcher = external_input["public_url_launcher"]
             public_url_launcher.setdefault("provider_id", "cloudflare_quick_tunnel")
-            public_url_launcher.setdefault("local_url", "http://127.0.0.1:8766")
+            current_local_url = str(public_url_launcher.get("local_url") or "").strip()
+            if not current_local_url or current_local_url == "http://127.0.0.1:8766":
+                public_url_launcher["local_url"] = _default_local_rumi_url()
             public_url_launcher["route_path"] = self._route_for_input_provider(str(external_input.get("input_provider") or "line"))
         external_input["provider_route_copy"] = self._provider_route_copy()
         external_input["input_template_summary"] = self._template_summary(input_templates)

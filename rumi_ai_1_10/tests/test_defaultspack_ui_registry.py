@@ -719,6 +719,28 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(custom["tokens"][0]["provider_id"], "xiaomi-token-plan-sgp")
         self.assertEqual(custom["tokens"][0]["token_id"], "main")
 
+    def test_external_public_url_defaults_to_runtime_port(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with patch.dict(os.environ, {"DEFAULTS_HTTP_HOST": "0.0.0.0", "DEFAULTS_HTTP_PORT": "18768"}, clear=False):
+            values = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT)._refresh_derived_settings(
+                {
+                    "external_input": {
+                        "public_url_launcher": {
+                            "provider_id": "cloudflare_quick_tunnel",
+                            "local_url": "http://127.0.0.1:8766",
+                        }
+                    },
+                    "external_output": {},
+                    "hook": {},
+                }
+            )
+
+        self.assertEqual(
+            values["external_input"]["public_url_launcher"]["local_url"],
+            "http://127.0.0.1:18768",
+        )
+
     def test_update_settings_persists_sidebar_user_data(self):
         from domain.frontend.registry import FrontendRegistry
 

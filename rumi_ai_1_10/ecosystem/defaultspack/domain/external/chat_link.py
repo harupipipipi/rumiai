@@ -120,6 +120,7 @@ def _new_chat_result(event, context: dict[str, Any], *, model: str | None = None
         store = ChatStore()
         conversation = store.create_conversation(
             model=str(model or "").strip() or None,
+            conversation_kind="external",
             tags=[f"integration:{origin.provider}"],
             metadata={
                 "external_chat_link": {

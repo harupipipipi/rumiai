@@ -3,6 +3,15 @@ import type { AuthorityApprovalScope } from "./authorityApproval";
 
 const PANEL_CSRF_STORAGE_KEY = "rumi-panel-csrf";
 const DEFAULTSPACK_CSRF_STORAGE_KEY = "rumi-defaultspack-csrf";
+const DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY = "rumi-defaultspack-local-auth";
+
+declare global {
+  interface Window {
+    __RUMI_DEFAULTSPACK_BOOTSTRAP__?: {
+      localAuthToken?: string;
+    };
+  }
+}
 
 export type ChatContentBlock = {
   type?: string;
@@ -1507,12 +1516,50 @@ export function defaultspackApiHeaders(method: string, headers?: HeadersInit): H
   return nextHeaders;
 }
 
+function defaultspackLocalAuthToken(): string {
+  const bootstrapToken = typeof window !== "undefined"
+    ? String(window.__RUMI_DEFAULTSPACK_BOOTSTRAP__?.localAuthToken ?? "").trim()
+    : "";
+  const storage = sessionStorageOrNull();
+  if (bootstrapToken) {
+    try {
+      storage?.setItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY, bootstrapToken);
+    } catch {
+      // A same-page bootstrap token is enough even if sessionStorage is unavailable.
+    }
+    return bootstrapToken;
+  }
+  return storage?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() ?? "";
+}
+
+function shouldAttachDefaultspackAuth(input: RequestInfo | URL): boolean {
+  if (typeof input === "string") {
+    if (input.startsWith("/api/") || input.startsWith("/v1/")) return true;
+    try {
+      const url = new URL(input, window.location.href);
+      return url.origin === window.location.origin && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/v1/"));
+    } catch {
+      return false;
+    }
+  }
+  if (input instanceof URL) {
+    if (typeof window === "undefined") return false;
+    return input.origin === window.location.origin && (input.pathname.startsWith("/api/") || input.pathname.startsWith("/v1/"));
+  }
+  return false;
+}
+
 export function defaultspackApiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
+  const headers = defaultspackApiHeaders(method, init.headers);
+  const localAuthToken = defaultspackLocalAuthToken();
+  if (localAuthToken && shouldAttachDefaultspackAuth(input) && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${localAuthToken}`);
+  }
   return fetch(input, {
     ...init,
     method,
-    headers: defaultspackApiHeaders(method, init.headers),
+    headers,
   });
 }
 

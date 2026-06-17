@@ -15,6 +15,8 @@ def _provider(provider_id: str):
 
 def _default_local_url() -> str:
     host = os.environ.get("DEFAULTS_HTTP_HOST") or "127.0.0.1"
+    if host in {"0.0.0.0", "::"}:
+        host = "127.0.0.1"
     port = os.environ.get("DEFAULTS_HTTP_PORT") or "8766"
     return f"http://{host}:{port}"
 

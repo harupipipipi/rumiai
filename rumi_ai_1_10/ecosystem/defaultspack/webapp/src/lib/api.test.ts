@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ChatStreamInterruptedError, api, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { ChatStreamInterruptedError, api, defaultspackApiFetch, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
@@ -943,6 +943,42 @@ test("safe API requests do not include a local CSRF header", async () => {
   const headers = requestHeaders as Headers | null;
   assert.ok(headers);
   assert.equal(headers.get("X-Rumi-CSRF"), null);
+});
+
+test("defaultspack API fetch attaches bootstrap local auth token to API routes", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  let requestHeaders: Headers | null = null;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      __RUMI_DEFAULTSPACK_BOOTSTRAP__: { localAuthToken: "local-secret" },
+      location: { href: "http://localhost:18768/chat", origin: "http://localhost:18768" },
+    },
+  });
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestHeaders = new Headers(init?.headers);
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { ok: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await defaultspackApiFetch("/api/webhooks/public-urls", { method: "POST", body: "{}" });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousWindow) {
+      Object.defineProperty(globalThis, "window", previousWindow);
+    } else {
+      Reflect.deleteProperty(globalThis, "window");
+    }
+  }
+
+  const headers = requestHeaders as Headers | null;
+  assert.ok(headers);
+  assert.equal(headers.get("Authorization"), "Bearer local-secret");
+  assert.ok(headers.get("X-Rumi-CSRF"));
 });
 
 test("streamMessage includes a local CSRF header", async () => {

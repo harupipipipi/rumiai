@@ -900,6 +900,12 @@ function publicUrlConfig(value: unknown, fallback: unknown): Record<string, unkn
   return {};
 }
 
+function defaultLocalRumiUrl(): string {
+  return typeof window !== "undefined" && window.location?.origin
+    ? window.location.origin
+    : "http://127.0.0.1:8766";
+}
+
 function ProviderOAuthPanel({
   sectionId,
   fieldId,
@@ -1159,7 +1165,7 @@ function PublicUrlField({
 }) {
   const config = publicUrlConfig(value, field.default);
   const [providerId, setProviderId] = useState(String(config.provider_id ?? "cloudflare_quick_tunnel"));
-  const [localUrl, setLocalUrl] = useState(String(config.local_url ?? "http://127.0.0.1:8766"));
+  const [localUrl, setLocalUrl] = useState(String(config.local_url ?? defaultLocalRumiUrl()));
   const [routePath, setRoutePath] = useState(String(config.route_path ?? "/api/integrations/line/webhook"));
   const [result, setResult] = useState<Record<string, unknown> | null>(
     config.result && typeof config.result === "object" ? config.result as Record<string, unknown> : null,
@@ -1170,7 +1176,7 @@ function PublicUrlField({
   useEffect(() => {
     const next = publicUrlConfig(value, field.default);
     setProviderId(String(next.provider_id ?? "cloudflare_quick_tunnel"));
-    setLocalUrl(String(next.local_url ?? "http://127.0.0.1:8766"));
+    setLocalUrl(String(next.local_url ?? defaultLocalRumiUrl()));
     setRoutePath(String(next.route_path ?? "/api/integrations/line/webhook"));
     setResult(next.result && typeof next.result === "object" ? next.result as Record<string, unknown> : null);
   }, [field.default, value]);
@@ -1240,7 +1246,7 @@ function PublicUrlField({
             value={localUrl}
             onChange={(event) => setLocalUrl(event.target.value)}
             className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500"
-            placeholder="http://127.0.0.1:8766"
+            placeholder={defaultLocalRumiUrl()}
           />
         </label>
         <label className="space-y-1.5">
