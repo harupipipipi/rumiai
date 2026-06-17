@@ -313,6 +313,53 @@ test("composer renders template-provided slash command suggestions", () => {
   assert.match(html, /Write a context handoff file/);
 });
 
+test("composer suppresses slash command suggestions when template disables slash commands", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "context_txt",
+      name: "context-txt",
+      label: "Context TXT",
+      description: "Write a context handoff file.",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+    },
+  ];
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "/context",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      commands,
+      composerInput: {
+        id: "no_slash_composer",
+        feature_flags: { slash_commands: false },
+      },
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onCommandSelect: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+    }),
+  );
+
+  assert.doesNotMatch(html, /Commands/);
+  assert.doesNotMatch(html, /\/context-txt/);
+  assert.doesNotMatch(html, /Write a context handoff file/);
+});
+
 test("composer input template metadata changes safe input copy without replacing the component", () => {
   const html = renderToStaticMarkup(
     createElement(ComposerRenderer, {

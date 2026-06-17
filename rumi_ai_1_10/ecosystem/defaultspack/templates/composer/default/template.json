@@ -170,7 +170,7 @@
         "label": "Web Search",
         "description": "Toggle web search for this AI input.",
         "widget_kind": "tool_toggle",
-        "enabled": false
+        "enabled": true
       }
     }
   ]

@@ -15,10 +15,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
-def test_context_txt_template_command_materializes_artifact(tmp_path, monkeypatch):
-    from blocks.chat import materialize_context
+def _create_conversation(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
-    from domain.frontend.command_registry import SlashCommandRegistry
 
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
     ChatStore._instance = None
@@ -32,6 +30,15 @@ def test_context_txt_template_command_materializes_artifact(tmp_path, monkeypatc
         conversation["id"],
         {"role": "assistant", "content": [{"type": "text", "text": "Assistant reply"}]},
     )
+    return conversation
+
+
+def test_context_txt_template_command_materializes_artifact(tmp_path, monkeypatch):
+    from blocks.chat import materialize_context
+    from domain.chat.store import ChatStore
+    from domain.frontend.command_registry import SlashCommandRegistry
+
+    conversation = _create_conversation(tmp_path, monkeypatch)
 
     pack_root = tmp_path / "defaultspack"
     template_path = pack_root / "templates" / "context_txt" / "default" / "template.json"
@@ -101,6 +108,21 @@ def test_context_txt_template_command_materializes_artifact(tmp_path, monkeypatc
     data = result["data"]["result"]
     assert data["conversation_id"] == conversation["id"]
     assert data["path"].endswith(".txt")
+    assert data["filename"] == Path(data["path"]).name
+    assert data["name"] == data["filename"]
+    assert data["format"] == "text"
+    assert data["mime_type"] == "text/plain"
+    assert data["content_type"] == "text/plain"
+    assert data["artifacts"] == [
+        {
+            "path": data["path"],
+            "filename": data["filename"],
+            "name": data["filename"],
+            "size": data["size"],
+            "format": "text",
+            "mime_type": "text/plain",
+        }
+    ]
     output_path = (artifact_root / data["path"]).resolve()
     output_path.relative_to(artifact_root.resolve())
     assert output_path.is_file()
@@ -108,3 +130,79 @@ def test_context_txt_template_command_materializes_artifact(tmp_path, monkeypatc
     content = output_path.read_text(encoding="utf-8")
     assert "Hello context" in content
     assert "Assistant reply" in content
+    assert "### User" not in content
+    assert not content.lstrip().startswith("#")
+
+
+def test_materialize_context_honors_text_aliases(tmp_path, monkeypatch):
+    from blocks.chat import materialize_context
+    from domain.chat.store import ChatStore
+
+    conversation = _create_conversation(tmp_path, monkeypatch)
+    artifact_root = tmp_path / "artifacts"
+
+    try:
+        for format_alias in ("text", "txt"):
+            result = materialize_context.run(
+                {"conversation_id": conversation["id"], "format": format_alias},
+                {"artifact_root": str(artifact_root)},
+            )
+
+            assert result["status"] == "ok"
+            data = result["data"]
+            assert data["path"].endswith(".txt")
+            assert data["filename"] == Path(data["path"]).name
+            assert data["format"] == "text"
+            assert data["mime_type"] == "text/plain"
+            output_path = (artifact_root / data["path"]).resolve()
+            output_path.relative_to(artifact_root.resolve())
+            content = output_path.read_text(encoding="utf-8")
+            assert "Hello context" in content
+            assert "### User" not in content
+            assert not content.lstrip().startswith("#")
+    finally:
+        ChatStore._instance = None
+
+
+def test_materialize_context_honors_markdown_alias_and_metadata(tmp_path, monkeypatch):
+    from blocks.chat import materialize_context
+    from domain.chat.store import ChatStore
+
+    conversation = _create_conversation(tmp_path, monkeypatch)
+    artifact_root = tmp_path / "artifacts"
+
+    try:
+        result = materialize_context.run(
+            {"conversation_id": conversation["id"], "format": "md"},
+            {"artifact_root": str(artifact_root)},
+        )
+    finally:
+        ChatStore._instance = None
+
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["conversation_id"] == conversation["id"]
+    assert data["path"].endswith(".md")
+    assert data["filename"] == Path(data["path"]).name
+    assert data["name"] == data["filename"]
+    assert data["format"] == "markdown"
+    assert data["mime_type"] == "text/markdown"
+    assert data["content_type"] == "text/markdown"
+    assert data["artifacts"] == [
+        {
+            "path": data["path"],
+            "filename": data["filename"],
+            "name": data["filename"],
+            "size": data["size"],
+            "format": "markdown",
+            "mime_type": "text/markdown",
+        }
+    ]
+    output_path = (artifact_root / data["path"]).resolve()
+    output_path.relative_to(artifact_root.resolve())
+    assert output_path.is_file()
+    assert data["size"] == output_path.stat().st_size
+    content = output_path.read_text(encoding="utf-8")
+    assert content.startswith("# ")
+    assert "### User" in content
+    assert "Hello context" in content

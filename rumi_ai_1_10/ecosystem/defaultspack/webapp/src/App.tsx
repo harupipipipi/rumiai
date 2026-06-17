@@ -36,7 +36,7 @@ import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
-import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateComposerWidgetsForInput, templateToolPolicySettings } from "./lib/templateAiInput";
+import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./lib/templateAiInput";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
@@ -2015,7 +2015,12 @@ type ParsedSlashCommandInput = {
   raw: string;
 };
 
-export function parseSlashCommandInput(input: string, commands: ComposerCommandItem[]): ParsedSlashCommandInput | null {
+export function parseSlashCommandInput(
+  input: string,
+  commands: ComposerCommandItem[],
+  options: { enabled?: boolean } = {},
+): ParsedSlashCommandInput | null {
+  if (options.enabled === false) return null;
   const trimmed = input.trim();
   if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return null;
   const body = trimmed.slice(1).trim();
@@ -2328,6 +2333,10 @@ function ChatApp() {
     () => selectTemplateComposerInput(catalog, composerMode, templateAiInputMetadata),
     [catalog, composerMode, templateAiInputMetadata],
   );
+  const slashCommandsEnabled = useMemo(
+    () => templateFeatureFlagEnabled(composerInputMetadata, "slash_commands", true),
+    [composerInputMetadata],
+  );
   const templateToolPolicyMetadata = useMemo(
     () => selectTemplateToolPolicy(catalog, composerMode, templateAiInputMetadata),
     [catalog, composerMode, templateAiInputMetadata],
@@ -2355,6 +2364,7 @@ function ChatApp() {
     () => new Set(activeTemplateToolPolicy.allowedToolIds),
     [activeTemplateToolPolicy.allowedToolIds],
   );
+  const templateHasToolAllowlist = activeTemplateToolPolicy.hasAllowedToolRestriction;
   const sidebarItems: SidebarItem[] = useMemo(
     () => rawSidebarItems.filter((item) => item.category !== "tool" || !hiddenToolIdSet.has(item.id)),
     [hiddenToolIdSet, rawSidebarItems],
@@ -2374,8 +2384,8 @@ function ChatApp() {
   const composerExtensions = useMemo(
     () => composerExtensionItems(sidebarItems)
       .filter((item) => !disabledToolIdSet.has(item.id))
-      .filter((item) => templateAllowedToolIdSet.size === 0 || templateAllowedToolIdSet.has(item.id)),
-    [disabledToolIdSet, sidebarItems, templateAllowedToolIdSet],
+      .filter((item) => !templateHasToolAllowlist || templateAllowedToolIdSet.has(item.id)),
+    [disabledToolIdSet, sidebarItems, templateAllowedToolIdSet, templateHasToolAllowlist],
   );
   const templateComposerWidgets = useMemo(
     () => templateComposerWidgetsForInput(catalog, templateAiInputMetadata, composerInputMetadata, composerExtensions),
@@ -2525,6 +2535,7 @@ function ChatApp() {
   }, [canvasPreviews]);
 
   const composerCommands = useMemo(() => {
+    if (!slashCommandsEnabled) return [];
     const showAdvanced = settingsValues.commands?.show_advanced_commands === true;
     const fastCandidate = fastCandidateForProfile(activeProfile, selectableModelProfiles);
     const priceLowCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "low");
@@ -2541,7 +2552,7 @@ function ChatApp() {
         active: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
         enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
       }));
-  }, [activeProfile, commandCatalog, deepthinkEnabled, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, ultraYoloMode, yoloMode]);
+  }, [activeProfile, commandCatalog, deepthinkEnabled, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, slashCommandsEnabled, ultraYoloMode, yoloMode]);
   const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
@@ -3825,6 +3836,7 @@ function ChatApp() {
   };
 
   const handleComposerCommand = (commandId: string, rawInput?: string) => {
+    if (!slashCommandsEnabled) return;
     void executeComposerCommand(commandId, rawInput);
   };
 
@@ -4493,7 +4505,7 @@ function ChatApp() {
     event.preventDefault();
     if ((!input.trim() && attachedFiles.length === 0) || isGenerating) return;
 
-    const commandInput = parseSlashCommandInput(input, commandCatalog);
+    const commandInput = parseSlashCommandInput(input, commandCatalog, { enabled: slashCommandsEnabled });
     if (commandInput) {
       const shouldClearInput = await executeComposerCommand(commandInput.command.id, commandInput.raw);
       if (shouldClearInput !== false) setInput("");
@@ -4874,7 +4886,7 @@ function ChatApp() {
         ...(templateAiInputMetadata?.id ? { ai_input_id: templateAiInputMetadata.id } : {}),
         ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
         ...(activeTemplateToolPolicy.id ? { template_tool_policy_id: activeTemplateToolPolicy.id } : {}),
-        ...(activeTemplateToolPolicy.allowedToolIds.length ? { tool_allowlist: activeTemplateToolPolicy.allowedToolIds } : {}),
+        ...(activeTemplateToolPolicy.hasAllowedToolRestriction ? { tool_allowlist: activeTemplateToolPolicy.allowedToolIds } : {}),
         ...(activeTemplateToolPolicy.deniedToolIds.length ? { tool_denylist: activeTemplateToolPolicy.deniedToolIds } : {}),
         ...(activeTemplateToolPolicy.defaultEnabledToolIds.length ? { default_enabled_tools: activeTemplateToolPolicy.defaultEnabledToolIds } : {}),
         ...(activeTemplateToolPolicy.defaultDisabledToolIds.length ? { default_disabled_tools: activeTemplateToolPolicy.defaultDisabledToolIds } : {}),

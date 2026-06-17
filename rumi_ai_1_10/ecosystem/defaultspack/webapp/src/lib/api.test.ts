@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
-import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateComposerWidgetsForInput, templateToolPolicySettings } from "./templateAiInput";
+import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
 
@@ -59,6 +59,23 @@ test("slash command parsing supports multi-word aliases without treating them as
 
   const explicitOff = parseSlashCommandInput("/ultra yolo off", commands);
   assert.deepEqual(explicitOff?.args, { enabled: "off" });
+});
+
+test("slash command parsing can be disabled by template feature flags", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "context_txt",
+      name: "context-txt",
+      label: "Context TXT",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+    },
+  ];
+
+  assert.equal(parseSlashCommandInput("/context-txt handoff", commands, { enabled: false }), null);
+  assert.equal(parseSlashCommandInput("/context-txt handoff", commands)?.command.id, "context_txt");
 });
 
 test("composer command merge keeps backend execution shape while adding catalog commands", () => {
@@ -175,6 +192,99 @@ test("template ai input selects composer and tool policy metadata", () => {
   assert.deepEqual(settings.deniedToolIds, ["browser_computer"]);
   assert.equal(settings.toolChoice, "auto");
   assert.equal(settings.parallelToolCalls, true);
+});
+
+test("template ai input composes multiple active inputs and policies deterministically", () => {
+  const catalog = {
+    ai_inputs: [
+      {
+        id: "primary_ai",
+        composer_input: "primary_composer",
+        tool_policy: "primary_tools",
+        widgets: ["web_widget"],
+        modes: ["agent" as const],
+      },
+      {
+        id: "review_ai",
+        composer_input: "review_composer",
+        tool_policy: "review_tools",
+        widgets: ["review_widget"],
+        modes: ["agent" as const],
+      },
+      {
+        id: "coding_only_ai",
+        composer_input: "coding_composer",
+        modes: ["coding" as const],
+      },
+    ],
+    composer_inputs: [
+      {
+        id: "primary_composer",
+        placeholder: "Ask Rumi",
+        accepted_modalities: ["text"],
+        feature_flags: { slash_commands: false, file_attachments: true, voice_input: true },
+        modes: ["agent" as const],
+      },
+      {
+        id: "review_composer",
+        help: "Review context",
+        accepted_modalities: ["file", "text"],
+        feature_flags: { slash_commands: true, voice_input: false },
+        modes: ["agent" as const],
+      },
+      {
+        id: "coding_composer",
+        placeholder: "Coding only",
+        modes: ["coding" as const],
+      },
+    ],
+    tool_policies: [
+      {
+        id: "primary_tools",
+        policy: {
+          default_enabled_tools: ["web_search", "local_file"],
+          allowed_tools: ["web_search", "local_file"],
+          tool_choice: "auto",
+          parallel_tool_calls: true,
+        },
+        modes: ["agent" as const],
+      },
+      {
+        id: "review_tools",
+        policy: {
+          default_enabled_tools: ["web_search"],
+          default_disabled_tools: ["terminal"],
+          allowed_tools: ["web_search", "browser_computer"],
+          denied_tools: ["browser_computer"],
+          tool_choice: "required",
+          parallel_tool_calls: false,
+        },
+        modes: ["agent" as const],
+      },
+    ],
+  };
+
+  const aiInput = selectTemplateAiInput(catalog as any, "agent");
+  const composerInput = selectTemplateComposerInput(catalog as any, "agent", aiInput);
+  const toolPolicy = selectTemplateToolPolicy(catalog as any, "agent", aiInput);
+  const settings = templateToolPolicySettings(toolPolicy);
+
+  assert.equal(aiInput?.id, "composed_ai_input:primary_ai+review_ai");
+  assert.deepEqual(aiInput?.widgets, ["web_widget", "review_widget"]);
+  assert.equal(composerInput?.id, "composed_composer_input:primary_composer+review_composer");
+  assert.equal(composerInput?.placeholder, "Ask Rumi");
+  assert.deepEqual(composerInput?.accepted_modalities, ["text", "file"]);
+  assert.equal(templateFeatureFlagEnabled(composerInput, "slash_commands", true), false);
+  assert.deepEqual(composerInput?.feature_flags, { slash_commands: false, file_attachments: true, voice_input: false });
+  assert.equal(toolPolicy?.id, "composed_tool_policy:primary_tools+review_tools");
+  assert.deepEqual(settings.ids, ["primary_tools", "review_tools"]);
+  assert.deepEqual(settings.allowedToolIds, ["web_search"]);
+  assert.equal(settings.hasAllowedToolRestriction, true);
+  assert.deepEqual(settings.deniedToolIds, ["browser_computer"]);
+  assert.deepEqual(settings.defaultEnabledToolIds, ["web_search"]);
+  assert.deepEqual(settings.defaultDisabledToolIds, ["terminal"]);
+  assert.equal(settings.toolChoice, "required");
+  assert.equal(settings.parallelToolCalls, false);
 });
 
 test("template composer widgets become safe tool toggle widgets", () => {

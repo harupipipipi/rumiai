@@ -11,9 +11,11 @@ import type { ComposerExtensionItem, DroppedWidget } from "../renderers/types";
 
 export type TemplateToolPolicySettings = {
   id: string | null;
+  ids: string[];
   defaultEnabledToolIds: string[];
   defaultDisabledToolIds: string[];
   allowedToolIds: string[];
+  hasAllowedToolRestriction: boolean;
   deniedToolIds: string[];
   toolChoice?: "auto" | "none" | "required" | Record<string, unknown>;
   parallelToolCalls?: boolean;
@@ -44,43 +46,204 @@ function itemEnabled(item: { enabled?: boolean }): boolean {
   return item.enabled !== false;
 }
 
-function firstActive<T extends { enabled?: boolean; modes?: ComposerCommandMode[] }>(
+function activeItems<T extends { enabled?: boolean; modes?: ComposerCommandMode[] }>(
   items: T[] | undefined,
   mode: ComposerCommandMode,
-): T | null {
-  return items?.find((item) => itemEnabled(item) && modesMatch(item, mode)) ?? null;
+): T[] {
+  return (items ?? []).filter((item) => itemEnabled(item) && modesMatch(item, mode));
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return [...new Set(values.map(nonEmptyString).filter(Boolean))];
+}
+
+function sourceIds(items: Array<{ id?: string }>): string[] {
+  return uniqueStrings(items.map((item) => item.id));
+}
+
+function composedId(prefix: string, items: Array<{ id?: string }>): string {
+  const ids = sourceIds(items);
+  return ids.length <= 1 ? ids[0] ?? prefix : `${prefix}:${ids.join("+")}`;
+}
+
+function firstString<T>(items: T[], pick: (item: T) => unknown): string | undefined {
+  for (const item of items) {
+    const value = nonEmptyString(pick(item));
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function sameString<T>(items: T[], pick: (item: T) => unknown): string | undefined {
+  const values = uniqueStrings(items.map(pick));
+  return values.length === 1 ? values[0] : undefined;
+}
+
+function mergeStringLists<T>(items: T[], pick: (item: T) => unknown): string[] {
+  return uniqueStrings(items.flatMap((item) => stringList(pick(item))));
+}
+
+function mergeRecordValues<T>(items: T[], pick: (item: T) => unknown): Record<string, unknown> | undefined {
+  const merged: Record<string, unknown> = {};
+  for (const item of items) {
+    const record = objectRecord(pick(item));
+    if (record) Object.assign(merged, record);
+  }
+  return Object.keys(merged).length ? merged : undefined;
+}
+
+function mergeModes(items: Array<{ modes?: ComposerCommandMode[] }>): ComposerCommandMode[] | undefined {
+  const modes = uniqueStrings(items.flatMap((item) => item.modes ?? [])) as ComposerCommandMode[];
+  return modes.length ? modes : undefined;
+}
+
+function mergeFeatureFlags(items: Array<{ feature_flags?: Record<string, boolean | string | number | null | undefined> }>): Record<string, boolean | string | number | null | undefined> | undefined {
+  const merged: Record<string, boolean | string | number | null | undefined> = {};
+  for (const item of items) {
+    const flags = objectRecord(item.feature_flags);
+    if (!flags) continue;
+    for (const [key, value] of Object.entries(flags)) {
+      if (!key || value === undefined) continue;
+      if (!(key in merged)) {
+        merged[key] = value as boolean | string | number | null;
+        continue;
+      }
+      const current = merged[key];
+      if (typeof current === "boolean" && typeof value === "boolean") {
+        merged[key] = current && value;
+      } else if (current !== value) {
+        merged[key] = value as boolean | string | number | null;
+      }
+    }
+  }
+  return Object.keys(merged).length ? merged : undefined;
+}
+
+function sourceMetadata(items: Array<{ id?: string; metadata?: Record<string, unknown> }>): Record<string, unknown> {
+  const ids = sourceIds(items);
+  return {
+    ...(items[0]?.metadata ?? {}),
+    ...(ids.length ? { source_ids: ids } : {}),
+  };
+}
+
+function aiInputComposerIds(input: TemplateAiInput): string[] {
+  return uniqueStrings([input.composer_input_id, input.composer_input]);
+}
+
+function aiInputToolPolicyIds(input: TemplateAiInput): string[] {
+  return uniqueStrings([input.tool_policy_id, input.tool_policy]);
+}
+
+function sourceIdsFromMetadata(value: unknown): string[] {
+  return stringList(objectRecord(value)?.source_ids);
+}
+
+function selectedAiInputs(
+  catalog: UICatalog | null | undefined,
+  mode: ComposerCommandMode,
+  aiInput: TemplateAiInput | TemplateAiInput[] | null,
+): TemplateAiInput[] {
+  if (Array.isArray(aiInput)) return aiInput.filter((item) => itemEnabled(item) && modesMatch(item, mode));
+  if (!aiInput) return [];
+  const selectedSourceIds = new Set(sourceIdsFromMetadata(aiInput.metadata));
+  if (selectedSourceIds.size > 0) {
+    return activeItems(catalog?.ai_inputs, mode).filter((item) => selectedSourceIds.has(item.id));
+  }
+  return itemEnabled(aiInput) && modesMatch(aiInput, mode) ? [aiInput] : [];
+}
+
+function mergeTemplateAiInputs(items: TemplateAiInput[]): TemplateAiInput | null {
+  if (items.length === 0) return null;
+  if (items.length === 1) return items[0];
+  const metadata = sourceMetadata(items);
+  const composerInputIds = uniqueStrings(items.flatMap(aiInputComposerIds));
+  const toolPolicyIds = uniqueStrings(items.flatMap(aiInputToolPolicyIds));
+  return {
+    id: composedId("composed_ai_input", items),
+    label: firstString(items, (item) => item.label),
+    description: firstString(items, (item) => item.description),
+    widgets: mergeStringLists(items, (item) => item.widgets),
+    params: mergeRecordValues(items, (item) => item.params),
+    modes: mergeModes(items),
+    enabled: true,
+    template_id: sameString(items, (item) => item.template_id),
+    piece_id: sameString(items, (item) => item.piece_id),
+    origin: items[0]?.origin,
+    metadata: {
+      ...metadata,
+      ...(composerInputIds.length ? { composer_input_ids: composerInputIds } : {}),
+      ...(toolPolicyIds.length ? { tool_policy_ids: toolPolicyIds } : {}),
+    },
+  };
+}
+
+function mergeTemplateComposerInputs(items: TemplateComposerInput[]): TemplateComposerInput | null {
+  if (items.length === 0) return null;
+  if (items.length === 1) return items[0];
+  const widgetIds = mergeStringLists(items, (item) => objectRecord(item)?.widgets);
+  return {
+    id: composedId("composed_composer_input", items),
+    label: firstString(items, (item) => item.label),
+    description: firstString(items, (item) => item.description),
+    placeholder: firstString(items, (item) => item.placeholder),
+    help: firstString(items, (item) => item.help),
+    accepted_modalities: mergeStringLists(items, (item) => item.accepted_modalities),
+    feature_flags: mergeFeatureFlags(items),
+    modes: mergeModes(items),
+    enabled: true,
+    component: firstString(items, (item) => item.component),
+    renderer: firstString(items, (item) => item.renderer),
+    template_id: sameString(items, (item) => item.template_id),
+    piece_id: sameString(items, (item) => item.piece_id),
+    origin: items[0]?.origin,
+    metadata: sourceMetadata(items),
+    ...(widgetIds.length ? { widgets: widgetIds } : {}),
+  } as TemplateComposerInput;
 }
 
 export function selectTemplateAiInput(catalog: UICatalog | null | undefined, mode: ComposerCommandMode): TemplateAiInput | null {
-  return firstActive(catalog?.ai_inputs, mode);
+  return mergeTemplateAiInputs(activeItems(catalog?.ai_inputs, mode));
 }
 
 export function selectTemplateComposerInput(
   catalog: UICatalog | null | undefined,
   mode: ComposerCommandMode,
-  aiInput: TemplateAiInput | null,
+  aiInput: TemplateAiInput | TemplateAiInput[] | null,
 ): TemplateComposerInput | null {
   const inputs = catalog?.composer_inputs ?? [];
-  const requestedId = nonEmptyString(aiInput?.composer_input_id) || nonEmptyString(aiInput?.composer_input);
-  if (requestedId) {
-    const requested = inputs.find((item) => item.id === requestedId && itemEnabled(item) && modesMatch(item, mode));
-    if (requested) return requested;
+  const activeInputs = activeItems(inputs, mode);
+  const aiInputs = selectedAiInputs(catalog, mode, aiInput);
+  const requestedIds = uniqueStrings([
+    ...aiInputs.flatMap(aiInputComposerIds),
+    ...stringList(objectRecord(Array.isArray(aiInput) ? null : aiInput?.metadata)?.composer_input_ids),
+  ]);
+  if (requestedIds.length > 0) {
+    const requestedIdSet = new Set(requestedIds);
+    const requested = activeInputs.filter((item) => requestedIdSet.has(item.id));
+    if (requested.length) return mergeTemplateComposerInputs(requested);
   }
-  return firstActive(inputs, mode);
+  return mergeTemplateComposerInputs(activeInputs);
 }
 
 export function selectTemplateToolPolicy(
   catalog: UICatalog | null | undefined,
   mode: ComposerCommandMode,
-  aiInput: TemplateAiInput | null,
+  aiInput: TemplateAiInput | TemplateAiInput[] | null,
 ): TemplateToolPolicy | null {
   const policies = catalog?.tool_policies ?? [];
-  const requestedId = nonEmptyString(aiInput?.tool_policy_id) || nonEmptyString(aiInput?.tool_policy);
-  if (requestedId) {
-    const requested = policies.find((item) => item.id === requestedId && itemEnabled(item) && modesMatch(item, mode));
-    if (requested) return requested;
+  const activePolicies = activeItems(policies, mode);
+  const aiInputs = selectedAiInputs(catalog, mode, aiInput);
+  const requestedIds = uniqueStrings([
+    ...aiInputs.flatMap(aiInputToolPolicyIds),
+    ...stringList(objectRecord(Array.isArray(aiInput) ? null : aiInput?.metadata)?.tool_policy_ids),
+  ]);
+  if (requestedIds.length > 0) {
+    const requestedIdSet = new Set(requestedIds);
+    const requested = activePolicies.filter((item) => requestedIdSet.has(item.id));
+    if (requested.length) return mergeTemplateToolPolicies(requested);
   }
-  return firstActive(policies, mode);
+  return mergeTemplateToolPolicies(activePolicies);
 }
 
 function policySource(policy: TemplateToolPolicy | null): Record<string, unknown> {
@@ -96,17 +259,132 @@ function toolChoice(value: unknown): TemplateToolPolicySettings["toolChoice"] {
   return objectRecord(value) ?? undefined;
 }
 
-export function templateToolPolicySettings(policy: TemplateToolPolicy | null): TemplateToolPolicySettings {
+function sameToolChoice(left: TemplateToolPolicySettings["toolChoice"], right: TemplateToolPolicySettings["toolChoice"]): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  if (typeof left !== "object" || typeof right !== "object") return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function mergeToolChoice(choices: Array<TemplateToolPolicySettings["toolChoice"]>): TemplateToolPolicySettings["toolChoice"] {
+  const defined = choices.filter((choice): choice is NonNullable<TemplateToolPolicySettings["toolChoice"]> => choice !== undefined);
+  if (defined.length === 0) return undefined;
+  const first = defined[0];
+  if (defined.every((choice) => sameToolChoice(first, choice))) return first;
+  if (defined.every((choice) => typeof choice === "string")) {
+    if (defined.includes("none")) return "none";
+    if (defined.includes("required")) return "required";
+    return "auto";
+  }
+  return first;
+}
+
+function mergeParallelToolCalls(values: Array<boolean | undefined>): boolean | undefined {
+  const defined = values.filter((value): value is boolean => typeof value === "boolean");
+  if (defined.length === 0) return undefined;
+  return defined.every(Boolean);
+}
+
+function intersectStringLists(lists: string[][]): string[] {
+  if (lists.length === 0) return [];
+  const [first, ...rest] = lists;
+  return first.filter((item) => rest.every((list) => list.includes(item)));
+}
+
+function templateToolPolicySourceIds(policy: TemplateToolPolicy | null): string[] {
+  if (!policy) return [];
+  const metadataIds = sourceIdsFromMetadata(policy.metadata);
+  return metadataIds.length ? metadataIds : policy.id ? [policy.id] : [];
+}
+
+function templateToolPolicySettingsFromPolicy(policy: TemplateToolPolicy | null): TemplateToolPolicySettings {
   const source = policySource(policy);
+  const ids = templateToolPolicySourceIds(policy);
+  const hasAllowedToolRestriction = (
+    Object.prototype.hasOwnProperty.call(source, "allowed_tools")
+    || Object.prototype.hasOwnProperty.call(source, "allowlist")
+    || Object.prototype.hasOwnProperty.call(source, "tool_allowlist")
+  );
   return {
     id: policy?.id ?? null,
+    ids,
     defaultEnabledToolIds: stringList(source.default_enabled_tools ?? source.defaultEnabledTools),
     defaultDisabledToolIds: stringList(source.default_disabled_tools ?? source.defaultDisabledTools),
     allowedToolIds: stringList(source.allowed_tools ?? source.allowlist ?? source.tool_allowlist),
+    hasAllowedToolRestriction,
     deniedToolIds: stringList(source.denied_tools ?? source.denylist ?? source.tool_denylist),
     toolChoice: toolChoice(source.tool_choice),
     parallelToolCalls: typeof source.parallel_tool_calls === "boolean" ? source.parallel_tool_calls : undefined,
   };
+}
+
+function mergeTemplateToolPolicySettings(policies: TemplateToolPolicy[]): TemplateToolPolicySettings {
+  const policySettings = policies.map(templateToolPolicySettingsFromPolicy);
+  const ids = uniqueStrings(policySettings.flatMap((settings) => settings.ids));
+  const deniedToolIds = uniqueStrings(policySettings.flatMap((settings) => settings.deniedToolIds));
+  const deniedToolIdSet = new Set(deniedToolIds);
+  const restrictiveAllowlists = policySettings
+    .filter((settings) => settings.hasAllowedToolRestriction)
+    .map((settings) => settings.allowedToolIds);
+  const allowedToolIds = intersectStringLists(restrictiveAllowlists);
+  const allowedToolIdSet = new Set(allowedToolIds);
+  const hasAllowedToolRestriction = restrictiveAllowlists.length > 0;
+  const defaultEnabledToolIds = uniqueStrings(policySettings.flatMap((settings) => settings.defaultEnabledToolIds))
+    .filter((toolId) => !deniedToolIdSet.has(toolId))
+    .filter((toolId) => !hasAllowedToolRestriction || allowedToolIdSet.has(toolId));
+  const defaultDisabledToolIds = uniqueStrings(policySettings.flatMap((settings) => settings.defaultDisabledToolIds));
+  return {
+    id: policies.length === 0 ? null : policies.length === 1 ? policies[0].id : composedId("composed_tool_policy", policies),
+    ids,
+    defaultEnabledToolIds,
+    defaultDisabledToolIds,
+    allowedToolIds,
+    hasAllowedToolRestriction,
+    deniedToolIds,
+    toolChoice: mergeToolChoice(policySettings.map((settings) => settings.toolChoice)),
+    parallelToolCalls: mergeParallelToolCalls(policySettings.map((settings) => settings.parallelToolCalls)),
+  };
+}
+
+function mergeTemplateToolPolicies(items: TemplateToolPolicy[]): TemplateToolPolicy | null {
+  if (items.length === 0) return null;
+  if (items.length === 1) return items[0];
+  const settings = mergeTemplateToolPolicySettings(items);
+  return {
+    id: settings.id ?? composedId("composed_tool_policy", items),
+    label: firstString(items, (item) => item.label),
+    description: firstString(items, (item) => item.description),
+    toggleable: items.some((item) => item.toggleable === true) ? true : undefined,
+    policy: {
+      default_enabled_tools: settings.defaultEnabledToolIds,
+      default_disabled_tools: settings.defaultDisabledToolIds,
+      ...(settings.hasAllowedToolRestriction ? { allowed_tools: settings.allowedToolIds } : {}),
+      denied_tools: settings.deniedToolIds,
+      ...(settings.toolChoice ? { tool_choice: settings.toolChoice } : {}),
+      ...(typeof settings.parallelToolCalls === "boolean" ? { parallel_tool_calls: settings.parallelToolCalls } : {}),
+    },
+    modes: mergeModes(items),
+    enabled: true,
+    template_id: sameString(items, (item) => item.template_id),
+    piece_id: sameString(items, (item) => item.piece_id),
+    origin: items[0]?.origin,
+    metadata: sourceMetadata(items),
+  };
+}
+
+export function templateToolPolicySettings(policy: TemplateToolPolicy | TemplateToolPolicy[] | null): TemplateToolPolicySettings {
+  if (Array.isArray(policy)) return mergeTemplateToolPolicySettings(policy);
+  return templateToolPolicySettingsFromPolicy(policy);
+}
+
+export function templateFeatureFlagEnabled(
+  input: TemplateComposerInput | null | undefined,
+  flagName: string,
+  fallback = true,
+): boolean {
+  const flags = objectRecord(input?.feature_flags);
+  const value = flags?.[flagName];
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function templateWidgetPayload(item: TemplateCatalogMetadataItem): Record<string, unknown> {

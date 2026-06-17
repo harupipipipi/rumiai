@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import importlib
 from functools import lru_cache
 import os
 import re
@@ -122,6 +123,15 @@ def validate_chat_run_input(input_data: dict[str, Any]) -> str | None:
     if isinstance(raw_content, list) and len(raw_content) == 0 and not has_attachments:
         return "message content must not be empty"
     return None
+
+
+def _resolve_template_tool_policy(
+    request_policy: dict[str, Any] | None,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> Any:
+    resolver_module = importlib.import_module("domain.templates.tool_policy_resolution")
+    return resolver_module.resolve_template_tool_policy(request_policy, metadata=metadata)
 
 
 def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None = None) -> PreparedChatRun:
@@ -246,6 +256,15 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         request_context["agent_id"] = resolved_agent_id
     _propagate_conversation_workspace(request_context, metadata, conversation_metadata)
     request_context.update(_approval_followup_tool_context(metadata))
+    template_tool_policy_resolution = _resolve_template_tool_policy(
+        params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {},
+        metadata=metadata,
+    )
+    if template_tool_policy_resolution.id_requested:
+        params["tool_policy"] = template_tool_policy_resolution.policy
+        request_context["template_tool_policy_resolution"] = template_tool_policy_resolution.to_context()
+        if isinstance(metadata, dict):
+            metadata["template_tool_policy_resolution"] = template_tool_policy_resolution.to_context()
     tool_policy = params.get("tool_policy")
     if isinstance(tool_policy, dict):
         request_context["profile_policy"] = {
@@ -261,6 +280,10 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             or str(tool_choice or "").strip().lower() in {"auto", "none", "required"}
         ):
             params["tool_choice"] = tool_choice
+        parallel_tool_calls = tool_policy.get("parallel_tool_calls")
+        if "parallel_tool_calls" not in params and isinstance(parallel_tool_calls, bool):
+            params["parallel_tool_calls"] = parallel_tool_calls
+    prepared_input = {**prepared_input, "params": params}
 
     request_context, effective_system_prompt = _apply_effective_ai_input_to_request_context(
         request_context,
@@ -823,11 +846,11 @@ def _merge_profile_snapshot_sources(
 ) -> dict[str, Any]:
     merged = dict(catalog_profile) if isinstance(catalog_profile, dict) else {}
     overrides = dict(workspace_profile) if isinstance(workspace_profile, dict) else {}
-    for field in _MERGED_PROFILE_DICT_FIELDS:
-        base = merged.get(field) if isinstance(merged.get(field), dict) else {}
-        override = overrides.get(field) if isinstance(overrides.get(field), dict) else {}
+    for field_name in _MERGED_PROFILE_DICT_FIELDS:
+        base = merged.get(field_name) if isinstance(merged.get(field_name), dict) else {}
+        override = overrides.get(field_name) if isinstance(overrides.get(field_name), dict) else {}
         if base or override:
-            merged[field] = {**base, **override}
+            merged[field_name] = {**base, **override}
     for key, value in overrides.items():
         if key in _MERGED_PROFILE_DICT_FIELDS:
             continue

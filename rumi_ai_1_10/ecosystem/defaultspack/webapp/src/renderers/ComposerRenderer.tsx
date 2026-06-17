@@ -793,18 +793,35 @@ function DroppedWidgetChip({
     );
   }
 
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${onToggle ? "cursor-pointer" : "cursor-default"} ${
-        widget.enabled
-          ? "border-emerald-600/50 bg-emerald-900/30 text-emerald-300"
-          : "border-zinc-700/60 bg-zinc-800/70 text-zinc-400"
-      }`}
-      onClick={() => onToggle?.(widget.id)}
-    >
+  const toolToggleClassName = `inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
+    widget.enabled
+      ? "border-emerald-600/50 bg-emerald-900/30 text-emerald-300"
+      : "border-zinc-700/60 bg-zinc-800/70 text-zinc-400"
+  }`;
+  const toolToggleContent = (
+    <>
       <Wrench size={10} />
       <span className="truncate">{widget.label}</span>
-    </span>
+    </>
+  );
+
+  if (!onToggle) {
+    return (
+      <span className={`${toolToggleClassName} cursor-default`}>
+        {toolToggleContent}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      title={widget.description ?? widget.label}
+      className={`${toolToggleClassName} cursor-pointer hover:bg-emerald-900/40`}
+      onClick={() => onToggle(widget.id)}
+    >
+      {toolToggleContent}
+    </button>
   );
 }
 
@@ -1501,6 +1518,7 @@ export function ComposerRenderer({
     () => templateComposerFeatureFlags(composerInput?.feature_flags),
     [composerInput?.feature_flags],
   );
+  const templateAllowsSlashCommands = templateFeatureFlags.slash_commands !== false;
   const templateComposerInfoItems = useMemo(() => {
     const items = [
       ...templateAcceptedModalities.map((modality) => TEMPLATE_COMPOSER_MODALITY_LABELS[modality] ?? modality),
@@ -1566,12 +1584,13 @@ export function ComposerRenderer({
   const effectiveComposerPlaceholder = isSteerMode
     ? "実行中のAIへステアを入力..."
     : templateComposerPlaceholder || (mode === "coding" ? "コーディング指示を入力... (@ でtool/ファイル)" : placeholder);
-  const slashText = !isSteerMode && input.startsWith("/") && !isEscapedSlash ? input.slice(1) : "";
+  const hasSlashCommandPrefix = templateAllowsSlashCommands && !isSteerMode && input.startsWith("/") && !isEscapedSlash;
+  const slashText = hasSlashCommandPrefix ? input.slice(1) : "";
   const slashCommandName = slashText.trimStart().split(/\s+/, 1)[0] ?? "";
   const slashQuery = slashCommandName.toLowerCase();
   const thinkingCommand = commands.find((command) => command.id === "think");
-  const thinkingMatch = !isSteerMode && input.startsWith("/") && !isEscapedSlash ? thinkingCommandMatch(input) : null;
-  const matchedCommands = !isSteerMode && input.startsWith("/") && !isEscapedSlash
+  const thinkingMatch = hasSlashCommandPrefix ? thinkingCommandMatch(input) : null;
+  const matchedCommands = hasSlashCommandPrefix
     ? thinkingMatch && thinkingCommand && levels.length > 0
       ? levels
           .filter((level) => !thinkingMatch.query || level.toLowerCase().includes(thinkingMatch.query))
@@ -1589,7 +1608,7 @@ export function ComposerRenderer({
     : [];
   const showThinkingLevelChips = Boolean(thinkingMatch && thinkingCommand && levels.length > 0);
   const hasModelCommandCandidates = !isSteerMode && modelCommandCandidates.length > 0;
-  const showCommandSuggestions = !hasModelCommandCandidates && matchedCommands.length > 0;
+  const showCommandSuggestions = templateAllowsSlashCommands && !hasModelCommandCandidates && matchedCommands.length > 0;
   const visibleSteerPreviewItems = steerPreviewItems.filter((item) => (
     item.visible !== false && String(item.prompt ?? "").trim()
   ));
@@ -1836,6 +1855,11 @@ export function ComposerRenderer({
   }, [onModelCommandCandidatesClose, suppressPopovers]);
 
   useEffect(() => {
+    if (templateAllowsSlashCommands || openFolder !== "commands") return;
+    setOpenFolder("tools");
+  }, [openFolder, templateAllowsSlashCommands]);
+
+  useEffect(() => {
     if (!hasModelCommandCandidates) return;
     updateComposerPopoverAnchor();
     window.addEventListener("resize", updateComposerPopoverAnchor);
@@ -1885,7 +1909,7 @@ export function ComposerRenderer({
 
   useEffect(() => {
     const handleDocumentSlashFocus = (event: KeyboardEvent) => {
-      if (isGenerating || !shouldFocusComposerForSlashKey(event, event.target)) return;
+      if (!templateAllowsSlashCommands || isGenerating || !shouldFocusComposerForSlashKey(event, event.target)) return;
       event.preventDefault();
       const textarea = textareaRef.current;
       if (!textarea) return;
@@ -1902,9 +1926,10 @@ export function ComposerRenderer({
 
     document.addEventListener("keydown", handleDocumentSlashFocus);
     return () => document.removeEventListener("keydown", handleDocumentSlashFocus);
-  }, [input, isGenerating, onInputChange]);
+  }, [input, isGenerating, onInputChange, templateAllowsSlashCommands]);
 
   const chooseCommand = (commandId: string, rawInput = input) => {
+    if (!templateAllowsSlashCommands) return;
     const thinkingLevelMatch = commandId.match(/^think:(.+)$/);
     if (thinkingLevelMatch) {
       onCommandSelect?.("think", `/think ${thinkingLevelMatch[1]}`);
@@ -1975,11 +2000,11 @@ export function ComposerRenderer({
       syncTextareaSelection();
       updateAtMentionStateFromInput(value);
 
-      if (!value.startsWith("/") || value.startsWith("//")) {
+      if (!templateAllowsSlashCommands || !value.startsWith("/") || value.startsWith("//")) {
         setSelectedCommandIndex(0);
       }
     },
-    [onInputChange, syncTextareaSelection, updateAtMentionStateFromInput],
+    [onInputChange, syncTextareaSelection, templateAllowsSlashCommands, updateAtMentionStateFromInput],
   );
 
   const handleAtMentionSelect = useCallback(
@@ -2530,6 +2555,16 @@ export function ComposerRenderer({
   const newConversationTopRightWidgets = leadingChromeWidgets.filter((widget) => widget.id === "voice-input");
   const newConversationSendWidgets = trailingChromeWidgets.filter((widget) => widget.id === "send");
   const newConversationTrailingWidgets = trailingChromeWidgets.filter((widget) => widget.id !== "send");
+  const menuFolders = templateAllowsSlashCommands
+    ? ([
+        ["tools", "Tools", Wrench],
+        ["models", "Models", SlidersHorizontal],
+        ["commands", "Commands", Folder],
+      ] as const)
+    : ([
+        ["tools", "Tools", Wrench],
+        ["models", "Models", SlidersHorizontal],
+      ] as const);
 
   return (
     <div
@@ -2654,13 +2689,7 @@ export function ComposerRenderer({
                       />
               <div ref={menuRef} className="absolute bottom-full left-4 rumi-layer-global-overlay mb-2 grid w-[min(480px,calc(100vw-32px))] grid-cols-[120px_minmax(0,1fr)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2 max-[640px]:grid-cols-1">
                 <div className="border-r border-zinc-800 bg-zinc-950/90 p-1.5 max-[640px]:flex max-[640px]:border-b max-[640px]:border-r-0">
-                  {(
-                    [
-                      ["tools", "Tools", Wrench],
-                      ["models", "Models", SlidersHorizontal],
-                      ["commands", "Commands", Folder],
-                    ] as const
-                  ).map(([id, label, Icon]) => (
+                  {menuFolders.map(([id, label, Icon]) => (
                             <button
                               key={id}
                               type="button"
@@ -2780,7 +2809,7 @@ export function ComposerRenderer({
                       })}
                     </div>
                   )}
-                  {openFolder === "commands" && (
+                  {templateAllowsSlashCommands && openFolder === "commands" && (
                     <div className="grid gap-0.5">
                       {commands.map((command) => (
                                 <button
