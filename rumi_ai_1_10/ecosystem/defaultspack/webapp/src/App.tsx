@@ -2112,7 +2112,7 @@ export function resolveUltraYoloModeState(
 }
 
 export function keepSelectedToolsAfterSend(settingsValues: Record<string, Record<string, unknown>>): boolean {
-  return parseCommandBoolean(settingsValues.tools?.keep_selected_tools_after_send, true);
+  return parseCommandBoolean(settingsValues.tools?.keep_selected_tools_after_send, false);
 }
 
 function commandSearchText(command: ComposerCommandItem): string {
@@ -4871,12 +4871,25 @@ function ChatApp() {
         ...templatePolicyReferencePayload,
         ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
       };
-      const requestedToolChoice = submittedToolIds.length > 0 ? "required" : undefined;
+      const toolSelectionRequest = shouldSendExplicitToolSelection
+        ? {
+            mode: "manual" as const,
+            include: submittedToolIds,
+            scope: "turn" as const,
+            must_use: false,
+          }
+        : {
+            mode: "auto" as const,
+            include: [],
+            exclude: [],
+            scope: "turn" as const,
+            must_use: false,
+          };
 
       await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         deepthink_enabled: deepthinkEnabled,
-        ...(requestedToolChoice ? { tool_choice: requestedToolChoice } : {}),
+        tool_selection: toolSelectionRequest,
         tool_policy: {
           ...templatePolicyPayload,
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
@@ -4887,7 +4900,7 @@ function ChatApp() {
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: submittedToolIds.length ? submittedToolIds : undefined,
+        tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
         metadata: {
           mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : mode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),

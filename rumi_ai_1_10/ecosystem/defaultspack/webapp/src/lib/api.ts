@@ -1454,12 +1454,21 @@ type ApiError = {
 
 type ApiEnvelope<T> = ApiOk<T> | ApiError;
 
+export type ToolSelectionRequest = {
+  mode?: "auto" | "manual" | "none";
+  include?: string[];
+  exclude?: string[];
+  scope?: "turn";
+  must_use?: boolean;
+};
+
 type SendMessageOptions = {
   thinking_level?: string | null;
   deepthink_enabled?: boolean;
   tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
   parallel_tool_calls?: boolean;
   tool_policy?: Record<string, unknown>;
+  tool_selection?: ToolSelectionRequest;
   attachments?: ChatAttachment[];
   tools?: string[];
   metadata?: Record<string, unknown>;
@@ -1809,6 +1818,7 @@ function messageRequestBody(
       tool_choice: options?.tool_choice ?? undefined,
       parallel_tool_calls: options?.parallel_tool_calls ?? undefined,
       tool_policy: options?.tool_policy ?? undefined,
+      tool_selection: options?.tool_selection ?? undefined,
     },
   };
 }

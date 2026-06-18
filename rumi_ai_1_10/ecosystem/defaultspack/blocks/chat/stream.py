@@ -19,17 +19,8 @@ def _fallback_send(input_data, context):
 
 
 def _input_with_default_empty_tools(input_data):
-    if not isinstance(input_data, dict) or "tools" in input_data:
-        return input_data
-    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
-    tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
-    message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
-    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-    if "selected_tools" in tool_policy or "selected_tools" in metadata:
-        return input_data
-    updated = dict(input_data)
-    updated["tools"] = []
-    return updated
+    # Legacy helper name kept for import compatibility; omitted tools now mean auto-selection.
+    return input_data
 
 
 def _engine_events(input_data, context):
