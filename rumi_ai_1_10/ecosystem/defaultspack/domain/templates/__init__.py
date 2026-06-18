@@ -50,6 +50,19 @@ from .resolver import (
 )
 from .security import assess_template_security, is_safe_template
 from .services import TemplateBackendServiceRegistry, TemplateBackendServiceSpec
+from .source_adapters import (
+    DomainComponentTemplateAdapter,
+    ExtensionManifestTemplateAdapter,
+    ExternalIoTemplateAdapter,
+    FlowRouteTemplateAdapter,
+    LegacyCommandTemplateAdapter,
+    TemplateSourceAdapter,
+    TemplateSourceAdapterDiagnostic,
+    TemplateSourceAdapterResult,
+    TemplateSourceContribution,
+    default_source_adapters,
+    discover_source_adapter_contributions,
+)
 from .validation import TemplateValidationResult, has_errors, parse_template, validate_template
 from .projectors import (
     build_template_catalog,
@@ -61,6 +74,11 @@ from .projectors import (
 __all__ = [
     "ResolvedTemplate",
     "CURRENT_TEMPLATE_SCHEMA_VERSION",
+    "DomainComponentTemplateAdapter",
+    "ExtensionManifestTemplateAdapter",
+    "ExternalIoTemplateAdapter",
+    "FlowRouteTemplateAdapter",
+    "LegacyCommandTemplateAdapter",
     "RumiTemplate",
     "TemplateActivationPlan",
     "TemplateActivationPlanner",
@@ -83,6 +101,10 @@ __all__ = [
     "TemplateBackendServiceSpec",
     "TemplateRegistry",
     "TemplateRoot",
+    "TemplateSourceAdapter",
+    "TemplateSourceAdapterDiagnostic",
+    "TemplateSourceAdapterResult",
+    "TemplateSourceContribution",
     "TemplateStatus",
     "TemplateTrustLevel",
     "TemplateValidationResult",
@@ -93,9 +115,11 @@ __all__ = [
     "build_template_catalog",
     "collect_template_diagnostics",
     "default_template_roots",
+    "default_source_adapters",
     "diagnose_capability_requirements",
     "diagnose_template_dependencies",
     "diagnostics_have_errors",
+    "discover_source_adapter_contributions",
     "discover_templates",
     "empty_template_catalog",
     "has_errors",

@@ -268,4 +268,5 @@ def _identity_extractors() -> dict[str, IdentityExtractor]:
         "context_policies": _field("policy_id", "id", "mode"),
         "external_io_templates": _field("id"),
         "test_contracts": _field("contract_id", "id"),
+        "source_adapter_contributions": _field("public_id", "id"),
     }

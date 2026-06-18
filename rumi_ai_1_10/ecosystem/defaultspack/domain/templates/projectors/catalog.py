@@ -20,6 +20,10 @@ from ..activation import (
 from ..collisions import resolve_catalog_collisions
 from ..registry import build_template_registry
 from ..resolver import resolve_template
+from ..source_adapters import (
+    TemplateSourceAdapter,
+    discover_source_adapter_contributions,
+)
 
 
 CATALOG_KEYS = (
@@ -45,6 +49,7 @@ CATALOG_KEYS = (
     "context_policies",
     "external_io_templates",
     "test_contracts",
+    "source_adapter_contributions",
 )
 
 
@@ -52,6 +57,7 @@ def build_template_catalog(
     *,
     defaultspack_root: str | Path | None = None,
     roots: list[str | Path] | None = None,
+    adapters: list[TemplateSourceAdapter] | None = None,
 ) -> dict[str, Any]:
     catalog = empty_template_catalog()
     registry, diagnostics = build_template_registry(
@@ -68,6 +74,20 @@ def build_template_catalog(
         diagnostics.extend(resolved.diagnostics)
 
     catalog = project_resolved_templates(resolved_templates, activation_plan=activation_plan)
+    adapter_root = (
+        Path(defaultspack_root).resolve()
+        if defaultspack_root is not None
+        else Path(__file__).resolve().parents[3]
+    )
+    adapter_result = discover_source_adapter_contributions(adapter_root, adapters=adapters)
+    catalog["source_adapter_contributions"].extend(
+        contribution.to_catalog_item() for contribution in adapter_result.contributions
+    )
+    catalog["template_diagnostics"].extend(
+        diagnostic.to_dict() for diagnostic in adapter_result.diagnostics
+    )
+    catalog, adapter_collision_diagnostics = resolve_catalog_collisions(catalog)
+    catalog["template_diagnostics"].extend(adapter_collision_diagnostics)
     catalog["template_diagnostics"] = _dedupe_diagnostics(
         [*catalog["template_diagnostics"], *(_diagnostic_to_dict(item) for item in diagnostics)]
     )
@@ -135,6 +155,7 @@ def project_resolved_templates(
         "context_policies",
         "external_io_templates",
         "test_contracts",
+        "source_adapter_contributions",
     ):
         catalog[key] = _dedupe_by_id(catalog[key])
     catalog, collision_diagnostics = resolve_catalog_collisions(catalog)
