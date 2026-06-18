@@ -1,6 +1,6 @@
 import type { FormEvent, MutableRefObject, ReactNode } from "react";
 
-import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ConversationSteerItem, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, TemplateComposerInput, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ConversationSteerItem, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, TemplateComposerInput, ToolLogEntry, ToolSelectionMode, ToolTarget, UICatalog } from "../lib/api";
 import type { DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import type { ComposerCommandItem } from "../lib/api";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "../components/HistoryBoard";
@@ -8,6 +8,7 @@ import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview
 import type { LocaleSetting } from "../lib/i18n";
 import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
 import type { WorkspaceTab, WorkspaceTabKind } from "../components/WorkspaceTabs";
+import type { PendingToolReview } from "../features/tools/types";
 
 export type { ComposerCommandItem } from "../lib/api";
 
@@ -169,6 +170,9 @@ export type ComposerRendererProps = {
   attachedFiles?: AttachedFile[];
   droppedWidgets?: DroppedWidget[];
   selectedToolIds?: string[];
+  toolSelectionMode?: ToolSelectionMode;
+  toolSelectionTargets?: ToolTarget[];
+  toolSelectionReview?: PendingToolReview | null;
   keyboardButtonNavigation?: boolean;
   steerStatus?: string | null;
   steerBusy?: boolean;
@@ -177,6 +181,12 @@ export type ComposerRendererProps = {
   suppressPopovers?: boolean;
   onOpenModelManager?: () => void;
   onOpenToolSettings?: () => void;
+  onToolSelectionModeChange?: (mode: ToolSelectionMode) => void;
+  onToolSelectionTargetRemove?: (target: ToolTarget) => void;
+  onToolSelectionReviewApprove?: () => void;
+  onToolSelectionReviewEdit?: () => void;
+  onToolSelectionReviewNoTools?: () => void;
+  onToolSelectionReviewCancel?: () => void;
   onSwitchToVisionModel?: () => void;
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string, rawInput?: string) => void;

@@ -20,7 +20,8 @@ import {
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
+import { useToolSelectionController } from "./features/tools/useToolSelectionController";
 import { authorityApprovalTitle, pendingAuthorityApproval } from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
@@ -93,6 +94,27 @@ type CalendarSettings = {
   timeSlotMinutes: 15 | 30 | 60;
   weekStart: "sunday" | "monday";
 };
+
+type SubmitOverride = {
+  input: string;
+  attachments: AttachedFile[];
+  droppedWidgets: DroppedWidget[];
+  toolSelectionRequest?: ToolSelectionRequest;
+  skipReview?: boolean;
+};
+
+function toolIdsFromSelectionRequest(request: ToolSelectionRequest): string[] {
+  const ids: string[] = [];
+  for (const target of request.include ?? []) {
+    if (typeof target === "string") {
+      if (target.trim()) ids.push(target.trim());
+      continue;
+    }
+    const structured = target as ToolTarget;
+    if (structured.kind === "tool" && structured.id.trim()) ids.push(structured.id.trim());
+  }
+  return [...new Set(ids)];
+}
 
 type CalendarCell = {
   col: number;
@@ -2408,6 +2430,11 @@ function ChatApp() {
     .filter((tool): tool is ComposerExtensionItem => Boolean(tool)), [composerExtensions, storedSelectedToolIds]);
   const selectedToolIds = useMemo(() => selectedTools.map((tool) => tool.id), [selectedTools]);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+  const toolSelectionController = useToolSelectionController({
+    settingsValues,
+    selectedToolIds,
+    setSelectedToolIds: setStoredSelectedToolIds,
+  });
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
@@ -3555,9 +3582,10 @@ function ChatApp() {
 
   const toggleSelectedTool = (item: ComposerExtensionItem) => {
     if (disabledToolIdSet.has(item.id)) {
-      setError(`${item.label || item.id} は Settings > Tools で OFF です。`);
+      setError(`${item.label || item.id} は機能と接続の権限設定でブロックされています。`);
       return;
     }
+    toolSelectionController.setTurnMode("manual");
     setStoredSelectedToolIds((current) => {
       if (current.includes(item.id)) {
         return current.filter((selectedId) => selectedId !== item.id);
@@ -4006,6 +4034,7 @@ function ChatApp() {
       const toolId = widget.sourceItemId || widget.id;
       const item = composerExtensions.find((candidate) => candidate.id === toolId);
       if (item) {
+        toolSelectionController.setTurnMode("manual");
         setStoredSelectedToolIds((current) => current.includes(item.id) ? current : [...current, item.id]);
       }
     }
@@ -4028,6 +4057,7 @@ function ChatApp() {
     const validIds = new Set(composerExtensions.map((tool) => tool.id));
     const requestedIds = [...new Set(toolIds.filter((toolId) => validIds.has(toolId)))];
     if (requestedIds.length === 0) return;
+    toolSelectionController.setTurnMode("manual");
     setStoredSelectedToolIds((current) => {
       if (enabled) return [...new Set([...current, ...requestedIds])];
       const requestedIdSet = new Set(requestedIds);
@@ -4491,21 +4521,53 @@ function ChatApp() {
     }
   };
 
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    if ((!input.trim() && attachedFiles.length === 0) || isGenerating) return;
+  const handleSubmit = async (event?: FormEvent, override?: SubmitOverride) => {
+    event?.preventDefault();
+    const inputForSubmit = override?.input ?? input;
+    const attachmentsForSubmit = override?.attachments ?? attachedFiles;
+    const droppedWidgetsForSubmit = override?.droppedWidgets ?? droppedWidgets;
+    if ((!inputForSubmit.trim() && attachmentsForSubmit.length === 0) || isGenerating) return;
 
-    const commandInput = parseSlashCommandInput(input, commandCatalog, { enabled: slashCommandsEnabled });
+    const commandInput = override ? null : parseSlashCommandInput(inputForSubmit, commandCatalog, { enabled: slashCommandsEnabled });
     if (commandInput) {
       const shouldClearInput = await executeComposerCommand(commandInput.command.id, commandInput.raw);
       if (shouldClearInput !== false) setInput("");
       return;
     }
 
-    const trimmedInput = input.trim();
+    const trimmedInput = inputForSubmit.trim();
     const userText = (trimmedInput.startsWith("//") ? trimmedInput.slice(1) : trimmedInput) || "添付ファイルを確認してください。";
-    const submittedAttachments = attachedFiles;
+    const submittedAttachments = attachmentsForSubmit;
     const wasNewConversation = isNewConversation;
+    const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions);
+    const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
+    const toolSelectionRequest = override?.toolSelectionRequest ?? toolSelectionController.buildRequest({
+      toolIds: selectedToolIds,
+      mentionedToolIds,
+    });
+    if (!override?.skipReview && toolSelectionRequest.mode === "review") {
+      setError(null);
+      try {
+        await toolSelectionController.previewReview({
+          conversationId: activeConversationId,
+          userText,
+          attachmentMetadata: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
+          toolSelection: toolSelectionRequest,
+          model: activeProfile?.profile_id ?? preferredModel ?? null,
+          draft: {
+            input: inputForSubmit,
+            attachments: submittedAttachments,
+            droppedWidgets: droppedWidgetsForSubmit,
+          },
+        });
+        setInput("");
+        setAttachedFiles([]);
+        setDroppedWidgets([]);
+      } catch (previewError) {
+        setError(previewError instanceof Error ? previewError.message : "機能の候補を取得できませんでした。");
+      }
+      return;
+    }
     setIsGenerating(true);
     setError(null);
     if (wasNewConversation) {
@@ -4515,15 +4577,14 @@ function ChatApp() {
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
     const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
-    const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions);
-    const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
-    const submittedToolIds = [...new Set([...selectedToolIds, ...mentionedToolIds])];
+    const requestedToolIds = [...new Set([...selectedToolIds, ...mentionedToolIds, ...toolIdsFromSelectionRequest(toolSelectionRequest)])];
+    const submittedToolIds = toolSelectionRequest.mode === "none" ? [] : requestedToolIds;
     const submittedToolIdSet = new Set(submittedToolIds);
     const composerToolById = new Map(composerExtensions.map((item) => [item.id, item]));
     const composerSkillById = new Map(composerSkills.map((item) => [item.id, item]));
-    const droppedWidgetToolIds = new Set(activeDroppedWidgets.map((widget) => widget.sourceItemId || widget.id));
+    const droppedWidgetToolIds = new Set(droppedWidgetsForSubmit.map((widget) => widget.sourceItemId || widget.id));
     const droppedWidgetSkillIds = new Set(
-      activeDroppedWidgets
+      droppedWidgetsForSubmit
         .filter((widget) => widget.type === "skill" || widget.widgetKind === "skill_prompt")
         .map((widget) => widget.sourceItemId || widget.id),
     );
@@ -4538,7 +4599,7 @@ function ChatApp() {
       .filter((item): item is ComposerSkillItem => Boolean(item))
       .filter((item) => !droppedWidgetSkillIds.has(item.id))
       .map((item) => composerSkillMentionWidget(item));
-    const submittedDroppedWidgets = [...activeDroppedWidgets, ...mentionedToolWidgets, ...mentionedSkillWidgets];
+    const submittedDroppedWidgets = [...droppedWidgetsForSubmit, ...mentionedToolWidgets, ...mentionedSkillWidgets];
     const selectedToolLabels = submittedToolIds.map((toolId) => composerToolById.get(toolId)?.label || toolId);
     const activeContextForSubmit = workspaceContextFromConversation(activeConversation);
     const groupIdForSubmit = pendingNewTaskContext?.groupId ?? activeContextForSubmit.groupId;
@@ -4871,7 +4932,6 @@ function ChatApp() {
             ...(mimoCodingToolAllowlist.length ? { tool_allowlist: mimoCodingToolAllowlist } : {}),
           }
         : {};
-      const shouldSendExplicitToolSelection = submittedToolIds.length > 0;
       const templateRequestPayload = {
         params: templateAiInputParams,
         toolPolicy: {
@@ -4879,20 +4939,7 @@ function ChatApp() {
           ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
         },
       };
-      const toolSelectionRequest = shouldSendExplicitToolSelection
-        ? {
-            mode: "manual" as const,
-            include: submittedToolIds,
-            scope: "turn" as const,
-            must_use: false,
-          }
-        : {
-            mode: "auto" as const,
-            include: [],
-            exclude: [],
-            scope: "turn" as const,
-            must_use: false,
-          };
+      const shouldSendExplicitToolSelection = toolSelectionRequest.mode === "manual" && submittedToolIds.length > 0;
 
       await api.streamMessage(conversation.id, userText, {
         params: templateRequestPayload.params,
@@ -4948,9 +4995,7 @@ function ChatApp() {
       });
       setAttachedFiles([]);
       setDroppedWidgets([]);
-      if (!shouldKeepSelectedToolsAfterSend) {
-        setStoredSelectedToolIds([]);
-      }
+      toolSelectionController.clearTurnStateAfterSend({ keepSelectedTools: shouldKeepSelectedToolsAfterSend });
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);
 
@@ -5033,6 +5078,49 @@ function ChatApp() {
       setIsGenerating(false);
       setIsNewChatLaunching(false);
     }
+  };
+
+  const handleToolReviewApprove = () => {
+    const pending = toolSelectionController.state.pendingReview;
+    const request = toolSelectionController.approveReview();
+    if (!pending || !request) return;
+    void handleSubmit(undefined, {
+      input: pending.draft.input,
+      attachments: pending.draft.attachments as AttachedFile[],
+      droppedWidgets: pending.draft.droppedWidgets as DroppedWidget[],
+      toolSelectionRequest: request,
+      skipReview: true,
+    });
+  };
+
+  const handleToolReviewNoTools = () => {
+    const pending = toolSelectionController.state.pendingReview;
+    const request = toolSelectionController.continueWithoutTools();
+    if (!pending || !request) return;
+    void handleSubmit(undefined, {
+      input: pending.draft.input,
+      attachments: pending.draft.attachments as AttachedFile[],
+      droppedWidgets: pending.draft.droppedWidgets as DroppedWidget[],
+      toolSelectionRequest: request,
+      skipReview: true,
+    });
+  };
+
+  const handleToolReviewCancel = () => {
+    const pending = toolSelectionController.state.pendingReview;
+    toolSelectionController.cancelReview();
+    if (!pending) return;
+    setInput(pending.draft.input);
+    setAttachedFiles(pending.draft.attachments as AttachedFile[]);
+    setDroppedWidgets(pending.draft.droppedWidgets as DroppedWidget[]);
+  };
+
+  const handleToolReviewEdit = () => {
+    const pending = toolSelectionController.state.pendingReview;
+    if (!pending) return;
+    const selectedIds = pending.decision.selected_tools.filter((toolId) => composerExtensions.some((tool) => tool.id === toolId));
+    setStoredSelectedToolIds(selectedIds);
+    toolSelectionController.setTurnMode("manual");
   };
 
   const Renderers = useMemo(() => resolveDefaultspackRenderers(catalog), [catalog]);
@@ -5135,6 +5223,9 @@ function ChatApp() {
       attachedFiles={attachedFiles}
       droppedWidgets={activeDroppedWidgets}
       selectedToolIds={selectedToolIds}
+      toolSelectionMode={toolSelectionController.state.effectiveMode}
+      toolSelectionTargets={toolSelectionController.state.turnInclude}
+      toolSelectionReview={toolSelectionController.state.pendingReview}
       keyboardButtonNavigation={keyboardButtonNavigation}
       steerStatus={modelSteerStatus}
       steerBusy={modelSteerBusy}
@@ -5143,6 +5234,12 @@ function ChatApp() {
       suppressPopovers={Boolean(visibleBrowserApproval || authorityApproval || runtimeApproval || staleRuntimeApprovalNotice)}
       onOpenModelManager={() => openSettingsSection("models")}
       onOpenToolSettings={() => openSettingsSection("tools")}
+      onToolSelectionModeChange={(nextMode) => toolSelectionController.setTurnMode(nextMode)}
+      onToolSelectionTargetRemove={toolSelectionController.removeTarget}
+      onToolSelectionReviewApprove={handleToolReviewApprove}
+      onToolSelectionReviewEdit={handleToolReviewEdit}
+      onToolSelectionReviewNoTools={handleToolReviewNoTools}
+      onToolSelectionReviewCancel={handleToolReviewCancel}
       onSwitchToVisionModel={handleSwitchToVisionModel}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
