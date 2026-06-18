@@ -188,9 +188,9 @@ test("template ai input selects composer and tool policy metadata", () => {
   assert.equal(composerInput?.id, "default_composer");
   assert.equal(toolPolicy?.id, "agent_tools");
   assert.deepEqual(settings.defaultEnabledToolIds, ["web_search"]);
-  assert.deepEqual(settings.defaultDisabledToolIds, ["terminal"]);
-  assert.deepEqual(settings.allowedToolIds, ["web_search", "local_file"]);
-  assert.deepEqual(settings.deniedToolIds, ["browser_computer"]);
+  assert.deepEqual(settings.defaultDisabledToolIds, ["browser_computer", "terminal"]);
+  assert.deepEqual(settings.allowedToolIds, ["local_file", "web_search"]);
+  assert.deepEqual(settings.deniedToolIds, ["browser_computer", "terminal"]);
   assert.equal(settings.toolChoice, "auto");
   assert.equal(settings.parallelToolCalls, true);
 });
@@ -277,14 +277,15 @@ test("template ai input composes multiple active inputs and policies determinist
   assert.deepEqual(composerInput?.accepted_modalities, ["text", "file"]);
   assert.equal(templateFeatureFlagEnabled(composerInput, "slash_commands", true), false);
   assert.deepEqual(composerInput?.feature_flags, { slash_commands: false, file_attachments: true, voice_input: false });
-  assert.equal(toolPolicy?.id, "composed_tool_policy:primary_tools+review_tools");
+  assert.match(toolPolicy?.id ?? "", /^composed_tool_policy:[0-9a-f]+$/);
   assert.deepEqual(settings.ids, ["primary_tools", "review_tools"]);
   assert.deepEqual(settings.allowedToolIds, ["web_search"]);
   assert.equal(settings.hasAllowedToolRestriction, true);
-  assert.deepEqual(settings.deniedToolIds, ["browser_computer"]);
+  assert.deepEqual(settings.deniedToolIds, ["browser_computer", "terminal"]);
   assert.deepEqual(settings.defaultEnabledToolIds, ["web_search"]);
-  assert.deepEqual(settings.defaultDisabledToolIds, ["terminal"]);
-  assert.equal(settings.toolChoice, "required");
+  assert.deepEqual(settings.defaultDisabledToolIds, ["browser_computer", "terminal"]);
+  assert.equal(settings.toolChoice, "auto");
+  assert.deepEqual(settings.diagnostics.map((item) => item.code), ["template.tool_policy.conflicting_tool_choice"]);
   assert.equal(settings.parallelToolCalls, false);
 });
 

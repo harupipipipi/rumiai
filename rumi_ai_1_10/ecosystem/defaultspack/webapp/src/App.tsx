@@ -36,7 +36,7 @@ import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
-import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./lib/templateAiInput";
+import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
@@ -2332,6 +2332,10 @@ function ChatApp() {
     () => templateToolPolicySettings(templateToolPolicyMetadata),
     [templateToolPolicyMetadata],
   );
+  const templatePolicyReferencePayload = useMemo(
+    () => templateToolPolicyReferencePayload(templateAiInputMetadata, templateToolPolicyMetadata),
+    [templateAiInputMetadata, templateToolPolicyMetadata],
+  );
   const disabledToolIds = settingList(settingsValues.tools?.disabled_tool_ids);
   const hiddenToolIds = settingList(settingsValues.tools?.hidden_tool_ids);
   const templateDisabledToolIds = useMemo(
@@ -4116,6 +4120,7 @@ function ChatApp() {
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_choice: "required",
         tool_policy: {
+          ...templatePolicyReferencePayload,
           ...((yoloMode || ultraYoloMode) ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
           ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
@@ -4180,8 +4185,10 @@ function ChatApp() {
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を続行してください。", {
         tool_choice: "required",
         tool_policy: {
+          ...templatePolicyReferencePayload,
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
+          ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
           selected_tools: [runtimeApproval.toolName],
         },
         tools: [runtimeApproval.toolName],
@@ -4861,21 +4868,15 @@ function ChatApp() {
         : {};
       const shouldSendExplicitToolSelection = submittedToolIds.length > 0;
       const templatePolicyPayload = {
-        ...(templateAiInputMetadata?.id ? { ai_input_id: templateAiInputMetadata.id } : {}),
+        ...templatePolicyReferencePayload,
         ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
-        ...(activeTemplateToolPolicy.id ? { template_tool_policy_id: activeTemplateToolPolicy.id } : {}),
-        ...(activeTemplateToolPolicy.hasAllowedToolRestriction ? { tool_allowlist: activeTemplateToolPolicy.allowedToolIds } : {}),
-        ...(activeTemplateToolPolicy.deniedToolIds.length ? { tool_denylist: activeTemplateToolPolicy.deniedToolIds } : {}),
-        ...(activeTemplateToolPolicy.defaultEnabledToolIds.length ? { default_enabled_tools: activeTemplateToolPolicy.defaultEnabledToolIds } : {}),
-        ...(activeTemplateToolPolicy.defaultDisabledToolIds.length ? { default_disabled_tools: activeTemplateToolPolicy.defaultDisabledToolIds } : {}),
       };
-      const requestedToolChoice = submittedToolIds.length > 0 ? "required" : activeTemplateToolPolicy.toolChoice;
+      const requestedToolChoice = submittedToolIds.length > 0 ? "required" : undefined;
 
       await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         deepthink_enabled: deepthinkEnabled,
-        tool_choice: requestedToolChoice,
-        parallel_tool_calls: activeTemplateToolPolicy.parallelToolCalls,
+        ...(requestedToolChoice ? { tool_choice: requestedToolChoice } : {}),
         tool_policy: {
           ...templatePolicyPayload,
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
@@ -4886,7 +4887,7 @@ function ChatApp() {
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: submittedToolIds,
+        tools: submittedToolIds.length ? submittedToolIds : undefined,
         metadata: {
           mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : mode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
@@ -4908,9 +4909,8 @@ function ChatApp() {
             workspace_label: workspaceLabelForSubmit,
             workspace_root: workspaceRootForSubmit,
           } : {}),
-          ...(templateAiInputMetadata?.id ? { ai_input_id: templateAiInputMetadata.id } : {}),
+          ...templatePolicyReferencePayload,
           ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
-          ...(activeTemplateToolPolicy.id ? { template_tool_policy_id: activeTemplateToolPolicy.id } : {}),
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
           ...(submittedSkillIds.length ? { skills: submittedSkillIds, skill_mentions: submittedSkillIds.map((skillId) => ({ id: skillId, label: composerSkillById.get(skillId)?.label ?? skillId })) } : {}),

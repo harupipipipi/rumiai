@@ -8,20 +8,12 @@ import type {
   UICatalog,
 } from "./api";
 import type { ComposerExtensionItem, DroppedWidget } from "../renderers/types";
+import {
+  mergeTemplateToolPolicies as mergeTemplateToolPoliciesCore,
+  templateToolPolicySettings as templateToolPolicySettingsCore,
+} from "./templateToolPolicyMerge";
 
-export type TemplateToolPolicySettings = {
-  id: string | null;
-  ids: string[];
-  defaultEnabledToolIds: string[];
-  defaultDisabledToolIds: string[];
-  allowedToolIds: string[];
-  hasAllowedToolRestriction: boolean;
-  deniedToolIds: string[];
-  toolChoice?: "auto" | "none" | "required" | Record<string, unknown>;
-  parallelToolCalls?: boolean;
-};
-
-const TOOL_CHOICE_VALUES = new Set(["auto", "none", "required"]);
+export type { TemplateToolPolicySettings } from "./templateToolPolicyMerge";
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -241,140 +233,41 @@ export function selectTemplateToolPolicy(
   if (requestedIds.length > 0) {
     const requestedIdSet = new Set(requestedIds);
     const requested = activePolicies.filter((item) => requestedIdSet.has(item.id));
-    if (requested.length) return mergeTemplateToolPolicies(requested);
+    if (requested.length) return mergeTemplateToolPoliciesCore(requested);
   }
-  return mergeTemplateToolPolicies(activePolicies);
+  return mergeTemplateToolPoliciesCore(activePolicies);
 }
 
-function policySource(policy: TemplateToolPolicy | null): Record<string, unknown> {
-  if (!policy) return {};
-  return objectRecord(policy.policy) ?? policy as unknown as Record<string, unknown>;
+export function templateAiInputSourceIds(input: TemplateAiInput | null | undefined): string[] {
+  if (!input) return [];
+  const metadataIds = sourceIdsFromMetadata(input.metadata);
+  return metadataIds.length ? metadataIds : input.id ? [input.id] : [];
 }
 
-function toolChoice(value: unknown): TemplateToolPolicySettings["toolChoice"] {
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    return TOOL_CHOICE_VALUES.has(normalized) ? normalized as "auto" | "none" | "required" : undefined;
-  }
-  return objectRecord(value) ?? undefined;
+export function templateComposerInputSourceIds(input: TemplateComposerInput | null | undefined): string[] {
+  if (!input) return [];
+  const metadataIds = sourceIdsFromMetadata(input.metadata);
+  return metadataIds.length ? metadataIds : input.id ? [input.id] : [];
 }
 
-function sameToolChoice(left: TemplateToolPolicySettings["toolChoice"], right: TemplateToolPolicySettings["toolChoice"]): boolean {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  if (typeof left !== "object" || typeof right !== "object") return false;
-  return JSON.stringify(left) === JSON.stringify(right);
+export function templateToolPolicySourceIds(policy: TemplateToolPolicy | TemplateToolPolicy[] | null): string[] {
+  return templateToolPolicySettingsCore(policy).ids;
 }
 
-function mergeToolChoice(choices: Array<TemplateToolPolicySettings["toolChoice"]>): TemplateToolPolicySettings["toolChoice"] {
-  const defined = choices.filter((choice): choice is NonNullable<TemplateToolPolicySettings["toolChoice"]> => choice !== undefined);
-  if (defined.length === 0) return undefined;
-  const first = defined[0];
-  if (defined.every((choice) => sameToolChoice(first, choice))) return first;
-  if (defined.every((choice) => typeof choice === "string")) {
-    if (defined.includes("none")) return "none";
-    if (defined.includes("required")) return "required";
-    return "auto";
-  }
-  return first;
-}
-
-function mergeParallelToolCalls(values: Array<boolean | undefined>): boolean | undefined {
-  const defined = values.filter((value): value is boolean => typeof value === "boolean");
-  if (defined.length === 0) return undefined;
-  return defined.every(Boolean);
-}
-
-function intersectStringLists(lists: string[][]): string[] {
-  if (lists.length === 0) return [];
-  const [first, ...rest] = lists;
-  return first.filter((item) => rest.every((list) => list.includes(item)));
-}
-
-function templateToolPolicySourceIds(policy: TemplateToolPolicy | null): string[] {
-  if (!policy) return [];
-  const metadataIds = sourceIdsFromMetadata(policy.metadata);
-  return metadataIds.length ? metadataIds : policy.id ? [policy.id] : [];
-}
-
-function templateToolPolicySettingsFromPolicy(policy: TemplateToolPolicy | null): TemplateToolPolicySettings {
-  const source = policySource(policy);
-  const ids = templateToolPolicySourceIds(policy);
-  const hasAllowedToolRestriction = (
-    Object.prototype.hasOwnProperty.call(source, "allowed_tools")
-    || Object.prototype.hasOwnProperty.call(source, "allowlist")
-    || Object.prototype.hasOwnProperty.call(source, "tool_allowlist")
-  );
+export function templateToolPolicyReferencePayload(
+  aiInput: TemplateAiInput | null | undefined,
+  policy: TemplateToolPolicy | TemplateToolPolicy[] | null,
+): Record<string, unknown> {
+  const aiInputIds = templateAiInputSourceIds(aiInput);
+  const policyIds = templateToolPolicySourceIds(policy);
   return {
-    id: policy?.id ?? null,
-    ids,
-    defaultEnabledToolIds: stringList(source.default_enabled_tools ?? source.defaultEnabledTools),
-    defaultDisabledToolIds: stringList(source.default_disabled_tools ?? source.defaultDisabledTools),
-    allowedToolIds: stringList(source.allowed_tools ?? source.allowlist ?? source.tool_allowlist),
-    hasAllowedToolRestriction,
-    deniedToolIds: stringList(source.denied_tools ?? source.denylist ?? source.tool_denylist),
-    toolChoice: toolChoice(source.tool_choice),
-    parallelToolCalls: typeof source.parallel_tool_calls === "boolean" ? source.parallel_tool_calls : undefined,
+    ...(aiInputIds.length ? { template_ai_input_ids: aiInputIds } : {}),
+    ...(policyIds.length ? { template_tool_policy_ids: policyIds } : {}),
   };
 }
 
-function mergeTemplateToolPolicySettings(policies: TemplateToolPolicy[]): TemplateToolPolicySettings {
-  const policySettings = policies.map(templateToolPolicySettingsFromPolicy);
-  const ids = uniqueStrings(policySettings.flatMap((settings) => settings.ids));
-  const deniedToolIds = uniqueStrings(policySettings.flatMap((settings) => settings.deniedToolIds));
-  const deniedToolIdSet = new Set(deniedToolIds);
-  const restrictiveAllowlists = policySettings
-    .filter((settings) => settings.hasAllowedToolRestriction)
-    .map((settings) => settings.allowedToolIds);
-  const allowedToolIds = intersectStringLists(restrictiveAllowlists);
-  const allowedToolIdSet = new Set(allowedToolIds);
-  const hasAllowedToolRestriction = restrictiveAllowlists.length > 0;
-  const defaultEnabledToolIds = uniqueStrings(policySettings.flatMap((settings) => settings.defaultEnabledToolIds))
-    .filter((toolId) => !deniedToolIdSet.has(toolId))
-    .filter((toolId) => !hasAllowedToolRestriction || allowedToolIdSet.has(toolId));
-  const defaultDisabledToolIds = uniqueStrings(policySettings.flatMap((settings) => settings.defaultDisabledToolIds));
-  return {
-    id: policies.length === 0 ? null : policies.length === 1 ? policies[0].id : composedId("composed_tool_policy", policies),
-    ids,
-    defaultEnabledToolIds,
-    defaultDisabledToolIds,
-    allowedToolIds,
-    hasAllowedToolRestriction,
-    deniedToolIds,
-    toolChoice: mergeToolChoice(policySettings.map((settings) => settings.toolChoice)),
-    parallelToolCalls: mergeParallelToolCalls(policySettings.map((settings) => settings.parallelToolCalls)),
-  };
-}
-
-function mergeTemplateToolPolicies(items: TemplateToolPolicy[]): TemplateToolPolicy | null {
-  if (items.length === 0) return null;
-  if (items.length === 1) return items[0];
-  const settings = mergeTemplateToolPolicySettings(items);
-  return {
-    id: settings.id ?? composedId("composed_tool_policy", items),
-    label: firstString(items, (item) => item.label),
-    description: firstString(items, (item) => item.description),
-    toggleable: items.some((item) => item.toggleable === true) ? true : undefined,
-    policy: {
-      default_enabled_tools: settings.defaultEnabledToolIds,
-      default_disabled_tools: settings.defaultDisabledToolIds,
-      ...(settings.hasAllowedToolRestriction ? { allowed_tools: settings.allowedToolIds } : {}),
-      denied_tools: settings.deniedToolIds,
-      ...(settings.toolChoice ? { tool_choice: settings.toolChoice } : {}),
-      ...(typeof settings.parallelToolCalls === "boolean" ? { parallel_tool_calls: settings.parallelToolCalls } : {}),
-    },
-    modes: mergeModes(items),
-    enabled: true,
-    template_id: sameString(items, (item) => item.template_id),
-    piece_id: sameString(items, (item) => item.piece_id),
-    origin: items[0]?.origin,
-    metadata: sourceMetadata(items),
-  };
-}
-
-export function templateToolPolicySettings(policy: TemplateToolPolicy | TemplateToolPolicy[] | null): TemplateToolPolicySettings {
-  if (Array.isArray(policy)) return mergeTemplateToolPolicySettings(policy);
-  return templateToolPolicySettingsFromPolicy(policy);
+export function templateToolPolicySettings(policy: TemplateToolPolicy | TemplateToolPolicy[] | null) {
+  return templateToolPolicySettingsCore(policy);
 }
 
 export function templateFeatureFlagEnabled(

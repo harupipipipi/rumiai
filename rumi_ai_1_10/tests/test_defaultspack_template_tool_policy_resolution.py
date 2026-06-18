@@ -70,10 +70,13 @@ def test_template_tool_policy_resolves_from_ai_input_and_ignores_request_lists()
     assert resolution.policy["tool_allowlist"] == ["web_search"]
     assert resolution.policy["tool_denylist"] == ["coding_terminal_exec", "sandbox_exec"]
     assert resolution.policy["default_enabled_tools"] == ["web_search"]
-    assert resolution.policy["default_disabled_tools"] == ["sandbox_exec"]
+    assert resolution.policy["default_disabled_tools"] == [
+        "coding_terminal_exec",
+        "sandbox_exec",
+    ]
     assert resolution.policy["parallel_tool_calls"] is False
     assert resolution.policy["tool_choice"] == "auto"
-    assert resolution.policy["selected_tools"] == ["web_search"]
+    assert "selected_tools" not in resolution.policy
     assert resolution.policy["yolo_mode"] is True
 
 
@@ -89,7 +92,9 @@ def test_template_tool_policy_resolves_projected_policy_id():
     assert resolution.applied is True
     assert resolution.policy["tool_allowlist"] == ["web_search"]
     assert resolution.policy["template_tool_policy_id"] == "chat_tools"
-    assert resolution.policy["template_tool_policy_projected_id"] == "template.ai.input:policy_piece"
+    assert (
+        resolution.policy["template_tool_policy_projected_id"] == "template.ai.input:policy_piece"
+    )
 
 
 def test_template_tool_policy_preserves_legacy_policy_without_ids_or_catalog():
@@ -107,8 +112,10 @@ def test_template_tool_policy_preserves_legacy_policy_without_ids_or_catalog():
     assert without_ids.id_requested is False
     assert without_ids.policy == legacy_policy
     assert without_catalog.catalog_available is False
-    assert without_catalog.policy["tool_allowlist"] == ["coding_terminal_exec"]
-    assert without_catalog.policy["default_disabled_tools"] == ["web_search"]
+    assert without_catalog.blocked is True
+    assert without_catalog.policy["tool_allowlist"] == []
+    assert without_catalog.policy["tool_choice"] == "none"
+    assert without_catalog.policy["template_policy_blocked"] is True
 
 
 def test_resolved_template_policy_filters_requested_tools_in_backend_pipeline():
