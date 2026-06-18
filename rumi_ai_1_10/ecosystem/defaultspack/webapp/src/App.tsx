@@ -4872,9 +4872,12 @@ function ChatApp() {
           }
         : {};
       const shouldSendExplicitToolSelection = submittedToolIds.length > 0;
-      const templatePolicyPayload = {
-        ...templatePolicyReferencePayload,
-        ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
+      const templateRequestPayload = {
+        params: templateAiInputParams,
+        toolPolicy: {
+          ...templatePolicyReferencePayload,
+          ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
+        },
       };
       const toolSelectionRequest = shouldSendExplicitToolSelection
         ? {
@@ -4892,12 +4895,12 @@ function ChatApp() {
           };
 
       await api.streamMessage(conversation.id, userText, {
-        params: templateAiInputParams,
+        params: templateRequestPayload.params,
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         deepthink_enabled: deepthinkEnabled,
         tool_selection: toolSelectionRequest,
         tool_policy: {
-          ...templatePolicyPayload,
+          ...templateRequestPayload.toolPolicy,
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,
           ...mimoCodingPolicy,
@@ -4928,8 +4931,7 @@ function ChatApp() {
             workspace_label: workspaceLabelForSubmit,
             workspace_root: workspaceRootForSubmit,
           } : {}),
-          ...templatePolicyReferencePayload,
-          ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
+          ...templateRequestPayload.toolPolicy,
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
           ...(submittedSkillIds.length ? { skills: submittedSkillIds, skill_mentions: submittedSkillIds.map((skillId) => ({ id: skillId, label: composerSkillById.get(skillId)?.label ?? skillId })) } : {}),
