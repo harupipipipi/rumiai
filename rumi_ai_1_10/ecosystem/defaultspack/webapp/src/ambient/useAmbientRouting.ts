@@ -28,6 +28,7 @@ export function useAmbientRouting({
   const [routingGroupId, setRoutingGroupId] = useState("gesture");
   const [routingGroupTitle, setRoutingGroupTitle] = useState("Gesture");
   const [routingModel, setRoutingModel] = useState("");
+  const [destinationConversationModel, setDestinationConversationModel] = useState({ id: "", model: "" });
   const [aiSendApprovalRequired, setAiSendApprovalRequired] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
   const [modelResults, setModelResults] = useState<ModelSearchItem[]>([]);
@@ -58,6 +59,41 @@ export function useAmbientRouting({
     () => conversations.find((conversation) => conversation.id === routingConversationId) ?? null,
     [conversations, routingConversationId],
   );
+  const destinationConversationId = routingConversationId || conversationId || null;
+  useEffect(() => {
+    let cancelled = false;
+    const activeId = String(destinationConversationId ?? "").trim();
+    if (!activeId) {
+      setDestinationConversationModel({ id: "", model: "" });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const listed = conversations.find((conversation) => conversation.id === activeId);
+    if (listed) {
+      setDestinationConversationModel({ id: activeId, model: listed.model || "" });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setDestinationConversationModel((current) => (current.id === activeId ? current : { id: activeId, model: "" }));
+    api.getConversation(activeId)
+      .then((conversation) => {
+        if (!cancelled) setDestinationConversationModel({ id: activeId, model: conversation.model || "" });
+      })
+      .catch(() => {
+        if (!cancelled) setDestinationConversationModel({ id: activeId, model: "" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversations, destinationConversationId]);
+  const destinationModel = destinationConversationModel.id === String(destinationConversationId ?? "").trim()
+    ? destinationConversationModel.model
+    : "";
+  const effectiveRoutingModel = routingModel || routingSelectedConversation?.model || destinationModel || "";
   const routingChatItems = useMemo(() => conversationsToChatItems(conversations), [conversations]);
   const routingSummary = useMemo(
     () => routingLabel(routingMode, routingSelectedConversation, routingConversationId, status?.routing?.session_conversation_id),
@@ -88,7 +124,7 @@ export function useAmbientRouting({
       group_enabled: routingGroupEnabled,
       group_id: routingGroupId,
       group_title: routingGroupTitle,
-      model: routingModel,
+      model: effectiveRoutingModel,
       ai_send_approval_required: aiSendApprovalRequired,
       ...patch,
     }, conversationId || null);
@@ -114,7 +150,11 @@ export function useAmbientRouting({
 
   async function selectConversationForRouting(chatId: string) {
     setChatPickerOpen(false);
-    await saveRouting({ mode: "selected_chat", conversation_id: chatId }, "このチャットに送ります。");
+    const selected = conversations.find((conversation) => conversation.id === chatId);
+    await saveRouting(
+      { mode: "selected_chat", conversation_id: chatId, model: selected?.model || "" },
+      "このチャットに送ります。",
+    );
   }
 
   async function searchRoutingModels(query = modelQuery) {
@@ -141,7 +181,7 @@ export function useAmbientRouting({
     setRoutingGroupId,
     routingGroupTitle,
     setRoutingGroupTitle,
-    routingModel,
+    routingModel: effectiveRoutingModel,
     setRoutingModel,
     aiSendApprovalRequired,
     modelQuery,

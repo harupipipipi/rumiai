@@ -231,8 +231,6 @@ def _transcription_candidates(
                 "openai/whisper-1",
             ]
         )
-    if isinstance(providers, dict) and "rumi" in providers:
-        fallback_candidates.append("rumi/transcribe")
     available_fallback_candidates = [
         model_ref
         for model_ref in fallback_candidates

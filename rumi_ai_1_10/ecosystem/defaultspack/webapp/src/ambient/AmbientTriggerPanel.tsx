@@ -1044,9 +1044,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                 >
                   <span className="inline-flex min-w-0 items-center gap-2">
                     {readoutEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
-                    <span className="truncate">回答音声</span>
+                    <span className="truncate">読み上げ</span>
                   </span>
-                  <span className="shrink-0 text-[11px]">{readoutEnabled ? (readoutPlaying ? "ON・再生中" : "ON") : "OFF"}</span>
+                  <span className="shrink-0 text-[11px]">{readoutEnabled ? (readoutPlaying ? "読み上げ: 再生中" : "読み上げ: オン") : "読み上げ: オフ"}</span>
                 </button>
                 {allRumiPermissionsGranted && (
                   <RoutingSettings
@@ -1161,8 +1161,8 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
 
             {approvalTarget && monitorEnabled && (
               <div className="border-l border-sky-400/35 pl-2 text-[11px] text-sky-100">
-                {approvalTarget.canReject !== false && <span className="mr-2"><X size={11} className="mr-1 inline" />{approvalTarget.rejectLabel ?? "拒否"} (2)</span>}
-                {approvalTarget.canApprove !== false && <span><Check size={11} className="mr-1 inline" />{approvalTarget.approveLabel ?? "許可"} ({approvalTarget.canReject === false ? "2" : "3"})</span>}
+                {approvalTarget.canReject !== false && <span className="mr-2"><X size={11} className="mr-1 inline" />{approvalTarget.rejectLabel ?? "拒否"}</span>}
+                {approvalTarget.canApprove !== false && <span><Check size={11} className="mr-1 inline" />{approvalTarget.approveLabel ?? "許可"}</span>}
               </div>
             )}
 
@@ -1378,6 +1378,13 @@ function ambientResultMessage(result: Record<string, unknown>, fallback: string)
   }
   if (status === "not_found") {
     return `${ambientOperationLabels.failed}: 送信待ちは見つかりませんでした。`;
+  }
+  if (status === "transcription_required" || reason === "ambient.audio_transcription_unavailable") {
+    const transcription = result.transcription && typeof result.transcription === "object"
+      ? result.transcription as Record<string, unknown>
+      : {};
+    const detail = String(transcription.reason || transcription.code || "").trim();
+    return `${ambientOperationLabels.failed}: 録音を文字起こしできないため送信しませんでした。文字起こし対応モデルを設定してから再録音してください。${detail ? ` (${detail})` : ""}`;
   }
   if (status === "ok" || reason === "trigger_dispatched") {
     return `${ambientOperationLabels.waitingResponse}: ${fallback} 返答を待っています。`;

@@ -297,6 +297,68 @@ def test_selected_chat_routing_passes_saved_model_as_turn_param(monkeypatch, tmp
     assert envelope.params["model"] == "opencode-go/kimi-k2.6"
 
 
+def test_always_new_chat_uses_selected_route_model_for_created_conversation(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "conversations.json"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+    from domain.chat.store import ChatStore
+
+    route_model = "opencode-go/deepseek-v4-flash"
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+    router.configure({"routing": {"mode": "always_new_chat", "group_id": "gesture", "model": route_model}})
+
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": ""}) as submit:
+        dispatched = router.submit_event(_pinch_audio_payload())
+
+    assert dispatched["status"] == "ok"
+    envelope = submit.call_args.args[0]
+    created = ChatStore().get_conversation(envelope.target["conversation_id"])
+    assert created["model"] == route_model
+    assert envelope.chat["model"] == route_model
+    assert envelope.params["model"] == route_model
+    serialized = json.dumps({"conversation": created, "chat": envelope.chat, "params": envelope.params}, ensure_ascii=False)
+    assert "ollama/llama3.1:8b" not in serialized
+
+
+def test_always_new_chat_prefers_current_conversation_model_when_route_model_blank(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "conversations.json"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+    from domain.chat.store import ChatStore
+
+    current_model = "opencode-go/deepseek-v4-flash"
+    source_conversation = ChatStore().create_conversation(model=current_model)
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+    router.configure({"routing": {"mode": "always_new_chat", "group_id": "gesture", "model": ""}})
+
+    payload = _pinch_audio_payload()
+    payload["conversation_id"] = source_conversation["id"]
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": ""}) as submit:
+        dispatched = router.submit_event(payload, {"conversation_id": source_conversation["id"]})
+
+    assert dispatched["status"] == "ok"
+    envelope = submit.call_args.args[0]
+    assert envelope.target["conversation_id"] != source_conversation["id"]
+    created = ChatStore().get_conversation(envelope.target["conversation_id"])
+    assert created["model"] == current_model
+    assert envelope.chat["model"] == current_model
+    assert envelope.params["model"] == current_model
+    serialized = json.dumps({"conversation": created, "chat": envelope.chat, "params": envelope.params}, ensure_ascii=False)
+    assert "ollama/llama3.1:8b" not in serialized
+
+
 def test_ambient_audio_release_without_transcript_transcribes_for_text_model(monkeypatch, tmp_path):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
@@ -363,6 +425,11 @@ def test_ambient_audio_release_without_transcript_requires_transcription_for_tex
     assert result["status"] == "transcription_required"
     assert result["reason"] == "ambient.audio_transcription_unavailable"
     assert result["transcription"]["code"] == "no_transcription_model"
+    serialized = json.dumps(result, ensure_ascii=False)
+    assert "pinch.webm" not in serialized
+    assert "ambient-pinch" not in serialized
+    assert "data:audio" not in serialized
+    assert "AAAA" not in serialized
     transcribe.assert_called_once()
     submit.assert_not_called()
 
@@ -375,10 +442,10 @@ def test_ambient_transcription_without_explicit_model_rejects_stub_only_provider
 
     class StubOnlyClient:
         def __init__(self):
-            self._providers = {"stub": object()}
+            self._providers = {"stub": object(), "rumi": object()}
 
         def transcribe(self, model, audio, params):
-            raise AssertionError("implicit stub transcription should not be attempted")
+            raise AssertionError("implicit fallback transcription should not be attempted")
 
     attachment = _pinch_audio_payload(transcript=None)["attachments"][0]
     with patch("domain.ai_client.client.AIClient", return_value=StubOnlyClient()):

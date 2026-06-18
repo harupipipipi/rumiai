@@ -279,13 +279,15 @@ class AmbientTriggerRouter:
                 attachments=attachments,
                 input_text=input_text,
             )
-        target_conversation_id = self._target_conversation_id(event, context, state)
         routing = state.get("routing") if isinstance(state.get("routing"), dict) else {}
         model = str(routing.get("model") or "").strip()
         params = dict(event.payload.get("params") if isinstance(event.payload.get("params"), dict) else {})
         if model and not str(params.get("model") or params.get("profile_id") or "").strip():
             params["model"] = model
+        target_conversation_id = self._target_conversation_id(event, context, state, params=params)
         model_ref = self._model_ref_for_dispatch(event, context, state, target_conversation_id, params=params, routing=routing)
+        if model_ref and routing.get("mode") != "selected_chat" and not str(params.get("model") or params.get("profile_id") or "").strip():
+            params["model"] = model_ref
         audio_plan = self._prepare_audio_dispatch(
             event,
             attachments,
@@ -307,12 +309,13 @@ class AmbientTriggerRouter:
         input_text = str(audio_plan.get("input_text") or input_text)
         attachments = list(audio_plan.get("attachments") if isinstance(audio_plan.get("attachments"), list) else attachments)
         transcription_summary = audio_plan.get("transcription") if isinstance(audio_plan.get("transcription"), dict) else {}
+        chat_model = model or (model_ref if routing.get("mode") != "selected_chat" else "")
         envelope = RumiInputEnvelope(
             role="user",
             input=input_text,
             chat={
                 "conversation_id": target_conversation_id,
-                **({"model": model} if model and routing.get("mode") != "selected_chat" else {}),
+                **({"model": chat_model} if chat_model and routing.get("mode") != "selected_chat" else {}),
             },
             source={
                 "provider": "ambient",
@@ -491,6 +494,8 @@ class AmbientTriggerRouter:
         event: AmbientTriggerEvent,
         context: dict[str, Any],
         state: dict[str, Any],
+        *,
+        params: dict[str, Any] | None = None,
     ) -> str | None:
         routing = state.get("routing") if isinstance(state.get("routing"), dict) else {}
         mode = str(routing.get("mode") or "selected_chat").strip()
@@ -499,24 +504,31 @@ class AmbientTriggerRouter:
         if mode == "selected_chat":
             return _clean_string(routing.get("conversation_id")) or _clean_string(event.payload.get("conversation_id")) or _clean_string(context.get("conversation_id"))
         if mode == "always_new_chat":
-            return self._create_routed_conversation(routing)["id"]
+            return self._create_routed_conversation(routing, params=params, context=context, event=event)["id"]
         session_key = self._session_route_key(routing)
         if not session_key:
-            return self._create_routed_conversation(routing)["id"]
+            return self._create_routed_conversation(routing, params=params, context=context, event=event)["id"]
         conversation_id = _SESSION_CONVERSATION_IDS.get(session_key)
         if conversation_id:
             existing = ChatStore().get_conversation(conversation_id)
             if existing:
                 return conversation_id
-        created = self._create_routed_conversation(routing)
+        created = self._create_routed_conversation(routing, params=params, context=context, event=event)
         _SESSION_CONVERSATION_IDS[session_key] = created["id"]
         return created["id"]
 
-    def _create_routed_conversation(self, routing: dict[str, Any]) -> dict[str, Any]:
+    def _create_routed_conversation(
+        self,
+        routing: dict[str, Any],
+        *,
+        params: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
+        event: AmbientTriggerEvent | None = None,
+    ) -> dict[str, Any]:
         group_enabled = _coerce_bool(routing.get("group_enabled"), True)
         group_id = (_clean_string(routing.get("group_id")) or "gesture") if group_enabled else ""
         group_title = (_clean_string(routing.get("group_title")) or "Gesture") if group_enabled else ""
-        model = _clean_string(routing.get("model"))
+        model = self._routed_new_conversation_model(routing, params=params, context=context, event=event)
         return ChatStore().create_conversation(
             model=model or None,
             tags=["ambient", "gesture"],
@@ -528,6 +540,37 @@ class AmbientTriggerRouter:
                 **({"group_id": group_id, "group_title": group_title} if group_enabled else {}),
             },
         )
+
+    def _routed_new_conversation_model(
+        self,
+        routing: dict[str, Any],
+        *,
+        params: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
+        event: AmbientTriggerEvent | None = None,
+    ) -> str:
+        params = params if isinstance(params, dict) else {}
+        context = context if isinstance(context, dict) else {}
+        event_payload = event.payload if isinstance(event, AmbientTriggerEvent) and isinstance(event.payload, dict) else {}
+        for value in (
+            params.get("model"),
+            params.get("profile_id"),
+            event_payload.get("model"),
+            event_payload.get("profile_id"),
+            routing.get("model"),
+            context.get("model"),
+            context.get("profile_id"),
+        ):
+            model_ref = _clean_string(value)
+            if model_ref:
+                return model_ref
+        source_conversation_id = _clean_string(event_payload.get("conversation_id")) or _clean_string(context.get("conversation_id"))
+        if source_conversation_id:
+            conversation = ChatStore().get_conversation(source_conversation_id) or {}
+            model_ref = _clean_string(conversation.get("model"))
+            if model_ref:
+                return model_ref
+        return ""
 
     def _session_route_key(self, routing: dict[str, Any]) -> str:
         if str(routing.get("mode") or "") != "startup_new_chat":
