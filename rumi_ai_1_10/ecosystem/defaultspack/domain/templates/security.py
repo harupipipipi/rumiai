@@ -66,7 +66,9 @@ def _diagnose_piece_paths(template: RumiTemplate, piece: TemplatePiece) -> list[
     return diagnostics
 
 
-def _diagnose_shell_like_handlers(template: RumiTemplate, piece: TemplatePiece) -> list[TemplateDiagnostic]:
+def _diagnose_shell_like_handlers(
+    template: RumiTemplate, piece: TemplatePiece
+) -> list[TemplateDiagnostic]:
     diagnostics: list[TemplateDiagnostic] = []
     for field_name, value in (("handler", piece.handler), ("entrypoint", piece.entrypoint)):
         if not value:

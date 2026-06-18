@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -408,8 +409,7 @@ def _template_routes(defaultspack_root: str | Path | None) -> list[Any]:
 
 def _template_functions(defaultspack_root: str | Path | None) -> dict[str, Any]:
     try:
-        from domain.function_runtime.template_specs import template_function_specs
-
-        return template_function_specs(defaultspack_root)
+        template_specs = importlib.import_module("domain.function_runtime.template_specs")
+        return template_specs.template_function_specs(defaultspack_root)
     except Exception:
         return {}

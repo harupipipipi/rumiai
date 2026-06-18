@@ -1,13 +1,9 @@
 from __future__ import annotations
 
+import importlib
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-
-from domain.templates.catalog_runtime import (
-    get_template_catalog_snapshot,
-    invalidate_template_catalog,
-)
 
 from .manifest_factory import FunctionSpec, manifest_for
 
@@ -26,7 +22,8 @@ def _runtime_dir() -> Path:
 
 def _template_catalog(defaultspack_root: str | None = None) -> dict[str, Any]:
     try:
-        catalog = get_template_catalog_snapshot(
+        catalog_runtime = importlib.import_module("domain.templates.catalog_runtime")
+        catalog = catalog_runtime.get_template_catalog_snapshot(
             defaultspack_root=defaultspack_root or _pack_root()
         ).catalog
     except Exception:
@@ -35,7 +32,11 @@ def _template_catalog(defaultspack_root: str | None = None) -> dict[str, Any]:
 
 
 def _clear_template_catalog_cache() -> None:
-    invalidate_template_catalog()
+    try:
+        catalog_runtime = importlib.import_module("domain.templates.catalog_runtime")
+        catalog_runtime.invalidate_template_catalog()
+    except Exception:
+        pass
 
 
 _template_catalog.cache_clear = _clear_template_catalog_cache  # type: ignore[attr-defined]
