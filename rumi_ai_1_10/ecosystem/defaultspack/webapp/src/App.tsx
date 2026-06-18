@@ -2119,7 +2119,7 @@ export function resolveUltraYoloModeState(
 }
 
 export function keepSelectedToolsAfterSend(settingsValues: Record<string, Record<string, unknown>>): boolean {
-  return parseCommandBoolean(settingsValues.tools?.keep_selected_tools_after_send, true);
+  return parseCommandBoolean(settingsValues.tools?.keep_selected_tools_after_send, false);
 }
 
 function commandSearchText(command: ComposerCommandItem): string {

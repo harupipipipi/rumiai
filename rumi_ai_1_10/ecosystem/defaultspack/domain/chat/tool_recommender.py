@@ -8,11 +8,20 @@ from pathlib import Path
 from typing import Any
 
 
-TOOL_ASSIST_DEFAULT_MODE = "all"
+TOOL_ASSIST_DEFAULT_MODE = "auto"
 TOOL_ASSIST_AUTO_MODE = "auto"
 TOOL_ASSIST_VECTOR_MODE = "vector"
-TOOL_ASSIST_MODES = {TOOL_ASSIST_DEFAULT_MODE, TOOL_ASSIST_AUTO_MODE, TOOL_ASSIST_VECTOR_MODE, "off"}
-TOOL_ASSIST_LEGACY_MODE_ALIASES: dict[str, str] = {}
+TOOL_ASSIST_ALL_SCHEMAS_MODE = "all_schemas"
+TOOL_ASSIST_MODES = {
+    TOOL_ASSIST_AUTO_MODE,
+    TOOL_ASSIST_VECTOR_MODE,
+    TOOL_ASSIST_ALL_SCHEMAS_MODE,
+    "off",
+}
+TOOL_ASSIST_LEGACY_MODE_ALIASES: dict[str, str] = {
+    "all": TOOL_ASSIST_AUTO_MODE,
+    "manual": "off",
+}
 DEFAULT_TOOL_RECOMMENDATION_LIMIT = 8
 DEFAULT_TOOL_RECOMMENDATION_THRESHOLD = 0.08
 
@@ -61,9 +70,9 @@ for group in _SYNONYM_GROUPS:
 def effective_tool_assist_mode(settings: dict[str, Any] | None = None, *, pack_root: Path | None = None) -> str:
     """Return the selected tool-assist mode.
 
-    The setting defaults to exposing every registered tool. Auto mode exposes
-    always-loaded tools plus vector-selected tools; vector mode keeps the same
-    selection behavior available as an explicit option.
+    The setting defaults to lexical auto-selection. Legacy "all" is treated as
+    auto so enabling omitted-tools auto selection does not suddenly expose every
+    registered tool. Use "all_schemas" only for explicit debug compatibility.
     """
 
     values = settings if isinstance(settings, dict) else _read_frontend_settings(pack_root)

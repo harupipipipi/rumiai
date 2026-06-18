@@ -1293,12 +1293,11 @@ type ApiError = {
 type ApiEnvelope<T> = ApiOk<T> | ApiError;
 
 export type ToolSelectionRequest = {
-  mode?: "auto" | "review" | "manual" | "none";
+  mode?: "auto" | "manual" | "none";
   include?: string[];
   exclude?: string[];
-  scope?: "turn" | "conversation";
+  scope?: "turn";
   must_use?: boolean;
-  review?: boolean;
 };
 
 type SendMessageOptions = {

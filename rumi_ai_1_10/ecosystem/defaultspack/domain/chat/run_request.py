@@ -71,7 +71,8 @@ _COMPUTER_USE_CHROME_NEGATED_RE = re.compile(
 _COMPUTER_USE_VIVALDI_TARGET_RE = re.compile(r"vivaldi|vivladi|ヴィヴァルディ|ビバルディ", re.IGNORECASE)
 _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
-_TOOL_SELECTION_MODES = {"auto", "review", "manual", "none"}
+_TOOL_SELECTION_MODES = {"auto", "manual", "none"}
+_TOOL_SELECTION_SCOPES = {"turn"}
 
 
 @dataclass
@@ -133,10 +134,16 @@ def validate_chat_run_input(input_data: dict[str, Any]) -> str | None:
         return "message content must not be empty"
     if isinstance(raw_content, list) and len(raw_content) == 0 and not has_attachments:
         return "message content must not be empty"
+    tool_selection_error = _validate_tool_selection_input(input_data)
+    if tool_selection_error:
+        return tool_selection_error
     return None
 
 
 def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None = None) -> PreparedChatRun:
+    validation_error = validate_chat_run_input(input_data if isinstance(input_data, dict) else {})
+    if validation_error:
+        raise ValueError(validation_error)
     store = ChatStore()
     conversation_id = str(input_data.get("conversation_id") or "")
     conversation = store.get_conversation(conversation_id)
@@ -1276,17 +1283,18 @@ def _normalize_tool_selection(input_data: dict[str, Any]) -> NormalizedToolSelec
         raw_mode = str(raw_selection.get("mode") or "").strip().lower()
         if raw_mode not in _TOOL_SELECTION_MODES:
             raw_mode = "manual" if include else "auto"
-        if raw_mode in {"auto", "review"} and top_level_tools:
+        if raw_mode == "auto" and top_level_tools:
             include = _merge_tool_items(include, top_level_tools)
+        if raw_mode == "manual" and not include:
+            raw_mode = "none"
         scope = str(raw_selection.get("scope") or "turn").strip().lower() or "turn"
-        review = _coerce_optional_bool(raw_selection.get("review"), default=raw_mode == "review")
         return NormalizedToolSelection(
             mode=raw_mode,
             include=include,
             exclude=exclude,
             scope=scope,
             must_use=_coerce_optional_bool(raw_selection.get("must_use"), default=False),
-            review=review,
+            review=False,
             source="tool_selection",
         )
 
@@ -1318,6 +1326,36 @@ def _normalize_tool_selection(input_data: dict[str, Any]) -> NormalizedToolSelec
         )
 
     return NormalizedToolSelection()
+
+
+def _validate_tool_selection_input(input_data: dict[str, Any]) -> str | None:
+    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
+    if "tool_selection" not in params:
+        return None
+    raw_selection = params.get("tool_selection")
+    if raw_selection is None:
+        return None
+    if not isinstance(raw_selection, dict):
+        return "params.tool_selection must be an object"
+    raw_mode = str(raw_selection.get("mode") or "auto").strip().lower()
+    if raw_mode not in _TOOL_SELECTION_MODES:
+        if raw_mode == "review":
+            return "params.tool_selection.mode=review is not implemented yet"
+        return "params.tool_selection.mode must be one of auto, manual, none"
+    raw_scope = str(raw_selection.get("scope") or "turn").strip().lower()
+    if raw_scope not in _TOOL_SELECTION_SCOPES:
+        if raw_scope == "conversation":
+            return "params.tool_selection.scope=conversation is not implemented yet"
+        return "params.tool_selection.scope must be turn"
+    if _coerce_optional_bool(raw_selection.get("review"), default=False):
+        return "params.tool_selection.review is not implemented yet"
+    must_use = _coerce_optional_bool(raw_selection.get("must_use"), default=False)
+    include = _coerce_tool_items(raw_selection.get("include"))
+    if raw_mode == "none" and must_use:
+        return "params.tool_selection cannot combine mode=none with must_use=true"
+    if raw_mode == "none" and include:
+        return "params.tool_selection mode=none cannot include tools"
+    return None
 
 
 def _coerce_tool_items(value: Any) -> list[Any]:
@@ -1406,7 +1444,7 @@ def _resolve_selected_tools(
             mode = "vector"
         if mode == "off":
             return [], []
-        if mode == "all":
+        if mode == "all_schemas":
             return tools, []
         candidate_tools = tools
         if prefers_vector:

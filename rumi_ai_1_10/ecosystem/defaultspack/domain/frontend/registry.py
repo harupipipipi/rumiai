@@ -1418,21 +1418,21 @@ class FrontendRegistry:
                         "id": "keep_selected_tools_after_send",
                         "label": "Keep Selected Tools",
                         "type": "toggle",
-                        "default": True,
+                        "default": False,
                         "help": "Keep composer tool selections after a message is sent.",
                     },
                     {
                         "id": "tool_assist_mode",
                         "label": "Tool Assist",
                         "type": "select",
-                        "default": "all",
+                        "default": "auto",
                         "options": [
-                            {"value": "all", "label": "All tools: expose every tool"},
-                            {"value": "auto", "label": "Auto: always tools plus relevant vector matches"},
-                            {"value": "vector", "label": "Vector: recommend relevant tools"},
+                            {"value": "auto", "label": "Auto: always tools plus relevant lexical matches"},
+                            {"value": "vector", "label": "Lexical: recommend relevant tools"},
                             {"value": "off", "label": "Off: only manually selected tools"},
+                            {"value": "all_schemas", "label": "Debug: expose all tool schemas"},
                         ],
-                        "help": "既定ではすべての tool を AI に渡します。Auto は常時読み込み宣言の tool と、入力文に関連する vector tool だけを渡します。",
+                        "help": "既定では常時読み込み宣言の tool と、入力文に関連する tool だけを渡します。全 schema 公開はdebug用です。",
                     },
                     {
                         "id": "tool_assist_limit",
@@ -2224,9 +2224,10 @@ class FrontendRegistry:
                 "show_advanced_commands": False,
             },
             "tools": {
+                "settings_version": 2,
                 "default_target": "",
-                "keep_selected_tools_after_send": True,
-                "tool_assist_mode": "all",
+                "keep_selected_tools_after_send": False,
+                "tool_assist_mode": "auto",
                 "tool_assist_limit": 8,
                 "disabled_tool_ids": [],
                 "hidden_tool_ids": [],
@@ -2688,7 +2689,16 @@ class FrontendRegistry:
         if not isinstance(tools, dict):
             tools = {}
             refreshed["tools"] = tools
-        tools.setdefault("keep_selected_tools_after_send", True)
+        try:
+            settings_version = int(tools.get("settings_version") or 1)
+        except (TypeError, ValueError):
+            settings_version = 1
+        tools["settings_version"] = 2
+        tools["keep_selected_tools_after_send"] = (
+            False
+            if settings_version < 2
+            else self._setting_bool(tools.get("keep_selected_tools_after_send"), False)
+        )
         disabled_tool_ids = tools.get("disabled_tool_ids")
         hidden_tool_ids = tools.get("hidden_tool_ids")
         tools["disabled_tool_ids"] = list(
@@ -2705,8 +2715,16 @@ class FrontendRegistry:
                 if str(item or "").strip()
             )
         )
-        tool_assist_mode = str(tools.get("tool_assist_mode") or "all").strip().lower()
-        tools["tool_assist_mode"] = tool_assist_mode if tool_assist_mode in {"all", "auto", "vector", "off"} else "all"
+        tool_assist_mode = str(tools.get("tool_assist_mode") or "auto").strip().lower()
+        if settings_version < 2 and tool_assist_mode in {"all", "auto", "vector"}:
+            tool_assist_mode = "auto"
+        elif tool_assist_mode == "manual":
+            tool_assist_mode = "off"
+        elif tool_assist_mode == "all":
+            tool_assist_mode = "auto"
+        tools["tool_assist_mode"] = (
+            tool_assist_mode if tool_assist_mode in {"auto", "vector", "off", "all_schemas"} else "auto"
+        )
         try:
             tools["tool_assist_limit"] = max(1, min(24, int(tools.get("tool_assist_limit", 8))))
         except (TypeError, ValueError):

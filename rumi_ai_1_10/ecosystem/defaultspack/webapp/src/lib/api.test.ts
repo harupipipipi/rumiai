@@ -241,8 +241,8 @@ test("defaultspack API errors include status and recovery context", () => {
   assert.match(message, /権限|承認/);
 });
 
-test("selected tools are kept after send unless settings opt out", () => {
-  assert.equal(keepSelectedToolsAfterSend({}), true);
+test("selected tools are cleared after send unless settings opt in", () => {
+  assert.equal(keepSelectedToolsAfterSend({}), false);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: "false" } }), false);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: true } }), true);
 });
