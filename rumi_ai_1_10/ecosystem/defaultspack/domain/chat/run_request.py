@@ -71,6 +71,9 @@ _COMPUTER_USE_CHROME_NEGATED_RE = re.compile(
 _COMPUTER_USE_VIVALDI_TARGET_RE = re.compile(r"vivaldi|vivladi|ヴィヴァルディ|ビバルディ", re.IGNORECASE)
 _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
+_AUTHORITY_FOLLOWUP_PERMISSION_IDS = frozenset(
+    {"model.invoke", "api_key.use", "network.egress"}
+)
 
 
 @dataclass
@@ -1020,29 +1023,42 @@ def _apply_authority_context(
     followup: dict[str, str] = {}
     approval_tokens: dict[str, dict[str, str]] = {}
 
-    def add_authority_followup(raw: Any) -> None:
+    def add_authority_followup(raw: Any, *, prefer_primary: bool = True, require_issued: bool = False) -> None:
         nonlocal followup
         if not isinstance(raw, dict):
             return
         permission_id = str(raw.get("permission_id") or "").strip()
-        if permission_id not in {"model.invoke", "api_key.use", "network.egress"} and not (
+        if permission_id not in _AUTHORITY_FOLLOWUP_PERMISSION_IDS and not (
             permission_id.startswith("host.") or permission_id.startswith("authority.")
         ):
             return
         token = str(raw.get("approval_token") or raw.get("token") or "").strip()
         authority_request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+        if require_issued and not _authority_followup_was_issued(
+            raw,
+            conversation_id=conversation_id,
+            principal_id=authority_principal_id,
+        ):
+            return
         if token and authority_request_id:
             approval_tokens[permission_id] = {
                 "approval_token": token,
                 "request_id": authority_request_id,
                 "permission_id": permission_id,
             }
-        if not followup:
+        if prefer_primary or not followup:
             followup = {
                 "approval_token": token,
                 "request_id": authority_request_id,
                 "permission_id": permission_id,
             }
+
+    for raw_followup in _trusted_authority_followups_from_current_chain(conversation_id):
+        approvals = raw_followup.get("approvals") if isinstance(raw_followup, dict) else None
+        if isinstance(approvals, list):
+            for item in approvals:
+                add_authority_followup(item, prefer_primary=False, require_issued=True)
+        add_authority_followup(raw_followup, prefer_primary=False, require_issued=True)
 
     if isinstance(metadata, dict):
         raw_followup = metadata.get("authority_followup")
@@ -1052,8 +1068,8 @@ def _apply_authority_context(
             approvals = raw_followup.get("approvals")
             if isinstance(approvals, list):
                 for item in approvals:
-                    add_authority_followup(item)
-            add_authority_followup(raw_followup)
+                    add_authority_followup(item, prefer_primary=False)
+            add_authority_followup(raw_followup, prefer_primary=True)
 
     authority_context = {
         "principal_id": authority_principal_id,
@@ -1072,6 +1088,83 @@ def _apply_authority_context(
         authority_context["approval_tokens"] = approval_tokens
     request_context["authority_principal_id"] = authority_principal_id
     request_context["authority"] = authority_context
+
+
+def _trusted_authority_followups_from_current_chain(conversation_id: str) -> list[dict[str, Any]]:
+    """Return hidden authority followups since the last visible user turn."""
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return []
+    try:
+        conversation = ChatStore().get_conversation(conversation_id)
+    except Exception:
+        return []
+    messages = conversation.get("messages") if isinstance(conversation, dict) else None
+    if not isinstance(messages, list):
+        return []
+
+    followups: list[dict[str, Any]] = []
+    for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        raw_followup = _hidden_authority_followup_from_metadata(metadata)
+        if raw_followup is not None:
+            followups.append(raw_followup)
+            continue
+        if str(message.get("role") or "").strip().lower() == "user":
+            break
+    followups.reverse()
+    return followups
+
+
+def _hidden_authority_followup_from_metadata(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    raw_followup = metadata.get("authority_followup")
+    if not isinstance(raw_followup, dict):
+        raw_followup = metadata.get("authorityFollowup")
+    if not isinstance(raw_followup, dict):
+        return None
+    chat_display = metadata.get("chat_display")
+    if not isinstance(chat_display, dict):
+        chat_display = metadata.get("chatDisplay")
+    hidden = bool(raw_followup.get("hidden"))
+    if isinstance(chat_display, dict):
+        hidden = hidden or (
+            bool(chat_display.get("hidden"))
+            and str(chat_display.get("reason") or "").strip() == "authority_followup"
+        )
+    return raw_followup if hidden else None
+
+
+def _authority_followup_was_issued(
+    raw: dict[str, Any],
+    *,
+    conversation_id: str,
+    principal_id: str,
+) -> bool:
+    permission_id = str(raw.get("permission_id") or "").strip()
+    authority_request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+    token = str(raw.get("approval_token") or raw.get("token") or "").strip()
+    if not permission_id or not authority_request_id or not token:
+        return False
+    try:
+        from core_runtime.authority import get_authority_service
+
+        service = get_authority_service()
+        issued = getattr(service, "one_shot_approval_issued", None)
+        if not callable(issued):
+            return False
+        return bool(
+            issued(
+                request_id=authority_request_id,
+                permission_id=permission_id,
+                token=token,
+                conversation_id=conversation_id,
+                principal_id=principal_id,
+            )
+        )
+    except Exception:
+        return False
 
 
 def _consume_turn_model_route_override(

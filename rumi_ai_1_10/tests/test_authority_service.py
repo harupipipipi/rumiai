@@ -175,6 +175,64 @@ def test_authority_approve_once_consumes_token(tmp_path, monkeypatch):
     assert second.approval_required is True
 
 
+def test_authority_non_consuming_check_does_not_spend_one_shot_token(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    resource = {"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"}
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    approval = service.approve_request(
+        decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    preflight = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+        consume_approval_token=False,
+    )
+    reusable_preflight = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+        consume_approval_token=False,
+    )
+    consumed = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+    )
+    after_consumed = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+        consume_approval_token=False,
+    )
+
+    assert preflight.allowed is True
+    assert reusable_preflight.allowed is True
+    assert consumed.allowed is True
+    assert after_consumed.allowed is False
+    assert after_consumed.approval_required is True
+
+
 def test_authority_approve_once_can_bundle_model_api_key_and_network_tokens(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     model_resource = {

@@ -17,6 +17,7 @@ type Props = {
   disabled: boolean;
   latestInputPreview: string | null;
   authorityApproval?: AuthorityApproval | null;
+  authorityApprovalUrl?: string | null;
   browserApprovalTokenPrompt?: {
     required: boolean;
     token: string;
@@ -42,6 +43,7 @@ export function AmbientMiniChat({
   disabled,
   latestInputPreview,
   authorityApproval = null,
+  authorityApprovalUrl = null,
   browserApprovalTokenPrompt = null,
   showPicker = true,
   onInputChange,
@@ -137,15 +139,27 @@ export function AmbientMiniChat({
                 </div>
               </form>
             ) : (
-              <button
-                type="button"
-                onClick={onOpenAuthorityApproval}
-                className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-sky-200/35 bg-sky-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white"
-                title="承認を開く"
-              >
-                <ExternalLink size={12} />
-                承認を開く
-              </button>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={onOpenAuthorityApproval}
+                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-sky-200/35 bg-sky-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white"
+                  title="承認を開く"
+                >
+                  <ExternalLink size={12} />
+                  承認を開く
+                </button>
+                {authorityApprovalUrl && (
+                  <a
+                    href={authorityApprovalUrl}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-sky-200/35 px-2 text-[11px] font-semibold text-sky-50 hover:bg-sky-300/10"
+                    title="同じタブで承認を開く"
+                  >
+                    <ExternalLink size={12} />
+                    同じタブ
+                  </a>
+                )}
+              </div>
             )}
           </div>
         )}

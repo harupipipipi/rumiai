@@ -82,6 +82,7 @@ type Props = {
 
 type MiniAuthorityApprovalResolution = {
   sourceRequestId: string;
+  sourceConversationId: string | null;
   approval: AuthorityApproval | null;
   stale: boolean;
 };
@@ -253,19 +254,24 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       status?.routing?.session_conversation_id,
     ],
   );
-  const miniConversationId = linkedAmbientConversationId || miniConversationIdOverride;
+  const miniConversationId = miniConversationIdOverride || linkedAmbientConversationId;
+  const miniAuthorityApprovalConversationId = miniConversation?.id ?? miniConversationId ?? null;
   const miniAuthorityApprovalCandidate = useMemo(
     () => ambientPendingAuthorityApproval(miniConversation),
     [miniConversation],
   );
   const miniAuthorityApprovalResolved = miniAuthorityApprovalCandidate
     && miniAuthorityApprovalResolution?.sourceRequestId === miniAuthorityApprovalCandidate.requestId
+    && miniAuthorityApprovalResolution?.sourceConversationId === miniAuthorityApprovalConversationId
     ? miniAuthorityApprovalResolution
     : null;
   const miniAuthorityApproval = miniAuthorityApprovalResolved?.approval ?? null;
   const miniAuthorityApprovalResolving = Boolean(miniAuthorityApprovalCandidate && !miniAuthorityApprovalResolved);
   const miniAuthorityBlocksInput = miniAuthorityApprovalResolving || Boolean(miniAuthorityApproval);
   const miniBrowserApprovalTokenRequired = Boolean(miniAuthorityApproval && !hasNativeAuthorityApprovalWindow() && !browserApprovalToken.trim());
+  const miniBrowserApprovalDirectUrl = miniAuthorityApproval && !hasNativeAuthorityApprovalWindow() && browserApprovalToken.trim()
+    ? browserAuthorityApprovalPath(miniAuthorityApproval.requestId, browserApprovalToken.trim())
+    : null;
   const inlineSettingsControlsVisible = !standalone;
   const miniChatRoutingSummary = standalone ? "次の送信で作成" : routingSummary;
   const debugQaVisible = standalone && debugMode;
@@ -276,6 +282,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     approvalTargetRef.current = approvalTarget;
     onApprovalGestureRef.current = onApprovalGesture;
   }, [approvalTarget, conversationId, onApprovalGesture, onOpenInput]);
+
+  const activateMiniConversationFromSubmitResult = useCallback((result: Record<string, unknown>, fallbackConversationId?: string | null) => {
+    const targetConversationId = ambientSubmittedConversationIdFromResult(result) || cleanString(fallbackConversationId);
+    if (targetConversationId) setMiniConversationIdOverride(targetConversationId);
+    return targetConversationId;
+  }, []);
 
   const loadMiniConversation = useCallback(async (options?: { conversationId?: string | null; quiet?: boolean }) => {
     const requestSeq = miniChatRequestSeqRef.current + 1;
@@ -334,10 +346,14 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     }
     setMiniAuthorityApprovalResolution(null);
     void (async () => {
-      const resolvedApproval = await resolveMiniAuthorityApprovalTarget(miniAuthorityApprovalCandidate);
+      const resolvedApproval = await resolveMiniAuthorityApprovalTarget(
+        miniAuthorityApprovalCandidate,
+        miniAuthorityApprovalConversationId,
+      );
       if (cancelled) return;
       setMiniAuthorityApprovalResolution({
         sourceRequestId: miniAuthorityApprovalCandidate.requestId,
+        sourceConversationId: miniAuthorityApprovalConversationId,
         approval: resolvedApproval,
         stale: !resolvedApproval,
       });
@@ -348,7 +364,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     return () => {
       cancelled = true;
     };
-  }, [miniAuthorityApprovalCandidate?.requestId]);
+  }, [miniAuthorityApprovalCandidate?.requestId, miniAuthorityApprovalConversationId]);
 
   useEffect(() => {
     if (!miniAuthorityApproval) return;
@@ -552,8 +568,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         ],
       });
       setMessage(ambientResultMessage(result, "録音音声をAIに送信しました。"));
-      const resultConversationId = ambientConversationIdFromResult(result);
-      if (resultConversationId) setMiniConversationIdOverride(resultConversationId);
+      const resultConversationId = activateMiniConversationFromSubmitResult(result, conversationIdRef.current);
       const resultStatus = String(result.status ?? "");
       if (resultStatus && resultStatus !== "ok" && resultStatus !== "approval_required") {
         setMiniChatError(ambientResultMessage(result, "録音音声をAIに送信しました。"));
@@ -571,7 +586,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     } finally {
       setPinchDetectorStatus("tracking");
     }
-  }, [loadMiniConversation]);
+  }, [activateMiniConversationFromSubmitResult, loadMiniConversation]);
 
   useEffect(() => {
     if (!pinchRecording || !recordingStartedAt) return;
@@ -792,10 +807,11 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     if (!options?.auto) setExpanded(true);
     setMiniChatError(null);
     try {
-      const resolvedApproval = await resolveMiniAuthorityApprovalTarget(approval);
+      const resolvedApproval = await resolveMiniAuthorityApprovalTarget(approval, miniAuthorityApprovalConversationId);
       if (!resolvedApproval) {
         setMiniAuthorityApprovalResolution({
           sourceRequestId: approval.requestId,
+          sourceConversationId: miniAuthorityApprovalConversationId,
           approval: null,
           stale: true,
         });
@@ -805,6 +821,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       if (resolvedApproval.requestId !== approval.requestId) {
         setMiniAuthorityApprovalResolution({
           sourceRequestId: miniAuthorityApprovalCandidate?.requestId ?? approval.requestId,
+          sourceConversationId: miniAuthorityApprovalConversationId,
           approval: resolvedApproval,
           stale: false,
         });
@@ -825,7 +842,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           if (!options?.auto) setMessage("ブラウザ承認ページを開きました。");
           return;
         }
-        setMiniChatError("ブラウザのポップアップがブロックされました。テストトークン付きの承認URLを開けませんでした。");
+        setMiniChatError("ブラウザのポップアップがブロックされました。同じタブの承認リンクを開いてください。");
         return;
       }
       if (!hasNativeAuthorityApprovalWindow()) {
@@ -852,10 +869,17 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     setMessage("ブラウザ承認テストトークンを保存しました。");
   }
 
-  async function resolveMiniAuthorityApprovalTarget(approval: AuthorityApproval): Promise<AuthorityApproval | null> {
+  async function resolveMiniAuthorityApprovalTarget(
+    approval: AuthorityApproval,
+    currentConversationId: string | null,
+  ): Promise<AuthorityApproval | null> {
     try {
       const pending = await api.listAuthorityRequests({ status: "pending" });
-      const resolvedApproval = resolvePendingAuthorityApproval(approval, pending.pending ?? []);
+      const resolvedApproval = resolvePendingAuthorityApproval(approval, pending.pending ?? [], {
+        conversationId: currentConversationId,
+        requireConversationMatch: true,
+        requirePrincipalMatch: true,
+      });
       if (resolvedApproval) return resolvedApproval;
     } catch (error) {
       console.info("[ambient] pending authority request lookup unavailable", error);
@@ -1069,8 +1093,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           manual_text_input: true,
         },
       });
-      const resultConversationId = ambientConversationIdFromResult(result);
-      if (resultConversationId) setMiniConversationIdOverride(resultConversationId);
+      const resultConversationId = activateMiniConversationFromSubmitResult(result, targetConversationId);
       const nextMessage = ambientResultMessage(result, "メッセージをAIに送信しました。");
       setMessage(nextMessage);
       const resultStatus = String(result.status ?? "");
@@ -1086,6 +1109,11 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     } finally {
       setMiniSending(false);
     }
+  }
+
+  async function selectMiniChatRoutingConversation(chatId: string) {
+    setMiniConversationIdOverride(null);
+    await selectConversationForRouting(chatId);
   }
 
   async function simulateDebugOkMarkRecording() {
@@ -1139,8 +1167,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           },
         ],
       });
-      const resultConversationId = ambientConversationIdFromResult(result);
-      if (resultConversationId) setMiniConversationIdOverride(resultConversationId);
+      const resultConversationId = activateMiniConversationFromSubmitResult(result, miniConversationId || conversationIdRef.current || null);
       const nextMessage = ambientResultMessage(result, "ブラウザQAのOKマーク録音をAIに送信しました。");
       setMessage(nextMessage);
       setDebugStatus(nextMessage);
@@ -1202,8 +1229,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     try {
       const result = await ambientTriggerClient.approvePendingApproval(requestId);
       setMessage(ambientResultMessage(result, "AIへ送信しました。"));
-      const resultConversationId = ambientConversationIdFromResult(result);
-      if (resultConversationId) setMiniConversationIdOverride(resultConversationId);
+      const resultConversationId = activateMiniConversationFromSubmitResult(result, pendingApproval?.conversation_id || null);
       await loadMiniConversation({ conversationId: resultConversationId || pendingApproval?.conversation_id || null, quiet: true });
       onOpenInputRef.current?.("");
       focusComposer();
@@ -1618,6 +1644,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             disabled={!ambientDispatchGranted || rumiApprovalPending || miniAuthorityBlocksInput}
             latestInputPreview={latestSubmittedInput}
             authorityApproval={miniAuthorityApproval}
+            authorityApprovalUrl={miniBrowserApprovalDirectUrl}
             browserApprovalTokenPrompt={miniBrowserApprovalTokenRequired ? {
               required: true,
               token: browserApprovalTokenInput,
@@ -1758,7 +1785,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           chatItems={routingChatItems}
           loading={conversationsLoading}
           onRefresh={() => void loadConversations()}
-          onSelect={(chatId) => void selectConversationForRouting(chatId)}
+          onSelect={(chatId) => void selectMiniChatRoutingConversation(chatId)}
           onClose={() => setChatPickerOpen(false)}
         />
       )}
@@ -1929,6 +1956,37 @@ function ambientResultMessage(result: Record<string, unknown>, fallback: string)
   return `${ambientOperationLabels.failed}: ${String(result.reason ?? result.status ?? fallback)}`;
 }
 
+function ambientSubmittedConversationIdFromResult(result: Record<string, unknown> | null | undefined): string | null {
+  const direct = ambientConversationIdFromResult(result);
+  if (direct) return direct;
+
+  const record = recordValue(result);
+  return (
+    ambientConversationIdFromNestedResult(record?.pending_approval)
+    || ambientConversationIdFromNestedResult(record?.dispatch)
+    || ambientConversationIdFromNestedResult(record?.dispatch_result)
+    || null
+  );
+}
+
+function ambientConversationIdFromNestedResult(value: unknown, depth = 0): string | null {
+  if (depth > 4) return null;
+  const record = recordValue(value);
+  if (!record) return null;
+  const direct = cleanString(record.conversation_id ?? record.conversationId);
+  if (direct) return direct;
+  return (
+    ambientConversationIdFromNestedResult(record.pending_approval, depth + 1)
+    || ambientConversationIdFromNestedResult(record.pendingApproval, depth + 1)
+    || ambientConversationIdFromNestedResult(record.dispatch, depth + 1)
+    || ambientConversationIdFromNestedResult(record.dispatch_result, depth + 1)
+    || ambientConversationIdFromNestedResult(record.dispatchResult, depth + 1)
+    || ambientConversationIdFromNestedResult(record.result, depth + 1)
+    || ambientConversationIdFromNestedResult(record.data, depth + 1)
+    || null
+  );
+}
+
 function miniAuthorityContinuationResolved(conversation: Conversation | null, requestId: string): boolean {
   if (!conversation) return false;
   const pending = ambientPendingAuthorityApproval(conversation);
@@ -1964,6 +2022,10 @@ function hasNativeAuthorityApprovalWindow(): boolean {
 function cleanString(value: unknown): string | null {
   const text = String(value ?? "").trim();
   return text || null;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
 function safeLocalStorageGet(key: string): string {

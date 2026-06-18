@@ -27,7 +27,9 @@ test("ambient mini authority CTA resolves stale request metadata before opening"
 
   assert.match(source, /resolveMiniAuthorityApprovalTarget/);
   assert.match(source, /api\.listAuthorityRequests\(\{ status: "pending" \}\)/);
-  assert.match(source, /resolvePendingAuthorityApproval\(approval, pending\.pending \?\? \[\]\)/);
+  assert.match(source, /const miniAuthorityApprovalConversationId = miniConversation\?\.id \?\? miniConversationId \?\? null/);
+  assert.match(source, /sourceConversationId: miniAuthorityApprovalConversationId/);
+  assert.match(source, /resolvePendingAuthorityApproval\(approval, pending\.pending \?\? \[\], \{[\s\S]*conversationId: currentConversationId,[\s\S]*requireConversationMatch: true,[\s\S]*requirePrincipalMatch: true,[\s\S]*\}\)/);
   assert.match(source, /authorityRequestSettledStatus\(currentRequest\.status\)/);
   assert.match(source, /openAuthorityApprovalWindow\(resolvedApproval\.requestId\)/);
   assert.doesNotMatch(source, /openAuthorityApprovalWindow\(approval\.requestId\)/);
@@ -142,4 +144,17 @@ test("ambient debug QA simulated OK payload avoids persistent media bytes", () =
   assert.match(miniChatSource, /data-testid="ambient-mini-chat"/);
   assert.match(miniChatSource, /data-testid="ambient-mini-chat-output"/);
   assert.match(miniChatSource, /data-testid="ambient-mini-chat-input"/);
+});
+
+test("ambient mini chat keeps a submitted conversation active over stale routing", () => {
+  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+
+  assert.match(panelSource, /const miniConversationId = miniConversationIdOverride \|\| linkedAmbientConversationId/);
+  assert.match(panelSource, /function ambientSubmittedConversationIdFromResult/);
+  assert.match(panelSource, /ambientConversationIdFromNestedResult\(record\?\.pending_approval\)/);
+  assert.match(panelSource, /ambientConversationIdFromNestedResult\(record\?\.dispatch\)/);
+  assert.match(panelSource, /ambientConversationIdFromNestedResult\(record\?\.dispatch_result\)/);
+  assert.match(panelSource, /record\.data, depth \+ 1/);
+  assert.match(panelSource, /async function selectMiniChatRoutingConversation[\s\S]*setMiniConversationIdOverride\(null\)[\s\S]*selectConversationForRouting\(chatId\)/);
+  assert.match(panelSource, /onSelect=\{\(chatId\) => void selectMiniChatRoutingConversation\(chatId\)\}/);
 });

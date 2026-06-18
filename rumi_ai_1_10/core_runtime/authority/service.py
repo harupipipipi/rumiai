@@ -63,6 +63,64 @@ class AuthorityService:
         graph_id: str | None = None,
         request_id: str | None = None,
         approval_token: str | None = None,
+        consume_approval_token: bool = True,
+    ) -> AuthorityDecision:
+        return self._check(
+            principal_id=principal_id,
+            permission_id=permission_id,
+            resource=resource,
+            reason=reason,
+            conversation_id=conversation_id,
+            profile_id=profile_id,
+            node_id=node_id,
+            graph_id=graph_id,
+            request_id=request_id,
+            approval_token=approval_token,
+            consume_approval_token=consume_approval_token,
+        )
+
+    def preflight_check(
+        self,
+        *,
+        principal_id: str,
+        permission_id: str,
+        resource: dict[str, Any],
+        reason: str = "",
+        conversation_id: str | None = None,
+        profile_id: str | None = None,
+        node_id: str | None = None,
+        graph_id: str | None = None,
+        request_id: str | None = None,
+        approval_token: str | None = None,
+    ) -> AuthorityDecision:
+        return self.check(
+            principal_id=principal_id,
+            permission_id=permission_id,
+            resource=resource,
+            reason=reason,
+            conversation_id=conversation_id,
+            profile_id=profile_id,
+            node_id=node_id,
+            graph_id=graph_id,
+            request_id=request_id,
+            approval_token=approval_token,
+            consume_approval_token=False,
+        )
+
+    def _check(
+        self,
+        *,
+        principal_id: str,
+        permission_id: str,
+        resource: dict[str, Any],
+        reason: str = "",
+        conversation_id: str | None = None,
+        profile_id: str | None = None,
+        node_id: str | None = None,
+        graph_id: str | None = None,
+        request_id: str | None = None,
+        approval_token: str | None = None,
+        consume_approval_token: bool = True,
     ) -> AuthorityDecision:
         permission_id = str(permission_id or "").strip()
         principal_id = str(principal_id or "").strip() or build_principal_id(
@@ -97,14 +155,22 @@ class AuthorityService:
             return self._decision(False, permission_id, principal_id, resource, str(deny.get("reason") or "Explicitly denied"), risk_level)
 
         if request_id and approval_token:
-            if self._request_store.consume_one_shot(
+            token_allowed = self._request_store.consume_one_shot(
                 request_id=request_id,
                 principal_id=principal_id,
                 permission_id=permission_id,
                 resource=resource,
                 token=approval_token,
-            ):
-                return self._decision(True, permission_id, principal_id, resource, "One-shot approval consumed", risk_level)
+            ) if consume_approval_token else self._request_store.one_shot_matches_request(
+                request_id=request_id,
+                principal_id=principal_id,
+                permission_id=permission_id,
+                resource=resource,
+                token=approval_token,
+            )
+            if token_allowed:
+                token_reason = "One-shot approval consumed" if consume_approval_token else "One-shot approval verified"
+                return self._decision(True, permission_id, principal_id, resource, token_reason, risk_level)
 
         grant_match = self._matching_capability_grant(candidates, permission_id, resource)
         if grant_match is not None:
@@ -453,6 +519,30 @@ class AuthorityService:
         if request is None:
             return {"success": False, "error": "Authority request not found", "status_code": 404}
         return {"success": True, "request": self._request_view(request)}
+
+    def one_shot_approval_issued(
+        self,
+        *,
+        request_id: str,
+        permission_id: str,
+        token: str,
+        conversation_id: str | None = None,
+        principal_id: str | None = None,
+    ) -> bool:
+        request = self._request_store.get_request(request_id)
+        if request is None:
+            return False
+        if request.permission_id != str(permission_id or "").strip():
+            return False
+        if conversation_id and request.conversation_id and request.conversation_id != conversation_id:
+            return False
+        expected_principal = str(principal_id or request.principal_id or "").strip() or None
+        return self._request_store.one_shot_matches_request(
+            request_id=request.request_id,
+            principal_id=expected_principal,
+            permission_id=request.permission_id,
+            token=token,
+        )
 
     def list_grants(self, principal_id: str = "") -> dict[str, Any]:
         manager = self._capability_grant_manager

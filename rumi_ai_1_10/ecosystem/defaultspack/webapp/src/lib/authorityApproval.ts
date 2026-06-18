@@ -5,6 +5,7 @@ export type AuthorityApproval = {
   principalId: string;
   permissionId: string;
   resource: Record<string, unknown>;
+  conversationId?: string | null;
   riskLevel?: string;
   summary?: string;
   reason?: string;
@@ -22,6 +23,8 @@ type AuthorityApprovalRequestLike = {
   request_id?: unknown;
   approval_request_id?: unknown;
   requestId?: unknown;
+  conversation_id?: unknown;
+  conversationId?: unknown;
   principal_id?: unknown;
   principalId?: unknown;
   permission_id?: unknown;
@@ -33,6 +36,13 @@ type AuthorityApprovalRequestLike = {
   display_summary?: unknown;
   summary?: unknown;
   display_metadata?: unknown;
+};
+
+export type ResolvePendingAuthorityApprovalOptions = {
+  conversationId?: string | null;
+  principalId?: string | null;
+  requireConversationMatch?: boolean;
+  requirePrincipalMatch?: boolean;
 };
 
 export const AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。";
@@ -127,6 +137,7 @@ export function authorityApprovalFromRecord(value: unknown, options?: { assumeAu
     principalId: String(value.principal_id ?? value.principalId ?? ""),
     permissionId,
     resource,
+    conversationId: stringValue(value.conversation_id ?? value.conversationId) || undefined,
     riskLevel: typeof value.risk_level === "string" ? value.risk_level : typeof value.riskLevel === "string" ? value.riskLevel : undefined,
     summary: typeof value.display_summary === "string" ? value.display_summary : typeof value.summary === "string" ? value.summary : undefined,
     reason: typeof value.reason === "string" ? value.reason : undefined,
@@ -139,6 +150,7 @@ export function authorityApprovalFromRequest(value: AuthorityApprovalRequestLike
   const approval = authorityApprovalFromRecord(
     {
       request_id: value.request_id ?? value.approval_request_id ?? value.requestId,
+      conversation_id: value.conversation_id ?? value.conversationId,
       principal_id: value.principal_id ?? value.principalId,
       permission_id: value.permission_id ?? value.permissionId,
       resource: value.resource,
@@ -155,6 +167,7 @@ export function authorityApprovalFromRequest(value: AuthorityApprovalRequestLike
 export function resolvePendingAuthorityApproval(
   approval: AuthorityApproval | null | undefined,
   pendingRequests: unknown[],
+  options?: ResolvePendingAuthorityApprovalOptions,
 ): AuthorityApproval | null {
   if (!approval) return null;
   const pendingApprovals = pendingRequests
@@ -162,9 +175,29 @@ export function resolvePendingAuthorityApproval(
     .filter((item): item is AuthorityApproval => Boolean(item));
   return (
     pendingApprovals.find((item) => item.requestId === approval.requestId)
-    ?? pendingApprovals.find((item) => authorityApprovalGrantMatches(approval, item))
+    ?? pendingApprovals.find((item) => (
+      authorityApprovalGrantMatches(approval, item)
+      && authorityApprovalGrantScopeMatches(approval, item, options)
+    ))
     ?? null
   );
+}
+
+function authorityApprovalGrantScopeMatches(
+  left: AuthorityApproval,
+  right: AuthorityApproval,
+  options: ResolvePendingAuthorityApprovalOptions | undefined,
+): boolean {
+  if (!options) return true;
+  const expectedConversationId = stringValue(options.conversationId);
+  if (options.requireConversationMatch && !expectedConversationId) return false;
+  if (expectedConversationId && stringValue(right.conversationId) !== expectedConversationId) return false;
+
+  const expectedPrincipalId = stringValue(options.principalId ?? left.principalId);
+  if (options.requirePrincipalMatch && expectedPrincipalId && stringValue(right.principalId) !== expectedPrincipalId) {
+    return false;
+  }
+  return true;
 }
 
 function authorityApprovalGrantMatches(left: AuthorityApproval, right: AuthorityApproval): boolean {

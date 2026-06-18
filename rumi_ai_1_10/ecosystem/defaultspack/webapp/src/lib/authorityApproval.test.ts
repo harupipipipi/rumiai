@@ -196,6 +196,108 @@ test("pending authority resolver replaces stale conversation metadata with match
   assert.equal(resolved?.principalId, "defaultspack");
 });
 
+test("scoped pending authority resolver does not borrow a grant match from another conversation", () => {
+  const resolved = resolvePendingAuthorityApproval(
+    {
+      requestId: "auth_stale_conv_a",
+      conversationId: "conversation-a",
+      principalId: "profile:default-profile__graph:defaultspack.startup",
+      permissionId: "model.invoke",
+      resource: {
+        provider_id: "opencode-go",
+        api_id: "legacy",
+        model_id: "deepseek-v4-flash",
+        model_ref: "opencode-go/deepseek-v4-flash",
+        pack_id: "defaultspack",
+      },
+    },
+    [{
+      request_id: "auth_pending_conv_b",
+      status: "pending",
+      conversation_id: "conversation-b",
+      principal_id: "profile:default-profile__graph:defaultspack.startup",
+      permission_id: "model.invoke",
+      resource: {
+        provider_id: "opencode-go",
+        api_id: "legacy",
+        model_id: "deepseek-v4-flash",
+        model_ref: "opencode-go/deepseek-v4-flash",
+        pack_id: "defaultspack",
+      },
+    }],
+    {
+      conversationId: "conversation-a",
+      requireConversationMatch: true,
+      requirePrincipalMatch: true,
+    },
+  );
+
+  assert.equal(resolved, null);
+});
+
+test("scoped pending authority resolver keeps grant fallback within the same conversation and principal", () => {
+  const resolved = resolvePendingAuthorityApproval(
+    {
+      requestId: "auth_stale_conv_a",
+      conversationId: "conversation-a",
+      principalId: "conversation:conversation-a",
+      permissionId: "model.invoke",
+      resource: {
+        provider_id: "opencode-go",
+        model_id: "deepseek-v4-flash",
+      },
+    },
+    [{
+      request_id: "auth_pending_conv_a",
+      status: "pending",
+      conversation_id: "conversation-a",
+      principal_id: "conversation:conversation-a",
+      permission_id: "model.invoke",
+      resource: {
+        provider_id: "opencode-go",
+        model_id: "deepseek-v4-flash",
+      },
+    }],
+    {
+      conversationId: "conversation-a",
+      requireConversationMatch: true,
+      requirePrincipalMatch: true,
+    },
+  );
+
+  assert.equal(resolved?.requestId, "auth_pending_conv_a");
+  assert.equal(resolved?.conversationId, "conversation-a");
+  assert.equal(resolved?.principalId, "conversation:conversation-a");
+});
+
+test("scoped pending authority resolver still accepts an exact request id match", () => {
+  const resolved = resolvePendingAuthorityApproval(
+    {
+      requestId: "auth_exact_pending",
+      conversationId: "conversation-a",
+      principalId: "conversation:conversation-a",
+      permissionId: "model.invoke",
+      resource: { provider_id: "opencode-go" },
+    },
+    [{
+      request_id: "auth_exact_pending",
+      status: "pending",
+      conversation_id: "conversation-b",
+      principal_id: "conversation:conversation-b",
+      permission_id: "model.invoke",
+      resource: { provider_id: "opencode-go" },
+    }],
+    {
+      conversationId: "conversation-a",
+      requireConversationMatch: true,
+      requirePrincipalMatch: true,
+    },
+  );
+
+  assert.equal(resolved?.requestId, "auth_exact_pending");
+  assert.equal(resolved?.conversationId, "conversation-b");
+});
+
 test("pending authority resolver does not expose stale metadata when no live request matches", () => {
   const resolved = resolvePendingAuthorityApproval(
     {
