@@ -388,6 +388,116 @@ def test_run_request_metadata_selected_tools_disables_auto_recommendation(monkey
     assert captured["raw_tools"] == []
 
 
+def test_run_request_tool_selection_auto_preserves_settings_driven_selection(monkeypatch):
+    from domain.chat import run_request
+
+    captured = {}
+
+    def fake_resolve(raw_tools, **_kwargs):
+        captured["raw_tools"] = raw_tools
+        return [], []
+
+    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
+    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
+    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
+
+    run_request._available_tools(
+        {},
+        {"params": {"tool_selection": {"mode": "auto"}}},
+        user_text="search the web",
+    )
+
+    assert captured["raw_tools"] is None
+
+
+def test_run_request_tool_selection_auto_merges_inferred_tools(monkeypatch):
+    from domain.chat import run_request
+
+    updated = run_request._with_inferred_tools(
+        {"params": {"tool_selection": {"mode": "auto"}}},
+        ["computer_use", "browser_computer"],
+    )
+
+    assert updated["tools"] == ["computer_use", "browser_computer"]
+
+    calls = []
+
+    def fake_resolve(raw_tools, **_kwargs):
+        calls.append(raw_tools)
+        if raw_tools is None:
+            return [{"tool_id": "tool_names"}], []
+        return [{"tool_id": item} for item in raw_tools], []
+
+    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
+    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
+    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
+
+    raw_tools, _provider_tools, _tool_context = run_request._available_tools(
+        {},
+        updated,
+        user_text="open Chrome",
+    )
+
+    assert calls == [None, ["computer_use", "browser_computer"]]
+    assert [tool["tool_id"] for tool in raw_tools] == ["tool_names", "computer_use", "browser_computer"]
+
+
+def test_run_request_tool_selection_none_blocks_auto_and_inferred_tools(monkeypatch):
+    from domain.chat import run_request
+
+    updated = run_request._with_inferred_tools(
+        {"params": {"tool_selection": {"mode": "none"}}},
+        ["computer_use", "browser_computer"],
+    )
+
+    assert "tools" not in updated
+
+    captured = {}
+
+    def fake_resolve(raw_tools, **_kwargs):
+        captured["raw_tools"] = raw_tools
+        return [], []
+
+    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
+    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
+    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
+
+    run_request._available_tools(
+        {},
+        {"params": {"tool_selection": {"mode": "none"}}},
+        user_text="open Chrome",
+    )
+
+    assert captured["raw_tools"] == []
+
+
+def test_run_request_tool_selection_manual_does_not_require_tool_choice(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "use the calculator if needed"},
+            "params": {"tool_selection": {"mode": "manual", "include": ["calculator"]}},
+        },
+        {},
+    )
+
+    assert prepared.params.get("tool_choice") != "required"
+    ChatStore._instance = None
+
+
 def test_run_request_selected_shell_tool_respects_profile_policy_yolo():
     from domain.chat import run_request
 
@@ -490,7 +600,7 @@ def test_coding_tools_get_larger_default_tool_limit():
     assert _default_tool_limit_for_connected_tools(2, {"coding_terminal_exec"}) == 2
 
 
-def test_stream_defaults_omitted_tools_to_empty_selection():
+def test_stream_preserves_omitted_tools_for_auto_selection():
     from blocks.chat import stream
 
     original = {
@@ -501,8 +611,7 @@ def test_stream_defaults_omitted_tools_to_empty_selection():
 
     updated = stream._input_with_default_empty_tools(original)
 
-    assert updated is not original
-    assert updated["tools"] == []
+    assert updated is original
     assert "tools" not in original
 
 

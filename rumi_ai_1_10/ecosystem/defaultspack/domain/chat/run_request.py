@@ -71,6 +71,18 @@ _COMPUTER_USE_CHROME_NEGATED_RE = re.compile(
 _COMPUTER_USE_VIVALDI_TARGET_RE = re.compile(r"vivaldi|vivladi|ヴィヴァルディ|ビバルディ", re.IGNORECASE)
 _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
+_TOOL_SELECTION_MODES = {"auto", "review", "manual", "none"}
+
+
+@dataclass
+class NormalizedToolSelection:
+    mode: str = "auto"
+    include: list[Any] = field(default_factory=list)
+    exclude: list[str] = field(default_factory=list)
+    scope: str = "turn"
+    must_use: bool = False
+    review: bool = False
+    source: str = "default"
 
 
 @dataclass
@@ -189,6 +201,8 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     chat_reference_prompt = _format_chat_references_for_prompt(chat_references)
 
     params = dict(prepared_input.get("params") or {})
+    tool_selection = _normalize_tool_selection(prepared_input)
+    params.pop("tool_selection", None)
     requested_model = str(params.get("model") or params.get("profile_id") or "").strip()
     if requested_model:
         model = requested_model
@@ -218,6 +232,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     request_context["model"] = model
     request_context["chat_params"] = params
     request_context["request_id"] = request_id
+    request_context["tool_selection"] = _tool_selection_metadata(tool_selection)
     _copy_enriched_context_into_request_context(request_context, enrich_info)
     if isinstance(metadata, dict):
         forced_skill_ids = metadata.get("skills") or metadata.get("skill_ids") or metadata.get("selected_skills")
@@ -261,6 +276,8 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             or str(tool_choice or "").strip().lower() in {"auto", "none", "required"}
         ):
             params["tool_choice"] = tool_choice
+    if tool_selection.must_use and "tool_choice" not in params:
+        params["tool_choice"] = "required"
 
     request_context, effective_system_prompt = _apply_effective_ai_input_to_request_context(
         request_context,
@@ -1247,6 +1264,132 @@ def _image_data_url_byte_length(data_url: Any) -> int | None:
         return None
 
 
+def _normalize_tool_selection(input_data: dict[str, Any]) -> NormalizedToolSelection:
+    if not isinstance(input_data, dict):
+        return NormalizedToolSelection()
+    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
+    raw_selection = params.get("tool_selection")
+    if isinstance(raw_selection, dict):
+        include = _coerce_tool_items(raw_selection.get("include"))
+        top_level_tools = _coerce_tool_items(input_data.get("tools"))
+        exclude = _coerce_tool_id_list(raw_selection.get("exclude"))
+        raw_mode = str(raw_selection.get("mode") or "").strip().lower()
+        if raw_mode not in _TOOL_SELECTION_MODES:
+            raw_mode = "manual" if include else "auto"
+        if raw_mode in {"auto", "review"} and top_level_tools:
+            include = _merge_tool_items(include, top_level_tools)
+        scope = str(raw_selection.get("scope") or "turn").strip().lower() or "turn"
+        review = _coerce_optional_bool(raw_selection.get("review"), default=raw_mode == "review")
+        return NormalizedToolSelection(
+            mode=raw_mode,
+            include=include,
+            exclude=exclude,
+            scope=scope,
+            must_use=_coerce_optional_bool(raw_selection.get("must_use"), default=False),
+            review=review,
+            source="tool_selection",
+        )
+
+    raw_tools = input_data.get("tools")
+    if isinstance(raw_tools, list):
+        return NormalizedToolSelection(
+            mode="manual" if raw_tools else "none",
+            include=list(raw_tools),
+            source="tools",
+        )
+
+    tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
+    if "selected_tools" in tool_policy:
+        selected = _coerce_tool_items(tool_policy.get("selected_tools"))
+        return NormalizedToolSelection(
+            mode="manual" if selected else "none",
+            include=selected,
+            source="tool_policy.selected_tools",
+        )
+
+    message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    if "selected_tools" in metadata:
+        selected = _coerce_tool_items(metadata.get("selected_tools"))
+        return NormalizedToolSelection(
+            mode="manual" if selected else "none",
+            include=selected,
+            source="message.metadata.selected_tools",
+        )
+
+    return NormalizedToolSelection()
+
+
+def _coerce_tool_items(value: Any) -> list[Any]:
+    if not isinstance(value, list):
+        return []
+    result: list[Any] = []
+    for item in value:
+        if isinstance(item, dict):
+            result.append(item)
+            continue
+        if isinstance(item, str):
+            stripped = item.strip()
+            if stripped:
+                result.append(stripped)
+    return result
+
+
+def _coerce_tool_id_list(value: Any) -> list[str]:
+    return [str(item).strip() for item in _coerce_tool_items(value) if not isinstance(item, dict) and str(item).strip()]
+
+
+def _merge_tool_items(*groups: list[Any]) -> list[Any]:
+    merged: list[Any] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            key = _tool_item_key(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+    return merged
+
+
+def _tool_item_key(item: Any) -> str:
+    if isinstance(item, dict):
+        return str(item.get("tool_id") or item.get("name") or id(item))
+    return str(item)
+
+
+def _coerce_optional_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _tool_selection_metadata(selection: NormalizedToolSelection) -> dict[str, Any]:
+    include: list[str] = []
+    for item in selection.include:
+        value = item.get("tool_id") or item.get("name") if isinstance(item, dict) else item
+        text = str(value or "").strip()
+        if text:
+            include.append(text)
+    return {
+        "mode": selection.mode,
+        "include": include,
+        "exclude": list(selection.exclude),
+        "scope": selection.scope,
+        "must_use": selection.must_use,
+        "review": selection.review,
+        "source": selection.source,
+    }
+
+
 def _resolve_selected_tools(
     raw_tools: Any,
     *,
@@ -1353,13 +1496,8 @@ def _with_inferred_tools(input_data: dict[str, Any], inferred_tool_ids: list[str
 
 
 def _has_explicit_selected_tools(input_data: dict[str, Any]) -> bool:
-    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
-    tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
-    if "selected_tools" in tool_policy:
-        return True
-    message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
-    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-    return "selected_tools" in metadata
+    selection = _normalize_tool_selection(input_data)
+    return selection.mode in {"manual", "none"}
 
 
 def _computer_use_preferences_from_text(user_text: str) -> dict[str, Any]:
@@ -1416,21 +1554,29 @@ def _available_tools(
     *,
     user_text: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
-    raw_tools = input_data.get("tools")
-    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
-    tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
-    if raw_tools is None and isinstance(tool_policy, dict) and "selected_tools" in tool_policy:
-        raw_tools = tool_policy.get("selected_tools")
-    if raw_tools is None:
-        message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
-        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-        if "selected_tools" in metadata:
-            raw_tools = metadata.get("selected_tools")
+    selection = _normalize_tool_selection(input_data)
+    if selection.mode == "none":
+        raw_tools: Any = []
+    elif selection.mode == "manual":
+        raw_tools = selection.include
+    else:
+        raw_tools = None
     try:
         tools, unknown_tools = _resolve_selected_tools(raw_tools, user_text=user_text, context=context)
     except Exception:
         tools, unknown_tools = [], []
+    if selection.mode in {"auto", "review"} and selection.include:
+        try:
+            included_tools, include_unknown = _resolve_selected_tools(selection.include, user_text=user_text, context=context)
+        except Exception:
+            included_tools, include_unknown = [], []
+        tools = _merge_tool_definitions(tools, included_tools)
+        unknown_tools = [*unknown_tools, *include_unknown]
+    if selection.exclude:
+        excluded = set(selection.exclude)
+        tools = [tool for tool in tools if _tool_definition_id(tool) not in excluded]
     resolved_context = resolve_runtime_profile_context(context or {})
+    resolved_context["tool_selection"] = _tool_selection_metadata(selection)
     if unknown_tools:
         resolved_context["unknown_selected_tools"] = unknown_tools
     runtime_profile = resolved_context.get("runtime_profile")
@@ -1443,3 +1589,22 @@ def _available_tools(
     )
     filtered = _append_special_model_tools(filtered, resolved_context, agent_id=agent_id)
     return filtered, adapt_tool_definitions(filtered), resolved_context
+
+
+def _merge_tool_definitions(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in groups:
+        for tool in group:
+            key = _tool_definition_id(tool) or str(id(tool))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(tool)
+    return merged
+
+
+def _tool_definition_id(tool: dict[str, Any]) -> str:
+    if not isinstance(tool, dict):
+        return ""
+    return str(tool.get("tool_id") or tool_name_from_definition(tool) or tool.get("name") or "").strip()

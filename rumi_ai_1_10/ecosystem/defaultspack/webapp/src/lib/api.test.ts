@@ -272,6 +272,7 @@ test("sendMessage serializes attachments and selected tools", async () => {
         { name: "photo.png", size: 1024, type: "image/png", truncated: false },
       ],
       tools: ["local_file"],
+      tool_selection: { mode: "manual", include: ["local_file"], scope: "turn", must_use: false },
       tool_policy: { selected_tools: ["local_file"] },
       metadata: { selected_tools: ["local_file"] },
     });
@@ -292,6 +293,7 @@ test("sendMessage serializes attachments and selected tools", async () => {
   assert.deepEqual(requestBody?.params, {
     thinking_level: "medium",
     tool_policy: { selected_tools: ["local_file"] },
+    tool_selection: { mode: "manual", include: ["local_file"], scope: "turn", must_use: false },
   });
 });
 
@@ -555,6 +557,39 @@ test("saveExternalToken serializes named token metadata", async () => {
     kind: "channel_access_token",
     value: "secret",
   });
+});
+
+test("streamMessage serializes auto tool selection without tools", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    const body = [
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"ok"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", {
+      tool_selection: { mode: "auto", include: [], exclude: [], scope: "turn", must_use: false },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestBody?.tools, undefined);
+  assert.deepEqual(requestBody?.params?.tool_selection, {
+    mode: "auto",
+    include: [],
+    exclude: [],
+    scope: "turn",
+    must_use: false,
+  });
+  assert.equal(requestBody?.params?.tool_choice, undefined);
 });
 
 test("deleteExternalToken serializes delete action", async () => {
