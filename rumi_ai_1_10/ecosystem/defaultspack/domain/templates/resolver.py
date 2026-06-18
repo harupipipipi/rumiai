@@ -6,6 +6,7 @@ from typing import Any
 from .models import (
     RumiTemplate,
     ResolvedTemplate,
+    TemplateDependencySpec,
     TemplateDiagnostic,
     TemplatePiece,
     TemplateTrustLevel,
@@ -92,11 +93,14 @@ def diagnose_template_dependencies(
 ) -> list[TemplateDiagnostic]:
     diagnostics: list[TemplateDiagnostic] = []
     for dependency in template.dependencies:
-        if registry.get(dependency) is None:
+        dependency_id = (
+            dependency.id if isinstance(dependency, TemplateDependencySpec) else str(dependency)
+        )
+        if registry.get(dependency_id) is None:
             diagnostics.append(
                 TemplateDiagnostic(
                     code="template.dependency.missing",
-                    message=f"missing template dependency: {dependency}",
+                    message=f"missing template dependency: {dependency_id}",
                     template_id=template.id,
                     path="/dependencies",
                     source_path=str(template.source_path) if template.source_path else None,
@@ -208,8 +212,14 @@ def _compose(
     raw = base.to_dict()
     child_raw = child.to_dict()
     raw.update(
-        {key: value for key, value in child_raw.items() if key not in {"pieces", "capabilities"}}
+        {
+            key: value
+            for key, value in child_raw.items()
+            if key not in {"pieces", "capabilities", "dependencies", "conflicts"}
+        }
     )
+    raw["dependencies"] = _merge_dependency_specs(base.dependencies, child.dependencies)
+    raw["conflicts"] = _merge_dependency_specs(base.conflicts, child.conflicts)
     raw["capabilities"] = {
         "provides": sorted(set(base.capabilities.provides) | set(child.capabilities.provides)),
         "requires": sorted(set(base.capabilities.requires) | set(child.capabilities.requires)),
@@ -226,6 +236,22 @@ def _compose(
     )
     diagnostics.extend(parsed.diagnostics)
     return parsed.template or child, diagnostics
+
+
+def _merge_dependency_specs(
+    base: list[TemplateDependencySpec],
+    child: list[TemplateDependencySpec],
+) -> list[str | dict[str, Any]]:
+    merged: dict[str, TemplateDependencySpec] = {}
+    order: list[str] = []
+    for spec in [*base, *child]:
+        spec_id = str(spec.id or "").strip()
+        if not spec_id:
+            continue
+        if spec_id not in merged:
+            order.append(spec_id)
+        merged[spec_id] = spec
+    return [merged[spec_id].to_value() for spec_id in order]
 
 
 def _extends_list(value: str | list[str] | None) -> list[str]:

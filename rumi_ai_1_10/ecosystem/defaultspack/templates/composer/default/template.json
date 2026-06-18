@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "rumi.composer.default",
   "kind": "frontend",
   "version": "1.0.0",

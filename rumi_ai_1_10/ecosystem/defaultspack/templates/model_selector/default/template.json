@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "rumi.model_selector.default",
   "kind": "composite",
   "version": "1.0.0",

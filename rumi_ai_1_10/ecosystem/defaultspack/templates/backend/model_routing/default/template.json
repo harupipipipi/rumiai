@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "rumi.backend.model_routing.default",
   "kind": "backend",
   "version": "1.0.0",

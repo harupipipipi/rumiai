@@ -4,7 +4,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
+
 from .models import (
+    CURRENT_TEMPLATE_SCHEMA_VERSION,
     RumiTemplate,
     TemplateDiagnostic,
     TemplateKind,
@@ -119,11 +123,176 @@ def validate_template(
 ) -> list[TemplateDiagnostic]:
     diagnostics: list[TemplateDiagnostic] = []
     diagnostics.extend(_validate_required(template, raw=raw))
+    diagnostics.extend(_validate_schema_version(template, raw=raw))
+    diagnostics.extend(_validate_template_version(template))
+    diagnostics.extend(_validate_dependency_specs(template, raw=raw))
     diagnostics.extend(_validate_canonical_identity(template, raw=raw))
     diagnostics.extend(_validate_enums(template))
     diagnostics.extend(_validate_pieces(template, raw=raw))
     diagnostics.extend(_validate_references(template))
     diagnostics.extend(assess_template_security(template))
+    return diagnostics
+
+
+def _validate_schema_version(
+    template: RumiTemplate, *, raw: dict[str, Any] | None
+) -> list[TemplateDiagnostic]:
+    diagnostics: list[TemplateDiagnostic] = []
+    source_path = str(template.source_path) if template.source_path else None
+    if raw is not None and "schema_version" not in raw:
+        diagnostics.append(
+            TemplateDiagnostic(
+                code="template.schema_version.implicit_v1",
+                message="missing schema_version is treated as legacy v1",
+                severity="info",
+                template_id=template.id or None,
+                path="/schema_version",
+                source_path=source_path,
+            )
+        )
+        return diagnostics
+    raw_value = raw.get("schema_version") if raw is not None else template.schema_version
+    if isinstance(raw_value, bool) or not isinstance(raw_value, int):
+        diagnostics.append(
+            TemplateDiagnostic(
+                code="template.schema_version.invalid",
+                message="schema_version must be an integer",
+                template_id=template.id or None,
+                path="/schema_version",
+                source_path=source_path,
+            )
+        )
+        return diagnostics
+    if raw_value > CURRENT_TEMPLATE_SCHEMA_VERSION:
+        diagnostics.append(
+            TemplateDiagnostic(
+                code="template.schema_version.unsupported",
+                message=(
+                    f"template schema_version is newer than this defaultspack supports: {raw_value}"
+                ),
+                template_id=template.id or None,
+                path="/schema_version",
+                source_path=source_path,
+            )
+        )
+    elif raw_value < 1:
+        diagnostics.append(
+            TemplateDiagnostic(
+                code="template.schema_version.unsupported",
+                message=f"template schema_version is unsupported: {raw_value}",
+                template_id=template.id or None,
+                path="/schema_version",
+                source_path=source_path,
+            )
+        )
+    return diagnostics
+
+
+def _validate_template_version(template: RumiTemplate) -> list[TemplateDiagnostic]:
+    try:
+        Version(str(template.version))
+    except InvalidVersion:
+        return [
+            TemplateDiagnostic(
+                code="template.version.invalid",
+                message=f"template version is invalid: {template.version}",
+                template_id=template.id or None,
+                path="/version",
+                source_path=str(template.source_path) if template.source_path else None,
+            )
+        ]
+    return []
+
+
+def _validate_dependency_specs(
+    template: RumiTemplate, *, raw: dict[str, Any] | None
+) -> list[TemplateDiagnostic]:
+    diagnostics: list[TemplateDiagnostic] = []
+    source_path = str(template.source_path) if template.source_path else None
+    raw = raw if isinstance(raw, dict) else {}
+    for field_name, parsed_specs in (
+        ("dependencies", template.dependencies),
+        ("conflicts", template.conflicts),
+    ):
+        raw_value = raw.get(field_name)
+        raw_items: list[Any]
+        if raw_value is None:
+            raw_items = []
+        elif isinstance(raw_value, list):
+            raw_items = raw_value
+        elif isinstance(raw_value, (str, dict)):
+            raw_items = [raw_value]
+        else:
+            diagnostics.append(
+                TemplateDiagnostic(
+                    code=f"template.{field_name}.invalid",
+                    message=f"{field_name} must be a string, object, or list",
+                    template_id=template.id or None,
+                    path=f"/{field_name}",
+                    source_path=source_path,
+                )
+            )
+            raw_items = []
+        for index, item in enumerate(raw_items):
+            path = f"/{field_name}/{index}"
+            if isinstance(item, str):
+                if not item.strip():
+                    diagnostics.append(
+                        TemplateDiagnostic(
+                            code=f"template.{field_name}.missing_id",
+                            message=f"{field_name} entry must include a non-empty id",
+                            template_id=template.id or None,
+                            path=path,
+                            source_path=source_path,
+                        )
+                    )
+                continue
+            if not isinstance(item, dict):
+                diagnostics.append(
+                    TemplateDiagnostic(
+                        code=f"template.{field_name}.invalid_entry",
+                        message=f"{field_name} entries must be strings or objects",
+                        template_id=template.id or None,
+                        path=path,
+                        source_path=source_path,
+                    )
+                )
+                continue
+            if not str(item.get("id") or "").strip():
+                diagnostics.append(
+                    TemplateDiagnostic(
+                        code=f"template.{field_name}.missing_id",
+                        message=f"{field_name} entry must include a non-empty id",
+                        template_id=template.id or None,
+                        path=f"{path}/id",
+                        source_path=source_path,
+                    )
+                )
+            if "optional" in item and not isinstance(item.get("optional"), bool):
+                diagnostics.append(
+                    TemplateDiagnostic(
+                        code=f"template.{field_name}.invalid_optional",
+                        message=f"{field_name}.optional must be boolean",
+                        template_id=template.id or None,
+                        path=f"{path}/optional",
+                        source_path=source_path,
+                    )
+                )
+        for index, spec in enumerate(parsed_specs):
+            if spec.version is None:
+                continue
+            try:
+                SpecifierSet(str(spec.version))
+            except InvalidSpecifier:
+                diagnostics.append(
+                    TemplateDiagnostic(
+                        code="template.dependency.invalid_version_specifier",
+                        message=f"invalid dependency version specifier: {spec.version}",
+                        template_id=template.id or None,
+                        path=f"/{field_name}/{index}/version",
+                        source_path=source_path,
+                    )
+                )
     return diagnostics
 
 

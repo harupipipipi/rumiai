@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any
 
 
+CURRENT_TEMPLATE_SCHEMA_VERSION = 1
+
+
 class TemplatePieceKind(str, Enum):
     BACKEND_SERVICE = "backend_service"
     FUNCTION = "function"
@@ -91,6 +94,38 @@ class TemplateCapabilitySpec:
         }
 
 
+@dataclass(frozen=True)
+class TemplateDependencySpec:
+    id: str
+    version: str | None = None
+    optional: bool = False
+
+    @classmethod
+    def from_value(cls, value: str | dict[str, Any]) -> "TemplateDependencySpec":
+        if isinstance(value, str):
+            return cls(id=value.strip())
+        if isinstance(value, dict):
+            return cls(
+                id=str(value.get("id") or "").strip(),
+                version=_optional_string(value.get("version")),
+                optional=bool(value.get("optional")),
+            )
+        return cls(id="")
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"id": self.id}
+        if self.version is not None:
+            result["version"] = self.version
+        if self.optional:
+            result["optional"] = True
+        return result
+
+    def to_value(self) -> str | dict[str, Any]:
+        if self.version is None and not self.optional:
+            return self.id
+        return self.to_dict()
+
+
 @dataclass
 class TemplatePiece:
     id: str
@@ -138,10 +173,12 @@ class RumiTemplate:
     kind: TemplateKind | str
     version: str
     status: TemplateStatus | str
+    schema_version: int = CURRENT_TEMPLATE_SCHEMA_VERSION
     pieces: list[TemplatePiece] = field(default_factory=list)
     trust_level: TemplateTrustLevel | str = TemplateTrustLevel.LOCAL
     extends: str | list[str] | None = None
-    dependencies: list[str] = field(default_factory=list)
+    dependencies: list[TemplateDependencySpec] = field(default_factory=list)
+    conflicts: list[TemplateDependencySpec] = field(default_factory=list)
     capabilities: TemplateCapabilitySpec = field(default_factory=TemplateCapabilitySpec)
     patches: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -173,6 +210,8 @@ class RumiTemplate:
             kind=_enum_or_raw(TemplateKind, raw.get("kind", "")),
             version=str(raw.get("version", "")),
             status=_enum_or_raw(TemplateStatus, raw.get("status", "")),
+            schema_version=_optional_int(raw.get("schema_version"))
+            or CURRENT_TEMPLATE_SCHEMA_VERSION,
             pieces=[
                 TemplatePiece.from_dict(piece)
                 for piece in raw.get("pieces", [])
@@ -180,7 +219,8 @@ class RumiTemplate:
             ],
             trust_level=_enum_or_raw(TemplateTrustLevel, explicit_trust),
             extends=_parse_extends(raw.get("extends")),
-            dependencies=_as_string_list(raw.get("dependencies")),
+            dependencies=_as_dependency_specs(raw.get("dependencies")),
+            conflicts=_as_dependency_specs(raw.get("conflicts")),
             capabilities=TemplateCapabilitySpec.from_dict(raw.get("capabilities")),
             patches=list(raw.get("patches", []))
             if isinstance(raw.get("patches", []), list)
@@ -197,12 +237,14 @@ class RumiTemplate:
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
             "id": self.id,
+            "schema_version": self.schema_version,
             "kind": _enum_value(self.kind),
             "version": self.version,
             "status": _enum_value(self.status),
             "trust_level": _enum_value(self.trust_level),
             "pieces": [piece.to_dict() for piece in self.pieces],
-            "dependencies": list(self.dependencies),
+            "dependencies": [dependency.to_value() for dependency in self.dependencies],
+            "conflicts": [conflict.to_value() for conflict in self.conflicts],
             "capabilities": self.capabilities.to_dict(),
             "patches": [dict(patch) for patch in self.patches],
             "metadata": dict(self.metadata),
@@ -242,6 +284,26 @@ def _as_string_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value if item is not None]
     return []
+
+
+def _as_dependency_specs(value: Any) -> list[TemplateDependencySpec]:
+    if value is None:
+        return []
+    if isinstance(value, (str, dict)):
+        values = [value]
+    elif isinstance(value, list):
+        values = value
+    else:
+        return []
+    return [
+        spec
+        for spec in (
+            TemplateDependencySpec.from_value(item)
+            for item in values
+            if isinstance(item, (str, dict))
+        )
+        if spec.id
+    ]
 
 
 def _optional_string(value: Any) -> str | None:

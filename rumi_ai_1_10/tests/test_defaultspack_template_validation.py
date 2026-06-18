@@ -431,3 +431,42 @@ def test_non_builtin_handler_refs_are_metadata_only_by_default():
     )
     assert diagnostic.severity == "warning"
     assert result.ok
+
+
+def test_missing_schema_version_is_implicit_v1_info():
+    result = parse_template(
+        {
+            "id": "legacy.template",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "pieces": [],
+        }
+    )
+
+    assert result.template is not None
+    assert result.template.schema_version == 1
+    diagnostic = next(
+        item for item in result.diagnostics if item.code == "template.schema_version.implicit_v1"
+    )
+    assert diagnostic.severity == "info"
+    assert result.ok
+
+
+def test_dependency_version_specifier_is_validated():
+    result = parse_template(
+        {
+            "schema_version": 1,
+            "id": "bad.dependency.version",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "dependencies": [{"id": "base", "version": "not a spec"}],
+            "pieces": [],
+        }
+    )
+
+    assert any(
+        item.code == "template.dependency.invalid_version_specifier" for item in result.diagnostics
+    )
+    assert not result.ok

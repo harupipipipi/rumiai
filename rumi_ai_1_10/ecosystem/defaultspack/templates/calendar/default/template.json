@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "rumi.calendar.default",
   "kind": "frontend",
   "version": "1.0.0",

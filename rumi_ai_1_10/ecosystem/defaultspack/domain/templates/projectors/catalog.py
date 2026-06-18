@@ -11,6 +11,11 @@ from ..models import (
     TemplatePiece,
     TemplateStatus,
 )
+from ..activation import (
+    TemplateActivationPlan,
+    TemplateActivationPlanner,
+    TemplateActivationState,
+)
 from ..registry import build_template_registry
 from ..resolver import resolve_template
 
@@ -51,20 +56,27 @@ def build_template_catalog(
         [str(root) for root in roots] if roots is not None else None,
         defaultspack_root=str(defaultspack_root) if defaultspack_root is not None else None,
     )
+    activation_plan = TemplateActivationPlanner(registry).build()
     resolved_templates: list[ResolvedTemplate] = []
-    for template in registry.list():
-        resolved = resolve_template(template.id, registry)
+    for template_id in activation_plan.ordered_template_ids:
+        resolved = resolve_template(template_id, registry)
+        if resolved.template is not None and template_id in activation_plan.states:
+            resolved.diagnostics.extend(activation_plan.states[template_id].diagnostics)
         resolved_templates.append(resolved)
         diagnostics.extend(resolved.diagnostics)
 
-    catalog = project_resolved_templates(resolved_templates)
+    catalog = project_resolved_templates(resolved_templates, activation_plan=activation_plan)
     catalog["template_diagnostics"] = _dedupe_diagnostics(
         [*catalog["template_diagnostics"], *(_diagnostic_to_dict(item) for item in diagnostics)]
     )
     return catalog
 
 
-def project_resolved_templates(resolved_templates: list[ResolvedTemplate]) -> dict[str, Any]:
+def project_resolved_templates(
+    resolved_templates: list[ResolvedTemplate],
+    *,
+    activation_plan: TemplateActivationPlan | None = None,
+) -> dict[str, Any]:
     catalog = empty_template_catalog()
     duplicate_resolved_ids = _duplicate_resolved_template_ids(resolved_templates)
     for resolved in resolved_templates:
@@ -79,12 +91,19 @@ def project_resolved_templates(resolved_templates: list[ResolvedTemplate]) -> di
         canonical_template_id = _canonical_template_id(template)
         if canonical_template_id in duplicate_resolved_ids:
             template_diagnostics.append(_resolved_template_id_collision(template))
-        catalog["templates"].append(_template_summary(template, resolved, template_diagnostics))
+        activation_state = (
+            activation_plan.states.get(template.id) if activation_plan is not None else None
+        )
+        catalog["templates"].append(
+            _template_summary(template, resolved, template_diagnostics, activation_state)
+        )
         catalog["template_diagnostics"].extend(template_diagnostics)
 
         if any(item.get("severity") == "error" for item in template_diagnostics):
             continue
-        if not _is_active_template(template):
+        if activation_state is not None and not activation_state.projectable:
+            continue
+        if activation_state is None and not _is_active_template(template):
             continue
 
         for piece in template.pieces:
@@ -417,23 +436,50 @@ def _template_summary(
     template: RumiTemplate,
     resolved: ResolvedTemplate,
     diagnostics: list[dict[str, Any]],
+    activation_state: TemplateActivationState | None = None,
 ) -> dict[str, Any]:
+    has_error = any(item.get("severity") == "error" for item in diagnostics)
+    projectable = (
+        activation_state.projectable and not has_error
+        if activation_state is not None
+        else _is_active_template(template) and not has_error
+    )
     return {
         "id": template.id,
+        "schema_version": template.schema_version,
         "kind": _value(template.kind),
         "version": template.version,
         "status": _value(template.status),
         "trust_level": _value(template.trust_level),
         "extends": template.extends,
-        "dependencies": list(template.dependencies),
+        "dependencies": [dependency.id for dependency in template.dependencies],
+        "dependency_specs": [dependency.to_dict() for dependency in template.dependencies],
+        "conflicts": [conflict.to_dict() for conflict in template.conflicts],
         "capabilities": template.capabilities.to_dict(),
         "metadata": deepcopy(template.metadata),
         "source_path": _source(template),
         "ancestry": list(resolved.ancestry),
         "piece_count": len(template.pieces),
         "diagnostic_count": len(diagnostics),
-        "projectable": _is_active_template(template)
-        and not any(item.get("severity") == "error" for item in diagnostics),
+        "projectable": projectable,
+        **(_activation_summary(activation_state) if activation_state is not None else {}),
+    }
+
+
+def _activation_summary(state: TemplateActivationState | None) -> dict[str, Any]:
+    if state is None:
+        return {}
+    return {
+        "activation_state": {
+            "active": state.active,
+            "projectable": state.projectable,
+            "blocked_by": list(state.blocked_by),
+        },
+        "dependency_ids": list(state.dependency_ids),
+        "optional_dependency_ids": list(state.optional_dependency_ids),
+        "blocked_by": list(state.blocked_by),
+        "provided_capabilities": list(state.provided_capabilities),
+        "capability_providers": deepcopy(state.capability_providers),
     }
 
 

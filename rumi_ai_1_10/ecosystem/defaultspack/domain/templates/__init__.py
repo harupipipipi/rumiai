@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+from .activation import TemplateActivationPlan, TemplateActivationPlanner, TemplateActivationState
 from .diagnostics import collect_template_diagnostics, diagnostics_have_errors
-from .discovery import TemplateDiscoveryResult, TemplateRoot, default_template_roots, discover_templates, load_template_file
+from .discovery import (
+    TemplateDiscoveryResult,
+    TemplateRoot,
+    default_template_roots,
+    discover_templates,
+    load_template_file,
+)
 from .migration import migrate_template_dict, register_template_migrations
 from .models import (
+    CURRENT_TEMPLATE_SCHEMA_VERSION,
     ResolvedTemplate,
     RumiTemplate,
     TemplateCapabilitySpec,
     TemplateContext,
+    TemplateDependencySpec,
     TemplateDiagnostic,
     TemplateKind,
     TemplatePiece,
@@ -25,13 +34,23 @@ from .resolver import (
 )
 from .security import assess_template_security, is_safe_template
 from .validation import TemplateValidationResult, has_errors, parse_template, validate_template
-from .projectors import build_template_catalog, empty_template_catalog, merge_settings_sections, project_resolved_templates
+from .projectors import (
+    build_template_catalog,
+    empty_template_catalog,
+    merge_settings_sections,
+    project_resolved_templates,
+)
 
 __all__ = [
     "ResolvedTemplate",
+    "CURRENT_TEMPLATE_SCHEMA_VERSION",
     "RumiTemplate",
+    "TemplateActivationPlan",
+    "TemplateActivationPlanner",
+    "TemplateActivationState",
     "TemplateCapabilitySpec",
     "TemplateContext",
+    "TemplateDependencySpec",
     "TemplateDiagnostic",
     "TemplateDiscoveryResult",
     "TemplateKind",

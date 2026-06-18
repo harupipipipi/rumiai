@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "rumi.api_keys.default",
   "kind": "integration",
   "version": "1.0.0",
