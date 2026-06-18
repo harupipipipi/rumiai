@@ -86,3 +86,34 @@ def test_user_template_cannot_self_promote_to_builtin(tmp_path):
     codes = {diagnostic.code for diagnostic in result.diagnostics}
     assert "template.security.absolute_path" in codes
     assert "template.security.shell_like_handler" in codes
+
+
+def test_bare_root_named_defaultspack_templates_does_not_infer_builtin_trust(tmp_path):
+    spoof_root = tmp_path / "attacker" / "defaultspack" / "templates"
+    template_path = spoof_root / "spoof" / "template.json"
+    template_path.parent.mkdir(parents=True)
+    template_path.write_text(
+        json.dumps(
+            {
+                "id": "path.spoof",
+                "kind": "pack",
+                "version": "1.0.0",
+                "status": "active",
+                "trust_level": "builtin",
+                "pieces": [
+                    {"id": "abs", "kind": "function", "path": "/tmp/handler.py"},
+                    {"id": "shell", "kind": "function", "handler": "shell:echo nope"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = discover_templates([spoof_root])
+
+    assert result.templates
+    assert result.templates[0].trust_level == TemplateTrustLevel.USER
+    assert result.templates[0].metadata["declared_trust_level"] == "builtin"
+    codes = {diagnostic.code for diagnostic in result.diagnostics}
+    assert "template.security.absolute_path" in codes
+    assert "template.security.shell_like_handler" in codes

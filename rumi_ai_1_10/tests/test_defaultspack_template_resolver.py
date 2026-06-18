@@ -8,11 +8,11 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-from domain.templates import TemplateRegistry, parse_template, resolve_template  # noqa: E402
+from domain.templates import TemplateRegistry, TemplateTrustLevel, parse_template, resolve_template  # noqa: E402
 
 
-def _register(registry: TemplateRegistry, raw: dict):
-    parsed = parse_template(raw)
+def _register(registry: TemplateRegistry, raw: dict, *, trust_level: str | None = None):
+    parsed = parse_template(raw, trust_level=trust_level)
     assert parsed.template is not None
     registry.register(parsed.template, validate=False)
     return parsed.template
@@ -107,8 +107,16 @@ def test_resolver_rejects_invalid_list_add_patch_indices():
             "status": "active",
             "pieces": [{"id": "anchor", "kind": "function"}],
             "patches": [
-                {"op": "add", "path": "/pieces/-1", "value": {"id": "negative", "kind": "function"}},
-                {"op": "add", "path": "/pieces/99", "value": {"id": "past_end", "kind": "function"}},
+                {
+                    "op": "add",
+                    "path": "/pieces/-1",
+                    "value": {"id": "negative", "kind": "function"},
+                },
+                {
+                    "op": "add",
+                    "path": "/pieces/99",
+                    "value": {"id": "past_end", "kind": "function"},
+                },
             ],
         },
     )
@@ -117,8 +125,90 @@ def test_resolver_rejects_invalid_list_add_patch_indices():
 
     assert resolved.template is not None
     assert [piece.id for piece in resolved.template.pieces] == ["anchor"]
-    failures = [diagnostic for diagnostic in resolved.diagnostics if diagnostic.code == "template.patch.apply_failed"]
+    failures = [
+        diagnostic
+        for diagnostic in resolved.diagnostics
+        if diagnostic.code == "template.patch.apply_failed"
+    ]
     assert len(failures) == 2
     assert any("invalid list index: -1" in diagnostic.message for diagnostic in failures)
     assert any("list index out of range: 99" in diagnostic.message for diagnostic in failures)
+    assert not resolved.ok
+
+
+def test_patch_cannot_mutate_loader_trust_or_template_id_and_revalidates_user_security():
+    registry = TemplateRegistry()
+    _register(
+        registry,
+        {
+            "id": "user.patch",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "pieces": [],
+            "patches": [
+                {"op": "replace", "path": "/trust_level", "value": "builtin"},
+                {"op": "replace", "path": "/id", "value": "rumi.composer.default"},
+                {
+                    "op": "add",
+                    "path": "/pieces/-",
+                    "value": {"id": "bad", "kind": "function", "handler": "shell:echo nope"},
+                },
+            ],
+        },
+        trust_level=TemplateTrustLevel.USER.value,
+    )
+
+    resolved = resolve_template("user.patch", registry)
+
+    assert resolved.template is not None
+    assert resolved.template.id == "user.patch"
+    assert resolved.template.trust_level == TemplateTrustLevel.USER
+    assert [piece.id for piece in resolved.template.pieces] == ["bad"]
+    codes = {diagnostic.code for diagnostic in resolved.diagnostics}
+    assert "template.patch.protected_path" in codes
+    assert "template.security.shell_like_handler" in codes
+    assert not resolved.ok
+
+
+def test_patch_cannot_write_reserved_piece_projection_metadata():
+    registry = TemplateRegistry()
+    _register(
+        registry,
+        {
+            "id": "user.piece.metadata",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "pieces": [],
+            "patches": [
+                {
+                    "op": "add",
+                    "path": "/pieces/-",
+                    "value": {
+                        "id": "spoof",
+                        "kind": "composer_command",
+                        "trust_level": "builtin",
+                        "command": {
+                            "id": "spoof",
+                            "execution": {
+                                "type": "pack_block",
+                                "qualified_name": "defaultspack:context.compact",
+                            },
+                        },
+                    },
+                }
+            ],
+        },
+        trust_level=TemplateTrustLevel.USER.value,
+    )
+
+    resolved = resolve_template("user.piece.metadata", registry)
+
+    assert resolved.template is not None
+    assert resolved.template.pieces == []
+    assert any(
+        diagnostic.code == "template.patch.reserved_piece_metadata"
+        for diagnostic in resolved.diagnostics
+    )
     assert not resolved.ok

@@ -10,7 +10,12 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.frontend.registry import FrontendRegistry  # noqa: E402
-from domain.templates import ResolvedTemplate, build_template_catalog, parse_template, project_resolved_templates  # noqa: E402
+from domain.templates import (  # noqa: E402
+    ResolvedTemplate,
+    build_template_catalog,
+    parse_template,
+    project_resolved_templates,
+)
 from domain.templates.projectors import empty_template_catalog  # noqa: E402
 
 
@@ -34,13 +39,25 @@ def test_template_projector_builds_stable_catalog_metadata():
     assert "rumi.external_io.default" in template_ids
     assert "rumi.backend.prompt_compaction.default" in template_ids
 
-    assert _field_types(catalog["settings_sections"]) >= {"model_select", "provider_select", "api_key_setup"}
-    assert any("model_select" in renderer.get("field_types", []) for renderer in catalog["field_renderers"])
-    assert any("model_select" in binding.get("field_types", []) for binding in catalog["component_bindings"])
+    assert _field_types(catalog["settings_sections"]) >= {
+        "model_select",
+        "provider_select",
+        "api_key_setup",
+    }
+    assert any(
+        "model_select" in renderer.get("field_types", []) for renderer in catalog["field_renderers"]
+    )
+    assert any(
+        "model_select" in binding.get("field_types", [])
+        for binding in catalog["component_bindings"]
+    )
     assert any(item.get("action_id") == "ai_set_preferred_model" for item in catalog["actions"])
     assert any(item.get("data_source") == "provider_key_status" for item in catalog["data_sources"])
     assert any(item.get("service_id") == "model_router" for item in catalog["backend_services"])
-    assert any(item.get("service_id") == "external_io_template_registry" for item in catalog["backend_services"])
+    assert any(
+        item.get("service_id") == "external_io_template_registry"
+        for item in catalog["backend_services"]
+    )
     assert any(item.get("service_id") == "prompt_compactor" for item in catalog["backend_services"])
     assert catalog["api_routes"] == []
     assert any(
@@ -48,7 +65,9 @@ def test_template_projector_builds_stable_catalog_metadata():
         for item in catalog["test_contracts"]
     )
     assert any(item.get("permission_id") == "api_key.use" for item in catalog["permissions"])
-    assert any(item.get("permission_id") == "external_io.configure" for item in catalog["permissions"])
+    assert any(
+        item.get("permission_id") == "external_io.configure" for item in catalog["permissions"]
+    )
     assert any(item.get("permission_id") == "context.compact" for item in catalog["permissions"])
     assert not catalog["template_diagnostics"]
 
@@ -59,8 +78,12 @@ def test_template_projector_builds_stable_catalog_metadata():
     }
     assert "rumi.backend.model_routing.default:model_router_service" in projected_ids
 
-    model_section = next(section for section in catalog["settings_sections"] if section["id"] == "models")
-    model_field = next(field for field in model_section["fields"] if field["id"] == "preferred_model")
+    model_section = next(
+        section for section in catalog["settings_sections"] if section["id"] == "models"
+    )
+    model_field = next(
+        field for field in model_section["fields"] if field["id"] == "preferred_model"
+    )
     assert model_field["piece_id"] == "model_select"
     assert model_field["template_id"] == "rumi.model_selector.default"
     assert model_field["projected_id"] == "rumi.model_selector.default:model_select"
@@ -79,10 +102,16 @@ def test_template_catalog_projects_composer_surface_pieces():
         assert key in catalog
 
     command = next(item for item in catalog["commands"] if item.get("id") == "context_txt")
-    composer_input = next(item for item in catalog["composer_inputs"] if item.get("id") == "default_composer")
+    composer_input = next(
+        item for item in catalog["composer_inputs"] if item.get("id") == "default_composer"
+    )
     shell_region = next(item for item in catalog["shell_regions"] if item.get("id") == "composer")
-    shell_renderer = next(item for item in catalog["shell_renderers"] if item.get("id") == "composer")
-    context_policy = next(item for item in catalog["context_policies"] if item.get("id") == "materialize_txt")
+    shell_renderer = next(
+        item for item in catalog["shell_renderers"] if item.get("id") == "composer"
+    )
+    context_policy = next(
+        item for item in catalog["context_policies"] if item.get("id") == "materialize_txt"
+    )
 
     assert command["execution"] == {
         "type": "pack_block",
@@ -101,7 +130,9 @@ def test_template_catalog_projects_composer_surface_pieces():
     assert {item["trust_level"] for item in projected} == {"builtin"}
     assert all(item["projected_id"].startswith("rumi.composer.default:") for item in projected)
     assert all(item["origin"]["template_id"] == "rumi.composer.default" for item in projected)
-    assert all(item["_source"].endswith("templates/composer/default/template.json") for item in projected)
+    assert all(
+        item["_source"].endswith("templates/composer/default/template.json") for item in projected
+    )
 
 
 def test_empty_template_catalog_exposes_ai_input_and_tool_policy_buckets():
@@ -119,17 +150,31 @@ def test_empty_template_catalog_exposes_ai_input_and_tool_policy_buckets():
 def test_template_catalog_projects_external_io_and_prompt_compaction_bundles():
     catalog = build_template_catalog(defaultspack_root=DEFAULTSPACK_ROOT)
 
-    external_template = next(item for item in catalog["external_io_templates"] if item["id"] == "line.input.default")
-    compact_command = next(item for item in catalog["commands"] if item.get("id") == "compact_context")
-    compact_policy = next(item for item in catalog["context_policies"] if item.get("id") == "long_context_txt")
-    token_source = next(item for item in catalog["data_sources"] if item.get("data_source") == "context_token_estimate")
-    compact_action = next(item for item in catalog["actions"] if item.get("action_id") == "compact_context")
+    external_template = next(
+        item for item in catalog["external_io_templates"] if item["id"] == "line.input.default"
+    )
+    compact_command = next(
+        item for item in catalog["commands"] if item.get("id") == "compact_context"
+    )
+    compact_policy = next(
+        item for item in catalog["context_policies"] if item.get("id") == "long_context_txt"
+    )
+    token_source = next(
+        item
+        for item in catalog["data_sources"]
+        if item.get("data_source") == "context_token_estimate"
+    )
+    compact_action = next(
+        item for item in catalog["actions"] if item.get("action_id") == "compact_context"
+    )
 
     assert external_template["origin"] == "template"
     assert external_template["template_id"] == "rumi.external_io.default"
     assert external_template["provider"] == "line"
     assert external_template["endpoint"]["route"] == "/api/integrations/line/webhook"
-    assert external_template["projected_id"] == "rumi.external_io.default:line_input_default_template"
+    assert (
+        external_template["projected_id"] == "rumi.external_io.default:line_input_default_template"
+    )
     assert compact_command["execution"]["qualified_name"] == "defaultspack:context.compact"
     assert compact_policy["format"] == "text/plain"
     assert token_source["route_path"] == "/api/context/token-estimate"
@@ -147,7 +192,11 @@ def test_template_catalog_projects_ai_input_and_tool_policy_metadata():
                 {
                     "id": "chat_composer_piece",
                     "kind": "composer_input",
-                    "input": {"id": "chat_composer", "region_id": "composer", "renderer": "composer"},
+                    "input": {
+                        "id": "chat_composer",
+                        "region_id": "composer",
+                        "renderer": "composer",
+                    },
                 },
                 {
                     "id": "chat_context_piece",
@@ -199,6 +248,155 @@ def test_template_catalog_projects_ai_input_and_tool_policy_metadata():
     assert not catalog["template_diagnostics"]
 
 
+def test_only_active_templates_project_runtime_buckets_while_inactive_summaries_remain():
+    resolved = []
+    for status in ("active", "draft", "deprecated", "disabled"):
+        template_id = f"template.status.{status}"
+        parsed = parse_template(
+            {
+                "id": template_id,
+                "kind": "pack",
+                "version": "1.0.0",
+                "status": status,
+                "pieces": [
+                    {
+                        "id": "field",
+                        "kind": "settings_field",
+                        "section_id": "models",
+                        "type": "text",
+                    },
+                    {
+                        "id": "command",
+                        "kind": "composer_command",
+                        "command": {
+                            "id": f"{status}_command",
+                            "execution": {"type": "frontend", "action": "noop"},
+                        },
+                    },
+                    {
+                        "id": "action",
+                        "kind": "function",
+                        "role": "action",
+                        "action_id": f"{status}_action",
+                    },
+                    {"id": "service", "kind": "backend_service", "service_id": f"{status}_service"},
+                    {
+                        "id": "route",
+                        "kind": "api_route",
+                        "method": "GET",
+                        "route_path": f"/api/{status}",
+                    },
+                    {"id": "permission", "kind": "permission", "permission_id": f"{status}.use"},
+                ],
+            },
+            trust_level="builtin",
+        )
+        assert parsed.template is not None
+        resolved.append(ResolvedTemplate(template=parsed.template))
+
+    catalog = project_resolved_templates(resolved)
+
+    summaries = {template["id"]: template for template in catalog["templates"]}
+    assert set(summaries) == {
+        "template.status.active",
+        "template.status.draft",
+        "template.status.deprecated",
+        "template.status.disabled",
+    }
+    assert summaries["template.status.active"]["projectable"] is True
+    assert summaries["template.status.draft"]["projectable"] is False
+    assert summaries["template.status.deprecated"]["projectable"] is False
+    assert summaries["template.status.disabled"]["projectable"] is False
+
+    runtime_projected_ids = {
+        item.get("projected_id")
+        for key in ("commands", "actions", "backend_services", "api_routes", "permissions")
+        for item in catalog[key]
+    }
+    model_section = next(
+        section for section in catalog["settings_sections"] if section["id"] == "models"
+    )
+    runtime_projected_ids.update(field.get("projected_id") for field in model_section["fields"])
+
+    assert "template.status.active:command" in runtime_projected_ids
+    assert "template.status.active:route" in runtime_projected_ids
+    assert "template.status.active:field" in runtime_projected_ids
+    assert not any(
+        str(item or "").startswith("template.status.draft:") for item in runtime_projected_ids
+    )
+    assert not any(
+        str(item or "").startswith("template.status.deprecated:") for item in runtime_projected_ids
+    )
+    assert not any(
+        str(item or "").startswith("template.status.disabled:") for item in runtime_projected_ids
+    )
+
+
+def test_projector_overwrites_piece_level_trust_spoofing():
+    parsed = parse_template(
+        {
+            "id": "template.user.spoofed_piece",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "pieces": [
+                {
+                    "id": "spoofed_action",
+                    "kind": "function",
+                    "role": "action",
+                    "action_id": "spoofed_action",
+                    "trust_level": "builtin",
+                    "template_id": "rumi.composer.default",
+                    "projected_id": "rumi.composer.default:spoofed_action",
+                }
+            ],
+        },
+        trust_level="user",
+    )
+    assert parsed.template is not None
+
+    catalog = project_resolved_templates([ResolvedTemplate(template=parsed.template)])
+    action = next(item for item in catalog["actions"] if item.get("id") == "spoofed_action")
+
+    assert action["trust_level"] == "user"
+    assert action["template_id"] == "template.user.spoofed_piece"
+    assert action["projected_id"] == "template.user.spoofed_piece:spoofed_action"
+
+
+def test_resolved_template_id_collision_is_error_and_not_projected():
+    resolved = []
+    for command_id in ("one", "two"):
+        parsed = parse_template(
+            {
+                "id": "template.duplicate.resolved",
+                "kind": "pack",
+                "version": "1.0.0",
+                "status": "active",
+                "pieces": [
+                    {
+                        "id": command_id,
+                        "kind": "composer_command",
+                        "command": {
+                            "id": command_id,
+                            "execution": {"type": "frontend", "action": "noop"},
+                        },
+                    }
+                ],
+            },
+            trust_level="builtin",
+        )
+        assert parsed.template is not None
+        resolved.append(ResolvedTemplate(template=parsed.template))
+
+    catalog = project_resolved_templates(resolved)
+
+    assert any(
+        diagnostic["code"] == "template.registry.resolved_duplicate_template"
+        for diagnostic in catalog["template_diagnostics"]
+    )
+    assert catalog["commands"] == []
+
+
 def test_frontend_catalog_merges_template_metadata_without_dropping_existing_keys():
     with patch("domain.frontend.registry.AIClient") as mock_client:
         mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
@@ -238,7 +436,9 @@ def test_frontend_catalog_merges_template_metadata_without_dropping_existing_key
     assert "shell_renderers" in catalog
 
     assert any(template["id"] == "rumi.model_selector.default" for template in catalog["templates"])
-    composer_input = next(item for item in catalog["composer_inputs"] if item["id"] == "default_composer")
+    composer_input = next(
+        item for item in catalog["composer_inputs"] if item["id"] == "default_composer"
+    )
     assert composer_input["template_id"] == "rumi.composer.default"
     assert composer_input["region_id"] == "composer"
     assert any(item["id"] == "context_txt" for item in catalog["commands"])
@@ -250,13 +450,19 @@ def test_frontend_catalog_merges_template_metadata_without_dropping_existing_key
         and item["function_name"] == "defaultspack:context_token_estimate"
         for item in catalog["routes"]["template_backed"]
     )
-    composer_region = next(item for item in catalog["shell"]["layout"]["regions"] if item["id"] == "composer")
-    composer_renderer = next(item for item in catalog["shell"]["renderers"] if item["id"] == "composer")
+    composer_region = next(
+        item for item in catalog["shell"]["layout"]["regions"] if item["id"] == "composer"
+    )
+    composer_renderer = next(
+        item for item in catalog["shell"]["renderers"] if item["id"] == "composer"
+    )
     assert composer_region["template_id"] == "rumi.composer.default"
     assert composer_renderer["template_id"] == "rumi.composer.default"
     assert "model_select" in _field_types(catalog["settings"]["sections"])
     assert "api_key_setup" in _field_types(settings["sections"])
-    assert any("model_select" in renderer.get("field_types", []) for renderer in catalog["field_renderers"])
+    assert any(
+        "model_select" in renderer.get("field_types", []) for renderer in catalog["field_renderers"]
+    )
 
 
 def test_projected_settings_fields_namespace_piece_ids_and_diagnose_setting_key_collisions():
@@ -324,5 +530,10 @@ def test_malformed_template_does_not_break_frontend_catalog(tmp_path):
     assert "app" in catalog
     assert "settings" in catalog
     assert catalog["templates"] == []
-    assert any(item["code"] == "template.discovery.json_parse_error" for item in catalog["diagnostics"])
-    assert any(item["code"] == "template.discovery.json_parse_error" for item in catalog["template_diagnostics"])
+    assert any(
+        item["code"] == "template.discovery.json_parse_error" for item in catalog["diagnostics"]
+    )
+    assert any(
+        item["code"] == "template.discovery.json_parse_error"
+        for item in catalog["template_diagnostics"]
+    )

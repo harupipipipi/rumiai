@@ -25,7 +25,11 @@ class TemplateDiscoveryResult:
 
 
 def default_template_roots(defaultspack_root: str | Path | None = None) -> list[TemplateRoot]:
-    root = Path(defaultspack_root) if defaultspack_root is not None else Path(__file__).resolve().parents[2]
+    root = (
+        Path(defaultspack_root)
+        if defaultspack_root is not None
+        else Path(__file__).resolve().parents[2]
+    )
     return [
         TemplateRoot(root / "templates", TemplateTrustLevel.BUILTIN),
         TemplateRoot(root / "user_data" / "shared" / "templates", TemplateTrustLevel.USER),
@@ -38,7 +42,9 @@ def discover_templates(
     defaultspack_root: str | Path | None = None,
     trust_level: TemplateTrustLevel | str | None = None,
 ) -> TemplateDiscoveryResult:
-    search_roots = _normalize_roots(roots, defaultspack_root=defaultspack_root, trust_level=trust_level)
+    search_roots = _normalize_roots(
+        roots, defaultspack_root=defaultspack_root, trust_level=trust_level
+    )
     result = TemplateDiscoveryResult()
     for template_root in search_roots:
         root_trust = _coerce_trust(template_root.trust_level)
@@ -83,7 +89,9 @@ def load_template_file(
     # Do not let a user-writable template self-declare ``trust_level: builtin``
     # and bypass path / shell diagnostics. Direct parse_template() remains a
     # lower-level parser for tests and in-memory builtin construction.
-    effective_trust = _coerce_trust(trust_level) if trust_level is not None else _infer_file_trust(path)
+    effective_trust = (
+        _coerce_trust(trust_level) if trust_level is not None else TemplateTrustLevel.USER
+    )
     parsed = parse_template(
         raw,
         source_path=str(path),
@@ -113,7 +121,9 @@ def _normalize_roots(
         configured_roots = default_template_roots(defaultspack_root)
     else:
         configured_roots = [
-            root if isinstance(root, TemplateRoot) else TemplateRoot(Path(root), _infer_root_trust(Path(root), defaultspack_root))
+            root
+            if isinstance(root, TemplateRoot)
+            else TemplateRoot(Path(root), _infer_root_trust(Path(root), defaultspack_root))
             for root in roots
         ]
     if trust_level is None:
@@ -132,27 +142,12 @@ def _coerce_trust(value: TemplateTrustLevel | str) -> TemplateTrustLevel:
 
 
 def _infer_root_trust(root: Path, defaultspack_root: str | Path | None) -> TemplateTrustLevel:
-    if defaultspack_root is not None:
-        pack_root = Path(defaultspack_root)
-        if _is_relative_to(root, pack_root / "templates"):
-            return TemplateTrustLevel.BUILTIN
-        if _is_relative_to(root, pack_root / "user_data" / "shared" / "templates"):
-            return TemplateTrustLevel.USER
-    return _infer_file_trust(root)
-
-
-def _infer_file_trust(path: Path) -> TemplateTrustLevel:
-    parts = path.parts
-    for index, part in enumerate(parts):
-        if part != "user_data":
-            continue
-        if parts[index:index + 3] == ("user_data", "shared", "templates"):
-            return TemplateTrustLevel.USER
-    for index, part in enumerate(parts):
-        if part != "defaultspack":
-            continue
-        if len(parts) > index + 1 and parts[index + 1] == "templates":
-            return TemplateTrustLevel.BUILTIN
+    del defaultspack_root
+    pack_root = Path(__file__).resolve().parents[2]
+    if _is_relative_to(root, pack_root / "templates"):
+        return TemplateTrustLevel.BUILTIN
+    if _is_relative_to(root, pack_root / "user_data" / "shared" / "templates"):
+        return TemplateTrustLevel.USER
     return TemplateTrustLevel.USER
 
 

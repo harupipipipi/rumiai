@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -191,6 +192,48 @@ def test_bridge_registers_template_backed_defaultspack_functions():
     assert token_entry.entrypoint == "template_runner.py:run"
     assert token_entry.extensions["defaultspack"]["template_runtime"] is True
     assert token_entry.extensions["defaultspack"]["block_module"] == "blocks.context.token_estimate"
+
+
+def test_template_function_specs_include_only_active_template_functions(tmp_path):
+    import domain.function_runtime.template_specs as template_specs
+
+    for status in ("active", "draft", "deprecated", "disabled"):
+        template_path = tmp_path / "templates" / status / "template.json"
+        template_path.parent.mkdir(parents=True)
+        template_path.write_text(
+            json.dumps(
+                {
+                    "id": f"function.{status}",
+                    "kind": "backend",
+                    "version": "1.0.0",
+                    "status": status,
+                    "trust_level": "builtin",
+                    "pieces": [
+                        {
+                            "id": "action",
+                            "kind": "function",
+                            "role": "action",
+                            "action_id": f"{status}_template_action",
+                            "block_module": "blocks.context.token_estimate",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    template_specs._template_catalog.cache_clear()
+    try:
+        specs = template_specs.template_function_specs(tmp_path)
+        manifests = template_specs.template_function_manifests(tmp_path)
+    finally:
+        template_specs._template_catalog.cache_clear()
+
+    assert "active_template_action" in specs
+    assert "active_template_action" in manifests
+    assert "draft_template_action" not in specs
+    assert "deprecated_template_action" not in specs
+    assert "disabled_template_action" not in specs
 
 
 def test_capability_executor_runs_template_backed_function_entry():

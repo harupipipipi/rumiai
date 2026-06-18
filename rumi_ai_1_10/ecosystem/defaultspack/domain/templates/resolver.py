@@ -3,9 +3,25 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from .models import RumiTemplate, ResolvedTemplate, TemplateDiagnostic, TemplatePiece
+from .models import (
+    RumiTemplate,
+    ResolvedTemplate,
+    TemplateDiagnostic,
+    TemplatePiece,
+    TemplateTrustLevel,
+)
 from .registry import TemplateRegistry
 from .validation import parse_template, validate_template
+
+
+RESERVED_PROJECTED_METADATA_FIELDS = {
+    "trust_level",
+    "template_id",
+    "piece_id",
+    "projected_id",
+    "origin",
+    "_source",
+}
 
 
 def resolve_template(template_id: str, registry: TemplateRegistry) -> ResolvedTemplate:
@@ -48,19 +64,31 @@ def merge_template_pieces(
     return _order_pieces(merged), diagnostics
 
 
-def apply_template_patches(template: RumiTemplate, patches: list[dict[str, Any]]) -> tuple[RumiTemplate, list[TemplateDiagnostic]]:
+def apply_template_patches(
+    template: RumiTemplate,
+    patches: list[dict[str, Any]],
+    *,
+    trust_level: TemplateTrustLevel | str | None = None,
+) -> tuple[RumiTemplate, list[TemplateDiagnostic]]:
     raw = template.to_dict()
     diagnostics: list[TemplateDiagnostic] = []
     for index, patch in enumerate(patches):
         diagnostic = _apply_patch(raw, patch, template_id=template.id, patch_index=index)
         if diagnostic is not None:
             diagnostics.append(diagnostic)
-    parsed = parse_template(raw, source_path=str(template.source_path) if template.source_path else None)
+    effective_trust = trust_level if trust_level is not None else template.trust_level
+    parsed = parse_template(
+        raw,
+        source_path=str(template.source_path) if template.source_path else None,
+        trust_level=_value(effective_trust),
+    )
     diagnostics.extend(parsed.diagnostics)
     return parsed.template or template, diagnostics
 
 
-def diagnose_template_dependencies(template: RumiTemplate, registry: TemplateRegistry) -> list[TemplateDiagnostic]:
+def diagnose_template_dependencies(
+    template: RumiTemplate, registry: TemplateRegistry
+) -> list[TemplateDiagnostic]:
     diagnostics: list[TemplateDiagnostic] = []
     for dependency in template.dependencies:
         if registry.get(dependency) is None:
@@ -76,7 +104,9 @@ def diagnose_template_dependencies(template: RumiTemplate, registry: TemplateReg
     return diagnostics
 
 
-def diagnose_capability_requirements(template: RumiTemplate, provided: set[str] | None = None) -> list[TemplateDiagnostic]:
+def diagnose_capability_requirements(
+    template: RumiTemplate, provided: set[str] | None = None
+) -> list[TemplateDiagnostic]:
     provided = set(provided or set()) | set(template.capabilities.provides)
     diagnostics: list[TemplateDiagnostic] = []
     for capability in template.capabilities.requires:
@@ -93,7 +123,9 @@ def diagnose_capability_requirements(template: RumiTemplate, provided: set[str] 
     return diagnostics
 
 
-def _resolve_template(template_id: str, registry: TemplateRegistry, *, stack: list[str]) -> ResolvedTemplate:
+def _resolve_template(
+    template_id: str, registry: TemplateRegistry, *, stack: list[str]
+) -> ResolvedTemplate:
     if template_id in stack:
         return ResolvedTemplate(
             None,
@@ -156,7 +188,9 @@ def _resolve_template(template_id: str, registry: TemplateRegistry, *, stack: li
             ancestry = [*bases, template_id]
 
     if resolved.patches:
-        resolved, patch_diagnostics = apply_template_patches(resolved, resolved.patches)
+        resolved, patch_diagnostics = apply_template_patches(
+            resolved, resolved.patches, trust_level=template.trust_level
+        )
         diagnostics.extend(patch_diagnostics)
 
     diagnostics.extend(validate_template(resolved))
@@ -165,16 +199,22 @@ def _resolve_template(template_id: str, registry: TemplateRegistry, *, stack: li
     return ResolvedTemplate(resolved, diagnostics, ancestry=ancestry)
 
 
-def _compose(base: RumiTemplate | None, child: RumiTemplate) -> tuple[RumiTemplate, list[TemplateDiagnostic]]:
+def _compose(
+    base: RumiTemplate | None, child: RumiTemplate
+) -> tuple[RumiTemplate, list[TemplateDiagnostic]]:
     if base is None:
         return deepcopy(child), []
     raw = base.to_dict()
     child_raw = child.to_dict()
-    raw.update({key: value for key, value in child_raw.items() if key not in {"pieces", "capabilities"}})
+    raw.update(
+        {key: value for key, value in child_raw.items() if key not in {"pieces", "capabilities"}}
+    )
     raw["capabilities"] = {
         "provides": sorted(set(base.capabilities.provides) | set(child.capabilities.provides)),
         "requires": sorted(set(base.capabilities.requires) | set(child.capabilities.requires)),
-        "permissions": sorted(set(base.capabilities.permissions) | set(child.capabilities.permissions)),
+        "permissions": sorted(
+            set(base.capabilities.permissions) | set(child.capabilities.permissions)
+        ),
     }
     pieces, diagnostics = merge_template_pieces(base.pieces, child.pieces, template_id=child.id)
     raw["pieces"] = [piece.to_dict() for piece in pieces]
@@ -200,17 +240,45 @@ def _slot_insert_index(pieces: list[TemplatePiece], slot: str | None) -> int | N
 
 def _order_pieces(pieces: list[TemplatePiece]) -> list[TemplatePiece]:
     indexed = list(enumerate(pieces))
-    indexed.sort(key=lambda item: (item[1].order is None, item[1].order if item[1].order is not None else item[0], item[0]))
+    indexed.sort(
+        key=lambda item: (
+            item[1].order is None,
+            item[1].order if item[1].order is not None else item[0],
+            item[0],
+        )
+    )
     return [piece for _, piece in indexed]
 
 
-def _apply_patch(raw: dict[str, Any], patch: dict[str, Any], *, template_id: str, patch_index: int) -> TemplateDiagnostic | None:
+def _apply_patch(
+    raw: dict[str, Any], patch: dict[str, Any], *, template_id: str, patch_index: int
+) -> TemplateDiagnostic | None:
     op = patch.get("op")
     path = patch.get("path")
-    if op not in {"replace", "add", "remove"} or not isinstance(path, str) or not path.startswith("/"):
+    if (
+        op not in {"replace", "add", "remove"}
+        or not isinstance(path, str)
+        or not path.startswith("/")
+    ):
         return TemplateDiagnostic(
             code="template.patch.invalid",
             message="patch must contain op replace/add/remove and JSON pointer path",
+            template_id=template_id,
+            path=f"/patches/{patch_index}",
+        )
+    protected_field = _protected_patch_field(path)
+    if protected_field:
+        return TemplateDiagnostic(
+            code="template.patch.protected_path",
+            message=f"patch cannot modify immutable template field: {protected_field}",
+            template_id=template_id,
+            path=f"/patches/{patch_index}",
+        )
+    reserved_piece_field = _reserved_piece_metadata_patch_field(path, patch)
+    if reserved_piece_field:
+        return TemplateDiagnostic(
+            code="template.patch.reserved_piece_metadata",
+            message=f"patch cannot write reserved projected piece metadata: {reserved_piece_field}",
             template_id=template_id,
             path=f"/patches/{patch_index}",
         )
@@ -230,6 +298,27 @@ def _apply_patch(raw: dict[str, Any], patch: dict[str, Any], *, template_id: str
             template_id=template_id,
             path=f"/patches/{patch_index}",
         )
+    return None
+
+
+def _protected_patch_field(pointer: str) -> str | None:
+    tokens = [_unescape_pointer(token) for token in pointer.strip("/").split("/") if token != ""]
+    if not tokens:
+        return None
+    return tokens[0] if tokens[0] in {"id", "trust_level"} else None
+
+
+def _reserved_piece_metadata_patch_field(pointer: str, patch: dict[str, Any]) -> str | None:
+    tokens = [_unescape_pointer(token) for token in pointer.strip("/").split("/") if token != ""]
+    if not tokens or tokens[0] != "pieces":
+        return None
+    if len(tokens) >= 3 and tokens[2] in RESERVED_PROJECTED_METADATA_FIELDS:
+        return f"pieces/*/{tokens[2]}"
+    value = patch.get("value")
+    if len(tokens) <= 2 and isinstance(value, dict):
+        for field_name in RESERVED_PROJECTED_METADATA_FIELDS:
+            if field_name in value:
+                return f"pieces/*/{field_name}"
     return None
 
 
@@ -289,3 +378,7 @@ def _list_index(token: str, length: int, *, allow_end: bool = False) -> int:
 
 def _unescape_pointer(token: str) -> str:
     return token.replace("~1", "/").replace("~0", "~")
+
+
+def _value(value: object) -> str:
+    return value.value if hasattr(value, "value") else str(value)

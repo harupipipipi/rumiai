@@ -50,10 +50,7 @@ def test_fallback_sorting_keeps_static_agent_company_status_before_generic_statu
 def test_chat_send_fallback_specs_target_chat_turn_flow():
     from ecosystem.defaultspack.transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
 
-    specs = {
-        (spec.method, spec.pattern): spec
-        for spec in _FALLBACK_HTTP_ROUTE_SPECS
-    }
+    specs = {(spec.method, spec.pattern): spec for spec in _FALLBACK_HTTP_ROUTE_SPECS}
 
     completion = specs[("POST", "/v1/chat/completions")]
     message = specs[("POST", "/api/chat/conversations/{id}/messages")]
@@ -78,9 +75,18 @@ def test_flow_yaml_routes_are_the_canonical_chat_ingress():
     canonical = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
 
     assert flow_specs[("POST", "/v1/chat/completions")].flow_id == "defaultspack.chat_turn"
-    assert flow_specs[("POST", "/api/chat/conversations/{id}/messages")].flow_id == "defaultspack.chat_turn"
-    assert flow_specs[("POST", "/api/chat/conversations/{id}/stream")].flow_id == "defaultspack.chat_stream_turn"
-    assert canonical[("POST", "/api/chat/conversations/{id}/stream")].flow_id == "defaultspack.chat_stream_turn"
+    assert (
+        flow_specs[("POST", "/api/chat/conversations/{id}/messages")].flow_id
+        == "defaultspack.chat_turn"
+    )
+    assert (
+        flow_specs[("POST", "/api/chat/conversations/{id}/stream")].flow_id
+        == "defaultspack.chat_stream_turn"
+    )
+    assert (
+        canonical[("POST", "/api/chat/conversations/{id}/stream")].flow_id
+        == "defaultspack.chat_stream_turn"
+    )
 
 
 def test_template_function_routes_join_canonical_transport_registry():
@@ -102,8 +108,56 @@ def test_template_function_routes_join_canonical_transport_registry():
     assert provider_key_route.function_name == "defaultspack:ai_set_provider_key"
     assert provider_key_route.sensitive is True
     external_template_route = canonical[("POST", "/api/external/templates")]
-    assert external_template_route.function_name == "defaultspack:external_io_upsert_custom_template"
+    assert (
+        external_template_route.function_name == "defaultspack:external_io_upsert_custom_template"
+    )
     assert external_template_route.sensitive is True
+
+
+def test_inactive_template_function_routes_are_not_registered(tmp_path):
+    import domain.function_runtime.template_specs as template_specs
+    from ecosystem.defaultspack.transport.registry import template_http_route_specs
+
+    for status in ("active", "draft", "deprecated", "disabled"):
+        template_path = tmp_path / "templates" / status / "template.json"
+        template_path.parent.mkdir(parents=True)
+        template_path.write_text(
+            json.dumps(
+                {
+                    "id": f"route.{status}",
+                    "kind": "backend",
+                    "version": "1.0.0",
+                    "status": status,
+                    "trust_level": "builtin",
+                    "pieces": [
+                        {
+                            "id": "route_action",
+                            "kind": "function",
+                            "role": "action",
+                            "action_id": f"{status}_route_action",
+                            "block_module": "blocks.context.token_estimate",
+                            "method": "POST",
+                            "route_path": f"/api/{status}",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    template_specs._template_catalog.cache_clear()
+    try:
+        routes = {
+            (spec.method, spec.pattern): spec
+            for spec in template_http_route_specs(defaultspack_root=tmp_path)
+        }
+    finally:
+        template_specs._template_catalog.cache_clear()
+
+    assert ("POST", "/api/active") in routes
+    assert ("POST", "/api/draft") not in routes
+    assert ("POST", "/api/deprecated") not in routes
+    assert ("POST", "/api/disabled") not in routes
 
 
 def test_pack_api_dispatches_defaultspack_interface_routes(monkeypatch):
@@ -194,9 +248,7 @@ def test_pack_api_uses_direct_defaultspack_fallback_without_registered_routes(mo
     finally:
         monkeypatch.setattr(PackAPIHandler, "kernel", previous_kernel)
 
-    assert captured == [
-        {"status": "ok", "data": {"id": "c1", "model": "google/gemma-4-31b-it"}}
-    ]
+    assert captured == [{"status": "ok", "data": {"id": "c1", "model": "google/gemma-4-31b-it"}}]
     module_name, input_data, context = calls[0]
     assert module_name == "blocks.chat.create_conversation"
     assert input_data["model"] == "google/gemma-4-31b-it"
@@ -548,7 +600,10 @@ def test_http_chat_stream_flow_route_falls_back_when_sse_events_are_stringified(
         def execute(self, flow_id, trigger_input, context=None):
             return FlowResult(
                 status="completed",
-                output={"status": "ok", "data": {"_sse": True, "events": "<generator object _engine_events>"}},
+                output={
+                    "status": "ok",
+                    "data": {"_sse": True, "events": "<generator object _engine_events>"},
+                },
                 metadata={"flow_id": flow_id},
             )
 
@@ -732,7 +787,9 @@ def test_registry_sorting_keeps_static_agent_company_status_before_generic_statu
             ]
 
     server = DefaultsHttpServer(Facade())
-    handler, params, source, path_inject, _ = server._match_route("GET", "/api/agent/company/status")
+    handler, params, source, path_inject, _ = server._match_route(
+        "GET", "/api/agent/company/status"
+    )
 
     assert handler is company_status
     assert params == {}
@@ -1029,16 +1086,40 @@ def test_fallback_specs_list_company_p2p_compact_and_workspace_routes():
         ("POST", "/api/company/bootstrap", "blocks.company.bootstrap"),
         ("GET", "/api/agent/companies/{company_id}/status", "blocks.company.status"),
         ("PUT", "/api/agent/companies/{company_id}/agents/{agent_id}", "blocks.company.agents"),
-        ("POST", "/api/agent/companies/{company_id}/channels/{channel_id}/messages", "blocks.company.messages"),
+        (
+            "POST",
+            "/api/agent/companies/{company_id}/channels/{channel_id}/messages",
+            "blocks.company.messages",
+        ),
         ("GET", "/api/agent/companies/{company_id}/threads", "blocks.company.threads"),
-        ("POST", "/api/agent/companies/{company_id}/threads/{thread_id}/messages", "blocks.company.messages"),
+        (
+            "POST",
+            "/api/agent/companies/{company_id}/threads/{thread_id}/messages",
+            "blocks.company.messages",
+        ),
         ("PUT", "/api/agent/companies/{company_id}/tasks/{task_id}", "blocks.company.tasks"),
-        ("POST", "/api/agent/companies/{company_id}/tasks/{task_id}/dispatch", "blocks.company.dispatch"),
+        (
+            "POST",
+            "/api/agent/companies/{company_id}/tasks/{task_id}/dispatch",
+            "blocks.company.dispatch",
+        ),
         ("GET", "/api/agent/companies/{company_id}/runs", "blocks.company.runs"),
-        ("GET", "/api/agent/companies/{company_id}/agents/{agent_id}/inbox", "blocks.company.inbox"),
-        ("POST", "/api/agent/companies/{company_id}/supervisor/tick", "blocks.company.supervisor_tick"),
+        (
+            "GET",
+            "/api/agent/companies/{company_id}/agents/{agent_id}/inbox",
+            "blocks.company.inbox",
+        ),
+        (
+            "POST",
+            "/api/agent/companies/{company_id}/supervisor/tick",
+            "blocks.company.supervisor_tick",
+        ),
         ("GET", "/api/agent/companies/{company_id}/summaries", "blocks.company.summary"),
-        ("DELETE", "/api/agent/companies/{company_id}/inbound-routes/{route_id}", "blocks.company.inbound_routes"),
+        (
+            "DELETE",
+            "/api/agent/companies/{company_id}/inbound-routes/{route_id}",
+            "blocks.company.inbound_routes",
+        ),
         ("GET", "/api/p2p/status", "blocks.p2p.status"),
         ("POST", "/api/p2p/identity/rotate", "blocks.p2p.identity"),
         ("PUT", "/api/p2p/peers/{peer_id}", "blocks.p2p.peers"),
@@ -1059,9 +1140,7 @@ def test_p2p_pre_auth_only_exposes_signed_integration_event():
     manifest = json.loads((DEFAULTSPACK_ROOT / "ecosystem.json").read_text(encoding="utf-8"))
     pre_auth_routes = manifest["pre_auth_routes"]
     method_paths = {
-        (route.get("method"), route.get("path"))
-        for route in pre_auth_routes
-        if route.get("path")
+        (route.get("method"), route.get("path")) for route in pre_auth_routes if route.get("path")
     }
 
     assert ("POST", "/api/integrations/p2p/events") in method_paths

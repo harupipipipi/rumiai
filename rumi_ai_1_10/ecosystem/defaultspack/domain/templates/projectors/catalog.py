@@ -4,7 +4,13 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from ..models import ResolvedTemplate, RumiTemplate, TemplateDiagnostic, TemplatePiece
+from ..models import (
+    ResolvedTemplate,
+    RumiTemplate,
+    TemplateDiagnostic,
+    TemplatePiece,
+    TemplateStatus,
+)
 from ..registry import build_template_registry
 from ..resolver import resolve_template
 
@@ -60,23 +66,32 @@ def build_template_catalog(
 
 def project_resolved_templates(resolved_templates: list[ResolvedTemplate]) -> dict[str, Any]:
     catalog = empty_template_catalog()
+    duplicate_resolved_ids = _duplicate_resolved_template_ids(resolved_templates)
     for resolved in resolved_templates:
         template = resolved.template
         if template is None:
-            catalog["template_diagnostics"].extend(_diagnostic_to_dict(item) for item in resolved.diagnostics)
+            catalog["template_diagnostics"].extend(
+                _diagnostic_to_dict(item) for item in resolved.diagnostics
+            )
             continue
 
         template_diagnostics = [_diagnostic_to_dict(item) for item in resolved.diagnostics]
+        if template.id in duplicate_resolved_ids:
+            template_diagnostics.append(_resolved_template_id_collision(template))
         catalog["templates"].append(_template_summary(template, resolved, template_diagnostics))
         catalog["template_diagnostics"].extend(template_diagnostics)
 
         if any(item.get("severity") == "error" for item in template_diagnostics):
             continue
+        if not _is_active_template(template):
+            continue
 
         for piece in template.pieces:
             _project_piece(catalog, template, piece)
 
-    catalog["component_bindings"].extend(_field_renderer_component_bindings(catalog["field_renderers"]))
+    catalog["component_bindings"].extend(
+        _field_renderer_component_bindings(catalog["field_renderers"])
+    )
     for key in (
         "templates",
         "field_renderers",
@@ -100,13 +115,17 @@ def project_resolved_templates(resolved_templates: list[ResolvedTemplate]) -> di
         "test_contracts",
     ):
         catalog[key] = _dedupe_by_id(catalog[key])
-    catalog["settings_sections"], settings_diagnostics = _merge_settings_sections(catalog["settings_sections"])
+    catalog["settings_sections"], settings_diagnostics = _merge_settings_sections(
+        catalog["settings_sections"]
+    )
     catalog["template_diagnostics"].extend(settings_diagnostics)
     catalog["template_diagnostics"] = _dedupe_diagnostics(catalog["template_diagnostics"])
     return catalog
 
 
-def _field_renderer_component_bindings(field_renderers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _field_renderer_component_bindings(
+    field_renderers: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     by_part: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     for renderer in field_renderers:
@@ -119,7 +138,10 @@ def _field_renderer_component_bindings(field_renderers: list[dict[str, Any]]) ->
                 "renderer": "template_field_renderer",
                 "field_types": [],
                 "renderers": [],
-                "origin": {"kind": "template_catalog", "path": "domain/templates/projectors/catalog.py"},
+                "origin": {
+                    "kind": "template_catalog",
+                    "path": "domain/templates/projectors/catalog.py",
+                },
                 "_source": "template_catalog",
             }
             order.append(part_id)
@@ -128,7 +150,11 @@ def _field_renderer_component_bindings(field_renderers: list[dict[str, Any]]) ->
         binding["field_types"] = sorted(
             {
                 *binding.get("field_types", []),
-                *(str(value) for value in renderer.get("field_types", []) if str(value or "").strip()),
+                *(
+                    str(value)
+                    for value in renderer.get("field_types", [])
+                    if str(value or "").strip()
+                ),
             }
         )
     return [by_part[part_id] for part_id in order]
@@ -178,9 +204,13 @@ def _project_piece(catalog: dict[str, Any], template: RumiTemplate, piece: Templ
     elif kind == "test_contract":
         catalog["test_contracts"].append(_metadata_item(template, piece, default_id=piece.id))
 
-    if role == "action" or (kind == "function" and _has_any(piece.data, ("action", "action_id", "command_id"))):
+    if role == "action" or (
+        kind == "function" and _has_any(piece.data, ("action", "action_id", "command_id"))
+    ):
         catalog["actions"].append(_metadata_item(template, piece, default_id=piece.id))
-    if role == "data_source" or (kind == "function" and _has_any(piece.data, ("data_source", "source", "query"))):
+    if role == "data_source" or (
+        kind == "function" and _has_any(piece.data, ("data_source", "source", "query"))
+    ):
         catalog["data_sources"].append(_metadata_item(template, piece, default_id=piece.id))
 
 
@@ -200,23 +230,31 @@ def _field_renderer(template: RumiTemplate, piece: TemplatePiece) -> dict[str, A
 def _component_binding(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
     item = _metadata_item(template, piece, default_id=piece.id)
     item.setdefault("part_id", piece.data.get("part_id") or piece.data.get("part") or piece.id)
-    item.setdefault("component", piece.data.get("component") or piece.data.get("renderer") or piece.id)
+    item.setdefault(
+        "component", piece.data.get("component") or piece.data.get("renderer") or piece.id
+    )
     item.setdefault("renderer", piece.data.get("renderer") or item.get("component"))
     if "field_types" in piece.data and isinstance(piece.data["field_types"], list):
-        item["field_types"] = [str(value) for value in piece.data["field_types"] if str(value or "").strip()]
+        item["field_types"] = [
+            str(value) for value in piece.data["field_types"] if str(value or "").strip()
+        ]
     return item
 
 
 def _command(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
     data = _piece_payload(piece, "command")
-    item = _metadata_item_from_data(template, piece, data, default_id=_payload_id(data, piece, "command_id"))
+    item = _metadata_item_from_data(
+        template, piece, data, default_id=_payload_id(data, piece, "command_id")
+    )
     item.setdefault("name", str(item.get("id") or piece.id).strip().lower().lstrip("/"))
     return item
 
 
 def _composer_input(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
     data = _piece_payload(piece, "input")
-    return _metadata_item_from_data(template, piece, data, default_id=_payload_id(data, piece, "input_id"))
+    return _metadata_item_from_data(
+        template, piece, data, default_id=_payload_id(data, piece, "input_id")
+    )
 
 
 def _shell_region(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
@@ -246,12 +284,16 @@ def _shell_renderer(template: RumiTemplate, piece: TemplatePiece) -> dict[str, A
 
 def _context_policy(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
     data = _piece_payload(piece, "policy")
-    return _metadata_item_from_data(template, piece, data, default_id=_payload_id(data, piece, "policy_id", "mode"))
+    return _metadata_item_from_data(
+        template, piece, data, default_id=_payload_id(data, piece, "policy_id", "mode")
+    )
 
 
 def _external_io_template(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
     data = _piece_payload(piece, "template")
-    item = _metadata_item_from_data(template, piece, data, default_id=_payload_id(data, piece, "template_id"))
+    item = _metadata_item_from_data(
+        template, piece, data, default_id=_payload_id(data, piece, "template_id")
+    )
     item.setdefault("template_origin", item.get("origin") or _origin(template, piece))
     item["origin"] = "template"
     return item
@@ -259,7 +301,9 @@ def _external_io_template(template: RumiTemplate, piece: TemplatePiece) -> dict[
 
 def _ai_input(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
     data = _ai_input_payload(piece)
-    return _metadata_item_from_data(template, piece, data, default_id=_payload_id(data, piece, "ai_input_id", "input_id"))
+    return _metadata_item_from_data(
+        template, piece, data, default_id=_payload_id(data, piece, "ai_input_id", "input_id")
+    )
 
 
 def _tool_policy(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
@@ -273,22 +317,26 @@ def _tool_policy(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]
 
 
 def _settings_section(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
-    section = piece.data.get("section") if isinstance(piece.data.get("section"), dict) else piece.data
+    section = (
+        piece.data.get("section") if isinstance(piece.data.get("section"), dict) else piece.data
+    )
     item = deepcopy(section) if isinstance(section, dict) else {}
     item.setdefault("id", piece.data.get("section_id") or piece.id)
     item.setdefault("label", _titleize(str(item["id"])))
     item.setdefault("fields", [])
-    item.setdefault("template_id", template.id)
-    item.setdefault("piece_id", piece.id)
-    item.setdefault("projected_id", _projected_id(template, piece))
-    item.setdefault("origin", _origin(template, piece))
-    item.setdefault("trust_level", _value(template.trust_level))
+    item["template_id"] = template.id
+    item["piece_id"] = piece.id
+    item["projected_id"] = _projected_id(template, piece)
+    item["origin"] = _origin(template, piece)
+    item["trust_level"] = _value(template.trust_level)
     item["_source"] = _source(template)
     return item
 
 
 def _settings_section_for_field(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
-    section_id = str(piece.data.get("section_id") or piece.data.get("section") or piece.slot or "templates").strip()
+    section_id = str(
+        piece.data.get("section_id") or piece.data.get("section") or piece.slot or "templates"
+    ).strip()
     field = piece.data.get("field") if isinstance(piece.data.get("field"), dict) else piece.data
     item = deepcopy(field) if isinstance(field, dict) else {}
     item.setdefault("id", piece.data.get("field_id") or piece.id)
@@ -297,11 +345,11 @@ def _settings_section_for_field(template: RumiTemplate, piece: TemplatePiece) ->
     item.setdefault("renderer", piece.data.get("renderer") or item.get("type"))
     item.setdefault("component", piece.data.get("component") or "SettingsFieldRendererHost")
     item.setdefault("part_id", piece.data.get("part_id") or "settings")
-    item.setdefault("template_id", template.id)
-    item.setdefault("piece_id", piece.id)
-    item.setdefault("projected_id", _projected_id(template, piece))
-    item.setdefault("origin", _origin(template, piece))
-    item.setdefault("trust_level", _value(template.trust_level))
+    item["template_id"] = template.id
+    item["piece_id"] = piece.id
+    item["projected_id"] = _projected_id(template, piece)
+    item["origin"] = _origin(template, piece)
+    item["trust_level"] = _value(template.trust_level)
     item["_source"] = _source(template)
     return {
         "id": section_id,
@@ -329,7 +377,9 @@ def _api_route(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
     return item
 
 
-def _metadata_item(template: RumiTemplate, piece: TemplatePiece, *, default_id: str) -> dict[str, Any]:
+def _metadata_item(
+    template: RumiTemplate, piece: TemplatePiece, *, default_id: str
+) -> dict[str, Any]:
     return _metadata_item_from_data(template, piece, piece.data, default_id=default_id)
 
 
@@ -353,11 +403,11 @@ def _metadata_item_from_data(
         item.setdefault("path", piece.path)
     if piece.handler is not None:
         item.setdefault("handler", piece.handler)
-    item.setdefault("template_id", template.id)
-    item.setdefault("piece_id", piece.id)
-    item.setdefault("projected_id", _projected_id(template, piece))
-    item.setdefault("origin", _origin(template, piece))
-    item.setdefault("trust_level", _value(template.trust_level))
+    item["template_id"] = template.id
+    item["piece_id"] = piece.id
+    item["projected_id"] = _projected_id(template, piece)
+    item["origin"] = _origin(template, piece)
+    item["trust_level"] = _value(template.trust_level)
     item["_source"] = _source(template)
     return item
 
@@ -381,11 +431,45 @@ def _template_summary(
         "ancestry": list(resolved.ancestry),
         "piece_count": len(template.pieces),
         "diagnostic_count": len(diagnostics),
-        "projectable": not any(item.get("severity") == "error" for item in diagnostics),
+        "projectable": _is_active_template(template)
+        and not any(item.get("severity") == "error" for item in diagnostics),
     }
 
 
-def _merge_settings_sections(sections: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _duplicate_resolved_template_ids(resolved_templates: list[ResolvedTemplate]) -> set[str]:
+    counts: dict[str, int] = {}
+    for resolved in resolved_templates:
+        template = resolved.template
+        if template is None:
+            continue
+        template_id = str(template.id or "").strip()
+        if not template_id:
+            continue
+        counts[template_id] = counts.get(template_id, 0) + 1
+    return {template_id for template_id, count in counts.items() if count > 1}
+
+
+def _resolved_template_id_collision(template: RumiTemplate) -> dict[str, Any]:
+    return {
+        "level": "error",
+        "severity": "error",
+        "code": "template.registry.resolved_duplicate_template",
+        "message": f"resolved template id collides after composition or patches: {template.id}",
+        "template_id": template.id,
+        "piece_id": None,
+        "path": "/id",
+        "source_path": _source(template),
+        "source": _source(template) or "template_catalog",
+    }
+
+
+def _is_active_template(template: RumiTemplate) -> bool:
+    return _value(template.status) == TemplateStatus.ACTIVE.value
+
+
+def _merge_settings_sections(
+    sections: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     merged: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     diagnostics: list[dict[str, Any]] = []
@@ -397,7 +481,11 @@ def _merge_settings_sections(sections: list[dict[str, Any]]) -> tuple[list[dict[
             merged[section_id] = deepcopy(section)
             order.append(section_id)
             merged[section_id]["fields"], field_diagnostics = _merge_settings_fields(
-                [field for field in merged[section_id].get("fields", []) if isinstance(field, dict)],
+                [
+                    field
+                    for field in merged[section_id].get("fields", [])
+                    if isinstance(field, dict)
+                ],
                 section_id=section_id,
             )
             diagnostics.extend(field_diagnostics)
@@ -410,7 +498,10 @@ def _merge_settings_sections(sections: list[dict[str, Any]]) -> tuple[list[dict[
                 continue
             if value not in (None, "", [], {}):
                 current[key] = deepcopy(value)
-        fields = [*current.get("fields", []), *(field for field in section.get("fields", []) if isinstance(field, dict))]
+        fields = [
+            *current.get("fields", []),
+            *(field for field in section.get("fields", []) if isinstance(field, dict)),
+        ]
         current["fields"], field_diagnostics = _merge_settings_fields(fields, section_id=section_id)
         diagnostics.extend(field_diagnostics)
     result: list[dict[str, Any]] = []
@@ -421,7 +512,9 @@ def _merge_settings_sections(sections: list[dict[str, Any]]) -> tuple[list[dict[
     return result, diagnostics
 
 
-def merge_settings_sections(sections: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def merge_settings_sections(
+    sections: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return _merge_settings_sections(sections)
 
 
@@ -485,7 +578,13 @@ def _dedupe_by_id(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     for item in items:
-        item_id = str(item.get("projected_id") or item.get("id") or item.get("permission_id") or item.get("path") or "").strip()
+        item_id = str(
+            item.get("projected_id")
+            or item.get("id")
+            or item.get("permission_id")
+            or item.get("path")
+            or ""
+        ).strip()
         if not item_id:
             item_id = f"__index_{len(order)}"
         if item_id not in deduped:
