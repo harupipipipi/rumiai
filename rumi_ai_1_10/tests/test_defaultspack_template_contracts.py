@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -11,6 +13,8 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.templates.contracts import run_template_contracts  # noqa: E402
 from domain.templates.projectors import build_template_catalog  # noqa: E402
+
+pytestmark = pytest.mark.contract
 
 
 def _catalog(assertions: list[object]) -> dict:
