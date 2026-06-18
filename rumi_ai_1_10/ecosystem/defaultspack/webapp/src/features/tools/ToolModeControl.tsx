@@ -1,7 +1,13 @@
 import { Ban, Check, ChevronDown, ShieldCheck, SlidersHorizontal, Sparkles } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 
 import type { ToolSelectionMode } from "./types";
+
+const MENU_WIDTH = 360;
+const MENU_HEIGHT_ESTIMATE = 244;
+const MENU_GAP = 10;
+const MENU_MARGIN = 8;
 
 const MODE_OPTIONS: Array<{
   mode: ToolSelectionMode;
@@ -25,7 +31,6 @@ export function ToolModeControl({
   tabIndex,
   onModeChange,
   onOpenPicker,
-  onOpenHub,
 }: {
   mode: ToolSelectionMode;
   manualCount?: number;
@@ -34,24 +39,126 @@ export function ToolModeControl({
   tabIndex?: number;
   onModeChange: (mode: ToolSelectionMode) => void;
   onOpenPicker?: () => void;
-  onOpenHub?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const current = MODE_OPTIONS.find((option) => option.mode === mode) ?? MODE_OPTIONS[0];
   const Icon = current.icon;
+
+  const closeMenu = useCallback(() => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }, []);
+
+  const updateMenuStyle = useCallback(() => {
+    if (typeof window === "undefined" || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    if (window.innerWidth <= 760) {
+      setMenuStyle({
+        left: MENU_MARGIN,
+        right: MENU_MARGIN,
+        bottom: MENU_MARGIN,
+        maxHeight: "72vh",
+      });
+      return;
+    }
+
+    const menuWidth = Math.min(MENU_WIDTH, window.innerWidth - MENU_MARGIN * 2);
+    const minLeft = MENU_MARGIN;
+    const maxLeft = window.innerWidth - menuWidth - MENU_MARGIN;
+    const preferredLeft = rect.left + rect.width / 2 - menuWidth / 2;
+    const left = Math.min(Math.max(preferredLeft, minLeft), maxLeft);
+    const spaceAbove = rect.top - MENU_MARGIN;
+    const spaceBelow = window.innerHeight - rect.bottom - MENU_MARGIN;
+    const placeBelow = spaceBelow >= MENU_HEIGHT_ESTIMATE || spaceBelow > spaceAbove;
+    const preferredTop = placeBelow
+      ? rect.bottom + MENU_GAP
+      : rect.top - MENU_HEIGHT_ESTIMATE - MENU_GAP;
+    const maxTop = window.innerHeight - MENU_HEIGHT_ESTIMATE - MENU_MARGIN;
+    const top = Math.min(Math.max(preferredTop, MENU_MARGIN), Math.max(MENU_MARGIN, maxTop));
+    setMenuStyle({
+      left,
+      top,
+      width: menuWidth,
+      maxHeight: Math.min(MENU_HEIGHT_ESTIMATE, window.innerHeight - MENU_MARGIN * 2),
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuStyle(null);
+      return;
+    }
+    updateMenuStyle();
+    if (typeof window === "undefined") return;
+    window.addEventListener("resize", updateMenuStyle);
+    window.addEventListener("scroll", updateMenuStyle, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuStyle);
+      window.removeEventListener("scroll", updateMenuStyle, true);
+    };
+  }, [open, updateMenuStyle]);
 
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setOpen(false);
-        triggerRef.current?.focus();
+        closeMenu();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open]);
+  }, [closeMenu, open]);
+
+  const menu = open && typeof document !== "undefined" ? createPortal(
+    <>
+      <button
+        type="button"
+        aria-label="機能メニューを閉じる"
+        className="fixed inset-0 rumi-layer-local-popover cursor-default bg-transparent"
+        onClick={closeMenu}
+      />
+      <div
+        role="menu"
+        aria-label="機能の使い方"
+        style={menuStyle ?? undefined}
+        className="fixed rumi-layer-command-palette overflow-y-auto rounded-[1.35rem] border border-zinc-700/70 bg-[#2b2b2b] p-2 shadow-2xl shadow-black/40 max-[760px]:rounded-[1.6rem]"
+      >
+        {MODE_OPTIONS.map((option) => {
+          const OptionIcon = option.icon;
+          const selected = option.mode === mode;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              role="menuitemradio"
+              aria-checked={selected}
+              tabIndex={tabIndex}
+              onClick={() => {
+                onModeChange(option.mode);
+                setOpen(false);
+                if (option.mode === "manual" && onOpenPicker) {
+                  window.setTimeout(onOpenPicker, 0);
+                }
+              }}
+              className={`flex min-h-[54px] w-full items-center gap-3 rounded-[1rem] px-4 py-2.5 text-left transition-colors ${
+                selected ? "bg-zinc-700/55 text-zinc-50" : "text-zinc-200 hover:bg-zinc-700/35"
+              }`}
+            >
+              <OptionIcon size={18} className="flex-shrink-0 text-zinc-300" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-medium leading-5">{option.title}</span>
+                <span className="block text-[12px] leading-4 text-zinc-400">{option.description}</span>
+              </span>
+              {selected && <Check size={18} className="flex-shrink-0 text-zinc-200" />}
+            </button>
+          );
+        })}
+      </div>
+    </>,
+    document.body,
+  ) : null;
 
   return (
     <div className="relative flex min-w-0">
@@ -60,7 +167,7 @@ export function ToolModeControl({
         type="button"
         tabIndex={tabIndex}
         disabled={disabled}
-        aria-haspopup="dialog"
+        aria-haspopup="menu"
         aria-expanded={open}
         aria-label="機能の使い方"
         title="機能の使い方"
@@ -79,73 +186,7 @@ export function ToolModeControl({
         )}
         <ChevronDown size={12} className={`flex-shrink-0 text-zinc-500 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
-      {open && (
-        <>
-          <button
-            type="button"
-            aria-label="機能メニューを閉じる"
-            className="fixed inset-0 rumi-layer-local-popover cursor-default bg-black/20 min-[761px]:bg-transparent"
-            onClick={() => {
-              setOpen(false);
-              triggerRef.current?.focus();
-            }}
-          />
-          <div
-            role="dialog"
-            aria-label="機能の使い方"
-            className="absolute bottom-full left-0 rumi-layer-command-palette mb-2 w-[336px] overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl max-[760px]:fixed max-[760px]:bottom-2 max-[760px]:left-2 max-[760px]:right-2 max-[760px]:mb-0 max-[760px]:max-h-[72vh] max-[760px]:w-auto"
-          >
-            <div className="hidden justify-center pt-2 max-[760px]:flex">
-              <span className="h-1 w-10 rounded-full bg-zinc-700" />
-            </div>
-            <div className="border-b border-zinc-800 px-4 py-3">
-              <p className="text-sm font-semibold text-zinc-100">機能の使い方</p>
-              <p className="mt-0.5 text-[11px] text-zinc-500">このメッセージで外部機能をどう扱うか選びます</p>
-            </div>
-            <div role="radiogroup" className="grid gap-1 p-2">
-              {MODE_OPTIONS.map((option) => {
-                const OptionIcon = option.icon;
-                const selected = option.mode === mode;
-                return (
-                  <button
-                    key={option.mode}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    tabIndex={tabIndex}
-                    onClick={() => {
-                      onModeChange(option.mode);
-                      setOpen(false);
-                      triggerRef.current?.focus();
-                    }}
-                    className={`flex min-h-[58px] w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors ${
-                      selected ? "bg-zinc-800 text-zinc-100" : "text-zinc-300 hover:bg-zinc-900"
-                    }`}
-                  >
-                    <OptionIcon size={16} className="flex-shrink-0 text-zinc-400" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-[13px] font-medium">{option.title}</span>
-                      <span className="block text-[11px] text-zinc-500">{option.description}</span>
-                    </span>
-                    {selected && <Check size={15} className="flex-shrink-0 text-emerald-300" />}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="grid gap-1 border-t border-zinc-800 p-2">
-              <button type="button" tabIndex={tabIndex} onClick={onOpenPicker} className="rounded-lg px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-900">
-                今回使う機能を選ぶ
-              </button>
-              <button type="button" tabIndex={tabIndex} onClick={onOpenHub} className="rounded-lg px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-900">
-                機能と接続を管理
-              </button>
-              <button type="button" tabIndex={tabIndex} onClick={() => setOpen(false)} className="hidden rounded-lg bg-zinc-100 px-3 py-2 text-center text-xs font-semibold text-zinc-950 max-[760px]:block">
-                完了
-              </button>
-            </div>
-          </div>
-        </>
-      )}
+      {menu}
     </div>
   );
 }

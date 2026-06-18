@@ -2423,7 +2423,6 @@ export function ComposerRenderer({
             setOpenFolder("tools");
             setMenuOpen(true);
           }}
-          onOpenHub={onOpenToolSettings}
         />
       ),
     },
