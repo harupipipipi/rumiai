@@ -162,9 +162,6 @@ jobs:
           pip install -e .
 
       - name: Audit Python dependencies
-        if: >
-          github.event_name == 'push' ||
-          contains(github.event.pull_request.labels.*.name, 'full-ci')
         working-directory: rumi_ai_1_10
         run: |
           pip install pip-audit
@@ -189,17 +186,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        if: >
-          matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp' ||
-          github.event_name == 'push' ||
-          contains(github.event.pull_request.labels.*.name, 'full-ci')
         uses: actions/checkout@v4
 
       - name: Set up Node
-        if: >
-          matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp' ||
-          github.event_name == 'push' ||
-          contains(github.event.pull_request.labels.*.name, 'full-ci')
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -207,17 +196,10 @@ jobs:
           cache-dependency-path: ${{ matrix.app }}/package-lock.json
 
       - name: Install frontend dependencies
-        if: >
-          matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp' ||
-          github.event_name == 'push' ||
-          contains(github.event.pull_request.labels.*.name, 'full-ci')
         working-directory: ${{ matrix.app }}
         run: npm ci
 
       - name: Audit frontend dependencies
-        if: >
-          github.event_name == 'push' ||
-          contains(github.event.pull_request.labels.*.name, 'full-ci')
         working-directory: ${{ matrix.app }}
         run: npm run audit
 
