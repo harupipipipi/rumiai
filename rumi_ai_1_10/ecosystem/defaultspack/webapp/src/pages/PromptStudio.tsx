@@ -28,7 +28,7 @@ import { PromptUsageSegmentCard } from "../components/prompts/PromptUsageSegment
 import { statusBadgeClass, tokenText } from "../components/prompts/promptSegmentView";
 import { api, type ModelProfile, type PromptStudioData, type PromptStudioPrompt, type PromptStudioTestResult, type PromptUsageSegment } from "../lib/api";
 import { cn } from "../lib/cn";
-import { normalizeLocale, t, type LocaleSetting } from "../lib/i18n";
+import { isLocaleSetting, normalizeLocale, supportedLocales, t, type LocaleSetting } from "../lib/i18n";
 
 type InspectorTab = "selected" | "test" | "diff" | "usage" | "variables";
 type PromptFilter = "all" | "active" | "editable" | "readonly" | "overrides";
@@ -50,6 +50,18 @@ const filters: Array<{ id: PromptFilter; labelKey: Parameters<typeof t>[1] }> = 
 ];
 
 const PROMPT_STUDIO_LOCALE_KEY = "rumi.promptStudio.locale";
+const localeLabels: Record<LocaleSetting, string> = {
+  auto: "AUTO",
+  ja: "JA",
+  en: "EN",
+  zh: "中文",
+  ko: "한국어",
+  es: "ES",
+  fr: "FR",
+  de: "DE",
+};
+const promptStudioLocaleOptions: LocaleSetting[] = ["auto", ...supportedLocales];
+type StudioMessage = (key: Parameters<typeof t>[1], values?: Record<string, string | number>) => string;
 
 function searchParam(name: string): string {
   try {
@@ -61,10 +73,10 @@ function searchParam(name: string): string {
 
 function storedPromptStudioLocale(fallback: LocaleSetting): LocaleSetting {
   const urlLocale = searchParam("locale");
-  if (urlLocale === "ja" || urlLocale === "en" || urlLocale === "auto") return urlLocale;
+  if (isLocaleSetting(urlLocale)) return urlLocale;
   try {
     const stored = window.localStorage.getItem(PROMPT_STUDIO_LOCALE_KEY);
-    if (stored === "ja" || stored === "en" || stored === "auto") return stored;
+    if (isLocaleSetting(stored)) return stored;
   } catch {
     // localStorage may be unavailable in tests or privacy modes.
   }
@@ -152,21 +164,73 @@ function verdictTone(status?: string): string {
   return "border-zinc-800 bg-zinc-950/70 text-zinc-300";
 }
 
-function ToolCandidateCard({ item }: { item: Record<string, unknown> }) {
+function localizedStudioVerdict(
+  verdict: Record<string, string>,
+  counts: { skillCount: number; selectedToolSegmentCount: number; selectedToolCount: number; candidateCount: number },
+  msg: StudioMessage,
+): { title: string; detail: string } {
+  const id = String(verdict.id || "");
+  if (id === "skill") {
+    return {
+      title: msg("promptStudio.verdict.skillTitle"),
+      detail: counts.skillCount > 0
+        ? msg("promptStudio.verdict.skillMatched", { count: counts.skillCount })
+        : msg("promptStudio.verdict.skillNone"),
+    };
+  }
+  if (id === "tool_schema") {
+    return {
+      title: msg("promptStudio.verdict.toolSchemaTitle"),
+      detail: counts.selectedToolSegmentCount > 0
+        ? msg("promptStudio.verdict.toolSchemaSelected", { count: counts.selectedToolSegmentCount })
+        : counts.selectedToolCount > 0
+          ? msg("promptStudio.verdict.toolSchemaMissingActive")
+          : msg("promptStudio.verdict.toolSchemaNoSelectedTool"),
+    };
+  }
+  if (id === "prompt_tool_judgement") {
+    return {
+      title: msg("promptStudio.verdict.promptToToolTitle"),
+      detail: counts.candidateCount > 0
+        ? msg("promptStudio.verdict.promptToToolMatched", { count: counts.candidateCount })
+        : msg("promptStudio.verdict.promptToToolNone"),
+    };
+  }
+  if (id === "safety") {
+    return {
+      title: msg("promptStudio.verdict.safetyTitle"),
+      detail: msg("promptStudio.verdict.safetyPassive"),
+    };
+  }
+  return {
+    title: String(verdict.title || msg("promptStudio.promptFallbackName")),
+    detail: String(verdict.detail || ""),
+  };
+}
+
+function localizedDecisionBoundary(value: unknown, msg: StudioMessage): string {
+  const text = String(value || "").trim();
+  if (!text || text === "Prompt text can suggest relevance, but cannot attach or execute tools.") {
+    return msg("promptStudio.promptToolBoundary");
+  }
+  return text;
+}
+
+function ToolCandidateCard({ item, msg }: { item: Record<string, unknown>; msg: StudioMessage }) {
   const why = listFromUnknown(item.why).map(String);
-  const matchedFrom = Array.isArray(item.matched_from) ? item.matched_from.join(", ") : String(item.matched_from || "match");
+  const matchedFrom = Array.isArray(item.matched_from) ? item.matched_from.join(", ") : String(item.matched_from || msg("promptStudio.matchFallback"));
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-zinc-100">{String(item.name || item.tool_id || "Tool")}</div>
+          <div className="truncate text-sm font-semibold text-zinc-100">{String(item.name || item.tool_id || msg("promptStudio.toolFallback"))}</div>
           <div className="mt-1 truncate font-mono text-[10px] text-zinc-600">{String(item.tool_id || "")}</div>
         </div>
         <span className="rounded border border-violet-500/25 bg-violet-500/10 px-1.5 py-0.5 font-mono text-[10px] text-violet-100">
           {Number(item.score || 0).toFixed(2)}
         </span>
       </div>
-      <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-zinc-400">{String(item.summary || "No summary.")}</p>
+      <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-zinc-400">{String(item.summary || msg("promptStudio.noSummary"))}</p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         <span className="rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-500">{matchedFrom}</span>
         {why.slice(0, 5).map((token) => (
@@ -210,10 +274,20 @@ function PromptStudioTestPanel({
   const candidates = result?.tool_candidates?.combined ?? [];
   const analysis = recordFromUnknown(result?.prompt_tool_analysis);
   const segments = result?.segments ?? [];
+  const selectedToolCount = splitCsvList(testTools).length;
   const selectedModelProfile = modelProfiles.find((profile) => profile.profile_id === selectedModelProfileId) ?? null;
   const focusedToolSegments = [...selectedToolSegments, ...candidateSegments].filter((segment, index, items) => (
     items.findIndex((item) => item.id === segment.id && item.status === segment.status) === index
   ));
+  const localizedVerdicts: Array<Record<string, string> & { title: string; detail: string }> = verdicts.map((verdict) => ({
+    ...verdict,
+    ...localizedStudioVerdict(verdict, {
+      skillCount: matchedSkills.length,
+      selectedToolSegmentCount: selectedToolSegments.length,
+      selectedToolCount,
+      candidateCount: candidates.length,
+    }, msg),
+  }));
   return (
     <div className="grid gap-3">
       <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
@@ -272,7 +346,7 @@ function PromptStudioTestPanel({
       {result && (
         <>
           <section className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-            {verdicts.map((verdict) => (
+            {localizedVerdicts.map((verdict) => (
               <div key={verdict.id || verdict.title} className={cn("rounded-lg border p-3", verdictTone(verdict.status))}>
                 <div className="text-xs font-semibold">{verdict.title}</div>
                 <p className="mt-1 text-[11px] leading-relaxed opacity-80">{verdict.detail}</p>
@@ -289,10 +363,10 @@ function PromptStudioTestPanel({
               <div className="grid gap-2">
                 {matchedSkills.map((skill, index) => (
                   <div key={`${String(skill.id || "skill")}-${index}`} className="rounded-md border border-zinc-800 bg-black/20 p-2">
-                    <div className="truncate text-xs font-semibold text-zinc-200">{String(skill.display_name || skill.id || "Skill")}</div>
+                    <div className="truncate text-xs font-semibold text-zinc-200">{String(skill.display_name || skill.id || msg("promptStudio.skillFallback"))}</div>
                     <div className="mt-1 grid gap-1 text-[11px] text-zinc-500">
-                      <div className="truncate">triggers: {formatInspectorValue(skill.triggers)}</div>
-                      <div className="truncate">tools: {formatInspectorValue(skill.applies_to_tools)}</div>
+                      <div className="truncate">{msg("promptStudio.triggers")}: {formatInspectorValue(skill.triggers)}</div>
+                      <div className="truncate">{msg("promptStudio.tools")}: {formatInspectorValue(skill.applies_to_tools)}</div>
                     </div>
                   </div>
                 ))}
@@ -309,10 +383,10 @@ function PromptStudioTestPanel({
                 <span className="font-mono text-[10px] text-zinc-600">{msg("promptStudio.candidates", { count: candidates.length })}</span>
               </div>
               <div className="rounded-md border border-zinc-800/80 bg-black/20 px-2 py-1.5 text-xs leading-relaxed text-zinc-300">
-                {String(analysis.decision_boundary || "Prompt text can suggest relevance, but cannot attach or execute tools.")}
+                {localizedDecisionBoundary(analysis.decision_boundary, msg)}
               </div>
               <div className="mt-2 grid gap-2">
-                {candidates.slice(0, 5).map((candidate) => <ToolCandidateCard key={String(candidate.tool_id || candidate.name)} item={candidate} />)}
+                {candidates.slice(0, 5).map((candidate) => <ToolCandidateCard key={String(candidate.tool_id || candidate.name)} item={candidate} msg={msg} />)}
                 {!candidates.length && <div className="rounded-md border border-dashed border-zinc-800 p-4 text-center text-xs text-zinc-500">{msg("promptStudio.noToolCandidate")}</div>}
               </div>
             </div>
@@ -321,7 +395,7 @@ function PromptStudioTestPanel({
           <section className="grid gap-2">
             <div className="flex items-center justify-between gap-3">
               <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600">{msg("promptStudio.testModelInput")}</div>
-              <span className="font-mono text-[10px] text-zinc-600">{segments.length} segments</span>
+              <span className="font-mono text-[10px] text-zinc-600">{msg("promptStudio.segments", { count: segments.length })}</span>
             </div>
             {focusedToolSegments.map((segment) => <PromptUsageSegmentCard key={`${segment.id}-${segment.status}-test-focus`} segment={segment} />)}
             {segments.filter((segment) => segment.kind === "skill").map((segment) => <PromptUsageSegmentCard key={`${segment.id}-${segment.status}-test-skill`} segment={segment} />)}
@@ -650,21 +724,19 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950 p-0.5" aria-label="Prompt Studio language">
+          <div className="flex h-8 items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950 px-1.5" aria-label="Prompt Studio language">
             <Languages size={13} className="ml-1 text-zinc-600" />
-            {(["ja", "en"] as const).map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => changeStudioLocale(item)}
-                className={cn(
-                  "rounded-md px-1.5 py-0.5 text-[10px] font-semibold",
-                  resolvedLocale === item ? "bg-cyan-500/15 text-cyan-100" : "text-zinc-500 hover:text-zinc-200",
-                )}
-              >
-                {item.toUpperCase()}
-              </button>
-            ))}
+            <select
+              value={studioLocale}
+              onChange={(event) => changeStudioLocale(event.target.value as LocaleSetting)}
+              className="h-6 rounded-md border-0 bg-transparent px-1 text-[10px] font-semibold text-zinc-300 outline-none focus:bg-zinc-900"
+            >
+              {promptStudioLocaleOptions.map((item) => (
+                <option key={item} value={item}>
+                  {localeLabels[item]}{item !== "auto" && resolvedLocale === item ? " *" : ""}
+                </option>
+              ))}
+            </select>
           </div>
           <button type="button" onClick={() => loadStudio(selectedId)} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100" aria-label={msg("promptStudio.refresh")}>
             <RefreshCw size={15} className={cn(busy === "load" && "animate-spin")} />
