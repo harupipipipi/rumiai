@@ -16,6 +16,7 @@ from .effective import resolve_effective_prompt, validate_prompt_template
 from .manager import get_manager
 from .prompt_compactor import compact_prompt
 from .prompt_linter import lint_prompt
+from ..skill_trigger import RuntimeSkillTriggerService
 from .usage import active_prompt_summary, append_runtime_prompt_segment, prompt_usage_from_trace
 
 
@@ -27,7 +28,7 @@ def load_prompt_studio(input_data: dict[str, Any] | None = None) -> dict[str, An
     profile_id = _resolve_profile_id(data.get("profile_id"))
     prompt_id = str(data.get("prompt_id") or data.get("name") or "").strip()
     active = _studio_active_summary(profile_id, data)
-    prompts = [*_prompt_records(profile_id), *_segment_records_from_active(active.get("segments", []))]
+    prompts = _merge_prompt_records([*_prompt_records(profile_id), *_segment_records_from_active(active.get("segments", []))])
     prompts = _annotate_prompt_records(prompts, active.get("segments", []))
     if not prompt_id and prompts:
         active_prompt = next((item for item in prompts if item.get("activation_state") == "active"), None)
@@ -405,13 +406,31 @@ def _trace_usage_for_studio(profile_id: str, data: dict[str, Any]) -> dict[str, 
     return prompt_usage_from_trace(trace, include_text=False)
 
 
+def _merge_prompt_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_key: dict[str, dict[str, Any]] = {}
+    anonymous: list[dict[str, Any]] = []
+    for record in records:
+        key = str(record.get("prompt_id") or record.get("name") or record.get("id") or "").strip()
+        if not key:
+            anonymous.append(record)
+            continue
+        by_key[key] = record
+    return sorted(
+        [*anonymous, *by_key.values()],
+        key=lambda item: (str(item.get("source_type") or ""), str(item.get("name") or item.get("id") or "")),
+    )
+
+
 def _segment_records_from_active(segments: Any) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for segment in segments if isinstance(segments, list) else []:
         if not isinstance(segment, dict):
             continue
         kind = str(segment.get("kind") or "").strip()
-        if kind in {"", "prompt", "pack", "profile", "component", "extension"}:
+        source_type = str(segment.get("source_type") or "").strip()
+        if kind in {"", "prompt", "pack", "component", "extension"}:
+            continue
+        if kind == "profile" and source_type != "profile_snapshot":
             continue
         segment_id = str(segment.get("id") or segment.get("prompt_id") or "").strip()
         if not segment_id:
@@ -431,6 +450,11 @@ def _segment_records_from_active(segments: Any) -> list[dict[str, Any]]:
                 ensure_ascii=False,
                 indent=2,
             )
+        record_metadata = {"source": source_type or kind, "segment": segment}
+        if source_type != "profile_snapshot":
+            record_metadata["prompt_usage_segment"] = True
+        if isinstance(segment.get("source_chain"), list):
+            record_metadata["source_chain"] = segment.get("source_chain")
         records.append(
             {
                 "id": name,
@@ -441,8 +465,8 @@ def _segment_records_from_active(segments: Any) -> list[dict[str, Any]]:
                 "body": body,
                 "content": body,
                 "variables": [],
-                "metadata": {"prompt_usage_segment": True, "segment": segment},
-                "source_type": str(segment.get("source_type") or kind),
+                "metadata": record_metadata,
+                "source_type": source_type or kind,
                 "source": str(segment.get("source") or segment.get("source_type") or ""),
                 "read_only": True,
                 "editable": False,
@@ -566,8 +590,11 @@ def _annotate_prompt_records(prompts: list[dict[str, Any]], segments: Any) -> li
 
 def _prompt_detail(profile_id: str, prompt_id: str, records: list[dict[str, Any]]) -> dict[str, Any] | None:
     prompt = next((item for item in records if str(item.get("name") or item.get("id")) == prompt_id), None)
+    effective = _resolve_effective_prompt_for(profile_id, prompt_id)
     if prompt is None:
-        return None
+        if str(effective.get("source_type") or "") not in {"profile_snapshot", "profile_override"}:
+            return None
+        prompt = _effective_prompt_record(profile_id, prompt_id, effective)
     metadata = prompt.get("metadata") if isinstance(prompt.get("metadata"), dict) else {}
     if metadata.get("prompt_usage_segment") is True:
         segment = metadata.get("segment") if isinstance(metadata.get("segment"), dict) else {}
@@ -586,23 +613,28 @@ def _prompt_detail(profile_id: str, prompt_id: str, records: list[dict[str, Any]
                 "can_mutate_chat_state": False,
             },
         }
-    workspace = profile_workspace_payload(ProfileWorkspaceManager().paths_for_profile(profile_id))
-    effective = resolve_effective_prompt(
-        {
-            "profile_id": profile_id,
-            "system_prompt_id": prompt_id,
-            "default_prompt_id": prompt_id,
-            "base_pack": "defaultspack",
-            "workspace": workspace,
-        }
-    )
     body = str(prompt.get("body") or prompt.get("content") or "")
+    effective_source_type = str(effective.get("source_type") or "")
+    effective_body = str(effective.get("final_content") or effective.get("content") or "")
+    if effective_source_type in {"profile_snapshot", "profile_override"}:
+        body = effective_body
+        prompt = {
+            **prompt,
+            "body": body,
+            "content": body,
+            "source_type": effective_source_type,
+            "source": str(effective.get("source") or prompt.get("source") or ""),
+            "read_only": effective_source_type == "profile_snapshot",
+            "editable": effective_source_type == "profile_override",
+            "tokens": _estimate_tokens(body),
+            "preview": " ".join(body.split())[:220],
+        }
     validation = validate_prompt_template({"template": body, "variables": prompt.get("variables")})
     return {
         **prompt,
         "source_chain": effective.get("source_chain", []),
         "effective_source": effective.get("source", ""),
-        "effective_source_type": effective.get("source_type", ""),
+        "effective_source_type": effective_source_type,
         "validation": validation,
         "lint": lint_prompt(body),
         "versions": prompt_versions({"profile_id": profile_id, "prompt_id": prompt_id}).get("versions", []),
@@ -621,10 +653,52 @@ def _base_prompt_body(prompt_id: str) -> str:
 
 
 def _effective_prompt_body(profile_id: str, prompt_id: str) -> str:
-    path = _profile_override_path(profile_id, prompt_id)
-    if path.is_file():
-        return path.read_text(encoding="utf-8")
+    effective = _resolve_effective_prompt_for(profile_id, prompt_id)
+    source_type = str(effective.get("source_type") or "")
+    if source_type and source_type != "empty":
+        return str(effective.get("final_content") or effective.get("content") or "")
     return _base_prompt_body(prompt_id)
+
+
+def _resolve_effective_prompt_for(profile_id: str, prompt_id: str) -> dict[str, Any]:
+    workspace = profile_workspace_payload(ProfileWorkspaceManager().paths_for_profile(profile_id))
+    return resolve_effective_prompt(
+        {
+            "profile_id": profile_id,
+            "system_prompt_id": prompt_id,
+            "default_prompt_id": prompt_id,
+            "base_pack": "defaultspack",
+            "workspace": workspace,
+        }
+    )
+
+
+def _effective_prompt_record(profile_id: str, prompt_id: str, effective: dict[str, Any]) -> dict[str, Any]:
+    body = str(effective.get("final_content") or effective.get("content") or "")
+    source_type = str(effective.get("source_type") or "profile_snapshot")
+    read_only = source_type != "profile_override"
+    return {
+        "id": prompt_id,
+        "name": prompt_id,
+        "prompt_id": prompt_id,
+        "description": "Effective profile prompt",
+        "body": body,
+        "content": body,
+        "variables": [],
+        "metadata": {
+            "profile_id": profile_id,
+            "source": source_type,
+            "source_chain": effective.get("source_chain") if isinstance(effective.get("source_chain"), list) else [],
+        },
+        "source_type": source_type,
+        "source": str(effective.get("source") or source_type),
+        "read_only": read_only,
+        "editable": not read_only,
+        "tokens": _estimate_tokens(body),
+        "preview": " ".join(body.split())[:220],
+        "created_at": "",
+        "updated_at": "",
+    }
 
 
 def _record_version(
@@ -793,17 +867,16 @@ def _tool_candidates(*, prompt_body: str, user_text: str, tools: list[dict[str, 
 
 
 def _evaluate_studio_skills(data: dict[str, Any], *, user_text: str, selected_tools: list[str]) -> dict[str, Any]:
-    skills = data.get("skills") if isinstance(data.get("skills"), list) else []
+    skills = data.get("skills") if "skills" in data and isinstance(data.get("skills"), list) else None
     context = data.get("request_context") if isinstance(data.get("request_context"), dict) else {}
     skill_context = {**context, "studio_test": True}
     forced_skills = _string_list(data.get("skills_forced") or data.get("selected_skills"))
-    if skill_context.get("disable_runtime_skill_triggers") is True:
-        return {"matched": [], "instructions": ""}
-    return _evaluate_inline_skills(
-        skills,
+    if forced_skills:
+        skill_context["selected_skills"] = forced_skills
+    return RuntimeSkillTriggerService(skills).evaluate(
         user_text=user_text,
-        selected_tools=selected_tools,
-        forced_skills=forced_skills,
+        tool_names=selected_tools,
+        context=skill_context,
     )
 
 

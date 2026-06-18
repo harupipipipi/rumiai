@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -100,6 +101,19 @@ class _EditablePromptManager:
         self.updated = dict(updates)
         self.prompt = {**self.prompt, **updates}
         return dict(self.prompt)
+
+
+class _EmptyPromptManager:
+    def list_prompts(self):
+        return []
+
+    def get_prompt_by_name(self, prompt_id: str):
+        del prompt_id
+        return None
+
+    def get_prompt(self, prompt_id: str):
+        del prompt_id
+        return None
 
 
 def _profile(profile_id: str = "prompt-profile") -> dict:
@@ -216,6 +230,39 @@ def test_low_risk_prompt_editor_load_cannot_be_promoted_to_save(monkeypatch, tmp
     override_path = manager.paths_for_profile("prompt-profile").prompts_dir / "locked.system.system.md"
     assert result["status"] == "ok"
     assert result["data"]["selected_prompt"]["prompt_id"] == "locked.system"
+    assert not override_path.exists()
+
+
+def test_low_risk_prompt_versions_cannot_be_promoted_to_write(monkeypatch, tmp_path: Path) -> None:
+    manager = _setup_profile(monkeypatch, tmp_path)
+    monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: _FakePromptManager())
+    override_path = manager.paths_for_profile("prompt-profile").prompts_dir / "locked.system.system.md"
+
+    save_result = run_defaultspack_function(
+        "prompt_versions",
+        {
+            "profile_id": "prompt-profile",
+            "prompt_id": "locked.system",
+            "action": "save",
+            "body": "This must not be written.",
+        },
+        {},
+    )
+    rollback_result = run_defaultspack_function(
+        "prompt_versions",
+        {
+            "profile_id": "prompt-profile",
+            "prompt_id": "locked.system",
+            "action": "rollback",
+            "version_id": "missing",
+        },
+        {},
+    )
+
+    assert save_result["status"] == "ok"
+    assert rollback_result["status"] == "ok"
+    assert save_result["data"]["prompt_id"] == "locked.system"
+    assert rollback_result["data"]["prompt_id"] == "locked.system"
     assert not override_path.exists()
 
 
@@ -360,6 +407,44 @@ def test_prompt_studio_testbench_matches_skill_and_tool_schema(monkeypatch, tmp_
     assert any(item["id"] == "safety" and item["status"] == "passive" for item in result["verdicts"])
 
 
+def test_prompt_studio_testbench_uses_runtime_skill_registry(monkeypatch, tmp_path: Path) -> None:
+    extensions_root = tmp_path / "extensions"
+    skill_dir = extensions_root / "skills" / "math-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "id": "qa/math-skill",
+                "category": "skill",
+                "version": "1",
+                "enabled": True,
+                "display_name": "Math QA",
+                "triggers": ["計算"],
+                "applies_to_tools": ["calculator"],
+                "instructions": "Use arithmetic format for calculator tasks.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTENSION_ROOTS", str(extensions_root))
+    _setup_profile(monkeypatch, tmp_path)
+    monkeypatch.setattr("core_runtime.ai_input_segments.resolve_effective_prompt", _fake_effective_prompt)
+    monkeypatch.setattr("core_runtime.ai_input_segments.ToolRegistry", _ToolRegistryWithCalculator)
+
+    result = run_prompt_studio_test(
+        {
+            "profile_id": "prompt-profile",
+            "prompt_id": "editable.system",
+            "draft": "For arithmetic requests, inspect calculator relevance.",
+            "user_text": "計算 QA: 12 * 8 を一文で確認して。",
+            "selected_tools": ["calculator"],
+        }
+    )
+
+    assert result["matched_skills"][0]["id"] == "qa/math-skill"
+    assert "arithmetic format" in result["skill_instructions"]
+
+
 def test_readonly_prompt_save_creates_profile_override(monkeypatch, tmp_path: Path) -> None:
     manager = _setup_profile(monkeypatch, tmp_path)
     monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: _FakePromptManager())
@@ -433,6 +518,39 @@ def test_first_override_rollback_removes_override_file(monkeypatch, tmp_path: Pa
 
     assert result["removed_override"] is True
     assert not override_path.exists()
+
+
+def test_prompt_studio_uses_profile_snapshot_as_editor_and_test_body(monkeypatch, tmp_path: Path) -> None:
+    profile = _profile()
+    profile["metadata"]["selected"]["prompts"] = ["snapshot.only"]
+    manager = _setup_profile(monkeypatch, tmp_path, profile)
+    monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: _EmptyPromptManager())
+    monkeypatch.setattr("core_runtime.ai_input_segments.ToolRegistry", _ToolRegistryWithCalculator)
+    snapshot_prompt = manager.paths_for_profile("prompt-profile").snapshots_dir / "defaultspack" / "prompts" / "snapshot.only"
+    snapshot_prompt.mkdir(parents=True)
+    snapshot_body = "Snapshot prompt says to inspect calculator relevance for arithmetic.\n"
+    (snapshot_prompt / "prompt.md").write_text(snapshot_body, encoding="utf-8")
+
+    studio = load_prompt_studio({"profile_id": "prompt-profile", "prompt_id": "snapshot.only"})
+    selected = studio["selected_prompt"]
+    nav_record = next(item for item in studio["prompts"] if item["prompt_id"] == "snapshot.only")
+
+    assert nav_record["source_type"] == "profile_snapshot"
+    assert selected["effective_source_type"] == "profile_snapshot"
+    assert selected["source_type"] == "profile_snapshot"
+    assert selected["read_only"] is True
+    assert selected["body"] == snapshot_body
+    assert selected["lint"]["estimated_tokens"] > 0
+
+    test_result = run_prompt_studio_test(
+        {
+            "profile_id": "prompt-profile",
+            "prompt_id": "snapshot.only",
+            "user_text": "2 + 2 を確認して",
+        }
+    )
+
+    assert any(item["tool_id"] == "calculator" for item in test_result["tool_candidates"]["from_prompt"])
 
 
 def test_prompt_usage_metadata_stores_previews_and_trace_pointer_not_full_text() -> None:
@@ -511,3 +629,4 @@ def test_prompt_route_specs_have_no_control_stub_and_match_fallback_registry() -
     assert ("POST", "/api/prompts/editor", "blocks.prompt.control") not in canonical
     assert ("GET", "/api/prompts/editor", "blocks.prompt.editor_load") in canonical
     assert ("POST", "/api/prompts/preview-toggle", "blocks.prompt.preview_toggle") in canonical
+    assert ("GET", "/api/prompts/{name}/versions", "blocks.prompt.versions") in canonical

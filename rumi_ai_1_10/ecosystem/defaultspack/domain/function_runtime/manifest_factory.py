@@ -438,7 +438,6 @@ REMOTE_FUNCTIONS: tuple[FunctionSpec, ...] = (
 _PROMPT_WORKSPACE_DEFAULT_ARGS: dict[str, dict[str, Any]] = {
     "prompt_editor_save": {"action": "save"},
     "prompt_create_override": {"action": "override"},
-    "prompt_versions": {"action": "versions"},
 }
 
 
@@ -472,7 +471,7 @@ DATA_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("prompt_create_override", "Create a profile prompt override.", ("prompt", "editor"), "medium", "blocks.prompt.editor"),
         ("prompt_test", "Run a local Prompt Studio test for prompt, skill, and tool-schema activation.", ("prompt", "editor"), "low", "blocks.prompt.test"),
         ("prompt_diff", "Diff prompt base, effective, and draft text.", ("prompt", "editor"), "low", "blocks.prompt.diff"),
-        ("prompt_versions", "List prompt versions recorded by Prompt Studio.", ("prompt", "editor"), "low", "blocks.prompt.editor"),
+        ("prompt_versions", "List prompt versions recorded by Prompt Studio.", ("prompt", "editor"), "low", "blocks.prompt.versions"),
         ("prompt_rollback", "Roll back a prompt to a recorded Prompt Studio version.", ("prompt", "editor"), "medium", "blocks.prompt.rollback"),
         ("memory_store", "Store memory.", ("memory",), "medium", "blocks.memory.store"),
         ("memory_recall", "Recall memory.", ("memory",), "low", "blocks.memory.recall"),

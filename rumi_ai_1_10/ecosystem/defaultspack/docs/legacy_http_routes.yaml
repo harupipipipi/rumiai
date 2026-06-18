@@ -1835,7 +1835,7 @@ legacy_routes:
   remove_after: v2.4
 - method: GET
   pattern: /api/prompts/{name}/versions
-  legacy_block_module: blocks.prompt.editor
+  legacy_block_module: blocks.prompt.versions
   replacement_function_id: prompt_versions
   owner: prompt
   reason: tracked compatibility fallback during HTTP function migration

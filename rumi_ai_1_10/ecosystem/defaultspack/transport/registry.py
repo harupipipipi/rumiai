@@ -467,9 +467,8 @@ _PROMPT_HTTP_ROUTE_SPECS = [
     HttpRouteSpec(
         "GET",
         "/api/prompts/{name}/versions",
-        block_module="blocks.prompt.editor",
+        block_module="blocks.prompt.versions",
         path_inject={"name": "name"},
-        defaults={"action": "versions"},
     ),
     HttpRouteSpec(
         "POST",
