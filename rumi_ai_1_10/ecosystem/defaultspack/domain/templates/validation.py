@@ -94,6 +94,7 @@ def parse_template(
     *,
     source_path: str | None = None,
     trust_level: str | None = None,
+    declared_id: str | None = None,
 ) -> TemplateValidationResult:
     if not isinstance(raw, dict):
         return TemplateValidationResult(
@@ -107,7 +108,9 @@ def parse_template(
             ],
         )
 
-    template = RumiTemplate.from_dict(raw, source_path=source_path, trust_level=trust_level)
+    template = RumiTemplate.from_dict(
+        raw, source_path=source_path, trust_level=trust_level, declared_id=declared_id
+    )
     return TemplateValidationResult(template, validate_template(template, raw=raw))
 
 
@@ -189,7 +192,7 @@ def _validate_canonical_identity(
             )
         ]
 
-    declared_id = template.metadata.get("declared_id")
+    declared_id = template.declared_id
     raw_id = raw.get("id") if raw is not None and "id" in raw else declared_id
     if not isinstance(raw_id, str):
         return []

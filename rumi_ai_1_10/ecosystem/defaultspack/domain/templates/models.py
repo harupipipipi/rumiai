@@ -146,6 +146,7 @@ class RumiTemplate:
     patches: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     source_path: Path | None = None
+    declared_id: str | None = None
 
     @classmethod
     def from_dict(
@@ -154,6 +155,7 @@ class RumiTemplate:
         *,
         source_path: str | Path | None = None,
         trust_level: TemplateTrustLevel | str | None = None,
+        declared_id: str | None = None,
     ) -> "RumiTemplate":
         explicit_trust = (
             trust_level
@@ -164,8 +166,6 @@ class RumiTemplate:
             dict(raw.get("metadata", {})) if isinstance(raw.get("metadata", {}), dict) else {}
         )
         raw_id = str(raw.get("id", ""))
-        if raw_id != raw_id.strip():
-            metadata["declared_id"] = raw_id
         if trust_level is not None and "trust_level" in raw:
             metadata["declared_trust_level"] = str(raw.get("trust_level"))
         return cls(
@@ -187,6 +187,11 @@ class RumiTemplate:
             else [],
             metadata=metadata,
             source_path=Path(source_path) if source_path is not None else None,
+            declared_id=declared_id
+            if declared_id is not None
+            else raw_id
+            if raw_id != raw_id.strip()
+            else None,
         )
 
     def to_dict(self) -> dict[str, Any]:

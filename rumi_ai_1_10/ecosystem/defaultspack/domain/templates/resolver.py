@@ -81,6 +81,7 @@ def apply_template_patches(
         raw,
         source_path=str(template.source_path) if template.source_path else None,
         trust_level=_value(effective_trust),
+        declared_id=template.declared_id,
     )
     diagnostics.extend(parsed.diagnostics)
     return parsed.template or template, diagnostics
@@ -218,7 +219,11 @@ def _compose(
     }
     pieces, diagnostics = merge_template_pieces(base.pieces, child.pieces, template_id=child.id)
     raw["pieces"] = [piece.to_dict() for piece in pieces]
-    parsed = parse_template(raw, source_path=str(child.source_path) if child.source_path else None)
+    parsed = parse_template(
+        raw,
+        source_path=str(child.source_path) if child.source_path else None,
+        declared_id=child.declared_id,
+    )
     diagnostics.extend(parsed.diagnostics)
     return parsed.template or child, diagnostics
 
@@ -305,7 +310,11 @@ def _protected_patch_field(pointer: str) -> str | None:
     tokens = [_unescape_pointer(token) for token in pointer.strip("/").split("/") if token != ""]
     if not tokens:
         return None
-    return tokens[0] if tokens[0] in {"id", "trust_level"} else None
+    if tokens[0] in {"declared_id", "id", "trust_level"}:
+        return tokens[0]
+    if len(tokens) >= 2 and tokens[:2] == ["metadata", "declared_id"]:
+        return "metadata/declared_id"
+    return None
 
 
 def _reserved_piece_metadata_patch_field(pointer: str, patch: dict[str, Any]) -> str | None:

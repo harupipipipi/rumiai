@@ -171,6 +171,40 @@ def test_patch_cannot_mutate_loader_trust_or_template_id_and_revalidates_user_se
     assert not resolved.ok
 
 
+def test_patch_cannot_mutate_declared_template_id_carriers():
+    registry = TemplateRegistry()
+    _register(
+        registry,
+        {
+            "id": "user.declared_id",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "metadata": {"declared_id": " user.declared_id "},
+            "pieces": [],
+            "patches": [
+                {"op": "remove", "path": "/declared_id"},
+                {"op": "remove", "path": "/metadata/declared_id"},
+            ],
+        },
+        trust_level=TemplateTrustLevel.USER.value,
+    )
+
+    resolved = resolve_template("user.declared_id", registry)
+
+    protected = [
+        diagnostic
+        for diagnostic in resolved.diagnostics
+        if diagnostic.code == "template.patch.protected_path"
+    ]
+    assert len(protected) == 2
+    assert {diagnostic.message.rsplit(": ", 1)[-1] for diagnostic in protected} == {
+        "declared_id",
+        "metadata/declared_id",
+    }
+    assert not resolved.ok
+
+
 def test_patch_cannot_write_reserved_piece_projection_metadata():
     registry = TemplateRegistry()
     _register(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -402,6 +403,56 @@ def test_resolved_template_id_collision_is_error_and_not_projected():
         for diagnostic in catalog["template_diagnostics"]
     )
     assert catalog["commands"] == []
+
+
+def test_patched_noncanonical_template_id_does_not_project_runtime_buckets(tmp_path):
+    template_path = tmp_path / "user_data" / "shared" / "templates" / "patched" / "template.json"
+    template_path.parent.mkdir(parents=True)
+    template_path.write_text(
+        json.dumps(
+            {
+                "id": " user.template ",
+                "kind": "frontend",
+                "version": "1.0.0",
+                "status": "active",
+                "metadata": {"declared_id": " user.template "},
+                "pieces": [
+                    {
+                        "id": "command",
+                        "kind": "composer_command",
+                        "command": {
+                            "id": "user_command",
+                            "execution": {"type": "frontend", "action": "noop"},
+                        },
+                    },
+                    {
+                        "id": "action",
+                        "kind": "function",
+                        "role": "action",
+                        "action_id": "user_action",
+                    },
+                    {
+                        "id": "route",
+                        "kind": "api_route",
+                        "method": "GET",
+                        "route_path": "/api/user-template",
+                    },
+                ],
+                "patches": [{"op": "replace", "path": "/metadata", "value": {}}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = build_template_catalog(defaultspack_root=tmp_path)
+
+    assert any(
+        diagnostic["code"] == "template.invalid_id"
+        for diagnostic in catalog["template_diagnostics"]
+    )
+    assert catalog["commands"] == []
+    assert catalog["actions"] == []
+    assert catalog["api_routes"] == []
 
 
 def test_frontend_catalog_merges_template_metadata_without_dropping_existing_keys():
