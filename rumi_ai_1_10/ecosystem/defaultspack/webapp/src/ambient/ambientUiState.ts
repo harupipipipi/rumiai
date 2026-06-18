@@ -327,6 +327,28 @@ export function ambientPendingInputLabel(pending: AmbientPendingApproval | null 
   return "入力内容を確認中";
 }
 
+const ROUTINE_MESSAGE_PREFIXES = [
+  ambientOperationLabels.recording,
+  ambientOperationLabels.transcribing,
+  ambientOperationLabels.sending,
+  ambientOperationLabels.waitingResponse,
+  ambientOperationLabels.done,
+];
+
+const ACTIONABLE_MESSAGE_PATTERN = /(?:失敗|できません|できない|使えません|利用できません|開始できません|処理できません|破棄できません|登録できません|検索できません|保存できません|読み込めません|開けません|見つかりません|拒否|許可|承認|必要|利用不可|未許可|エラー|問題|権限|設定|このブラウザでは)/;
+
+export function ambientRenderableMessage(message: string | null | undefined): string | null {
+  const text = String(message ?? "").trim();
+  if (!text) return null;
+  if (ROUTINE_MESSAGE_PREFIXES.some((prefix) => text === prefix || text.startsWith(`${prefix}:`) || text.startsWith(`${prefix}：`))) {
+    return null;
+  }
+  if (/hello/i.test(text) || /(?:文字起こし|transcript)\s*[:：]/i.test(text)) {
+    return null;
+  }
+  return ACTIONABLE_MESSAGE_PATTERN.test(text) ? text : null;
+}
+
 export function looksLikeAmbientAudioFilenamePlaceholder(value: string): boolean {
   const text = String(value || "").trim();
   if (!text) return false;

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronUp, Loader2, MessageSquare, RefreshCcw, Search, ShieldCheck, X } from "lucide-react";
+import { ChevronUp, ExternalLink, Loader2, MessageSquare, RefreshCcw, Search, ShieldCheck, X } from "lucide-react";
 
 import { HistoryBoard, type ChatItem } from "../components/HistoryBoard";
 import type { ModelSearchItem } from "../lib/api";
@@ -69,7 +69,7 @@ export function RoutingSettings({
       </div>
       <div className="grid grid-cols-3 gap-1">
         <RouteModeButton label="選ぶ" active={mode === "selected_chat"} disabled={busy} onClick={() => onModeChange("selected_chat")} />
-        <RouteModeButton label="再起動ごと" active={mode === "startup_new_chat"} disabled={busy} onClick={() => onModeChange("startup_new_chat")} />
+        <RouteModeButton label="起動ごと" active={mode === "startup_new_chat"} disabled={busy} onClick={() => onModeChange("startup_new_chat")} />
         <RouteModeButton label="毎回新規" active={mode === "always_new_chat"} disabled={busy} onClick={() => onModeChange("always_new_chat")} />
       </div>
       {mode === "selected_chat" && (
@@ -229,6 +229,175 @@ export function RoutingSettings({
   );
 }
 
+export function CompactRoutingControl({
+  busy,
+  mode,
+  summary,
+  selectedConversationId,
+  sessionConversationId,
+  model,
+  modelQuery,
+  modelResults,
+  modelLoading,
+  onModeChange,
+  onPickChat,
+  onModelChange,
+  onModelCommit,
+  onModelQueryChange,
+  onModelSearch,
+}: {
+  busy: boolean;
+  mode: AmbientRoutingMode;
+  summary: string;
+  selectedConversationId: string | null;
+  sessionConversationId?: string | null;
+  model: string;
+  modelQuery: string;
+  modelResults: ModelSearchItem[];
+  modelLoading: boolean;
+  onModeChange: (mode: AmbientRoutingMode) => void;
+  onPickChat: () => void;
+  onModelChange: (value: string) => void;
+  onModelCommit: (model: string) => void;
+  onModelQueryChange: (value: string) => void;
+  onModelSearch: (query?: string) => void;
+}) {
+  const [modelChangeOpen, setModelChangeOpen] = useState(false);
+  const modelLabel = model ? modelLabelFromId(model) : "モデル指定なし";
+  const concreteChatId = mode === "selected_chat" ? selectedConversationId : mode === "startup_new_chat" ? sessionConversationId ?? null : null;
+  const createsNewChat = mode === "startup_new_chat" || mode === "always_new_chat";
+
+  function openConcreteChat() {
+    if (!concreteChatId) return;
+    const url = new URL("/chat", window.location.origin);
+    url.searchParams.set("chat", concreteChatId);
+    window.location.assign(url.toString());
+  }
+
+  return (
+    <section className="space-y-2 border-t border-zinc-800/75 pt-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Defaultspack</span>
+        <span className="min-w-0 truncate text-[11px] text-zinc-400">送信先</span>
+      </div>
+      <div className="grid grid-cols-3 rounded-md border border-zinc-800 bg-zinc-950 p-0.5">
+        <SegmentedRouteModeButton label="選ぶ" active={mode === "selected_chat"} disabled={busy} onClick={() => onModeChange("selected_chat")} />
+        <SegmentedRouteModeButton label="起動ごと" active={mode === "startup_new_chat"} disabled={busy} onClick={() => onModeChange("startup_new_chat")} />
+        <SegmentedRouteModeButton label="毎回新規" active={mode === "always_new_chat"} disabled={busy} onClick={() => onModeChange("always_new_chat")} />
+      </div>
+
+      <div className="flex min-w-0 items-center gap-1.5 text-[11px]">
+        <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/75 px-2 py-1.5 text-zinc-200">
+          <MessageSquare size={13} className="shrink-0 text-zinc-500" />
+          <span className="truncate">{summary}</span>
+        </span>
+        {concreteChatId ? (
+          <button type="button" onClick={openConcreteChat} className="ambient-mini-button h-7 shrink-0 px-2" title={`/chat?chat=${concreteChatId}`}>
+            <ExternalLink size={12} />
+            開く
+          </button>
+        ) : createsNewChat ? (
+          <span className="shrink-0 rounded-md border border-zinc-800 px-2 py-1.5 text-[10px] font-semibold text-zinc-400">次の送信で作成</span>
+        ) : null}
+        {mode === "selected_chat" && (
+          <button type="button" onClick={onPickChat} disabled={busy} className="ambient-mini-button h-7 shrink-0 px-2">
+            {selectedConversationId ? "変更" : "選択"}
+          </button>
+        )}
+      </div>
+
+      {!modelChangeOpen && (
+        <button
+          type="button"
+          onClick={() => {
+            setModelChangeOpen(true);
+            onModelQueryChange("");
+          }}
+          disabled={busy}
+          className={cn(
+            "inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border px-2 text-[11px] font-semibold transition",
+            model
+              ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100"
+              : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
+          )}
+          title={model || modelLabel}
+        >
+          <Search size={12} className="shrink-0" />
+          <span className="truncate">{modelLabel}</span>
+        </button>
+      )}
+
+      {modelChangeOpen && (
+        <div className="space-y-1.5">
+          <div className="flex gap-1.5">
+            <input
+              value={modelQuery}
+              onChange={(event) => onModelQueryChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  onModelSearch(modelQuery);
+                }
+                if (event.key === "Escape") {
+                  setModelChangeOpen(false);
+                }
+              }}
+              placeholder="モデルを探す"
+              className="h-8 min-w-0 flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+              autoFocus
+            />
+            <button type="button" onClick={() => onModelSearch(modelQuery)} disabled={modelLoading} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
+              {modelLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+            </button>
+            <button type="button" onClick={() => setModelChangeOpen(false)} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
+              <X size={13} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between gap-2 text-[11px]">
+            {model ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onModelCommit("");
+                  setModelChangeOpen(false);
+                }}
+                className="text-zinc-400 hover:text-zinc-100"
+              >
+                指定を外す
+              </button>
+            ) : (
+              <span className="text-zinc-500">未指定ならDefaultspackの通常設定を使います。</span>
+            )}
+          </div>
+          {modelResults.length > 0 && (
+            <div className="max-h-24 overflow-auto border-l border-zinc-800 pl-2">
+              {modelResults
+                .map((item) => ({ item, id: modelIdForSearchItem(item) }))
+                .filter(({ id }) => Boolean(id))
+                .slice(0, 6)
+                .map(({ item, id }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      onModelChange(id);
+                      onModelCommit(id);
+                      onModelQueryChange("");
+                      setModelChangeOpen(false);
+                    }}
+                    className="block w-full truncate py-1 text-left text-[11px] text-zinc-300 hover:text-zinc-50"
+                  >
+                    {modelLabelForSearchItem(item)}
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function ChatPickerDialog({
   activeChatId,
   selectedChatId,
@@ -291,6 +460,24 @@ function RouteModeButton({ label, active, disabled, onClick }: { label: string; 
       )}
     >
       {label}
+    </button>
+  );
+}
+
+function SegmentedRouteModeButton({ label, active, disabled, onClick }: { label: string; active: boolean; disabled: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "h-7 min-w-0 rounded px-1.5 text-[11px] font-semibold transition",
+        active
+          ? "bg-zinc-100 text-zinc-950"
+          : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100",
+      )}
+    >
+      <span className="block truncate">{label}</span>
     </button>
   );
 }

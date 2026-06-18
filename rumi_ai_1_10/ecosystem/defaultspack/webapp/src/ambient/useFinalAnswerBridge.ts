@@ -59,11 +59,11 @@ export function useFinalAnswerBridge({
     const trimmed = text.trim();
     if (!trimmed) return;
     if (!("speechSynthesis" in window)) {
-      onMessage("この環境では回答の読み上げを使えません。");
+      onMessage("この環境では回答音声を使えません。");
       return;
     }
     if (readoutBlocked()) {
-      onMessage("録音中は読み上げを止めています。");
+      onMessage("録音中は回答音声を止めています。");
       return;
     }
     window.speechSynthesis.cancel();

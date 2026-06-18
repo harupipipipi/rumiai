@@ -7,13 +7,13 @@ import {
   ambientCopyJa,
   ambientOperationLabels,
   ambientPendingInputLabel,
+  ambientRenderableMessage,
   deriveAmbientUiState,
   looksLikeAmbientAudioFilenamePlaceholder,
   osPermissionBucket,
   rumiPermissionBucket,
   type AmbientRuntimeStatus,
 } from "./ambientUiState";
-import { AMBIENT_TEST_SEND_ACTION_ID, ambientTestActionPayload, ambientTestSendAction } from "./ambientTestActions";
 import type { AmbientPendingApproval, AmbientStatus } from "./ambientTriggerClient";
 
 function status(options?: {
@@ -132,22 +132,19 @@ test("ambient pending audio label never exposes generated audio filenames as inp
   assert.equal(ambientPendingInputLabel(pendingTranscript), "文字起こし: hello");
 });
 
-test("ambient hello test action builds a declared preset_text event", () => {
-  assert.equal(ambientTestSendAction.id, AMBIENT_TEST_SEND_ACTION_ID);
-  assert.equal(ambientTestSendAction.buttonLabel, "テスト送信");
-  assert.equal(ambientTestSendAction.inputText, "hello");
+test("ambient renderable message keeps actionable problems and hides routine status text", () => {
+  assert.equal(ambientRenderableMessage("送信中: hello をテスト送信しています。"), null);
+  assert.equal(ambientRenderableMessage("返答待ち: 録音音声をAIに送信しました。返答を待っています。"), null);
+  assert.equal(ambientRenderableMessage("完了: AIの回答が届きました。"), null);
+  assert.equal(ambientRenderableMessage("待機中です。OKマークで録音開始、指を開くと送信します。"), null);
+  assert.equal(ambientRenderableMessage("文字起こし: hello"), null);
 
-  const payload = ambientTestActionPayload(ambientTestSendAction, "conv-test");
-
-  assert.equal(payload.source, "hook");
-  assert.equal(payload.trigger, "external_hook");
-  assert.equal(payload.mode, "preset_text");
-  assert.equal(payload.action_id, "chat.message");
-  assert.equal(payload.input_text, "hello");
-  assert.equal(payload.conversation_id, "conv-test");
-  assert.deepEqual(payload.metadata, {
-    panel: "ambient_mini_window",
-    test_action_id: AMBIENT_TEST_SEND_ACTION_ID,
-    preset: "hello",
-  });
+  assert.equal(
+    ambientRenderableMessage("失敗: 送信できませんでした。"),
+    "失敗: 送信できませんでした。",
+  );
+  assert.equal(
+    ambientRenderableMessage("承認待ち: Rumiの許可がそろってから録音できます。"),
+    "承認待ち: Rumiの許可がそろってから録音できます。",
+  );
 });

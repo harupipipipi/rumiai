@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, MessageSquare, Mic, Play, Radio, RefreshCcw, Search, Settings, Shield, Square, Video, Volume2, VolumeX, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, Mic, Radio, RefreshCcw, Settings, Shield, Video, Volume2, VolumeX, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import { subscribeAuthorityApprovalSettlements } from "../lib/authorityApprovalEvents";
@@ -27,23 +27,19 @@ import {
   ambientCopyJa,
   ambientOperationLabels,
   ambientPendingInputLabel,
-  ambientPermissionLabels,
+  ambientRenderableMessage,
   deriveAmbientUiState,
   grantedPermissionCount,
   hasAllOsPermissions,
   hasAllRumiPermissions,
-  osPermissionBucket,
-  rumiPermissionBucket,
   type AmbientRuntimeStatus,
   type AmbientUiState,
 } from "./ambientUiState";
-import { ambientTestActionPayload, ambientTestSendAction } from "./ambientTestActions";
 import { startHandLandmarkerLoop, type HandTrackingFrame } from "./mediaPipeHandLandmarker";
 import type { PinchState } from "./gesturePinchDetector";
-import { ChatPickerDialog, RoutingSettings } from "./AmbientRoutingSettings";
+import { ChatPickerDialog, CompactRoutingControl, RoutingSettings } from "./AmbientRoutingSettings";
 import { PrimaryActionIcon, StateBadge, StatusGlyph, primaryButtonClass } from "./AmbientTriggerVisuals";
-import { PermissionSection, gestureStatusLabel } from "./AmbientPermissionSections";
-import { modelLabelFromId } from "./ambientRouting";
+import { gestureStatusLabel } from "./AmbientPermissionSections";
 import { useFinalAnswerBridge } from "./useFinalAnswerBridge";
 import { useAmbientRouting } from "./useAmbientRouting";
 
@@ -119,12 +115,10 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     frontOnFinal,
     setFrontOnFinal,
     frontFlash,
-    lastFinalAnswer,
     readoutEnabled,
     setReadoutEnabled,
     readoutPlaying,
     stopSpeechReadout,
-    speakFinalAnswer,
   } = useFinalAnswerBridge({
     finalAnswerText,
     standalone,
@@ -188,21 +182,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     () => grantedPermissionCount(status, AMBIENT_OS_PERMISSIONS, "os"),
     [status],
   );
-  const rumiPermissionRows = useMemo(() => AMBIENT_REQUIRED_PERMISSIONS.map((permissionId) => ({
-    id: permissionId,
-    label: ambientPermissionLabels[permissionId] ?? permissionId,
-    bucket: rumiPermissionBucket(status, permissionId),
-  })), [status]);
-  const osPermissionRows = useMemo(() => AMBIENT_OS_PERMISSIONS.map((permissionId) => ({
-    id: permissionId,
-    label: permissionId === AMBIENT_MIC_PERMISSION ? "マイク" : "カメラ",
-    bucket: osPermissionBucket(status, permissionId),
-  })), [status]);
   const allRumiPermissionsGranted = useMemo(() => hasAllRumiPermissions(status), [status]);
   const allOsPermissionsGranted = useMemo(() => hasAllOsPermissions(status), [status]);
   const rumiApprovalPending = rumiApprovalOpen && !allRumiPermissionsGranted;
   const surfaceTitle = standalone && window.location.pathname === "/finger-recording" ? ambientCopyJa.subtitle : ambientCopyJa.title;
   const pendingApproval = status?.pending_approval ?? null;
+  const visibleMessage = useMemo(() => ambientRenderableMessage(message), [message]);
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -573,6 +558,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     }
   }
 
+  function toggleReadoutEnabled() {
+    const next = !readoutEnabled;
+    setReadoutEnabled(next);
+    if (!next) stopSpeechReadout();
+  }
+
   async function openRumiPermissionApproval() {
     setManualRumiFallbackOpen(false);
     setMessage(null);
@@ -758,28 +749,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     }
   }
 
-  async function submitTestAction() {
-    if (!allRumiPermissionsGranted || rumiApprovalPending) {
-      setExpanded(true);
-      setMessage(`${ambientOperationLabels.approvalPending}: Rumiの許可がそろってからテスト送信できます。`);
-      return;
-    }
-    setBusy(true);
-    setMessage(`${ambientOperationLabels.sending}: ${ambientTestSendAction.inputText} をテスト送信しています。`);
-    try {
-      const result = await ambientTriggerClient.submitEvent(ambientTestActionPayload(ambientTestSendAction, conversationIdRef.current));
-      setMessage(ambientResultMessage(result, `${ambientTestSendAction.inputText} をAIに送信しました。`));
-      onOpenInputRef.current?.("");
-      focusComposer();
-      await refresh();
-    } catch (error) {
-      setMessage(`${ambientOperationLabels.failed}: ${error instanceof Error ? error.message : "テスト送信できませんでした。"}`);
-      await refresh().catch(() => undefined);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function approvePendingApproval() {
     const requestId = pendingApproval?.request_id;
     if (!requestId) return;
@@ -885,19 +854,6 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           </div>
           <button
             type="button"
-            onClick={() => readoutPlaying ? stopSpeechReadout() : speakFinalAnswer()}
-            disabled={!lastFinalAnswer || pinchRecording || rumiApprovalPending}
-            className={cn(
-              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-35",
-              readoutPlaying && "border-emerald-400/35 bg-emerald-400/10 text-emerald-100",
-            )}
-            title={readoutPlaying ? "読み上げを停止" : "最新回答を読み上げる"}
-            aria-label={readoutPlaying ? "読み上げを停止" : "最新回答を読み上げる"}
-          >
-            {readoutPlaying ? <VolumeX size={15} /> : <Volume2 size={15} />}
-          </button>
-          <button
-            type="button"
             onClick={() => {
               setSettingsOpen((value) => !value);
               if (!standalone) setExpanded(true);
@@ -999,62 +955,65 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
               </span>
             </div>
           )}
-          <div className="grid grid-cols-[1fr_auto] items-center gap-2 rounded-lg border border-zinc-800/80 bg-zinc-900/35 px-2 py-1.5">
-            <button
-              type="button"
-              onClick={() => setReadoutEnabled((value) => !value)}
-              className={cn(
-                "inline-flex min-w-0 items-center justify-between gap-2 rounded-md px-1 py-0.5 text-left text-[11px] font-medium",
-                readoutEnabled ? "text-emerald-100" : "text-zinc-400",
-              )}
-            >
-              <span className="inline-flex min-w-0 items-center gap-2">
-                {readoutEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
-                <span className="truncate">読み上げ</span>
-              </span>
-              <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold", readoutEnabled ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100" : "border-zinc-700 bg-zinc-950 text-zinc-400")}>
-                {readoutEnabled ? "常にON" : "常にOFF"}
-              </span>
-            </button>
-            {readoutPlaying && (
-              <button
-                type="button"
-                onClick={stopSpeechReadout}
-                className="inline-flex h-7 items-center justify-center rounded-md border border-emerald-400/25 px-2 text-[11px] font-semibold text-emerald-100 hover:border-emerald-300/45"
-              >
-                停止
-              </button>
+          <div
+            className={cn(
+              "border-l pl-2 text-[11px] leading-5",
+              allRumiPermissionsGranted && allOsPermissionsGranted ? "border-emerald-400/45" : stateCopy.tone === "red" ? "border-red-400/40" : "border-sky-400/40",
             )}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className={cn("min-w-0 flex-1 font-semibold", allRumiPermissionsGranted && allOsPermissionsGranted ? "text-[13px] text-zinc-50" : "text-[12px] text-zinc-100")}>
+                {allRumiPermissionsGranted && allOsPermissionsGranted
+                  ? "OKマークで録音開始、指を開くと送信します"
+                  : !allRumiPermissionsGranted
+                    ? "Rumiの利用許可を完了してください"
+                    : "Macのマイク・カメラ許可を完了してください"}
+              </p>
+              <span
+                className={cn(
+                  "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold",
+                  allRumiPermissionsGranted && allOsPermissionsGranted
+                    ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100"
+                    : stateCopy.tone === "red"
+                      ? "border-red-300/30 bg-red-500/10 text-red-100"
+                      : "border-sky-300/30 bg-sky-400/10 text-sky-100",
+                )}
+              >
+                {allRumiPermissionsGranted && allOsPermissionsGranted
+                  ? gestureStatusLabel(pinchDetectorStatus, monitorEnabled)
+                  : !allRumiPermissionsGranted
+                    ? `${rumiPermissionCount}/${AMBIENT_REQUIRED_PERMISSIONS.length}`
+                    : `${osPermissionCount}/${AMBIENT_OS_PERMISSIONS.length}`}
+              </span>
+            </div>
+            <p className="mt-0.5 text-zinc-500">
+              {allRumiPermissionsGranted && allOsPermissionsGranted
+                ? monitorEnabled
+                  ? "カメラ認識がONです。"
+                  : "開始するとカメラ認識がONになります。"
+                : stateCopy.body}
+            </p>
           </div>
           {allRumiPermissionsGranted && (
-            <div className="flex items-center gap-2 rounded-lg border border-zinc-800/70 bg-zinc-950/45 px-2 py-1.5 text-[11px] text-zinc-400">
-              <span className="shrink-0 text-zinc-500">送信先</span>
-              <span className="min-w-0 flex-1 truncate text-zinc-200">{routingSummary}</span>
-              {routingModel && (
-                <span className="max-w-[45%] truncate rounded border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-100" title={routingModel}>
-                  {modelLabelFromId(routingModel)}
-                </span>
-              )}
-            </div>
+            <CompactRoutingControl
+              busy={busy || rumiApprovalPending}
+              mode={routingMode}
+              summary={routingSummary}
+              selectedConversationId={routingConversationId}
+              sessionConversationId={status?.routing?.session_conversation_id ?? null}
+              model={routingModel}
+              modelQuery={modelQuery}
+              modelResults={modelResults}
+              modelLoading={modelLoading}
+              onModeChange={(mode) => void saveRouting({ mode })}
+              onPickChat={() => void openChatPicker()}
+              onModelChange={setRoutingModel}
+              onModelCommit={(model) => void saveRouting({ model }, model ? "送信モデルを保存しました。" : "モデル指定を外しました。")}
+              onModelQueryChange={setModelQuery}
+              onModelSearch={(query) => void searchRoutingModels(query)}
+            />
           )}
-          {allRumiPermissionsGranted && (
-            <div className="flex items-center gap-2 rounded-lg border border-zinc-800/70 bg-zinc-950/45 px-2 py-1.5">
-              <span className="shrink-0 text-[11px] text-zinc-500">確認</span>
-              <button
-                type="button"
-                onClick={() => void submitTestAction()}
-                disabled={busy || rumiApprovalPending}
-                className="ambient-mini-button h-7 px-2"
-                title={`${ambientTestSendAction.label}: ${ambientTestSendAction.inputText}`}
-              >
-                <MessageSquare size={13} />
-                {ambientTestSendAction.buttonLabel}
-                <span className="font-mono text-[10px] text-zinc-400">{ambientTestSendAction.inputText}</span>
-              </button>
-            </div>
-          )}
-          <div className="flex items-center justify-between gap-2 text-[11px] leading-4 text-zinc-500">
-            <span className="min-w-0 flex-1">{stateCopy.body}</span>
+          <div className="flex items-center justify-end text-[11px] leading-4 text-zinc-500">
             <button
               type="button"
               onClick={() => setPrivacyOpen((value) => !value)}
@@ -1072,68 +1031,23 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           )}
         </div>
 
-        {expanded && (
+        {expanded && (settingsOpen || (approvalTarget && monitorEnabled) || manualRumiFallbackOpen || visibleMessage) && (
           <div className="space-y-2.5 border-t border-zinc-800/80 px-3 py-2.5">
-            <section className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[11px] font-semibold uppercase text-zinc-500">現在</p>
-                <button type="button" onClick={() => void refresh({ probeOs: true })} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100">
-                  <RefreshCcw size={12} />
-                  再確認
-                </button>
-              </div>
-              {!allRumiPermissionsGranted && (
-                <PermissionSection
-                  title="Rumiで許可"
-                  count={rumiPermissionCount}
-                  total={AMBIENT_REQUIRED_PERMISSIONS.length}
-                  rows={rumiPermissionRows}
-                  actionLabel="Rumiで許可"
-                  actionIcon={<Hand size={14} />}
-                  busyIcon={<Loader2 size={14} className="animate-spin" />}
-                  busy={busy}
-                  disabled={busy || rumiApprovalPending}
-                  onAction={() => void openRumiPermissionApproval()}
-                />
-              )}
-
-              {allRumiPermissionsGranted && !allOsPermissionsGranted && (
-                <PermissionSection
-                  title="端末のマイク・カメラ"
-                  count={osPermissionCount}
-                  total={AMBIENT_OS_PERMISSIONS.length}
-                  rows={osPermissionRows}
-                  actionLabel="マイク・カメラを許可"
-                  actionIcon={<Video size={14} />}
-                  busyIcon={<Loader2 size={14} className="animate-spin" />}
-                  busy={busy}
-                  disabled={busy || rumiApprovalPending}
-                  onAction={() => void requestMediaPermissions()}
-                />
-              )}
-
-              {allRumiPermissionsGranted && allOsPermissionsGranted && (
-                <div className="border-l border-emerald-400/40 pl-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[12px] font-semibold text-zinc-100">合図待ち</p>
-                    <span className="text-[11px] text-emerald-200">{gestureStatusLabel(pinchDetectorStatus, monitorEnabled)}</span>
-                  </div>
+            {settingsOpen && (
+              <section className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase text-zinc-500">設定</p>
                 <button
                   type="button"
-                  onClick={() => void (monitorEnabled ? stopMonitoring() : startMonitoring())}
-                  disabled={busy || rumiApprovalPending}
-                  className="ambient-mini-button mt-2 w-full"
+                  onClick={toggleReadoutEnabled}
+                  disabled={rumiApprovalPending}
+                  className={cn("ambient-mini-button w-full justify-between", readoutEnabled && "border-emerald-400/30 text-emerald-200")}
                 >
-                  {monitorEnabled ? <Square size={14} /> : <Play size={14} />}
-                  {monitorEnabled ? "合図待ちを停止" : "合図待ちを開始"}
+                  <span className="inline-flex min-w-0 items-center gap-2">
+                    {readoutEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
+                    <span className="truncate">回答音声</span>
+                  </span>
+                  <span className="shrink-0 text-[11px]">{readoutEnabled ? (readoutPlaying ? "ON・再生中" : "ON") : "OFF"}</span>
                 </button>
-                </div>
-              )}
-            </section>
-
-            {settingsOpen && (
-              <section className="space-y-2 border-t border-zinc-800/80 pt-3">
-                <p className="text-[11px] font-semibold uppercase text-zinc-500">設定</p>
                 {allRumiPermissionsGranted && (
                   <RoutingSettings
                     busy={busy}
@@ -1291,29 +1205,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
               </section>
             )}
 
-            {lastFinalAnswer && (
-              <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 text-emerald-50">
-                <div className="flex items-center justify-between gap-2 border-b border-emerald-400/15 px-2 py-1.5">
-                  <span className="min-w-0 truncate text-[11px] font-semibold">最新の回答</span>
-                  <button
-                    type="button"
-                    onClick={() => readoutPlaying ? stopSpeechReadout() : speakFinalAnswer()}
-                    disabled={pinchRecording}
-                    className="inline-flex h-7 items-center gap-1 rounded-md border border-emerald-300/25 px-2 text-[11px] font-semibold text-emerald-50 hover:border-emerald-200/45 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {readoutPlaying ? <VolumeX size={12} /> : <Volume2 size={12} />}
-                    {readoutPlaying ? "停止" : "読み上げ"}
-                  </button>
-                </div>
-                <div className="max-h-24 overflow-auto px-2 py-1.5 text-[11px] leading-5">
-                  {lastFinalAnswer}
-                </div>
-              </div>
-            )}
-
-            {message && (
+            {visibleMessage && (
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-[11px] text-zinc-400">
-                {message}
+                {visibleMessage}
               </div>
             )}
           </div>
