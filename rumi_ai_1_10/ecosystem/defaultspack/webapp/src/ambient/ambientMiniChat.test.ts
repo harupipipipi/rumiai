@@ -128,6 +128,43 @@ test("ambient mini chat detects approval_requested events and renders a compact 
   assert.equal(html.includes(AUTHORITY_WAITING_TEXT), false);
 });
 
+test("ambient mini chat renders browser token prompt instead of approval CTA when token is required", () => {
+  const approval = {
+    requestId: "auth-browser-1",
+    principalId: "local-user",
+    permissionId: "model.invoke",
+    resource: {},
+  };
+  const html = renderToStaticMarkup(createElement(AmbientMiniChat, {
+    conversation: null,
+    conversationId: "c1",
+    routingSummary: "Mini",
+    loading: false,
+    error: null,
+    input: "",
+    sending: false,
+    disabled: true,
+    latestInputPreview: null,
+    authorityApproval: approval,
+    browserApprovalTokenPrompt: {
+      required: true,
+      token: "",
+      onTokenChange: () => {},
+      onSave: () => {},
+    },
+    onInputChange: () => {},
+    onSubmit: (event) => event.preventDefault(),
+    onRefresh: () => {},
+    onPickChat: () => {},
+    onOpenAuthorityApproval: () => {},
+  }));
+
+  assert.match(html, /ブラウザで承認するにはテストトークンが必要です/);
+  assert.match(html, /browser_approval_token/);
+  assert.match(html, /保存/);
+  assert.equal(html.includes("承認を開く"), false);
+});
+
 test("ambient mini chat hides hidden authority resume and keeps only the final answer for readout", () => {
   const conversation = conversationWithMessages([
     message({ id: "u1", role: "user", raw_text: "question", created_at: 2, sequence_number: 1 }),

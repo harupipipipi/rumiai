@@ -5606,6 +5606,7 @@ export default function App() {
   const fingerDebugMode = pathname === "/ambient-debug"
     || searchParams.get("debug") === "1"
     || searchParams.get("qa") === "debug";
+  const explicitDebugConversationId = fingerDebugMode ? chatIdFromLocation() : null;
 
   if (pathname === "/approval") {
     return <AuthorityApprovalWindow />;
@@ -5614,7 +5615,7 @@ export default function App() {
     return <AmbientTriggerPanel variant="window" />;
   }
   if (pathname === "/ambient-debug" || pathname === "/finger-recording") {
-    return <AmbientTriggerPanel variant="window" debugMode={fingerDebugMode} />;
+    return <AmbientTriggerPanel variant="window" debugMode={fingerDebugMode} conversationId={explicitDebugConversationId} />;
   }
   if (pathname === "/console") {
     return <DefaultsConsoleWindow />;

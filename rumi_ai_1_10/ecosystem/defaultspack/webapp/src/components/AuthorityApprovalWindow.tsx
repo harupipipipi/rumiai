@@ -15,7 +15,6 @@ import {
 import { authorityApprovalResources, type AuthorityApprovalDecision, type AuthorityRequest } from "../features/chat/resources/authorityApprovalResources";
 import {
   authorityApprovalConfig,
-  authorityRelatedPermissions,
   authorityApprovalSettledLabel,
   authorityApprovalShouldRetryWithFreshContext,
   authorityApprovalRiskTone,
@@ -27,6 +26,11 @@ import {
   type AuthorityApprovalScope,
   authorityRequestSettledStatus,
 } from "../lib/authorityApproval";
+import {
+  readBrowserApprovalTokenFromLocation,
+  readBrowserApprovalTokenFromStorage,
+  rememberBrowserApprovalToken,
+} from "../lib/authorityApprovalBrowserToken";
 import { broadcastAuthorityApprovalSettlement } from "../lib/authorityApprovalEvents";
 import { closeCurrentWindow, getAuthorityApprovalContext, openFingerRecordingWindow } from "../lib/desktopApproval";
 import { cn } from "../lib/cn";
@@ -45,8 +49,6 @@ type TauriAuthorityWindow = Window & {
   __TAURI_INTERNALS__?: unknown;
   __TAURI__?: unknown;
 };
-
-const BROWSER_APPROVAL_TOKEN_STORAGE_KEY = "rumi.authority.browserApprovalToken";
 
 const SCOPE_LABELS: Record<AuthorityApprovalScope, string> = {
   once: "今回のみ",
@@ -120,36 +122,6 @@ function hasNativeAuthorityApprovalContext(): boolean {
   if (typeof window === "undefined") return false;
   const maybeWindow = window as TauriAuthorityWindow;
   return Boolean(maybeWindow.__TAURI__ || maybeWindow.__TAURI_INTERNALS__);
-}
-
-function readBrowserApprovalTokenFromLocation(): string {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    return (
-      params.get("browser_approval_token")
-      ?? params.get("approval_browser_token")
-      ?? params.get("browserApprovalToken")
-      ?? ""
-    ).trim();
-  } catch {
-    return "";
-  }
-}
-
-function readBrowserApprovalTokenFromSession(): string {
-  try {
-    return window.sessionStorage.getItem(BROWSER_APPROVAL_TOKEN_STORAGE_KEY)?.trim() ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function rememberBrowserApprovalToken(token: string): void {
-  try {
-    window.sessionStorage.setItem(BROWSER_APPROVAL_TOKEN_STORAGE_KEY, token);
-  } catch {
-    // Session storage may be unavailable in private or file-based browser contexts.
-  }
 }
 
 function stringValue(value: unknown): string {
@@ -264,7 +236,7 @@ export function AuthorityApprovalWindow() {
       setBrowserApprovalToken(tokenFromLocation);
       return;
     }
-    setBrowserApprovalToken(readBrowserApprovalTokenFromSession());
+    setBrowserApprovalToken(readBrowserApprovalTokenFromStorage());
   }, []);
 
   const settleAuthorityRequest = useCallback((
@@ -503,7 +475,6 @@ export function AuthorityApprovalWindow() {
       const decision = await authorityApprovalResources.approveAuthorityApproval(request.request_id, {
         scope: selectedScope,
         config,
-        related_permissions: authorityRelatedPermissions(approval),
         ui_operator: context.ui_operator,
       });
       if (!decision.approved) throw new Error("authority approval failed");

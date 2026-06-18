@@ -33,6 +33,18 @@ test("ambient mini authority CTA resolves stale request metadata before opening"
   assert.doesNotMatch(source, /openAuthorityApprovalWindow\(approval\.requestId\)/);
 });
 
+test("ambient mini authority browser fallback opens only tokenized approval URLs", () => {
+  const source = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const helperSource = readFileSync(resolve(SRC_ROOT, "lib", "authorityApprovalBrowserToken.ts"), "utf8");
+
+  assert.match(source, /const nextBrowserApprovalToken = readBrowserApprovalToken\(\)/);
+  assert.match(source, /browserAuthorityApprovalPath\(resolvedApproval\.requestId, nextBrowserApprovalToken\)/);
+  assert.match(source, /window\.open\(approvalUrl/);
+  assert.match(source, /ブラウザで承認するにはテストトークンを保存してください。/);
+  assert.doesNotMatch(source, /window\.open\(["'`]\/approval\?request_id/);
+  assert.match(helperSource, /params\.set\("browser_approval_token", token\)/);
+});
+
 test("authority approval route does not render ambient gesture overlay", () => {
   const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
 
@@ -103,8 +115,11 @@ test("ambient debug QA controls are limited to finger recording window routes", 
 
   assert.match(appSource, /pathname === "\/ambient-debug"/);
   assert.match(appSource, /pathname === "\/ambient-debug" \|\| pathname === "\/finger-recording"/);
-  assert.match(appSource, /<AmbientTriggerPanel variant="window" debugMode=\{fingerDebugMode\}/);
+  assert.match(appSource, /const explicitDebugConversationId = fingerDebugMode \? chatIdFromLocation\(\) : null/);
+  assert.match(appSource, /<AmbientTriggerPanel variant="window" debugMode=\{fingerDebugMode\} conversationId=\{explicitDebugConversationId\}/);
   assert.doesNotMatch(appSource, /pathname === "\/viewer"/);
+  assert.match(panelSource, /const explicitDebugConversationId = debugMode \? cleanString\(conversationId\) : null/);
+  assert.match(panelSource, /explicitDebugConversationId \?\? ambientLinkedConversationId\(status, conversationId\)/);
   assert.match(panelSource, /const debugQaVisible = standalone && debugMode/);
   assert.match(panelSource, /data-testid="ambient-debug-panel"/);
   assert.match(panelSource, /data-testid="ambient-debug-transcript"/);

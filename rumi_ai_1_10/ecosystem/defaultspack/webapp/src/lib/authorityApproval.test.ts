@@ -15,6 +15,10 @@ import {
   pendingAuthorityApproval,
   resolvePendingAuthorityApproval,
 } from "./authorityApproval";
+import {
+  browserAuthorityApprovalPath,
+  readBrowserApprovalTokenFromLocation,
+} from "./authorityApprovalBrowserToken";
 
 const SRC_ROOT = resolve(import.meta.dirname, "..");
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -248,7 +252,7 @@ test("authority approval config dedupes matching host action aliases", () => {
   );
 });
 
-test("authority related permissions bundle provider-scoped network approval", () => {
+test("authority related permissions helper can identify provider-scoped network approval", () => {
   assert.deepEqual(
     authorityRelatedPermissions({
       permissionId: "model.invoke",
@@ -260,6 +264,24 @@ test("authority related permissions bundle provider-scoped network approval", ()
     }),
     ["api_key.use", "network.egress"],
   );
+});
+
+test("authority approval browser token helper accepts URL aliases and builds tokenized path", () => {
+  assert.equal(readBrowserApprovalTokenFromLocation("?browser_approval_token=tok-1"), "tok-1");
+  assert.equal(readBrowserApprovalTokenFromLocation("?approval_browser_token=tok-2"), "tok-2");
+  assert.equal(readBrowserApprovalTokenFromLocation("?browserApprovalToken=tok-3"), "tok-3");
+  assert.equal(
+    browserAuthorityApprovalPath("auth 1", "tok/en"),
+    "/approval?request_id=auth+1&browser_approval_token=tok%2Fen",
+  );
+});
+
+test("authority approval window approves exact request by default without related permission bundling", () => {
+  const source = authorityApprovalWindowSource();
+
+  assert.doesNotMatch(source, /related_permissions:\s*authorityRelatedPermissions/);
+  assert.doesNotMatch(source, /authorityRelatedPermissions/);
+  assert.match(source, /approveAuthorityApproval\(request\.request_id,[\s\S]*scope: selectedScope,[\s\S]*config,[\s\S]*ui_operator: context\.ui_operator/);
 });
 
 test("authority approval risk tones render critical and high as danger", () => {
@@ -342,13 +364,19 @@ test("authority approval window refreshes stale ui_operator once and retries onc
 
 test("authority approval browser route is read-only without token but can fetch browser ui_operator with token", () => {
   const source = authorityApprovalWindowSource();
+  const tokenSource = readFileSync(resolve(SRC_ROOT, "lib", "authorityApprovalBrowserToken.ts"), "utf8");
   const apiSource = readFileSync(resolve(SRC_ROOT, "lib", "api.ts"), "utf8");
   const resourceSource = readFileSync(resolve(SRC_ROOT, "features", "chat", "resources", "authorityApprovalResources.ts"), "utf8");
 
   assert.match(source, /function hasNativeAuthorityApprovalContext\(\)/);
-  assert.match(source, /BROWSER_APPROVAL_TOKEN_STORAGE_KEY/);
   assert.match(source, /readBrowserApprovalTokenFromLocation/);
-  assert.match(source, /window\.sessionStorage/);
+  assert.match(source, /readBrowserApprovalTokenFromStorage/);
+  assert.match(tokenSource, /BROWSER_APPROVAL_TOKEN_STORAGE_KEY/);
+  assert.match(tokenSource, /"browser_approval_token"/);
+  assert.match(tokenSource, /"approval_browser_token"/);
+  assert.match(tokenSource, /"browserApprovalToken"/);
+  assert.match(tokenSource, /"sessionStorage"/);
+  assert.match(tokenSource, /"localStorage"/);
   assert.match(source, /const browserApprovalAvailable = Boolean\(!nativeApprovalAvailable && browserApprovalToken\)/);
   assert.match(source, /request\.status === "pending" && approvalContextAvailable && !displayedSettledStatus/);
   assert.match(source, /getBrowserAuthorityApprovalContext\(targetRequestId, token\)/);
