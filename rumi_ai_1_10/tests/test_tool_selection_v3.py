@@ -163,7 +163,7 @@ def test_semantic_index_falls_back_to_lexical_and_reuses_cache(tmp_path):
     second = index.search("GitHub code search", _tools(), limit=3, backend="embedding")
 
     assert first["stage"] == "lexical_fallback"
-    assert first["fallback_reason"] == "embedding_backend_unavailable"
+    assert first["fallback_reason"] == "embedding_model_not_configured"
     assert first["cache_hit"] is False
     assert second["cache_hit"] is True
     assert "github.search_code" in second["tool_ids"]

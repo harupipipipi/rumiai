@@ -85,7 +85,7 @@ def test_tool_executor_task_board_shares_env_kanban_api_board(tmp_path, monkeypa
     context = {
         "workspace_id": "ws-env-shared",
         "conversation_id": "conv-env",
-        "_tool_server_approved": True,
+        "profile_policy": {"yolo_mode": True},
         "principal_id": "defaultspack",
     }
 
@@ -128,7 +128,7 @@ def test_task_board_ignores_untrusted_context_db_path(tmp_path, monkeypatch):
             "kanban_db_path": str(redirected_db),
             "task_board_kanban_db_path": str(redirected_db),
             "_task_board_test_context": True,
-            "_tool_server_approved": True,
+            "profile_policy": {"yolo_mode": True},
             "principal_id": "defaultspack",
         },
     )
@@ -344,7 +344,7 @@ def test_tool_registry_and_executor_invoke_manifest_backed_task_board(tmp_path):
         {"action": "create", "title": "Exercise ToolExecutor"},
         {
             "conversation_workspace_dir": str(tmp_path),
-            "_tool_server_approved": True,
+            "profile_policy": {"yolo_mode": True},
             "principal_id": "defaultspack",
         },
     )

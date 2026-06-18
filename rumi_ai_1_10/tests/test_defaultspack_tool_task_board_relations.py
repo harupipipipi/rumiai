@@ -59,7 +59,11 @@ def test_task_board_tracks_dependencies_blockers_and_subtasks(tmp_path):
 def test_tool_task_board_relations_manifest_loads_and_executes(tmp_path):
     ToolRegistry._instance = None
     registry = ToolRegistry()
-    context = {"conversation_workspace_dir": str(tmp_path), "_tool_server_approved": True, "principal_id": "defaultspack"}
+    context = {
+        "conversation_workspace_dir": str(tmp_path),
+        "profile_policy": {"yolo_mode": True},
+        "principal_id": "defaultspack",
+    }
     root = ToolExecutor().execute("tool_task_board", {"action": "create", "title": "Root"}, context)["widget"]["changed"]
     result = ToolExecutor().execute(
         "tool_task_board",

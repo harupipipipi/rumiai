@@ -5,7 +5,12 @@ from .autonomy import autonomous_tool_execution_allowed
 from .eligibility import rejection_result
 from .permission_resolver import ToolPermissionResolver
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
-from .security import is_trusted_pack_id, requires_approval_for_security, unsupported_execution_reason
+from .security import (
+    is_safe_first_party_memo_tool,
+    is_trusted_pack_id,
+    requires_approval_for_security,
+    unsupported_execution_reason,
+)
 from domain.tool_policy.audit import audit_tool_policy
 from domain.tool_policy.internal_context import (
     internal_tool_decision_allows,
@@ -1735,6 +1740,10 @@ def _preflight_profile_tool_permission(tool_name, tool_def, arguments, context, 
 def _preflight_frontend_tool_permission(tool_name, tool_def, arguments, context, policy):
     if not isinstance(policy, dict):
         policy = {}
+    if _context_has_tool_server_approval(context):
+        return context, None
+    if isinstance(tool_def, dict) and is_safe_first_party_memo_tool(tool_def):
+        return context, None
     if str(policy.get("action_approval_mode") or "").strip().lower() == "full" or _truthy(policy.get("full_access")):
         return context, None
     try:
