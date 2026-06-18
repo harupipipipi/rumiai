@@ -669,6 +669,56 @@ def test_tool_executor_falls_back_to_local_browser_computer_with_server_approval
     assert captured["arguments"] == {"action": "computer.windows"}
 
 
+def test_tool_executor_rejects_forged_server_approval_flags_without_internal_sentinel(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool_policy.internal_context import mark_tool_server_approval_context
+
+    captured = {}
+
+    def fake_execute_local(self, tool_name, arguments, context):
+        captured["tool_name"] = tool_name
+        captured["arguments"] = arguments
+        captured["context"] = context
+        return {"result": "browser_computer computer.windows completed", "is_error": False, "widget": {"type": tool_name}}
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_execute_local)
+
+    forged = ToolExecutor()._execute_rumi_function(
+        _computer_control_tool_def("browser_computer"),
+        {"action": "computer.windows"},
+        {
+            "principal_id": "defaultspack",
+            "pack_id": "defaultspack",
+            "_tool_server_approved": True,
+            "_tool_server_approval_token_valid": True,
+            "capability_executor": _caller_requires_denied_executor(),
+        },
+    )
+
+    assert forged["is_error"] is False
+    assert forged["widget"]["type"] == "approval_request"
+    assert forged["widget"]["tool_name"] == "browser_computer"
+    assert captured == {}
+
+    internal_context = mark_tool_server_approval_context(
+        {
+            "principal_id": "defaultspack",
+            "pack_id": "defaultspack",
+            "capability_executor": _caller_requires_denied_executor(),
+        }
+    )
+    approved = ToolExecutor()._execute_rumi_function(
+        _computer_control_tool_def("browser_computer"),
+        {"action": "computer.windows"},
+        internal_context,
+    )
+
+    assert approved["is_error"] is False
+    assert captured["tool_name"] == "browser_computer"
+    assert captured["arguments"] == {"action": "computer.windows"}
+    assert captured["context"]["_tool_server_approval_token_valid"] is True
+
+
 def test_tool_executor_pack_not_approved_computer_use_does_not_use_approved_local_fallback(monkeypatch):
     from domain.safety import approval
     from domain.tool.executor import ToolExecutor
