@@ -69,6 +69,24 @@ _APPROVAL_WAITING_TEXT = "許可が必要なため、ユーザーが承認する
 _AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。"
 
 
+def _tool_selection_activity_message(selection: dict[str, Any]) -> str:
+    services = selection.get("selected_services") if isinstance(selection.get("selected_services"), list) else []
+    labels = [
+        str(service.get("label") or service.get("service_id") or "").strip()
+        for service in services
+        if isinstance(service, dict) and str(service.get("label") or service.get("service_id") or "").strip()
+    ]
+    count = len(selection.get("selected_tool_ids") if isinstance(selection.get("selected_tool_ids"), list) else [])
+    if labels:
+        head = " と ".join(labels[:2])
+        if len(labels) > 2:
+            head = f"{head} など"
+        return f"{head}を使用します"
+    if count:
+        return f"{count}個の機能を使用します"
+    return "追加の機能なしで続行します"
+
+
 def _tool_display_group(tool_name: str) -> dict[str, str]:
     lowered = str(tool_name or "").lower()
     rules = [
@@ -801,6 +819,24 @@ class ChatRunEngine:
                 data={"message": prepared.user_message},
                 message="user message committed",
             )
+            tool_selection = prepared.request_context.get("tool_selection") if isinstance(prepared.request_context, dict) else None
+            if isinstance(tool_selection, dict) and tool_selection.get("selection_id"):
+                yield self._emit(
+                    "tool_selection_started",
+                    data={
+                        "selection_id": tool_selection.get("selection_id"),
+                        "mode": tool_selection.get("mode"),
+                        "strategy": tool_selection.get("strategy"),
+                    },
+                    message="機能を選定しています",
+                    phase="tool_selection",
+                )
+                yield self._emit(
+                    "tool_selection_completed",
+                    data=tool_selection,
+                    message=_tool_selection_activity_message(tool_selection),
+                    phase="tool_selection",
+                )
 
             assistant_seq = int(prepared.user_message.get("sequence_number", 1) or 1) + 1
             if stream_mode:
@@ -2061,6 +2097,8 @@ class ChatRunEngine:
                 "provider_capabilities": redact_sensitive_value(dict(prepared.provider_capabilities or {})),
             }
         )
+        if isinstance(prepared.request_context, dict) and isinstance(prepared.request_context.get("tool_selection"), dict):
+            metadata["tool_selection"] = dict(prepared.request_context["tool_selection"])
         trace_metadata = self._write_provider_trace(prepared, finalized)
         if trace_metadata:
             metadata["provider_trace"] = trace_metadata
@@ -2167,6 +2205,10 @@ class ChatRunEngine:
             "ai_retry_scheduled",
             "task_failed",
             "cancelled",
+            "tool_selection_started",
+            "tool_selection_completed",
+            "tool_selection_fallback",
+            "tool_selection_reviewed",
         }
 
     def _provider_supports_stream_tool_calls(self, model: str) -> bool:

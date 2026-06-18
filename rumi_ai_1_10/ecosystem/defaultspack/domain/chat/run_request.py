@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import importlib
+import json
 from functools import lru_cache
 import os
 import re
@@ -32,6 +33,9 @@ from domain.chat.ir_legacy_adapter import (
 from domain.chat.modality_detector import detect_modalities
 from domain.chat.public_metadata import compact_tool_filter_entries
 from domain.chat.store import ChatStore
+from domain.chat.tool_selection_schema import TOOL_SELECTION_MODES, TOOL_SELECTION_SCOPES, TOOL_SELECTION_STRATEGIES, normalize_tool_targets
+from domain.chat.tool_selection_service import ToolSelectionService
+from domain.chat.tool_selection_trace import ToolSelectionTraceStore
 from domain.human_operator.constants import HUMAN_OPERATOR_TOOL_NAME, is_human_operator_model
 from domain.vision.image_bridge import (
     apply_vision_bridge_to_messages,
@@ -84,18 +88,17 @@ _COMPUTER_USE_VIVALDI_TARGET_RE = re.compile(
 )
 _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
-_TOOL_SELECTION_MODES = {"auto", "manual", "none"}
-_TOOL_SELECTION_SCOPES = {"turn"}
-
 
 @dataclass
 class NormalizedToolSelection:
     mode: str = "auto"
+    strategy: str | None = None
     include: list[Any] = field(default_factory=list)
-    exclude: list[str] = field(default_factory=list)
+    exclude: list[Any] = field(default_factory=list)
     scope: str = "turn"
     must_use: bool = False
     review: bool = False
+    preview_id: str | None = None
     source: str = "default"
 
 
@@ -299,6 +302,8 @@ def prepare_chat_run(
     conversation_metadata = (
         conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
     )
+    if isinstance(conversation_metadata.get("tool_preferences"), dict):
+        request_context["conversation_tool_preferences"] = conversation_metadata["tool_preferences"]
     resolved_profile_id = str(
         request_context.get("profile_id")
         or metadata.get("profile_id")
@@ -1487,9 +1492,9 @@ def _normalize_tool_selection(input_data: dict[str, Any]) -> NormalizedToolSelec
     if isinstance(raw_selection, dict):
         include = _coerce_tool_items(raw_selection.get("include"))
         top_level_tools = _coerce_tool_items(input_data.get("tools"))
-        exclude = _coerce_tool_id_list(raw_selection.get("exclude"))
+        exclude = _coerce_tool_items(raw_selection.get("exclude"))
         raw_mode = str(raw_selection.get("mode") or "").strip().lower()
-        if raw_mode not in _TOOL_SELECTION_MODES:
+        if raw_mode not in TOOL_SELECTION_MODES:
             raw_mode = "manual" if include else "auto"
         if raw_mode == "auto" and top_level_tools:
             include = _merge_tool_items(include, top_level_tools)
@@ -1498,11 +1503,13 @@ def _normalize_tool_selection(input_data: dict[str, Any]) -> NormalizedToolSelec
         scope = str(raw_selection.get("scope") or "turn").strip().lower() or "turn"
         return NormalizedToolSelection(
             mode=raw_mode,
+            strategy=_normalize_tool_selection_strategy(raw_selection.get("strategy")),
             include=include,
             exclude=exclude,
             scope=scope,
             must_use=_coerce_optional_bool(raw_selection.get("must_use"), default=False),
-            review=False,
+            review=raw_mode == "review" or _coerce_optional_bool(raw_selection.get("review"), default=False),
+            preview_id=str(raw_selection.get("preview_id") or "").strip() or None,
             source="tool_selection",
         )
 
@@ -1546,17 +1553,14 @@ def _validate_tool_selection_input(input_data: dict[str, Any]) -> str | None:
     if not isinstance(raw_selection, dict):
         return "params.tool_selection must be an object"
     raw_mode = str(raw_selection.get("mode") or "auto").strip().lower()
-    if raw_mode not in _TOOL_SELECTION_MODES:
-        if raw_mode == "review":
-            return "params.tool_selection.mode=review is not implemented yet"
-        return "params.tool_selection.mode must be one of auto, manual, none"
+    if raw_mode not in TOOL_SELECTION_MODES:
+        return "params.tool_selection.mode must be one of auto, review, manual, none"
     raw_scope = str(raw_selection.get("scope") or "turn").strip().lower()
-    if raw_scope not in _TOOL_SELECTION_SCOPES:
-        if raw_scope == "conversation":
-            return "params.tool_selection.scope=conversation is not implemented yet"
-        return "params.tool_selection.scope must be turn"
-    if _coerce_optional_bool(raw_selection.get("review"), default=False):
-        return "params.tool_selection.review is not implemented yet"
+    if raw_scope not in TOOL_SELECTION_SCOPES:
+        return "params.tool_selection.scope must be one of turn, conversation"
+    raw_strategy = str(raw_selection.get("strategy") or "").strip().lower()
+    if raw_strategy and raw_strategy not in TOOL_SELECTION_STRATEGIES:
+        return "params.tool_selection.strategy must be one of hybrid, semantic, catalog_ai, all_with_hints, all_schemas, lexical"
     must_use = _coerce_optional_bool(raw_selection.get("must_use"), default=False)
     include = _coerce_tool_items(raw_selection.get("include"))
     if raw_mode == "none" and must_use:
@@ -1590,6 +1594,11 @@ def _coerce_tool_id_list(value: Any) -> list[str]:
         for item in _coerce_tool_items(value)
         if not isinstance(item, dict) and str(item).strip()
     ]
+
+
+def _normalize_tool_selection_strategy(value: Any) -> str | None:
+    strategy = str(value or "").strip().lower()
+    return strategy if strategy in TOOL_SELECTION_STRATEGIES else None
 
 
 def _merge_tool_items(*groups: list[Any]) -> list[Any]:
@@ -1626,19 +1635,17 @@ def _coerce_optional_bool(value: Any, *, default: bool) -> bool:
 
 
 def _tool_selection_metadata(selection: NormalizedToolSelection) -> dict[str, Any]:
-    include: list[str] = []
-    for item in selection.include:
-        value = item.get("tool_id") or item.get("name") if isinstance(item, dict) else item
-        text = str(value or "").strip()
-        if text:
-            include.append(text)
+    include = [target.to_dict() for target in normalize_tool_targets(selection.include)]
+    exclude = [target.to_dict() for target in normalize_tool_targets(selection.exclude)]
     return {
         "mode": selection.mode,
+        "strategy": selection.strategy,
         "include": include,
-        "exclude": list(selection.exclude),
+        "exclude": exclude,
         "scope": selection.scope,
         "must_use": selection.must_use,
         "review": selection.review,
+        "preview_id": selection.preview_id,
         "source": selection.source,
     }
 
@@ -1816,44 +1823,76 @@ def _available_tools(
     user_text: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     selection = _normalize_tool_selection(input_data)
-    if selection.mode == "none":
-        raw_tools: Any = []
-    elif selection.mode == "manual":
-        raw_tools = selection.include
-    else:
-        raw_tools = None
-    try:
-        tools, unknown_tools = _resolve_selected_tools(
-            raw_tools, user_text=user_text, context=context
-        )
-    except Exception:
-        tools, unknown_tools = [], []
-    if selection.mode in {"auto", "review"} and selection.include:
-        try:
-            included_tools, include_unknown = _resolve_selected_tools(
-                selection.include, user_text=user_text, context=context
-            )
-        except Exception:
-            included_tools, include_unknown = [], []
-        tools = _merge_tool_definitions(tools, included_tools)
-        unknown_tools = [*unknown_tools, *include_unknown]
-    if selection.exclude:
-        excluded = set(selection.exclude)
-        tools = [tool for tool in tools if _tool_definition_id(tool) not in excluded]
     resolved_context = resolve_runtime_profile_context(context or {})
     resolved_context["tool_selection"] = _tool_selection_metadata(selection)
-    if unknown_tools:
-        resolved_context["unknown_selected_tools"] = unknown_tools
     runtime_profile = resolved_context.get("runtime_profile")
     agent_id = input_data.get("agent_id")
-    filtered = filter_tool_definitions_for_runtime_profile(
-        tools,
-        runtime_profile,
-        agent_id=agent_id,
-        policy_context=resolved_context,
-    )
+    try:
+        settings = _read_frontend_settings()
+        explicit_tool_definitions = [
+            item
+            for item in selection.include
+            if isinstance(item, dict) and tool_name_from_definition(item)
+        ]
+        registry_tools = ToolRegistry().list_tools()
+        profile_filtered = filter_tool_definitions_for_runtime_profile(
+            registry_tools,
+            runtime_profile,
+            agent_id=agent_id,
+            policy_context=resolved_context,
+        )
+        if explicit_tool_definitions:
+            profile_filtered = _merge_tool_definitions(profile_filtered, explicit_tool_definitions)
+        service = ToolSelectionService(
+            call_handler=resolved_context.get("call_handler"),
+            settings=settings,
+        )
+        decision = service.select(
+            user_text,
+            profile_filtered,
+            selection=selection,
+            context=resolved_context,
+        )
+        filtered = list(decision.selected_tools)
+        selection_trace = decision.to_trace_dict()
+        resolved_context["tool_selection"] = {
+            **resolved_context["tool_selection"],
+            **selection_trace,
+        }
+        ToolSelectionTraceStore().save(resolved_context["tool_selection"])
+        if decision.unknown_targets:
+            resolved_context["unknown_selected_tools"] = list(decision.unknown_targets)
+    except Exception as exc:
+        filtered = []
+        resolved_context["tool_selection"] = {
+            **resolved_context["tool_selection"],
+            "selection_id": gen_id(),
+            "stage": "selection_failed",
+            "fallbacks": [{"stage": "tool_selection_service", "reason": str(exc)}],
+            "selected_tool_ids": [],
+            "eligible_count": 0,
+            "candidate_count": 0,
+            "duration_ms": 0,
+        }
+        if selection.mode == "manual":
+            try:
+                filtered, unknown_tools = _resolve_selected_tools(selection.include, user_text=user_text, context=resolved_context)
+                if unknown_tools:
+                    resolved_context["unknown_selected_tools"] = unknown_tools
+            except Exception:
+                filtered = []
     filtered = _append_special_model_tools(filtered, resolved_context, agent_id=agent_id)
     return filtered, adapt_tool_definitions(filtered), resolved_context
+
+
+def _read_frontend_settings() -> dict[str, Any]:
+    env_path = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH")
+    path = Path(env_path).expanduser() if env_path else Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _ensure_must_use_has_eligible_tools(

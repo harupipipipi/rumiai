@@ -98,6 +98,62 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
+  pattern: /api/chat/conversations/{id}/tool-preferences
+  legacy_block_module: blocks.chat.tool_preferences
+  replacement_function_id: ''
+  owner: chat
+  reason: tracked compatibility fallback for Tool UX v3 conversation preferences
+  remove_after: v2.4
+- method: PUT
+  pattern: /api/chat/conversations/{id}/tool-preferences
+  legacy_block_module: blocks.chat.tool_preferences
+  replacement_function_id: ''
+  owner: chat
+  reason: tracked compatibility fallback for Tool UX v3 conversation preferences
+  remove_after: v2.4
+- method: GET
+  pattern: /api/conversations/{id}/tool-preferences
+  legacy_block_module: blocks.chat.tool_preferences
+  replacement_function_id: ''
+  owner: chat
+  reason: tracked compatibility fallback for Tool UX v3 conversation preferences
+  remove_after: v2.4
+- method: PUT
+  pattern: /api/conversations/{id}/tool-preferences
+  legacy_block_module: blocks.chat.tool_preferences
+  replacement_function_id: ''
+  owner: chat
+  reason: tracked compatibility fallback for Tool UX v3 conversation preferences
+  remove_after: v2.4
+- method: GET
+  pattern: /api/tools/catalog
+  legacy_block_module: blocks.tool.catalog
+  replacement_function_id: ''
+  owner: tool
+  reason: tracked compatibility fallback for Tool UX v3 catalog
+  remove_after: v2.4
+- method: POST
+  pattern: /api/tools/selection/preview
+  legacy_block_module: blocks.tool.selection_preview
+  replacement_function_id: ''
+  owner: tool
+  reason: tracked compatibility fallback for Tool UX v3 review preview
+  remove_after: v2.4
+- method: GET
+  pattern: /api/tools/selection/traces/{trace_id}
+  legacy_block_module: blocks.tool.selection_trace
+  replacement_function_id: ''
+  owner: tool
+  reason: tracked compatibility fallback for Tool UX v3 trace lookup
+  remove_after: v2.4
+- method: POST
+  pattern: /api/tools/embedding-index/rebuild
+  legacy_block_module: blocks.tool.embedding_index_rebuild
+  replacement_function_id: ''
+  owner: tool
+  reason: tracked compatibility fallback for Tool UX v3 local embedding cache rebuild
+  remove_after: v2.4
+- method: GET
   pattern: /api/chat/channels
   legacy_block_module: blocks.chat.channel.list
   replacement_function_id: chat_channel_list

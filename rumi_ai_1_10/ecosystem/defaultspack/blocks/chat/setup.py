@@ -45,6 +45,10 @@ def run(context):
         ("POST", "/api/chat/conversations/{id}/export", _lazy("blocks.chat.export_conversation"), {"id": "conversation_id"}),
         ("POST", "/api/chat/conversations/{id}/summarize", _lazy("blocks.chat.summarize_and_trim"), {"id": "conversation_id"}),
         ("POST", "/api/chat/conversations/{id}/auto-trim", _lazy("blocks.chat.auto_trim"), {"id": "conversation_id"}),
+        ("GET", "/api/chat/conversations/{id}/tool-preferences", _lazy("blocks.chat.tool_preferences", "run_get"), {"id": "conversation_id"}),
+        ("PUT", "/api/chat/conversations/{id}/tool-preferences", _lazy("blocks.chat.tool_preferences", "run_put"), {"id": "conversation_id"}),
+        ("GET", "/api/conversations/{id}/tool-preferences", _lazy("blocks.chat.tool_preferences", "run_get"), {"id": "conversation_id"}),
+        ("PUT", "/api/conversations/{id}/tool-preferences", _lazy("blocks.chat.tool_preferences", "run_put"), {"id": "conversation_id"}),
         ("GET", "/api/chat/conversations/{id}/run-results/{run_id}/browser-screenshots", _lazy("blocks.chat.browser_screenshots"), {"id": "conversation_id", "run_id": "run_id"}),
         ("GET", "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots", _lazy("blocks.chat.browser_screenshots"), {"id": "conversation_id", "run_id": "run_id"}),
         # --- T11: Channel routes ---
