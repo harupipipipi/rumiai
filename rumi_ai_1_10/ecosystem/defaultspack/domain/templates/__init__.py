@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from .activation import TemplateActivationPlan, TemplateActivationPlanner, TemplateActivationState
 from .diagnostics import collect_template_diagnostics, diagnostics_have_errors
+from .lifecycle import (
+    TemplateLifecyclePlan,
+    TemplateLifecycleStore,
+    apply_template_lifecycle,
+    plan_template_lifecycle,
+)
 from .discovery import (
     TemplateDiscoveryResult,
     TemplateRoot,
@@ -9,7 +15,12 @@ from .discovery import (
     discover_templates,
     load_template_file,
 )
-from .migration import migrate_template_dict, register_template_migrations
+from .migration import (
+    TemplateMigrationRegistry,
+    TemplateMigrationResult,
+    migrate_template_dict,
+    register_template_migrations,
+)
 from .models import (
     CURRENT_TEMPLATE_SCHEMA_VERSION,
     ResolvedTemplate,
@@ -33,6 +44,7 @@ from .resolver import (
     resolve_template,
 )
 from .security import assess_template_security, is_safe_template
+from .services import TemplateBackendServiceRegistry, TemplateBackendServiceSpec
 from .validation import TemplateValidationResult, has_errors, parse_template, validate_template
 from .projectors import (
     build_template_catalog,
@@ -54,14 +66,21 @@ __all__ = [
     "TemplateDiagnostic",
     "TemplateDiscoveryResult",
     "TemplateKind",
+    "TemplateLifecyclePlan",
+    "TemplateLifecycleStore",
+    "TemplateMigrationRegistry",
+    "TemplateMigrationResult",
     "TemplatePiece",
     "TemplatePieceKind",
+    "TemplateBackendServiceRegistry",
+    "TemplateBackendServiceSpec",
     "TemplateRegistry",
     "TemplateRoot",
     "TemplateStatus",
     "TemplateTrustLevel",
     "TemplateValidationResult",
     "apply_template_patches",
+    "apply_template_lifecycle",
     "assess_template_security",
     "build_template_registry",
     "build_template_catalog",
@@ -79,6 +98,7 @@ __all__ = [
     "merge_template_pieces",
     "migrate_template_dict",
     "parse_template",
+    "plan_template_lifecycle",
     "project_resolved_templates",
     "register_template_migrations",
     "resolve_template",
