@@ -133,6 +133,10 @@
       "kind": "permission",
       "order": 19,
       "permission_id": "api_key.use",
+      "override": {
+        "mode": "replace",
+        "target_projected_id": "rumi.backend.model_routing.default:model_route_api_key_permission"
+      },
       "scope": "ai_client",
       "reason": "Provider keys are secret material and must stay approval-aware."
     },

@@ -611,6 +611,7 @@ class SlashCommandRegistry:
             "modes",
             "args",
             "execution",
+            "override",
         ):
             if key not in command and key in projection:
                 command[key] = deepcopy(projection[key])
@@ -636,6 +637,7 @@ class SlashCommandRegistry:
         command["_template_piece_id"] = piece_id
         command["_template_source"] = source
         command["_template_trust_level"] = trust_level
+        command["_public_id"] = command_id
         return command
 
     @staticmethod
@@ -711,6 +713,7 @@ class SlashCommandRegistry:
         )
         normalized["id"] = command_id
         normalized["name"] = str(normalized.get("name") or command_id).strip().lower().lstrip("/")
+        normalized["_public_id"] = command_id
         normalized["label"] = str(normalized.get("label") or normalized["name"])
         normalized["aliases"] = [
             str(alias).strip().lower().lstrip("/")
@@ -748,14 +751,26 @@ class SlashCommandRegistry:
                 continue
             existing = deduped.get(command_id)
             if existing is not None:
+                if self._command_override_allows(command, existing):
+                    manifest_errors.append(
+                        self._manifest_issue(
+                            "info",
+                            "command_explicit_override",
+                            f"command id '{command_id}' from {self._source_label(command)} explicitly replaces {self._source_label(existing)}",
+                            command.get("_manifest_path"),
+                        )
+                    )
+                    deduped[command_id] = command
+                    continue
                 manifest_errors.append(
                     self._manifest_issue(
-                        "warning",
+                        "error",
                         "command_duplicate_id",
-                        f"command id '{command_id}' from {self._source_label(command)} overrides {self._source_label(existing)}",
+                        f"command id '{command_id}' from {self._source_label(command)} collides with {self._source_label(existing)}; keeping the first definition",
                         command.get("_manifest_path"),
                     )
                 )
+                continue
             if command_id not in deduped:
                 order.append(command_id)
             deduped[command_id] = command
@@ -775,6 +790,28 @@ class SlashCommandRegistry:
                     "source": self._source_label(command),
                 }
         return [deduped[item] for item in order]
+
+    @staticmethod
+    def _command_override_allows(command: dict[str, Any], existing: dict[str, Any]) -> bool:
+        override = command.get("override")
+        if not isinstance(override, dict):
+            return False
+        if str(override.get("mode") or "").strip() != "replace":
+            return False
+        target_public_id = str(override.get("target_public_id") or "").strip().lower().lstrip("/")
+        if target_public_id and target_public_id != str(existing.get("id") or "").strip():
+            return False
+        target_projected_id = str(override.get("target_projected_id") or "").strip()
+        existing_projected_id = str(
+            existing.get("projected_id") or existing.get("_template_piece_id") or ""
+        ).strip()
+        if target_projected_id and target_projected_id != existing_projected_id:
+            return False
+        if command.get("_manifest_origin") != MANIFEST_ORIGIN_DEFAULT:
+            return False
+        if existing.get("_manifest_origin") not in {MANIFEST_ORIGIN_DEFAULT, None}:
+            return False
+        return bool(target_public_id or target_projected_id)
 
     @staticmethod
     def _coerce_args(command: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:

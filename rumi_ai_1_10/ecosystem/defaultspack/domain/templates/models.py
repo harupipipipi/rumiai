@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -65,10 +66,23 @@ class TemplateDiagnostic:
     piece_id: str | None = None
     path: str | None = None
     source_path: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_error(self) -> bool:
         return self.severity == "error"
+
+    def fingerprint(self) -> tuple[str, str, str, str, str, str, str, str]:
+        return (
+            self.severity,
+            self.code,
+            self.template_id or "",
+            self.piece_id or "",
+            self.path or "",
+            self.source_path or "",
+            self.message,
+            json.dumps(self.details, sort_keys=True, separators=(",", ":"), ensure_ascii=True),
+        )
 
 
 @dataclass
@@ -132,6 +146,8 @@ class TemplatePiece:
     kind: TemplatePieceKind | str
     slot: str | None = None
     order: int | None = None
+    insert_before: str | None = None
+    insert_after: str | None = None
     entrypoint: str | None = None
     path: str | None = None
     handler: str | None = None
@@ -139,12 +155,24 @@ class TemplatePiece:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "TemplatePiece":
-        known = {"id", "kind", "slot", "order", "entrypoint", "path", "handler"}
+        known = {
+            "id",
+            "kind",
+            "slot",
+            "order",
+            "insert_before",
+            "insert_after",
+            "entrypoint",
+            "path",
+            "handler",
+        }
         return cls(
             id=str(raw.get("id", "")),
             kind=_enum_or_raw(TemplatePieceKind, raw.get("kind", "")),
             slot=_optional_string(raw.get("slot")),
             order=_optional_int(raw.get("order")),
+            insert_before=_optional_string(raw.get("insert_before")),
+            insert_after=_optional_string(raw.get("insert_after")),
             entrypoint=_optional_string(raw.get("entrypoint")),
             path=_optional_string(raw.get("path")),
             handler=_optional_string(raw.get("handler")),
@@ -157,6 +185,10 @@ class TemplatePiece:
             result["slot"] = self.slot
         if self.order is not None:
             result["order"] = self.order
+        if self.insert_before is not None:
+            result["insert_before"] = self.insert_before
+        if self.insert_after is not None:
+            result["insert_after"] = self.insert_after
         if self.entrypoint is not None:
             result["entrypoint"] = self.entrypoint
         if self.path is not None:

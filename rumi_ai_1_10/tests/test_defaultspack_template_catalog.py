@@ -567,9 +567,7 @@ def test_projected_settings_fields_namespace_piece_ids_and_diagnose_setting_key_
     )
 
     models = next(section for section in catalog["settings_sections"] if section["id"] == "models")
-    projected_ids = {field["projected_id"] for field in models["fields"]}
-    assert projected_ids == {"template.one:shared", "template.two:shared"}
-    assert {field["id"] for field in models["fields"]} == {"shared"}
+    assert models["fields"] == []
     assert any(
         diagnostic["code"] == "template.catalog.settings_field_id_collision"
         for diagnostic in catalog["template_diagnostics"]

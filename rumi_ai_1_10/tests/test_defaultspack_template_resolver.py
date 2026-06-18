@@ -61,6 +61,116 @@ def test_resolver_applies_extends_slot_merge_and_json_pointer_patches():
     assert [piece.id for piece in resolved.template.pieces] == ["anchor", "inserted", "tail"]
 
 
+def test_resolver_explicit_piece_ordering_edges_win_over_order_values():
+    registry = TemplateRegistry()
+    _register(
+        registry,
+        {
+            "id": "base.template",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "pieces": [
+                {"id": "first", "kind": "sidebar_item", "order": 10},
+                {"id": "last", "kind": "sidebar_item", "order": 20},
+            ],
+        },
+    )
+    _register(
+        registry,
+        {
+            "id": "child.template",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "extends": "base.template",
+            "pieces": [
+                {
+                    "id": "inserted",
+                    "kind": "sidebar_item",
+                    "insert_before": "last",
+                    "order": 999,
+                }
+            ],
+        },
+    )
+
+    resolved = resolve_template("child.template", registry)
+
+    assert resolved.ok
+    assert resolved.template is not None
+    assert [piece.id for piece in resolved.template.pieces] == ["first", "inserted", "last"]
+
+
+def test_resolver_reports_unknown_piece_order_anchor_and_semantic_slot_is_not_anchor():
+    registry = TemplateRegistry()
+    _register(
+        registry,
+        {
+            "id": "base.template",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "pieces": [{"id": "anchor", "kind": "sidebar_item", "slot": "main"}],
+        },
+    )
+    _register(
+        registry,
+        {
+            "id": "child.template",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "extends": "base.template",
+            "pieces": [
+                {"id": "semantic", "kind": "sidebar_item", "slot": "main"},
+                {
+                    "id": "unknown",
+                    "kind": "sidebar_item",
+                    "insert_after": "missing",
+                },
+            ],
+        },
+    )
+
+    resolved = resolve_template("child.template", registry)
+    codes = [diagnostic.code for diagnostic in resolved.diagnostics]
+
+    assert resolved.ok
+    assert resolved.template is not None
+    assert [piece.id for piece in resolved.template.pieces] == [
+        "anchor",
+        "semantic",
+        "unknown",
+    ]
+    assert "template.piece.unknown_order_anchor" in codes
+    assert "template.piece.legacy_slot_anchor" not in codes
+
+
+def test_resolver_blocks_piece_ordering_cycle():
+    registry = TemplateRegistry()
+    _register(
+        registry,
+        {
+            "id": "cycle.template",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "pieces": [
+                {"id": "a", "kind": "sidebar_item", "insert_after": "b"},
+                {"id": "b", "kind": "sidebar_item", "insert_after": "a"},
+            ],
+        },
+    )
+
+    resolved = resolve_template("cycle.template", registry)
+
+    assert not resolved.ok
+    assert any(
+        diagnostic.code == "template.piece.ordering_cycle" for diagnostic in resolved.diagnostics
+    )
+
+
 def test_resolver_reports_missing_dependencies_capabilities_and_duplicate_pieces():
     registry = TemplateRegistry()
     _register(

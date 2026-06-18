@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from ..activation import (
     TemplateActivationPlanner,
     TemplateActivationState,
 )
+from ..collisions import resolve_catalog_collisions
 from ..registry import build_template_registry
 from ..resolver import resolve_template
 
@@ -135,6 +137,8 @@ def project_resolved_templates(
         "test_contracts",
     ):
         catalog[key] = _dedupe_by_id(catalog[key])
+    catalog, collision_diagnostics = resolve_catalog_collisions(catalog)
+    catalog["template_diagnostics"].extend(collision_diagnostics)
     catalog["settings_sections"], settings_diagnostics = _merge_settings_sections(
         catalog["settings_sections"]
     )
@@ -417,6 +421,10 @@ def _metadata_item_from_data(
         item.setdefault("slot", piece.slot)
     if piece.order is not None:
         item.setdefault("order", piece.order)
+    if piece.insert_before is not None:
+        item.setdefault("insert_before", piece.insert_before)
+    if piece.insert_after is not None:
+        item.setdefault("insert_after", piece.insert_after)
     if piece.entrypoint is not None:
         item.setdefault("entrypoint", piece.entrypoint)
     if piece.path is not None:
@@ -579,6 +587,7 @@ def _merge_settings_fields(
     setting_key_owner: dict[str, dict[str, Any]] = {}
     diagnostics: list[dict[str, Any]] = []
     seen_collisions: set[tuple[str, str, str, str]] = set()
+    excluded_projected_ids: set[str] = set()
     for index, field in enumerate(fields):
         item = deepcopy(field)
         projected_id = str(item.get("projected_id") or "").strip()
@@ -605,6 +614,7 @@ def _merge_settings_fields(
         if collision_key in seen_collisions:
             continue
         seen_collisions.add(collision_key)
+        excluded_projected_ids.update({previous_projected_id, projected_id})
         diagnostics.append(
             {
                 "level": "error",
@@ -622,7 +632,9 @@ def _merge_settings_fields(
                 "conflicting_projected_id": previous_projected_id,
             }
         )
-    return [by_projected_id[item_id] for item_id in order], diagnostics
+    return [
+        by_projected_id[item_id] for item_id in order if item_id not in excluded_projected_ids
+    ], diagnostics
 
 
 def _dedupe_by_id(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -645,14 +657,23 @@ def _dedupe_by_id(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _dedupe_diagnostics(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    deduped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
-    order: list[tuple[str, str, str, str]] = []
+    deduped: dict[tuple[str, str, str, str, str, str, str, str], dict[str, Any]] = {}
+    order: list[tuple[str, str, str, str, str, str, str, str]] = []
     for item in items:
         key = (
+            str(item.get("severity") or item.get("level") or ""),
             str(item.get("code") or ""),
             str(item.get("template_id") or ""),
             str(item.get("piece_id") or ""),
-            str(item.get("source_path") or item.get("source") or ""),
+            str(item.get("path") or ""),
+            str(item.get("source_path") or item.get("source_path") or item.get("source") or ""),
+            str(item.get("message") or ""),
+            json.dumps(
+                item.get("details") or {},
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ),
         )
         if key not in deduped:
             order.append(key)
@@ -661,7 +682,7 @@ def _dedupe_diagnostics(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _diagnostic_to_dict(diagnostic: TemplateDiagnostic) -> dict[str, Any]:
-    return {
+    result = {
         "level": diagnostic.severity,
         "severity": diagnostic.severity,
         "code": diagnostic.code,
@@ -672,6 +693,9 @@ def _diagnostic_to_dict(diagnostic: TemplateDiagnostic) -> dict[str, Any]:
         "source_path": diagnostic.source_path,
         "source": diagnostic.source_path or "template_catalog",
     }
+    if diagnostic.details:
+        result["details"] = deepcopy(diagnostic.details)
+    return result
 
 
 def empty_template_catalog() -> dict[str, Any]:

@@ -1986,6 +1986,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                                 "kind": "function",
                                 "role": "action",
                                 "action_id": "context_txt",
+                                "override": {
+                                    "mode": "replace",
+                                    "target_public_id": "context_txt",
+                                },
                                 "slash_command": {
                                     "id": "context_txt",
                                     "name": "context_txt",
@@ -2009,12 +2013,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             duplicate = next(
                 item
                 for item in registry.manifest_errors()
-                if item["code"] == "command_duplicate_id"
+                if item["code"] == "command_explicit_override"
             )
 
         self.assertEqual(command["label"], "Context TXT")
         self.assertEqual(command["execution"]["type"], "pack_block")
-        self.assertIn("rumi.test.context_txt/context_txt_action", duplicate["message"])
+        self.assertIn("explicitly replaces", duplicate["message"])
         self.assertIn("template_id=rumi.test.context_txt", duplicate["source"])
         self.assertIn("piece_id=context_txt_action", duplicate["source"])
 

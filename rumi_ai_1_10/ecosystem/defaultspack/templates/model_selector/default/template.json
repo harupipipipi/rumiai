@@ -274,6 +274,10 @@
       "kind": "permission",
       "order": 41,
       "permission_id": "model.invoke",
+      "override": {
+        "mode": "replace",
+        "target_projected_id": "rumi.backend.model_routing.default:model_route_permission"
+      },
       "scope": "ai_client",
       "reason": "Selecting a model can lead to local model invocation later."
     },
