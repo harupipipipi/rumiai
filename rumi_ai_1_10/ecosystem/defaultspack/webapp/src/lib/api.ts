@@ -2139,6 +2139,13 @@ export const api = {
     });
   },
 
+  rebuildToolEmbeddingIndex(payload: { model?: string | null }) {
+    return request<Record<string, unknown>>("/api/tools/embedding-index/rebuild", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
   getConversationToolPreferences(conversationId: string) {
     return request<{ conversation_id: string; preferences: Record<string, unknown> }>(
       `/api/conversations/${encodeURIComponent(conversationId)}/tool-preferences`,

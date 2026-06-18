@@ -59,13 +59,14 @@ import {
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
-import type {
-  ModelProfile,
-  SettingsSection,
-  SidebarAction,
-  SidebarCategory,
-  SidebarField,
-  SidebarItem,
+import {
+  api,
+  type ModelProfile,
+  type SettingsSection,
+  type SidebarAction,
+  type SidebarCategory,
+  type SidebarField,
+  type SidebarItem,
 } from "../lib/api";
 import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
 import { toolFilterBlockedSummary } from "../lib/toolStatus";
@@ -85,6 +86,35 @@ const PANEL_WIDTH_STORAGE_KEY = "rumi-right-sidebar-panel-width";
 const PLACEMENT_PANEL_PREFIX = "__placement__:";
 const DEFAULT_TOOL_GROUP_RAIL_LIMIT = 8;
 const RAIL_MENU_GAP = 8;
+
+type ToolSelectionScope = "turn" | "conversation";
+
+type ToolServiceCard = {
+  id: string;
+  label: string;
+  description: string;
+  items: SidebarItem[];
+};
+
+const TOOL_SERVICE_LABELS: Record<string, { label: string; description: string }> = {
+  web: { label: "Web検索", description: "Web、検索、オンライン情報" },
+  github: { label: "GitHub", description: "リポジトリ、Issue、Pull Request" },
+  files: { label: "Files", description: "ローカルファイルやドキュメント" },
+  coding: { label: "Coding", description: "コード編集、ビルド、開発作業" },
+  terminal: { label: "Terminal", description: "コマンド実行やジョブ操作" },
+  browser: { label: "Browser", description: "ブラウザ、ページ、ダウンロード" },
+  computer: { label: "PC操作", description: "画面上のアプリやPC操作" },
+  calendar: { label: "Calendar", description: "予定やカレンダー" },
+  gmail: { label: "Gmail", description: "メール検索や下書き" },
+  slack: { label: "Slack", description: "Slackメッセージ" },
+  google_drive: { label: "Google Drive", description: "Drive、Docs、Sheets、Slides" },
+  notion: { label: "Notion", description: "NotionページやDB" },
+  memory: { label: "Memory", description: "記憶、知識、会話コンテキスト" },
+  artifacts: { label: "Artifacts", description: "成果物ファイルとプレビュー" },
+  mcp: { label: "MCP", description: "MCP接続と外部サーバーTool" },
+  system: { label: "System", description: "Rumi内部のシステム機能" },
+  other: { label: "Other", description: "その他の機能" },
+};
 
 export function getRailFloatingMenuPosition(
   rect: Pick<DOMRect, "left" | "top">,
@@ -329,6 +359,66 @@ function baseTagsForItem(item: SidebarItem): string[] {
     tags.push("danger");
   }
   return [...new Set(tags)];
+}
+
+function serviceIdForTool(item: SidebarItem): string {
+  const ui = item.ui as Record<string, unknown> | undefined;
+  const explicit = String(ui?.service_id ?? "").trim().toLowerCase();
+  if (explicit && TOOL_SERVICE_LABELS[explicit]) return explicit;
+  const haystack = `${item.id} ${item.label} ${item.description ?? ""} ${(item.tags ?? []).join(" ")} ${item.ui?.group_id ?? ""}`.toLowerCase();
+  const rules: Array<[string, RegExp]> = [
+    ["github", /github|pull_request|pr_|issue/],
+    ["gmail", /gmail|email|mail/],
+    ["slack", /slack/],
+    ["google_drive", /google_drive|drive|slides|sheet|doc_/],
+    ["calendar", /calendar/],
+    ["notion", /notion/],
+    ["browser", /browser|html_preview|webapp_preview/],
+    ["computer", /computer_use|screen|mouse|keyboard|click/],
+    ["terminal", /terminal|sandbox_exec|python_exec|node_exec|command|shell/],
+    ["coding", /coding|workspace|git_|webapp_build|webapp_lint|project_scaffold|package_install/],
+    ["files", /file|pdf|doc|ocr|audio_transcribe|image_convert|image_resize/],
+    ["artifacts", /artifact|export|zip|preview/],
+    ["memory", /memory|knowledge|source_rank|source_extract/],
+    ["web", /web_search|reddit|research|wide_research/],
+    ["mcp", /mcp__/],
+    ["system", /workflow|job_|tts_generate|image_generate|tool_search/],
+  ];
+  for (const [serviceId, pattern] of rules) {
+    if (pattern.test(haystack)) return serviceId;
+  }
+  return "other";
+}
+
+function toolServiceCards(items: SidebarItem[]): ToolServiceCard[] {
+  const groups = new Map<string, SidebarItem[]>();
+  for (const item of items) {
+    const serviceId = serviceIdForTool(item);
+    groups.set(serviceId, [...(groups.get(serviceId) ?? []), item]);
+  }
+  return [...groups.entries()]
+    .map(([id, groupItems]) => ({
+      id,
+      label: TOOL_SERVICE_LABELS[id]?.label ?? id,
+      description: TOOL_SERVICE_LABELS[id]?.description ?? "追加機能",
+      items: sortedToolUiItems(groupItems),
+    }))
+    .sort((left, right) => right.items.length - left.items.length || compareText(left.label, right.label));
+}
+
+function targetList(value: unknown): Array<{ kind: string; id: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    if (typeof item === "string") return { kind: "tool", id: item };
+    if (item && typeof item === "object") {
+      const record = item as Record<string, unknown>;
+      return {
+        kind: String(record.kind ?? record.type ?? "tool"),
+        id: String(record.id ?? record.tool_id ?? record.service_id ?? ""),
+      };
+    }
+    return { kind: "tool", id: "" };
+  }).filter((item) => item.id.trim());
 }
 
 function compareSidebarItems(left: SidebarItem, right: SidebarItem): number {
@@ -800,6 +890,7 @@ export function RightSidebar({
   yoloMode = false,
   workspaceTabs = [],
   activeWorkspaceTabId = null,
+  activeConversationId = null,
   onSettingChange,
   onOpenSettings,
   onOpenSettingsSection,
@@ -825,6 +916,7 @@ export function RightSidebar({
   yoloMode?: boolean;
   workspaceTabs?: WorkspaceTab[];
   activeWorkspaceTabId?: string | null;
+  activeConversationId?: string | null;
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
   onOpenSettings: () => void;
   onOpenSettingsSection?: (sectionId: string) => void;
@@ -841,6 +933,8 @@ export function RightSidebar({
   const [searchQuery, setSearchQuery] = useState("");
   const [toolManagerSearchQuery, setToolManagerSearchQuery] = useState("");
   const [isToolManagerSearchOpen, setIsToolManagerSearchOpen] = useState(false);
+  const [toolSelectionScope, setToolSelectionScope] = useState<ToolSelectionScope>("turn");
+  const [conversationToolPreferences, setConversationToolPreferences] = useState<Record<string, unknown>>({});
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [panelWidth, setPanelWidth] = useState(readStoredPanelWidth);
@@ -909,6 +1003,25 @@ export function RightSidebar({
       // Storage may be unavailable in restricted browser contexts.
     }
   }, [panelWidthPx]);
+
+  useEffect(() => {
+    if (!activeConversationId) {
+      setConversationToolPreferences({});
+      setToolSelectionScope("turn");
+      return;
+    }
+    let cancelled = false;
+    api.getConversationToolPreferences(activeConversationId)
+      .then((result) => {
+        if (!cancelled) setConversationToolPreferences(result.preferences ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setConversationToolPreferences({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConversationId]);
 
   const startPanelResize = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1111,6 +1224,12 @@ export function RightSidebar({
     (!showStarredOnly || starredItemIdSet.has(item.id))
     && (!activeTagFilter || tagMap.get(item.id)?.includes(activeTagFilter))
   ))), [activeTagFilter, showStarredOnly, starredItemIdSet, tagMap, toolManagerSearchItems]);
+  const serviceCards = useMemo(() => toolServiceCards(toolManagerItems).slice(0, 10), [toolManagerItems]);
+  const conversationServiceTargets = useMemo(() => new Set(
+    targetList(conversationToolPreferences.include)
+      .filter((target) => target.kind === "service")
+      .map((target) => target.id),
+  ), [conversationToolPreferences.include]);
   const toolManagerCandidates = useMemo(() => toolManagerSearchItems.slice(0, 8), [toolManagerSearchItems]);
   const allToolTags = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1362,6 +1481,24 @@ export function RightSidebar({
     const uniqueToolIds = [...new Set(toolIds.filter((toolId) => items.some((item) => item.id === toolId && item.category === "tool")))];
     if (uniqueToolIds.length === 0) return;
     onToolBatchSet?.(uniqueToolIds, enabled);
+  };
+
+  const setServiceEnabled = (service: ToolServiceCard, enabled: boolean) => {
+    if (toolSelectionScope !== "conversation" || !activeConversationId) {
+      setToolsEnabled(service.items.map((item) => item.id), enabled);
+      return;
+    }
+    const include = targetList(conversationToolPreferences.include)
+      .filter((target) => !(target.kind === "service" && target.id === service.id));
+    const nextPreferences = {
+      ...conversationToolPreferences,
+      mode: enabled ? "manual" : (conversationToolPreferences.mode ?? "auto"),
+      include: enabled ? [...include, { kind: "service", id: service.id }] : include,
+    };
+    setConversationToolPreferences(nextPreferences);
+    void api.updateConversationToolPreferences(activeConversationId, nextPreferences).catch(() => {
+      setConversationToolPreferences(conversationToolPreferences);
+    });
   };
 
   const toolsWithTag = (tag: string) => allToolItems.filter((item) => tagMap.get(item.id)?.includes(tag)).map((item) => item.id);
@@ -1740,6 +1877,65 @@ export function RightSidebar({
                                   )}
                                 </div>
                               )}
+                            </div>
+                            <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Services</p>
+                                <div className="inline-grid grid-cols-2 rounded-md border border-zinc-800 bg-zinc-950 p-0.5">
+                                  {(["turn", "conversation"] as const).map((scope) => (
+                                    <button
+                                      key={scope}
+                                      type="button"
+                                      disabled={scope === "conversation" && !activeConversationId}
+                                      onClick={() => setToolSelectionScope(scope)}
+                                      className={cn(
+                                        "rounded px-2 py-1 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                                        toolSelectionScope === scope ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-200",
+                                      )}
+                                    >
+                                      {scope === "turn" ? "今回" : "この会話"}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="grid gap-1.5">
+                                {serviceCards.map((service) => {
+                                  const serviceToolIds = service.items.map((item) => item.id);
+                                  const turnSelected = serviceToolIds.some((id) => selectedToolIdSet.has(id));
+                                  const conversationSelected = conversationServiceTargets.has(service.id);
+                                  const selected = toolSelectionScope === "conversation" ? conversationSelected : turnSelected;
+                                  const pinnedCount = service.items.filter((item) => pinnedItemIdSet.has(item.id) || starredItemIdSet.has(item.id)).length;
+                                  return (
+                                    <div key={service.id} className="rounded-md border border-zinc-800 bg-zinc-950/55 p-2">
+                                      <div className="flex items-start gap-2">
+                                        <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500">
+                                          <Wrench size={14} />
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex items-center justify-between gap-2">
+                                            <p className="truncate text-[12px] font-medium text-zinc-200">{service.label}</p>
+                                            <span className={cn("h-1.5 w-1.5 flex-shrink-0 rounded-full", selected ? "bg-emerald-400" : "bg-zinc-700")} />
+                                          </div>
+                                          <p className="mt-0.5 truncate text-[10px] text-zinc-500">{service.description}</p>
+                                          <div className="mt-1 flex flex-wrap gap-1 text-[9px] text-zinc-500">
+                                            <span className="rounded bg-zinc-900 px-1.5 py-0.5">{service.items.length} tools</span>
+                                            {pinnedCount > 0 && <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-200">{pinnedCount} pinned</span>}
+                                            {conversationSelected && <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-sky-200">会話固定</span>}
+                                          </div>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => setServiceEnabled(service, !selected)}
+                                          className={cn("flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md transition-colors", selected ? "text-emerald-300 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
+                                          title={selected ? "サービス指定を解除" : "サービスを使う"}
+                                        >
+                                          <Power size={15} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
                             <div className="grid grid-cols-3 gap-2">
                               <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">

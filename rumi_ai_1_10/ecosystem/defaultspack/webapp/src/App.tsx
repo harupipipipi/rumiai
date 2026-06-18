@@ -21,6 +21,7 @@ import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./componen
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
+import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
 import { useToolSelectionController } from "./features/tools/useToolSelectionController";
 import { authorityApprovalTitle, pendingAuthorityApproval } from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
@@ -3510,6 +3511,32 @@ function ChatApp() {
     setIsSettingsOpen(true);
   }, []);
 
+  const actionApprovalMode: ActionApprovalMode = ultraYoloMode ? "full" : yoloMode ? "agent" : "ask";
+
+  const handleActionApprovalModeChange = useCallback((nextMode: ActionApprovalMode) => {
+    if (nextMode === "custom") {
+      openSettingsSection("tools");
+      return;
+    }
+    if (nextMode === "full") {
+      const nextState = resolveUltraYoloModeState(
+        {
+          yoloMode,
+          ultraYoloMode,
+          restoreYoloMode: ultraYoloRestoreYoloMode,
+        },
+        true,
+      );
+      setYoloMode(nextState.yoloMode);
+      setUltraYoloMode(nextState.ultraYoloMode);
+      setUltraYoloRestoreYoloMode(nextState.restoreYoloMode);
+      return;
+    }
+    setUltraYoloMode(false);
+    setUltraYoloRestoreYoloMode(false);
+    setYoloMode(nextMode === "agent");
+  }, [openSettingsSection, setUltraYoloMode, setUltraYoloRestoreYoloMode, setYoloMode, ultraYoloMode, ultraYoloRestoreYoloMode, yoloMode]);
+
   const handleSwitchToVisionModel = useCallback(() => {
     if (preferredVisionCandidate) {
       handleModelProfileSelect(preferredVisionCandidate.profile_id);
@@ -4156,7 +4183,9 @@ function ChatApp() {
         tool_choice: "required",
         tool_policy: {
           ...templatePolicyReferencePayload,
+          action_approval_mode: actionApprovalMode,
           ...((yoloMode || ultraYoloMode) ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(ultraYoloMode ? { full_access: true } : {}),
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
           ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
           ...(approvalToolIds.length ? { selected_tools: approvalToolIds } : {}),
@@ -4221,7 +4250,9 @@ function ChatApp() {
         tool_choice: "required",
         tool_policy: {
           ...templatePolicyReferencePayload,
+          action_approval_mode: actionApprovalMode,
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(ultraYoloMode ? { full_access: true } : {}),
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
           ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
           selected_tools: [runtimeApproval.toolName],
@@ -4948,7 +4979,9 @@ function ChatApp() {
         tool_selection: toolSelectionRequest,
         tool_policy: {
           ...templateRequestPayload.toolPolicy,
+          action_approval_mode: actionApprovalMode,
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(ultraYoloMode ? { full_access: true } : {}),
           ...operationsPolicy,
           ...mimoCodingPolicy,
           ...(isCodingWorkspaceSubmit && workspaceIdForSubmit ? { workspace_id: workspaceIdForSubmit } : {}),
@@ -5223,7 +5256,7 @@ function ChatApp() {
       attachedFiles={attachedFiles}
       droppedWidgets={activeDroppedWidgets}
       selectedToolIds={selectedToolIds}
-      toolSelectionMode={toolSelectionController.state.effectiveMode}
+      actionApprovalMode={actionApprovalMode}
       toolSelectionTargets={toolSelectionController.state.turnInclude}
       toolSelectionReview={toolSelectionController.state.pendingReview}
       keyboardButtonNavigation={keyboardButtonNavigation}
@@ -5234,7 +5267,7 @@ function ChatApp() {
       suppressPopovers={Boolean(visibleBrowserApproval || authorityApproval || runtimeApproval || staleRuntimeApprovalNotice)}
       onOpenModelManager={() => openSettingsSection("models")}
       onOpenToolSettings={() => openSettingsSection("tools")}
-      onToolSelectionModeChange={(nextMode) => toolSelectionController.setTurnMode(nextMode)}
+      onActionApprovalModeChange={handleActionApprovalModeChange}
       onToolSelectionTargetRemove={toolSelectionController.removeTarget}
       onToolSelectionReviewApprove={handleToolReviewApprove}
       onToolSelectionReviewEdit={handleToolReviewEdit}
@@ -5652,6 +5685,7 @@ function ChatApp() {
             yoloMode={yoloMode}
             workspaceTabs={workspaceTabs}
             activeWorkspaceTabId={activeWorkspaceTabId}
+            activeConversationId={activeConversationId}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenSettingsSection={openSettingsSection}

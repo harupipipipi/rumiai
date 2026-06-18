@@ -39,7 +39,7 @@ import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicke
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { chatComposerResources } from "../features/chat/resources/chatComposerResources";
-import { ToolModeControl } from "../features/tools/ToolModeControl";
+import { ActionApprovalControl } from "../features/tools/ActionApprovalControl";
 import { ToolOverrideChips } from "../features/tools/ToolOverrideChips";
 import { ToolSelectionReviewCard } from "../features/tools/ToolSelectionReviewCard";
 import { fileToAttachment } from "../lib/attachments";
@@ -1433,7 +1433,7 @@ export function ComposerRenderer({
   attachedFiles = [],
   droppedWidgets = [],
   selectedToolIds = [],
-  toolSelectionMode = "auto",
+  actionApprovalMode = "ask",
   toolSelectionTargets = [],
   toolSelectionReview = null,
   keyboardButtonNavigation = false,
@@ -1444,7 +1444,7 @@ export function ComposerRenderer({
   suppressPopovers = false,
   onOpenModelManager,
   onOpenToolSettings,
-  onToolSelectionModeChange,
+  onActionApprovalModeChange,
   onToolSelectionTargetRemove,
   onToolSelectionReviewApprove,
   onToolSelectionReviewEdit,
@@ -2406,23 +2406,19 @@ export function ComposerRenderer({
       ),
     },
     {
-      id: "tool-mode-control",
+      id: "action-approval-control",
       slot: "leading",
       order: 50,
-      width: { basis: "auto", min: "4.5rem", max: "9rem", shrink: 1 },
+      width: { basis: "auto", min: "4rem", max: "8.5rem", shrink: 1 },
       className: "rumi-composer-dock-control",
       render: () => (
-        <ToolModeControl
-          mode={toolSelectionMode}
-          manualCount={selectedToolIds.length}
+        <ActionApprovalControl
+          mode={actionApprovalMode}
           disabled={isGenerating}
           surfaceClassName={COMPOSER_CONTROL_SURFACE_CLASSNAME}
           tabIndex={chromeButtonTabIndex}
-          onModeChange={(nextMode) => onToolSelectionModeChange?.(nextMode)}
-          onOpenPicker={() => {
-            setOpenFolder("tools");
-            setMenuOpen(true);
-          }}
+          onModeChange={(nextMode) => onActionApprovalModeChange?.(nextMode)}
+          onOpenSettings={onOpenToolSettings}
         />
       ),
     },
