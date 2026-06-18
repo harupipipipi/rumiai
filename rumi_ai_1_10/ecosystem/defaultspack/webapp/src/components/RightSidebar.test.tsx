@@ -45,7 +45,7 @@ test("right sidebar initially focuses the rail on tools", () => {
     }),
   );
 
-  assert.match(html, /title="Filter: Tools"/);
+  assert.match(html, /title="Filter: 機能"/);
   assert.match(html, /title="other \(1\)"/);
   assert.doesNotMatch(html, /title="Widget A"/);
 });
@@ -90,7 +90,7 @@ test("right sidebar keeps initial tool groups compact", () => {
     }),
   );
 
-  assert.match(html, /title="More tools \(4 groups\)"/);
+  assert.match(html, /title="その他の機能 \(4 groups\)"/);
   assert.doesNotMatch(html, /title="Group 11 \(1\)"/);
 });
 

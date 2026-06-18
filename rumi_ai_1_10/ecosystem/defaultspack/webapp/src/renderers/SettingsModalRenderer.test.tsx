@@ -326,17 +326,17 @@ test("Settings > Tools contains detailed tool settings", () => {
       settingsSections: [
         {
           id: "tools",
-          label: "Tools",
+          label: "機能と接続",
           fields: [
-            { id: "keep_selected_tools_after_send", label: "Keep Selected Tools", type: "toggle", default: true },
+            { id: "default_mode", label: "既定の使い方", type: "select", default: "auto", options: [{ value: "auto", label: "自動で選ぶ" }] },
           ],
         },
       ],
       settingsValues: {
         tools: {
-          keep_selected_tools_after_send: true,
           disabled_tool_ids: [],
           hidden_tool_ids: [],
+          tool_permission_overrides: {},
         },
       },
       onClose: () => undefined,
@@ -344,7 +344,7 @@ test("Settings > Tools contains detailed tool settings", () => {
     }),
   );
 
-  assert.match(html, /Tool details/);
+  assert.match(html, /個別機能管理/);
   assert.match(html, /Vision Tool/);
   assert.match(html, /model.image_input/);
 });
