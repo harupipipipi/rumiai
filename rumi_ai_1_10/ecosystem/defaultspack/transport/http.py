@@ -1491,7 +1491,8 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
     def _route_metadata_sensitive(self, method, path):
         method = str(method or "").upper()
         path = str(path or "")
-        for entry in getattr(self, "_routes", []):
+        server_ref = getattr(self, "server_ref", None)
+        for entry in getattr(server_ref, "_routes", []):
             try:
                 route_method, compiled, handler = entry[0], entry[1], entry[2]
             except Exception:

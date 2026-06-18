@@ -266,6 +266,12 @@ export function templateToolPolicyReferencePayload(
   };
 }
 
+export function templateAiInputParamsPayload(
+  aiInput: TemplateAiInput | null | undefined,
+): Record<string, unknown> {
+  return { ...(objectRecord(aiInput?.params) ?? {}) };
+}
+
 export function templateToolPolicySettings(policy: TemplateToolPolicy | TemplateToolPolicy[] | null) {
   return templateToolPolicySettingsCore(policy);
 }

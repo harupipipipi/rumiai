@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
-import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
+import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
 
@@ -78,7 +78,7 @@ test("slash command parsing can be disabled by template feature flags", () => {
   assert.equal(parseSlashCommandInput("/context-txt handoff", commands)?.command.id, "context_txt");
 });
 
-test("composer command merge lets template catalog override backend command shape", () => {
+test("composer command merge keeps backend command definitions authoritative", () => {
   const backendCommands: ComposerCommandItem[] = [
     {
       id: "goal",
@@ -113,9 +113,10 @@ test("composer command merge lets template catalog override backend command shap
   ];
 
   const merged = mergeComposerCommands(backendCommands, catalogCommands);
-  assert.deepEqual(merged.map((command) => command.id), ["goal_template", "context_txt"]);
-  assert.deepEqual(merged[0].execution, catalogCommands[0].execution);
-  assert.equal(parseSlashCommandInput("/goal frontend handoff", merged)?.command.id, "goal_template");
+  assert.deepEqual(merged.map((command) => command.id), ["goal", "context_txt"]);
+  assert.deepEqual(merged[0].execution, backendCommands[0].execution);
+  assert.equal(merged[0].risk, "medium");
+  assert.equal(parseSlashCommandInput("/goal frontend handoff", merged)?.command.id, "goal");
   assert.equal(parseSlashCommandInput("/context-txt frontend handoff", merged)?.command.id, "context_txt");
 });
 
@@ -158,6 +159,7 @@ test("template ai input selects composer and tool policy metadata", () => {
         id: "default_ai_input",
         composer_input: "default_composer",
         tool_policy: "agent_tools",
+        params: { model: "template/model", max_output_tokens: 2048 },
         modes: ["agent" as const],
       },
     ],
@@ -185,6 +187,10 @@ test("template ai input selects composer and tool policy metadata", () => {
   const settings = templateToolPolicySettings(toolPolicy);
 
   assert.equal(aiInput?.id, "default_ai_input");
+  assert.deepEqual(templateAiInputParamsPayload(aiInput), {
+    model: "template/model",
+    max_output_tokens: 2048,
+  });
   assert.equal(composerInput?.id, "default_composer");
   assert.equal(toolPolicy?.id, "agent_tools");
   assert.deepEqual(settings.defaultEnabledToolIds, ["web_search"]);
@@ -859,6 +865,8 @@ test("streamMessage serializes auto tool selection without tools", async () => {
 
   try {
     await api.streamMessage("c1", "hello", {
+      params: { model: "template/model", max_output_tokens: 2048 },
+      thinking_level: "medium",
       tool_selection: { mode: "auto", include: [], exclude: [], scope: "turn", must_use: false },
     });
   } finally {
@@ -866,6 +874,9 @@ test("streamMessage serializes auto tool selection without tools", async () => {
   }
 
   assert.equal(requestBody?.tools, undefined);
+  assert.equal(requestBody?.params?.model, "template/model");
+  assert.equal(requestBody?.params?.max_output_tokens, 2048);
+  assert.equal(requestBody?.params?.thinking_level, "medium");
   assert.deepEqual(requestBody?.params?.tool_selection, {
     mode: "auto",
     include: [],

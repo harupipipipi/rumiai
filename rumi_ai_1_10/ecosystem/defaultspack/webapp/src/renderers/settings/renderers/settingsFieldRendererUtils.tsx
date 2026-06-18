@@ -53,7 +53,7 @@ export function modelSelectTargetFieldId(field: SettingsFieldRendererProps["fiel
 }
 
 export function apiKeySetupTargetFieldId(field: SettingsFieldRendererProps["field"]): string {
-  return field.id === "api_keys" ? field.id : "api_keys";
+  return field.id;
 }
 
 export function selectedProviderKind(providerId: string, options: ApiProviderOption[]): ApiProviderKind {

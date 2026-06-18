@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { buildVisibleModelOptions, SettingsModalRenderer } from "./SettingsModalRenderer";
 import { createSettingsFieldRendererRegistry, SettingsFieldRendererHost } from "./settings/fieldRendererRegistry";
 import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
+import { apiKeySetupTargetFieldId } from "./settings/renderers/settingsFieldRendererUtils";
 import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
 import type { SettingsSection } from "../lib/api";
 
@@ -126,6 +127,14 @@ test("builtin settings field renderer registry resolves template model_select re
 
   assert.equal(match?.entry.id, "builtin-settings-model-select");
   assert.equal(match?.key, "model_select");
+});
+
+test("api_key_setup renderer actions target the rendered template field", () => {
+  assert.equal(apiKeySetupTargetFieldId({
+    id: "api_key_setup_template",
+    label: "API Setup",
+    type: "api_key_setup",
+  } as TemplateSettingsField), "api_key_setup_template");
 });
 
 test("SettingsModalRenderer renders template model_select with searchable model selector surface", () => {

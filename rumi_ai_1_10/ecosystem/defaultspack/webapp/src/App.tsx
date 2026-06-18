@@ -36,7 +36,7 @@ import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
-import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
+import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
@@ -2336,6 +2336,10 @@ function ChatApp() {
     () => templateToolPolicyReferencePayload(templateAiInputMetadata, templateToolPolicyMetadata),
     [templateAiInputMetadata, templateToolPolicyMetadata],
   );
+  const templateAiInputParams = useMemo(
+    () => templateAiInputParamsPayload(templateAiInputMetadata),
+    [templateAiInputMetadata],
+  );
   const disabledToolIds = settingList(settingsValues.tools?.disabled_tool_ids);
   const hiddenToolIds = settingList(settingsValues.tools?.hidden_tool_ids);
   const templateDisabledToolIds = useMemo(
@@ -3272,9 +3276,10 @@ function ChatApp() {
     setSettingsValues((current) => {
       const section = settingsSections.find((item) => item.id === sectionId);
       const field = section?.fields.find((item) => item.id === fieldId);
+      const fieldType = String(field?.type ?? "");
       const sectionPatch = {
         ...(current[sectionId] ?? {}),
-        [fieldId]: field?.type === "secret" || field?.type === "api_keys" || field?.type === "external_tokens" ? "" : value,
+        [fieldId]: fieldType === "secret" || fieldType === "api_keys" || fieldType === "api_key_setup" || fieldType === "external_tokens" ? "" : value,
       };
       if (sectionId === "external_input" && fieldId === "input_provider") {
         const provider = String(value ?? "line");
@@ -3352,7 +3357,7 @@ function ChatApp() {
         ...current,
         [sectionId]: sectionPatch,
       };
-      if (field?.type === "api_keys") {
+      if (fieldType === "api_keys" || fieldType === "api_key_setup") {
         const payload = value && typeof value === "object" ? value as Record<string, unknown> : {};
         const providerId = String(payload.provider_id ?? "").trim();
         const apiId = String(payload.api_id ?? payload.name ?? "").trim();
@@ -4887,6 +4892,7 @@ function ChatApp() {
           };
 
       await api.streamMessage(conversation.id, userText, {
+        params: templateAiInputParams,
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         deepthink_enabled: deepthinkEnabled,
         tool_selection: toolSelectionRequest,

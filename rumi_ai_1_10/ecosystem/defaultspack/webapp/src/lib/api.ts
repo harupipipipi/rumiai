@@ -1392,13 +1392,7 @@ export function mergeComposerCommands(
     const existingIndex = keys.map((key) => indexByKey.get(key)).find((index) => index !== undefined);
     if (existingIndex !== undefined) {
       if (source === "catalog") {
-        const existing = merged[existingIndex];
-        merged[existingIndex] = {
-          ...existing,
-          ...command,
-          execution: command.execution ?? existing.execution,
-        };
-        commandIdentityKeys(merged[existingIndex]).forEach((key) => indexByKey.set(key, existingIndex));
+        return;
       }
       return;
     }
@@ -1467,6 +1461,7 @@ type SendMessageOptions = {
   deepthink_enabled?: boolean;
   tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
   parallel_tool_calls?: boolean;
+  params?: Record<string, unknown>;
   tool_policy?: Record<string, unknown>;
   tool_selection?: ToolSelectionRequest;
   attachments?: ChatAttachment[];
@@ -1813,6 +1808,7 @@ function messageRequestBody(
     },
     tools: Array.isArray(options?.tools) ? options.tools : undefined,
     params: {
+      ...(options?.params ?? {}),
       thinking_level: options?.thinking_level ?? undefined,
       deepthink_enabled: options?.deepthink_enabled ?? undefined,
       tool_choice: options?.tool_choice ?? undefined,
