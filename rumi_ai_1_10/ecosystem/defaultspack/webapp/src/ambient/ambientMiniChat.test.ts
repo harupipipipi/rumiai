@@ -5,8 +5,15 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { Conversation } from "../lib/api";
+import { AUTHORITY_FOLLOWUP_TEXT, AUTHORITY_WAITING_TEXT } from "../lib/authorityApproval";
 import { AmbientMiniChat } from "./AmbientMiniChat";
-import { ambientConversationIdFromResult, ambientLinkedConversationId, ambientMiniChatMessages } from "./ambientMiniChatState";
+import {
+  ambientConversationIdFromResult,
+  ambientLatestAssistantFinalText,
+  ambientLinkedConversationId,
+  ambientMiniChatMessages,
+  ambientPendingAuthorityApproval,
+} from "./ambientMiniChatState";
 import type { AmbientStatus } from "./ambientTriggerClient";
 
 test("ambient mini chat resolves the linked conversation from routing state", () => {
@@ -46,6 +53,130 @@ test("ambient mini chat keeps recent user and assistant text in order", () => {
   ]);
 });
 
+test("ambient mini chat detects pending authority and hides the approval placeholder", () => {
+  const conversation = conversationWithMessages([
+    message({ id: "u1", role: "user", raw_text: "I'll see you next time.", created_at: 2, sequence_number: 1 }),
+    message({
+      id: "a1",
+      role: "assistant",
+      raw_text: AUTHORITY_WAITING_TEXT,
+      content: [{ type: "text", text: AUTHORITY_WAITING_TEXT }],
+      created_at: 3,
+      sequence_number: 2,
+      metadata: {
+        pendingAuthorityApproval: {
+          request_id: "auth-1",
+          principal_id: "local-user",
+          permission_id: "model.invoke",
+          resource: { provider_id: "opencode-go", model_id: "deepseek-v4-flash" },
+        },
+      },
+    }),
+  ]);
+
+  const approval = ambientPendingAuthorityApproval(conversation);
+  assert.equal(approval?.requestId, "auth-1");
+  assert.deepEqual(ambientMiniChatMessages(conversation, 4), [
+    { id: "u1", role: "user", text: "I'll see you next time.", createdAt: 2 },
+  ]);
+  assert.equal(ambientLatestAssistantFinalText(conversation), null);
+});
+
+test("ambient mini chat detects approval_requested events and renders a compact authority CTA", () => {
+  const conversation = conversationWithMessages([
+    message({ id: "u1", role: "user", raw_text: "hello", created_at: 2, sequence_number: 1 }),
+    message({
+      id: "a1",
+      role: "assistant",
+      raw_text: AUTHORITY_WAITING_TEXT,
+      content: [{ type: "text", text: AUTHORITY_WAITING_TEXT }],
+      created_at: 3,
+      sequence_number: 2,
+      events: [{
+        type: "approval_requested",
+        request_id: "auth-event-1",
+        principal_id: "local-user",
+        permission_id: "model.invoke",
+        authority: true,
+        resource: { provider_id: "opencode-go" },
+      }],
+    }),
+  ]);
+  const approval = ambientPendingAuthorityApproval(conversation);
+  assert.equal(approval?.requestId, "auth-event-1");
+
+  const html = renderToStaticMarkup(createElement(AmbientMiniChat, {
+    conversation,
+    conversationId: "c1",
+    routingSummary: "Mini",
+    loading: false,
+    error: null,
+    input: "",
+    sending: false,
+    disabled: true,
+    latestInputPreview: null,
+    authorityApproval: approval,
+    onInputChange: () => {},
+    onSubmit: (event) => event.preventDefault(),
+    onRefresh: () => {},
+    onPickChat: () => {},
+    onOpenAuthorityApproval: () => {},
+  }));
+
+  assert.match(html, /AIの使用を許可/);
+  assert.match(html, /承認を開く/);
+  assert.equal(html.includes(AUTHORITY_WAITING_TEXT), false);
+});
+
+test("ambient mini chat hides hidden authority resume and keeps only the final answer for readout", () => {
+  const conversation = conversationWithMessages([
+    message({ id: "u1", role: "user", raw_text: "question", created_at: 2, sequence_number: 1 }),
+    message({
+      id: "a1",
+      role: "assistant",
+      raw_text: AUTHORITY_WAITING_TEXT,
+      content: [{ type: "text", text: AUTHORITY_WAITING_TEXT }],
+      created_at: 3,
+      sequence_number: 2,
+      metadata: {
+        pendingAuthorityApproval: {
+          request_id: "auth-2",
+          permission_id: "model.invoke",
+          resource: {},
+        },
+      },
+    }),
+    message({
+      id: "u2",
+      role: "user",
+      raw_text: AUTHORITY_FOLLOWUP_TEXT,
+      content: [{ type: "text", text: AUTHORITY_FOLLOWUP_TEXT }],
+      created_at: 4,
+      sequence_number: 3,
+      metadata: {
+        authority_followup: {
+          request_id: "auth-2",
+          permission_id: "model.invoke",
+        },
+        chat_display: {
+          hidden: true,
+          reason: "authority_followup",
+        },
+      },
+    }),
+    message({ id: "a2", role: "assistant", raw_text: "また会いましょう。", created_at: 5, sequence_number: 4 }),
+  ]);
+
+  const miniMessages = ambientMiniChatMessages(conversation, 6);
+  assert.deepEqual(miniMessages, [
+    { id: "u1", role: "user", text: "question", createdAt: 2 },
+    { id: "a2", role: "assistant", text: "また会いましょう。", createdAt: 5 },
+  ]);
+  assert.equal(miniMessages.some((item) => item.text === AUTHORITY_FOLLOWUP_TEXT), false);
+  assert.equal(ambientPendingAuthorityApproval(conversation), null);
+  assert.equal(ambientLatestAssistantFinalText(conversation), "また会いましょう。");
+});
+
 test("ambient mini chat hides routing picker controls for the standalone normal screen", () => {
   const html = renderToStaticMarkup(createElement(AmbientMiniChat, {
     conversation: null,
@@ -83,6 +214,20 @@ function status(routing: AmbientStatus["routing"]): AmbientStatus {
       os: {},
     },
     routing,
+  };
+}
+
+function conversationWithMessages(messages: Conversation["messages"]): Conversation {
+  return {
+    id: "c1",
+    title: "Mini",
+    created_at: 1,
+    updated_at: 5,
+    model: "stub/default",
+    tags: [],
+    is_starred: false,
+    is_archived: false,
+    messages,
   };
 }
 

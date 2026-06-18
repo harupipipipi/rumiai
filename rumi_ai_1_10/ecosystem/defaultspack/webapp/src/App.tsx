@@ -26,7 +26,12 @@ import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./componen
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { ChatStreamInterruptedError, api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
-import { authorityApprovalTitle, pendingAuthorityApproval } from "./lib/authorityApproval";
+import {
+  AUTHORITY_WAITING_TEXT,
+  authorityApprovalTitle,
+  pendingAuthorityApproval,
+  sanitizeAssistantAuthorityBoilerplate,
+} from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
@@ -2383,7 +2388,13 @@ function ChatApp() {
   const latestAssistantFinalText = useMemo(() => {
     if (isGenerating || isConversationPending) return null;
     for (const message of [...messages].reverse()) {
-      if (message.role === "agent" && message.rawText.trim()) return message.rawText.trim();
+      if (message.role === "user") return null;
+      if (message.role !== "agent") continue;
+      const rawText = message.rawText.trim();
+      if (!rawText) continue;
+      if (rawText === AUTHORITY_WAITING_TEXT && pendingAuthorityApproval([message])) return null;
+      const text = sanitizeAssistantAuthorityBoilerplate(rawText).trim();
+      if (text) return text;
     }
     return null;
   }, [isConversationPending, isGenerating, messages]);

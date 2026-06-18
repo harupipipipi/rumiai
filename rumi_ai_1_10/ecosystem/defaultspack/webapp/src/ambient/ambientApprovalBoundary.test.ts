@@ -13,6 +13,15 @@ test("ambient panel cannot render or persist its own Rumi approval", () => {
   assert.match(source, /openAuthorityApprovalWindow\(AMBIENT_AUTHORITY_REQUEST_ID\)/);
 });
 
+test("ambient mini authority settlement never sends its own resume", () => {
+  const source = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+
+  assert.doesNotMatch(source, /sendAuthorityResume/);
+  assert.doesNotMatch(source, /authorityApprovalRuntimeContent/);
+  assert.match(source, /waitForMiniAuthorityContinuation/);
+  assert.match(source, /承認後の続行がまだ完了していません。もう一度送信してください。/);
+});
+
 test("authority approval route does not render ambient gesture overlay", () => {
   const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
 

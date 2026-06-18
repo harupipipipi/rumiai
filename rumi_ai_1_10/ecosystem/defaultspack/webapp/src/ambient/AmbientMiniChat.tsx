@@ -1,7 +1,8 @@
 import type { FormEvent } from "react";
-import { Loader2, MessageSquare, RefreshCcw, SendHorizontal } from "lucide-react";
+import { ExternalLink, Loader2, MessageSquare, RefreshCcw, SendHorizontal, ShieldAlert } from "lucide-react";
 
 import type { Conversation } from "../lib/api";
+import type { AuthorityApproval } from "../lib/authorityApproval";
 import { cn } from "../lib/cn";
 import { ambientMiniChatMessages } from "./ambientMiniChatState";
 
@@ -15,11 +16,13 @@ type Props = {
   sending: boolean;
   disabled: boolean;
   latestInputPreview: string | null;
+  authorityApproval?: AuthorityApproval | null;
   showPicker?: boolean;
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onRefresh: () => void;
   onPickChat: () => void;
+  onOpenAuthorityApproval?: () => void;
 };
 
 export function AmbientMiniChat({
@@ -32,11 +35,13 @@ export function AmbientMiniChat({
   sending,
   disabled,
   latestInputPreview,
+  authorityApproval = null,
   showPicker = true,
   onInputChange,
   onSubmit,
   onRefresh,
   onPickChat,
+  onOpenAuthorityApproval,
 }: Props) {
   const messages = ambientMiniChatMessages(conversation, 5);
   const latestPreview = String(latestInputPreview ?? "").trim();
@@ -86,6 +91,26 @@ export function AmbientMiniChat({
           <MiniChatBubble key={message.id} role={message.role} text={message.text} />
         ))}
         {showLatestPreview && <MiniChatBubble role="user" text={latestPreview} pending />}
+        {authorityApproval && (
+          <div className="rounded-md border border-sky-300/25 bg-sky-400/10 px-2 py-2 text-[11px] leading-5 text-sky-50">
+            <div className="flex items-start gap-2">
+              <ShieldAlert size={14} className="mt-0.5 shrink-0 text-sky-200" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">AIの使用を許可</p>
+                <p className="text-sky-100/75">承認後に回答を続行します。</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenAuthorityApproval}
+              className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-sky-200/35 bg-sky-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white"
+              title="承認を開く"
+            >
+              <ExternalLink size={12} />
+              承認を開く
+            </button>
+          </div>
+        )}
         {error && (
           <div className="rounded-md border border-red-400/25 bg-red-500/10 px-2 py-1.5 text-[11px] leading-5 text-red-100">
             {error}

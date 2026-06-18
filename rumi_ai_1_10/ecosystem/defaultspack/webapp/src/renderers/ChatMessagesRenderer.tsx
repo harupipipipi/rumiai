@@ -8,8 +8,15 @@ import { cn } from "../lib/cn";
 import { elapsedDurationLabel, formatCompactDuration, timestampMs } from "../lib/duration";
 import { buildToolActivityGroups, toolFolderFor, type ToolActivityGroup } from "../lib/toolActivity";
 import type { ChatContentBlock } from "../lib/api";
+import {
+  AUTHORITY_FOLLOWUP_TEXT,
+  AUTHORITY_WAITING_TEXT,
+  sanitizeAssistantAuthorityBoilerplate,
+} from "../lib/authorityApproval";
 import { chatMessageResources, type BrowserScreenshot } from "../features/chat/resources/chatMessageResources";
 import type { ChatMessagesRendererProps } from "./types";
+
+export { AUTHORITY_FOLLOWUP_TEXT, sanitizeAssistantAuthorityBoilerplate };
 
 type ImagePreviewDetail = {
   label: string;
@@ -29,15 +36,9 @@ const LOG_PREVIEW_MIN_CHARS = 1200;
 const LOG_PREVIEW_MAX_CHARS = 2200;
 const LOG_PREVIEW_HEAD_CHARS = 1300;
 const LOG_PREVIEW_TAIL_CHARS = 620;
-const AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。";
-export const AUTHORITY_FOLLOWUP_TEXT = "Internal authority resume.";
 const AUTHORITY_PENDING_TITLE = "承認待ち";
 const AUTHORITY_PENDING_DETAIL = "別ウィンドウで承認してください";
 const markdownPlugins = [remarkGfm];
-const AUTHORITY_APPROVAL_BOILERPLATE_PATTERNS = [
-  /^\s*The model\/API authority is now approved\.\s*Retrying the request(?: to [^.]{0,360})?\.{1,3}\s*/i,
-  /^\s*Thank you for granting the (?:model\/API|model|API) authority request\.\s*I can now use the approved (?:provider|model)[^.]{0,360}\.{1,3}\s*/i,
-];
 const LOG_LIKE_TOKENS = [
   "\\n",
   "\"stdout\"",
@@ -264,21 +265,6 @@ export function shouldRenderImageBlockInChat(block: ChatContentBlock): boolean {
     || block.presentation === "chat"
     || block.intent === "show_to_user"
   );
-}
-
-function stripLeadingMarkdownSeparator(text: string): string {
-  return text.replace(/^(?:[ \t]*\r?\n)*[ \t]*-{3,}[ \t]*(?:\r?\n|$)(?:[ \t]*\r?\n)*/, "");
-}
-
-export function sanitizeAssistantAuthorityBoilerplate(text: string): string {
-  let sanitized = text;
-  for (const pattern of AUTHORITY_APPROVAL_BOILERPLATE_PATTERNS) {
-    const next = sanitized.replace(pattern, "");
-    if (next !== sanitized) {
-      return stripLeadingMarkdownSeparator(next).trimStart();
-    }
-  }
-  return sanitized;
 }
 
 function messageDisplayText(message: ChatMessagesRendererProps["messages"][number], text: string): string {

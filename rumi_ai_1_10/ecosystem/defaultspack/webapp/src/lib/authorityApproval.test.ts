@@ -12,6 +12,7 @@ import {
   authorityApprovalTitle,
   authorityRelatedPermissions,
   authorityRequestSettledStatus,
+  pendingAuthorityApproval,
 } from "./authorityApproval";
 
 const SRC_ROOT = resolve(import.meta.dirname, "..");
@@ -124,6 +125,35 @@ test("authority approval window sends only the terse hidden resume marker", () =
   assert.match(source, /sendAuthorityResume\([\s\S]*"Internal authority resume\."/);
   assertNoRiskyAuthorityFollowupPhrases(source);
   assert.match(source, /runtime_content: authorityApprovalRuntimeContent\(settledApproval, decision\.token\)/);
+});
+
+test("pending authority approval detects persisted assistant metadata", () => {
+  const approval = pendingAuthorityApproval([
+    {
+      id: "u1",
+      role: "user",
+      content: [{ type: "text", text: "hello" }],
+      rawText: "hello",
+    },
+    {
+      id: "a1",
+      role: "agent",
+      content: [{ type: "text", text: "モデル/API の使用許可が必要です。承認後に続行します。" }],
+      rawText: "モデル/API の使用許可が必要です。承認後に続行します。",
+      metadata: {
+        pendingAuthorityApproval: {
+          request_id: "auth-metadata-1",
+          principal_id: "local-user",
+          permission_id: "model.invoke",
+          resource: { provider_id: "opencode-go" },
+        },
+      },
+    },
+  ]);
+
+  assert.equal(approval?.requestId, "auth-metadata-1");
+  assert.equal(approval?.permissionId, "model.invoke");
+  assert.deepEqual(approval?.resource, { provider_id: "opencode-go" });
 });
 
 test("authority approval config accumulates distinct host action aliases", () => {

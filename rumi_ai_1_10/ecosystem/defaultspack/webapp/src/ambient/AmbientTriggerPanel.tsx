@@ -3,12 +3,18 @@ import { AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronUp, ExternalLink, 
 
 import { cn } from "../lib/cn";
 import { api, type Conversation } from "../lib/api";
+import type { AuthorityApproval } from "../lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "../lib/authorityApprovalEvents";
 import { openDefaultsConsoleWindow, openFingerRecordingWindow, openAuthorityApprovalWindow, openHostPermissionsPageWindow } from "../lib/desktopApproval";
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { ambientTriggerClient, type AmbientStatus } from "./ambientTriggerClient";
 import { AmbientMiniChat } from "./AmbientMiniChat";
-import { ambientConversationIdFromResult, ambientLinkedConversationId } from "./ambientMiniChatState";
+import {
+  ambientConversationIdFromResult,
+  ambientLatestAssistantFinalText,
+  ambientLinkedConversationId,
+  ambientPendingAuthorityApproval,
+} from "./ambientMiniChatState";
 import {
   audioCaptureConstraints,
   captureAudioEmbedding,
@@ -67,6 +73,8 @@ const MIC_DEVICE_STORAGE_KEY = "rumi.ambient.selectedMicId";
 const CAMERA_DEVICE_STORAGE_KEY = "rumi.ambient.selectedCameraId";
 const THUMB_TIP_INDEX = 4;
 const INDEX_TIP_INDEX = 8;
+const MINI_AUTHORITY_CONTINUATION_PENDING_ERROR = "承認後の続行がまだ完了していません。もう一度送信してください。";
+const MINI_AUTHORITY_CONTINUATION_POLL_DELAYS_MS = [700, 1400, 2400, 3600] as const;
 const HAND_LANDMARK_CONNECTIONS = [
   [0, 1], [1, 2], [2, 3], [3, 4],
   [0, 5], [5, 6], [6, 7], [7, 8],
@@ -115,6 +123,9 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const choiceHandledAtRef = useRef(0);
   const approvalGestureBusyRef = useRef(false);
   const rumiApprovalAutoOpenRef = useRef(false);
+  const miniAuthorityApprovalAutoOpenedRef = useRef(new Set<string>());
+  const miniAuthorityContinuationWaitRef = useRef(new Set<string>());
+  const miniAuthorityContinuationErrorRequestRef = useRef<string | null>(null);
   const conversationIdRef = useRef<string | null | undefined>(conversationId);
   const onOpenInputRef = useRef<Props["onOpenInput"]>(onOpenInput);
   const approvalTargetRef = useRef<Props["approvalTarget"]>(approvalTarget);
@@ -122,6 +133,10 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const miniChatRequestSeqRef = useRef(0);
 
   const readoutBlocked = useCallback(() => pinchRecording || Boolean(pinchRecorderRef.current), [pinchRecording]);
+  const miniFinalAnswerText = useMemo(
+    () => standalone ? ambientLatestAssistantFinalText(miniConversation) : null,
+    [miniConversation, standalone],
+  );
   const {
     frontOnFinal,
     setFrontOnFinal,
@@ -131,7 +146,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     readoutPlaying,
     stopSpeechReadout,
   } = useFinalAnswerBridge({
-    finalAnswerText,
+    finalAnswerText: finalAnswerText ?? miniFinalAnswerText,
     standalone,
     pinchRecording,
     readoutBlocked,
@@ -210,6 +225,10 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     ],
   );
   const miniConversationId = linkedAmbientConversationId || miniConversationIdOverride;
+  const miniAuthorityApproval = useMemo(
+    () => ambientPendingAuthorityApproval(miniConversation),
+    [miniConversation],
+  );
   const inlineSettingsControlsVisible = !standalone;
   const miniChatRoutingSummary = standalone ? "次の送信で作成" : routingSummary;
 
@@ -241,7 +260,13 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       }
       if (miniChatRequestSeqRef.current !== requestSeq) return;
       setMiniConversation(conversation);
-      setMiniChatError(null);
+      const stuckRequestId = miniAuthorityContinuationErrorRequestRef.current;
+      if (stuckRequestId && !miniAuthorityContinuationResolved(conversation, stuckRequestId)) {
+        setMiniChatError(MINI_AUTHORITY_CONTINUATION_PENDING_ERROR);
+      } else {
+        if (stuckRequestId) miniAuthorityContinuationErrorRequestRef.current = null;
+        setMiniChatError(null);
+      }
     } catch (error) {
       if (miniChatRequestSeqRef.current === requestSeq) {
         setMiniChatError(error instanceof Error ? error.message : "チャットを読み込めませんでした。");
@@ -260,6 +285,36 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     }, miniConversationId ? 1800 : 3500);
     return () => window.clearInterval(interval);
   }, [loadMiniConversation, miniConversationId]);
+
+  useEffect(() => {
+    if (!miniAuthorityApproval) return;
+    const requestId = miniAuthorityApproval.requestId;
+    if (miniAuthorityApprovalAutoOpenedRef.current.has(requestId)) return;
+    miniAuthorityApprovalAutoOpenedRef.current.add(requestId);
+    setExpanded(true);
+    void openMiniAuthorityApproval(miniAuthorityApproval, { auto: true });
+  }, [miniAuthorityApproval?.requestId]);
+
+  useEffect(() => {
+    if (!miniAuthorityApproval) return undefined;
+    return subscribeAuthorityApprovalSettlements((event) => {
+      if (event.requestId !== miniAuthorityApproval.requestId) return;
+      const targetConversationId = event.conversationId || miniConversation?.id || miniConversationId || null;
+      if (miniAuthorityContinuationErrorRequestRef.current === event.requestId) {
+        miniAuthorityContinuationErrorRequestRef.current = null;
+      }
+      if (event.status === "denied") {
+        setMiniChatError("AIの使用が許可されませんでした。");
+        setMessage("AIの使用は許可されませんでした。");
+        void loadMiniConversation({ conversationId: targetConversationId, quiet: true });
+        return;
+      }
+      setMiniChatError(null);
+      setMessage("AIが続きを作成しています。");
+      void loadMiniConversation({ conversationId: targetConversationId, quiet: true });
+      void waitForMiniAuthorityContinuation(miniAuthorityApproval, targetConversationId);
+    });
+  }, [loadMiniConversation, miniAuthorityApproval?.requestId, miniConversation?.id, miniConversationId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -660,6 +715,54 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     setMessage("Rumi Viewerの承認ウィンドウを開けませんでした。Viewerから開き直して許可してください。");
   }
 
+  async function openMiniAuthorityApproval(approval = miniAuthorityApproval, options?: { auto?: boolean }) {
+    if (!approval) return;
+    if (!options?.auto) setExpanded(true);
+    setMiniChatError(null);
+    try {
+      const opened = await openAuthorityApprovalWindow(approval.requestId);
+      if (opened) {
+        if (!options?.auto) setMessage("AI使用の承認ウィンドウを開きました。");
+        return;
+      }
+    } catch (error) {
+      console.info("[ambient] authority approval window unavailable", error);
+    }
+    setMiniChatError("承認ウィンドウを開けませんでした。Rumi Viewerから承認を開いてください。");
+  }
+
+  async function waitForMiniAuthorityContinuation(approval: AuthorityApproval, targetConversationId: string | null) {
+    const requestId = approval.requestId;
+    if (miniAuthorityContinuationWaitRef.current.has(requestId)) return;
+    const conversationId = targetConversationId || miniConversation?.id || miniConversationId || null;
+    if (!conversationId) return;
+    miniAuthorityContinuationWaitRef.current.add(requestId);
+    try {
+      for (const delayMs of MINI_AUTHORITY_CONTINUATION_POLL_DELAYS_MS) {
+        await sleep(delayMs);
+        const latestConversation = await api.getConversation(conversationId);
+        setMiniConversation(latestConversation);
+        if (miniAuthorityContinuationResolved(latestConversation, requestId)) {
+          if (miniAuthorityContinuationErrorRequestRef.current === requestId) {
+            miniAuthorityContinuationErrorRequestRef.current = null;
+          }
+          setMiniChatError(null);
+          return;
+        }
+      }
+      miniAuthorityContinuationErrorRequestRef.current = requestId;
+      setMessage(MINI_AUTHORITY_CONTINUATION_PENDING_ERROR);
+      setMiniChatError(MINI_AUTHORITY_CONTINUATION_PENDING_ERROR);
+    } catch (error) {
+      console.warn("[ambient] authority approval continuation polling failed", error);
+      miniAuthorityContinuationErrorRequestRef.current = requestId;
+      setMessage(MINI_AUTHORITY_CONTINUATION_PENDING_ERROR);
+      setMiniChatError(MINI_AUTHORITY_CONTINUATION_PENDING_ERROR);
+    } finally {
+      miniAuthorityContinuationWaitRef.current.delete(requestId);
+    }
+  }
+
   async function openAmbientWindow() {
     setMessage(null);
     try {
@@ -801,9 +904,15 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
       setExpanded(true);
       return;
     }
+    if (miniAuthorityApproval) {
+      setMiniChatError("AIの使用許可を開いてから続行します。");
+      setExpanded(true);
+      return;
+    }
 
     const targetConversationId = miniConversationId || conversationIdRef.current || null;
     setMiniSending(true);
+    miniAuthorityContinuationErrorRequestRef.current = null;
     setMiniChatError(null);
     setLatestSubmittedInput(text);
     setMiniInput("");
@@ -1296,13 +1405,15 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             error={miniChatError}
             input={miniInput}
             sending={miniSending}
-            disabled={!ambientDispatchGranted || rumiApprovalPending}
+            disabled={!ambientDispatchGranted || rumiApprovalPending || Boolean(miniAuthorityApproval)}
             latestInputPreview={latestSubmittedInput}
+            authorityApproval={miniAuthorityApproval}
             showPicker={inlineSettingsControlsVisible}
             onInputChange={setMiniInput}
             onSubmit={submitMiniChat}
             onRefresh={() => void loadMiniConversation()}
             onPickChat={() => void openChatPicker()}
+            onOpenAuthorityApproval={() => void openMiniAuthorityApproval()}
           />
           {inlineSettingsControlsVisible && (
             <>
@@ -1563,6 +1674,17 @@ function ambientResultMessage(result: Record<string, unknown>, fallback: string)
     return `${ambientOperationLabels.waitingResponse}: ${fallback} 返答を待っています。`;
   }
   return `${ambientOperationLabels.failed}: ${String(result.reason ?? result.status ?? fallback)}`;
+}
+
+function miniAuthorityContinuationResolved(conversation: Conversation | null, requestId: string): boolean {
+  if (!conversation) return false;
+  const pending = ambientPendingAuthorityApproval(conversation);
+  if (pending) return pending.requestId !== requestId;
+  return Boolean(ambientLatestAssistantFinalText(conversation));
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function focusComposer() {

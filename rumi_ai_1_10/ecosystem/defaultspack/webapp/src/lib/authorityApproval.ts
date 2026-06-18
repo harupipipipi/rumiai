@@ -18,8 +18,31 @@ type AuthorityApprovalResource = {
   resource: Record<string, unknown>;
 };
 
+export const AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。";
+export const AUTHORITY_FOLLOWUP_TEXT = "Internal authority resume.";
+
+const AUTHORITY_APPROVAL_BOILERPLATE_PATTERNS = [
+  /^\s*The model\/API authority is now approved\.\s*Retrying the request(?: to [^.]{0,360})?\.{1,3}\s*/i,
+  /^\s*Thank you for granting the (?:model\/API|model|API) authority request\.\s*I can now use the approved (?:provider|model)[^.]{0,360}\.{1,3}\s*/i,
+];
+
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function stripLeadingMarkdownSeparator(text: string): string {
+  return text.replace(/^(?:[ \t]*\r?\n)*[ \t]*-{3,}[ \t]*(?:\r?\n|$)(?:[ \t]*\r?\n)*/, "");
+}
+
+export function sanitizeAssistantAuthorityBoilerplate(text: string): string {
+  let sanitized = text;
+  for (const pattern of AUTHORITY_APPROVAL_BOILERPLATE_PATTERNS) {
+    const next = sanitized.replace(pattern, "");
+    if (next !== sanitized) {
+      return stripLeadingMarkdownSeparator(next).trimStart();
+    }
+  }
+  return sanitized;
 }
 
 export function authorityRequestSettledStatus(status: unknown): AuthorityApprovalSettledStatus | null {
@@ -75,27 +98,40 @@ function isAuthorityApprovalEvent(event: Record<string, unknown>): boolean {
   );
 }
 
+export function authorityApprovalFromRecord(value: unknown, options?: { assumeAuthority?: boolean }): AuthorityApproval | null {
+  if (!isRecord(value)) return null;
+  if (!options?.assumeAuthority && !isAuthorityApprovalEvent(value)) return null;
+  const requestId = String(value.request_id ?? value.approval_request_id ?? value.requestId ?? "").trim();
+  if (!requestId) return null;
+  const permissionId = String(value.permission_id ?? value.permissionId ?? "model.invoke").trim() || "model.invoke";
+  const resource = isRecord(value.resource) ? value.resource : {};
+  return {
+    requestId,
+    principalId: String(value.principal_id ?? value.principalId ?? ""),
+    permissionId,
+    resource,
+    riskLevel: typeof value.risk_level === "string" ? value.risk_level : typeof value.riskLevel === "string" ? value.riskLevel : undefined,
+    summary: typeof value.display_summary === "string" ? value.display_summary : typeof value.summary === "string" ? value.summary : undefined,
+    reason: typeof value.reason === "string" ? value.reason : undefined,
+  };
+}
+
 export function pendingAuthorityApproval(messages: ChatUiMessage[]): AuthorityApproval | null {
   for (const message of [...messages].reverse()) {
     if (message.role === "user") return null;
     if (message.role !== "agent") continue;
 
+    const metadata = isRecord(message.metadata) ? message.metadata as Record<string, unknown> : {};
+    const metadataApproval = authorityApprovalFromRecord(
+      metadata.pendingAuthorityApproval ?? metadata.pending_authority_approval,
+      { assumeAuthority: true },
+    );
+    if (metadataApproval) return metadataApproval;
+
     for (const event of [...(message.events ?? [])].reverse()) {
       if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
-      const candidate = event as Record<string, unknown>;
-      if (!isAuthorityApprovalEvent(candidate)) continue;
-      const requestId = String(candidate.request_id ?? candidate.approval_request_id ?? "").trim();
-      if (!requestId) continue;
-      const resource = isRecord(candidate.resource) ? candidate.resource : {};
-      return {
-        requestId,
-        principalId: String(candidate.principal_id ?? ""),
-        permissionId: String(candidate.permission_id ?? "model.invoke"),
-        resource,
-        riskLevel: typeof candidate.risk_level === "string" ? candidate.risk_level : undefined,
-        summary: typeof candidate.display_summary === "string" ? candidate.display_summary : undefined,
-        reason: typeof candidate.reason === "string" ? candidate.reason : undefined,
-      };
+      const approval = authorityApprovalFromRecord(event);
+      if (approval) return approval;
     }
   }
   return null;
