@@ -3063,6 +3063,9 @@ export function SettingsModalRenderer({
                         hiddenToolIds={Array.isArray(settingsValues.tools?.hidden_tool_ids)
                           ? settingsValues.tools?.hidden_tool_ids.map((item) => String(item)).filter(Boolean)
                           : []}
+                        toolPermissionOverrides={settingsValues.tools?.tool_permission_overrides && typeof settingsValues.tools.tool_permission_overrides === "object" && !Array.isArray(settingsValues.tools.tool_permission_overrides)
+                          ? settingsValues.tools.tool_permission_overrides as Record<string, unknown>
+                          : {}}
                         onSettingChange={onSettingChange}
                       />
                     )}

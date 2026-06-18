@@ -168,7 +168,7 @@ function readStoredStringArrayRecord(key: string): Record<string, string[]> {
 
 const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: ReactElement }> = {
   all: { label: "All", icon: <Layers size={16} /> },
-  tool: { label: "Tools", icon: <Wrench size={16} /> },
+  tool: { label: "機能", icon: <Wrench size={16} /> },
   widget: { label: "Widgets", icon: <LayoutGrid size={16} /> },
   system: { label: "System", icon: <Settings size={16} /> },
   integration: { label: "Integrations", icon: <Blocks size={16} /> },
@@ -1522,15 +1522,15 @@ export function RightSidebar({
         >
           <div
             role="separator"
-            aria-label="Tool panel幅を変更"
-            title="Tool panel幅を変更"
+            aria-label="機能パネル幅を変更"
+            title="機能パネル幅を変更"
             className="absolute left-0 top-0 rumi-layer-local-popover h-full w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-zinc-700/60"
             onPointerDown={startPanelResize}
           />
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
               <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isWorkspaceTabsActive ? "bg-emerald-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
-              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Employees" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isToolFilterLogActive ? "Tool filter log" : isRuntimeStatusActive ? "Runtime status" : "Tool manager")}</h3>
+              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Employees" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isToolFilterLogActive ? "選定ログ" : isRuntimeStatusActive ? "Runtime status" : "機能")}</h3>
               {activeItem?.badge && (
                 <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.5 rounded-full font-bold flex-shrink-0">
                   {activeItem.badge}
@@ -1545,7 +1545,7 @@ export function RightSidebar({
                   "p-1 rounded transition-colors",
                   selectedToolIdSet.has(activeItem.id) ? "text-emerald-400 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800",
                 )}
-                title={selectedToolIdSet.has(activeItem.id) ? "無効にする" : "有効にする"}
+                title={selectedToolIdSet.has(activeItem.id) ? "今回の指定を解除" : "今回使う"}
               >
                 <Power size={14} />
               </button>
@@ -1685,7 +1685,7 @@ export function RightSidebar({
                                       setIsToolManagerSearchOpen(true);
                                     }
                                   }}
-                                  placeholder="Tool managerで検索"
+                                  placeholder="機能を検索"
                                   aria-expanded={Boolean(toolManagerSearchQuery.trim() && isToolManagerSearchOpen)}
                                   className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 pl-8 pr-8 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
                                 />
@@ -1736,22 +1736,22 @@ export function RightSidebar({
                                       ))}
                                     </div>
                                   ) : (
-                                    <p className="px-3 py-3 text-[11px] text-zinc-500">一致するtoolがありません。</p>
+                                    <p className="px-3 py-3 text-[11px] text-zinc-500">一致する機能がありません。</p>
                                   )}
                                 </div>
                               )}
                             </div>
                             <div className="grid grid-cols-3 gap-2">
                               <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
-                                <p className="text-[9px] uppercase tracking-wider text-zinc-600">Tools</p>
+                                <p className="text-[9px] uppercase tracking-wider text-zinc-600">機能</p>
                                 <p className="mt-1 text-lg font-semibold text-zinc-100">{toolManagerItems.length}</p>
                               </div>
                   <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
-                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">On</p>
+                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">今回</p>
                     <p className="mt-1 text-lg font-semibold text-emerald-300">{selectedToolIds.length}</p>
                   </div>
                   <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
-                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">Star</p>
+                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">ピン留め</p>
                     <p className="mt-1 text-lg font-semibold text-amber-300">{starredItemIds.length}</p>
                   </div>
                 </div>
@@ -1762,7 +1762,7 @@ export function RightSidebar({
                     className="flex items-center justify-center gap-1 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 py-1.5 text-[11px] font-medium text-emerald-200 hover:bg-emerald-500/15"
                   >
                     <FolderCheck size={13} />
-                    表示中をON
+                    表示中を今回使う
                   </button>
                               <button
                                 type="button"
@@ -1770,7 +1770,7 @@ export function RightSidebar({
                     className="flex items-center justify-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/60 px-2 py-1.5 text-[11px] font-medium text-zinc-300 hover:bg-zinc-900"
                   >
                     <FolderX size={13} />
-                    表示中をOFF
+                    今回指定を解除
                   </button>
                 </div>
                 {allToolTags.length > 0 && (
@@ -1815,7 +1815,7 @@ export function RightSidebar({
                           onClick={() => setToolsEnabled(toolsWithTag(activeTagFilter), true)}
                           className="rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200 hover:bg-emerald-500/15"
                         >
-                          tag ON
+                          tagを今回使う
                         </button>
                         <button
                           type="button"
@@ -1825,7 +1825,7 @@ export function RightSidebar({
                             activeTagFilter === "danger" ? "bg-red-500/10 text-red-200 hover:bg-red-500/15" : "bg-zinc-900 text-zinc-300 hover:bg-zinc-800",
                           )}
                         >
-                          tag OFF
+                          tag指定を解除
                         </button>
                       </div>
                     )}
@@ -1833,7 +1833,7 @@ export function RightSidebar({
                 )}
                 <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Tool Filter Log</p>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">選定ログ</p>
                     <button
                       type="button"
                       onClick={() => setActivePanel("__tool_filter_log__")}
@@ -1895,7 +1895,7 @@ export function RightSidebar({
                                           type="button"
                                           onClick={() => onToolToggle?.(item)}
                                           className={cn("flex h-7 w-7 items-center justify-center rounded-md transition-colors", enabled ? "text-emerald-300 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
-                                          title={enabled ? "無効にする" : "有効にする"}
+                                          title={enabled ? "今回の指定を解除" : "今回使う"}
                                         >
                                           <Power size={15} />
                                         </button>
@@ -1920,10 +1920,10 @@ export function RightSidebar({
                         )}
                         <div className="mt-2 flex flex-wrap gap-1 pl-9">
                           {globallyDisabled && (
-                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-zinc-900 text-zinc-400">OFF by user</span>
+                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-zinc-900 text-zinc-400">権限ブロック</span>
                           )}
                           {hidden && (
-                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-zinc-900 text-zinc-400">Hidden</span>
+                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-zinc-900 text-zinc-400">一覧から隠す</span>
                           )}
                           {item.tool_info?.requires_approval && (
                             <span className="rounded px-1.5 py-0.5 text-[9px] bg-sky-500/10 text-sky-200">Needs approval</span>
@@ -2005,7 +2005,7 @@ export function RightSidebar({
                         ? "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30"
                         : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                     )}
-                    title="Starred tools"
+                    title="ピン留めした機能"
                   >
             <Star
               size={18}
@@ -2028,7 +2028,7 @@ export function RightSidebar({
                         ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
                         : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                     )}
-                    title="Tool manager"
+                    title="機能"
           >
             <SlidersHorizontal size={16} className="h-4 w-4 shrink-0" />
             {selectedToolIds.length > 0 && (
@@ -2185,7 +2185,7 @@ export function RightSidebar({
                           {group.path?.length && group.path.length > 1 && (
                             <p className="truncate text-[10px] text-zinc-500">{group.path.join(" / ")}</p>
                           )}
-                          <p className="text-[10px] text-zinc-500">{group.count} tools</p>
+                          <p className="text-[10px] text-zinc-500">{group.count} 機能</p>
                         </div>
                               <div className="grid grid-cols-2 gap-1 border-b border-zinc-800 p-2">
                                 <button
@@ -2195,7 +2195,7 @@ export function RightSidebar({
                                   className="flex items-center justify-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200 hover:bg-emerald-500/15"
                                 >
                           <FolderCheck size={11} />
-                          folder ON
+                          今回使う
                         </button>
                                 <button
                                   type="button"
@@ -2204,7 +2204,7 @@ export function RightSidebar({
                                   className="flex items-center justify-center gap-1 rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-zinc-300 hover:bg-zinc-800"
                                 >
                           <FolderX size={11} />
-                          folder OFF
+                          解除
                         </button>
                       </div>
                       <div className="max-h-64 overflow-y-auto py-1">
@@ -2263,14 +2263,14 @@ export function RightSidebar({
                       ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
                       : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                   )}
-                  title={`More tools (${hiddenToolGroupCount} groups)`}
+                  title={`その他の機能 (${hiddenToolGroupCount} groups)`}
                 >
                   <MoreVertical size={17} className="h-[17px] w-[17px] shrink-0" />
                   <span className="absolute -top-0.5 -right-0.5 text-[7px] bg-zinc-700 text-zinc-300 px-0.5 rounded-full leading-tight">
                     {hiddenToolGroupCount}
                   </span>
                   <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg rumi-layer-global-overlay">
-                    More tools
+                    その他の機能
                   </span>
                 </button>
               )}
@@ -2336,7 +2336,7 @@ export function RightSidebar({
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
                   >
                     <Power size={13} className={enabled ? "text-emerald-300" : undefined} />
-                    <span>{enabled ? "Tool を off" : "Tool を on"}</span>
+                    <span>{enabled ? "今回の指定を解除" : "今回使う"}</span>
                   </button>
                 )}
                         <button
