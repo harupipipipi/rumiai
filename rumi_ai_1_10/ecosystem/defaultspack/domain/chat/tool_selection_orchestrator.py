@@ -4,7 +4,7 @@ from typing import Any
 
 from domain.ai_client.model_call import call_model
 from domain.chat.tool_recommender import recommend_tool_ids
-from domain.chat.tool_selection_schema import COMPUTER_TOOL_IDS, ToolRecommendation, ToolSelectionResult
+from domain.chat.tool_selection_schema import ToolRecommendation, ToolSelectionResult
 from domain.tool.loading import split_tools_by_loading
 
 
@@ -21,7 +21,7 @@ class ToolSelectionOrchestrator:
         selected_model_capabilities: dict[str, Any] | None = None,
         settings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        allowed_tools = [tool for tool in tools if _tool_id(tool) not in COMPUTER_TOOL_IDS]
+        allowed_tools = [tool for tool in tools if _tool_id(tool)]
         always_tools, vector_tools = split_tools_by_loading(allowed_tools)
         candidate_ids = recommend_tool_ids(user_text, vector_tools, limit=min(20, max(limit, 1)))
         candidates = [tool for tool in vector_tools if _tool_id(tool) in set(candidate_ids)]
@@ -46,8 +46,13 @@ class ToolSelectionOrchestrator:
             {
                 "model_hint": (settings or {}).get("utility_models", {}).get("tool_selector") if isinstance((settings or {}).get("utility_models"), dict) else "",
                 "question": (
-                    "Select the most relevant tools for the user message. "
-                    "Return JSON with recommended_tools as an array of {{tool_id, confidence, reason}}.\n\n"
+                    "Select the minimum sufficient set of tools for the user message.\n"
+                    "- Prefer read/search before write/execute.\n"
+                    "- Never return a tool outside the supplied candidate list.\n"
+                    "- Do not select a tool only because of word overlap.\n"
+                    "- Do not select computer/browser-control tools without explicit user intent.\n"
+                    "- Respect the maximum tool count.\n"
+                    "Return JSON only with selected_tools as an array of {{tool_id, confidence, reason}}.\n\n"
                     "User message:\n{}\n\nCandidate tools:\n{}"
                 ).format(
                     user_text,
@@ -96,7 +101,9 @@ def _compact_tool(tool: dict[str, Any]) -> dict[str, Any]:
 def _selected_ids(output: Any, fallback: list[str]) -> list[str]:
     if not isinstance(output, dict):
         return fallback
-    values = output.get("recommended_tools")
+    values = output.get("selected_tools")
+    if not isinstance(values, list):
+        values = output.get("recommended_tools")
     if not isinstance(values, list):
         return fallback
     ids = []
@@ -111,7 +118,8 @@ def _selected_ids(output: Any, fallback: list[str]) -> list[str]:
 
 
 def _confidence(output: Any, tool_id: str) -> float:
-    for item in output.get("recommended_tools", []) if isinstance(output, dict) and isinstance(output.get("recommended_tools"), list) else []:
+    items = _output_items(output)
+    for item in items:
         if isinstance(item, dict) and str(item.get("tool_id") or "") == tool_id:
             try:
                 return float(item.get("confidence", 0.6))
@@ -121,7 +129,18 @@ def _confidence(output: Any, tool_id: str) -> float:
 
 
 def _reason(output: Any, tool_id: str) -> str:
-    for item in output.get("recommended_tools", []) if isinstance(output, dict) and isinstance(output.get("recommended_tools"), list) else []:
+    items = _output_items(output)
+    for item in items:
         if isinstance(item, dict) and str(item.get("tool_id") or "") == tool_id:
             return str(item.get("reason") or "selected by tool selector")
     return "selected by keyword prefilter"
+
+
+def _output_items(output: Any) -> list[Any]:
+    if not isinstance(output, dict):
+        return []
+    selected = output.get("selected_tools")
+    if isinstance(selected, list):
+        return selected
+    recommended = output.get("recommended_tools")
+    return recommended if isinstance(recommended, list) else []

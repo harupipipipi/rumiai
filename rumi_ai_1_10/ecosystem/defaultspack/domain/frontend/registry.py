@@ -1516,8 +1516,8 @@ class FrontendRegistry:
             },
             {
                 "id": "tools",
-                "label": "Tools",
-                "description": "Tool composer defaults and selection behavior.",
+                "label": "機能と接続",
+                "description": "機能の既定動作、権限、接続、高度な選定方式。",
                 "fields": [
                     {
                         "id": "default_target",
@@ -1528,33 +1528,93 @@ class FrontendRegistry:
                         "advanced": True,
                     },
                     {
-                        "id": "keep_selected_tools_after_send",
-                        "label": "Keep Selected Tools",
-                        "type": "toggle",
-                        "default": False,
-                        "help": "Keep composer tool selections after a message is sent.",
-                    },
-                    {
-                        "id": "tool_assist_mode",
-                        "label": "Tool Assist",
+                        "id": "default_mode",
+                        "label": "既定の使い方",
                         "type": "select",
                         "default": "auto",
                         "options": [
-                            {"value": "auto", "label": "Auto: always tools plus relevant lexical matches"},
-                            {"value": "vector", "label": "Lexical: recommend relevant tools"},
-                            {"value": "off", "label": "Off: only manually selected tools"},
-                            {"value": "all_schemas", "label": "Debug: expose all tool schemas"},
+                            {"value": "auto", "label": "自動で選ぶ"},
+                            {"value": "review", "label": "使う前に確認"},
+                            {"value": "manual", "label": "自分で選ぶ"},
+                            {"value": "none", "label": "機能を使わない"},
                         ],
-                        "help": "既定では常時読み込み宣言の tool と、入力文に関連する tool だけを渡します。全 schema 公開はdebug用です。",
                     },
                     {
-                        "id": "tool_assist_limit",
-                        "label": "Tool Assist Limit",
+                        "id": "selection_strategy",
+                        "label": "選定方式",
+                        "type": "select",
+                        "default": "hybrid",
+                        "options": [
+                            {"value": "hybrid", "label": "自動選定・高精度"},
+                            {"value": "semantic", "label": "意味検索"},
+                            {"value": "catalog_ai", "label": "別AIに全体から選ばせる"},
+                            {"value": "all_with_hints", "label": "全機能＋おすすめ"},
+                            {"value": "all_schemas", "label": "全schemaを公開・デバッグ"},
+                            {"value": "lexical", "label": "軽量検索"},
+                        ],
+                        "help": "通常は自動選定・高精度のままで構いません。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "show_selection_summary",
+                        "label": "選んだ機能を回答内に表示",
+                        "type": "toggle",
+                        "default": True,
+                    },
+                    {
+                        "id": "show_selection_reasons",
+                        "label": "選定理由を常に展開して表示",
+                        "type": "toggle",
+                        "default": False,
+                    },
+                    {
+                        "id": "semantic_backend",
+                        "label": "Semantic backend",
+                        "type": "select",
+                        "default": "auto",
+                        "options": [
+                            {"value": "auto", "label": "自動"},
+                            {"value": "embedding", "label": "Embedding"},
+                            {"value": "lexical", "label": "軽量検索"},
+                        ],
+                        "advanced": True,
+                    },
+                    {
+                        "id": "selector_trace",
+                        "label": "Trace",
+                        "type": "select",
+                        "default": "summary",
+                        "options": [
+                            {"value": "none", "label": "保存しない"},
+                            {"value": "summary", "label": "要約のみ"},
+                            {"value": "full", "label": "完全トレース"},
+                        ],
+                        "advanced": True,
+                    },
+                    {
+                        "id": "selector_model",
+                        "label": "Selector model",
+                        "type": "text",
+                        "default": "",
+                        "help": "空なら高速なutility modelを自動選択します。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "final_tool_limit",
+                        "label": "最終機能数",
                         "type": "number",
                         "default": 8,
                         "min": 1,
                         "max": 24,
-                        "help": "Vector が AI に推薦する tool 数の上限です。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "semantic_candidate_limit",
+                        "label": "Semantic候補数",
+                        "type": "number",
+                        "default": 32,
+                        "min": 8,
+                        "max": 64,
                         "advanced": True,
                     },
                 ],
@@ -2538,8 +2598,30 @@ class FrontendRegistry:
                 "show_advanced_commands": False,
             },
             "tools": {
-                "settings_version": 2,
+                "settings_version": 3,
                 "default_target": "",
+                "default_mode": "auto",
+                "selection_strategy": "hybrid",
+                "semantic_backend": "auto",
+                "semantic_candidate_limit": 32,
+                "final_tool_limit": 8,
+                "selector_model": "",
+                "selector_trace": "summary",
+                "show_selection_summary": True,
+                "show_selection_reasons": False,
+                "action_permissions": {
+                    "read": "auto",
+                    "search": "auto",
+                    "create": "confirm",
+                    "update": "confirm",
+                    "send": "confirm",
+                    "execute": "confirm",
+                    "computer": "confirm",
+                    "delete": "confirm",
+                },
+                "service_permission_overrides": {},
+                "tool_permission_overrides": {},
+                "pinned_service_ids": [],
                 "keep_selected_tools_after_send": False,
                 "tool_assist_mode": "auto",
                 "tool_assist_limit": 8,
@@ -3007,21 +3089,43 @@ class FrontendRegistry:
             settings_version = int(tools.get("settings_version") or 1)
         except (TypeError, ValueError):
             settings_version = 1
-        tools["settings_version"] = 2
+        legacy_tool_assist_mode = str(tools.get("tool_assist_mode") or "auto").strip().lower()
+        if settings_version < 3:
+            if "default_mode" not in tools:
+                if legacy_tool_assist_mode in {"off", "manual"}:
+                    tools["default_mode"] = "manual"
+                else:
+                    tools["default_mode"] = "auto"
+            if "selection_strategy" not in tools:
+                if legacy_tool_assist_mode == "vector":
+                    tools["selection_strategy"] = "lexical"
+                elif legacy_tool_assist_mode == "all_schemas":
+                    tools["selection_strategy"] = "all_schemas"
+                else:
+                    tools["selection_strategy"] = "hybrid"
+        tools["settings_version"] = 3
         tools["keep_selected_tools_after_send"] = (
             False
-            if settings_version < 2
+            if settings_version < 3
             else self._setting_bool(tools.get("keep_selected_tools_after_send"), False)
         )
         disabled_tool_ids = tools.get("disabled_tool_ids")
         hidden_tool_ids = tools.get("hidden_tool_ids")
-        tools["disabled_tool_ids"] = list(
+        normalized_disabled_tool_ids = list(
             dict.fromkeys(
                 str(item).strip()
                 for item in (disabled_tool_ids if isinstance(disabled_tool_ids, list) else [])
                 if str(item or "").strip()
             )
         )
+        tool_permission_overrides = tools.get("tool_permission_overrides")
+        if not isinstance(tool_permission_overrides, dict):
+            tool_permission_overrides = {}
+        if settings_version < 3:
+            for tool_id in normalized_disabled_tool_ids:
+                tool_permission_overrides.setdefault(tool_id, "block")
+        tools["tool_permission_overrides"] = tool_permission_overrides
+        tools["disabled_tool_ids"] = normalized_disabled_tool_ids
         tools["hidden_tool_ids"] = list(
             dict.fromkeys(
                 str(item).strip()
@@ -3029,7 +3133,41 @@ class FrontendRegistry:
                 if str(item or "").strip()
             )
         )
-        tool_assist_mode = str(tools.get("tool_assist_mode") or "auto").strip().lower()
+        default_mode = str(tools.get("default_mode") or "auto").strip().lower()
+        tools["default_mode"] = default_mode if default_mode in {"auto", "review", "manual", "none"} else "auto"
+        selection_strategy = str(tools.get("selection_strategy") or "hybrid").strip().lower()
+        tools["selection_strategy"] = selection_strategy if selection_strategy in {"hybrid", "semantic", "catalog_ai", "all_with_hints", "all_schemas", "lexical"} else "hybrid"
+        semantic_backend = str(tools.get("semantic_backend") or "auto").strip().lower()
+        tools["semantic_backend"] = semantic_backend if semantic_backend in {"auto", "embedding", "lexical"} else "auto"
+        selector_trace = str(tools.get("selector_trace") or "summary").strip().lower()
+        tools["selector_trace"] = selector_trace if selector_trace in {"none", "summary", "full"} else "summary"
+        tools["selector_model"] = str(tools.get("selector_model") or "")
+        tools["show_selection_summary"] = self._setting_bool(tools.get("show_selection_summary"), True)
+        tools["show_selection_reasons"] = self._setting_bool(tools.get("show_selection_reasons"), False)
+        action_permissions = tools.get("action_permissions")
+        if not isinstance(action_permissions, dict):
+            action_permissions = {}
+        for action, default in {
+            "read": "auto",
+            "search": "auto",
+            "create": "confirm",
+            "update": "confirm",
+            "send": "confirm",
+            "execute": "confirm",
+            "computer": "confirm",
+            "delete": "confirm",
+        }.items():
+            value = str(action_permissions.get(action) or default).strip().lower()
+            action_permissions[action] = value if value in {"auto", "confirm", "block"} else default
+        tools["action_permissions"] = action_permissions
+        for key in ("service_permission_overrides",):
+            if not isinstance(tools.get(key), dict):
+                tools[key] = {}
+        pinned_service_ids = tools.get("pinned_service_ids")
+        if not isinstance(pinned_service_ids, list):
+            pinned_service_ids = []
+        tools["pinned_service_ids"] = list(dict.fromkeys(str(item).strip() for item in pinned_service_ids if str(item or "").strip()))
+        tool_assist_mode = legacy_tool_assist_mode
         if settings_version < 2 and tool_assist_mode in {"all", "auto", "vector"}:
             tool_assist_mode = "auto"
         elif tool_assist_mode == "manual":
@@ -3043,6 +3181,14 @@ class FrontendRegistry:
             tools["tool_assist_limit"] = max(1, min(24, int(tools.get("tool_assist_limit", 8))))
         except (TypeError, ValueError):
             tools["tool_assist_limit"] = 8
+        try:
+            tools["semantic_candidate_limit"] = max(8, min(64, int(tools.get("semantic_candidate_limit", 32))))
+        except (TypeError, ValueError):
+            tools["semantic_candidate_limit"] = 32
+        try:
+            tools["final_tool_limit"] = max(1, min(24, int(tools.get("final_tool_limit", tools.get("tool_assist_limit", 8)))))
+        except (TypeError, ValueError):
+            tools["final_tool_limit"] = 8
         legacy_default_target = self._legacy_default_target(refreshed)
         if "default_target" not in tools or (not str(tools.get("default_target") or "").strip() and legacy_default_target):
             tools["default_target"] = legacy_default_target
