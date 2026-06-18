@@ -1,4 +1,4 @@
-import type { AuthorityUiOperator } from "./api";
+import type { AuthorityApprovalContext } from "./api";
 
 type TauriInvoke = <T = unknown>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -9,11 +9,6 @@ type TauriWindow = Window & {
       invoke?: TauriInvoke;
     };
   };
-};
-
-export type AuthorityApprovalContext = {
-  request_id: string;
-  ui_operator: AuthorityUiOperator;
 };
 
 function tauriInvoke(): TauriInvoke | null {

@@ -108,6 +108,66 @@ def test_authority_http_transport_approve_passes_related_permissions_and_ui_oper
     }]
 
 
+def test_authority_browser_ui_operator_endpoint_is_disabled_without_token(monkeypatch):
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    monkeypatch.delenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", raising=False)
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+
+    result = server._handle_authority_browser_ui_operator({"request_id": "auth_1"}, {})
+
+    assert result["status"] == "error"
+    assert result["_http_status"] == 404
+    assert result["error"]["code"] == "AUTHORITY_BROWSER_TEST_DISABLED"
+
+
+def test_authority_browser_ui_operator_endpoint_requires_valid_token(monkeypatch):
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    monkeypatch.setenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "browser-secret")
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+
+    missing = server._handle_authority_browser_ui_operator({"request_id": "auth_1"}, {})
+    invalid = server._handle_authority_browser_ui_operator(
+        {
+            "request_id": "auth_1",
+            "_headers": {"X-Rumi-Approval-Browser-Token": "wrong"},
+        },
+        {},
+    )
+
+    assert missing["status"] == "error"
+    assert missing["_http_status"] == 401
+    assert missing["error"]["code"] == "AUTHORITY_BROWSER_TOKEN_REQUIRED"
+    assert invalid["status"] == "error"
+    assert invalid["_http_status"] == 403
+    assert invalid["error"]["code"] == "AUTHORITY_BROWSER_TOKEN_INVALID"
+
+
+def test_authority_browser_ui_operator_endpoint_mints_signed_context(monkeypatch):
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+    from core_runtime.authority.ui_operator import verify_ui_operator
+
+    monkeypatch.setenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "browser-secret")
+    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "authority-signing-secret-" + ("x" * 32))
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+
+    result = server._handle_authority_browser_ui_operator(
+        {
+            "request_id": "auth_1",
+            "browser_approval_token": "browser-secret",
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["request_id"] == "auth_1"
+    ui_operator = result["data"]["ui_operator"]
+    verified, reason, normalized = verify_ui_operator(ui_operator, request_id="auth_1")
+    assert verified is True, reason
+    assert normalized["request_id"] == "auth_1"
+
+
 def test_authority_http_errors_preserve_status(monkeypatch):
     from blocks.authority import requests
 

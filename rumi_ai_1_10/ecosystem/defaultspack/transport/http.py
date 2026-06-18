@@ -957,6 +957,45 @@ class DefaultsHttpServer:
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
 
+    def _handle_authority_browser_ui_operator(self, request_data, path_params):
+        del path_params
+        expected = str(os.environ.get("RUMI_AUTHORITY_BROWSER_TEST_TOKEN") or "").strip()
+        if not expected:
+            response = error("browser approval test endpoint is disabled", "AUTHORITY_BROWSER_TEST_DISABLED")
+            response["_http_status"] = 404
+            return response
+
+        headers = request_data.get("_headers") if isinstance(request_data.get("_headers"), dict) else {}
+        provided = (
+            _header_value(headers, "X-Rumi-Approval-Browser-Token").strip()
+            or str(request_data.get("browser_approval_token") or "").strip()
+        )
+        if not provided:
+            response = error("browser approval token is required", "AUTHORITY_BROWSER_TOKEN_REQUIRED")
+            response["_http_status"] = 401
+            return response
+        if not hmac.compare_digest(provided, expected):
+            response = error("browser approval token is invalid", "AUTHORITY_BROWSER_TOKEN_INVALID")
+            response["_http_status"] = 403
+            return response
+
+        request_id = str(request_data.get("request_id") or "").strip()
+        if not request_id:
+            response = error("request_id is required", "INVALID_INPUT")
+            response["_http_status"] = 400
+            return response
+        try:
+            from core_runtime.authority.ui_operator import sign_ui_operator
+
+            ui_operator = sign_ui_operator(request_id)
+        except Exception as exc:
+            return error("authority ui_operator unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+        if not str(ui_operator.get("signature") or "").strip():
+            response = error("authority ui_operator signing secret is unavailable", "AUTHORITY_UI_OPERATOR_UNAVAILABLE")
+            response["_http_status"] = 503
+            return response
+        return ok({"request_id": request_id, "ui_operator": ui_operator})
+
     def _handle_authority_approve(self, request_data, path_params):
         request_id = str((path_params or {}).get("request_id") or "").strip()
         config = request_data.get("config") if isinstance(request_data.get("config"), dict) else None
@@ -1439,7 +1478,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             )
             self.send_header(
                 "Access-Control-Allow-Headers",
-                "Content-Type, Authorization, X-Rumi-CSRF, X-Rumi-Approval",
+                "Content-Type, Authorization, X-Rumi-CSRF, X-Rumi-Approval, X-Rumi-Approval-Browser-Token",
             )
             return
         if origin and _is_allowed_sensitive_origin(origin):
@@ -1448,7 +1487,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         elif not origin:
             self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Rumi-CSRF")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Rumi-CSRF, X-Rumi-Approval-Browser-Token")
 
     def log_message(self, format, *args):
         pass

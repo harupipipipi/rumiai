@@ -310,7 +310,8 @@ test("authority approval window settles already-approved or denied requests on l
     /const singleSettledStatus = authorityRequestSettledStatus\(single\.status\)[\s\S]*settleAuthorityRequest\(single, singleSettledStatus\)/,
   );
   assert.match(source, /const displayedSettledStatus = decisionSettledStatus \?\? authorityRequestSettledStatus\(request\?\.status\)/);
-  assert.match(source, /const showApprovalControls = Boolean\(request && request\.status === "pending" && nativeApprovalAvailable && !displayedSettledStatus/);
+  assert.match(source, /const approvalContextAvailable = nativeApprovalAvailable \|\| browserApprovalAvailable/);
+  assert.match(source, /const showApprovalControls = Boolean\(request && request\.status === "pending" && approvalContextAvailable && !displayedSettledStatus/);
   assert.match(source, /authorityApprovalSettledLabel\(displayedSettledStatus\)/);
 });
 
@@ -333,17 +334,30 @@ test("authority approval window treats post failure followed by settled GET as s
 test("authority approval window refreshes stale ui_operator once and retries once", () => {
   const source = authorityApprovalWindowSource();
 
-  assert.match(source, /const submitApproveOnce = async[\s\S]*getAuthorityApprovalContext\(request\.request_id\)/);
+  assert.match(source, /const submitApproveOnce = async[\s\S]*getApprovalContext\(request\.request_id\)/);
+  assert.match(source, /if \(nativeApprovalAvailableRef\.current\)[\s\S]*getAuthorityApprovalContext\(targetRequestId\)/);
   assert.match(source, /if \(!authorityApprovalShouldRetryWithFreshContext\(postError\)\) throw postError;\s*try \{\s*const retriedDecision = await submitApproveOnce\(\);/);
   assert.equal((source.match(/await submitApproveOnce\(\)/g) ?? []).length, 2);
 });
 
-test("authority approval browser route cannot approve pending requests but still shows settled status", () => {
+test("authority approval browser route is read-only without token but can fetch browser ui_operator with token", () => {
   const source = authorityApprovalWindowSource();
+  const apiSource = readFileSync(resolve(SRC_ROOT, "lib", "api.ts"), "utf8");
+  const resourceSource = readFileSync(resolve(SRC_ROOT, "features", "chat", "resources", "authorityApprovalResources.ts"), "utf8");
 
   assert.match(source, /function hasNativeAuthorityApprovalContext\(\)/);
-  assert.match(source, /request\.status === "pending" && nativeApprovalAvailable && !displayedSettledStatus/);
+  assert.match(source, /BROWSER_APPROVAL_TOKEN_STORAGE_KEY/);
+  assert.match(source, /readBrowserApprovalTokenFromLocation/);
+  assert.match(source, /window\.sessionStorage/);
+  assert.match(source, /const browserApprovalAvailable = Boolean\(!nativeApprovalAvailable && browserApprovalToken\)/);
+  assert.match(source, /request\.status === "pending" && approvalContextAvailable && !displayedSettledStatus/);
+  assert.match(source, /getBrowserAuthorityApprovalContext\(targetRequestId, token\)/);
   assert.match(source, /承認操作は Rumi Viewer の専用ウィンドウでのみ実行できます。/);
+  assert.match(source, /ブラウザでは承認テストトークンがないため読み取り専用です。/);
   assert.match(source, /displayedSettledStatus && \(/);
   assert.match(source, /このリクエストは処理済みです。追加の操作は不要です。/);
+  assert.match(apiSource, /browserAuthorityUiOperator\(requestId: string, browserApprovalToken: string\)/);
+  assert.match(apiSource, /\/api\/authority\/browser-ui-operator/);
+  assert.match(apiSource, /"X-Rumi-Approval-Browser-Token": browserApprovalToken/);
+  assert.match(resourceSource, /getBrowserAuthorityApprovalContext\(requestId: string, browserApprovalToken: string\)/);
 });

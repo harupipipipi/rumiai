@@ -51,7 +51,7 @@ export function AmbientMiniChat({
   const title = conversation?.title?.trim() || (conversationId ? "Linked chat" : "チャット");
 
   return (
-    <section className="flex min-h-[178px] flex-1 flex-col rounded-lg border border-zinc-800 bg-zinc-950/70">
+    <section data-testid="ambient-mini-chat" className="flex min-h-[178px] flex-1 flex-col rounded-lg border border-zinc-800 bg-zinc-950/70">
       <div className="flex items-center gap-2 border-b border-zinc-800/75 px-2.5 py-2">
         <MessageSquare size={13} className="shrink-0 text-sky-200" />
         <div className="min-w-0 flex-1">
@@ -81,7 +81,7 @@ export function AmbientMiniChat({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-2.5 py-2">
+      <div data-testid="ambient-mini-chat-output" className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-2.5 py-2">
         {messages.length === 0 && !showLatestPreview && (
           <div className="rounded-md border border-zinc-800 bg-black/20 px-2 py-2 text-[11px] leading-5 text-zinc-500">
             {conversationId ? "まだ表示できるメッセージはありません。" : "送信先チャットは次の入力で確定します。"}
@@ -112,7 +112,7 @@ export function AmbientMiniChat({
           </div>
         )}
         {error && (
-          <div className="rounded-md border border-red-400/25 bg-red-500/10 px-2 py-1.5 text-[11px] leading-5 text-red-100">
+          <div data-testid="ambient-mini-chat-status" className="rounded-md border border-red-400/25 bg-red-500/10 px-2 py-1.5 text-[11px] leading-5 text-red-100">
             {error}
           </div>
         )}
@@ -120,6 +120,7 @@ export function AmbientMiniChat({
 
       <form onSubmit={onSubmit} className="flex gap-1.5 border-t border-zinc-800/75 p-2">
         <input
+          data-testid="ambient-mini-chat-input"
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
           disabled={disabled || sending}

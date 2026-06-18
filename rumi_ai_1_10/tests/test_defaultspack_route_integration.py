@@ -92,9 +92,16 @@ def test_always_available_routes_include_ambient_shell():
     }
 
     assert ("GET", "/chat", "_handle_static") in routes
+    assert ("GET", "/defaultspack", "_handle_static") in routes
+    assert ("GET", "/pack/defaultspack", "_handle_static") in routes
     assert ("GET", "/coding", "_handle_static") in routes
     assert ("GET", "/approval", "_handle_static") in routes
+    assert ("POST", "/api/authority/browser-ui-operator", "_handle_authority_browser_ui_operator") in routes
     assert ("GET", "/ambient", "_handle_static") in routes
+    assert ("GET", "/ambient-debug", "_handle_static") in routes
+    assert ("GET", "/finger-recording", "_handle_static") in routes
+    assert ("GET", "/console", "_handle_static") in routes
+    assert ("GET", "/host-permissions", "_handle_static") in routes
 
 
 def test_routes_json_transport_direct_entries_match_canonical_registry():
@@ -1095,6 +1102,16 @@ def test_routes_json_documents_new_route_groups():
     routes = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))["routes"]
     method_paths = {(route["method"], route["path"]) for route in routes}
     expected = {
+        ("POST", "/api/authority/browser-ui-operator"),
+        ("GET", "/chat"),
+        ("GET", "/defaultspack"),
+        ("GET", "/pack/defaultspack"),
+        ("GET", "/approval"),
+        ("GET", "/ambient"),
+        ("GET", "/ambient-debug"),
+        ("GET", "/finger-recording"),
+        ("GET", "/console"),
+        ("GET", "/host-permissions"),
         ("POST", "/api/chat/conversations/{id}/compact"),
         ("GET", "/api/agent/companies/{company_id}/status"),
         ("POST", "/api/agent/companies/{company_id}/dispatch"),

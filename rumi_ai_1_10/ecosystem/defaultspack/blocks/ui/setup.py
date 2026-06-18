@@ -58,6 +58,9 @@ def run(context):
             {"id": "conversation_id"},
         ),
         ("POST", "/api/ui/select-directory", _lazy("blocks.ui.select_directory"), {}),
+        ("GET", "/defaultspack", _static_shell, {}),
+        ("GET", "/pack/defaultspack", _static_shell, {}),
+        ("GET", "/ambient-debug", _static_shell, {}),
         ("GET", "/finger-recording", _static_shell, {}),
         ("GET", "/console", _static_shell, {}),
     ]

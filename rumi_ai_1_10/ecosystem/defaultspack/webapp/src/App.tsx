@@ -5601,20 +5601,29 @@ function AmbientWindowLauncher() {
 }
 
 export default function App() {
-  if (window.location.pathname === "/approval") {
+  const pathname = window.location.pathname;
+  const searchParams = new URLSearchParams(window.location.search);
+  const fingerDebugMode = pathname === "/ambient-debug"
+    || searchParams.get("debug") === "1"
+    || searchParams.get("qa") === "debug";
+
+  if (pathname === "/approval") {
     return <AuthorityApprovalWindow />;
   }
-  if (window.location.pathname === "/ambient") {
+  if (pathname === "/ambient") {
     return <AmbientTriggerPanel variant="window" />;
   }
-  if (window.location.pathname === "/finger-recording") {
-    return <AmbientTriggerPanel variant="window" />;
+  if (pathname === "/ambient-debug" || pathname === "/finger-recording") {
+    return <AmbientTriggerPanel variant="window" debugMode={fingerDebugMode} />;
   }
-  if (window.location.pathname === "/console") {
+  if (pathname === "/console") {
     return <DefaultsConsoleWindow />;
   }
-  if (window.location.pathname === "/host-permissions") {
+  if (pathname === "/host-permissions") {
     return <HostPermissionsPage />;
+  }
+  if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat") {
+    return <ChatApp />;
   }
   return <ChatApp />;
 }

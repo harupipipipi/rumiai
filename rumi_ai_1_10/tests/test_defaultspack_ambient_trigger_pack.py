@@ -186,6 +186,69 @@ def test_pinch_and_agent_dispatch_share_ambient_router(monkeypatch, tmp_path):
     assert envelope.target["conversation_id"] == "conv-1"
 
 
+def test_debug_qa_ok_mark_dispatch_strips_media_and_keeps_transcript_metadata(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": "", "conversation_id": "conv-debug"}) as submit:
+        dispatched = router.submit_event(
+            {
+                "source": "camera",
+                "trigger": "pinch",
+                "confidence": 1,
+                "duration_ms": 0,
+                "mode": "dispatch_audio",
+                "action_id": "chat.message",
+                "input_text": "文字起こし:\nブラウザQAです",
+                "conversation_id": "conv-debug",
+                "metadata": {
+                    "panel": "ambient_mini_window",
+                    "debug_qa": True,
+                    "simulated_ok_mark": True,
+                },
+                "attachments": [
+                    {
+                        "name": "debug-ok-mark.webm",
+                        "type": "audio/webm",
+                        "size": 0,
+                        "dataUrl": "data:audio/webm;base64,AAAA",
+                        "audio": "raw-audio",
+                        "blob": "raw-blob",
+                        "ephemeral": True,
+                        "do_not_persist": True,
+                        "transcript": "ブラウザQAです",
+                        "transcript_source": "debug_qa",
+                    }
+                ],
+            },
+            {"conversation_id": "conv-debug"},
+        )
+
+    assert dispatched["status"] == "ok"
+    envelope = submit.call_args.args[0]
+    assert envelope.input == "ブラウザQAです"
+    assert envelope.metadata["ambient"]["metadata"]["debug_qa"] is True
+    assert envelope.metadata["ambient"]["metadata"]["simulated_ok_mark"] is True
+    attachment = envelope.attachments[0]
+    assert attachment["type"] == "audio/webm"
+    assert attachment["size"] == 0
+    assert attachment["ephemeral"] is True
+    assert attachment["do_not_persist"] is True
+    assert attachment["transcript"] == "ブラウザQAです"
+    assert attachment["transcript_source"] == "debug_qa"
+    assert "dataUrl" not in attachment
+    assert "audio" not in attachment
+    assert "blob" not in attachment
+
+
 def test_gesture_choice_does_not_dispatch_numeric_reply_without_audio(monkeypatch, tmp_path):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))

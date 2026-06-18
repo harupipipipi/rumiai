@@ -71,6 +71,7 @@ type Props = {
   onApprovalGesture?: (decision: "approve" | "reject") => void | Promise<void>;
   finalAnswerText?: string | null;
   variant?: "floating" | "window";
+  debugMode?: boolean;
 };
 
 type MiniAuthorityApprovalResolution = {
@@ -94,7 +95,7 @@ const HAND_LANDMARK_CONNECTIONS = [
   [0, 17],
 ] as const;
 
-export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarget, onApprovalGesture, finalAnswerText, variant = "floating" }: Props) {
+export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarget, onApprovalGesture, finalAnswerText, variant = "floating", debugMode = false }: Props) {
   const [status, setStatus] = useState<AmbientStatus | null>(null);
   const standalone = variant === "window";
   const [expanded, setExpanded] = useState(() => standalone);
@@ -124,6 +125,8 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const [trackingFrame, setTrackingFrame] = useState<HandTrackingFrame | null>(null);
   const [cameraDebugOpen, setCameraDebugOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [debugTranscript, setDebugTranscript] = useState("ブラウザQAのテストです。");
+  const [debugStatus, setDebugStatus] = useState("待機中です。");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioStopRef = useRef<(() => void) | null>(null);
   const gestureStopRef = useRef<(() => void) | null>(null);
@@ -222,7 +225,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const allRumiPermissionsGranted = useMemo(() => hasAllRumiPermissions(status), [status]);
   const allOsPermissionsGranted = useMemo(() => hasAllOsPermissions(status), [status]);
   const rumiApprovalPending = rumiApprovalOpen && !allRumiPermissionsGranted;
-  const surfaceTitle = standalone && window.location.pathname === "/finger-recording" ? ambientCopyJa.subtitle : ambientCopyJa.title;
+  const surfaceTitle = standalone && (window.location.pathname === "/finger-recording" || window.location.pathname === "/ambient-debug") ? ambientCopyJa.subtitle : ambientCopyJa.title;
   const pendingApproval = status?.pending_approval ?? null;
   const visibleMessage = useMemo(() => ambientRenderableMessage(message), [message]);
   const ambientDispatchGranted = Boolean(status?.permissions.rumi["ambient.trigger.dispatch"]?.granted);
@@ -249,6 +252,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const miniAuthorityBlocksInput = miniAuthorityApprovalResolving || Boolean(miniAuthorityApproval);
   const inlineSettingsControlsVisible = !standalone;
   const miniChatRoutingSummary = standalone ? "次の送信で作成" : routingSummary;
+  const debugQaVisible = standalone && debugMode;
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -1028,6 +1032,76 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     }
   }
 
+  async function simulateDebugOkMarkRecording() {
+    const transcript = debugTranscript.trim() || "ブラウザQAのテストです。";
+    const inputText = `文字起こし:\n${transcript}`;
+    setDebugStatus("OKマーク録音のシミュレーションを送信しています。");
+    setMiniChatError(null);
+    setLatestSubmittedInput(inputText);
+    try {
+      await ambientTriggerClient.submitEvent({
+        source: "camera",
+        trigger: "pinch",
+        mode: "record_audio_start",
+        action_id: "chat.message",
+        confidence: 1,
+        metadata: {
+          panel: "ambient_mini_window",
+          debug_qa: true,
+          simulated_ok_mark: true,
+        },
+      }).catch(() => undefined);
+
+      const result = await ambientTriggerClient.submitEvent({
+        source: "camera",
+        trigger: "pinch",
+        mode: "dispatch_audio",
+        action_id: "chat.message",
+        input_text: inputText,
+        conversation_id: miniConversationId || conversationIdRef.current || undefined,
+        confidence: 1,
+        duration_ms: 0,
+        metadata: {
+          panel: "ambient_mini_window",
+          debug_qa: true,
+          simulated_ok_mark: true,
+          transcript,
+          transcript_source: "debug_qa",
+        },
+        attachments: [
+          {
+            id: `ambient-debug-audio-${Date.now()}`,
+            name: "debug-ok-mark.webm",
+            type: "audio/webm",
+            size: 0,
+            source: "ambient.debug_qa",
+            ephemeral: true,
+            do_not_persist: true,
+            transcript,
+            transcription: transcript,
+            transcript_source: "debug_qa",
+          },
+        ],
+      });
+      const resultConversationId = ambientConversationIdFromResult(result);
+      if (resultConversationId) setMiniConversationIdOverride(resultConversationId);
+      const nextMessage = ambientResultMessage(result, "ブラウザQAのOKマーク録音をAIに送信しました。");
+      setMessage(nextMessage);
+      setDebugStatus(nextMessage);
+      const resultStatus = String(result.status ?? "");
+      if (resultStatus && resultStatus !== "ok" && resultStatus !== "approval_required") {
+        setMiniChatError(nextMessage);
+      }
+      await refresh();
+      await loadMiniConversation({ conversationId: resultConversationId || miniConversationId || conversationIdRef.current || null, quiet: true });
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : "ブラウザQAのシミュレーションを送信できませんでした。";
+      setDebugStatus(errorText);
+      setMiniChatError(errorText);
+      setMessage(`${ambientOperationLabels.failed}: ${errorText}`);
+    }
+  }
+
   async function submitApprovalGesture(decision: "approve" | "reject", state: PinchState, mode: string) {
     const target = approvalTargetRef.current;
     if (!target || approvalGestureBusyRef.current) return;
@@ -1495,6 +1569,43 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             onPickChat={() => void openChatPicker()}
             onOpenAuthorityApproval={() => void openMiniAuthorityApproval()}
           />
+          {debugQaVisible && (
+            <section
+              data-testid="ambient-debug-panel"
+              className="space-y-2 rounded-lg border border-amber-300/25 bg-amber-400/10 p-2.5"
+            >
+              {/* Local Browser QA only: this simulates OK-mark release without persistent audio/image bytes. */}
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold text-amber-100">Browser QA</p>
+                  <p className="mt-0.5 text-[10px] leading-4 text-amber-100/70">
+                    Rumi権限と監視状態はbackendで通常通り確認されます。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-testid="ambient-debug-simulate-ok"
+                  onClick={() => void simulateDebugOkMarkRecording()}
+                  disabled={miniSending}
+                  className="ambient-mini-button h-8 shrink-0 border-amber-300/35 text-amber-100"
+                >
+                  <Check size={13} />
+                  OK送信
+                </button>
+              </div>
+              <textarea
+                data-testid="ambient-debug-transcript"
+                value={debugTranscript}
+                onChange={(event) => setDebugTranscript(event.target.value)}
+                rows={2}
+                className="min-h-14 w-full resize-none rounded-md border border-amber-300/20 bg-zinc-950/80 px-2 py-1.5 text-xs leading-5 text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-amber-200/45"
+                placeholder="QA用の文字起こし"
+              />
+              <div data-testid="ambient-debug-status" className="text-[11px] leading-5 text-amber-100/80">
+                {debugStatus}
+              </div>
+            </section>
+          )}
           {inlineSettingsControlsVisible && (
             <>
               <div className="flex items-center justify-end text-[11px] leading-4 text-zinc-500">

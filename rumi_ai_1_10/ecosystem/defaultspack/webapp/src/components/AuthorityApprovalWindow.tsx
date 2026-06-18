@@ -46,6 +46,8 @@ type TauriAuthorityWindow = Window & {
   __TAURI__?: unknown;
 };
 
+const BROWSER_APPROVAL_TOKEN_STORAGE_KEY = "rumi.authority.browserApprovalToken";
+
 const SCOPE_LABELS: Record<AuthorityApprovalScope, string> = {
   once: "今回のみ",
   conversation: "会話",
@@ -120,6 +122,36 @@ function hasNativeAuthorityApprovalContext(): boolean {
   return Boolean(maybeWindow.__TAURI__ || maybeWindow.__TAURI_INTERNALS__);
 }
 
+function readBrowserApprovalTokenFromLocation(): string {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return (
+      params.get("browser_approval_token")
+      ?? params.get("approval_browser_token")
+      ?? params.get("browserApprovalToken")
+      ?? ""
+    ).trim();
+  } catch {
+    return "";
+  }
+}
+
+function readBrowserApprovalTokenFromSession(): string {
+  try {
+    return window.sessionStorage.getItem(BROWSER_APPROVAL_TOKEN_STORAGE_KEY)?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberBrowserApprovalToken(token: string): void {
+  try {
+    window.sessionStorage.setItem(BROWSER_APPROVAL_TOKEN_STORAGE_KEY, token);
+  } catch {
+    // Session storage may be unavailable in private or file-based browser contexts.
+  }
+}
+
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -143,6 +175,7 @@ export function AuthorityApprovalWindow() {
   const [ambientEnabled, setAmbientEnabled] = useState(false);
   const [confirmationText, setConfirmationText] = useState("");
   const [nativeApprovalAvailable, setNativeApprovalAvailable] = useState(hasNativeAuthorityApprovalContext);
+  const [browserApprovalToken, setBrowserApprovalToken] = useState("");
   const nativeApprovalAvailableRef = useRef(nativeApprovalAvailable);
   const locallySettledRequestsRef = useRef(new Map<string, AuthorityApprovalSettledStatus>());
   const settlementBroadcastedRef = useRef(new Set<string>());
@@ -172,7 +205,9 @@ export function AuthorityApprovalWindow() {
     ? "approved"
     : decisionState.kind === "rejected" ? "denied" : null;
   const displayedSettledStatus = decisionSettledStatus ?? authorityRequestSettledStatus(request?.status);
-  const showApprovalControls = Boolean(request && request.status === "pending" && nativeApprovalAvailable && !displayedSettledStatus && decisionState.kind === "idle");
+  const browserApprovalAvailable = Boolean(!nativeApprovalAvailable && browserApprovalToken);
+  const approvalContextAvailable = nativeApprovalAvailable || browserApprovalAvailable;
+  const showApprovalControls = Boolean(request && request.status === "pending" && approvalContextAvailable && !displayedSettledStatus && decisionState.kind === "idle");
   const controlsDisabled = !showApprovalControls || action !== null;
   const confirmationPhrase = stringValue(request?.display_metadata?.confirmation_phrase) || stringValue(request?.resource?.confirmation_phrase);
   const typedConfirmationRequired = Boolean(
@@ -219,6 +254,17 @@ export function AuthorityApprovalWindow() {
     const nextNativeApprovalAvailable = hasNativeAuthorityApprovalContext();
     nativeApprovalAvailableRef.current = nextNativeApprovalAvailable;
     setNativeApprovalAvailable(nextNativeApprovalAvailable);
+  }, []);
+
+  useEffect(() => {
+    if (hasNativeAuthorityApprovalContext()) return;
+    const tokenFromLocation = readBrowserApprovalTokenFromLocation();
+    if (tokenFromLocation) {
+      rememberBrowserApprovalToken(tokenFromLocation);
+      setBrowserApprovalToken(tokenFromLocation);
+      return;
+    }
+    setBrowserApprovalToken(readBrowserApprovalTokenFromSession());
   }, []);
 
   const settleAuthorityRequest = useCallback((
@@ -435,12 +481,23 @@ export function AuthorityApprovalWindow() {
     settleAuthorityRequest({ ...settledRequest, status: "denied" }, "denied");
   }, [settleAuthorityRequest]);
 
+  const getApprovalContext = async (targetRequestId: string) => {
+    if (nativeApprovalAvailableRef.current) {
+      return getAuthorityApprovalContext(targetRequestId);
+    }
+    const token = browserApprovalToken.trim();
+    if (!token) {
+      throw new Error("ブラウザでは承認テストトークンがないため、この承認は読み取り専用です。");
+    }
+    return authorityApprovalResources.getBrowserAuthorityApprovalContext(targetRequestId, token);
+  };
+
   const approve = async () => {
     if (!request || !approval) return;
     setAction("approve");
     setError(null);
     const submitApproveOnce = async (): Promise<AuthorityApprovalDecision> => {
-      const context = await getAuthorityApprovalContext(request.request_id);
+      const context = await getApprovalContext(request.request_id);
       const config = authorityApprovalConfig(approval);
       if (typedConfirmationRequired) config.confirmation_text = confirmationText.trim();
       const decision = await authorityApprovalResources.approveAuthorityApproval(request.request_id, {
@@ -482,7 +539,7 @@ export function AuthorityApprovalWindow() {
     setAction("reject");
     setError(null);
     const submitRejectOnce = async (): Promise<void> => {
-      const context = await getAuthorityApprovalContext(request.request_id);
+      const context = await getApprovalContext(request.request_id);
       await authorityApprovalResources.denyAuthorityApproval(request.request_id, {
         reason: "Denied from dedicated authority approval window",
         persist: false,
@@ -687,8 +744,8 @@ export function AuthorityApprovalWindow() {
                 </div>
               ) : !displayedSettledStatus ? (
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-400">
-                  {request.status === "pending" && !nativeApprovalAvailable
-                    ? "承認操作は Rumi Viewer の専用ウィンドウでのみ実行できます。"
+                  {request.status === "pending" && !approvalContextAvailable
+                    ? "承認操作は Rumi Viewer の専用ウィンドウでのみ実行できます。ブラウザでは承認テストトークンがないため読み取り専用です。"
                     : `このリクエストは ${request.status} のため、この画面では操作できません。`}
                 </div>
               ) : null}

@@ -523,6 +523,48 @@
       "description": "Record observed OS microphone and camera permission state without changing Rumi permissions"
     },
     {
+      "method": "POST",
+      "path": "/api/authority/browser-ui-operator",
+      "flow_id": "transport_direct",
+      "description": "Mint a signed ui_operator for local browser approval QA when RUMI_AUTHORITY_BROWSER_TEST_TOKEN is configured"
+    },
+    {
+      "method": "GET",
+      "path": "/chat",
+      "flow_id": "transport_direct",
+      "description": "Render the canonical Defaultspack chat shell"
+    },
+    {
+      "method": "GET",
+      "path": "/defaultspack",
+      "flow_id": "transport_direct",
+      "description": "Render the Defaultspack chat shell alias"
+    },
+    {
+      "method": "GET",
+      "path": "/pack/defaultspack",
+      "flow_id": "transport_direct",
+      "description": "Render the Defaultspack chat shell pack alias"
+    },
+    {
+      "method": "GET",
+      "path": "/approval",
+      "flow_id": "transport_direct",
+      "description": "Render the dedicated authority approval window"
+    },
+    {
+      "method": "GET",
+      "path": "/ambient",
+      "flow_id": "transport_direct",
+      "description": "Render the ambient trigger window surface"
+    },
+    {
+      "method": "GET",
+      "path": "/ambient-debug",
+      "flow_id": "transport_direct",
+      "description": "Render the finger recording debug QA window surface"
+    },
+    {
       "method": "GET",
       "path": "/finger-recording",
       "flow_id": "transport_direct",
@@ -533,6 +575,12 @@
       "path": "/console",
       "flow_id": "transport_direct",
       "description": "Render the dedicated Defaultspack detailed log window"
+    },
+    {
+      "method": "GET",
+      "path": "/host-permissions",
+      "flow_id": "transport_direct",
+      "description": "Render the local host permissions window"
     },
     {
       "method": "GET",

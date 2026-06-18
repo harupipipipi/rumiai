@@ -191,6 +191,11 @@ export type AuthorityUiOperator = {
   signature: string;
 };
 
+export type AuthorityApprovalContext = {
+  request_id: string;
+  ui_operator: AuthorityUiOperator;
+};
+
 export type AuthorityRequestDisplayMetadata = {
   title?: string;
   summary?: string;
@@ -2888,6 +2893,18 @@ export const api = {
       `/api/authority/requests/${encodeURIComponent(requestId)}`,
       { cache: "no-store" },
     );
+  },
+
+  browserAuthorityUiOperator(requestId: string, browserApprovalToken: string) {
+    return request<AuthorityApprovalContext>("/api/authority/browser-ui-operator", {
+      method: "POST",
+      headers: {
+        "X-Rumi-Approval-Browser-Token": browserApprovalToken,
+      },
+      body: JSON.stringify({
+        request_id: requestId,
+      }),
+    });
   },
 
   approveAuthorityApproval(

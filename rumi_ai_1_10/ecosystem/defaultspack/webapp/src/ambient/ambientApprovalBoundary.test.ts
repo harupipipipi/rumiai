@@ -89,8 +89,42 @@ test("generic authority approval retries stale native context once without brows
   const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
 
   assert.equal((source.match(/authorityApprovalShouldRetryWithFreshContext\(postError\)/g) ?? []).length, 2);
-  assert.match(source, /const submitApproveOnce = async[\s\S]*getAuthorityApprovalContext\(request\.request_id\)/);
+  assert.match(source, /const submitApproveOnce = async[\s\S]*getApprovalContext\(request\.request_id\)/);
+  assert.match(source, /if \(nativeApprovalAvailableRef\.current\)[\s\S]*getAuthorityApprovalContext\(targetRequestId\)/);
+  assert.match(source, /getBrowserAuthorityApprovalContext\(targetRequestId, token\)/);
   assert.match(source, /const retriedDecision = await submitApproveOnce\(\)/);
-  assert.match(source, /const submitRejectOnce = async[\s\S]*getAuthorityApprovalContext\(request\.request_id\)/);
+  assert.match(source, /const submitRejectOnce = async[\s\S]*getApprovalContext\(request\.request_id\)/);
   assert.doesNotMatch(source, /window\.localStorage/);
+});
+
+test("ambient debug QA controls are limited to finger recording window routes", () => {
+  const appSource = readFileSync(resolve(SRC_ROOT, "App.tsx"), "utf8");
+  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+
+  assert.match(appSource, /pathname === "\/ambient-debug"/);
+  assert.match(appSource, /pathname === "\/ambient-debug" \|\| pathname === "\/finger-recording"/);
+  assert.match(appSource, /<AmbientTriggerPanel variant="window" debugMode=\{fingerDebugMode\}/);
+  assert.doesNotMatch(appSource, /pathname === "\/viewer"/);
+  assert.match(panelSource, /const debugQaVisible = standalone && debugMode/);
+  assert.match(panelSource, /data-testid="ambient-debug-panel"/);
+  assert.match(panelSource, /data-testid="ambient-debug-transcript"/);
+  assert.match(panelSource, /data-testid="ambient-debug-simulate-ok"/);
+  assert.match(panelSource, /data-testid="ambient-debug-status"/);
+});
+
+test("ambient debug QA simulated OK payload avoids persistent media bytes", () => {
+  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const miniChatSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientMiniChat.tsx"), "utf8");
+
+  assert.match(panelSource, /Local Browser QA only: this simulates OK-mark release without persistent audio\/image bytes/);
+  assert.match(panelSource, /mode: "record_audio_start"[\s\S]*debug_qa: true/);
+  assert.match(panelSource, /mode: "dispatch_audio"[\s\S]*action_id: "chat\.message"/);
+  assert.match(panelSource, /input_text: inputText/);
+  assert.match(panelSource, /type: "audio\/webm"[\s\S]*size: 0[\s\S]*ephemeral: true[\s\S]*do_not_persist: true/);
+  assert.match(panelSource, /transcript_source: "debug_qa"/);
+  assert.doesNotMatch(panelSource, /dataUrl: debug/);
+  assert.doesNotMatch(panelSource, /blob: debug/);
+  assert.match(miniChatSource, /data-testid="ambient-mini-chat"/);
+  assert.match(miniChatSource, /data-testid="ambient-mini-chat-output"/);
+  assert.match(miniChatSource, /data-testid="ambient-mini-chat-input"/);
 });
