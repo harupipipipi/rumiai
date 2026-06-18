@@ -119,9 +119,11 @@
         "diagnostic": "Template route metadata is catalog/test-contract only and does not register a transport route."
       },
       "assertions": [
-        "catalog.backend_services includes model_router",
-        "catalog.test_contracts route_metadata includes /api/ai/models/route",
-        "catalog.permissions includes model.invoke"
+        {"type": "catalog_contains", "bucket": "backend_services", "match": {"service_id": "model_router"}},
+        {"type": "catalog_contains", "bucket": "test_contracts", "match": {"route_metadata": {"path": "/api/ai/models/route"}}},
+        {"type": "route_resolves", "method": "POST", "path": "/api/ai/models/route"},
+        {"type": "function_registered", "function_id": "ai_route_model"},
+        {"type": "permission_declared", "permission_id": "model.invoke"}
       ]
     }
   ]

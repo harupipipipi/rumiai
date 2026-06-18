@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from .activation import TemplateActivationPlan, TemplateActivationPlanner, TemplateActivationState
+from .contracts import (
+    TemplateContractAssertionResult,
+    TemplateContractRunResult,
+    run_template_contracts,
+)
 from .diagnostics import collect_template_diagnostics, diagnostics_have_errors
 from .lifecycle import (
     TemplateLifecyclePlan,
@@ -61,6 +66,8 @@ __all__ = [
     "TemplateActivationPlanner",
     "TemplateActivationState",
     "TemplateCapabilitySpec",
+    "TemplateContractAssertionResult",
+    "TemplateContractRunResult",
     "TemplateContext",
     "TemplateDependencySpec",
     "TemplateDiagnostic",
@@ -101,6 +108,7 @@ __all__ = [
     "plan_template_lifecycle",
     "project_resolved_templates",
     "register_template_migrations",
+    "run_template_contracts",
     "resolve_template",
     "validate_template",
 ]

@@ -195,10 +195,13 @@
         "diagnostic": "Transport route is registered by defaultspack context setup; this template owns the compaction function bundle metadata."
       },
       "assertions": [
-        "catalog.actions includes compact_prompt and compact_context",
-        "catalog.data_sources includes context_token_estimate",
-        "catalog.commands includes compact_context",
-        "catalog.context_policies includes long_context_txt"
+        {"type": "catalog_contains", "bucket": "actions", "match": {"action_id": "compact_prompt"}},
+        {"type": "catalog_contains", "bucket": "actions", "match": {"action_id": "compact_context"}},
+        {"type": "catalog_contains", "bucket": "data_sources", "match": {"data_source": "context_token_estimate"}},
+        {"type": "catalog_contains", "bucket": "commands", "match": {"id": "compact_context"}},
+        {"type": "catalog_contains", "bucket": "context_policies", "match": {"id": "long_context_txt"}},
+        {"type": "route_resolves", "method": "POST", "path": "/api/context/compact"},
+        {"type": "function_registered", "function_id": "context_token_estimate"}
       ]
     }
   ]

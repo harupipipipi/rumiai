@@ -585,9 +585,11 @@
         "diagnostic": "Transport route is registered by defaultspack chat/http setup; this template owns the catalog metadata and provider template declarations."
       },
       "assertions": [
-        "catalog.external_io_templates includes line.input.default",
-        "external_io_template_catalog prefers origin=template for builtin provider templates",
-        "user_data/shared/external_io_templates custom YAML remains an override layer"
+        {"type": "catalog_contains", "bucket": "external_io_templates", "match": {"id": "line.input.default", "origin": "template"}},
+        {"type": "catalog_contains", "bucket": "data_sources", "match": {"data_source": "external_io_template_catalog"}},
+        {"type": "route_resolves", "method": "GET", "path": "/api/external/templates"},
+        {"type": "function_registered", "function_id": "external_io_template_catalog"},
+        {"type": "permission_declared", "permission_id": "external_io.configure"}
       ]
     }
   ]

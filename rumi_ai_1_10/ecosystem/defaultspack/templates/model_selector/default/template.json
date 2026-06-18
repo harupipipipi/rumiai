@@ -293,9 +293,12 @@
         "diagnostic": "Template function route_path is projected to transport when it is not already covered by a builtin route."
       },
       "assertions": [
-        "catalog.templates includes rumi.model_selector.default",
-        "settings.sections includes model_select field",
-        "field_renderers includes model_select"
+        {"type": "template_projectable", "template_id": "rumi.model_selector.default"},
+        {"type": "catalog_contains", "bucket": "templates", "match": {"id": "rumi.model_selector.default"}},
+        {"type": "setting_field_exists", "section_id": "models", "field_id": "preferred_model", "field_type": "model_select"},
+        {"type": "catalog_contains", "bucket": "field_renderers", "match": {"renderer": "model_select"}},
+        {"type": "route_resolves", "method": "GET", "path": "/api/ai/models"},
+        {"type": "function_registered", "function_id": "ai_models"}
       ]
     }
   ]

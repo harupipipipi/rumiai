@@ -152,9 +152,12 @@
         "diagnostic": "Template function route_path is projected to transport when it is not already covered by a builtin route."
       },
       "assertions": [
-        "catalog.actions includes ai_set_provider_api_key",
-        "catalog.data_sources includes provider_key_status",
-        "settings.sections includes api_key_setup field"
+        {"type": "catalog_contains", "bucket": "actions", "match": {"action_id": "ai_set_provider_api_key"}},
+        {"type": "catalog_contains", "bucket": "data_sources", "match": {"data_source": "provider_key_status"}},
+        {"type": "setting_field_exists", "section_id": "apis", "field_id": "api_keys", "field_type": "api_key_setup"},
+        {"type": "route_resolves", "method": "POST", "path": "/api/ai/provider-key"},
+        {"type": "function_registered", "function_id": "ai_set_provider_key"},
+        {"type": "permission_declared", "permission_id": "api_key.use"}
       ]
     }
   ]
