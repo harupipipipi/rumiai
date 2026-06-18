@@ -2119,7 +2119,7 @@ export function resolveUltraYoloModeState(
 }
 
 export function keepSelectedToolsAfterSend(settingsValues: Record<string, Record<string, unknown>>): boolean {
-  return parseCommandBoolean(settingsValues.tools?.keep_selected_tools_after_send, true);
+  return parseCommandBoolean(settingsValues.tools?.keep_selected_tools_after_send, false);
 }
 
 function commandSearchText(command: ComposerCommandItem): string {
@@ -4807,11 +4807,25 @@ function ChatApp() {
           }
         : {};
       const shouldSendExplicitToolSelection = submittedToolIds.length > 0;
+      const toolSelectionRequest = shouldSendExplicitToolSelection
+        ? {
+            mode: "manual" as const,
+            include: submittedToolIds,
+            scope: "turn" as const,
+            must_use: false,
+          }
+        : {
+            mode: "auto" as const,
+            include: [],
+            exclude: [],
+            scope: "turn" as const,
+            must_use: false,
+          };
 
       await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         deepthink_enabled: deepthinkEnabled,
-        tool_choice: submittedToolIds.length > 0 ? "required" : undefined,
+        tool_selection: toolSelectionRequest,
         tool_policy: {
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,
@@ -4821,7 +4835,7 @@ function ChatApp() {
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: submittedToolIds,
+        tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
         metadata: {
           mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : mode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),

@@ -141,10 +141,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         tools_field_ids = {field["id"] for field in tools_section["fields"]}
         self.assertIn("tool_assist_mode", tools_field_ids)
         tool_assist_field = next(field for field in tools_section["fields"] if field["id"] == "tool_assist_mode")
-        self.assertEqual(catalog["settings"]["values"]["tools"]["tool_assist_mode"], "all")
+        self.assertEqual(catalog["settings"]["values"]["tools"]["settings_version"], 2)
+        self.assertEqual(catalog["settings"]["values"]["tools"]["tool_assist_mode"], "auto")
         tool_assist_options = {option["value"] for option in tool_assist_field["options"]}
         self.assertIn("auto", tool_assist_options)
         self.assertIn("vector", tool_assist_options)
+        self.assertIn("all_schemas", tool_assist_options)
         general_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "general")
         general_field_ids = {field["id"] for field in general_section["fields"]}
         self.assertIn("language", general_field_ids)
@@ -776,7 +778,45 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(values["debug"]["ai_request_logging"])
         self.assertEqual(values["debug"]["custom_debug_flag"], "keep-me")
         self.assertEqual(values["tools"]["default_target"], "current_browser")
-        self.assertTrue(values["tools"]["keep_selected_tools_after_send"])
+        self.assertFalse(values["tools"]["keep_selected_tools_after_send"])
+
+    def test_settings_migrates_legacy_tool_assist_all_to_safe_auto(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps({"tools": {"tool_assist_mode": "all"}}),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        self.assertEqual(values["tools"]["settings_version"], 2)
+        self.assertEqual(values["tools"]["tool_assist_mode"], "auto")
+
+    def test_settings_migrates_legacy_keep_selected_tools_after_send_true_to_false(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps({"tools": {"keep_selected_tools_after_send": True}}),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        self.assertEqual(values["tools"]["settings_version"], 2)
+        self.assertFalse(values["tools"]["keep_selected_tools_after_send"])
 
     def test_settings_migrates_model_api_routes_from_apis_to_models(self):
         from domain.frontend.registry import FrontendRegistry
