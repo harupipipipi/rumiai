@@ -27,6 +27,9 @@ template renderer は任意の React module を実行する仕組みではなく
 へ metadata を渡す。backend 実行も任意 `handler_ref` ではなく、builtin
 template から許可済み `pack_block` / registry entry へ接続する。
 
+RumiTemplate の schema、trust、activation、collision、AI input、tool policy、
+test contract、renderer security の詳細は [templates.md](templates.md) に集約している。
+
 
 ## 2. アーキテクチャ
 
