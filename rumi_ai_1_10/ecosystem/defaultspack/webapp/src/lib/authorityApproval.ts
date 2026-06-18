@@ -18,6 +18,23 @@ type AuthorityApprovalResource = {
   resource: Record<string, unknown>;
 };
 
+type AuthorityApprovalRequestLike = {
+  request_id?: unknown;
+  approval_request_id?: unknown;
+  requestId?: unknown;
+  principal_id?: unknown;
+  principalId?: unknown;
+  permission_id?: unknown;
+  permissionId?: unknown;
+  resource?: unknown;
+  risk_level?: unknown;
+  riskLevel?: unknown;
+  reason?: unknown;
+  display_summary?: unknown;
+  summary?: unknown;
+  display_metadata?: unknown;
+};
+
 export const AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。";
 export const AUTHORITY_FOLLOWUP_TEXT = "Internal authority resume.";
 
@@ -114,6 +131,65 @@ export function authorityApprovalFromRecord(value: unknown, options?: { assumeAu
     summary: typeof value.display_summary === "string" ? value.display_summary : typeof value.summary === "string" ? value.summary : undefined,
     reason: typeof value.reason === "string" ? value.reason : undefined,
   };
+}
+
+export function authorityApprovalFromRequest(value: AuthorityApprovalRequestLike | unknown): AuthorityApproval | null {
+  if (!isRecord(value)) return null;
+  const displayMetadata = isRecord(value.display_metadata) ? value.display_metadata : {};
+  const approval = authorityApprovalFromRecord(
+    {
+      request_id: value.request_id ?? value.approval_request_id ?? value.requestId,
+      principal_id: value.principal_id ?? value.principalId,
+      permission_id: value.permission_id ?? value.permissionId,
+      resource: value.resource,
+      risk_level: value.risk_level ?? value.riskLevel ?? displayMetadata.risk_level,
+      display_summary: value.display_summary ?? value.summary ?? displayMetadata.summary,
+      reason: value.reason,
+      authority: true,
+    },
+    { assumeAuthority: true },
+  );
+  return approval;
+}
+
+export function resolvePendingAuthorityApproval(
+  approval: AuthorityApproval | null | undefined,
+  pendingRequests: unknown[],
+): AuthorityApproval | null {
+  if (!approval) return null;
+  const pendingApprovals = pendingRequests
+    .map((request) => authorityApprovalFromRequest(request))
+    .filter((item): item is AuthorityApproval => Boolean(item));
+  return (
+    pendingApprovals.find((item) => item.requestId === approval.requestId)
+    ?? pendingApprovals.find((item) => authorityApprovalGrantMatches(approval, item))
+    ?? null
+  );
+}
+
+function authorityApprovalGrantMatches(left: AuthorityApproval, right: AuthorityApproval): boolean {
+  if (left.permissionId !== right.permissionId) return false;
+  const keys = [
+    "provider_id",
+    "api_id",
+    "model_id",
+    "model_ref",
+    "pack_id",
+    "domain",
+    "endpoint_url",
+    "function_id",
+    "host_action",
+    "operation",
+  ];
+  let comparableKeys = 0;
+  for (const key of keys) {
+    const leftValue = stringValue(left.resource?.[key]);
+    const rightValue = stringValue(right.resource?.[key]);
+    if (!leftValue || !rightValue) continue;
+    comparableKeys += 1;
+    if (leftValue !== rightValue) return false;
+  }
+  return comparableKeys > 0;
 }
 
 export function pendingAuthorityApproval(messages: ChatUiMessage[]): AuthorityApproval | null {

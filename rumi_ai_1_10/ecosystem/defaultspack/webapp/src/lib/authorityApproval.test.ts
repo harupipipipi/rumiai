@@ -13,6 +13,7 @@ import {
   authorityRelatedPermissions,
   authorityRequestSettledStatus,
   pendingAuthorityApproval,
+  resolvePendingAuthorityApproval,
 } from "./authorityApproval";
 
 const SRC_ROOT = resolve(import.meta.dirname, "..");
@@ -154,6 +155,67 @@ test("pending authority approval detects persisted assistant metadata", () => {
   assert.equal(approval?.requestId, "auth-metadata-1");
   assert.equal(approval?.permissionId, "model.invoke");
   assert.deepEqual(approval?.resource, { provider_id: "opencode-go" });
+});
+
+test("pending authority resolver replaces stale conversation metadata with matching live request", () => {
+  const resolved = resolvePendingAuthorityApproval(
+    {
+      requestId: "auth_old_approved",
+      principalId: "profile:default-profile__graph:defaultspack.startup",
+      permissionId: "model.invoke",
+      resource: {
+        provider_id: "opencode-go",
+        api_id: "legacy",
+        model_id: "deepseek-v4-flash",
+        model_ref: "opencode-go/deepseek-v4-flash",
+        pack_id: "defaultspack",
+      },
+    },
+    [{
+      request_id: "auth_live_pending",
+      status: "pending",
+      principal_id: "defaultspack",
+      permission_id: "model.invoke",
+      resource: {
+        provider_id: "opencode-go",
+        api_id: "legacy",
+        model_id: "deepseek-v4-flash",
+        model_ref: "opencode-go/deepseek-v4-flash",
+        pack_id: "defaultspack",
+      },
+      risk_level: "medium",
+      reason: "use provider",
+    }],
+  );
+
+  assert.equal(resolved?.requestId, "auth_live_pending");
+  assert.equal(resolved?.principalId, "defaultspack");
+});
+
+test("pending authority resolver does not expose stale metadata when no live request matches", () => {
+  const resolved = resolvePendingAuthorityApproval(
+    {
+      requestId: "auth_old_approved",
+      principalId: "profile:default-profile__graph:defaultspack.startup",
+      permissionId: "model.invoke",
+      resource: {
+        provider_id: "opencode-go",
+        model_id: "deepseek-v4-flash",
+      },
+    },
+    [{
+      request_id: "auth_other_pending",
+      status: "pending",
+      principal_id: "defaultspack",
+      permission_id: "model.invoke",
+      resource: {
+        provider_id: "opencode-go",
+        model_id: "qwen3.7-plus",
+      },
+    }],
+  );
+
+  assert.equal(resolved, null);
 });
 
 test("authority approval config accumulates distinct host action aliases", () => {

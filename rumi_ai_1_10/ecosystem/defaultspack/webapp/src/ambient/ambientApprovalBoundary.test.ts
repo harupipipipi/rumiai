@@ -22,6 +22,17 @@ test("ambient mini authority settlement never sends its own resume", () => {
   assert.match(source, /承認後の続行がまだ完了していません。もう一度送信してください。/);
 });
 
+test("ambient mini authority CTA resolves stale request metadata before opening", () => {
+  const source = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+
+  assert.match(source, /resolveMiniAuthorityApprovalTarget/);
+  assert.match(source, /api\.listAuthorityRequests\(\{ status: "pending" \}\)/);
+  assert.match(source, /resolvePendingAuthorityApproval\(approval, pending\.pending \?\? \[\]\)/);
+  assert.match(source, /authorityRequestSettledStatus\(currentRequest\.status\)/);
+  assert.match(source, /openAuthorityApprovalWindow\(resolvedApproval\.requestId\)/);
+  assert.doesNotMatch(source, /openAuthorityApprovalWindow\(approval\.requestId\)/);
+});
+
 test("authority approval route does not render ambient gesture overlay", () => {
   const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
 
@@ -54,6 +65,8 @@ test("generic authority approval load settles already completed backend requests
   const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
 
   assert.match(source, /const singleSettledStatus = authorityRequestSettledStatus\(single\.status\)[\s\S]*settleAuthorityRequest\(single, singleSettledStatus\)/);
+  assert.match(source, /resolvePendingAuthorityApproval\(requestToApproval\(single\), list\.pending \?\? \[\]\)/);
+  assert.match(source, /setRequestId\(activePendingApproval\.requestId\)/);
   assert.match(source, /const displayedSettledStatus = decisionSettledStatus \?\? authorityRequestSettledStatus\(request\?\.status\)/);
   assert.match(source, /authorityApprovalSettledLabel\(displayedSettledStatus\)/);
   assert.match(source, /\{showApprovalControls \? \(/);
