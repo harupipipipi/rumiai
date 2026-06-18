@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from blocks._common import gen_id
+from domain.ai_client.model_search import search_models
 from domain.chat.tool_embedding_index import ToolEmbeddingIndex
 from domain.chat.tool_recommender import recommend_tool_ids
 from domain.chat.tool_selection_orchestrator import ToolSelectionOrchestrator
@@ -49,7 +50,15 @@ class ToolSelectionService:
         conversation_preferences = conversation_preferences if isinstance(conversation_preferences, dict) else {}
         mode = str(getattr(selection, "mode", "auto") or "auto").strip().lower()
         conversation_mode = str(conversation_preferences.get("mode") or "").strip().lower()
-        if getattr(selection, "source", "default") == "default" and conversation_mode in {"auto", "review", "manual", "none"}:
+        selection_include = normalize_tool_targets(getattr(selection, "include", []))
+        selection_exclude = normalize_tool_targets(getattr(selection, "exclude", []))
+        selection_has_turn_targets = bool(selection_include or selection_exclude)
+        selection_scope = str(getattr(selection, "scope", "turn") or "turn").strip().lower()
+        selection_source = str(getattr(selection, "source", "default") or "default").strip()
+        if conversation_mode in {"auto", "review", "manual", "none"} and (
+            selection_source == "default"
+            or (selection_scope == "turn" and not selection_has_turn_targets and mode in {"auto", "review"})
+        ):
             mode = conversation_mode
         if mode not in {"auto", "review", "manual", "none"}:
             mode = "auto"
@@ -58,8 +67,8 @@ class ToolSelectionService:
             strategy = "hybrid"
         conversation_include = normalize_tool_targets(conversation_preferences.get("include"))
         conversation_exclude = normalize_tool_targets(conversation_preferences.get("exclude"))
-        include = _merge_targets(conversation_include, normalize_tool_targets(getattr(selection, "include", [])))
-        exclude = _merge_targets(conversation_exclude, normalize_tool_targets(getattr(selection, "exclude", [])))
+        include = _merge_targets(conversation_include, selection_include)
+        exclude = _merge_targets(conversation_exclude, selection_exclude)
         if mode == "none":
             return self._decision(
                 mode=mode,
@@ -113,6 +122,7 @@ class ToolSelectionService:
                 started=started,
                 unknown_targets=unknown_targets,
                 permission_entries=permission_entries,
+                recommendations=[],
             )
 
         if strategy == "all_with_hints":
@@ -294,7 +304,7 @@ class ToolSelectionService:
 
     def _semantic_candidates(self, user_text: str, tools: list[dict[str, Any]], *, context: dict[str, Any]) -> dict[str, Any]:
         backend = str(self._tool_settings.get("semantic_backend") or "auto").strip().lower() or "auto"
-        embedding_model = str(self._tool_settings.get("embedding_model") or "").strip()
+        embedding_model = self._embedding_model()
         result = ToolEmbeddingIndex().search(
             user_text,
             tools,
@@ -307,6 +317,20 @@ class ToolSelectionService:
             fallbacks.append({"stage": result.get("stage"), "reason": result.get("fallback_reason")})
         result["fallbacks"] = fallbacks
         return result
+
+    def _embedding_model(self) -> str:
+        configured = str(self._tool_settings.get("embedding_model") or "").strip()
+        if configured:
+            return configured
+        try:
+            result = search_models({"type": "embedding", "configured_only": True, "max_results": 1})
+        except Exception:
+            return ""
+        models = result.get("models") if isinstance(result, dict) else []
+        if not isinstance(models, list) or not models:
+            return ""
+        model = models[0] if isinstance(models[0], dict) else {}
+        return str(model.get("profile_id") or model.get("qualified_model_id") or model.get("model_id") or "").strip()
 
     def _select_with_utility_model(
         self,

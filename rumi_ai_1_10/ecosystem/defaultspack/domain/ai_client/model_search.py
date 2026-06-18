@@ -12,6 +12,9 @@ def search_models(filters: dict[str, Any] | None = None, *, profiles: list[dict[
     if profiles is None:
         profiles = _profile_catalog()
     query = str(filters.get("query") or "").strip().casefold()
+    type_filter = _as_set(filters.get("type") or filters.get("model_type"))
+    if not type_filter:
+        type_filter = {"chat", "reasoning"}
     requires = filters.get("requires") if isinstance(filters.get("requires"), dict) else {}
     speed_filter = _as_set(filters.get("speed_tier"))
     provider_id = str(filters.get("provider_id") or filters.get("provider") or "").strip()
@@ -28,7 +31,10 @@ def search_models(filters: dict[str, Any] | None = None, *, profiles: list[dict[
 
     matches: list[dict[str, Any]] = []
     for profile in profiles:
-        if not isinstance(profile, dict) or str(profile.get("type") or "chat") not in {"", "chat", "reasoning"}:
+        if not isinstance(profile, dict):
+            continue
+        profile_type = str(profile.get("type") or "chat").strip().lower() or "chat"
+        if profile_type not in type_filter:
             continue
         item = _public_model(profile)
         if query and not _matches_query(item, query):
@@ -52,6 +58,7 @@ def search_models(filters: dict[str, Any] | None = None, *, profiles: list[dict[
         "models": [deepcopy(item) for item in matches[:max_results]],
         "filters_applied": {
             "query": filters.get("query", ""),
+            "type": sorted(type_filter),
             "requires": deepcopy(requires),
             "min_knowledge_level": min_knowledge_level,
             "speed_tier": sorted(speed_filter),
@@ -179,13 +186,88 @@ def _profile_catalog() -> list[dict[str, Any]]:
     except Exception:
         profiles = []
     try:
+        from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
+    except ModuleNotFoundError:
+        from backend.ai_client.provider_catalog import list_model_catalog
+    try:
+        profiles.extend(_embedding_profiles_from_models(list_model_catalog()))
+    except Exception:
+        pass
+    try:
         from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 
         service = ModelRuntimeSettingsService()
         profiles.extend(service.runtime_defined_profiles(service.get_settings()))
     except Exception:
         pass
-    return profiles
+    return _dedupe_profiles(profiles)
+
+
+def _dedupe_profiles(profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    positions: dict[str, int] = {}
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        key = str(
+            profile.get("qualified_model_id")
+            or profile.get("profile_id")
+            or profile.get("id")
+            or "{}/{}".format(profile.get("provider_id") or profile.get("provider") or "", profile.get("model_id") or profile.get("model") or "")
+        ).strip()
+        if not key:
+            continue
+        if key in positions:
+            existing = output[positions[key]]
+            if _profile_configured(profile) and not _profile_configured(existing):
+                output[positions[key]] = profile
+            continue
+        positions[key] = len(output)
+        output.append(profile)
+    return output
+
+
+def _profile_configured(profile: dict[str, Any]) -> bool:
+    availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+    return bool(
+        profile.get("configured")
+        or availability.get("configured")
+        or availability.get("active")
+        or str(availability.get("status") or "").lower() in {"configured", "active"}
+    )
+
+
+def _embedding_profiles_from_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        if str(model.get("type") or "").strip().lower() != "embedding":
+            continue
+        provider_id = str(model.get("provider_id") or model.get("provider") or "").strip()
+        model_id = str(model.get("model_id") or model.get("model") or model.get("id") or "").strip()
+        qualified = str(model.get("qualified_model_id") or model.get("id") or "{}/{}".format(provider_id, model_id)).strip()
+        if not qualified or qualified in seen:
+            continue
+        seen.add(qualified)
+        output.append(
+            {
+                **model,
+                "profile_id": qualified,
+                "qualified_model_id": qualified,
+                "provider_id": provider_id,
+                "provider": provider_id,
+                "model_id": model_id,
+                "model": model_id,
+                "display_name": str(model.get("display_name") or model.get("name") or model_id or qualified),
+                "type": "embedding",
+                "capability_tags": sorted(set([*(model.get("capability_tags") if isinstance(model.get("capability_tags"), list) else []), "embedding"])),
+                "recommended_roles": sorted(set([*(model.get("recommended_roles") if isinstance(model.get("recommended_roles"), list) else []), "tool_embedding"])),
+                "allowed_roles": sorted(set([*(model.get("allowed_roles") if isinstance(model.get("allowed_roles"), list) else []), "tool_embedding"])),
+            }
+        )
+    return output
 
 
 def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
@@ -194,6 +276,7 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
     model_id = str(profile.get("model_id") or profile.get("model") or "").strip()
     label_provider = str(profile.get("provider_display_name") or profile.get("provider_name") or provider_id or "").strip()
     display_name = str(profile.get("display_name") or profile.get("name") or model_id or profile_id).strip()
+    model_type = str(profile.get("type") or "chat").strip().lower() or "chat"
     availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
     configured = bool(
         profile.get("configured")
@@ -202,6 +285,13 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
         or str(availability.get("status") or "").lower() in {"configured", "active"}
         or provider_id == "stub"
     )
+    capability_tags = list(profile.get("capability_tags") or [])
+    recommended_roles = list(profile.get("recommended_roles") or [])
+    allowed_roles = list(profile.get("allowed_roles") or [])
+    if model_type == "embedding":
+        capability_tags = sorted({*capability_tags, "embedding"})
+        recommended_roles = sorted({*recommended_roles, "tool_embedding"})
+        allowed_roles = sorted({*allowed_roles, "tool_embedding"})
     return {
         "profile_id": profile_id,
         "qualified_model_id": str(profile.get("qualified_model_id") or profile_id),
@@ -210,6 +300,7 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
         "provider_id": provider_id,
         "provider_display_name": label_provider,
         "model_id": model_id,
+        "type": model_type,
         "configured": configured,
         "local": bool(profile.get("local") or availability.get("local") or provider_id in {"stub", "ollama", "lmstudio", "vllm", "llamacpp"}),
         "requires_api_key": bool(provider_id and provider_id not in {"stub"} and not configured),
@@ -224,9 +315,9 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
         "knowledge_level": int(profile.get("knowledge_level") or 0),
         "knowledge_band": str(profile.get("knowledge_band") or "unknown"),
         "cost_tier": str(profile.get("cost_tier") or "unknown"),
-        "capability_tags": list(profile.get("capability_tags") or []),
-        "recommended_roles": list(profile.get("recommended_roles") or []),
-        "allowed_roles": list(profile.get("allowed_roles") or []),
+        "capability_tags": capability_tags,
+        "recommended_roles": recommended_roles,
+        "allowed_roles": allowed_roles,
         "max_context": profile.get("max_context"),
         "availability": deepcopy(availability),
         "metadata": deepcopy(profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}),

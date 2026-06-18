@@ -42,21 +42,16 @@ class ToolPermissionResolver:
 
         minimum = "confirm" if minimum_requires_confirm(tool) else "auto"
         steps.append({"source": "built_in_minimum", "value": minimum})
-        effective = minimum
-
-        profile_mode = _profile_policy_mode(tool_id, service_id, context.get("profile_policy"))
-        if profile_mode:
-            steps.append({"source": "profile_policy", "value": profile_mode})
-            effective = more_restrictive_permission(effective, profile_mode)
+        hard_minimum = _hard_minimum_permission(tool, action_class)
 
         action_default = self._action_permission(action_class)
         steps.append({"source": f"action:{action_class}", "value": action_default})
-        effective = more_restrictive_permission(effective, action_default)
+        effective = _apply_hard_minimum(action_default, hard_minimum)
 
         service_override = _override_value(self._tool_settings.get("service_permission_overrides"), service_id, action_class)
         if service_override:
             steps.append({"source": f"service:{service_id}", "value": service_override})
-            effective = more_restrictive_permission(effective, service_override)
+            effective = _apply_hard_minimum(service_override, hard_minimum)
 
         tool_override = _override_value(self._tool_settings.get("tool_permission_overrides"), tool_id, action_class)
         legacy_disabled = tool_id in _string_set(self._tool_settings.get("disabled_tool_ids"))
@@ -64,7 +59,12 @@ class ToolPermissionResolver:
             tool_override = "block"
         if tool_override:
             steps.append({"source": f"tool:{tool_id}", "value": tool_override})
-            effective = more_restrictive_permission(effective, tool_override)
+            effective = _apply_hard_minimum(tool_override, hard_minimum)
+
+        profile_mode = _profile_policy_mode(tool_id, service_id, context.get("profile_policy"))
+        if profile_mode:
+            steps.append({"source": "profile_policy", "value": profile_mode})
+            effective = more_restrictive_permission(effective, profile_mode)
 
         runtime_mode = _runtime_policy_mode(tool_id, service_id, context)
         if runtime_mode:
@@ -127,6 +127,25 @@ def _override_value(container: Any, target_id: str, action_class: str) -> str:
         value = str(raw.get(action_class) or raw.get("*") or raw.get("default") or "").strip().lower()
         return value if value in PERMISSION_MODES else ""
     return ""
+
+
+def _hard_minimum_permission(tool: dict[str, Any], action_class: str) -> str:
+    metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+    risk = str(tool.get("risk") or metadata.get("risk") or "").strip().lower()
+    if bool(tool.get("requires_approval") or metadata.get("requires_approval")):
+        return "confirm"
+    if risk == "high":
+        return "confirm"
+    if action_class == "delete":
+        return "confirm"
+    return "auto"
+
+
+def _apply_hard_minimum(permission: str, hard_minimum: str) -> str:
+    value = permission if permission in PERMISSION_MODES else "confirm"
+    if hard_minimum == "confirm":
+        return more_restrictive_permission(value, "confirm")
+    return value
 
 
 def _profile_policy_mode(tool_id: str, service_id: str, policy: Any) -> str:
