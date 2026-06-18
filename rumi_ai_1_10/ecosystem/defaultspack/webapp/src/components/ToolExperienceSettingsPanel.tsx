@@ -1,7 +1,8 @@
 import { AlertTriangle, Check, ChevronDown, Loader2, Search, Shield, Sparkles, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { api, type ModelSearchItem, type SidebarItem, type ToolCatalogResponse, type ToolCatalogService, type ToolCatalogTool, type ToolSelectionMode, type ToolSelectionStrategy } from "../lib/api";
+import type { ModelSearchItem, SidebarItem, ToolCatalogResponse, ToolCatalogService, ToolCatalogTool, ToolSelectionMode, ToolSelectionStrategy } from "../lib/api";
+import { toolResources } from "../features/tools/resources/toolResources";
 import { cn } from "../lib/cn";
 import { ToolSettingsPanel } from "./ToolSettingsPanel";
 
@@ -348,7 +349,7 @@ export function ToolExperienceSettingsPanel({
   useEffect(() => {
     let cancelled = false;
     setCatalogLoading(true);
-    api.toolCatalog()
+    toolResources.toolCatalog()
       .then((result) => {
         if (!cancelled) setCatalog(result);
       })
@@ -366,9 +367,17 @@ export function ToolExperienceSettingsPanel({
   useEffect(() => {
     let cancelled = false;
     setModelsLoading(true);
-    api.searchModels({ query: "", max_results: 200 })
-      .then((result) => {
-        if (!cancelled) setModels(Array.isArray(result.models) ? result.models : []);
+    Promise.all([
+      toolResources.searchModels({ query: "", max_results: 200, type: ["chat", "reasoning"] }),
+      toolResources.searchModels({ query: "", max_results: 100, type: "embedding" }),
+    ])
+      .then(([chatResult, embeddingResult]) => {
+        if (!cancelled) {
+          setModels([
+            ...(Array.isArray(chatResult.models) ? chatResult.models : []),
+            ...(Array.isArray(embeddingResult.models) ? embeddingResult.models : []),
+          ]);
+        }
       })
       .catch(() => {
         if (!cancelled) setModels([]);
@@ -418,7 +427,7 @@ export function ToolExperienceSettingsPanel({
     setPreviewLoading(true);
     setPreviewResult(null);
     try {
-      const result = await api.previewToolSelection({
+      const result = await toolResources.previewToolSelection({
         user_text: previewText || "この依頼に必要な機能を選んで",
         tool_selection: { mode: defaultMode, strategy },
       });
@@ -686,7 +695,7 @@ export function ToolExperienceSettingsPanel({
         </div>
       </details>
       {warningStrategy && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 p-4">
+        <div className="fixed inset-0 rumi-layer-modal flex items-center justify-center bg-black/55 p-4">
           <div className="max-w-lg rounded-xl border border-amber-500/30 bg-zinc-950 p-5 shadow-2xl">
             <div className="flex gap-3">
               <AlertTriangle size={20} className="mt-0.5 flex-shrink-0 text-amber-300" />

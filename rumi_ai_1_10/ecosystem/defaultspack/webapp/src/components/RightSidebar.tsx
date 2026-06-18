@@ -59,15 +59,15 @@ import {
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
-import {
-  api,
-  type ModelProfile,
-  type SettingsSection,
-  type SidebarAction,
-  type SidebarCategory,
-  type SidebarField,
-  type SidebarItem,
+import type {
+  ModelProfile,
+  SettingsSection,
+  SidebarAction,
+  SidebarCategory,
+  SidebarField,
+  SidebarItem,
 } from "../lib/api";
+import { toolResources } from "../features/tools/resources/toolResources";
 import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
 import { toolFilterBlockedSummary } from "../lib/toolStatus";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement } from "../lib/placement";
@@ -1011,7 +1011,7 @@ export function RightSidebar({
       return;
     }
     let cancelled = false;
-    api.getConversationToolPreferences(activeConversationId)
+    toolResources.getConversationToolPreferences(activeConversationId)
       .then((result) => {
         if (!cancelled) setConversationToolPreferences(result.preferences ?? {});
       })
@@ -1496,7 +1496,7 @@ export function RightSidebar({
       include: enabled ? [...include, { kind: "service", id: service.id }] : include,
     };
     setConversationToolPreferences(nextPreferences);
-    void api.updateConversationToolPreferences(activeConversationId, nextPreferences).catch(() => {
+    void toolResources.updateConversationToolPreferences(activeConversationId, nextPreferences).catch(() => {
       setConversationToolPreferences(conversationToolPreferences);
     });
   };

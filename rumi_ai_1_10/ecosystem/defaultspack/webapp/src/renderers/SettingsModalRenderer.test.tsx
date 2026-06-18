@@ -295,7 +295,7 @@ test("SettingsModalRenderer renders template model_api_routes through registered
   assert.match(html, /google\/main/);
 });
 
-test("Settings > Tools contains detailed tool settings", () => {
+test("Settings > Tools contains tool experience settings tabs", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {
       isOpen: true,
@@ -344,9 +344,12 @@ test("Settings > Tools contains detailed tool settings", () => {
     }),
   );
 
-  assert.match(html, /個別機能管理/);
-  assert.match(html, /Vision Tool/);
-  assert.match(html, /model.image_input/);
+  assert.match(html, /基本/);
+  assert.match(html, /権限/);
+  assert.match(html, /接続/);
+  assert.match(html, /高度な設定/);
+  assert.match(html, /既定の使い方/);
+  assert.match(html, /自動で選ぶ/);
 });
 
 test("settings surface pinned placements render in the modal", () => {

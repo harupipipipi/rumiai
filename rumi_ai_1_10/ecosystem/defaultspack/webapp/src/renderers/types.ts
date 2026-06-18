@@ -243,6 +243,7 @@ export type RightSidebarRendererProps = {
   yoloMode?: boolean;
   workspaceTabs?: WorkspaceTab[];
   activeWorkspaceTabId?: string | null;
+  activeConversationId?: string | null;
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
   onOpenSettingsSection?: (sectionId: string) => void;

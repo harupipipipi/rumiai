@@ -404,7 +404,7 @@ test("composer input template metadata changes safe input copy without replacing
   assert.doesNotMatch(html, /remote-module/);
 });
 
-test("composer renders tool mode control and review card", () => {
+test("composer renders action approval control and review card", () => {
   const html = renderToStaticMarkup(
     createElement(ComposerRenderer, {
       input: "",
@@ -422,7 +422,7 @@ test("composer renders tool mode control and review card", () => {
       thinkingLevel: null,
       contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
       selectedToolIds: ["github.search_code"],
-      toolSelectionMode: "review",
+      actionApprovalMode: "ask",
       toolSelectionReview: {
         previewId: "sel_1",
         expiresAt: "2026-01-01T00:05:00Z",
@@ -448,8 +448,9 @@ test("composer renders tool mode control and review card", () => {
     }),
   );
 
-  assert.match(html, /data-composer-widget="tool-mode-control"/);
-  assert.match(html, /機能 確認/);
+  assert.match(html, /data-composer-widget="action-approval-control"/);
+  assert.match(html, /アクションの承認方法/);
+  assert.match(html, /承認/);
   assert.match(html, /使用する機能を確認/);
   assert.match(html, /この内容で続ける/);
 });
