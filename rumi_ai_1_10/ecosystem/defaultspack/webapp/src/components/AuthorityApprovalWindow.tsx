@@ -298,7 +298,7 @@ export function AuthorityApprovalWindow() {
     try {
       await authorityApprovalResources.sendAuthorityResume(
         settledRequest.conversation_id,
-        "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。",
+        "Internal authority resume.",
         {
           authority_followup: {
             ...(decision.token ? { approval_token: decision.token } : {}),

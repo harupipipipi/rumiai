@@ -1,8 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
+import { AUTHORITY_FOLLOWUP_TEXT, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
+
+const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
+  "Thank you for granting",
+  "approved provider",
+  "approved model",
+  "I can now use",
+  "使用を許可しました",
+];
 
 function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
   return {
@@ -12,6 +20,12 @@ function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
     rawText: "",
     ...overrides,
   };
+}
+
+function assertNoRiskyAuthorityFollowupPhrases(text: string): void {
+  for (const phrase of RISKY_AUTHORITY_FOLLOWUP_PHRASES) {
+    assert.equal(text.includes(phrase), false, `unexpected risky phrase: ${phrase}`);
+  }
 }
 
 test("message copy text includes visible text and code blocks", () => {
@@ -119,6 +133,9 @@ test("empty response warning only appears for finalized agent messages without a
 });
 
 test("authority approval followup is hidden while waiting response remains passive", () => {
+  assert.equal(AUTHORITY_FOLLOWUP_TEXT, "Internal authority resume.");
+  assertNoRiskyAuthorityFollowupPhrases(AUTHORITY_FOLLOWUP_TEXT);
+
   const waiting = message({
     id: "authority-waiting",
     rawText: "モデル/API の使用許可が必要です。承認後に続行します。",
@@ -133,8 +150,8 @@ test("authority approval followup is hidden while waiting response remains passi
   const followup = message({
     id: "authority-followup",
     role: "user",
-    rawText: "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。",
-    content: [{ type: "text", text: "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。" }],
+    rawText: AUTHORITY_FOLLOWUP_TEXT,
+    content: [{ type: "text", text: AUTHORITY_FOLLOWUP_TEXT }],
     metadata: {
       authorityFollowup: {
         request_id: "approval-1",
@@ -154,6 +171,8 @@ test("authority approval followup is hidden while waiting response remains passi
 });
 
 test("authority waiting message is not replaced by the settled assistant continuation", () => {
+  assertNoRiskyAuthorityFollowupPhrases(AUTHORITY_FOLLOWUP_TEXT);
+
   const waiting = message({
     id: "authority-waiting",
     rawText: "モデル/API の使用許可が必要です。承認後に続行します。",
@@ -168,8 +187,8 @@ test("authority waiting message is not replaced by the settled assistant continu
   const followup = message({
     id: "authority-followup",
     role: "user",
-    rawText: "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。",
-    content: [{ type: "text", text: "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。" }],
+    rawText: AUTHORITY_FOLLOWUP_TEXT,
+    content: [{ type: "text", text: AUTHORITY_FOLLOWUP_TEXT }],
     metadata: {
       authorityFollowup: {
         request_id: "approval-1",

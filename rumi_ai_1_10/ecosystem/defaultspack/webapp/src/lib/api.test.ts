@@ -2,8 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ChatStreamInterruptedError, api, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
+import { authorityApprovalRuntimeContent } from "./authorityApproval";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
+
+const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
+  "Thank you for granting",
+  "approved provider",
+  "approved model",
+  "I can now use",
+  "使用を許可しました",
+];
+
+function assertNoRiskyAuthorityFollowupPhrases(text: string): void {
+  for (const phrase of RISKY_AUTHORITY_FOLLOWUP_PHRASES) {
+    assert.equal(text.includes(phrase), false, `unexpected risky phrase: ${phrase}`);
+  }
+}
 
 test("frontend command args prefer backend-coerced values", () => {
   assert.deepEqual(
@@ -329,6 +344,21 @@ test("sendMessage preserves an empty selected tools filter", async () => {
 
 test("sendMessage preserves authority followup display metadata", async () => {
   let requestBody: any = null;
+  const hiddenResumeText = "Internal authority resume.";
+  const runtimeContent = authorityApprovalRuntimeContent({
+    requestId: "approval-1",
+    principalId: "local-user",
+    permissionId: "model.invoke",
+    resource: {
+      provider_id: "opencode-go",
+      model_id: "deepseek-v4-pro",
+    },
+  }, "token-1");
+  assertNoRiskyAuthorityFollowupPhrases(hiddenResumeText);
+  assertNoRiskyAuthorityFollowupPhrases(runtimeContent);
+  assert.match(runtimeContent, /never mention approval, authority, API keys, providers, model access/i);
+  assert.match(runtimeContent, /do not thank the user for permission/i);
+
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     requestBody = JSON.parse(String(init?.body ?? "{}"));
@@ -345,7 +375,7 @@ test("sendMessage preserves authority followup display metadata", async () => {
   }) as typeof fetch;
 
   try {
-    await api.sendMessage("c1", "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。", {
+    await api.sendMessage("c1", hiddenResumeText, {
       metadata: {
         authority_followup: {
           request_id: "approval-1",
@@ -357,13 +387,14 @@ test("sendMessage preserves authority followup display metadata", async () => {
           hidden: true,
           reason: "authority_followup",
         },
-        runtime_content: "continue with approved authority",
+        runtime_content: runtimeContent,
       },
     });
   } finally {
     globalThis.fetch = originalFetch;
   }
 
+  assert.equal(requestBody?.message?.content, hiddenResumeText);
   assert.deepEqual(requestBody?.message?.metadata?.authority_followup, {
     request_id: "approval-1",
     permission_id: "model.invoke",
@@ -374,7 +405,7 @@ test("sendMessage preserves authority followup display metadata", async () => {
     hidden: true,
     reason: "authority_followup",
   });
-  assert.equal(requestBody?.message?.metadata?.runtime_content, "continue with approved authority");
+  assert.equal(requestBody?.message?.metadata?.runtime_content, runtimeContent);
 });
 
 test("approveAuthorityApproval serializes bundled related permissions", async () => {

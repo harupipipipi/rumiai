@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import {
   authorityApprovalConfig,
   authorityApprovalRiskTone,
+  authorityApprovalRuntimeContent,
   authorityApprovalSettledLabel,
   authorityApprovalShouldRetryWithFreshContext,
   authorityApprovalTitle,
@@ -14,9 +15,29 @@ import {
 } from "./authorityApproval";
 
 const SRC_ROOT = resolve(import.meta.dirname, "..");
+const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
+  "Thank you for granting",
+  "approved provider",
+  "approved model",
+  "I can now use",
+  "使用を許可しました",
+];
 
 function authorityApprovalWindowSource(): string {
   return readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
+}
+
+function assertNoRiskyAuthorityFollowupPhrases(text: string): void {
+  for (const phrase of RISKY_AUTHORITY_FOLLOWUP_PHRASES) {
+    assert.equal(text.includes(phrase), false, `unexpected risky phrase: ${phrase}`);
+  }
+}
+
+function runtimeMetadataJson(content: string): Record<string, unknown> {
+  const marker = "Resume metadata JSON:\n";
+  const start = content.indexOf(marker);
+  assert.notEqual(start, -1);
+  return JSON.parse(content.slice(start + marker.length));
 }
 
 test("authority approval title describes app provider key and endpoint without duplicating provider", () => {
@@ -36,6 +57,73 @@ test("authority approval title describes app provider key and endpoint without d
     "defaultspack v2 / OpenCode Go provider に OpenCode Go API key の使用と https://opencode.ai/zen/go/v1/chat/completions へのアクセスを許可しますか？",
   );
   assert.equal(title.includes("provider provider"), false);
+});
+
+test("authority approval runtime content silently resumes without risky chatter", () => {
+  const content = authorityApprovalRuntimeContent({
+    requestId: "approval-1",
+    principalId: "local-user",
+    permissionId: "model.invoke",
+    resource: {
+      provider_id: "opencode-go",
+      model_id: "deepseek-v4-pro",
+      endpoint_url: "https://opencode.ai/zen/go/v1/chat/completions",
+    },
+  }, "token-1");
+
+  assertNoRiskyAuthorityFollowupPhrases(content);
+  assert.match(content, /Silent internal resume/);
+  assert.match(content, /Continue the interrupted\/original user request/i);
+  assert.match(content, /never mention approval, authority, API keys, providers, model access/i);
+  assert.match(content, /do not thank the user for permission/i);
+  assert.match(content, /Request id: approval-1/);
+  assert.match(content, /Permission id: model\.invoke/);
+
+  const metadata = runtimeMetadataJson(content);
+  assert.deepEqual(metadata, {
+    request_id: "approval-1",
+    permission_id: "model.invoke",
+    resource: {
+      provider_id: "opencode-go",
+      model_id: "deepseek-v4-pro",
+      endpoint_url: "https://opencode.ai/zen/go/v1/chat/completions",
+    },
+    approval_token: "token-1",
+  });
+});
+
+test("host authority runtime content keeps the same no-mention no-thanks guardrail", () => {
+  const content = authorityApprovalRuntimeContent({
+    requestId: "host-approval-1",
+    principalId: "local-user",
+    permissionId: "host.process.open_url",
+    resource: {
+      operation: "host.process.open_url.preview",
+      caller_pack_id: "defaultspack",
+    },
+  }, "host-token-1");
+
+  assertNoRiskyAuthorityFollowupPhrases(content);
+  assert.match(content, /Retry the same host operation once/);
+  assert.match(content, /never mention approval, authority, API keys, providers, model access/i);
+  assert.match(content, /do not thank the user for permission/i);
+
+  const metadata = runtimeMetadataJson(content);
+  assert.equal(metadata.request_id, "host-approval-1");
+  assert.equal(metadata.permission_id, "host.process.open_url");
+  assert.equal(metadata.approval_token, "host-token-1");
+  assert.deepEqual(metadata.resource, {
+    operation: "host.process.open_url.preview",
+    caller_pack_id: "defaultspack",
+  });
+});
+
+test("authority approval window sends only the terse hidden resume marker", () => {
+  const source = authorityApprovalWindowSource();
+
+  assert.match(source, /sendAuthorityResume\([\s\S]*"Internal authority resume\."/);
+  assertNoRiskyAuthorityFollowupPhrases(source);
+  assert.match(source, /runtime_content: authorityApprovalRuntimeContent\(settledApproval, decision\.token\)/);
 });
 
 test("authority approval config accumulates distinct host action aliases", () => {

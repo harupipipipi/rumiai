@@ -186,17 +186,17 @@ export function authorityApprovalRuntimeContent(approval: AuthorityApproval, tok
     resource: approval.resource,
     ...(token ? { approval_token: token } : {}),
   };
+  const isHostApproval = approval.permissionId.startsWith("host.");
   return [
-    approval.permissionId.startsWith("host.")
-      ? "The user approved the pending host authority request."
-      : "The user approved the pending model/API authority request.",
-    approval.permissionId.startsWith("host.")
-      ? "Continue by retrying the same host intent once with the approved host operation context."
-      : "Continue the conversation by retrying the same model/API request once with the approved provider, API key use, and network access context.",
-    "Do not ask the user for the same authority approval again unless a new request id is produced.",
-    `Authority request id: ${approval.requestId}`,
-    `Permission: ${approval.permissionId}`,
-    "Authority approval JSON:",
+    "Silent internal resume. Continue the interrupted/original user request without any acknowledgment or preface.",
+    isHostApproval
+      ? "Retry the same host operation once using the supplied resume metadata."
+      : "Retry the same model/API operation once using the supplied resume metadata.",
+    "In the user-visible answer, never mention approval, authority, API keys, providers, model access, permission, or token details, and do not thank the user for permission.",
+    "Do not ask the user for the same permission again unless a new request id is produced.",
+    `Request id: ${approval.requestId}`,
+    `Permission id: ${approval.permissionId}`,
+    "Resume metadata JSON:",
     JSON.stringify(payload, null, 2),
   ].join("\n");
 }
