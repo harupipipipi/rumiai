@@ -5,36 +5,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ._helpers import ordered_unique_strings, payload_source, string_list
 from .catalog_runtime import get_template_catalog_snapshot
 from .tool_policy_merge import (
+    TEMPLATE_POLICY_AUTHORITY_FIELDS,
     blocked_template_tool_policy,
     merge_template_tool_policies,
 )
 
 
-_TEMPLATE_POLICY_AUTHORITY_FIELDS = {
-    "allowedToolIds",
-    "allowed_tool_ids",
-    "allowed_tools",
-    "allowlist",
-    "defaultDisabledTools",
-    "defaultEnabledTools",
-    "default_disabled_tools",
-    "default_enabled_tools",
-    "deniedToolIds",
-    "denied_tool_ids",
-    "denied_tools",
-    "denylist",
-    "parallel_tool_calls",
-    "params",
-    "selectedTools",
-    "selected_tools",
-    "toggleable",
-    "tool_allowlist",
-    "tool_blocklist",
-    "tool_choice",
-    "tool_denylist",
-}
 _AI_INPUT_ID_KEYS = ("ai_input_id", "template_ai_input_id", "ai_input")
 _AI_INPUT_LIST_KEYS = ("ai_input_ids", "template_ai_input_ids")
 _TOOL_POLICY_ID_KEYS = ("template_tool_policy_id", "tool_policy_id")
@@ -113,14 +92,14 @@ def resolve_template_tool_policy(
     """Resolve request template ids to an authoritative backend tool policy."""
     raw_policy = deepcopy(request_policy) if isinstance(request_policy, dict) else {}
     requested_ai_input_ids = _collect_ids(raw_policy, metadata, keys=_AI_INPUT_ID_KEYS)
-    requested_ai_input_ids = _dedupe(
+    requested_ai_input_ids = ordered_unique_strings(
         [
             *requested_ai_input_ids,
             *_collect_ids(raw_policy, metadata, keys=_AI_INPUT_LIST_KEYS, list_only=True),
         ]
     )
     requested_policy_ids = _collect_ids(raw_policy, metadata, keys=_TOOL_POLICY_ID_KEYS)
-    requested_policy_ids = _dedupe(
+    requested_policy_ids = ordered_unique_strings(
         [
             *requested_policy_ids,
             *_collect_ids(raw_policy, metadata, keys=_TOOL_POLICY_LIST_KEYS, list_only=True),
@@ -167,7 +146,7 @@ def resolve_template_tool_policy(
         resolved_ai_inputs.append(resolved_ai_input)
         policy_ids.extend(_candidate_policy_ids(resolved_ai_input))
 
-    policy_ids = _dedupe(policy_ids)
+    policy_ids = ordered_unique_strings(policy_ids)
     resolved_policies: list[dict[str, Any]] = []
     for policy_id in policy_ids:
         resolved_policy = _find_catalog_item(loaded_catalog.get("tool_policies"), policy_id)
@@ -269,14 +248,14 @@ def _collect_ids(
                 continue
             value = source.get(key)
             if list_only:
-                values.extend(_string_list(value))
+                values.extend(string_list(value))
             elif isinstance(value, list):
-                values.extend(_string_list(value))
+                values.extend(string_list(value))
             elif isinstance(value, str) and value.strip():
                 values.append(value.strip())
             elif value not in (None, "", [], {}) and not isinstance(value, dict):
                 values.append(str(value).strip())
-    return _dedupe(values)
+    return ordered_unique_strings(values)
 
 
 def _find_catalog_item(items: Any, requested_id: str) -> dict[str, Any] | None:
@@ -321,9 +300,9 @@ def _catalog_item_matches(item: Any, requested_id: str) -> bool:
 def _candidate_policy_ids(ai_input: dict[str, Any] | None) -> list[str]:
     if not isinstance(ai_input, dict):
         return []
-    source = _payload_source(ai_input, "input", "ai_input")
+    source = payload_source(ai_input, "input", "ai_input")
     metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
-    return _dedupe(
+    return ordered_unique_strings(
         [
             *_collect_ids(source, keys=("tool_policy_id", "tool_policy")),
             *_collect_ids(source, keys=("tool_policy_ids",), list_only=True),
@@ -332,19 +311,11 @@ def _candidate_policy_ids(ai_input: dict[str, Any] | None) -> list[str]:
     )
 
 
-def _payload_source(item: dict[str, Any], *nested_keys: str) -> dict[str, Any]:
-    for key in nested_keys:
-        nested = item.get(key)
-        if isinstance(nested, dict):
-            return nested
-    return item
-
-
 def _strip_template_authority_fields(policy: dict[str, Any]) -> dict[str, Any]:
     return {
         key: deepcopy(value)
         for key, value in policy.items()
-        if key not in _TEMPLATE_POLICY_AUTHORITY_FIELDS
+        if key not in TEMPLATE_POLICY_AUTHORITY_FIELDS
         and key
         not in {
             *_AI_INPUT_ID_KEYS,
@@ -358,30 +329,10 @@ def _strip_template_authority_fields(policy: dict[str, Any]) -> dict[str, Any]:
 def _first_string_list(source: dict[str, Any], keys: tuple[str, ...]) -> list[str]:
     for key in keys:
         if key in source:
-            values = _string_list(source.get(key))
+            values = string_list(source.get(key))
             if values:
                 return values
     return []
-
-
-def _string_list(value: Any) -> list[str]:
-    if isinstance(value, str):
-        value = [item.strip() for item in value.split(",")]
-    if not isinstance(value, list):
-        return []
-    return _dedupe(str(item).strip() for item in value if str(item or "").strip())
-
-
-def _dedupe(values: Any) -> list[str]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        text = str(value or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        output.append(text)
-    return output
 
 
 def _ids_for_items(items: list[dict[str, Any]], *keys: str) -> list[str]:
@@ -392,7 +343,7 @@ def _ids_for_items(items: list[dict[str, Any]], *keys: str) -> list[str]:
             if value:
                 values.append(value)
                 break
-    return _dedupe(values)
+    return ordered_unique_strings(values)
 
 
 def _diagnostic(code: str, requested_id: str) -> dict[str, Any]:

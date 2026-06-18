@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+from ._helpers import canonical_json
 
 
 CURRENT_TEMPLATE_SCHEMA_VERSION = 1
@@ -81,7 +82,7 @@ class TemplateDiagnostic:
             self.path or "",
             self.source_path or "",
             self.message,
-            json.dumps(self.details, sort_keys=True, separators=(",", ":"), ensure_ascii=True),
+            canonical_json(self.details),
         )
 
 

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import threading
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ._helpers import canonical_json
 from .discovery import default_template_roots
 from .models import CURRENT_TEMPLATE_SCHEMA_VERSION
 
@@ -131,11 +131,7 @@ def _catalog_generation(
             for path in files
         ],
     }
-    generation = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
-            "utf-8"
-        )
-    ).hexdigest()
+    generation = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
     return generation, [str(path) for path in files]
 
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
+
+from ._helpers import canonical_json, payload_source, sorted_unique_strings, string_list
 
 
 ALLOWLIST_KEYS = (
@@ -29,6 +30,19 @@ DEFAULT_ENABLED_KEYS = ("default_enabled_tools", "defaultEnabledTools")
 DEFAULT_DISABLED_KEYS = ("default_disabled_tools", "defaultDisabledTools")
 SELECTED_TOOLS_KEYS = ("selected_tools", "selectedTools")
 TOOL_CHOICE_VALUES = {"auto", "none", "required"}
+TEMPLATE_POLICY_AUTHORITY_FIELDS = frozenset(
+    [
+        *ALLOWLIST_KEYS,
+        *DENYLIST_KEYS,
+        *DEFAULT_ENABLED_KEYS,
+        *DEFAULT_DISABLED_KEYS,
+        *SELECTED_TOOLS_KEYS,
+        "tool_choice",
+        "parallel_tool_calls",
+        "toggleable",
+        "params",
+    ]
+)
 
 
 @dataclass(frozen=True)
@@ -58,8 +72,8 @@ class MergedTemplateToolPolicy:
 
 
 def normalize_template_tool_policy(item: dict[str, Any]) -> NormalizedTemplateToolPolicy:
-    source = _payload_source(item, "policy", "tool_policy")
-    source_ids = _sorted_unique(
+    source = payload_source(item, "policy", "tool_policy")
+    source_ids = sorted_unique_strings(
         [
             item.get("id"),
             item.get("policy_id"),
@@ -69,7 +83,7 @@ def normalize_template_tool_policy(item: dict[str, Any]) -> NormalizedTemplateTo
             source.get("tool_policy_id"),
         ]
     )
-    projected_ids = _sorted_unique(
+    projected_ids = sorted_unique_strings(
         [
             item.get("projected_id"),
             item.get("template_tool_policy_projected_id"),
@@ -108,10 +122,10 @@ def merge_template_tool_policies(
         normalize_template_tool_policy(item) for item in policies if isinstance(item, dict)
     ]
     diagnostics: list[dict[str, Any]] = []
-    source_ids = _sorted_unique(
+    source_ids = sorted_unique_strings(
         source_id for policy in normalized for source_id in policy.source_ids
     )
-    projected_ids = _sorted_unique(
+    projected_ids = sorted_unique_strings(
         projected_id for policy in normalized for projected_id in policy.projected_ids
     )
 
@@ -123,7 +137,7 @@ def merge_template_tool_policies(
         allowlist = [item for item in allowlist if item in allowed]
     allowlist = sorted(set(allowlist))
 
-    denylist = _sorted_unique(
+    denylist = sorted_unique_strings(
         [
             *(tool for policy in normalized for tool in policy.denylist),
             *(request_disabled_tools or []),
@@ -136,12 +150,12 @@ def merge_template_tool_policies(
 
     default_enabled = [
         tool
-        for tool in _sorted_unique(
+        for tool in sorted_unique_strings(
             tool for policy in normalized for tool in policy.default_enabled_tools
         )
         if tool not in denied and (not has_allowlist or tool in allowed)
     ]
-    default_disabled = _sorted_unique(
+    default_disabled = sorted_unique_strings(
         [
             *(tool for policy in normalized for tool in policy.default_disabled_tools),
             *denylist,
@@ -149,7 +163,9 @@ def merge_template_tool_policies(
     )
     selected_tools = [
         tool
-        for tool in _sorted_unique(tool for policy in normalized for tool in policy.selected_tools)
+        for tool in sorted_unique_strings(
+            tool for policy in normalized for tool in policy.selected_tools
+        )
         if tool not in denied and (not has_allowlist or tool in allowed)
     ]
     tool_choice = _merge_tool_choice([policy.tool_choice for policy in normalized], diagnostics)
@@ -199,7 +215,7 @@ def blocked_template_tool_policy(
     request_disabled_tools: list[str] | None = None,
     diagnostics: list[dict[str, Any]] | None = None,
 ) -> MergedTemplateToolPolicy:
-    denylist = _sorted_unique(request_disabled_tools or [])
+    denylist = sorted_unique_strings(request_disabled_tools or [])
     policy: dict[str, Any] = {
         "tool_allowlist": [],
         "tool_choice": "none",
@@ -219,20 +235,12 @@ def blocked_template_tool_policy(
     )
 
 
-def _payload_source(item: dict[str, Any], *nested_keys: str) -> dict[str, Any]:
-    for key in nested_keys:
-        nested = item.get(key)
-        if isinstance(nested, dict):
-            return nested
-    return item
-
-
 def _merged_string_list(source: dict[str, Any], keys: tuple[str, ...]) -> list[str]:
     values: list[str] = []
     for key in keys:
         if key in source:
-            values.extend(_string_list(source.get(key)))
-    return _sorted_unique(values)
+            values.extend(string_list(source.get(key)))
+    return sorted_unique_strings(values)
 
 
 def _merged_string_list_with_presence(
@@ -240,18 +248,6 @@ def _merged_string_list_with_presence(
 ) -> tuple[list[str], bool]:
     present = any(key in source for key in keys)
     return _merged_string_list(source, keys), present
-
-
-def _string_list(value: Any) -> list[str]:
-    if isinstance(value, str):
-        value = [item.strip() for item in value.split(",")]
-    if not isinstance(value, list):
-        return []
-    return [str(item).strip() for item in value if str(item or "").strip()]
-
-
-def _sorted_unique(values: Any) -> list[str]:
-    return sorted({str(value).strip() for value in values if str(value or "").strip()})
 
 
 def _valid_tool_choice(value: Any) -> str | dict[str, Any] | None:
@@ -263,12 +259,8 @@ def _valid_tool_choice(value: Any) -> str | dict[str, Any] | None:
     return None
 
 
-def _canonical_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-
-
 def _same_tool_choice(left: Any, right: Any) -> bool:
-    return _canonical_json(left) == _canonical_json(right)
+    return canonical_json(left) == canonical_json(right)
 
 
 def _merge_tool_choice(values: list[Any], diagnostics: list[dict[str, Any]]) -> Any:
@@ -313,7 +305,7 @@ def _merge_params(
             if key not in merged:
                 merged[key] = deepcopy(value)
                 continue
-            if _canonical_json(merged[key]) == _canonical_json(value):
+            if canonical_json(merged[key]) == canonical_json(value):
                 continue
             conflicts.add(key)
             merged.pop(key, None)
@@ -330,7 +322,7 @@ def _merge_params(
 
 
 def _composed_id(source_ids: list[str], projected_ids: list[str], policy: dict[str, Any]) -> str:
-    canonical = _canonical_json(
+    canonical = canonical_json(
         {
             "source_ids": source_ids,
             "projected_ids": projected_ids,

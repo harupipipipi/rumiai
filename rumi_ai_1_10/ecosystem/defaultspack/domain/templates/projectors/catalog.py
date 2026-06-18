@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .._helpers import canonical_json
 from ..models import (
     ResolvedTemplate,
     RumiTemplate,
@@ -689,12 +689,7 @@ def _dedupe_diagnostics(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             str(item.get("path") or ""),
             str(item.get("source_path") or item.get("source_path") or item.get("source") or ""),
             str(item.get("message") or ""),
-            json.dumps(
-                item.get("details") or {},
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=True,
-            ),
+            canonical_json(item.get("details") or {}),
         )
         if key not in deduped:
             order.append(key)
