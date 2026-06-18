@@ -16,11 +16,15 @@ import { authorityApprovalResources, type AuthorityApprovalDecision, type Author
 import {
   authorityApprovalConfig,
   authorityRelatedPermissions,
+  authorityApprovalSettledLabel,
+  authorityApprovalShouldRetryWithFreshContext,
   authorityApprovalRiskTone,
   authorityApprovalRuntimeContent,
   authorityApprovalTitle,
   type AuthorityApproval,
+  type AuthorityApprovalSettledStatus,
   type AuthorityApprovalScope,
+  authorityRequestSettledStatus,
 } from "../lib/authorityApproval";
 import { broadcastAuthorityApprovalSettlement } from "../lib/authorityApprovalEvents";
 import { closeCurrentWindow, getAuthorityApprovalContext, openFingerRecordingWindow } from "../lib/desktopApproval";
@@ -28,8 +32,18 @@ import { cn } from "../lib/cn";
 
 type DecisionState =
   | { kind: "idle" }
-  | { kind: "approved"; decision: AuthorityApprovalDecision; resumed: boolean }
+  | { kind: "approved"; decision?: AuthorityApprovalDecision; resumed: boolean }
   | { kind: "rejected" };
+
+type AuthoritySettlement = {
+  request: AuthorityRequest;
+  status: AuthorityApprovalSettledStatus;
+};
+
+type TauriAuthorityWindow = Window & {
+  __TAURI_INTERNALS__?: unknown;
+  __TAURI__?: unknown;
+};
 
 const SCOPE_LABELS: Record<AuthorityApprovalScope, string> = {
   once: "今回のみ",
@@ -99,6 +113,12 @@ function scheduleAuthorityApprovalWindowClose() {
   window.setTimeout(() => void closeAuthorityApprovalWindow(), 650);
 }
 
+function hasNativeAuthorityApprovalContext(): boolean {
+  if (typeof window === "undefined") return false;
+  const maybeWindow = window as TauriAuthorityWindow;
+  return Boolean(maybeWindow.__TAURI__ || maybeWindow.__TAURI_INTERNALS__);
+}
+
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -121,6 +141,10 @@ export function AuthorityApprovalWindow() {
   const [decisionState, setDecisionState] = useState<DecisionState>({ kind: "idle" });
   const [ambientEnabled, setAmbientEnabled] = useState(false);
   const [confirmationText, setConfirmationText] = useState("");
+  const [nativeApprovalAvailable, setNativeApprovalAvailable] = useState(hasNativeAuthorityApprovalContext);
+  const nativeApprovalAvailableRef = useRef(nativeApprovalAvailable);
+  const locallySettledRequestsRef = useRef(new Map<string, AuthorityApprovalSettledStatus>());
+  const settlementBroadcastedRef = useRef(new Set<string>());
 
   const approval = useMemo(() => request ? requestToApproval(request) : null, [request]);
   const title = request ? windowTitle(request) : "Rumiの許可";
@@ -143,7 +167,12 @@ export function AuthorityApprovalWindow() {
     )) ?? [];
     return scopes.length ? scopes : ["once"];
   }, [request?.allowed_scopes]);
-  const controlsDisabled = !request || request.status !== "pending" || action !== null || decisionState.kind !== "idle";
+  const decisionSettledStatus: AuthorityApprovalSettledStatus | null = decisionState.kind === "approved"
+    ? "approved"
+    : decisionState.kind === "rejected" ? "denied" : null;
+  const displayedSettledStatus = decisionSettledStatus ?? authorityRequestSettledStatus(request?.status);
+  const showApprovalControls = Boolean(request && request.status === "pending" && nativeApprovalAvailable && !displayedSettledStatus && decisionState.kind === "idle");
+  const controlsDisabled = !showApprovalControls || action !== null;
   const confirmationPhrase = stringValue(request?.display_metadata?.confirmation_phrase) || stringValue(request?.resource?.confirmation_phrase);
   const typedConfirmationRequired = Boolean(
     request?.display_metadata?.typed_confirmation_required
@@ -186,6 +215,113 @@ export function AuthorityApprovalWindow() {
   }, [request?.request_id]);
 
   useEffect(() => {
+    const nextNativeApprovalAvailable = hasNativeAuthorityApprovalContext();
+    nativeApprovalAvailableRef.current = nextNativeApprovalAvailable;
+    setNativeApprovalAvailable(nextNativeApprovalAvailable);
+  }, []);
+
+  const settleAuthorityRequest = useCallback((
+    settledRequest: AuthorityRequest,
+    status: AuthorityApprovalSettledStatus,
+    options?: {
+      decision?: AuthorityApprovalDecision;
+      resumed?: boolean;
+      scheduleClose?: boolean;
+    },
+  ) => {
+    const nextRequest: AuthorityRequest = { ...settledRequest, status };
+    locallySettledRequestsRef.current.set(settledRequest.request_id, status);
+    setRequest(nextRequest);
+    setError(null);
+    setDecisionState(status === "approved"
+      ? { kind: "approved", decision: options?.decision, resumed: Boolean(options?.resumed) }
+      : { kind: "rejected" });
+    setPendingRequests((current) => current.filter((item) => item.request_id !== settledRequest.request_id));
+
+    const settlementKey = `${settledRequest.request_id}:${status}`;
+    if (!settlementBroadcastedRef.current.has(settlementKey)) {
+      settlementBroadcastedRef.current.add(settlementKey);
+      broadcastAuthorityApprovalSettlement({
+        requestId: settledRequest.request_id,
+        status,
+        conversationId: settledRequest.conversation_id,
+      });
+    }
+
+    const shouldScheduleClose = options?.scheduleClose ?? nativeApprovalAvailableRef.current;
+    if (shouldScheduleClose) {
+      scheduleAuthorityApprovalWindowClose();
+    }
+  }, []);
+
+  const readAuthoritySettlement = useCallback(async (targetRequestId: string): Promise<AuthoritySettlement | null> => {
+    const latest = await authorityApprovalResources.getAuthorityRequest(targetRequestId);
+    const status = authorityRequestSettledStatus(latest.status);
+    return status ? { request: latest, status } : null;
+  }, []);
+
+  const readAuthoritySettlementOrNull = useCallback(async (targetRequestId: string): Promise<AuthoritySettlement | null> => {
+    try {
+      return await readAuthoritySettlement(targetRequestId);
+    } catch {
+      return null;
+    }
+  }, [readAuthoritySettlement]);
+
+  const settleFromServer = useCallback(async (targetRequestId: string): Promise<boolean> => {
+    const settlement = await readAuthoritySettlementOrNull(targetRequestId);
+    if (!settlement) return false;
+    settleAuthorityRequest(settlement.request, settlement.status);
+    return true;
+  }, [readAuthoritySettlementOrNull, settleAuthorityRequest]);
+
+  const tryResumeAfterApproval = useCallback(async (
+    settledRequest: AuthorityRequest,
+    decision: AuthorityApprovalDecision,
+  ): Promise<boolean> => {
+    if (!settledRequest.conversation_id) return false;
+    const settledApproval = requestToApproval(settledRequest);
+    const approvalFollowups = [
+      ...(decision.token ? [{
+        approval_token: decision.token,
+        request_id: settledRequest.request_id,
+        permission_id: settledRequest.permission_id,
+      }] : []),
+      ...((decision.related_approvals ?? [])
+        .filter((item) => item.token && item.request_id && item.permission_id)
+        .map((item) => ({
+          approval_token: item.token,
+          request_id: item.request_id,
+          permission_id: item.permission_id,
+        }))),
+    ];
+    try {
+      await authorityApprovalResources.sendAuthorityResume(
+        settledRequest.conversation_id,
+        "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。",
+        {
+          authority_followup: {
+            ...(decision.token ? { approval_token: decision.token } : {}),
+            request_id: settledRequest.request_id,
+            permission_id: settledRequest.permission_id,
+            approvals: approvalFollowups,
+            hidden: true,
+          },
+          chat_display: {
+            hidden: true,
+            reason: "authority_followup",
+          },
+          runtime_content: authorityApprovalRuntimeContent(settledApproval, decision.token),
+        },
+      );
+      return true;
+    } catch (resumeError) {
+      console.warn("[authority] approval was saved but resume follow-up failed", resumeError);
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function load() {
@@ -197,15 +333,29 @@ export function AuthorityApprovalWindow() {
       }
       setLoading(true);
       setError(null);
-      setDecisionState({ kind: "idle" });
       try {
         const [single, list] = await Promise.all([
           requestId ? authorityApprovalResources.getAuthorityRequest(requestId) : Promise.resolve(null),
           authorityApprovalResources.listAuthorityRequests({ status: "pending" }),
         ]);
         if (cancelled) return;
-        setRequest(single);
         setPendingRequests(list.pending ?? []);
+        if (!single) {
+          setRequest(null);
+          setDecisionState({ kind: "idle" });
+          return;
+        }
+
+        const singleSettledStatus = authorityRequestSettledStatus(single.status)
+          ?? locallySettledRequestsRef.current.get(single.request_id)
+          ?? null;
+        if (singleSettledStatus) {
+          settleAuthorityRequest(single, singleSettledStatus);
+          return;
+        }
+
+        setRequest(single);
+        setDecisionState({ kind: "idle" });
       } catch (loadError) {
         if (cancelled) return;
         setRequest(null);
@@ -219,13 +369,16 @@ export function AuthorityApprovalWindow() {
     return () => {
       cancelled = true;
     };
-  }, [isAmbientPackApproval, requestId, refreshNonce]);
+  }, [isAmbientPackApproval, requestId, refreshNonce, settleAuthorityRequest]);
 
   const selectRequest = (nextRequestId: string) => {
     if (!nextRequestId || nextRequestId === requestId) return;
     const nextUrl = new URL(window.location.href);
     nextUrl.searchParams.set("request_id", nextRequestId);
     window.history.replaceState(null, "", nextUrl.toString());
+    setAction(null);
+    setError(null);
+    setDecisionState({ kind: "idle" });
     setRequestId(nextRequestId);
   };
 
@@ -233,11 +386,48 @@ export function AuthorityApprovalWindow() {
     setRefreshNonce((value) => value + 1);
   };
 
+  const settleApprovedDecision = useCallback((
+    settledRequest: AuthorityRequest,
+    decision: AuthorityApprovalDecision,
+  ) => {
+    settleAuthorityRequest({ ...settledRequest, status: "approved" }, "approved", {
+      decision,
+      resumed: false,
+    });
+  }, [settleAuthorityRequest]);
+
+  const finalizeApprovedDecision = useCallback(async (
+    settledRequest: AuthorityRequest,
+    decision: AuthorityApprovalDecision,
+  ) => {
+    const serverSettlement = await readAuthoritySettlementOrNull(settledRequest.request_id);
+    const finalStatus = serverSettlement?.status ?? "approved";
+    const finalRequest: AuthorityRequest = serverSettlement?.request ?? { ...settledRequest, status: finalStatus };
+    const resumed = finalStatus === "approved"
+      ? await tryResumeAfterApproval(finalRequest, decision)
+      : false;
+    settleAuthorityRequest(finalRequest, finalStatus, {
+      decision: finalStatus === "approved" ? decision : undefined,
+      resumed,
+    });
+  }, [readAuthoritySettlementOrNull, settleAuthorityRequest, tryResumeAfterApproval]);
+
+  const finalizeDeniedRequest = useCallback(async (settledRequest: AuthorityRequest) => {
+    const serverSettlement = await readAuthoritySettlementOrNull(settledRequest.request_id);
+    const finalStatus = serverSettlement?.status ?? "denied";
+    const finalRequest: AuthorityRequest = serverSettlement?.request ?? { ...settledRequest, status: finalStatus };
+    settleAuthorityRequest(finalRequest, finalStatus);
+  }, [readAuthoritySettlementOrNull, settleAuthorityRequest]);
+
+  const settleDeniedRequest = useCallback((settledRequest: AuthorityRequest) => {
+    settleAuthorityRequest({ ...settledRequest, status: "denied" }, "denied");
+  }, [settleAuthorityRequest]);
+
   const approve = async () => {
     if (!request || !approval) return;
     setAction("approve");
     setError(null);
-    try {
+    const submitApproveOnce = async (): Promise<AuthorityApprovalDecision> => {
       const context = await getAuthorityApprovalContext(request.request_id);
       const config = authorityApprovalConfig(approval);
       if (typedConfirmationRequired) config.confirmation_text = confirmationText.trim();
@@ -248,52 +438,26 @@ export function AuthorityApprovalWindow() {
         ui_operator: context.ui_operator,
       });
       if (!decision.approved) throw new Error("authority approval failed");
+      return decision;
+    };
 
-      let resumed = false;
-      if (request.conversation_id) {
-        const approvalFollowups = [
-          ...(decision.token ? [{
-            approval_token: decision.token,
-            request_id: request.request_id,
-            permission_id: request.permission_id,
-          }] : []),
-          ...((decision.related_approvals ?? [])
-            .filter((item) => item.token && item.request_id && item.permission_id)
-            .map((item) => ({
-              approval_token: item.token,
-              request_id: item.request_id,
-              permission_id: item.permission_id,
-            }))),
-        ];
-        await authorityApprovalResources.sendAuthorityResume(
-          request.conversation_id,
-          "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。",
-          {
-            authority_followup: {
-              ...(decision.token ? { approval_token: decision.token } : {}),
-              request_id: request.request_id,
-              permission_id: request.permission_id,
-              approvals: approvalFollowups,
-              hidden: true,
-            },
-            chat_display: {
-              hidden: true,
-              reason: "authority_followup",
-            },
-            runtime_content: authorityApprovalRuntimeContent(approval, decision.token),
-          },
-        );
-        resumed = true;
+    try {
+      try {
+        const decision = await submitApproveOnce();
+        settleApprovedDecision(request, decision);
+        await finalizeApprovedDecision(request, decision);
+      } catch (postError) {
+        if (await settleFromServer(request.request_id)) return;
+        if (!authorityApprovalShouldRetryWithFreshContext(postError)) throw postError;
+        try {
+          const retriedDecision = await submitApproveOnce();
+          settleApprovedDecision(request, retriedDecision);
+          await finalizeApprovedDecision(request, retriedDecision);
+        } catch (retryError) {
+          if (await settleFromServer(request.request_id)) return;
+          throw retryError;
+        }
       }
-      setDecisionState({ kind: "approved", decision, resumed });
-      setRequest({ ...request, status: "approved" });
-      setPendingRequests((current) => current.filter((item) => item.request_id !== request.request_id));
-      broadcastAuthorityApprovalSettlement({
-        requestId: request.request_id,
-        status: "approved",
-        conversationId: request.conversation_id,
-      });
-      scheduleAuthorityApprovalWindowClose();
     } catch (approvalError) {
       setError(approvalError instanceof Error ? approvalError.message : "authority 承認に失敗しました。");
     } finally {
@@ -305,22 +469,32 @@ export function AuthorityApprovalWindow() {
     if (!request) return;
     setAction("reject");
     setError(null);
-    try {
+    const submitRejectOnce = async (): Promise<void> => {
       const context = await getAuthorityApprovalContext(request.request_id);
       await authorityApprovalResources.denyAuthorityApproval(request.request_id, {
         reason: "Denied from dedicated authority approval window",
         persist: false,
         ui_operator: context.ui_operator,
       });
-      setDecisionState({ kind: "rejected" });
-      setRequest({ ...request, status: "denied" });
-      setPendingRequests((current) => current.filter((item) => item.request_id !== request.request_id));
-      broadcastAuthorityApprovalSettlement({
-        requestId: request.request_id,
-        status: "denied",
-        conversationId: request.conversation_id,
-      });
-      scheduleAuthorityApprovalWindowClose();
+    };
+
+    try {
+      try {
+        await submitRejectOnce();
+        settleDeniedRequest(request);
+        await finalizeDeniedRequest(request);
+      } catch (postError) {
+        if (await settleFromServer(request.request_id)) return;
+        if (!authorityApprovalShouldRetryWithFreshContext(postError)) throw postError;
+        try {
+          await submitRejectOnce();
+          settleDeniedRequest(request);
+          await finalizeDeniedRequest(request);
+        } catch (retryError) {
+          if (await settleFromServer(request.request_id)) return;
+          throw retryError;
+        }
+      }
     } catch (rejectionError) {
       setError(rejectionError instanceof Error ? rejectionError.message : "authority 承認の拒否に失敗しました。");
     } finally {
@@ -360,20 +534,27 @@ export function AuthorityApprovalWindow() {
           </div>
         )}
 
-        {decisionState.kind !== "idle" && (
+        {displayedSettledStatus && (
           <div className={cn(
             "mt-4 rounded-lg border px-3 py-3 text-sm",
-            decisionState.kind === "approved"
+            displayedSettledStatus === "approved"
               ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
               : "border-zinc-700 bg-zinc-900 text-zinc-200",
           )}>
             <div className="flex items-center gap-2 font-medium">
-              {decisionState.kind === "approved" ? <ShieldCheck size={16} /> : <ShieldX size={16} />}
-              {decisionState.kind === "approved" ? "承認しました" : "拒否しました"}
+              {displayedSettledStatus === "approved" ? <ShieldCheck size={16} /> : <ShieldX size={16} />}
+              {authorityApprovalSettledLabel(displayedSettledStatus)}
             </div>
-            {decisionState.kind === "approved" && (
+            {decisionState.kind === "approved" && decisionState.decision ? (
               <p className="mt-1 text-xs text-emerald-200/80">
                 許可範囲: {SCOPE_LABELS[decisionState.decision.scope] ?? decisionState.decision.scope}{decisionState.resumed ? " / 続行しました" : ""}
+              </p>
+            ) : (
+              <p className={cn(
+                "mt-1 text-xs",
+                displayedSettledStatus === "approved" ? "text-emerald-200/80" : "text-zinc-400",
+              )}>
+                {nativeApprovalAvailable ? "このリクエストは処理済みです。ウィンドウを閉じます。" : "このリクエストは処理済みです。追加の操作は不要です。"}
               </p>
             )}
           </div>
@@ -411,7 +592,7 @@ export function AuthorityApprovalWindow() {
                   ))}
                 </dl>
 
-                {typedConfirmationRequired && (
+                {showApprovalControls && typedConfirmationRequired && (
                   <div className="mt-4 rounded-lg border border-red-500/35 bg-red-500/10 p-3">
                     <p className="text-[11px] font-semibold text-red-200">重要な確認</p>
                     <p className="mt-2 text-xs leading-5 text-red-100/85">
@@ -432,27 +613,29 @@ export function AuthorityApprovalWindow() {
                   </div>
                 )}
 
-                <div className="mt-4 rounded-lg border border-zinc-800 bg-black/30 p-3">
-                  <p className="text-[11px] font-medium text-zinc-400">許可する範囲</p>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    {allowedScopes.map((scope) => (
-                      <button
-                        key={scope}
-                        type="button"
-                        disabled={controlsDisabled}
-                        onClick={() => setSelectedScope(scope)}
-                        className={cn(
-                          "flex h-9 items-center justify-center rounded-lg border text-xs font-medium transition-colors disabled:opacity-50",
-                          selectedScope === scope
-                            ? "border-zinc-100 bg-zinc-100 text-zinc-950"
-                            : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
-                        )}
-                      >
-                        {SCOPE_LABELS[scope]}
-                      </button>
-                    ))}
+                {showApprovalControls && (
+                  <div className="mt-4 rounded-lg border border-zinc-800 bg-black/30 p-3">
+                    <p className="text-[11px] font-medium text-zinc-400">許可する範囲</p>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {allowedScopes.map((scope) => (
+                        <button
+                          key={scope}
+                          type="button"
+                          disabled={controlsDisabled}
+                          onClick={() => setSelectedScope(scope)}
+                          className={cn(
+                            "flex h-9 items-center justify-center rounded-lg border text-xs font-medium transition-colors disabled:opacity-50",
+                            selectedScope === scope
+                              ? "border-zinc-100 bg-zinc-100 text-zinc-950"
+                              : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
+                          )}
+                        >
+                          {SCOPE_LABELS[scope]}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="mt-4 rounded-lg border border-zinc-800 bg-black/30 p-3">
                   <p className="text-[11px] font-medium text-zinc-400">記録される内容</p>
@@ -469,26 +652,34 @@ export function AuthorityApprovalWindow() {
                 </details>
               </div>
 
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => void reject()}
-                  disabled={controlsDisabled}
-                  className="flex h-10 min-w-28 items-center justify-center gap-2 rounded-lg border border-zinc-800 px-4 text-sm font-semibold text-zinc-300 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-100 disabled:opacity-50"
-                >
-                  {action === "reject" ? <Loader2 className="animate-spin" size={15} /> : <X size={15} />}
-                  拒否{ambientEnabled ? " (2)" : ""}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void approve()}
-                  disabled={controlsDisabled || !typedConfirmationSatisfied}
-                  className="flex h-10 min-w-32 items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-50"
-                >
-                  {action === "approve" ? <Loader2 className="animate-spin" size={15} /> : <Check size={15} />}
-                  承認{ambientEnabled ? " (3)" : ""}
-                </button>
-              </div>
+              {showApprovalControls ? (
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void reject()}
+                    disabled={controlsDisabled}
+                    className="flex h-10 min-w-28 items-center justify-center gap-2 rounded-lg border border-zinc-800 px-4 text-sm font-semibold text-zinc-300 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-100 disabled:opacity-50"
+                  >
+                    {action === "reject" ? <Loader2 className="animate-spin" size={15} /> : <X size={15} />}
+                    拒否{ambientEnabled ? " (2)" : ""}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void approve()}
+                    disabled={controlsDisabled || !typedConfirmationSatisfied}
+                    className="flex h-10 min-w-32 items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-50"
+                  >
+                    {action === "approve" ? <Loader2 className="animate-spin" size={15} /> : <Check size={15} />}
+                    承認{ambientEnabled ? " (3)" : ""}
+                  </button>
+                </div>
+              ) : !displayedSettledStatus ? (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-400">
+                  {request.status === "pending" && !nativeApprovalAvailable
+                    ? "承認操作は Rumi Viewer の専用ウィンドウでのみ実行できます。"
+                    : `このリクエストは ${request.status} のため、この画面では操作できません。`}
+                </div>
+              ) : null}
             </>
           ) : (
             <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">

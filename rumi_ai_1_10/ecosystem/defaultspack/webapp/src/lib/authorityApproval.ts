@@ -11,6 +11,7 @@ export type AuthorityApproval = {
 };
 
 export type AuthorityApprovalScope = "once" | "conversation" | "profile" | "node";
+export type AuthorityApprovalSettledStatus = "approved" | "denied";
 
 type AuthorityApprovalResource = {
   permissionId: string;
@@ -19,6 +20,31 @@ type AuthorityApprovalResource = {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+export function authorityRequestSettledStatus(status: unknown): AuthorityApprovalSettledStatus | null {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  if (normalized === "approved") return "approved";
+  if (normalized === "denied" || normalized === "rejected") return "denied";
+  return null;
+}
+
+export function authorityApprovalSettledLabel(status: AuthorityApprovalSettledStatus): string {
+  return status === "approved" ? "承認済み" : "拒否済み";
+}
+
+export function authorityApprovalShouldRetryWithFreshContext(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const normalized = message.toLowerCase();
+  return [
+    "ui_operator expired",
+    "ui_operator source is invalid",
+    "ui_operator version is invalid",
+    "ui_operator timestamps are invalid",
+    "ui_operator issued_at is invalid",
+    "ui_operator request mismatch",
+    "ui_operator signature is invalid",
+  ].some((needle) => normalized.includes(needle));
 }
 
 export function authorityApprovalRiskTone(riskLevel?: string): string {
