@@ -396,6 +396,170 @@ def test_ambient_audio_release_without_transcript_transcribes_for_text_model(mon
     assert "data:audio" not in json.dumps(envelope.attachments, ensure_ascii=False)
 
 
+def test_text_model_audio_uses_local_whisper_fallback(monkeypatch, tmp_path):
+    _clear_local_whisper_env(monkeypatch)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH",
+        str(tmp_path / "ambient-audit.jsonl"),
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "conversations.json"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    class NoTranscriptionClient:
+        def __init__(self):
+            self._providers = {}
+
+        def transcribe(self, model, audio, params):
+            raise AssertionError("cloud transcription should not be attempted")
+
+    route_model = "opencode-go/deepseek-v4-flash"
+    transcript = "録音をローカルで文字起こししました"
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+    router.configure({
+        "routing": {"mode": "always_new_chat", "group_id": "gesture", "model": route_model}
+    })
+
+    with (
+        patch("domain.ai_client.client.AIClient", return_value=NoTranscriptionClient()),
+        patch(
+            "domain.ambient.local_transcription.transcribe_local_audio",
+            return_value={
+                "status": "ok",
+                "text": transcript,
+                "source": "local_whisper",
+                "model": "local-whisper:ggml-base.bin",
+            },
+        ) as local_transcribe,
+        patch(
+            "domain.ambient.router.submit_input",
+            return_value={"status": "ok", "assistant_text": ""},
+        ) as submit,
+    ):
+        dispatched = router.submit_event(_pinch_audio_payload(transcript=None))
+
+    assert dispatched["status"] == "ok"
+    local_transcribe.assert_called_once()
+    envelope = submit.call_args.args[0]
+    assert envelope.input == transcript
+    assert "pinch.webm" not in envelope.input
+    assert envelope.attachments[0]["transcript"] == transcript
+    assert envelope.attachments[0]["transcript_source"] == "local_whisper"
+    assert envelope.attachments[0]["transcription_model"] == "local-whisper:ggml-base.bin"
+    assert "dataUrl" not in envelope.attachments[0]
+    assert "data:audio" not in json.dumps(envelope.attachments, ensure_ascii=False)
+    assert envelope.params["model"] == route_model
+
+
+def test_audio_tagged_model_keeps_audio_passthrough(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH",
+        str(tmp_path / "ambient-audit.jsonl"),
+    )
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    route_model = "provider/audio-model"
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+    router.configure({"routing": {"mode": "selected_chat", "model": route_model}})
+
+    with (
+        patch(
+            "domain.ambient.router.get_model_capabilities",
+            return_value={
+                "profile_id": route_model,
+                "provider_id": "provider",
+                "supports_audio": False,
+                "supports_audio_input": False,
+                "capability_tags": ["audio"],
+                "input_modalities": ["text", "audio"],
+            },
+        ),
+        patch(
+            "domain.ambient.router.transcribe_ambient_audio",
+            return_value={
+                "status": "unavailable",
+                "code": "no_transcription_model",
+                "reason": "No configured transcription model is available.",
+                "text": "",
+            },
+        ) as transcribe,
+        patch(
+            "domain.ambient.router.submit_input",
+            return_value={"status": "ok", "assistant_text": ""},
+        ) as submit,
+    ):
+        dispatched = router.submit_event(_pinch_audio_payload(transcript=None))
+
+    assert dispatched["status"] == "ok"
+    transcribe.assert_called_once()
+    envelope = submit.call_args.args[0]
+    assert envelope.params["model"] == route_model
+    assert envelope.attachments[0]["dataUrl"].startswith("data:audio/webm")
+    assert envelope.attachments[0]["transcription_status"] == "unavailable"
+
+
+def test_multimodal_vision_without_audio_requires_transcription(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH",
+        str(tmp_path / "ambient-audit.jsonl"),
+    )
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    route_model = "provider/vision-model"
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+    router.configure({"routing": {"mode": "selected_chat", "model": route_model}})
+
+    with (
+        patch(
+            "domain.ambient.router.get_model_capabilities",
+            return_value={
+                "profile_id": route_model,
+                "provider_id": "provider",
+                "supports_vision": True,
+                "supports_image_input": True,
+                "supports_audio": False,
+                "supports_audio_input": False,
+                "capability_tags": ["multimodal", "vision"],
+                "input_modalities": ["text", "image"],
+            },
+        ),
+        patch(
+            "domain.ambient.router.transcribe_ambient_audio",
+            return_value={
+                "status": "unavailable",
+                "code": "local_whisper_not_configured",
+                "reason": "ローカルWhisperが未設定です。",
+                "text": "",
+            },
+        ) as transcribe,
+        patch("domain.ambient.router.submit_input") as submit,
+    ):
+        result = router.submit_event(_pinch_audio_payload(transcript=None))
+
+    assert result["status"] == "transcription_required"
+    assert result["reason"] == "ambient.audio_transcription_unavailable"
+    assert result["transcription"]["code"] == "local_whisper_not_configured"
+    transcribe.assert_called_once()
+    submit.assert_not_called()
+
+
 def test_ambient_audio_release_without_transcript_requires_transcription_for_text_model(monkeypatch, tmp_path):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
@@ -432,6 +596,113 @@ def test_ambient_audio_release_without_transcript_requires_transcription_for_tex
     assert "AAAA" not in serialized
     transcribe.assert_called_once()
     submit.assert_not_called()
+
+
+def test_ambient_audio_release_without_local_whisper_blocks_text_model(monkeypatch, tmp_path):
+    _clear_local_whisper_env(monkeypatch)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH",
+        str(tmp_path / "ambient-audit.jsonl"),
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "conversations.json"))
+
+    from domain.ambient import local_transcription
+    from domain.ambient.router import AmbientTriggerRouter
+
+    monkeypatch.setattr(local_transcription.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(local_transcription, "_default_model_candidates", lambda _env: [])
+    monkeypatch.setattr(local_transcription, "_has_python_module", lambda _name: False)
+
+    class NoTranscriptionClient:
+        def __init__(self):
+            self._providers = {}
+
+        def transcribe(self, model, audio, params):
+            raise AssertionError("cloud transcription should not be attempted")
+
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+    router.configure({
+        "routing": {
+            "mode": "always_new_chat",
+            "group_id": "gesture",
+            "model": "opencode-go/deepseek-v4-flash",
+        }
+    })
+
+    with (
+        patch("domain.ai_client.client.AIClient", return_value=NoTranscriptionClient()),
+        patch("domain.ambient.router.submit_input") as submit,
+    ):
+        result = router.submit_event(_pinch_audio_payload(transcript=None))
+
+    assert result["status"] == "transcription_required"
+    assert result["reason"] == "ambient.audio_transcription_unavailable"
+    assert result["transcription"]["code"] == "local_whisper_not_configured"
+    assert "ローカルWhisper" in result["transcription"]["reason"]
+    serialized = json.dumps(result, ensure_ascii=False)
+    assert "pinch.webm" not in serialized
+    assert "ambient-pinch" not in serialized
+    assert "data:audio" not in serialized
+    assert "AAAA" not in serialized
+    submit.assert_not_called()
+
+
+def test_local_whisper_command_uses_secure_temp_audio_and_deletes_it(monkeypatch, tmp_path):
+    _clear_local_whisper_env(monkeypatch)
+
+    from domain.ambient import local_transcription
+
+    model_path = tmp_path / "ggml-base.bin"
+    model_path.write_bytes(b"model")
+    monkeypatch.setenv("WHISPER_CPP_BIN", "/mock/bin/whisper-cli")
+    monkeypatch.setenv("WHISPER_CPP_MODEL", str(model_path))
+    monkeypatch.setenv("FFMPEG_BIN", "/mock/bin/ffmpeg")
+
+    conversion_source_paths = []
+    whisper_audio_paths = []
+
+    def fake_run_subprocess(argv, *, timeout_seconds):
+        del timeout_seconds
+        if Path(argv[0]).name == "ffmpeg":
+            source_path = Path(argv[argv.index("-i") + 1])
+            converted_path = Path(argv[-1])
+            assert source_path.exists()
+            conversion_source_paths.append(source_path)
+            converted_path.write_bytes(b"RIFF converted wav")
+            return local_transcription.CommandResult(returncode=0, stdout="", stderr="")
+        audio_path = Path(argv[argv.index("-f") + 1])
+        output_prefix = Path(argv[argv.index("-of") + 1])
+        assert audio_path.exists()
+        assert audio_path.suffix == ".wav"
+        assert audio_path.read_bytes() == b"RIFF converted wav"
+        whisper_audio_paths.append(audio_path)
+        output_prefix.with_suffix(".txt").write_text(
+            "ローカル文字起こし\n",
+            encoding="utf-8",
+        )
+        return local_transcription.CommandResult(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(local_transcription, "_run_subprocess", fake_run_subprocess)
+
+    result = local_transcription.transcribe_local_audio(
+        "data:audio/webm;base64,AAA=",
+        mime_type="audio/webm",
+    )
+
+    assert result["status"] == "ok"
+    assert result["text"] == "ローカル文字起こし"
+    assert result["source"] == "local_whisper"
+    assert result["model"] == "local-whisper:ggml-base.bin"
+    assert local_transcription.local_whisper_status()["status"] == "local_whisper_configured"
+    assert conversion_source_paths
+    assert whisper_audio_paths
+    assert not conversion_source_paths[0].exists()
+    assert not whisper_audio_paths[0].exists()
 
 
 def test_ambient_transcription_without_explicit_model_rejects_stub_only_provider(monkeypatch):
@@ -894,6 +1165,24 @@ def _contains_any_key(value, keys: set[str]) -> bool:
     if isinstance(value, list):
         return any(_contains_any_key(item, keys) for item in value)
     return False
+
+
+def _clear_local_whisper_env(monkeypatch) -> None:
+    for key in (
+        "RUMI_LOCAL_WHISPER_COMMAND",
+        "RUMI_WHISPER_CPP_BIN",
+        "WHISPER_CPP_BIN",
+        "RUMI_LOCAL_WHISPER_MODEL",
+        "WHISPER_CPP_MODEL",
+        "RUMI_WHISPER_MODEL_PATH",
+        "RUMI_LOCAL_WHISPER_DIR",
+        "RUMI_LOCAL_WHISPER_ALLOW_DOWNLOAD",
+        "RUMI_WHISPER_ALLOW_DOWNLOAD",
+        "RUMI_LOCAL_WHISPER_TIMEOUT_SECONDS",
+        "RUMI_FFMPEG_BIN",
+        "FFMPEG_BIN",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
 
 def _pinch_audio_payload(transcript: str | None = "今日の予定を確認して") -> dict:

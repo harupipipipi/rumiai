@@ -4,6 +4,7 @@ from copy import deepcopy
 import re
 from typing import Any
 
+from domain.ai_client.audio_capability import metadata_supports_audio_input
 from domain.ai_client.model_groups import normalize_model_groups
 
 
@@ -197,6 +198,7 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
     label_provider = str(profile.get("provider_display_name") or profile.get("provider_name") or provider_id or "").strip()
     display_name = str(profile.get("display_name") or profile.get("name") or model_id or profile_id).strip()
     availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+    supports_audio = metadata_supports_audio_input(profile)
     configured = bool(
         profile.get("configured")
         or availability.get("configured")
@@ -217,8 +219,8 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
         "requires_api_key": bool(provider_id and provider_id not in {"stub"} and not configured),
         "supports_vision": bool(profile.get("supports_vision")),
         "supports_image_input": bool(profile.get("supports_image_input") or profile.get("supports_vision")),
-        "supports_audio": bool(profile.get("supports_audio") or profile.get("supports_audio_input")),
-        "supports_audio_input": bool(profile.get("supports_audio_input") or profile.get("supports_audio")),
+        "supports_audio": supports_audio,
+        "supports_audio_input": supports_audio,
         "supports_tool_calling": bool(profile.get("supports_tool_calling")),
         "supports_thinking": bool(profile.get("supports_thinking")),
         "thinking_levels": list(profile.get("thinking_levels") or []),

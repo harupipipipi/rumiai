@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from domain.ai_client.audio_capability import metadata_supports_audio_input
 from domain.ai_client.model_capability_schema import (
     ModelCapabilityFlags,
     ModelCapabilityRecord,
@@ -28,12 +29,10 @@ TOOL_CAPABLE_PROVIDERS = {
     "openai_compatible",
 }
 VISION_CAPABLE_PROVIDERS = {"openai", "anthropic", "google", "genspark", "fireworks", "xai"}
-AUDIO_CAPABLE_PROVIDERS = {"openai", "google"}
 STRUCTURED_OUTPUT_PROVIDERS = {"openai", "google", "genspark", "openai_compatible"}
 FAST_MODEL_RE = re.compile(r"(flash|flash-lite|mini|nano|lite|turbo|fast|hy3|free|groq)", re.IGNORECASE)
 SLOW_MODEL_RE = re.compile(r"(pro|opus|large|reason|thinking|r1|o3|o4|gpt-5\.5)", re.IGNORECASE)
 VISION_MODEL_RE = re.compile(r"(vision|gpt-4o|gpt-5|gemini|claude|grok|pixtral|vl|omni)", re.IGNORECASE)
-AUDIO_MODEL_RE = re.compile(r"(audio|omni|gpt-4o|gpt-5|gemini)", re.IGNORECASE)
 TOOL_MODEL_RE = re.compile(r"(gpt-|gemini|claude|command|llama-3\.3|mistral-large|deepseek|glm)", re.IGNORECASE)
 THINKING_MODEL_RE = re.compile(r"(gpt-5|claude|gemini|deepseek|reason|thinking|r1|o3|o4)", re.IGNORECASE)
 
@@ -141,15 +140,14 @@ def _supports_vision(model: dict[str, Any]) -> bool:
 
 def _supports_audio_input(model: dict[str, Any]) -> bool:
     explicit = _explicit_bool(model, "supports_audio", "supports_audio_input", "audio_input", "input_audio")
-    if explicit is not None:
-        return explicit
-    provider_id, model_id, qualified = _model_identity(model)
+    if explicit is True:
+        return True
     model_type = str(model.get("type") or "chat").lower()
     if model_type not in {"chat", "reasoning", "vision"}:
         return False
-    if _capability_truthy(model, "audio", "audio_input", "input_audio"):
+    if metadata_supports_audio_input(model):
         return True
-    return provider_id in AUDIO_CAPABLE_PROVIDERS and bool(AUDIO_MODEL_RE.search(f"{model_id} {qualified}"))
+    return False
 
 
 def _supports_tool_calling(model: dict[str, Any]) -> bool:

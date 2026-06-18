@@ -135,6 +135,8 @@ def transcribe_ambient_audio(
     payload: dict[str, Any] | None = None,
     params: dict[str, Any] | None = None,
     routing: dict[str, Any] | None = None,
+    target_model_ref: str = "",
+    target_supports_audio: bool | None = None,
 ) -> dict[str, Any]:
     missing = [
         (index, attachment)
@@ -150,7 +152,14 @@ def transcribe_ambient_audio(
 
     client = AIClient()
     candidates = _transcription_candidates(client, payload=payload, params=params, routing=routing)
-    if not candidates:
+    use_local_fallback = _should_try_local_fallback(
+        payload=payload,
+        params=params,
+        routing=routing,
+        target_model_ref=target_model_ref,
+        target_supports_audio=target_supports_audio,
+    )
+    if not candidates and not use_local_fallback:
         return {
             "status": "unavailable",
             "code": "no_transcription_model",
@@ -188,11 +197,35 @@ def transcribe_ambient_audio(
                 }
                 break
             errors.append({"model": model_ref, "error": "empty transcription response"})
+        if transcribed is None and use_local_fallback:
+            local_result = _transcribe_local_attachment(audio, attachment, params_for_attachment)
+            local_text = str(local_result.get("text") or "").strip()
+            if local_result.get("status") == "ok" and local_text:
+                transcribed = {
+                    "index": index,
+                    "text": local_text,
+                    "source": str(local_result.get("source") or "local_whisper"),
+                    "model": str(local_result.get("model") or "local-whisper"),
+                }
+            else:
+                local_error = (
+                    local_result.get("reason")
+                    or local_result.get("code")
+                    or "local transcription unavailable"
+                )
+                errors.append(
+                    {
+                        "model": str(local_result.get("model") or "local-whisper"),
+                        "error": str(local_error)[:300],
+                    }
+                )
         if transcribed is None:
+            last_error = errors[-1]["error"] if errors else "Transcription failed."
+            code = "transcription_failed" if candidates else "local_whisper_not_configured"
             return {
                 "status": "unavailable",
-                "code": "transcription_failed",
-                "reason": errors[-1]["error"] if errors else "Transcription failed.",
+                "code": code,
+                "reason": last_error,
                 "text": "\n\n".join(item["text"] for item in results if item.get("text")),
                 "results": results,
                 "attempts": errors[-5:],
@@ -239,6 +272,78 @@ def _transcription_candidates(
     return _dedupe(explicit_candidates + available_fallback_candidates)
 
 
+def _should_try_local_fallback(
+    *,
+    payload: dict[str, Any] | None,
+    params: dict[str, Any] | None,
+    routing: dict[str, Any] | None,
+    target_model_ref: str,
+    target_supports_audio: bool | None,
+) -> bool:
+    if target_supports_audio is False:
+        return True
+    if target_supports_audio is True:
+        return False
+    model_ref = str(target_model_ref or "").strip() or _target_model_from_context(
+        payload=payload,
+        params=params,
+        routing=routing,
+    )
+    if not model_ref:
+        return False
+    try:
+        from domain.ai_client.audio_capability import metadata_supports_audio_input
+        from domain.ai_client.model_search import get_model_capabilities
+    except Exception:
+        return False
+    capabilities = get_model_capabilities(model_ref)
+    if not isinstance(capabilities, dict):
+        return False
+    return not metadata_supports_audio_input(capabilities)
+
+
+def _target_model_from_context(
+    *,
+    payload: dict[str, Any] | None,
+    params: dict[str, Any] | None,
+    routing: dict[str, Any] | None,
+) -> str:
+    payload = payload if isinstance(payload, dict) else {}
+    params = params if isinstance(params, dict) else {}
+    routing = routing if isinstance(routing, dict) else {}
+    for source in (params, payload, routing):
+        for key in ("model", "profile_id", "model_ref", "model_id"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
+
+
+def _transcribe_local_attachment(
+    audio: str,
+    attachment: dict[str, Any],
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        from .local_transcription import transcribe_local_audio
+    except Exception:
+        return {
+            "status": "unavailable",
+            "code": "local_whisper_not_configured",
+            "reason": (
+                "ローカルWhisperが未設定です。ローカルWhisperを設定するか、"
+                "文字起こし対応プロバイダを使用してください。"
+            ),
+            "text": "",
+        }
+    return transcribe_local_audio(
+        audio,
+        mime_type=str(attachment.get("type") or attachment.get("mime_type") or ""),
+        language=str(params.get("language") or ""),
+        prompt=str(params.get("prompt") or ""),
+    )
+
+
 def _explicit_transcription_models(
     *,
     payload: dict[str, Any] | None,
@@ -252,7 +357,8 @@ def _explicit_transcription_models(
     for source in (params, payload, routing):
         for key in TRANSCRIPTION_MODEL_KEYS:
             _append_model(models, source.get(key))
-        nested = source.get("transcription") if isinstance(source.get("transcription"), dict) else {}
+        raw_nested = source.get("transcription")
+        nested = raw_nested if isinstance(raw_nested, dict) else {}
         for key in ("model", "model_id", "profile_id"):
             _append_model(models, nested.get(key))
     for env_key in TRANSCRIPTION_ENV_KEYS:

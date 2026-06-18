@@ -5,6 +5,7 @@ import time
 import uuid
 from typing import Any
 
+from domain.ai_client.audio_capability import metadata_supports_audio_input
 from domain.ai_client.model_search import get_model_capabilities
 from domain.chat.store import ChatStore
 from domain.input.envelope import RumiInputEnvelope
@@ -68,6 +69,7 @@ class AmbientTriggerRouter:
         state["allowed_actions"] = sorted(ALLOWED_ACTIONS)
         state["input_aliases"] = dict(ACTION_ALIASES)
         state["pending_approval"] = self._latest_pending_summary()
+        state["local_transcription"] = _local_transcription_status()
         return state
 
     def start_monitor(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -637,6 +639,8 @@ class AmbientTriggerRouter:
                 payload=event.payload,
                 params=params,
                 routing=routing,
+                target_model_ref=model_ref,
+                target_supports_audio=supports_audio,
             )
             transcription = _transcription_result_summary(result)
             if result.get("status") == "ok" and str(result.get("text") or "").strip():
@@ -812,13 +816,20 @@ def _model_supports_audio(model_ref: str) -> bool:
         return False
     if str(capabilities.get("provider_id") or "").strip() == "stub":
         return False
-    if capabilities.get("supports_audio") is True:
-        return True
-    if capabilities.get("supports_audio_input") is True:
-        return True
-    model_capabilities = capabilities.get("model_capabilities") if isinstance(capabilities.get("model_capabilities"), dict) else {}
-    flags = model_capabilities.get("capabilities") if isinstance(model_capabilities.get("capabilities"), dict) else {}
-    return bool(flags.get("audio_input") or flags.get("audio"))
+    return metadata_supports_audio_input(capabilities)
+
+
+def _local_transcription_status() -> dict[str, Any]:
+    try:
+        from .local_transcription import local_whisper_status
+
+        return local_whisper_status()
+    except Exception:
+        return {
+            "status": "local_whisper_not_configured",
+            "configured": False,
+            "reason": "ローカルWhisperの状態を確認できませんでした。",
+        }
 
 
 def _audio_transcription_summary(attachments: list[dict[str, Any]]) -> dict[str, Any]:
