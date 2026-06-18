@@ -84,7 +84,9 @@ class TemplateValidationResult:
 
     @property
     def ok(self) -> bool:
-        return self.template is not None and not any(diagnostic.is_error for diagnostic in self.diagnostics)
+        return self.template is not None and not any(
+            diagnostic.is_error for diagnostic in self.diagnostics
+        )
 
 
 def parse_template(
@@ -109,9 +111,12 @@ def parse_template(
     return TemplateValidationResult(template, validate_template(template, raw=raw))
 
 
-def validate_template(template: RumiTemplate, *, raw: dict[str, Any] | None = None) -> list[TemplateDiagnostic]:
+def validate_template(
+    template: RumiTemplate, *, raw: dict[str, Any] | None = None
+) -> list[TemplateDiagnostic]:
     diagnostics: list[TemplateDiagnostic] = []
     diagnostics.extend(_validate_required(template, raw=raw))
+    diagnostics.extend(_validate_canonical_identity(template, raw=raw))
     diagnostics.extend(_validate_enums(template))
     diagnostics.extend(_validate_pieces(template, raw=raw))
     diagnostics.extend(_validate_references(template))
@@ -123,7 +128,9 @@ def has_errors(diagnostics: list[TemplateDiagnostic]) -> bool:
     return any(diagnostic.is_error for diagnostic in diagnostics)
 
 
-def _validate_required(template: RumiTemplate, *, raw: dict[str, Any] | None) -> list[TemplateDiagnostic]:
+def _validate_required(
+    template: RumiTemplate, *, raw: dict[str, Any] | None
+) -> list[TemplateDiagnostic]:
     diagnostics: list[TemplateDiagnostic] = []
     required = {
         "id": template.id,
@@ -167,6 +174,38 @@ def _validate_required(template: RumiTemplate, *, raw: dict[str, Any] | None) ->
     return diagnostics
 
 
+def _validate_canonical_identity(
+    template: RumiTemplate, *, raw: dict[str, Any] | None
+) -> list[TemplateDiagnostic]:
+    template_id = str(template.id or "")
+    if template_id != template_id.strip():
+        return [
+            TemplateDiagnostic(
+                code="template.invalid_id",
+                message="template id must not include leading or trailing whitespace",
+                template_id=template_id.strip() or None,
+                path="/id",
+                source_path=str(template.source_path) if template.source_path else None,
+            )
+        ]
+
+    declared_id = template.metadata.get("declared_id")
+    raw_id = raw.get("id") if raw is not None and "id" in raw else declared_id
+    if not isinstance(raw_id, str):
+        return []
+    if raw_id == raw_id.strip():
+        return []
+    return [
+        TemplateDiagnostic(
+            code="template.invalid_id",
+            message="template id must not include leading or trailing whitespace",
+            template_id=template.id or None,
+            path="/id",
+            source_path=str(template.source_path) if template.source_path else None,
+        )
+    ]
+
+
 def _validate_references(template: RumiTemplate) -> list[TemplateDiagnostic]:
     diagnostics: list[TemplateDiagnostic] = []
     trust_level = _value(template.trust_level)
@@ -194,16 +233,23 @@ def _validate_references(template: RumiTemplate) -> list[TemplateDiagnostic]:
             for input_id in _payload_ids(_piece_payload(piece, "input"), piece, "input_id"):
                 composer_input_ids.add(input_id)
         elif kind == TemplatePieceKind.CONTEXT_POLICY.value:
-            for policy_id in _payload_ids(_piece_payload(piece, "policy"), piece, "policy_id", "mode"):
+            for policy_id in _payload_ids(
+                _piece_payload(piece, "policy"), piece, "policy_id", "mode"
+            ):
                 context_policy_ids.add(policy_id)
         elif kind == TemplatePieceKind.TOOL_POLICY.value:
-            for policy_id in _payload_ids(_tool_policy_payload(piece), piece, "policy_id", "tool_policy_id"):
+            for policy_id in _payload_ids(
+                _tool_policy_payload(piece), piece, "policy_id", "tool_policy_id"
+            ):
                 tool_policy_ids.add(policy_id)
 
     for index, piece in enumerate(template.pieces):
         kind = _value(piece.kind)
         if trust_level != TemplateTrustLevel.BUILTIN.value:
-            for field_name, value in (("entrypoint", piece.entrypoint), ("handler_ref", piece.data.get("handler_ref"))):
+            for field_name, value in (
+                ("entrypoint", piece.entrypoint),
+                ("handler_ref", piece.data.get("handler_ref")),
+            ):
                 if not str(value or "").strip():
                     continue
                 diagnostics.append(
@@ -248,7 +294,9 @@ def _validate_references(template: RumiTemplate) -> list[TemplateDiagnostic]:
             )
 
         if kind == TemplatePieceKind.SHELL_RENDERER.value:
-            diagnostics.extend(_validate_shell_renderer(template, piece, index, trust_level=trust_level))
+            diagnostics.extend(
+                _validate_shell_renderer(template, piece, index, trust_level=trust_level)
+            )
 
         if kind == TemplatePieceKind.SHELL_REGION.value:
             diagnostics.extend(
@@ -290,7 +338,9 @@ def _validate_references(template: RumiTemplate) -> list[TemplateDiagnostic]:
             _record_unique_id(
                 diagnostics,
                 action_ids,
-                str(piece.data.get("action_id") or piece.data.get("command_id") or piece.id or "").strip(),
+                str(
+                    piece.data.get("action_id") or piece.data.get("command_id") or piece.id or ""
+                ).strip(),
                 template=template,
                 piece_id=piece.id,
                 path=f"/pieces/{index}/action_id",
@@ -302,7 +352,9 @@ def _validate_references(template: RumiTemplate) -> list[TemplateDiagnostic]:
             _record_unique_id(
                 diagnostics,
                 data_source_ids,
-                str(piece.data.get("data_source") or piece.data.get("source") or piece.id or "").strip(),
+                str(
+                    piece.data.get("data_source") or piece.data.get("source") or piece.id or ""
+                ).strip(),
                 template=template,
                 piece_id=piece.id,
                 path=f"/pieces/{index}/data_source",
@@ -376,10 +428,14 @@ def _validate_enums(template: RumiTemplate) -> list[TemplateDiagnostic]:
     return diagnostics
 
 
-def _validate_pieces(template: RumiTemplate, *, raw: dict[str, Any] | None) -> list[TemplateDiagnostic]:
+def _validate_pieces(
+    template: RumiTemplate, *, raw: dict[str, Any] | None
+) -> list[TemplateDiagnostic]:
     diagnostics: list[TemplateDiagnostic] = []
     seen: set[str] = set()
-    raw_pieces = raw.get("pieces") if raw is not None and isinstance(raw.get("pieces"), list) else []
+    raw_pieces = (
+        raw.get("pieces") if raw is not None and isinstance(raw.get("pieces"), list) else []
+    )
 
     for index, piece in enumerate(template.pieces):
         if not piece.id:
@@ -432,7 +488,9 @@ def _validate_pieces(template: RumiTemplate, *, raw: dict[str, Any] | None) -> l
     return diagnostics
 
 
-def _invalid_enum(template: RumiTemplate, field_name: str, value: object, enum_type: type[Enum]) -> TemplateDiagnostic:
+def _invalid_enum(
+    template: RumiTemplate, field_name: str, value: object, enum_type: type[Enum]
+) -> TemplateDiagnostic:
     allowed = ", ".join(item.value for item in enum_type)
     return TemplateDiagnostic(
         code=f"template.invalid_{field_name}",
@@ -492,7 +550,10 @@ def _validate_composer_command(
                 nested_key="command",
             )
         )
-    if execution_type in {"pack_block", "rumi_function"} and not str(execution.get("qualified_name") or "").strip():
+    if (
+        execution_type in {"pack_block", "rumi_function"}
+        and not str(execution.get("qualified_name") or "").strip()
+    ):
         diagnostics.append(
             _piece_diagnostic(
                 template,
@@ -617,7 +678,9 @@ def _validate_shell_region(
     shell_renderer_ids: set[str],
 ) -> list[TemplateDiagnostic]:
     data = _piece_payload(piece, "region")
-    renderer_id = str(data.get("renderer") or data.get("renderer_id") or data.get("shell_renderer_id") or "").strip()
+    renderer_id = str(
+        data.get("renderer") or data.get("renderer_id") or data.get("shell_renderer_id") or ""
+    ).strip()
     if not renderer_id or renderer_id in shell_renderer_ids:
         return []
     return [
@@ -917,13 +980,15 @@ def _field_renderer_types(data: dict[str, Any]) -> set[str]:
 
 def _is_action_piece(kind: str, data: dict[str, Any]) -> bool:
     return str(data.get("role") or "").strip() == "action" or (
-        kind == TemplatePieceKind.FUNCTION.value and any(key in data for key in ("action", "action_id", "command_id"))
+        kind == TemplatePieceKind.FUNCTION.value
+        and any(key in data for key in ("action", "action_id", "command_id"))
     )
 
 
 def _is_data_source_piece(kind: str, data: dict[str, Any]) -> bool:
     return str(data.get("role") or "").strip() == "data_source" or (
-        kind == TemplatePieceKind.FUNCTION.value and any(key in data for key in ("data_source", "source", "query"))
+        kind == TemplatePieceKind.FUNCTION.value
+        and any(key in data for key in ("data_source", "source", "query"))
     )
 
 

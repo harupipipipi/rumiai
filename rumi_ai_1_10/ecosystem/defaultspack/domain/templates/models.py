@@ -155,21 +155,36 @@ class RumiTemplate:
         source_path: str | Path | None = None,
         trust_level: TemplateTrustLevel | str | None = None,
     ) -> "RumiTemplate":
-        explicit_trust = trust_level if trust_level is not None else raw.get("trust_level", TemplateTrustLevel.LOCAL)
-        metadata = dict(raw.get("metadata", {})) if isinstance(raw.get("metadata", {}), dict) else {}
+        explicit_trust = (
+            trust_level
+            if trust_level is not None
+            else raw.get("trust_level", TemplateTrustLevel.LOCAL)
+        )
+        metadata = (
+            dict(raw.get("metadata", {})) if isinstance(raw.get("metadata", {}), dict) else {}
+        )
+        raw_id = str(raw.get("id", ""))
+        if raw_id != raw_id.strip():
+            metadata["declared_id"] = raw_id
         if trust_level is not None and "trust_level" in raw:
             metadata["declared_trust_level"] = str(raw.get("trust_level"))
         return cls(
-            id=str(raw.get("id", "")),
+            id=raw_id.strip(),
             kind=_enum_or_raw(TemplateKind, raw.get("kind", "")),
             version=str(raw.get("version", "")),
             status=_enum_or_raw(TemplateStatus, raw.get("status", "")),
-            pieces=[TemplatePiece.from_dict(piece) for piece in raw.get("pieces", []) if isinstance(piece, dict)],
+            pieces=[
+                TemplatePiece.from_dict(piece)
+                for piece in raw.get("pieces", [])
+                if isinstance(piece, dict)
+            ],
             trust_level=_enum_or_raw(TemplateTrustLevel, explicit_trust),
             extends=_parse_extends(raw.get("extends")),
             dependencies=_as_string_list(raw.get("dependencies")),
             capabilities=TemplateCapabilitySpec.from_dict(raw.get("capabilities")),
-            patches=list(raw.get("patches", [])) if isinstance(raw.get("patches", []), list) else [],
+            patches=list(raw.get("patches", []))
+            if isinstance(raw.get("patches", []), list)
+            else [],
             metadata=metadata,
             source_path=Path(source_path) if source_path is not None else None,
         )
@@ -188,7 +203,9 @@ class RumiTemplate:
             "metadata": dict(self.metadata),
         }
         if self.extends is not None:
-            result["extends"] = list(self.extends) if isinstance(self.extends, list) else self.extends
+            result["extends"] = (
+                list(self.extends) if isinstance(self.extends, list) else self.extends
+            )
         return result
 
 
@@ -207,7 +224,9 @@ class ResolvedTemplate:
 
     @property
     def ok(self) -> bool:
-        return self.template is not None and not any(diagnostic.is_error for diagnostic in self.diagnostics)
+        return self.template is not None and not any(
+            diagnostic.is_error for diagnostic in self.diagnostics
+        )
 
 
 def _as_string_list(value: Any) -> list[str]:

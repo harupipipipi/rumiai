@@ -12,27 +12,43 @@ class TemplateRegistry:
         self._templates: dict[str, RumiTemplate] = {}
         self._diagnostics: dict[str, list[TemplateDiagnostic]] = defaultdict(list)
 
-    def register(self, template: RumiTemplate, *, validate: bool = True) -> list[TemplateDiagnostic]:
+    def register(
+        self, template: RumiTemplate, *, validate: bool = True
+    ) -> list[TemplateDiagnostic]:
         diagnostics: list[TemplateDiagnostic] = []
-        if template.id in self._templates:
-            existing = self._templates[template.id]
+        template_id = str(template.id or "").strip()
+        if template_id != str(template.id or ""):
+            diagnostics.append(
+                TemplateDiagnostic(
+                    code="template.registry.noncanonical_template_id",
+                    message="template id must not include leading or trailing whitespace",
+                    template_id=template_id or None,
+                    source_path=str(template.source_path) if template.source_path else None,
+                    path="/id",
+                )
+            )
+            self._diagnostics[template_id or str(template.id or "")].extend(diagnostics)
+            return diagnostics
+
+        if template_id in self._templates:
+            existing = self._templates[template_id]
             diagnostics.append(
                 TemplateDiagnostic(
                     code="template.registry.duplicate_template",
                     message=(
-                        f"duplicate template id rejected: {template.id}; "
+                        f"duplicate template id rejected: {template_id}; "
                         f"existing source={existing.source_path}, duplicate source={template.source_path}"
                     ),
-                    template_id=template.id,
+                    template_id=template_id,
                     source_path=str(template.source_path) if template.source_path else None,
                 )
             )
-            self._diagnostics[template.id].extend(diagnostics)
+            self._diagnostics[template_id].extend(diagnostics)
             return diagnostics
         if validate:
             diagnostics.extend(validate_template(template))
-        self._templates[template.id] = template
-        self._diagnostics[template.id].extend(diagnostics)
+        self._templates[template_id] = template
+        self._diagnostics[template_id].extend(diagnostics)
         return diagnostics
 
     def list(
@@ -47,7 +63,9 @@ class TemplateRegistry:
             templates = [template for template in templates if _value(template.kind) == kind_value]
         if status is not None:
             status_value = status.value if isinstance(status, TemplateStatus) else str(status)
-            templates = [template for template in templates if _value(template.status) == status_value]
+            templates = [
+                template for template in templates if _value(template.status) == status_value
+            ]
         return sorted(templates, key=lambda template: template.id)
 
     def get(self, template_id: str) -> RumiTemplate | None:

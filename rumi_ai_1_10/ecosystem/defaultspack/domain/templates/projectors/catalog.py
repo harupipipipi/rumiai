@@ -76,7 +76,8 @@ def project_resolved_templates(resolved_templates: list[ResolvedTemplate]) -> di
             continue
 
         template_diagnostics = [_diagnostic_to_dict(item) for item in resolved.diagnostics]
-        if template.id in duplicate_resolved_ids:
+        canonical_template_id = _canonical_template_id(template)
+        if canonical_template_id in duplicate_resolved_ids:
             template_diagnostics.append(_resolved_template_id_collision(template))
         catalog["templates"].append(_template_summary(template, resolved, template_diagnostics))
         catalog["template_diagnostics"].extend(template_diagnostics)
@@ -442,11 +443,15 @@ def _duplicate_resolved_template_ids(resolved_templates: list[ResolvedTemplate])
         template = resolved.template
         if template is None:
             continue
-        template_id = str(template.id or "").strip()
+        template_id = _canonical_template_id(template)
         if not template_id:
             continue
         counts[template_id] = counts.get(template_id, 0) + 1
     return {template_id for template_id, count in counts.items() if count > 1}
+
+
+def _canonical_template_id(template: RumiTemplate) -> str:
+    return str(template.id or "").strip()
 
 
 def _resolved_template_id_collision(template: RumiTemplate) -> dict[str, Any]:

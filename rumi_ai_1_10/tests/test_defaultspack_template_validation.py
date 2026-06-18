@@ -93,7 +93,11 @@ def test_parse_template_accepts_ai_input_and_tool_policy_piece_kinds():
             {
                 "id": "composer_input",
                 "kind": "composer_input",
-                "input": {"id": "default_composer", "region_id": "composer", "renderer": "composer"},
+                "input": {
+                    "id": "default_composer",
+                    "region_id": "composer",
+                    "renderer": "composer",
+                },
             },
             {
                 "id": "context_policy",
@@ -155,6 +159,23 @@ def test_parse_template_reports_required_and_enum_errors():
     assert "template.piece.invalid_kind" in codes
 
 
+def test_parse_template_rejects_noncanonical_template_id():
+    result = parse_template(
+        {
+            "id": " bad.template ",
+            "kind": "pack",
+            "version": "1.0.0",
+            "status": "active",
+            "pieces": [{"id": "piece", "kind": "function"}],
+        }
+    )
+
+    assert result.template is not None
+    assert result.template.id == "bad.template"
+    assert any(diagnostic.code == "template.invalid_id" for diagnostic in result.diagnostics)
+    assert not result.ok
+
+
 def test_duplicate_piece_ids_are_diagnostic_warnings():
     result = parse_template(
         {
@@ -169,7 +190,11 @@ def test_duplicate_piece_ids_are_diagnostic_warnings():
         }
     )
 
-    duplicate = [diagnostic for diagnostic in result.diagnostics if diagnostic.code == "template.piece.duplicate_id"]
+    duplicate = [
+        diagnostic
+        for diagnostic in result.diagnostics
+        if diagnostic.code == "template.piece.duplicate_id"
+    ]
     assert duplicate
     assert duplicate[0].severity == "warning"
     assert result.ok
@@ -186,7 +211,11 @@ def test_reference_validation_reports_missing_renderers_permissions_and_route_me
             "pieces": [
                 {"id": "field", "kind": "settings_field", "type": "unknown_field_type"},
                 {"id": "renderer", "kind": "field_renderer", "field_types": []},
-                {"id": "route_contract", "kind": "test_contract", "route_metadata": {"method": "GET"}},
+                {
+                    "id": "route_contract",
+                    "kind": "test_contract",
+                    "route_metadata": {"method": "GET"},
+                },
             ],
         }
     )
@@ -237,7 +266,11 @@ def test_reference_validation_reports_composer_shell_and_context_errors():
             "trust_level": "user",
             "pieces": [
                 {"id": "bad_command", "kind": "composer_command"},
-                {"id": "bad_pack_block", "kind": "composer_command", "execution": {"type": "pack_block"}},
+                {
+                    "id": "bad_pack_block",
+                    "kind": "composer_command",
+                    "execution": {"type": "pack_block"},
+                },
                 {"id": "bad_input", "kind": "composer_input"},
                 {
                     "id": "bad_renderer",
@@ -337,10 +370,30 @@ def test_reference_validation_reports_duplicate_action_and_data_source_ids():
             "version": "1.0.0",
             "status": "active",
             "pieces": [
-                {"id": "first_action", "kind": "function", "role": "action", "action_id": "same_action"},
-                {"id": "second_action", "kind": "function", "role": "action", "action_id": "same_action"},
-                {"id": "first_source", "kind": "function", "role": "data_source", "data_source": "same_source"},
-                {"id": "second_source", "kind": "function", "role": "data_source", "data_source": "same_source"},
+                {
+                    "id": "first_action",
+                    "kind": "function",
+                    "role": "action",
+                    "action_id": "same_action",
+                },
+                {
+                    "id": "second_action",
+                    "kind": "function",
+                    "role": "action",
+                    "action_id": "same_action",
+                },
+                {
+                    "id": "first_source",
+                    "kind": "function",
+                    "role": "data_source",
+                    "data_source": "same_source",
+                },
+                {
+                    "id": "second_source",
+                    "kind": "function",
+                    "role": "data_source",
+                    "data_source": "same_source",
+                },
             ],
         }
     )

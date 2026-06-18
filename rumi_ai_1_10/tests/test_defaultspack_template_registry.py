@@ -10,6 +10,7 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.templates import (  # noqa: E402
+    RumiTemplate,
     TemplateRegistry,
     TemplateRoot,
     TemplateTrustLevel,
@@ -75,7 +76,10 @@ def test_discovery_reads_template_json_and_keeps_json_parse_errors_as_diagnostic
     result = discover_templates([tmp_path])
 
     assert [template.id for template in result.templates] == ["discovered.template"]
-    assert any(diagnostic.code == "template.discovery.json_parse_error" for diagnostic in result.diagnostics)
+    assert any(
+        diagnostic.code == "template.discovery.json_parse_error"
+        for diagnostic in result.diagnostics
+    )
     assert load_template_file(bad).templates == []
 
 
@@ -101,7 +105,9 @@ def test_user_template_cannot_override_builtin_with_same_id(tmp_path):
         "status": "active",
         "pieces": [{"id": "fn", "kind": "function"}],
     }
-    builtin.write_text(json.dumps({**template, "metadata": {"source": "builtin"}}), encoding="utf-8")
+    builtin.write_text(
+        json.dumps({**template, "metadata": {"source": "builtin"}}), encoding="utf-8"
+    )
     user.write_text(json.dumps({**template, "metadata": {"source": "user"}}), encoding="utf-8")
 
     registry, diagnostics = build_template_registry(defaultspack_root=str(tmp_path))
@@ -117,3 +123,58 @@ def test_user_template_cannot_override_builtin_with_same_id(tmp_path):
     )
     assert duplicate.severity == "error"
     assert duplicate.source_path == str(user)
+
+
+def test_user_template_cannot_override_builtin_with_whitespace_variant_id(tmp_path):
+    builtin = tmp_path / "templates" / "shared" / "template.json"
+    user = tmp_path / "user_data" / "shared" / "templates" / "shared" / "template.json"
+    builtin.parent.mkdir(parents=True)
+    user.parent.mkdir(parents=True)
+    template = {
+        "id": "shared.template",
+        "kind": "pack",
+        "version": "1.0.0",
+        "status": "active",
+        "pieces": [{"id": "fn", "kind": "function"}],
+    }
+    builtin.write_text(
+        json.dumps({**template, "metadata": {"source": "builtin"}}), encoding="utf-8"
+    )
+    user.write_text(
+        json.dumps({**template, "id": " shared.template ", "metadata": {"source": "user"}}),
+        encoding="utf-8",
+    )
+
+    registry, diagnostics = build_template_registry(defaultspack_root=str(tmp_path))
+
+    registered = registry.get("shared.template")
+    assert registered is not None
+    assert registered.trust_level == TemplateTrustLevel.BUILTIN
+    assert registered.metadata["source"] == "builtin"
+    assert registry.get(" shared.template ") is None
+    assert any(diagnostic.code == "template.invalid_id" for diagnostic in diagnostics)
+    duplicate = next(
+        diagnostic
+        for diagnostic in diagnostics
+        if diagnostic.code == "template.registry.duplicate_template"
+    )
+    assert duplicate.severity == "error"
+    assert duplicate.source_path == str(user)
+
+
+def test_registry_rejects_direct_noncanonical_template_id():
+    registry = TemplateRegistry()
+    diagnostics = registry.register(
+        RumiTemplate(
+            id=" direct.template ",
+            kind="pack",
+            version="1.0.0",
+            status="active",
+        )
+    )
+
+    assert registry.get("direct.template") is None
+    assert any(
+        diagnostic.code == "template.registry.noncanonical_template_id"
+        for diagnostic in diagnostics
+    )

@@ -292,7 +292,7 @@ def test_only_active_templates_project_runtime_buckets_while_inactive_summaries_
             trust_level="builtin",
         )
         assert parsed.template is not None
-        resolved.append(ResolvedTemplate(template=parsed.template))
+        resolved.append(ResolvedTemplate(template=parsed.template, diagnostics=parsed.diagnostics))
 
     catalog = project_resolved_templates(resolved)
 
@@ -365,10 +365,13 @@ def test_projector_overwrites_piece_level_trust_spoofing():
 
 def test_resolved_template_id_collision_is_error_and_not_projected():
     resolved = []
-    for command_id in ("one", "two"):
+    for command_id, template_id in (
+        ("one", "template.duplicate.resolved"),
+        ("two", " template.duplicate.resolved "),
+    ):
         parsed = parse_template(
             {
-                "id": "template.duplicate.resolved",
+                "id": template_id,
                 "kind": "pack",
                 "version": "1.0.0",
                 "status": "active",
@@ -386,12 +389,16 @@ def test_resolved_template_id_collision_is_error_and_not_projected():
             trust_level="builtin",
         )
         assert parsed.template is not None
-        resolved.append(ResolvedTemplate(template=parsed.template))
+        resolved.append(ResolvedTemplate(template=parsed.template, diagnostics=parsed.diagnostics))
 
     catalog = project_resolved_templates(resolved)
 
     assert any(
         diagnostic["code"] == "template.registry.resolved_duplicate_template"
+        for diagnostic in catalog["template_diagnostics"]
+    )
+    assert any(
+        diagnostic["code"] == "template.invalid_id"
         for diagnostic in catalog["template_diagnostics"]
     )
     assert catalog["commands"] == []
