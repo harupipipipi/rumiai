@@ -1758,7 +1758,7 @@ legacy_routes:
   remove_after: v2.4
 - method: GET
   pattern: /api/prompts
-  legacy_block_module: blocks.prompt.editor
+  legacy_block_module: blocks.prompt.editor_load
   replacement_function_id: prompt_editor_load
   owner: prompt
   reason: tracked compatibility fallback during HTTP function migration
@@ -1793,14 +1793,14 @@ legacy_routes:
   remove_after: v2.4
 - method: POST
   pattern: /api/prompts/preview-toggle
-  legacy_block_module: blocks.prompt.toggle
+  legacy_block_module: blocks.prompt.preview_toggle
   replacement_function_id: prompt_preview_toggle
   owner: prompt
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
   pattern: /api/prompts/editor
-  legacy_block_module: blocks.prompt.editor
+  legacy_block_module: blocks.prompt.editor_load
   replacement_function_id: prompt_editor_load
   owner: prompt
   reason: tracked compatibility fallback during HTTP function migration

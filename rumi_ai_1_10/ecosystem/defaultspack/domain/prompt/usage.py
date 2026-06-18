@@ -82,7 +82,8 @@ def toggle_prompt_edge(input_data: dict[str, Any] | None = None, *, preview: boo
         raise ValueError("edge_id is required")
     enabled = bool(data.get("enabled", True))
     profile = _load_profile(profile_id)
-    current = build_ai_input_graph_response(profile, include_text=False, request_context=_request_context(data))
+    request_context = _request_context(data)
+    current = build_ai_input_graph_response(profile, include_text=False, request_context=request_context)
     edge = _find_edge(current.get("graph"), edge_id)
     if edge is None:
         raise ValueError(f"edge not found: {edge_id}")
@@ -96,10 +97,14 @@ def toggle_prompt_edge(input_data: dict[str, Any] | None = None, *, preview: boo
     response = build_ai_input_graph_response(
         patched_profile,
         include_text=bool(data.get("include_text", False)),
-        request_context=_request_context(data),
+        request_context=request_context,
     )
     if not preview:
-        ProfileWorkspaceManager().save_profile_yaml(profile_id, patched_profile)
+        raw_profile = _load_raw_profile(profile_id)
+        ProfileWorkspaceManager().save_profile_yaml(
+            profile_id,
+            _profile_with_edge_state(raw_profile, edge_id=edge_id, enabled=enabled),
+        )
     return {
         "profile_id": profile_id,
         "edge_id": edge_id,
@@ -353,6 +358,14 @@ def _resolve_profile_id(value: Any = None) -> str:
 
 
 def _load_profile(profile_id: str) -> dict[str, Any]:
+    profile = _load_raw_profile(profile_id)
+    try:
+        return apply_profile_graph_selection(profile)
+    except Exception:
+        return profile
+
+
+def _load_raw_profile(profile_id: str) -> dict[str, Any]:
     manager = ProfileWorkspaceManager()
     profile = manager.load_profile_yaml(profile_id)
     if not isinstance(profile, dict) or not profile:
@@ -367,10 +380,7 @@ def _load_profile(profile_id: str) -> dict[str, Any]:
         }
     profile.setdefault("profile_id", profile_id)
     profile.setdefault("base_pack", "defaultspack")
-    try:
-        return apply_profile_graph_selection(profile)
-    except Exception:
-        return profile
+    return profile
 
 
 def _request_context(data: dict[str, Any]) -> dict[str, Any]:
@@ -385,8 +395,9 @@ def _request_context(data: dict[str, Any]) -> dict[str, Any]:
 def _profile_with_edge_state(profile: dict[str, Any], *, edge_id: str, enabled: bool) -> dict[str, Any]:
     patched = copy.deepcopy(profile)
     metadata = patched.get("metadata") if isinstance(patched.get("metadata"), dict) else {}
-    ai_input = normalize_ai_input_config(metadata.get("ai_input"))
-    disabled_edges = list(ai_input.get("disabled_edges") or [])
+    raw_ai_input = metadata.get("ai_input") if isinstance(metadata.get("ai_input"), dict) else {}
+    ai_input = copy.deepcopy(raw_ai_input)
+    disabled_edges = list(normalize_ai_input_config(raw_ai_input).get("disabled_edges") or [])
     if enabled:
         disabled_edges = [item for item in disabled_edges if item != edge_id]
     elif edge_id not in disabled_edges:

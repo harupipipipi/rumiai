@@ -434,7 +434,7 @@ def flow_http_output_is_compatible(flow_id: str, output: Any, *, fallback_block_
 
 
 _PROMPT_HTTP_ROUTE_SPECS = [
-    HttpRouteSpec("GET", "/api/prompts", block_module="blocks.prompt.editor"),
+    HttpRouteSpec("GET", "/api/prompts", block_module="blocks.prompt.editor_load"),
     HttpRouteSpec("GET", "/api/prompts/active", block_module="blocks.prompt.active"),
     HttpRouteSpec("GET", "/api/prompts/traces", block_module="blocks.prompt.trace"),
     HttpRouteSpec(
@@ -447,10 +447,9 @@ _PROMPT_HTTP_ROUTE_SPECS = [
     HttpRouteSpec(
         "POST",
         "/api/prompts/preview-toggle",
-        block_module="blocks.prompt.toggle",
-        defaults={"_preview": True},
+        block_module="blocks.prompt.preview_toggle",
     ),
-    HttpRouteSpec("GET", "/api/prompts/editor", block_module="blocks.prompt.editor"),
+    HttpRouteSpec("GET", "/api/prompts/editor", block_module="blocks.prompt.editor_load"),
     HttpRouteSpec(
         "POST",
         "/api/prompts/editor/save",

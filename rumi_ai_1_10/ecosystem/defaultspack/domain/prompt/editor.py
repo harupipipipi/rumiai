@@ -48,13 +48,19 @@ def save_prompt(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
     profile_id = _resolve_profile_id(data.get("profile_id"))
     prompt_id = _clean_prompt_id(data.get("prompt_id") or data.get("name"))
     body = str(data.get("body") if data.get("body") is not None else data.get("content") or "")
-    description = str(data.get("description") or "")
-    variables = data.get("variables") if isinstance(data.get("variables"), list) else []
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     force_override = bool(data.get("create_override") or data.get("override"))
     manager = get_manager()
     existing = manager.get_prompt_by_name(prompt_id) or manager.get_prompt(prompt_id)
     read_only = bool(existing and existing.get("read_only"))
+    existing_description = str((existing or {}).get("description") or "")
+    existing_variables = (
+        list((existing or {}).get("variables") or [])
+        if isinstance((existing or {}).get("variables"), list)
+        else []
+    )
+    description = str(data.get("description") or "") if "description" in data else existing_description
+    variables = data.get("variables") if "variables" in data and isinstance(data.get("variables"), list) else existing_variables
 
     if force_override or read_only or existing is None:
         return create_profile_override(
@@ -62,8 +68,8 @@ def save_prompt(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
                 "profile_id": profile_id,
                 "prompt_id": prompt_id,
                 "body": body,
-                "description": description or (existing or {}).get("description", ""),
-                "variables": variables or (existing or {}).get("variables", []),
+                "description": description,
+                "variables": variables,
                 "metadata": metadata,
                 "reason": data.get("reason") or "manual_save",
             }
@@ -104,7 +110,8 @@ def create_profile_override(input_data: dict[str, Any] | None = None) -> dict[st
         body = str((existing or {}).get("body") or (existing or {}).get("content") or "")
     body = str(body or "")
     path = _profile_override_path(profile_id, prompt_id)
-    previous_body = path.read_text(encoding="utf-8") if path.is_file() else ""
+    previous_exists = path.is_file()
+    previous_body = path.read_text(encoding="utf-8") if previous_exists else ""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
     version = _record_version(
@@ -115,11 +122,12 @@ def create_profile_override(input_data: dict[str, Any] | None = None) -> dict[st
         next_body=body,
         reason=str(data.get("reason") or "manual_override"),
         metadata={
+            **(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}),
             "source_type": "profile_override",
             "path": str(path),
+            "previous_exists": previous_exists,
             "description": data.get("description") or "",
             "variables": data.get("variables") if isinstance(data.get("variables"), list) else [],
-            **(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}),
         },
     )
     return {
@@ -176,12 +184,39 @@ def rollback_prompt(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
     if version is None:
         raise ValueError(f"Version not found: {version_id}")
     scope = str(version.get("scope") or "profile_override")
-    body = str(version.get("previous_body") if data.get("use_previous", True) else version.get("next_body") or "")
+    use_previous = bool(data.get("use_previous", True))
+    body = str(version.get("previous_body") if use_previous else version.get("next_body") or "")
     if scope == "user_prompt":
         prompt = get_manager().update_prompt(prompt_id, {"body": body, "content": body})
         return {"action": "rolled_back", "profile_id": profile_id, "prompt_id": prompt_id, "scope": scope, "prompt": prompt}
     path = _profile_override_path(profile_id, prompt_id)
-    previous = path.read_text(encoding="utf-8") if path.is_file() else ""
+    path_was_file = path.is_file()
+    previous = path.read_text(encoding="utf-8") if path_was_file else ""
+    version_metadata = version.get("metadata") if isinstance(version.get("metadata"), dict) else {}
+    if use_previous and version_metadata.get("previous_exists") is False:
+        if path.is_file():
+            path.unlink()
+        _record_version(
+            profile_id=profile_id,
+            prompt_id=prompt_id,
+            scope="profile_override",
+            previous_body=previous,
+            next_body="",
+            reason=f"rollback:{version_id}",
+            metadata={
+                "rolled_back_from": version_id,
+                "previous_exists": path_was_file,
+                "removed_override": True,
+            },
+        )
+        return {
+            "action": "rolled_back",
+            "profile_id": profile_id,
+            "prompt_id": prompt_id,
+            "scope": scope,
+            "path": str(path),
+            "removed_override": True,
+        }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
     _record_version(

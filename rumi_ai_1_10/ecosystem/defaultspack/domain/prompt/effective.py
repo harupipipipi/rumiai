@@ -15,6 +15,7 @@ from .resolver import PromptResolver
 _VARIABLE_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 _BRACED_PATTERN = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 _VALID_VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
+_SAFE_PROMPT_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 def _read_mapping(path: Path | None) -> dict[str, Any]:
@@ -28,7 +29,23 @@ def _read_mapping(path: Path | None) -> dict[str, Any]:
 
 
 def _clean_id(value: Any) -> str:
-    return str(value or "").strip().rsplit(".", 1)[-1]
+    prompt_id = str(value or "").strip()
+    if not prompt_id or not _SAFE_PROMPT_ID.match(prompt_id):
+        return ""
+    if prompt_id in {".", ".."} or not prompt_id.strip("."):
+        return ""
+    return prompt_id
+
+
+def _prompt_id_aliases(value: Any) -> list[str]:
+    prompt_id = _clean_id(value)
+    if not prompt_id:
+        return []
+    aliases = [prompt_id]
+    suffix = prompt_id.rsplit(".", 1)[-1]
+    if "." in prompt_id and suffix and suffix != prompt_id and _SAFE_PROMPT_ID.match(suffix):
+        aliases.append(suffix)
+    return aliases
 
 
 def _path_from_workspace(workspace: dict[str, Any], key: str) -> Path | None:
@@ -48,10 +65,10 @@ def _prompt_ids(data: dict[str, Any], profile: dict[str, Any]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
     for item in ids:
-        prompt_id = _clean_id(item)
-        if prompt_id and prompt_id not in seen:
-            seen.add(prompt_id)
-            result.append(prompt_id)
+        for prompt_id in _prompt_id_aliases(item):
+            if prompt_id and prompt_id not in seen:
+                seen.add(prompt_id)
+                result.append(prompt_id)
     return result
 
 

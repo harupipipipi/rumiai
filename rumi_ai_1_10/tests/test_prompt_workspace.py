@@ -10,9 +10,11 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-from core_runtime.profile_workspace import ProfileWorkspaceManager  # noqa: E402
+from core_runtime.profile_workspace import ProfileWorkspaceManager, profile_workspace_payload  # noqa: E402
 from core_runtime.ai_input_trace_store import AiInputTraceStore  # noqa: E402
-from domain.prompt.editor import load_prompt_studio, save_prompt, test_prompt_input as run_prompt_studio_test  # noqa: E402
+from domain.function_runtime.dispatcher import run_defaultspack_function  # noqa: E402
+from domain.prompt.effective import resolve_effective_prompt  # noqa: E402
+from domain.prompt.editor import load_prompt_studio, rollback_prompt, save_prompt, test_prompt_input as run_prompt_studio_test  # noqa: E402
 from domain.prompt.usage import (  # noqa: E402
     active_prompt_summary,
     append_runtime_prompt_segment,
@@ -51,6 +53,9 @@ class _ToolRegistryWithCalculator:
 
 
 class _FakePromptManager:
+    def list_prompts(self):
+        return [self.get_prompt_by_name("locked.system")]
+
     def get_prompt_by_name(self, prompt_id: str):
         return {
             "id": prompt_id,
@@ -65,6 +70,36 @@ class _FakePromptManager:
 
     def get_prompt(self, prompt_id: str):
         return self.get_prompt_by_name(prompt_id)
+
+
+class _EditablePromptManager:
+    def __init__(self) -> None:
+        self.updated: dict | None = None
+        self.prompt = {
+            "id": "editable.system",
+            "name": "editable.system",
+            "body": "Original body",
+            "content": "Original body",
+            "description": "Keep this description",
+            "variables": [{"name": "topic", "type": "string", "required": True}],
+            "metadata": {"source": "user_data", "owner": "test"},
+            "read_only": False,
+        }
+
+    def list_prompts(self):
+        return [dict(self.prompt)]
+
+    def get_prompt_by_name(self, prompt_id: str):
+        return dict(self.prompt) if prompt_id == "editable.system" else None
+
+    def get_prompt(self, prompt_id: str):
+        return self.get_prompt_by_name(prompt_id)
+
+    def update_prompt(self, name: str, updates: dict):
+        assert name == "editable.system"
+        self.updated = dict(updates)
+        self.prompt = {**self.prompt, **updates}
+        return dict(self.prompt)
 
 
 def _profile(profile_id: str = "prompt-profile") -> dict:
@@ -142,7 +177,10 @@ def test_active_prompt_summary_explains_tool_schema_boundary(monkeypatch, tmp_pa
 
 
 def test_prompt_toggle_uses_disabled_edges_and_respects_allow_disable(monkeypatch, tmp_path: Path) -> None:
-    manager = _setup_profile(monkeypatch, tmp_path)
+    profile = _profile()
+    profile["metadata"]["selected"]["tools"] = ["calculator"]
+    profile["metadata"]["selected"]["api_routes"] = ["GET /api/test"]
+    manager = _setup_profile(monkeypatch, tmp_path, profile)
     monkeypatch.setattr("core_runtime.ai_input_segments.resolve_effective_prompt", _fake_effective_prompt)
     editable_edge = "edge:prompt:editable.system->model_input:default.system"
     locked_edge = "edge:prompt:locked.system->model_input:default.system"
@@ -152,9 +190,56 @@ def test_prompt_toggle_uses_disabled_edges_and_respects_allow_disable(monkeypatc
 
     assert result["enabled"] is False
     assert editable_edge in saved["metadata"]["ai_input"]["disabled_edges"]
+    assert "system_prompt_id" not in saved
+    assert saved["policy"] == {}
     assert any(segment["edge_id"] == editable_edge and segment["status"] == "disabled" for segment in result["summary"]["segments"])
     with pytest.raises(PermissionError):
         toggle_prompt_edge({"profile_id": "prompt-profile", "edge_id": locked_edge, "enabled": False})
+
+
+def test_low_risk_prompt_editor_load_cannot_be_promoted_to_save(monkeypatch, tmp_path: Path) -> None:
+    manager = _setup_profile(monkeypatch, tmp_path)
+    monkeypatch.setattr("core_runtime.ai_input_segments.resolve_effective_prompt", _fake_effective_prompt)
+    monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: _FakePromptManager())
+
+    result = run_defaultspack_function(
+        "prompt_editor_load",
+        {
+            "profile_id": "prompt-profile",
+            "prompt_id": "locked.system",
+            "action": "save",
+            "body": "This must not be written.",
+        },
+        {},
+    )
+
+    override_path = manager.paths_for_profile("prompt-profile").prompts_dir / "locked.system.system.md"
+    assert result["status"] == "ok"
+    assert result["data"]["selected_prompt"]["prompt_id"] == "locked.system"
+    assert not override_path.exists()
+
+
+def test_low_risk_prompt_preview_toggle_cannot_persist(monkeypatch, tmp_path: Path) -> None:
+    manager = _setup_profile(monkeypatch, tmp_path)
+    monkeypatch.setattr("core_runtime.ai_input_segments.resolve_effective_prompt", _fake_effective_prompt)
+    editable_edge = "edge:prompt:editable.system->model_input:default.system"
+
+    result = run_defaultspack_function(
+        "prompt_preview_toggle",
+        {
+            "profile_id": "prompt-profile",
+            "edge_id": editable_edge,
+            "enabled": False,
+            "preview": False,
+        },
+        {},
+    )
+    saved = manager.load_profile_yaml("prompt-profile")
+
+    assert result["status"] == "ok"
+    assert result["data"]["preview"] is True
+    assert editable_edge in result["data"]["ai_input"]["disabled_edges"]
+    assert saved["metadata"].get("ai_input") is None
 
 
 def test_runtime_skill_prompt_segment_records_trigger_and_safety_boundary() -> None:
@@ -276,7 +361,7 @@ def test_prompt_studio_testbench_matches_skill_and_tool_schema(monkeypatch, tmp_
 
 
 def test_readonly_prompt_save_creates_profile_override(monkeypatch, tmp_path: Path) -> None:
-    _setup_profile(monkeypatch, tmp_path)
+    manager = _setup_profile(monkeypatch, tmp_path)
     monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: _FakePromptManager())
 
     result = save_prompt(
@@ -293,6 +378,61 @@ def test_readonly_prompt_save_creates_profile_override(monkeypatch, tmp_path: Pa
     assert override_path.is_file()
     assert override_path.read_text(encoding="utf-8") == "Profile-owned override text"
     assert "profiles/prompt-profile/prompts/locked.system.system.md" in str(override_path)
+
+    resolved = resolve_effective_prompt(
+        {
+            "profile_id": "prompt-profile",
+            "prompt_id": "locked.system",
+            "workspace": profile_workspace_payload(manager.paths_for_profile("prompt-profile")),
+        }
+    )
+    assert resolved["source_type"] == "profile_override"
+    assert resolved["prompt_id"] == "locked.system"
+    assert resolved["final_content"] == "Profile-owned override text"
+
+
+def test_body_only_user_prompt_save_preserves_description_and_variables(monkeypatch, tmp_path: Path) -> None:
+    _setup_profile(monkeypatch, tmp_path)
+    fake_manager = _EditablePromptManager()
+    monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: fake_manager)
+    monkeypatch.setattr("domain.prompt.editor._record_version", lambda **kwargs: {"version_id": "stub"})
+
+    result = save_prompt(
+        {
+            "profile_id": "prompt-profile",
+            "prompt_id": "editable.system",
+            "body": "Updated body only",
+        }
+    )
+
+    assert result["action"] == "saved"
+    assert fake_manager.updated is not None
+    assert fake_manager.updated["description"] == "Keep this description"
+    assert fake_manager.updated["variables"] == [{"name": "topic", "type": "string", "required": True}]
+
+
+def test_first_override_rollback_removes_override_file(monkeypatch, tmp_path: Path) -> None:
+    _setup_profile(monkeypatch, tmp_path)
+    monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: _FakePromptManager())
+    saved = save_prompt(
+        {
+            "profile_id": "prompt-profile",
+            "prompt_id": "locked.system",
+            "body": "Temporary override",
+        }
+    )
+    override_path = Path(saved["path"])
+
+    result = rollback_prompt(
+        {
+            "profile_id": "prompt-profile",
+            "prompt_id": "locked.system",
+            "version_id": saved["version"]["version_id"],
+        }
+    )
+
+    assert result["removed_override"] is True
+    assert not override_path.exists()
 
 
 def test_prompt_usage_metadata_stores_previews_and_trace_pointer_not_full_text() -> None:
@@ -369,3 +509,5 @@ def test_prompt_route_specs_have_no_control_stub_and_match_fallback_registry() -
     assert canonical == fallback
     assert all("/control" not in pattern for _, pattern, _ in canonical)
     assert ("POST", "/api/prompts/editor", "blocks.prompt.control") not in canonical
+    assert ("GET", "/api/prompts/editor", "blocks.prompt.editor_load") in canonical
+    assert ("POST", "/api/prompts/preview-toggle", "blocks.prompt.preview_toggle") in canonical

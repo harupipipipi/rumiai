@@ -436,7 +436,6 @@ REMOTE_FUNCTIONS: tuple[FunctionSpec, ...] = (
 
 
 _PROMPT_WORKSPACE_DEFAULT_ARGS: dict[str, dict[str, Any]] = {
-    "prompt_preview_toggle": {"preview": True},
     "prompt_editor_save": {"action": "save"},
     "prompt_create_override": {"action": "override"},
     "prompt_versions": {"action": "versions"},
@@ -467,8 +466,8 @@ DATA_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("prompt_trace_list", "List saved prompt usage traces.", ("prompt", "trace"), "low", "blocks.prompt.trace"),
         ("prompt_trace_get", "Get a saved prompt usage trace.", ("prompt", "trace"), "low", "blocks.prompt.trace"),
         ("prompt_toggle", "Enable or disable a prompt edge through AI Input Graph disabled_edges.", ("prompt",), "medium", "blocks.prompt.toggle"),
-        ("prompt_preview_toggle", "Preview enabling or disabling a prompt edge without saving.", ("prompt",), "low", "blocks.prompt.toggle"),
-        ("prompt_editor_load", "Load Prompt Studio data for prompts, source chains, and versions.", ("prompt", "editor"), "low", "blocks.prompt.editor"),
+        ("prompt_preview_toggle", "Preview enabling or disabling a prompt edge without saving.", ("prompt",), "low", "blocks.prompt.preview_toggle"),
+        ("prompt_editor_load", "Load Prompt Studio data for prompts, source chains, and versions.", ("prompt", "editor"), "low", "blocks.prompt.editor_load"),
         ("prompt_editor_save", "Save an editable prompt or create a profile override for a read-only prompt.", ("prompt", "editor"), "medium", "blocks.prompt.editor"),
         ("prompt_create_override", "Create a profile prompt override.", ("prompt", "editor"), "medium", "blocks.prompt.editor"),
         ("prompt_test", "Run a local Prompt Studio test for prompt, skill, and tool-schema activation.", ("prompt", "editor"), "low", "blocks.prompt.test"),

@@ -11,5 +11,5 @@
   "vocab_aliases": ["defaults.prompt.editor_load", "defaultspack.prompt.editor_load", "defaults.prompt.editor.load", "defaultspack.prompt.editor.load"],
   "input_schema": {"type": "object", "additionalProperties": true},
   "output_schema": {"type": "object", "properties": {"status": {"type": "string"}, "data": {}, "error": {"type": "object"}}},
-  "extensions": {"defaultspack": {"block_module": "blocks.prompt.editor", "default_args": {"action": "load"}}}
+  "extensions": {"defaultspack": {"block_module": "blocks.prompt.editor_load", "default_args": {}}}
 }

@@ -24,6 +24,7 @@ Read/inspect:
 - `defaultspack:prompt_trace_list` / `defaults.prompt.trace_list`
 - `defaultspack:prompt_trace_get` / `defaults.prompt.trace_get`
 - `defaultspack:prompt_editor_load` / `defaults.prompt.editor_load`
+- `defaultspack:prompt_preview_toggle` / `defaults.prompt.preview_toggle`
 - `defaultspack:prompt_versions` / `defaults.prompt.versions`
 - `defaultspack:prompt_diff` / `defaults.prompt.diff`
 - `defaultspack:prompt_lint_prompt` / `defaults.prompt.lint_prompt`
@@ -32,7 +33,6 @@ Read/inspect:
 Mutate:
 
 - `defaultspack:prompt_toggle` / `defaults.prompt.toggle`
-- `defaultspack:prompt_preview_toggle` / `defaults.prompt.preview_toggle`
 - `defaultspack:prompt_editor_save` / `defaults.prompt.editor_save`
 - `defaultspack:prompt_create_override` / `defaults.prompt.create_override`
 - `defaultspack:prompt_test` / `defaults.prompt.test`

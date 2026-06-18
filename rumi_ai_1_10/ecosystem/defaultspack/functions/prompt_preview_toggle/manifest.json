@@ -11,5 +11,5 @@
   "vocab_aliases": ["defaults.prompt.preview_toggle", "defaultspack.prompt.preview_toggle", "defaults.prompt.preview.toggle", "defaultspack.prompt.preview.toggle"],
   "input_schema": {"type": "object", "additionalProperties": true},
   "output_schema": {"type": "object", "properties": {"status": {"type": "string"}, "data": {}, "error": {"type": "object"}}},
-  "extensions": {"defaultspack": {"block_module": "blocks.prompt.toggle", "default_args": {"preview": true}}}
+  "extensions": {"defaultspack": {"block_module": "blocks.prompt.preview_toggle", "default_args": {}}}
 }
