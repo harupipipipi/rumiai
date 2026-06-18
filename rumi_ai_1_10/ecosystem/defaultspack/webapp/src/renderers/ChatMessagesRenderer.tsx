@@ -34,6 +34,10 @@ export const AUTHORITY_FOLLOWUP_TEXT = "Internal authority resume.";
 const AUTHORITY_PENDING_TITLE = "承認待ち";
 const AUTHORITY_PENDING_DETAIL = "別ウィンドウで承認してください";
 const markdownPlugins = [remarkGfm];
+const AUTHORITY_APPROVAL_BOILERPLATE_PATTERNS = [
+  /^\s*The model\/API authority is now approved\.\s*Retrying the request(?: to [^.]{0,360})?\.{1,3}\s*/i,
+  /^\s*Thank you for granting the (?:model\/API|model|API) authority request\.\s*I can now use the approved (?:provider|model)[^.]{0,360}\.{1,3}\s*/i,
+];
 const LOG_LIKE_TOKENS = [
   "\\n",
   "\"stdout\"",
@@ -183,17 +187,21 @@ function artifactDialogItemFromImagePreview(image: ImagePreviewRequest | null): 
 
 function MessageBlock({
   block,
+  sanitizeText,
   unknownStrategy,
   onOpenImagePreview,
 }: {
   block: ChatContentBlock;
+  sanitizeText?: (text: string) => string;
   unknownStrategy: string;
   onOpenImagePreview?: (image: ImagePreviewRequest) => void;
 }) {
   const blockType = String(block.type ?? "text");
 
   if (blockType === "text" || blockType === "markdown") {
-    return <MessageMarkdown text={String(block.text ?? "")} />;
+    const text = sanitizeText ? sanitizeText(String(block.text ?? "")) : String(block.text ?? "");
+    if (!text.trim()) return null;
+    return <MessageMarkdown text={text} />;
   }
 
   if (blockType === "code") {
@@ -258,6 +266,25 @@ export function shouldRenderImageBlockInChat(block: ChatContentBlock): boolean {
   );
 }
 
+function stripLeadingMarkdownSeparator(text: string): string {
+  return text.replace(/^(?:[ \t]*\r?\n)*[ \t]*-{3,}[ \t]*(?:\r?\n|$)(?:[ \t]*\r?\n)*/, "");
+}
+
+export function sanitizeAssistantAuthorityBoilerplate(text: string): string {
+  let sanitized = text;
+  for (const pattern of AUTHORITY_APPROVAL_BOILERPLATE_PATTERNS) {
+    const next = sanitized.replace(pattern, "");
+    if (next !== sanitized) {
+      return stripLeadingMarkdownSeparator(next).trimStart();
+    }
+  }
+  return sanitized;
+}
+
+function messageDisplayText(message: ChatMessagesRendererProps["messages"][number], text: string): string {
+  return message.role === "agent" ? sanitizeAssistantAuthorityBoilerplate(text) : text;
+}
+
 function messageVisibleText(message: ChatMessagesRendererProps["messages"][number]): string {
   const blockText = message.content
     .map((block) => {
@@ -268,7 +295,7 @@ function messageVisibleText(message: ChatMessagesRendererProps["messages"][numbe
     })
     .join("")
     .trim();
-  return blockText || String(message.rawText ?? "").trim();
+  return messageDisplayText(message, blockText || String(message.rawText ?? "").trim());
 }
 
 function messageMetadataRecord(message: ChatMessagesRendererProps["messages"][number]): Record<string, unknown> {
@@ -367,7 +394,7 @@ export function messageCopyText(message: ChatMessagesRendererProps["messages"][n
     .filter((text) => text.trim().length > 0)
     .join("\n\n")
     .trim();
-  return blockText || String(message.rawText ?? "").trim();
+  return messageDisplayText(message, blockText || String(message.rawText ?? "").trim());
 }
 
 export function formatMessageTimestamp(value: unknown): string {
@@ -1166,6 +1193,7 @@ export function ChatMessagesRenderer({
               const toolActivity = showActivityInMessages && message.role === "agent"
                 ? toolActivityStateForMessage(message, activityNow)
                 : null;
+              const sanitizeMessageText = message.role === "agent" ? sanitizeAssistantAuthorityBoilerplate : undefined;
               const isToolActivityOpen = toolActivity
                 ? openToolActivityByMessageId[message.id] ?? toolActivity.hasRunningItems
                 : false;
@@ -1241,7 +1269,7 @@ export function ChatMessagesRenderer({
                             )
                           : message.content.length > 0 && (messageVisibleText(message) || message.content.some((block) => String(block.type ?? "text") !== "text"))
                           ? message.content.map((block, index) => (
-                              <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} onOpenImagePreview={setImagePreview} />
+                              <MessageBlock key={`${message.id}-${index}`} block={block} sanitizeText={sanitizeMessageText} unknownStrategy={unknownBlockStrategy} onOpenImagePreview={setImagePreview} />
                             ))
                           : shouldShowEmptyResponseWarning(message, hasToolActivity)
                             ? (
@@ -1250,7 +1278,7 @@ export function ChatMessagesRenderer({
                                   <span>レスポンス本文が空でした。stream が途中で閉じたか、thinking のみで終了した可能性があります。</span>
                                 </div>
                               )
-                            : <MessageMarkdown text={message.rawText} />}
+                            : <MessageMarkdown text={messageDisplayText(message, message.rawText)} />}
                       </div>
 
                       {showWidgets && message.widget && <WidgetCard widget={message.widget} />}

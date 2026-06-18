@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { AUTHORITY_FOLLOWUP_TEXT, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
+import { AUTHORITY_FOLLOWUP_TEXT, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, sanitizeAssistantAuthorityBoilerplate, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -39,6 +39,30 @@ test("message copy text includes visible text and code blocks", () => {
 
 test("message copy text falls back to raw text", () => {
   assert.equal(messageCopyText(message({ rawText: "fallback text" })), "fallback text");
+});
+
+test("assistant authority retry boilerplate is stripped while preserving the answer", () => {
+  const leakedText = "The model/API authority is now approved. Retrying the request to DeepSeek V4 Flash via OpenCode Go with the provided credentials and network context.\n\n---\n\nHello! 😊 How can I help you today? I’m DeepSeek V4 Flash, ready to assist you...";
+  const answer = "Hello! 😊 How can I help you today? I’m DeepSeek V4 Flash, ready to assist you...";
+
+  assert.equal(sanitizeAssistantAuthorityBoilerplate(leakedText), answer);
+  assert.equal(messageCopyText(message({ rawText: leakedText })), answer);
+  assert.equal(messageCopyText(message({ content: [{ type: "markdown", text: leakedText }] })), answer);
+});
+
+test("assistant authority thank-you boilerplate is stripped while preserving the answer", () => {
+  const leakedText = "Thank you for granting the model authority request. I can now use the approved provider...\n\n---\n\nHere is the implementation detail you asked for.";
+  const answer = "Here is the implementation detail you asked for.";
+
+  assert.equal(sanitizeAssistantAuthorityBoilerplate(leakedText), answer);
+  assert.equal(messageCopyText(message({ content: [{ type: "text", text: leakedText }] })), answer);
+});
+
+test("ordinary assistant messages are not sanitized as authority boilerplate", () => {
+  const normalText = "Thank you for granting the docs review enough context.\n\n---\n\nHere is the summary.";
+
+  assert.equal(sanitizeAssistantAuthorityBoilerplate(normalText), normalText);
+  assert.equal(messageCopyText(message({ rawText: normalText })), normalText);
 });
 
 test("formatMessageTimestamp shows the conversation day and time", () => {
