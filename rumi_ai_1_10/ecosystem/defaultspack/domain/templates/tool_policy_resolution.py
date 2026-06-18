@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .projectors import build_template_catalog
+from .catalog_runtime import get_template_catalog_snapshot
 from .tool_policy_merge import (
     blocked_template_tool_policy,
     merge_template_tool_policies,
@@ -238,21 +237,16 @@ def resolve_template_tool_policy(
     )
 
 
-@lru_cache(maxsize=4)
-def _cached_template_catalog(defaultspack_root: str) -> dict[str, Any] | None:
-    try:
-        return build_template_catalog(defaultspack_root=defaultspack_root)
-    except Exception:
-        return None
-
-
 def _load_template_catalog(defaultspack_root: str | Path | None) -> dict[str, Any] | None:
     root = (
         Path(defaultspack_root)
         if defaultspack_root is not None
         else Path(__file__).resolve().parents[2]
     )
-    return _cached_template_catalog(str(root))
+    try:
+        return get_template_catalog_snapshot(defaultspack_root=root).catalog
+    except Exception:
+        return None
 
 
 def _catalog_has_template_policy_surface(catalog: dict[str, Any] | None) -> bool:

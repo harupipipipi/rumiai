@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-import importlib
 from dataclasses import replace
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from domain.templates.catalog_runtime import (
+    get_template_catalog_snapshot,
+    invalidate_template_catalog,
+)
 
 from .manifest_factory import FunctionSpec, manifest_for
 
@@ -21,24 +24,21 @@ def _runtime_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
-@lru_cache(maxsize=4)
 def _template_catalog(defaultspack_root: str | None = None) -> dict[str, Any]:
     try:
-        projectors = importlib.import_module("domain.templates.projectors")
-        build_template_catalog = getattr(projectors, "build_template_catalog", None)
-    except Exception:
-        try:
-            projectors = importlib.import_module("ecosystem.defaultspack.domain.templates.projectors")
-            build_template_catalog = getattr(projectors, "build_template_catalog", None)
-        except Exception:
-            return {}
-    if not callable(build_template_catalog):
-        return {}
-    try:
-        catalog = build_template_catalog(defaultspack_root=defaultspack_root or _pack_root())
+        catalog = get_template_catalog_snapshot(
+            defaultspack_root=defaultspack_root or _pack_root()
+        ).catalog
     except Exception:
         return {}
     return catalog if isinstance(catalog, dict) else {}
+
+
+def _clear_template_catalog_cache() -> None:
+    invalidate_template_catalog()
+
+
+_template_catalog.cache_clear = _clear_template_catalog_cache  # type: ignore[attr-defined]
 
 
 def template_function_specs(defaultspack_root: str | Path | None = None) -> dict[str, FunctionSpec]:
@@ -60,19 +60,23 @@ def template_function_specs(defaultspack_root: str | Path | None = None) -> dict
     return specs
 
 
-def template_function_manifests(defaultspack_root: str | Path | None = None) -> dict[str, dict[str, Any]]:
+def template_function_manifests(
+    defaultspack_root: str | Path | None = None,
+) -> dict[str, dict[str, Any]]:
     manifests: dict[str, dict[str, Any]] = {}
     for function_id, spec in template_function_specs(defaultspack_root).items():
         manifest = manifest_for(spec)
         manifest["entrypoint"] = TEMPLATE_RUNTIME_ENTRYPOINT
-        manifest.setdefault("extensions", {}).setdefault("defaultspack", {})[
-            "template_runtime"
-        ] = True
+        manifest.setdefault("extensions", {}).setdefault("defaultspack", {})["template_runtime"] = (
+            True
+        )
         manifests[function_id] = manifest
     return manifests
 
 
-def template_permission_items(defaultspack_root: str | Path | None = None) -> dict[str, dict[str, Any]]:
+def template_permission_items(
+    defaultspack_root: str | Path | None = None,
+) -> dict[str, dict[str, Any]]:
     root = str(defaultspack_root) if defaultspack_root is not None else None
     catalog = _template_catalog(root)
     permissions: dict[str, dict[str, Any]] = {}
@@ -88,7 +92,9 @@ def template_permission_items(defaultspack_root: str | Path | None = None) -> di
     return permissions
 
 
-def template_backend_service_items(defaultspack_root: str | Path | None = None) -> dict[str, dict[str, Any]]:
+def template_backend_service_items(
+    defaultspack_root: str | Path | None = None,
+) -> dict[str, dict[str, Any]]:
     root = str(defaultspack_root) if defaultspack_root is not None else None
     catalog = _template_catalog(root)
     services: dict[str, dict[str, Any]] = {}
@@ -185,7 +191,11 @@ def _spec_from_template_item(
     if block_module is None:
         return None
     permission_id = _permission_id(item)
-    if permission_id and declared_permission_ids is not None and permission_id not in declared_permission_ids:
+    if (
+        permission_id
+        and declared_permission_ids is not None
+        and permission_id not in declared_permission_ids
+    ):
         return None
     role = str(item.get("role") or "").strip()
     risk = _risk(item, role=role)
