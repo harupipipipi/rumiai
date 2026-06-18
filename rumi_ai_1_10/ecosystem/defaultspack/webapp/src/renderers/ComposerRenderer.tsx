@@ -120,7 +120,7 @@ const COMPOSER_MODEL_CONTROL_MIN_CH = 9;
 const COMPOSER_MODEL_CONTROL_MAX_CH = 18;
 const COMPOSER_MODEL_CONTROL_CHROME_CH = 6;
 const NEW_CONVERSATION_TEXTAREA_MIN_HEIGHT = 22;
-const NEW_CONVERSATION_TEXTAREA_MAX_HEIGHT = 72;
+const NEW_CONVERSATION_TEXTAREA_MAX_HEIGHT = 150;
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 const MODEL_STATUS_POPOVER_WIDTH = 240;
 const MODEL_STATUS_POPOVER_HEIGHT = 176;
@@ -2778,81 +2778,86 @@ export function ComposerRenderer({
           )}
 
           {isNewConversation ? (
-            <div className="grid gap-1.5">
-              <div className="rumi-composer-main-panel grid min-h-[46px] grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-[1.4rem] border border-white/20 bg-[#242423] px-4 py-1">
-                <div className="self-center">
-                  {newConversationInlineLeadingWidgets.map((widget) => (
-                    <ComposerChromeWidget key={widget.id} widget={widget} />
-                  ))}
-                </div>
-                <div className="relative min-w-0 self-center">
-                  <ComposerMentionOverlay
-                    value={input}
-                    mentionLookup={composerMentionLookup}
-                    cursorPosition={textareaSelection.start}
-                    showCaret={textareaFocused && textareaSelection.start === textareaSelection.end}
-                    className="rumi-composer-input-new-overlay text-[16px] font-medium leading-[22px]"
-                  />
-                  <textarea
-                    ref={textareaRef}
-                    autoFocus
-                    rows={1}
-                    value={input}
-                    onChange={(event) => {
-                      resizeNewConversationTextarea(event.currentTarget);
-                      handleInputChange(event.currentTarget.value);
-                    }}
-                    placeholder={
-                      isSteerMode
-                        ? "実行中のAIへステアを入力..."
-                        : mode === "coding"
-                        ? "コーディング指示を入力... (@ でtool/ファイル)"
-                        : placeholder
-                    }
-                    className={`rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[22px] w-full max-h-[72px] select-text resize-none overflow-x-hidden overflow-y-hidden border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[22px] text-transparent outline-none placeholder:text-zinc-500 ${
-                      input ? "caret-transparent" : "caret-zinc-100"
-                    }`}
-                    onFocus={() => {
-                      setTextareaFocused(true);
-                      syncTextareaSelection();
-                    }}
-                    onBlur={() => setTextareaFocused(false)}
-                    onClick={syncTextareaSelection}
-                    onKeyUp={syncTextareaSelection}
-                    onSelect={syncTextareaSelection}
-                    onKeyDownCapture={(event) => {
-                      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
-                        event.stopPropagation();
+            <div className="grid gap-1.5 focus-within:scale-[1.01] transition-transform duration-300">
+              <div className="rumi-composer-main-panel flex flex-col gap-2 rounded-3xl border border-white/10 bg-[#20201f] p-3 shadow-xl focus-within:border-white/30 focus-within:bg-[#242423] focus-within:shadow-2xl transition-all duration-300">
+                <div className="grid min-h-[32px] grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-3">
+                  <div className="self-center flex items-center justify-center">
+                    {newConversationInlineLeadingWidgets.map((widget) => (
+                      <ComposerChromeWidget key={widget.id} widget={widget} />
+                    ))}
+                  </div>
+                  <div className="relative min-w-0 self-center">
+                    <ComposerMentionOverlay
+                      value={input}
+                      mentionLookup={composerMentionLookup}
+                      cursorPosition={textareaSelection.start}
+                      showCaret={textareaFocused && textareaSelection.start === textareaSelection.end}
+                      className="rumi-composer-input-new-overlay text-[16px] font-medium leading-[24px]"
+                    />
+                    <textarea
+                      ref={textareaRef}
+                      autoFocus
+                      rows={1}
+                      value={input}
+                      onChange={(event) => {
+                        resizeNewConversationTextarea(event.currentTarget);
+                        handleInputChange(event.currentTarget.value);
+                      }}
+                      placeholder={
+                        isSteerMode
+                          ? "実行中のAIへステアを入力..."
+                          : mode === "coding"
+                          ? "コーディング指示を入力... (@ でtool/ファイル)"
+                          : placeholder
                       }
-                    }}
-                    onKeyDown={handleKeyDown}
-                  />
-                </div>
-                <div className="flex items-center justify-end gap-2 self-center">
-                  {newConversationInlineActionWidgets.map((widget) => (
-                    <ComposerChromeWidget key={widget.id} widget={widget} />
-                  ))}
-                  {newConversationTopRightWidgets.map((widget) => (
-                    <ComposerChromeWidget key={widget.id} widget={widget} />
-                  ))}
-                  {newConversationSendWidgets.map((widget) => (
-                    <ComposerChromeWidget key={widget.id} widget={widget} />
-                  ))}
-                </div>
-              </div>
-              {newConversationTrailingWidgets.length > 0 && (
-                <div className="rumi-composer-model-dock flex min-w-0 justify-end pr-5 max-[640px]:hidden">
-                  <div className="rumi-composer-dock-rail flex min-w-0 items-center justify-end gap-2">
-                    {newConversationTrailingWidgets.map((widget) => (
-                      <ComposerChromeWidget
-                        key={widget.id}
-                        widget={widget}
-                        onNodeChange={registerChromeWidgetNode}
-                      />
+                      className={`rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[24px] w-full max-h-[150px] select-text resize-none overflow-x-hidden overflow-y-auto border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[24px] text-transparent outline-none placeholder:text-zinc-500/70 transition-all ${
+                        input ? "caret-transparent" : "caret-zinc-100"
+                      }`}
+                      onFocus={() => {
+                        setTextareaFocused(true);
+                        syncTextareaSelection();
+                      }}
+                      onBlur={() => setTextareaFocused(false)}
+                      onClick={syncTextareaSelection}
+                      onKeyUp={syncTextareaSelection}
+                      onSelect={syncTextareaSelection}
+                      onKeyDownCapture={(event) => {
+                        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+                          event.stopPropagation();
+                        }
+                      }}
+                      onKeyDown={handleKeyDown}
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-2 self-center">
+                    {newConversationTopRightWidgets.map((widget) => (
+                      <ComposerChromeWidget key={widget.id} widget={widget} />
+                    ))}
+                    {newConversationSendWidgets.map((widget) => (
+                      <ComposerChromeWidget key={widget.id} widget={widget} />
                     ))}
                   </div>
                 </div>
-              )}
+                
+                <div className="flex items-center justify-between border-t border-white/5 pt-2">
+                  <div className="flex items-center gap-2">
+                    {newConversationInlineActionWidgets.map((widget) => (
+                      <ComposerChromeWidget key={widget.id} widget={widget} />
+                    ))}
+                  </div>
+                  {newConversationTrailingWidgets.length > 0 && (
+                    <div className="rumi-composer-model-dock flex min-w-0 items-center justify-end gap-2 max-[640px]:hidden">
+                      {newConversationTrailingWidgets.map((widget) => (
+                        <ComposerChromeWidget
+                          key={widget.id}
+                          widget={widget}
+                          onNodeChange={registerChromeWidgetNode}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           ) : (
             <textarea

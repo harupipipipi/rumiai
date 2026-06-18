@@ -665,18 +665,15 @@ function RumiActivityLoading({
   const now = useActivityNow(Boolean(startedAt));
   const elapsed = startedAt ? elapsedDurationLabel(startedAt, now) : "";
   return (
-    <div className={cn("rumi-activity-loading flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/72 px-3 py-2 text-zinc-300", compact ? "w-fit" : "w-[min(440px,calc(100vw-48px))]")}>
-      <div className="rumi-loading-bars flex h-5 w-6 items-end gap-1" aria-hidden="true">
-        <span />
-        <span />
-        <span />
+    <div className={cn("flex items-center gap-4 px-2 py-2 text-zinc-300", compact ? "w-fit" : "w-[min(640px,calc(100vw-48px))]")}>
+      <div className="flex h-6 items-center gap-[4px]" aria-hidden="true">
+        <span className="h-2 w-2 rounded-full bg-zinc-300 animate-bounce [animation-delay:-0.3s]" />
+        <span className="h-2 w-2 rounded-full bg-zinc-300 animate-bounce [animation-delay:-0.15s]" />
+        <span className="h-2 w-2 rounded-full bg-zinc-300 animate-bounce" />
       </div>
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-[12px] font-medium text-zinc-200">{phase.label}</span>
-          {elapsed && <span className="shrink-0 font-mono text-[10px] leading-none text-zinc-600">{elapsed}</span>}
-        </div>
-        <div className="truncate text-[11px] text-zinc-500">{phase.detail}</div>
+      <div className="min-w-0 flex items-baseline gap-3">
+        <span className="truncate text-[16px] font-medium text-zinc-200">{status || phase.detail || phase.label}</span>
+        {elapsed && <span className="shrink-0 font-mono text-[12px] leading-none text-zinc-500">{elapsed}</span>}
       </div>
     </div>
   );
