@@ -317,6 +317,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     )
 
     raw_tools, provider_tools, tool_context = _available_tools(request_context, prepared_input, user_text=user_text)
+    _ensure_must_use_has_eligible_tools(tool_selection, raw_tools)
     modalities = detect_modalities(content, metadata)
     routing_decision = route_model_request(
         ModelRoutingRequest(
@@ -370,6 +371,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         ),
     )
     raw_tools = list(eligibility_result.get("allowed_tools") or [])
+    _ensure_must_use_has_eligible_tools(tool_selection, raw_tools)
     provider_tools = adapt_tool_definitions(raw_tools)
     filter_entries = list(eligibility_result.get("entries") or [])
     compact_filter_entries = compact_tool_filter_entries(filter_entries)
@@ -1355,6 +1357,9 @@ def _validate_tool_selection_input(input_data: dict[str, Any]) -> str | None:
         return "params.tool_selection cannot combine mode=none with must_use=true"
     if raw_mode == "none" and include:
         return "params.tool_selection mode=none cannot include tools"
+    normalized = _normalize_tool_selection(input_data)
+    if normalized.mode == "none" and normalized.must_use:
+        return "params.tool_selection cannot combine mode=none with must_use=true"
     return None
 
 
@@ -1627,6 +1632,11 @@ def _available_tools(
     )
     filtered = _append_special_model_tools(filtered, resolved_context, agent_id=agent_id)
     return filtered, adapt_tool_definitions(filtered), resolved_context
+
+
+def _ensure_must_use_has_eligible_tools(selection: NormalizedToolSelection, tools: list[dict[str, Any]]) -> None:
+    if selection.must_use and not tools:
+        raise ValueError("params.tool_selection.must_use requires at least one eligible tool")
 
 
 def _merge_tool_definitions(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -524,6 +524,39 @@ def test_run_request_tool_selection_must_use_requires_tool_choice(tmp_path, monk
     ChatStore._instance = None
 
 
+def test_run_request_tool_selection_must_use_rejects_unknown_only_tools(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    try:
+        prepare_chat_run(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "must use the selected tool"},
+                "params": {
+                    "tool_selection": {
+                        "mode": "manual",
+                        "include": ["definitely_missing_tool"],
+                        "must_use": True,
+                    }
+                },
+            },
+            {},
+        )
+        raise AssertionError("must_use should fail when no eligible tool remains")
+    except ValueError as exc:
+        assert "must_use requires at least one eligible tool" in str(exc)
+    finally:
+        ChatStore._instance = None
+
+
 def test_run_request_rejects_unimplemented_or_conflicting_tool_selection():
     from domain.chat.run_request import validate_chat_run_input
 
@@ -538,6 +571,7 @@ def test_run_request_rejects_unimplemented_or_conflicting_tool_selection():
     assert "scope=conversation" in validate_chat_run_input(payload({"mode": "auto", "scope": "conversation"}))
     assert "review is not implemented" in validate_chat_run_input(payload({"mode": "auto", "review": True}))
     assert "mode=none" in validate_chat_run_input(payload({"mode": "none", "must_use": True}))
+    assert "mode=none" in validate_chat_run_input(payload({"mode": "manual", "include": [], "must_use": True}))
     assert "cannot include tools" in validate_chat_run_input(payload({"mode": "none", "include": ["web_search"]}))
     assert "mode must be" in validate_chat_run_input(payload({"mode": "sometimes"}))
 

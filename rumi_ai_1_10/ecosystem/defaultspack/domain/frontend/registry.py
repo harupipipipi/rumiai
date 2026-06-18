@@ -2185,8 +2185,18 @@ class FrontendRegistry:
                 saved = json.loads(self._settings_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 saved = {}
+            saved = self._settings_with_legacy_tool_version(saved)
             values = self._deep_merge(values, saved)
         return self._refresh_derived_settings(values)
+
+    def _settings_with_legacy_tool_version(self, saved: Any) -> dict[str, Any]:
+        if not isinstance(saved, dict):
+            return {}
+        normalized = deepcopy(saved)
+        tools = normalized.get("tools")
+        if isinstance(tools, dict) and "settings_version" not in tools:
+            tools["settings_version"] = 1
+        return normalized
 
     def _default_settings(self) -> dict[str, Any]:
         return {
