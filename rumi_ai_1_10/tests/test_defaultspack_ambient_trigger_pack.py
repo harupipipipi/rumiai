@@ -123,7 +123,7 @@ def test_pinch_and_agent_dispatch_share_ambient_router(monkeypatch, tmp_path):
     assert pinch_start["status"] == "recording_started"
     assert pinch_start["capture_started"] is True
 
-    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": ""}) as submit:
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": "", "conversation_id": "conv-1"}) as submit:
         pinch_release = router.submit_event(
             {
                 "source": "camera",
@@ -150,6 +150,7 @@ def test_pinch_and_agent_dispatch_share_ambient_router(monkeypatch, tmp_path):
         )
 
     assert pinch_release["status"] == "ok"
+    assert pinch_release["conversation_id"] == "conv-1"
     envelope = submit.call_args.args[0]
     assert envelope.delivery["action_id"] == "chat.message"
     assert envelope.input == "今日の予定を確認して"

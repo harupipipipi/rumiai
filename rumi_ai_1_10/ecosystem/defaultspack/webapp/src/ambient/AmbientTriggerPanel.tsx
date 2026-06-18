@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, Mic, Radio, RefreshCcw, Settings, Shield, Video, Volume2, VolumeX, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from "react";
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, Mic, Radio, RefreshCcw, Settings, Shield, Video, Volume2, VolumeX, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
+import { api, type Conversation } from "../lib/api";
 import { subscribeAuthorityApprovalSettlements } from "../lib/authorityApprovalEvents";
 import { openDefaultsConsoleWindow, openFingerRecordingWindow, openAuthorityApprovalWindow, openHostPermissionsPageWindow } from "../lib/desktopApproval";
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { ambientTriggerClient, type AmbientStatus } from "./ambientTriggerClient";
+import { AmbientMiniChat } from "./AmbientMiniChat";
+import { ambientConversationIdFromResult, ambientLinkedConversationId } from "./ambientMiniChatState";
 import {
   audioCaptureConstraints,
   captureAudioEmbedding,
@@ -82,6 +85,13 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const [rumiApprovalOpen, setRumiApprovalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [miniConversationIdOverride, setMiniConversationIdOverride] = useState<string | null>(null);
+  const [miniConversation, setMiniConversation] = useState<Conversation | null>(null);
+  const [miniChatLoading, setMiniChatLoading] = useState(false);
+  const [miniChatError, setMiniChatError] = useState<string | null>(null);
+  const [miniInput, setMiniInput] = useState("");
+  const [miniSending, setMiniSending] = useState(false);
+  const [latestSubmittedInput, setLatestSubmittedInput] = useState<string | null>(null);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedMicId, setSelectedMicId] = useState(() => safeLocalStorageGet(MIC_DEVICE_STORAGE_KEY));
@@ -109,6 +119,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const onOpenInputRef = useRef<Props["onOpenInput"]>(onOpenInput);
   const approvalTargetRef = useRef<Props["approvalTarget"]>(approvalTarget);
   const onApprovalGestureRef = useRef<Props["onApprovalGesture"]>(onApprovalGesture);
+  const miniChatRequestSeqRef = useRef(0);
 
   const readoutBlocked = useCallback(() => pinchRecording || Boolean(pinchRecorderRef.current), [pinchRecording]);
   const {
@@ -188,6 +199,19 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const surfaceTitle = standalone && window.location.pathname === "/finger-recording" ? ambientCopyJa.subtitle : ambientCopyJa.title;
   const pendingApproval = status?.pending_approval ?? null;
   const visibleMessage = useMemo(() => ambientRenderableMessage(message), [message]);
+  const ambientDispatchGranted = Boolean(status?.permissions.rumi["ambient.trigger.dispatch"]?.granted);
+  const linkedAmbientConversationId = useMemo(
+    () => ambientLinkedConversationId(status, conversationId),
+    [
+      conversationId,
+      status?.routing?.conversation_id,
+      status?.routing?.mode,
+      status?.routing?.session_conversation_id,
+    ],
+  );
+  const miniConversationId = linkedAmbientConversationId || miniConversationIdOverride;
+  const inlineSettingsControlsVisible = !standalone;
+  const miniChatRoutingSummary = standalone ? "次の送信で作成" : routingSummary;
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -195,6 +219,47 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     approvalTargetRef.current = approvalTarget;
     onApprovalGestureRef.current = onApprovalGesture;
   }, [approvalTarget, conversationId, onApprovalGesture, onOpenInput]);
+
+  const loadMiniConversation = useCallback(async (options?: { conversationId?: string | null; quiet?: boolean }) => {
+    const requestSeq = miniChatRequestSeqRef.current + 1;
+    miniChatRequestSeqRef.current = requestSeq;
+    const targetId = String(options?.conversationId ?? miniConversationId ?? "").trim();
+    if (!options?.quiet) setMiniChatLoading(true);
+    try {
+      let conversation: Conversation | null = null;
+      if (targetId) {
+        conversation = await api.getConversation(targetId);
+      } else {
+        const result = await api.listConversations({
+          tag: "ambient",
+          group_id: "gesture",
+          include_messages: true,
+          limit: 1,
+        });
+        conversation = result.conversations[0] ?? null;
+        if (conversation?.id) setMiniConversationIdOverride(conversation.id);
+      }
+      if (miniChatRequestSeqRef.current !== requestSeq) return;
+      setMiniConversation(conversation);
+      setMiniChatError(null);
+    } catch (error) {
+      if (miniChatRequestSeqRef.current === requestSeq) {
+        setMiniChatError(error instanceof Error ? error.message : "チャットを読み込めませんでした。");
+      }
+    } finally {
+      if (!options?.quiet) {
+        setMiniChatLoading(false);
+      }
+    }
+  }, [miniConversationId]);
+
+  useEffect(() => {
+    void loadMiniConversation();
+    const interval = window.setInterval(() => {
+      void loadMiniConversation({ quiet: true });
+    }, miniConversationId ? 1800 : 3500);
+    return () => window.clearInterval(interval);
+  }, [loadMiniConversation, miniConversationId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -318,10 +383,12 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     setPinchTranscriptPreview("");
     setPinchDetectorStatus("sending");
     setMessage(`${ambientOperationLabels.sending}: 録音音声をAIへ送っています。`);
+    setLatestSubmittedInput(transcript || "録音音声を送信しました。文字起こしはまだありません。");
     try {
       const recording = await recorder.stop();
       if (recording.size <= 0) {
         setMessage(`${ambientOperationLabels.failed}: 録音が空でした。もう一度お試しください。`);
+        setMiniChatError("録音が空でした。もう一度お試しください。");
         setPinchDetectorStatus("tracking");
         return;
       }
@@ -358,15 +425,26 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         ],
       });
       setMessage(ambientResultMessage(result, "録音音声をAIに送信しました。"));
+      const resultConversationId = ambientConversationIdFromResult(result);
+      if (resultConversationId) setMiniConversationIdOverride(resultConversationId);
+      const resultStatus = String(result.status ?? "");
+      if (resultStatus && resultStatus !== "ok" && resultStatus !== "approval_required") {
+        setMiniChatError(ambientResultMessage(result, "録音音声をAIに送信しました。"));
+      } else {
+        setMiniChatError(null);
+      }
       onOpenInputRef.current?.("");
       focusComposer();
       await refresh();
+      await loadMiniConversation({ conversationId: resultConversationId || conversationIdRef.current || null, quiet: true });
     } catch (error) {
-      setMessage(`${ambientOperationLabels.failed}: ${error instanceof Error ? error.message : "送信できませんでした。録音は保存されていません。"}`);
+      const errorText = error instanceof Error ? error.message : "送信できませんでした。録音は保存されていません。";
+      setMessage(`${ambientOperationLabels.failed}: ${errorText}`);
+      setMiniChatError(errorText);
     } finally {
       setPinchDetectorStatus("tracking");
     }
-  }, []);
+  }, [loadMiniConversation]);
 
   useEffect(() => {
     if (!pinchRecording || !recordingStartedAt) return;
@@ -713,6 +791,54 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     }
   }
 
+  async function submitMiniChat(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const text = miniInput.trim();
+    if (!text || miniSending) return;
+    if (!ambientDispatchGranted || rumiApprovalPending) {
+      const errorText = "AIへ送る許可を完了してから送信できます。";
+      setMiniChatError(errorText);
+      setExpanded(true);
+      return;
+    }
+
+    const targetConversationId = miniConversationId || conversationIdRef.current || null;
+    setMiniSending(true);
+    setMiniChatError(null);
+    setLatestSubmittedInput(text);
+    setMiniInput("");
+    try {
+      const result = await ambientTriggerClient.submitEvent({
+        source: "hook",
+        trigger: "external_hook",
+        mode: "preset_text",
+        action_id: "chat.message",
+        input_text: text,
+        conversation_id: targetConversationId || undefined,
+        metadata: {
+          panel: "ambient_mini_window",
+          manual_text_input: true,
+        },
+      });
+      const resultConversationId = ambientConversationIdFromResult(result);
+      if (resultConversationId) setMiniConversationIdOverride(resultConversationId);
+      const nextMessage = ambientResultMessage(result, "メッセージをAIに送信しました。");
+      setMessage(nextMessage);
+      const resultStatus = String(result.status ?? "");
+      if (resultStatus && resultStatus !== "ok" && resultStatus !== "approval_required") {
+        setMiniChatError(nextMessage);
+      }
+      await refresh();
+      await loadMiniConversation({ conversationId: resultConversationId || targetConversationId, quiet: true });
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : "送信できませんでした。";
+      setMiniChatError(errorText);
+      setMessage(`${ambientOperationLabels.failed}: ${errorText}`);
+    } finally {
+      setMiniSending(false);
+    }
+  }
+
   async function submitApprovalGesture(decision: "approve" | "reject", state: PinchState, mode: string) {
     const target = approvalTargetRef.current;
     if (!target || approvalGestureBusyRef.current) return;
@@ -757,11 +883,16 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     try {
       const result = await ambientTriggerClient.approvePendingApproval(requestId);
       setMessage(ambientResultMessage(result, "AIへ送信しました。"));
+      const resultConversationId = ambientConversationIdFromResult(result);
+      if (resultConversationId) setMiniConversationIdOverride(resultConversationId);
+      await loadMiniConversation({ conversationId: resultConversationId || pendingApproval?.conversation_id || null, quiet: true });
       onOpenInputRef.current?.("");
       focusComposer();
       await refresh();
     } catch (error) {
-      setMessage(`${ambientOperationLabels.failed}: ${error instanceof Error ? error.message : "送信を許可できませんでした。"}`);
+      const errorText = error instanceof Error ? error.message : "送信を許可できませんでした。";
+      setMessage(`${ambientOperationLabels.failed}: ${errorText}`);
+      setMiniChatError(errorText);
       await refresh().catch(() => undefined);
     } finally {
       setBusy(false);
@@ -829,6 +960,136 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     }
   }
 
+  const settingsSection = (
+    <section className="space-y-2">
+      <p className="text-[11px] font-semibold uppercase text-zinc-500">設定</p>
+      <button
+        type="button"
+        onClick={toggleReadoutEnabled}
+        disabled={rumiApprovalPending}
+        className={cn("ambient-mini-button w-full justify-between", readoutEnabled && "border-emerald-400/30 text-emerald-200")}
+      >
+        <span className="inline-flex min-w-0 items-center gap-2">
+          {readoutEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
+          <span className="truncate">読み上げ</span>
+        </span>
+        <span className="shrink-0 text-[11px]">{readoutEnabled ? (readoutPlaying ? "読み上げ: 再生中" : "読み上げ: オン") : "読み上げ: オフ"}</span>
+      </button>
+      {allRumiPermissionsGranted && (
+        <RoutingSettings
+          busy={busy}
+          mode={routingMode}
+          summary={routingSummary}
+          selectedConversationId={routingConversationId}
+          groupEnabled={routingGroupEnabled}
+          groupId={routingGroupId}
+          groupTitle={routingGroupTitle}
+          model={routingModel}
+          aiSendApprovalRequired={aiSendApprovalRequired}
+          modelQuery={modelQuery}
+          modelResults={modelResults}
+          modelLoading={modelLoading}
+          needsNewChatSettings={routingNeedsNewChatSettings}
+          onModeChange={(mode) => void saveRouting({ mode })}
+          onPickChat={() => void openChatPicker()}
+          onGroupEnabledChange={(enabled) => void saveRouting({ group_enabled: enabled }, enabled ? "新しいチャットをグループ内に作ります。" : "新しいチャットを通常の履歴に作ります。")}
+          onGroupIdChange={setRoutingGroupId}
+          onGroupTitleChange={setRoutingGroupTitle}
+          onGroupCommit={() => void saveRouting({ group_id: routingGroupId, group_title: routingGroupTitle }, "新しいチャットのグループを保存しました。")}
+          onModelChange={setRoutingModel}
+          onModelCommit={(model) => void saveRouting({ model }, model ? "送信モデルを保存しました。" : "モデル指定を外しました。")}
+          onModelQueryChange={setModelQuery}
+          onModelSearch={() => void searchRoutingModels()}
+          onAiSendApprovalRequiredChange={(enabled) => void saveRouting(
+            { ai_send_approval_required: enabled },
+            enabled ? "AIへ送る前に確認します。" : "AIへすぐ送る設定にしました。",
+          )}
+        />
+      )}
+      <label className="block text-[11px] text-zinc-500">
+        マイク
+        <select
+          value={selectedMicId}
+          onChange={(event) => setSelectedMicId(event.target.value)}
+          className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+        >
+          <option value="">デフォルト</option>
+          {devices.filter((device) => device.kind === "audioinput").map((device, index) => (
+            <option key={device.deviceId || `mic-${index}`} value={device.deviceId}>
+              {deviceLabel(device, index, "マイク")}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block text-[11px] text-zinc-500">
+        カメラ
+        <select
+          value={selectedCameraId}
+          onChange={(event) => setSelectedCameraId(event.target.value)}
+          className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+        >
+          <option value="">デフォルト</option>
+          {devices.filter((device) => device.kind === "videoinput").map((device, index) => (
+            <option key={device.deviceId || `camera-${index}`} value={device.deviceId}>
+              {deviceLabel(device, index, "カメラ")}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={() => void refreshDevices()} disabled={rumiApprovalPending} className="ambient-mini-button">
+          <Settings size={14} />
+          デバイス更新
+        </button>
+        <button type="button" onClick={() => void refresh({ probeOs: true })} disabled={rumiApprovalPending} className="ambient-mini-button">
+          <Shield size={14} />
+          許可を再確認
+        </button>
+      </div>
+      <button
+        type="button"
+        onClick={() => setCameraDebugOpen((value) => !value)}
+        disabled={rumiApprovalPending}
+        className={cn("ambient-mini-button w-full", cameraDebugOpen && "border-amber-400/30 text-amber-100")}
+      >
+        <Video size={14} />
+        カメラ映像を確認する（開発者向け）
+      </button>
+      <button
+        type="button"
+        onClick={() => setFrontOnFinal((value) => !value)}
+        className={cn("ambient-mini-button w-full", frontOnFinal && "border-emerald-400/30 text-emerald-200")}
+      >
+        <Radio size={14} />
+        最終回答で前面表示: {frontOnFinal ? "有効" : "無効"}
+      </button>
+      <button
+        type="button"
+        onClick={() => void openDefaultsConsoleWindow().then((opened) => {
+          if (!opened) setMessage("Rumi Viewerから開くと、詳細ログは別ウィンドウで表示されます。");
+        })}
+        className="ambient-mini-button w-full"
+      >
+        <ExternalLink size={14} />
+        詳細ログを開く
+      </button>
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={() => void enrollWakeVoice()} disabled={rumiApprovalPending} className="ambient-mini-button">
+          <Mic size={14} />
+          声で起動を登録
+        </button>
+        <button type="button" onClick={() => void toggleMicListening()} disabled={rumiApprovalPending} className="ambient-mini-button">
+          <Radio size={14} />
+          {micListening ? "音声待機を停止" : "音声待機を開始"}
+        </button>
+      </div>
+      <div className="border-l border-emerald-400/35 pl-2 text-[11px] leading-5 text-zinc-400">
+        <p className="font-semibold text-zinc-300">プライバシー</p>
+        <p>音声と映像は保存しません。残るのは、使われた時刻と結果だけです。</p>
+      </div>
+    </section>
+  );
+
   const content = (
     <>
       <section
@@ -892,7 +1153,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
           )}
         </div>
 
-        {monitorEnabled && (
+        {monitorEnabled && !(standalone && settingsOpen) && (
           <RecognitionMonitor
             videoRef={videoRef}
             frame={trackingFrame}
@@ -904,6 +1165,20 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         )}
 
         <div className="min-h-0 overflow-y-auto overscroll-contain">
+        {standalone && settingsOpen ? (
+          <div className="space-y-2.5 px-3 py-2.5">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(false)}
+              className="ambient-mini-button h-8 w-full justify-start"
+            >
+              <ArrowLeft size={14} />
+              戻る
+            </button>
+            {settingsSection}
+          </div>
+        ) : (
+        <>
         <div className="space-y-2 px-3 py-2.5">
           <button
             type="button"
@@ -994,7 +1269,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
                 : stateCopy.body}
             </p>
           </div>
-          {allRumiPermissionsGranted && (
+          {inlineSettingsControlsVisible && allRumiPermissionsGranted && (
             <CompactRoutingControl
               busy={busy || rumiApprovalPending}
               mode={routingMode}
@@ -1013,151 +1288,47 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
               onModelSearch={(query) => void searchRoutingModels(query)}
             />
           )}
-          <div className="flex items-center justify-end text-[11px] leading-4 text-zinc-500">
-            <button
-              type="button"
-              onClick={() => setPrivacyOpen((value) => !value)}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-zinc-800 text-[11px] font-semibold text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
-              aria-label="プライバシー"
-              title="プライバシー"
-            >
-              i
-            </button>
-          </div>
-          {privacyOpen && (
-            <div className="border-l border-emerald-400/35 pl-2 text-[11px] leading-5 text-zinc-400">
-              音声と映像は保存しません。残るのは、使われた時刻と結果だけです。
-            </div>
+          <AmbientMiniChat
+            conversation={miniConversation}
+            conversationId={miniConversation?.id || miniConversationId || null}
+            routingSummary={miniChatRoutingSummary}
+            loading={miniChatLoading}
+            error={miniChatError}
+            input={miniInput}
+            sending={miniSending}
+            disabled={!ambientDispatchGranted || rumiApprovalPending}
+            latestInputPreview={latestSubmittedInput}
+            showPicker={inlineSettingsControlsVisible}
+            onInputChange={setMiniInput}
+            onSubmit={submitMiniChat}
+            onRefresh={() => void loadMiniConversation()}
+            onPickChat={() => void openChatPicker()}
+          />
+          {inlineSettingsControlsVisible && (
+            <>
+              <div className="flex items-center justify-end text-[11px] leading-4 text-zinc-500">
+                <button
+                  type="button"
+                  onClick={() => setPrivacyOpen((value) => !value)}
+                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-zinc-800 text-[11px] font-semibold text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
+                  aria-label="プライバシー"
+                  title="プライバシー"
+                >
+                  i
+                </button>
+              </div>
+              {privacyOpen && (
+                <div className="border-l border-emerald-400/35 pl-2 text-[11px] leading-5 text-zinc-400">
+                  音声と映像は保存しません。残るのは、使われた時刻と結果だけです。
+                </div>
+              )}
+            </>
           )}
         </div>
 
         {expanded && (settingsOpen || (approvalTarget && monitorEnabled) || manualRumiFallbackOpen || visibleMessage) && (
           <div className="space-y-2.5 border-t border-zinc-800/80 px-3 py-2.5">
-            {settingsOpen && (
-              <section className="space-y-2">
-                <p className="text-[11px] font-semibold uppercase text-zinc-500">設定</p>
-                <button
-                  type="button"
-                  onClick={toggleReadoutEnabled}
-                  disabled={rumiApprovalPending}
-                  className={cn("ambient-mini-button w-full justify-between", readoutEnabled && "border-emerald-400/30 text-emerald-200")}
-                >
-                  <span className="inline-flex min-w-0 items-center gap-2">
-                    {readoutEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
-                    <span className="truncate">読み上げ</span>
-                  </span>
-                  <span className="shrink-0 text-[11px]">{readoutEnabled ? (readoutPlaying ? "読み上げ: 再生中" : "読み上げ: オン") : "読み上げ: オフ"}</span>
-                </button>
-                {allRumiPermissionsGranted && (
-                  <RoutingSettings
-                    busy={busy}
-                    mode={routingMode}
-                    summary={routingSummary}
-                    selectedConversationId={routingConversationId}
-                    groupEnabled={routingGroupEnabled}
-                    groupId={routingGroupId}
-                    groupTitle={routingGroupTitle}
-                    model={routingModel}
-                    aiSendApprovalRequired={aiSendApprovalRequired}
-                    modelQuery={modelQuery}
-                    modelResults={modelResults}
-                    modelLoading={modelLoading}
-                    needsNewChatSettings={routingNeedsNewChatSettings}
-                    onModeChange={(mode) => void saveRouting({ mode })}
-                    onPickChat={() => void openChatPicker()}
-                    onGroupEnabledChange={(enabled) => void saveRouting({ group_enabled: enabled }, enabled ? "新しいチャットをグループ内に作ります。" : "新しいチャットを通常の履歴に作ります。")}
-                    onGroupIdChange={setRoutingGroupId}
-                    onGroupTitleChange={setRoutingGroupTitle}
-                    onGroupCommit={() => void saveRouting({ group_id: routingGroupId, group_title: routingGroupTitle }, "新しいチャットのグループを保存しました。")}
-                    onModelChange={setRoutingModel}
-                    onModelCommit={(model) => void saveRouting({ model }, model ? "送信モデルを保存しました。" : "モデル指定を外しました。")}
-                    onModelQueryChange={setModelQuery}
-                    onModelSearch={() => void searchRoutingModels()}
-                    onAiSendApprovalRequiredChange={(enabled) => void saveRouting(
-                      { ai_send_approval_required: enabled },
-                      enabled ? "AIへ送る前に確認します。" : "AIへすぐ送る設定にしました。",
-                    )}
-                  />
-                )}
-                <label className="block text-[11px] text-zinc-500">
-                  マイク
-                  <select
-                    value={selectedMicId}
-                    onChange={(event) => setSelectedMicId(event.target.value)}
-                    className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
-                  >
-                    <option value="">デフォルト</option>
-                    {devices.filter((device) => device.kind === "audioinput").map((device, index) => (
-                      <option key={device.deviceId || `mic-${index}`} value={device.deviceId}>
-                        {deviceLabel(device, index, "マイク")}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block text-[11px] text-zinc-500">
-                  カメラ
-                  <select
-                    value={selectedCameraId}
-                    onChange={(event) => setSelectedCameraId(event.target.value)}
-                    className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
-                  >
-                    <option value="">デフォルト</option>
-                    {devices.filter((device) => device.kind === "videoinput").map((device, index) => (
-                      <option key={device.deviceId || `camera-${index}`} value={device.deviceId}>
-                        {deviceLabel(device, index, "カメラ")}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => void refreshDevices()} disabled={rumiApprovalPending} className="ambient-mini-button">
-                    <Settings size={14} />
-                    デバイス更新
-                  </button>
-                  <button type="button" onClick={() => void refresh({ probeOs: true })} disabled={rumiApprovalPending} className="ambient-mini-button">
-                    <Shield size={14} />
-                    許可を再確認
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setCameraDebugOpen((value) => !value)}
-                  disabled={rumiApprovalPending}
-                  className={cn("ambient-mini-button w-full", cameraDebugOpen && "border-amber-400/30 text-amber-100")}
-                >
-                  <Video size={14} />
-                  カメラ映像を確認する（開発者向け）
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFrontOnFinal((value) => !value)}
-                  className={cn("ambient-mini-button w-full", frontOnFinal && "border-emerald-400/30 text-emerald-200")}
-                >
-                  <Radio size={14} />
-                  最終回答で前面表示: {frontOnFinal ? "有効" : "無効"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void openDefaultsConsoleWindow().then((opened) => {
-                    if (!opened) setMessage("Rumi Viewerから開くと、詳細ログは別ウィンドウで表示されます。");
-                  })}
-                  className="ambient-mini-button w-full"
-                >
-                  <ExternalLink size={14} />
-                  詳細ログを開く
-                </button>
-                <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => void enrollWakeVoice()} disabled={rumiApprovalPending} className="ambient-mini-button">
-                    <Mic size={14} />
-                    声で起動を登録
-                  </button>
-                  <button type="button" onClick={() => void toggleMicListening()} disabled={rumiApprovalPending} className="ambient-mini-button">
-                    <Radio size={14} />
-                    {micListening ? "音声待機を停止" : "音声待機を開始"}
-                  </button>
-                </div>
-              </section>
-            )}
+            {settingsOpen && settingsSection}
 
             {approvalTarget && monitorEnabled && (
               <div className="border-l border-sky-400/35 pl-2 text-[11px] text-sky-100">
@@ -1212,11 +1383,13 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
             )}
           </div>
         )}
+        </>
+        )}
         </div>
       </section>
       {chatPickerOpen && (
         <ChatPickerDialog
-          activeChatId={conversationId ?? null}
+          activeChatId={miniConversationId ?? conversationId ?? null}
           selectedChatId={routingConversationId}
           chatItems={routingChatItems}
           loading={conversationsLoading}

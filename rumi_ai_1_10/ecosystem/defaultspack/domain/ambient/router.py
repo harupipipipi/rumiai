@@ -368,6 +368,9 @@ class AmbientTriggerRouter:
         )
         if isinstance(result, dict):
             audit["dispatch"] = result
+            conversation_id = _clean_string(result.get("conversation_id"))
+            if conversation_id:
+                audit["conversation_id"] = conversation_id
         return audit
 
     def _requires_ai_send_approval(self, state: dict[str, Any]) -> bool:

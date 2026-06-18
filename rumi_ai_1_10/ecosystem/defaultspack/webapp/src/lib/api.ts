@@ -736,6 +736,8 @@ export type ConversationListOptions = {
   company_id?: string;
   workspace_id?: string;
   conversation_kind?: string;
+  group_id?: string;
+  include_messages?: boolean;
   limit?: number;
   offset?: number;
 };
