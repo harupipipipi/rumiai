@@ -409,6 +409,9 @@ def prepare_chat_run(
     raw_tools, provider_tools, tool_context = _available_tools(
         request_context, tool_resolution_input, user_text=user_text
     )
+    tool_hint_prompt = _tool_selection_hints_prompt(tool_context)
+    if tool_hint_prompt:
+        _append_system_context_message(standard_messages, tool_hint_prompt)
     _ensure_must_use_has_eligible_tools(tool_selection, raw_tools)
     modalities = detect_modalities(content, metadata)
     routing_decision = route_model_request(
@@ -730,6 +733,39 @@ def _append_system_context_message(messages: list[dict[str, Any]], content: str)
         messages[0]["content"] = "{}\n\n{}".format(existing, text) if existing else text
         return
     messages.insert(0, {"role": "system", "content": text})
+
+
+def _tool_selection_hints_prompt(context: dict[str, Any]) -> str:
+    metadata = context.get("tool_selection") if isinstance(context, dict) else {}
+    if not isinstance(metadata, dict) or metadata.get("strategy") != "all_with_hints":
+        return ""
+    metrics = metadata.get("metrics") if isinstance(metadata.get("metrics"), dict) else {}
+    recommendations = metrics.get("recommended_tools")
+    if not isinstance(recommendations, list):
+        recommendations = metadata.get("recommendations") if isinstance(metadata.get("recommendations"), list) else []
+    lines = []
+    for item in recommendations[:16]:
+        if not isinstance(item, dict):
+            continue
+        tool_id = str(item.get("tool_id") or item.get("id") or "").strip()
+        if not tool_id:
+            continue
+        reason = str(item.get("reason") or "").strip()
+        confidence = item.get("confidence")
+        suffix = " reason={}".format(reason) if reason else ""
+        if confidence not in (None, ""):
+            suffix += " confidence={}".format(confidence)
+        lines.append("- {}{}".format(tool_id, suffix))
+    if not lines:
+        order = metrics.get("recommendation_order") if isinstance(metrics.get("recommendation_order"), list) else []
+        lines = ["- {}".format(str(item)) for item in order[:16] if str(item or "").strip()]
+    if not lines:
+        return ""
+    return (
+        "Tool selection hints for all_with_hints strategy.\n"
+        "All eligible tool schemas are attached, but prefer this order when it fits the user request:\n"
+        + "\n".join(lines)
+    )
 
 
 def _active_profile_selected(active_profile: dict[str, Any] | None) -> dict[str, Any]:
@@ -1859,7 +1895,13 @@ def _available_tools(
             **resolved_context["tool_selection"],
             **selection_trace,
         }
-        ToolSelectionTraceStore().save(resolved_context["tool_selection"])
+        _persist_tool_selection_trace(
+            resolved_context,
+            settings,
+            decision,
+            user_text=user_text,
+            trace=selection_trace,
+        )
         if decision.unknown_targets:
             resolved_context["unknown_selected_tools"] = list(decision.unknown_targets)
     except Exception as exc:
@@ -1883,6 +1925,98 @@ def _available_tools(
                 filtered = []
     filtered = _append_special_model_tools(filtered, resolved_context, agent_id=agent_id)
     return filtered, adapt_tool_definitions(filtered), resolved_context
+
+
+def _persist_tool_selection_trace(
+    resolved_context: dict[str, Any],
+    settings: dict[str, Any],
+    decision: Any,
+    *,
+    user_text: str,
+    trace: dict[str, Any],
+) -> None:
+    tool_settings = settings.get("tools") if isinstance(settings.get("tools"), dict) else {}
+    trace_mode = str(tool_settings.get("selector_trace") or "summary").strip().lower()
+    if trace_mode not in {"none", "summary", "full"}:
+        trace_mode = "summary"
+    selection_metadata = resolved_context.get("tool_selection") if isinstance(resolved_context.get("tool_selection"), dict) else {}
+    selection_metadata["trace_mode"] = trace_mode
+    if trace_mode == "none":
+        selection_metadata.pop("selection_id", None)
+        return
+    if trace_mode == "summary":
+        ToolSelectionTraceStore().save(selection_metadata)
+        return
+    child_id = _create_hidden_tool_selection_conversation(
+        resolved_context,
+        decision,
+        user_text=user_text,
+        trace=trace,
+    )
+    if child_id:
+        selection_metadata["trace_conversation_id"] = child_id
+
+
+def _create_hidden_tool_selection_conversation(
+    resolved_context: dict[str, Any],
+    decision: Any,
+    *,
+    user_text: str,
+    trace: dict[str, Any],
+) -> str:
+    conversation_id = str(resolved_context.get("conversation_id") or "").strip()
+    if not conversation_id:
+        return ""
+    try:
+        store = ChatStore()
+        child = store.create_conversation(
+            model=str(resolved_context.get("model") or ""),
+            parent_conversation_id=conversation_id,
+            conversation_kind="tool_selection_trace",
+            metadata={
+                "hidden": True,
+                "tool_selection_trace": True,
+                "selection_id": trace.get("selection_id"),
+                "trace_mode": "full",
+            },
+        )
+        child_id = str(child.get("id") or "") if isinstance(child, dict) else ""
+        if not child_id:
+            return ""
+        child_metadata = child.get("metadata") if isinstance(child.get("metadata"), dict) else {}
+        store.update_conversation(
+            child_id,
+            {
+                "title": "Tool補助の記録 {}".format(str(trace.get("selection_id") or "")[:8]),
+                "is_archived": True,
+                "metadata": {
+                    **child_metadata,
+                    "hidden": True,
+                    "tool_selection_trace": True,
+                    "selection_id": trace.get("selection_id"),
+                    "trace_mode": "full",
+                },
+            },
+        )
+        payload = {
+            "user_text": user_text,
+            "trace": trace,
+            "decision": decision.to_trace_dict() if hasattr(decision, "to_trace_dict") else trace,
+        }
+        raw_text = json.dumps(payload, ensure_ascii=False, indent=2)
+        store.add_message(
+            child_id,
+            {
+                "id": gen_id(),
+                "role": "system",
+                "content": [{"type": "text", "text": raw_text}],
+                "raw_text": raw_text,
+                "metadata": {"hidden": True, "tool_selection_trace": True},
+            },
+        )
+        return child_id
+    except Exception:
+        return ""
 
 
 def _read_frontend_settings() -> dict[str, Any]:

@@ -91,10 +91,14 @@ class ToolPermissionResolver:
         return allowed, entries
 
     def _action_permission(self, action_class: str) -> str:
-        overrides = self._tool_settings.get("action_permissions")
+        overrides = self._tool_settings.get("standard_permissions")
+        if not isinstance(overrides, dict):
+            overrides = self._tool_settings.get("action_permissions")
         if not isinstance(overrides, dict):
             overrides = {}
         value = str(overrides.get(action_class) or DEFAULT_ACTION_PERMISSIONS.get(action_class, "confirm")).strip().lower()
+        if action_class == "delete" and value == "auto":
+            value = "confirm"
         return value if value in PERMISSION_MODES else DEFAULT_ACTION_PERMISSIONS.get(action_class, "confirm")
 
 

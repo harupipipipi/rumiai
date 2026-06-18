@@ -3,6 +3,7 @@ from .mcp_client import McpClient
 from .mcp_registry import McpRegistry
 from .autonomy import autonomous_tool_execution_allowed
 from .eligibility import rejection_result
+from .permission_resolver import ToolPermissionResolver
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from .security import is_trusted_pack_id, requires_approval_for_security, unsupported_execution_reason
 from domain.tool_policy.audit import audit_tool_policy
@@ -161,6 +162,16 @@ class ToolExecutor:
         )
         if permission_response is not None:
             return permission_response
+
+        context, settings_permission_response = _preflight_frontend_tool_permission(
+            tool_name,
+            tool_def,
+            arguments,
+            context,
+            policy,
+        )
+        if settings_permission_response is not None:
+            return settings_permission_response
 
         execution = tool_def.get("execution", {})
         exec_type = execution.get("type", "local")
@@ -1721,6 +1732,76 @@ def _preflight_profile_tool_permission(tool_name, tool_def, arguments, context, 
     return context, None
 
 
+def _preflight_frontend_tool_permission(tool_name, tool_def, arguments, context, policy):
+    if not isinstance(policy, dict):
+        policy = {}
+    if str(policy.get("action_approval_mode") or "").strip().lower() == "full" or _truthy(policy.get("full_access")):
+        return context, None
+    try:
+        resolution = ToolPermissionResolver().resolve(tool_def, context=context if isinstance(context, dict) else {})
+    except Exception:
+        return context, None
+    permission = str(resolution.get("permission") or "auto").strip().lower()
+    if permission == "auto":
+        return context, None
+    decision = {
+        "tool_name": tool_name,
+        "action": resolution.get("action_class"),
+        "status": "denied" if permission == "block" else "approval_required",
+        "mode": permission,
+        "risk": resolution.get("minimum_permission"),
+        "risk_level": "high" if permission == "block" else "medium",
+        "matched_by": "frontend_settings",
+        "matched_value": resolution.get("service_id"),
+        "reason": "blocked by Settings" if permission == "block" else "confirmation required by Settings",
+        "audit_required": True,
+    }
+    _audit_frontend_tool_permission(context, decision, resolution)
+    if permission == "block":
+        return context, _tool_permission_denied_result(tool_def, arguments, decision)
+    if permission != "confirm":
+        return context, None
+    approved_context, approval_error = _context_with_frontend_tool_permission_token(
+        context,
+        tool_def,
+        arguments,
+        decision,
+    )
+    if approval_error is not None:
+        return approved_context, approval_error
+    if isinstance(approved_context, dict) and approved_context.get("_frontend_tool_permission_approved") is True:
+        return approved_context, None
+    return context, _approval_required_tool_response(tool_def, arguments or {}, context)
+
+
+def _context_with_frontend_tool_permission_token(context, tool_def, arguments, decision):
+    next_context = dict(context or {}) if isinstance(context, dict) else {}
+    if _is_policy_allow_context(next_context):
+        next_context["_frontend_tool_permission_approved"] = True
+        return next_context, None
+    token = _approval_token_from_context(next_context, tool_def, arguments) or _approval_token_from_arguments(arguments)
+    if not token:
+        return next_context, None
+    token_result = _verify_profile_tool_permission_token(next_context, tool_def, arguments, token)
+    verification = token_result.get("verification")
+    if verification is not None and verification.valid:
+        approved_context = _seal_profile_tool_permission_context(next_context, decision, source="frontend_settings_approval")
+        approved_context["_frontend_tool_permission_approved"] = True
+        return _attach_tool_approval_token(approved_context, tool_def, token_result), None
+    code = str(getattr(verification, "code", "") or "")
+    if code in _STALE_APPROVAL_TOKEN_CODES:
+        response = _approval_required_tool_response(tool_def, arguments or {}, next_context)
+        if isinstance(response.get("widget"), dict):
+            response["widget"]["stale_approval_token"] = True
+            response["widget"]["stale_approval_code"] = code
+        return next_context, response
+    return next_context, {
+        "result": getattr(verification, "message", None) or "approval token is invalid",
+        "is_error": True,
+        "widget": None,
+    }
+
+
 def _context_with_profile_tool_permission_allow(context, tool_def, arguments, decision):
     next_context = _seal_profile_tool_permission_context(context, decision, source="policy_allow")
     if not isinstance(tool_def, dict) or not _requires_approval(tool_def):
@@ -1912,6 +1993,27 @@ def _audit_profile_tool_permission(context, decision):
                 "risk_level": decision.get("risk_level"),
                 "matched_by": decision.get("matched_by"),
                 "matched_value": decision.get("matched_value"),
+                "reason": decision.get("reason"),
+            },
+        )
+    except Exception:
+        pass
+
+
+def _audit_frontend_tool_permission(context, decision, resolution):
+    if not isinstance(decision, dict) or decision.get("audit_required") is False:
+        return
+    try:
+        audit_tool_policy(
+            context if isinstance(context, dict) else {},
+            "frontend_tool_permission_decision",
+            {
+                "tool_name": decision.get("tool_name"),
+                "action": decision.get("action"),
+                "status": decision.get("status"),
+                "mode": decision.get("mode"),
+                "service_id": resolution.get("service_id") if isinstance(resolution, dict) else None,
+                "permission_sources": resolution.get("sources") if isinstance(resolution, dict) else None,
                 "reason": decision.get("reason"),
             },
         )

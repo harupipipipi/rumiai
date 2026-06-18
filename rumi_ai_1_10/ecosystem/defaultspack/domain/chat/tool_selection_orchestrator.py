@@ -20,11 +20,16 @@ class ToolSelectionOrchestrator:
         limit: int = 8,
         selected_model_capabilities: dict[str, Any] | None = None,
         settings: dict[str, Any] | None = None,
+        prefilter: bool = True,
     ) -> dict[str, Any]:
         allowed_tools = [tool for tool in tools if _tool_id(tool)]
         always_tools, vector_tools = split_tools_by_loading(allowed_tools)
-        candidate_ids = recommend_tool_ids(user_text, vector_tools, limit=min(20, max(limit, 1)))
-        candidates = [tool for tool in vector_tools if _tool_id(tool) in set(candidate_ids)]
+        if prefilter:
+            candidate_ids = recommend_tool_ids(user_text, vector_tools, limit=min(20, max(limit, 1)))
+            candidates = [tool for tool in vector_tools if _tool_id(tool) in set(candidate_ids)]
+        else:
+            candidates = list(vector_tools)
+            candidate_ids = [_tool_id(tool) for tool in candidates if _tool_id(tool)]
         if not candidates and not always_tools:
             return ToolSelectionResult(candidate_count=0).to_dict()
         always_recommendations = [
@@ -44,7 +49,7 @@ class ToolSelectionOrchestrator:
             ).to_dict()
         model_call = call_model(
             {
-                "model_hint": (settings or {}).get("utility_models", {}).get("tool_selector") if isinstance((settings or {}).get("utility_models"), dict) else "",
+                "model_hint": _tool_selector_model_hint(settings),
                 "question": (
                     "Select the minimum sufficient set of tools for the user message.\n"
                     "- Prefer read/search before write/execute.\n"
@@ -77,7 +82,7 @@ class ToolSelectionOrchestrator:
             not_selected=[],
             requires_tool_calling_model=bool(recommendations and supports_tools),
             candidate_count=len(always_tools) + len(candidates),
-            stage="utility_model" if isinstance(model_call, dict) and model_call.get("status") == "ok" else "keyword",
+            stage=("catalog_ai_direct" if not prefilter else "utility_model") if isinstance(model_call, dict) and model_call.get("status") == "ok" else "keyword",
         ).to_dict()
 
 
@@ -96,6 +101,16 @@ def _compact_tool(tool: dict[str, Any]) -> dict[str, Any]:
         "summary": tool.get("summary") or tool.get("description"),
         "tags": tool.get("tags", []),
     }
+
+
+def _tool_selector_model_hint(settings: dict[str, Any] | None) -> str:
+    if not isinstance(settings, dict):
+        return ""
+    models = settings.get("models") if isinstance(settings.get("models"), dict) else {}
+    utility_models = models.get("utility_models") if isinstance(models.get("utility_models"), dict) else None
+    if not isinstance(utility_models, dict):
+        utility_models = settings.get("utility_models") if isinstance(settings.get("utility_models"), dict) else {}
+    return str(utility_models.get("tool_selector") or "").strip()
 
 
 def _selected_ids(output: Any, fallback: list[str]) -> list[str]:

@@ -253,6 +253,9 @@ class ChatStore:
             if not isinstance(conv, dict):
                 continue
             self._normalize_conversation(str(conv.get("id") or ""), conv)
+            metadata = conv.get("metadata") if isinstance(conv.get("metadata"), dict) else {}
+            if metadata.get("hidden") is True:
+                continue
             if tag is not None and tag not in conv.get("tags", []):
                 continue
             if filter_tags and not all(item in conv.get("tags", []) for item in filter_tags):

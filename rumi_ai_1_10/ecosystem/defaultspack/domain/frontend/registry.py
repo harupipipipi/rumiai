@@ -2603,12 +2603,26 @@ class FrontendRegistry:
                 "default_mode": "auto",
                 "selection_strategy": "hybrid",
                 "semantic_backend": "auto",
+                "embedding_model": "",
                 "semantic_candidate_limit": 32,
                 "final_tool_limit": 8,
+                "catalog_ai_direct_limit": 80,
                 "selector_model": "",
                 "selector_trace": "summary",
                 "show_selection_summary": True,
                 "show_selection_reasons": False,
+                "show_selected_tools_in_answer": True,
+                "expand_selection_reasoning": False,
+                "standard_permissions": {
+                    "read": "auto",
+                    "search": "auto",
+                    "create": "confirm",
+                    "update": "confirm",
+                    "send": "confirm",
+                    "execute": "confirm",
+                    "computer": "confirm",
+                    "delete": "confirm",
+                },
                 "action_permissions": {
                     "read": "auto",
                     "search": "auto",
@@ -3141,9 +3155,28 @@ class FrontendRegistry:
         tools["semantic_backend"] = semantic_backend if semantic_backend in {"auto", "embedding", "lexical"} else "auto"
         selector_trace = str(tools.get("selector_trace") or "summary").strip().lower()
         tools["selector_trace"] = selector_trace if selector_trace in {"none", "summary", "full"} else "summary"
-        tools["selector_model"] = str(tools.get("selector_model") or "")
-        tools["show_selection_summary"] = self._setting_bool(tools.get("show_selection_summary"), True)
-        tools["show_selection_reasons"] = self._setting_bool(tools.get("show_selection_reasons"), False)
+        tools["embedding_model"] = str(tools.get("embedding_model") or "").strip()
+        models_settings = refreshed.setdefault("models", {})
+        if not isinstance(models_settings, dict):
+            models_settings = {}
+            refreshed["models"] = models_settings
+        utility_models = models_settings.setdefault("utility_models", {})
+        if not isinstance(utility_models, dict):
+            utility_models = {}
+            models_settings["utility_models"] = utility_models
+        selector_alias = str(tools.get("selector_model") or "").strip()
+        if selector_alias and not str(utility_models.get("tool_selector") or "").strip():
+            utility_models["tool_selector"] = selector_alias
+        tools["selector_model"] = str(utility_models.get("tool_selector") or selector_alias or "").strip()
+        show_summary = self._setting_bool(tools.get("show_selected_tools_in_answer", tools.get("show_selection_summary")), True)
+        show_reasons = self._setting_bool(tools.get("expand_selection_reasoning", tools.get("show_selection_reasons")), False)
+        tools["show_selection_summary"] = show_summary
+        tools["show_selection_reasons"] = show_reasons
+        tools["show_selected_tools_in_answer"] = show_summary
+        tools["expand_selection_reasoning"] = show_reasons
+        standard_permissions = tools.get("standard_permissions")
+        if not isinstance(standard_permissions, dict):
+            standard_permissions = {}
         action_permissions = tools.get("action_permissions")
         if not isinstance(action_permissions, dict):
             action_permissions = {}
@@ -3157,12 +3190,40 @@ class FrontendRegistry:
             "computer": "confirm",
             "delete": "confirm",
         }.items():
-            value = str(action_permissions.get(action) or default).strip().lower()
-            action_permissions[action] = value if value in {"auto", "confirm", "block"} else default
+            value = str(standard_permissions.get(action) or action_permissions.get(action) or default).strip().lower()
+            if action == "delete" and value == "auto":
+                value = "confirm"
+            value = value if value in {"auto", "confirm", "block"} else default
+            standard_permissions[action] = value
+            action_permissions[action] = value
+        tools["standard_permissions"] = standard_permissions
         tools["action_permissions"] = action_permissions
-        for key in ("service_permission_overrides",):
-            if not isinstance(tools.get(key), dict):
-                tools[key] = {}
+        service_permission_overrides = tools.get("service_permission_overrides")
+        if not isinstance(service_permission_overrides, dict):
+            service_permission_overrides = {}
+        sanitized_service_overrides: dict[str, dict[str, str] | str] = {}
+        for service_id, raw_override in service_permission_overrides.items():
+            clean_service_id = str(service_id).strip()
+            if not clean_service_id:
+                continue
+            if isinstance(raw_override, str):
+                value = raw_override.strip().lower()
+                if value in {"auto", "confirm", "block"}:
+                    sanitized_service_overrides[clean_service_id] = value
+                continue
+            if not isinstance(raw_override, dict):
+                continue
+            clean_override: dict[str, str] = {}
+            for action, raw_value in raw_override.items():
+                clean_action = str(action).strip()
+                value = str(raw_value or "").strip().lower()
+                if clean_action == "delete" and value == "auto":
+                    value = "confirm"
+                if clean_action and value in {"auto", "confirm", "block"}:
+                    clean_override[clean_action] = value
+            if clean_override:
+                sanitized_service_overrides[clean_service_id] = clean_override
+        tools["service_permission_overrides"] = sanitized_service_overrides
         pinned_service_ids = tools.get("pinned_service_ids")
         if not isinstance(pinned_service_ids, list):
             pinned_service_ids = []
@@ -3189,6 +3250,10 @@ class FrontendRegistry:
             tools["final_tool_limit"] = max(1, min(24, int(tools.get("final_tool_limit", tools.get("tool_assist_limit", 8)))))
         except (TypeError, ValueError):
             tools["final_tool_limit"] = 8
+        try:
+            tools["catalog_ai_direct_limit"] = max(20, min(200, int(tools.get("catalog_ai_direct_limit", 80))))
+        except (TypeError, ValueError):
+            tools["catalog_ai_direct_limit"] = 80
         legacy_default_target = self._legacy_default_target(refreshed)
         if "default_target" not in tools or (not str(tools.get("default_target") or "").strip() and legacy_default_target):
             tools["default_target"] = legacy_default_target

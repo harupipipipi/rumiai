@@ -26,6 +26,7 @@ from domain.tool.schema_adapter import tool_name_from_definition
 
 DEFAULT_SEMANTIC_CANDIDATE_LIMIT = 32
 DEFAULT_FINAL_TOOL_LIMIT = 8
+DEFAULT_CATALOG_AI_DIRECT_LIMIT = 80
 
 
 class ToolSelectionService:
@@ -116,6 +117,20 @@ class ToolSelectionService:
 
         if strategy == "all_with_hints":
             hints = self._semantic_candidates(user_text, eligible, context=context)
+            hint_candidates = self._tools_by_ids(eligible, list(hints.get("tool_ids") or []))
+            hint_selected_ids, hint_stage, hint_fallbacks, hint_recommendations = self._select_with_utility_model(
+                user_text,
+                hint_candidates or eligible[: self._catalog_ai_direct_limit()],
+                strategy=strategy,
+                fallback_ids=list(hints.get("tool_ids") or []),
+                context=context,
+                prefilter=False,
+            )
+            if not hint_recommendations:
+                hint_recommendations = [
+                    ToolRecommendation(tool_id=tool_id, confidence=0.5, reason="semantic hint")
+                    for tool_id in list(hints.get("tool_ids") or [])[: self._final_limit()]
+                ]
             selected = self._stable_merge(included, eligible)
             return self._decision(
                 mode=mode,
@@ -127,8 +142,13 @@ class ToolSelectionService:
                 started=started,
                 unknown_targets=unknown_targets,
                 permission_entries=permission_entries,
-                fallbacks=list(hints.get("fallbacks", [])),
-                metrics={"recommendation_order": list(hints.get("tool_ids", []))},
+                fallbacks=[*list(hints.get("fallbacks", [])), *hint_fallbacks],
+                recommendations=hint_recommendations,
+                metrics={
+                    "recommendation_order": hint_selected_ids or list(hints.get("tool_ids", [])),
+                    "recommended_tools": [item.to_dict() for item in hint_recommendations],
+                    "hint_stage": hint_stage,
+                },
                 cache_hit=bool(hints.get("cache_hit")),
             )
 
@@ -168,15 +188,26 @@ class ToolSelectionService:
             )
 
         if strategy == "catalog_ai":
-            candidates = eligible
+            direct_limit = self._catalog_ai_direct_limit()
+            if len(eligible) <= direct_limit:
+                candidates = eligible
+                selector_prefilter = False
+                selector_fallback_ids = [_tool_id(tool) for tool in eligible]
+            else:
+                candidates = self._stable_merge(included, semantic_candidates)
+                selector_prefilter = True
+                selector_fallback_ids = semantic_ids
         else:
             candidates = self._stable_merge(included, semantic_candidates)
+            selector_prefilter = True
+            selector_fallback_ids = semantic_ids
         selected_ids, stage, fallbacks, recommendations = self._select_with_utility_model(
             user_text,
             candidates,
             strategy=strategy,
-            fallback_ids=semantic_ids,
+            fallback_ids=selector_fallback_ids,
             context=context,
+            prefilter=selector_prefilter,
         )
         selected = self._stable_merge(included, self._tools_by_ids(eligible, selected_ids))[: self._final_limit()]
         if not selected and semantic_candidates:
@@ -263,11 +294,13 @@ class ToolSelectionService:
 
     def _semantic_candidates(self, user_text: str, tools: list[dict[str, Any]], *, context: dict[str, Any]) -> dict[str, Any]:
         backend = str(self._tool_settings.get("semantic_backend") or "auto").strip().lower() or "auto"
+        embedding_model = str(self._tool_settings.get("embedding_model") or "").strip()
         result = ToolEmbeddingIndex().search(
             user_text,
             tools,
             limit=self._semantic_limit(),
             backend=backend,
+            model=embedding_model,
         )
         fallbacks = []
         if result.get("fallback_reason"):
@@ -283,6 +316,7 @@ class ToolSelectionService:
         strategy: str,
         fallback_ids: list[str],
         context: dict[str, Any],
+        prefilter: bool = True,
     ) -> tuple[list[str], str, list[dict[str, Any]], list[ToolRecommendation]]:
         if not candidates:
             return [], "empty_candidates", [], []
@@ -294,6 +328,7 @@ class ToolSelectionService:
                 limit=limit,
                 selected_model_capabilities=context.get("selected_model_capabilities") if isinstance(context.get("selected_model_capabilities"), dict) else None,
                 settings=self._settings,
+                prefilter=prefilter,
             )
         except Exception as exc:
             return fallback_ids[:limit], "semantic_fallback", [{"stage": "utility_model", "reason": str(exc)}], [
@@ -387,6 +422,12 @@ class ToolSelectionService:
             return max(1, min(24, int(self._tool_settings.get("final_tool_limit", DEFAULT_FINAL_TOOL_LIMIT))))
         except (TypeError, ValueError):
             return DEFAULT_FINAL_TOOL_LIMIT
+
+    def _catalog_ai_direct_limit(self) -> int:
+        try:
+            return max(20, min(200, int(self._tool_settings.get("catalog_ai_direct_limit", DEFAULT_CATALOG_AI_DIRECT_LIMIT))))
+        except (TypeError, ValueError):
+            return DEFAULT_CATALOG_AI_DIRECT_LIMIT
 
     @staticmethod
     def _tools_by_ids(tools: list[dict[str, Any]], tool_ids: list[str]) -> list[dict[str, Any]]:
