@@ -39,6 +39,46 @@ function formatReadonlyValue(value: unknown, fallback: unknown): string {
   return String(resolved);
 }
 
+function hookStatusRows(value: unknown, fallback: unknown): Array<{ label: string; state: "on" | "off" | "missing" | "planned" | "ok"; detail: string }> {
+  return formatReadonlyValue(value, fallback)
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [rawLabel, ...rest] = line.split(":");
+      const detail = rest.join(":").trim();
+      const haystack = line.toLowerCase();
+      let state: "on" | "off" | "missing" | "planned" | "ok" = "missing";
+      if (haystack.includes("[planned]")) state = "planned";
+      else if (haystack.includes("token:missing") || haystack.includes("[missing]")) state = "missing";
+      else if (haystack.includes("[off]")) state = "off";
+      else if (haystack.includes("[on]") || haystack.includes("token:ok") || haystack.includes("auto post")) state = "on";
+      else if (haystack.includes("ok")) state = "ok";
+      return {
+        label: (rawLabel || line).trim(),
+        state,
+        detail: detail || line,
+      };
+    });
+}
+
+function HookStatusIcon({ state }: { state: ReturnType<typeof hookStatusRows>[number]["state"] }) {
+  if (state === "on" || state === "ok") {
+    return <Check size={14} className="text-emerald-300" />;
+  }
+  if (state === "planned") {
+    return <Loader2 size={14} className="text-zinc-500" />;
+  }
+  return <X size={14} className={state === "off" ? "text-zinc-500" : "text-amber-300"} />;
+}
+
+function hookStatusClass(state: ReturnType<typeof hookStatusRows>[number]["state"]): string {
+  if (state === "on" || state === "ok") return "border-emerald-500/25 bg-emerald-500/10";
+  if (state === "planned") return "border-zinc-800 bg-zinc-950/45";
+  if (state === "off") return "border-zinc-800 bg-zinc-900/35";
+  return "border-amber-500/25 bg-amber-500/10";
+}
+
 function colorFieldValue(value: unknown, fallback: unknown): string {
   const resolved = String(value ?? fallback ?? "#ffffff").trim();
   return /^#[0-9a-fA-F]{6}$/.test(resolved) ? resolved : "#ffffff";
@@ -877,6 +917,12 @@ function publicUrlConfig(value: unknown, fallback: unknown): Record<string, unkn
   return {};
 }
 
+function defaultLocalRumiUrl(): string {
+  return typeof window !== "undefined" && window.location?.origin
+    ? window.location.origin
+    : "http://127.0.0.1:8766";
+}
+
 function ProviderOAuthPanel({
   sectionId,
   fieldId,
@@ -1136,7 +1182,7 @@ function PublicUrlField({
 }) {
   const config = publicUrlConfig(value, field.default);
   const [providerId, setProviderId] = useState(String(config.provider_id ?? "cloudflare_quick_tunnel"));
-  const [localUrl, setLocalUrl] = useState(String(config.local_url ?? "http://127.0.0.1:8766"));
+  const [localUrl, setLocalUrl] = useState(String(config.local_url ?? defaultLocalRumiUrl()));
   const [routePath, setRoutePath] = useState(String(config.route_path ?? "/api/integrations/line/webhook"));
   const [result, setResult] = useState<Record<string, unknown> | null>(
     config.result && typeof config.result === "object" ? config.result as Record<string, unknown> : null,
@@ -1147,7 +1193,7 @@ function PublicUrlField({
   useEffect(() => {
     const next = publicUrlConfig(value, field.default);
     setProviderId(String(next.provider_id ?? "cloudflare_quick_tunnel"));
-    setLocalUrl(String(next.local_url ?? "http://127.0.0.1:8766"));
+    setLocalUrl(String(next.local_url ?? defaultLocalRumiUrl()));
     setRoutePath(String(next.route_path ?? "/api/integrations/line/webhook"));
     setResult(next.result && typeof next.result === "object" ? next.result as Record<string, unknown> : null);
   }, [field.default, value]);
@@ -1217,7 +1263,7 @@ function PublicUrlField({
             value={localUrl}
             onChange={(event) => setLocalUrl(event.target.value)}
             className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500"
-            placeholder="http://127.0.0.1:8766"
+            placeholder={defaultLocalRumiUrl()}
           />
         </label>
         <label className="space-y-1.5">
@@ -2677,6 +2723,28 @@ function SettingsField({
       );
       break;
     }
+    case "hook_status": {
+      const rows = hookStatusRows(value, field.default);
+      control = (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {rows.map((row) => (
+            <div
+              key={`${row.label}:${row.detail}`}
+              className={cn("flex min-w-0 items-start gap-2 rounded-lg border px-3 py-2", hookStatusClass(row.state))}
+            >
+              <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-current/20">
+                <HookStatusIcon state={row.state} />
+              </span>
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-zinc-100">{row.label}</div>
+                <div className="mt-0.5 break-words text-[11px] leading-5 text-zinc-400">{row.detail}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+      break;
+    }
     case "readonly":
       control = (
         <div className="group/readonly flex items-start justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
@@ -2841,7 +2909,7 @@ export function SettingsModalRenderer({
       key={`${activeSection?.id}.${field.id}`}
       className={cn(
         "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
-        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || String(field.type) === "api_key_setup" || field.type === "external_tokens" || field.type === "public_url" || field.type === "model_api_routes" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
+        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || String(field.type) === "api_key_setup" || field.type === "external_tokens" || field.type === "public_url" || field.type === "model_api_routes" || field.type === "hook_status" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
       )}
     >
       <SettingsFieldRendererHost

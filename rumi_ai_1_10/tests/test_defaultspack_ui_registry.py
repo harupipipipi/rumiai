@@ -884,9 +884,17 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("external_input", sections)
         self.assertIn("external_output", sections)
         self.assertIn("external_custom", sections)
+        self.assertIn("hook", sections)
         self.assertNotIn("external_inputs", sections)
+        hook_fields = {field["id"]: field for field in sections["hook"]["fields"]}
         input_fields = {field["id"]: field for field in sections["external_input"]["fields"]}
         output_fields = {field["id"]: field for field in sections["external_output"]["fields"]}
+        self.assertEqual(hook_fields["hook_status_summary"]["type"], "hook_status")
+        self.assertEqual(hook_fields["answer_model"]["type"], "select")
+        self.assertEqual(hook_fields["trigger_model"]["type"], "select")
+        self.assertEqual(hook_fields["response_trigger_mode"]["type"], "select")
+        self.assertEqual(hook_fields["line_auto_post_on_reply_failure"]["type"], "toggle")
+        self.assertEqual(hook_fields["line_model"]["advanced"], True)
         self.assertEqual(input_fields["input_setup_guide"]["type"], "readonly")
         self.assertEqual(input_fields["input_provider"]["type"], "select")
         self.assertEqual(input_fields["input_template_id"]["type"], "select")
@@ -909,6 +917,11 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertNotIn("textarea", {field["type"] for field in input_fields.values()})
         self.assertNotIn("textarea", {field["type"] for field in output_fields.values()})
         self.assertEqual(sections["external_custom"]["fields"][-1]["type"], "textarea")
+        self.assertTrue(values["hook"]["enabled"])
+        self.assertEqual(values["hook"]["response_trigger_mode"], "always")
+        self.assertEqual(values["hook"]["trigger_prefix"], "#")
+        self.assertFalse(values["hook"]["line_auto_post_on_reply_failure"])
+        self.assertIn("line:", values["hook"]["hook_status_summary"])
         self.assertTrue(values["external_input"]["include_source_context"])
         self.assertEqual(values["external_input"]["default_response_mode"], "same_response")
         self.assertEqual(values["external_input"]["input_provider"], "line")
@@ -935,15 +948,20 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         updated = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT)._refresh_derived_settings(
             {
                 **values,
-                "external_input": {
-                    **values["external_input"],
-                    "input_provider": "slack",
-                    "input_endpoint_id": "slack-main",
+                "hook": {
+                    **values["hook"],
+                    "response_trigger_mode": "auto",
+                    "line_auto_post_on_reply_failure": True,
+                    "line_progress_notice_seconds": 80,
                 },
+                "external_input": {**values["external_input"], "input_provider": "slack", "input_endpoint_id": "slack-main"},
                 "external_output": {**values["external_output"], "output_provider": "discord"},
             }
         )
 
+        self.assertEqual(updated["hook"]["response_trigger_mode"], "auto")
+        self.assertTrue(updated["hook"]["line_auto_post_on_reply_failure"])
+        self.assertEqual(updated["hook"]["line_progress_notice_seconds"], 55)
         self.assertEqual(updated["external_input"]["input_template_id"], "slack.input.default")
         self.assertEqual(
             updated["external_input"]["public_url_launcher"]["route_path"],
@@ -976,6 +994,28 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         custom = next(row for row in rows if row["provider_id"] == "xiaomi-token-plan-sgp")
         self.assertEqual(custom["tokens"][0]["provider_id"], "xiaomi-token-plan-sgp")
         self.assertEqual(custom["tokens"][0]["token_id"], "main")
+
+    def test_external_public_url_defaults_to_runtime_port(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with patch.dict(os.environ, {"DEFAULTS_HTTP_HOST": "0.0.0.0", "DEFAULTS_HTTP_PORT": "18768"}, clear=False):
+            values = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT)._refresh_derived_settings(
+                {
+                    "external_input": {
+                        "public_url_launcher": {
+                            "provider_id": "cloudflare_quick_tunnel",
+                            "local_url": "http://127.0.0.1:8766",
+                        }
+                    },
+                    "external_output": {},
+                    "hook": {},
+                }
+            )
+
+        self.assertEqual(
+            values["external_input"]["public_url_launcher"]["local_url"],
+            "http://127.0.0.1:18768",
+        )
 
     def test_update_settings_persists_sidebar_user_data(self):
         from domain.frontend.registry import FrontendRegistry
@@ -1722,7 +1762,18 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("think", ids)
         self.assertIn("deepthink", ids)
         self.assertIn("compact", ids)
+        self.assertIn("change", ids)
+        self.assertIn("newchat", ids)
+        self.assertIn("approvals", ids)
         self.assertIn("commit", ids)
+        self.assertEqual(
+            next(command for command in commands if command["id"] == "model")["template_id"],
+            "rumi.composer.default",
+        )
+        self.assertEqual(
+            next(command for command in commands if command["id"] == "change")["execution"]["action"],
+            "line_change_chat",
+        )
         self.assertEqual(
             next(command for command in commands if command["id"] == "commit")["risk"], "high"
         )

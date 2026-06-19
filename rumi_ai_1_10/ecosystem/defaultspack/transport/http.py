@@ -1082,6 +1082,9 @@ class DefaultsHttpServer:
         if os.path.isfile(shell_path):
             with open(shell_path, "r", encoding="utf-8") as f:
                 body = f.read()
+            bootstrap_script = _defaultspack_frontend_bootstrap_script()
+            if bootstrap_script:
+                body = body.replace("<body>", "<body>\n    " + bootstrap_script, 1)
             ui_dir = os.path.dirname(shell_path)
             for asset_name in ("shell-app.css", "shell-app.js"):
                 asset_path = os.path.join(ui_dir, asset_name)
@@ -1246,6 +1249,15 @@ def _configured_local_auth_token():
         if value:
             return value
     return ""
+
+
+def _defaultspack_frontend_bootstrap_script():
+    token = _configured_local_auth_token()
+    if not token:
+        return ""
+    payload = json.dumps({"localAuthToken": token}, ensure_ascii=False)
+    payload = payload.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    return "<script>window.__RUMI_DEFAULTSPACK_BOOTSTRAP__ = " + payload + ";</script>"
 
 
 def _bearer_token(headers):

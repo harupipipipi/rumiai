@@ -3236,6 +3236,16 @@ function ChatApp() {
       .catch((updateError) => setError(updateError instanceof Error ? updateError.message : "会話メタデータの更新に失敗しました。"));
   };
 
+  const copyChatIdToClipboard = useCallback((conversationId: string | null) => {
+    if (!conversationId) {
+      setError("コピーする chatid がありません。");
+      return;
+    }
+    void navigator.clipboard?.writeText(conversationId).catch(() => {
+      setError("chatid のコピーに失敗しました。");
+    });
+  }, []);
+
   const closeSpotlight = () => {
     setIsSpotlightOpen(false);
     setSpotlightQuery("");
@@ -4412,14 +4422,7 @@ function ChatApp() {
         result = await api.exportConversation(activeConversationId, String(action.payload?.format ?? "markdown"));
       } else if (action.id === "conversation.share") {
         if (!activeConversationId) throw new Error("共有する会話がありません。");
-        const exported = await api.exportConversation(activeConversationId, "markdown");
-        result = await api.createShare({
-          target_type: "conversation",
-          target_id: activeConversationId,
-          title: activeChatTitle,
-          content: exported.content,
-          visibility: "local",
-        });
+        result = activeConversationId;
       } else if (action.id === "artifacts.list") {
         result = await api.listArtifacts();
       } else if (action.id === "research.web") {
@@ -5201,6 +5204,7 @@ function ChatApp() {
               isKanbanActive={isKanbanMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
+              onCopyChatId={copyChatIdToClipboard}
               onMinimize={() => setIsHistoryMinimized(true)}
             />
           </div>
@@ -5229,6 +5233,7 @@ function ChatApp() {
               isKanbanActive={isKanbanMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
+              onCopyChatId={copyChatIdToClipboard}
               onRestore={() => setIsHistoryMinimized(false)}
               isCompact
             />
@@ -5251,9 +5256,11 @@ function ChatApp() {
             {showRegion("chat_header") && isChatWorkspace && !isCalendarMode && !isKanbanMode && (
               <Renderers.chatHeader
                 title={activeWorkspaceTab ? workspaceTabDisplayTitle(activeWorkspaceTab) : activeChatTitle}
+                conversationId={activeConversationId}
                 showPreview={effectiveShowPreview}
                 canShowPreview={showRegion("activity_preview") && canShowCanvas}
                 canOpenSettings={showRegion("settings_modal")}
+                onCopyChatId={() => copyChatIdToClipboard(activeConversationId)}
                 onTogglePreview={() => {
                   if (canShowCanvas) setShowPreview((value) => !value);
                 }}

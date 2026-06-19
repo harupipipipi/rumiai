@@ -100,6 +100,7 @@ domains:
     path: domain/extensions
   external:
     may_import:
+    - domain/chat
     - domain/components
     - domain/input
     - domain/integrations
@@ -166,8 +167,11 @@ domains:
     path: domain/input_profiles
   integrations:
     may_import:
+    - domain/ai_client
     - domain/external
+    - domain/frontend
     - domain/input
+    - domain/safety
     - domain/webhook
     path: domain/integrations
   knowledge:

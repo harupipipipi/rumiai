@@ -1,29 +1,5 @@
 [
   {
-    "id": "help",
-    "name": "help",
-    "label": "Help",
-    "description": "Show slash command help.",
-    "category": "chat",
-    "visibility": "default",
-    "risk": "low",
-    "modes": ["chat", "coding", "agent"],
-    "execution": { "type": "frontend", "action": "open_command_help" }
-  },
-  {
-    "id": "model",
-    "name": "model",
-    "aliases": ["models"],
-    "label": "Model",
-    "description": "Select or search the active model.",
-    "category": "model",
-    "visibility": "default",
-    "risk": "low",
-    "modes": ["chat", "coding", "agent"],
-    "args": [{ "name": "query", "type": "string", "required": false }],
-    "execution": { "type": "model_command", "action": "select_or_suggest_model" }
-  },
-  {
     "id": "think",
     "name": "think",
     "aliases": ["thinking", "t"],
@@ -177,17 +153,6 @@
     "modes": ["chat", "coding", "agent"],
     "args": [{ "name": "query", "type": "string", "required": false }],
     "execution": { "type": "frontend", "action": "open_tool_picker" }
-  },
-  {
-    "id": "status",
-    "name": "status",
-    "label": "Status",
-    "description": "Show model, mode, tools, and context status.",
-    "category": "chat",
-    "visibility": "default",
-    "risk": "low",
-    "modes": ["chat", "coding", "agent"],
-    "execution": { "type": "frontend", "action": "show_status" }
   },
   {
     "id": "settings",
@@ -415,17 +380,6 @@
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
     "execution": { "type": "frontend", "action": "open_permissions" }
-  },
-  {
-    "id": "approvals",
-    "name": "approvals",
-    "label": "Approvals",
-    "description": "Open approval center.",
-    "category": "settings",
-    "visibility": "advanced",
-    "risk": "low",
-    "modes": ["chat", "coding", "agent"],
-    "execution": { "type": "frontend", "action": "open_approvals" }
   },
   {
     "id": "usage",

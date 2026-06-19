@@ -103,6 +103,7 @@ def test_template_catalog_projects_composer_surface_pieces():
         assert key in catalog
 
     command = next(item for item in catalog["commands"] if item.get("id") == "context_txt")
+    command_ids = {item.get("id") for item in catalog["commands"]}
     composer_input = next(
         item for item in catalog["composer_inputs"] if item.get("id") == "default_composer"
     )
@@ -119,6 +120,28 @@ def test_template_catalog_projects_composer_surface_pieces():
         "qualified_name": "defaultspack:chat.materialize_context",
         "mode": "materialize_txt",
     }
+    assert {
+        "help",
+        "model",
+        "status",
+        "change",
+        "newchat",
+        "approvals",
+        "approve",
+        "deny",
+        "context_txt",
+    }.issubset(command_ids)
+    assert composer_input["commands"] == [
+        "help",
+        "model",
+        "status",
+        "change",
+        "newchat",
+        "approvals",
+        "approve",
+        "deny",
+        "context_txt",
+    ]
     assert composer_input["region_id"] == "composer"
     assert composer_input["renderer"] == "composer"
     assert shell_region["renderer"] == "composer"

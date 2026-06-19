@@ -501,7 +501,7 @@ def test_external_integration_routes_are_registered():
     assert "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots" in patterns
 
 
-def test_slack_event_creates_external_conversation(tmp_path, monkeypatch):
+def test_slack_newchat_creates_external_conversation(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.integrations.slack import run
 
@@ -525,7 +525,7 @@ def test_slack_event_creates_external_conversation(tmp_path, monkeypatch):
                 "channel": "C1",
                 "user": "U1",
                 "ts": "1.0",
-                "text": "hello from slack",
+                "text": "/newchat",
             },
             "model": "stub/default",
             "tools": [],
@@ -536,14 +536,17 @@ def test_slack_event_creates_external_conversation(tmp_path, monkeypatch):
     assert result["status"] == "ok"
     data = result["data"]
     assert data["status"] == "ok"
+    assert data["external_chat_link"]["action"] == "newchat"
     assert data["reply"]["sent"] is False
 
     stored = json.loads(storage_path.read_text(encoding="utf-8"))
-    conversation = stored["conversations"][data["conversation_id"]]
+    conversation_id = data["external_chat_link"]["conversation_id"]
+    conversation = stored["conversations"][conversation_id]
     assert conversation["conversation_kind"] == "external"
     assert conversation["model"] == "stub/default"
     assert "integration:slack" in conversation["tags"]
-    assert conversation["messages"][0]["metadata"]["external"]["provider"] == "slack"
+    assert conversation["metadata"]["external_chat_link"]["provider"] == "slack"
+    assert conversation["metadata"]["external_chat_link"]["source_id"] == "C1"
     ChatStore._instance = None
 
 

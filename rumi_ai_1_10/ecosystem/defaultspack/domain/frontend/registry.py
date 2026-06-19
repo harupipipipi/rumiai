@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import importlib
 import json
+import os
 import re
 from copy import deepcopy
 from pathlib import Path
@@ -33,6 +34,14 @@ from transport.registry import (
     template_http_route_specs,
     template_route_diagnostics,
 )
+
+
+def _default_local_rumi_url() -> str:
+    port = str(os.environ.get("RUMI_DEFAULTSPACK_PORT") or os.environ.get("DEFAULTS_HTTP_PORT") or "8766").strip()
+    host = str(os.environ.get("DEFAULTS_HTTP_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    if host in {"0.0.0.0", "::"}:
+        host = "127.0.0.1"
+    return f"http://{host}:{port or '8766'}"
 
 
 class FrontendRegistry:
@@ -749,11 +758,13 @@ class FrontendRegistry:
         *,
         template_catalog: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
+        default_local_url = _default_local_rumi_url()
         external_template_catalog = self._external_io_template_catalog(template_catalog)
         input_templates = external_template_catalog.get("input") if isinstance(external_template_catalog.get("input"), list) else []
         output_templates = external_template_catalog.get("output") if isinstance(external_template_catalog.get("output"), list) else []
         input_profile_options = self._input_profile_options()
         output_profile_options = self._output_profile_options()
+        model_options = [{"value": "", "label": "Use default model"}, *self._model_options()]
         sections = [
             {
                 "id": "general",
@@ -1186,6 +1197,110 @@ class FrontendRegistry:
                 ],
             },
             {
+                "id": "hook",
+                "label": "Hook",
+                "description": "LINE, Discord, Slackなどの外部hook入口と返信モデルをまとめます。",
+                "fields": [
+                    {
+                        "id": "hook_status_summary",
+                        "label": "Hook Status",
+                        "type": "hook_status",
+                        "default": "LINE [missing], Discord [missing], Slack [missing], Telegram [planned], WeChat [planned]",
+                        "help": "有効/無効、token未設定、未実装予定のproviderをまとめて表示します。",
+                    },
+                    {
+                        "id": "enabled",
+                        "label": "Hook Enabled",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "OFFにするとLINE hookの自動応答を止めます。",
+                    },
+                    {
+                        "id": "answer_model",
+                        "label": "Default Reply Model",
+                        "type": "select",
+                        "default": "",
+                        "options": model_options,
+                        "help": "Hook返信の既定モデル。空なら通常のデフォルトモデル/endpoint設定を使います。",
+                    },
+                    {
+                        "id": "response_trigger_mode",
+                        "label": "Reaction Mode",
+                        "type": "select",
+                        "default": "always",
+                        "options": [
+                            {"value": "always", "label": "Always reply"},
+                            {"value": "prefix", "label": "Prefix only"},
+                            {"value": "auto", "label": "AI decides"},
+                        ],
+                        "help": "autoは判断モデルで自分が呼ばれているか判定します。",
+                    },
+                    {
+                        "id": "trigger_model",
+                        "label": "Judge Model",
+                        "type": "select",
+                        "default": "",
+                        "options": model_options,
+                        "help": "Reaction Modeがautoの時だけ使う判断モデル。空ならデフォルトモデル。",
+                    },
+                    {
+                        "id": "trigger_prefix",
+                        "label": "Prefix",
+                        "type": "text",
+                        "default": "#",
+                        "help": "Prefix only時に、この文字列で始まるLINEメッセージだけに反応します。",
+                    },
+                    {
+                        "id": "line_auto_post_on_reply_failure",
+                        "label": "LINE Auto Post",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "reply期限切れ/使用済みなら同じLINE sourceへpush/postします。",
+                    },
+                    {
+                        "id": "line_progress_post_enabled",
+                        "label": "40s Progress Post",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "40秒経っても処理中なら、push/post可能な時だけ通知します。",
+                    },
+                    {
+                        "id": "line_slash_commands_enabled",
+                        "label": "LINE Slash Commands",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "/model で現在の応答モデルや判断モデルを確認できます。",
+                    },
+                    {
+                        "id": "line_model",
+                        "label": "LINE Reply Model",
+                        "type": "select",
+                        "default": "",
+                        "options": model_options,
+                        "advanced": True,
+                        "help": "LINEだけ別モデルにしたい時に使います。空ならDefault Reply Model。",
+                    },
+                    {
+                        "id": "line_progress_notice_seconds",
+                        "label": "Progress Seconds",
+                        "type": "number",
+                        "default": 40,
+                        "min": 5,
+                        "max": 55,
+                        "advanced": True,
+                        "help": "LINE progress通知の秒数。replyToken期限を避けるため55秒以下です。",
+                    },
+                    {
+                        "id": "line_reply_guidance_prompt_enabled",
+                        "label": "Reply Guidance Prompt",
+                        "type": "toggle",
+                        "default": True,
+                        "advanced": True,
+                        "help": "replyは短命・1回のみ、長いタスクは許可確認、期限切れはpush提案、という短い指示をAIへ渡します。",
+                    },
+                ],
+            },
+            {
                 "id": "external_input",
                 "label": "External Input",
                 "description": "Webhookで受ける入口。LINE は Messaging API channel の webhook として受けます。",
@@ -1245,7 +1360,7 @@ class FrontendRegistry:
                         "type": "public_url",
                         "default": {
                             "provider_id": "cloudflare_quick_tunnel",
-                            "local_url": "http://127.0.0.1:8766",
+                            "local_url": default_local_url,
                             "route_path": "/api/integrations/line/webhook",
                         },
                         "help": "LINE/Slack/DiscordのWebhook URL欄へ貼る一時公開URLを発行します。Cloudflareはprovider実装の1つです。",
@@ -2503,6 +2618,7 @@ class FrontendRegistry:
         return normalized
 
     def _default_settings(self) -> dict[str, Any]:
+        default_local_url = _default_local_rumi_url()
         return {
             "general": {
                 "composer_placeholder": "メッセージを入力...",
@@ -2536,6 +2652,20 @@ class FrontendRegistry:
             },
             "commands": {
                 "show_advanced_commands": False,
+            },
+            "hook": {
+                "hook_status_summary": "LINE [missing], Discord [missing], Slack [missing], Telegram [planned], WeChat [planned]",
+                "enabled": True,
+                "answer_model": "",
+                "response_trigger_mode": "always",
+                "trigger_model": "",
+                "trigger_prefix": "#",
+                "line_auto_post_on_reply_failure": False,
+                "line_progress_post_enabled": True,
+                "line_slash_commands_enabled": True,
+                "line_model": "",
+                "line_progress_notice_seconds": 40,
+                "line_reply_guidance_prompt_enabled": True,
             },
             "tools": {
                 "settings_version": 2,
@@ -2583,7 +2713,7 @@ class FrontendRegistry:
                 "input_endpoint_id": "line-main",
                 "public_url_launcher": {
                     "provider_id": "cloudflare_quick_tunnel",
-                    "local_url": "http://127.0.0.1:8766",
+                    "local_url": default_local_url,
                     "route_path": "/api/integrations/line/webhook",
                 },
                 "provider_route_copy": (
@@ -3123,6 +3253,26 @@ class FrontendRegistry:
             if legacy_routes and not models.get("model_api_routes"):
                 models["model_api_routes"] = legacy_routes
         refreshed["models"] = ModelRuntimeSettingsService(self._pack_root).refresh_models_settings(models)
+        hook = refreshed.setdefault("hook", {})
+        if not isinstance(hook, dict):
+            hook = {}
+            refreshed["hook"] = hook
+        hook["enabled"] = bool(hook.get("enabled", True))
+        hook["answer_model"] = str(hook.get("answer_model") or "").strip()
+        hook["trigger_model"] = str(hook.get("trigger_model") or "").strip()
+        hook["line_model"] = str(hook.get("line_model") or "").strip()
+        trigger_mode = str(hook.get("response_trigger_mode") or hook.get("trigger_mode") or "always").strip().lower()
+        if trigger_mode in {"ai", "llm"}:
+            trigger_mode = "auto"
+        hook["response_trigger_mode"] = trigger_mode if trigger_mode in {"always", "prefix", "auto"} else "always"
+        hook["trigger_prefix"] = str(hook.get("trigger_prefix") or "#").strip() or "#"
+        hook["line_auto_post_on_reply_failure"] = bool(hook.get("line_auto_post_on_reply_failure", False))
+        hook["line_progress_post_enabled"] = bool(hook.get("line_progress_post_enabled", True))
+        hook["line_slash_commands_enabled"] = bool(hook.get("line_slash_commands_enabled", True))
+        hook["line_reply_guidance_prompt_enabled"] = bool(hook.get("line_reply_guidance_prompt_enabled", True))
+        hook["line_progress_notice_seconds"] = int(
+            self._clamped_float(hook.get("line_progress_notice_seconds"), 40, 5, 55)
+        )
         line = refreshed.setdefault("line", {})
         if not isinstance(line, dict):
             line = {}
@@ -3152,11 +3302,13 @@ class FrontendRegistry:
         ).list_endpoints()
         input_profiles = InputProfileRegistry(self._pack_root).list_profiles()
         output_profiles = OutputProfileRegistry(self._pack_root).list_profiles()
+        token_status = external_token_status(pack_root=self._pack_root)
         template_catalog = self._template_catalog_metadata()
         external_template_catalog = self._external_io_template_catalog(template_catalog)
         input_templates = external_template_catalog.get("input") if isinstance(external_template_catalog.get("input"), list) else []
         output_templates = external_template_catalog.get("output") if isinstance(external_template_catalog.get("output"), list) else []
         enabled_count = sum(1 for endpoint in endpoints if endpoint.get("enabled"))
+        hook["hook_status_summary"] = self._hook_status_summary(endpoints, token_status, hook)
         self._sync_external_input_selection(external_input, input_templates, endpoints=endpoints)
         self._sync_external_output_selection(external_output, output_templates)
         external_input.setdefault(
@@ -3178,14 +3330,16 @@ class FrontendRegistry:
             "public_url_launcher",
             {
                 "provider_id": "cloudflare_quick_tunnel",
-                "local_url": "http://127.0.0.1:8766",
+                "local_url": _default_local_rumi_url(),
                 "route_path": self._route_for_input_provider(str(external_input.get("input_provider") or "line"), input_templates),
             },
         )
         if isinstance(external_input.get("public_url_launcher"), dict):
             public_url_launcher = external_input["public_url_launcher"]
             public_url_launcher.setdefault("provider_id", "cloudflare_quick_tunnel")
-            public_url_launcher.setdefault("local_url", "http://127.0.0.1:8766")
+            current_local_url = str(public_url_launcher.get("local_url") or "").strip()
+            if not current_local_url or current_local_url == "http://127.0.0.1:8766":
+                public_url_launcher["local_url"] = _default_local_rumi_url()
             public_url_launcher["route_path"] = self._route_for_input_provider(str(external_input.get("input_provider") or "line"), input_templates)
         external_input["provider_route_copy"] = self._provider_route_copy(input_templates)
         external_input["input_template_summary"] = self._template_summary(input_templates)
@@ -3205,7 +3359,7 @@ class FrontendRegistry:
                 "Web/local: 外部投稿せず、chat historyやlocal保存に寄せる"
             ),
         )
-        external_output["external_tokens"] = external_token_status(pack_root=self._pack_root)
+        external_output["external_tokens"] = token_status
         external_output.setdefault("output_provider", "line")
         external_output.setdefault("output_template_id", "line.output.default")
         external_output.setdefault("output_profile_id", "line.default")
@@ -3413,6 +3567,47 @@ class FrontendRegistry:
         mode = self._output_mode_for_template(template)
         if mode:
             values.setdefault("output_send_mode", mode)
+
+    @staticmethod
+    def _hook_status_summary(endpoints: list[dict[str, Any]], token_status: list[dict[str, Any]], hook: dict[str, Any]) -> str:
+        endpoint_state: dict[str, str] = {}
+        for endpoint in endpoints:
+            if not isinstance(endpoint, dict):
+                continue
+            provider = str(endpoint.get("kind") or "").strip()
+            if not provider:
+                continue
+            current = endpoint_state.get(provider)
+            state = "on" if endpoint.get("enabled") else "off"
+            if current != "on":
+                endpoint_state[provider] = state
+        required: dict[str, list[dict[str, Any]]] = {}
+        for row in token_status:
+            if not isinstance(row, dict):
+                continue
+            provider = str(row.get("provider_id") or "").strip()
+            if provider:
+                required.setdefault(provider, []).extend(
+                    item
+                    for item in (row.get("required_tokens") if isinstance(row.get("required_tokens"), list) else [])
+                    if isinstance(item, dict)
+                )
+
+        def token_state(provider: str) -> str:
+            items = required.get(provider, [])
+            if not items:
+                return "missing"
+            return "ok" if all(bool(item.get("configured")) for item in items) else "missing"
+
+        rows = []
+        for provider in ("line", "discord", "slack"):
+            enabled = endpoint_state.get(provider, "off")
+            tokens = token_state(provider)
+            rows.append(f"{provider}: [{enabled}] token:{tokens}")
+        rows.append("telegram: [planned]")
+        rows.append("wechat: [planned]")
+        rows.append(f"reply-fallback: {'auto post' if hook.get('line_auto_post_on_reply_failure') else 'ask/log'}")
+        return "\n".join(rows)
 
     def _external_sources_summary(self) -> str:
         try:

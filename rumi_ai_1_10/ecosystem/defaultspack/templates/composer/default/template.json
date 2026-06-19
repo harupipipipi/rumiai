@@ -75,15 +75,161 @@
           "context_preview": true
         },
         "commands": [
+          "help",
+          "model",
+          "status",
+          "change",
+          "newchat",
+          "approvals",
+          "approve",
+          "deny",
           "context_txt"
         ],
         "context_policy": "materialize_txt"
       }
     },
     {
-      "id": "context_txt_command",
+      "id": "help_command",
       "kind": "composer_command",
       "order": 53,
+      "command": {
+        "id": "help",
+        "name": "help",
+        "label": "Help",
+        "description": "Show slash command help.",
+        "category": "chat",
+        "visibility": "default",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "execution": { "type": "frontend", "action": "open_command_help" }
+      }
+    },
+    {
+      "id": "model_command",
+      "kind": "composer_command",
+      "order": 54,
+      "command": {
+        "id": "model",
+        "name": "model",
+        "aliases": ["models"],
+        "label": "Model",
+        "description": "Select or search the active model.",
+        "category": "model",
+        "visibility": "default",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "args": [{ "name": "query", "type": "string", "required": false }],
+        "execution": { "type": "model_command", "action": "select_or_suggest_model" }
+      }
+    },
+    {
+      "id": "status_command",
+      "kind": "composer_command",
+      "order": 55,
+      "command": {
+        "id": "status",
+        "name": "status",
+        "label": "Status",
+        "description": "Show model, mode, tools, and context status.",
+        "category": "chat",
+        "visibility": "default",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "execution": { "type": "frontend", "action": "show_status" }
+      }
+    },
+    {
+      "id": "change_chat_command",
+      "kind": "composer_command",
+      "order": 56,
+      "command": {
+        "id": "change",
+        "name": "change",
+        "aliases": ["chatid", "usechat"],
+        "label": "Change Chat",
+        "description": "Continue a specific chat id from an external conversation.",
+        "category": "chat",
+        "visibility": "default",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "args": [{ "name": "chatid", "type": "string", "required": false }],
+        "execution": { "type": "frontend", "action": "line_change_chat" }
+      }
+    },
+    {
+      "id": "newchat_command",
+      "kind": "composer_command",
+      "order": 57,
+      "command": {
+        "id": "newchat",
+        "name": "newchat",
+        "aliases": ["new_chat", "new-chat"],
+        "label": "New External Chat",
+        "description": "Start a new chat for the current external conversation.",
+        "category": "chat",
+        "visibility": "default",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "execution": { "type": "frontend", "action": "external_new_chat" }
+      }
+    },
+    {
+      "id": "approvals_command",
+      "kind": "composer_command",
+      "order": 58,
+      "command": {
+        "id": "approvals",
+        "name": "approvals",
+        "aliases": ["approval", "pending"],
+        "label": "Approvals",
+        "description": "Open approval center or list pending approvals from external chat.",
+        "category": "settings",
+        "visibility": "advanced",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "execution": { "type": "frontend", "action": "open_approvals" }
+      }
+    },
+    {
+      "id": "approve_command",
+      "kind": "composer_command",
+      "order": 59,
+      "command": {
+        "id": "approve",
+        "name": "approve",
+        "aliases": ["allow", "ok"],
+        "label": "Approve",
+        "description": "Approve a pending operation from an external chat.",
+        "category": "settings",
+        "visibility": "advanced",
+        "risk": "medium",
+        "modes": ["chat", "coding", "agent"],
+        "args": [{ "name": "request", "type": "string", "required": false }],
+        "execution": { "type": "frontend", "action": "approve_pending_operation" }
+      }
+    },
+    {
+      "id": "deny_command",
+      "kind": "composer_command",
+      "order": 60,
+      "command": {
+        "id": "deny",
+        "name": "deny",
+        "aliases": ["reject", "no"],
+        "label": "Deny",
+        "description": "Deny a pending operation from an external chat.",
+        "category": "settings",
+        "visibility": "advanced",
+        "risk": "medium",
+        "modes": ["chat", "coding", "agent"],
+        "args": [{ "name": "request", "type": "string", "required": false }],
+        "execution": { "type": "frontend", "action": "deny_pending_operation" }
+      }
+    },
+    {
+      "id": "context_txt_command",
+      "kind": "composer_command",
+      "order": 61,
       "command": {
         "id": "context_txt",
         "name": "context_txt",
@@ -122,7 +268,7 @@
     {
       "id": "materialize_txt_policy",
       "kind": "context_policy",
-      "order": 54,
+      "order": 62,
       "policy": {
         "id": "materialize_txt",
         "mode": "materialize_txt",
@@ -136,7 +282,7 @@
     {
       "id": "default_tool_policy",
       "kind": "tool_policy",
-      "order": 55,
+      "order": 63,
       "policy": {
         "id": "default_tools",
         "toggleable": true,
@@ -156,7 +302,7 @@
     {
       "id": "default_ai_input",
       "kind": "ai_input",
-      "order": 56,
+      "order": 64,
       "input": {
         "id": "default_ai_input",
         "composer_input": "default_composer",
@@ -171,7 +317,7 @@
     {
       "id": "web_search_toggle",
       "kind": "composer_widget",
-      "order": 57,
+      "order": 65,
       "widget": {
         "id": "web_search_toggle",
         "tool_id": "web_search",
@@ -184,7 +330,7 @@
     {
       "id": "tools_settings_section",
       "kind": "settings_section",
-      "order": 57,
+      "order": 66,
       "section_id": "tools",
       "label": "Tools",
       "description": "Tool composer defaults and selection behavior.",
@@ -194,7 +340,7 @@
       "id": "tool_default_target",
       "kind": "settings_field",
       "slot": "tools",
-      "order": 57,
+      "order": 67,
       "section_id": "tools",
       "field_id": "default_target",
       "type": "text",
@@ -207,7 +353,7 @@
       "id": "keep_selected_tools_after_send",
       "kind": "settings_field",
       "slot": "tools",
-      "order": 57,
+      "order": 68,
       "section_id": "tools",
       "type": "toggle",
       "label": "Keep Selected Tools",
@@ -218,7 +364,7 @@
       "id": "tool_assist_mode",
       "kind": "settings_field",
       "slot": "tools",
-      "order": 58,
+      "order": 69,
       "section_id": "tools",
       "type": "select",
       "label": "Tool Assist",
@@ -235,7 +381,7 @@
       "id": "tool_assist_limit",
       "kind": "settings_field",
       "slot": "tools",
-      "order": 59,
+      "order": 70,
       "section_id": "tools",
       "type": "number",
       "label": "Tool Assist Limit",
@@ -248,7 +394,7 @@
     {
       "id": "commands_settings_section",
       "kind": "settings_section",
-      "order": 60,
+      "order": 71,
       "section_id": "commands",
       "label": "Commands",
       "description": "Slash command visibility and command palette behavior.",
@@ -258,7 +404,7 @@
       "id": "show_advanced_commands",
       "kind": "settings_field",
       "slot": "commands",
-      "order": 61,
+      "order": 72,
       "section_id": "commands",
       "type": "toggle",
       "label": "Show Advanced Commands",

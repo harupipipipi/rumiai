@@ -102,6 +102,7 @@ export type HistoryBoardRendererProps = {
   isKanbanActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
+  onCopyChatId?: (chatId: string) => void;
   onMinimize?: () => void;
   onRestore?: () => void;
   isCompact?: boolean;
@@ -115,9 +116,11 @@ export type HistoryBoardRendererProps = {
 
 export type ChatHeaderRendererProps = {
   title: string;
+  conversationId?: string | null;
   showPreview: boolean;
   canShowPreview: boolean;
   canOpenSettings: boolean;
+  onCopyChatId?: () => void;
   onTogglePreview: () => void;
   onOpenSettings: () => void;
 };

@@ -20,6 +20,7 @@ from domain.external.adapters import line as line_adapter_module  # noqa: E402
 from domain.external.adapters.line import LineResponseAdapter  # noqa: E402
 from domain.external.audience_policy import AudiencePolicy  # noqa: E402
 from domain.external.audience_policy_registry import AudiencePolicyRegistry  # noqa: E402
+from domain.external.chat_link import CHAT_LINK_PROMPT  # noqa: E402
 from domain.external.normalizer import normalize_line_event  # noqa: E402
 from domain.external.source_store import ExternalSourceStore  # noqa: E402
 from domain.external.response import RumiResponse  # noqa: E402
@@ -116,6 +117,80 @@ def _seed_line_group_conversation(monkeypatch, tmp_path, *, group_id: str = "Cgr
     return conversation
 
 
+def _link_line_source_to_chat(
+    monkeypatch,
+    tmp_path,
+    *,
+    source_type: str = "user",
+    source_id: str = "Uactor",
+    actor_id: str = "Uactor",
+    allow_push: bool = False,
+    title: str = "Linked LINE Chat",
+    model: str = "stub/default",
+) -> dict[str, Any]:
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTERNAL_SOURCES_PATH", str(tmp_path / "external_sources.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    source: dict[str, Any] = {"type": source_type, "userId": actor_id}
+    if source_type == "group":
+        source["groupId"] = source_id
+    elif source_type == "room":
+        source["roomId"] = source_id
+    else:
+        source["userId"] = source_id
+    event = normalize_line_event(
+        {
+            "type": "message",
+            "source": source,
+            "message": {"id": f"m-link-{source_id}", "type": "text", "text": "link"},
+        },
+        verified=True,
+        destination="Udestination",
+    )
+    origin = origin_from_external_event(event)
+    source_store = ExternalSourceStore()
+    source_store.record_origin(origin, verified=True)
+    source_store.update_source("line", source_type, source_id, enabled=True, allow_push=allow_push)
+    chat_store = ChatStore()
+    conversation = chat_store.create_conversation(model=model, tags=["integration:line"])
+    conversation = chat_store.update_conversation(conversation["id"], {"title": title}) or conversation
+    source_store.set_linked_conversation(
+        "line",
+        source_type,
+        source_id,
+        conversation["id"],
+        title=conversation.get("title"),
+        actor_id=actor_id,
+        enabled=True,
+    )
+    return conversation
+
+
+def _reset_line_approval_store(monkeypatch, tmp_path):
+    from domain.safety import approval  # noqa: E402
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_DB_PATH", str(tmp_path / "approval.sqlite3"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH", str(tmp_path / "approval_secret"))
+    approval.reset_approval_state_for_tests()
+    return approval
+
+
+def _create_line_tool_approval(approval, conversation_id: str, *, action: str = "computer.click") -> dict[str, Any]:
+    args = {"action": action, "payload": {"normalized_x": 0.5, "normalized_y": 0.8, "physical": True}}
+    return approval.create_approval_request(
+        action,
+        "high",
+        args,
+        details={
+            "tool_name": "browser_computer",
+            "action": action,
+            "function_id": action,
+            "pack_id": "defaultspack",
+            "conversation_id": conversation_id,
+            "arguments": args,
+        },
+    )
+
+
 def test_line_route_uses_endpoint_enabled_flag(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
@@ -138,12 +213,14 @@ def test_line_route_sends_webhook_acknowledgement_when_reply_token_and_access_to
         response={"mode": "computer_use_line_biz"},
     )
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="Uactor")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
     calls: list[dict[str, Any]] = []
     captured: dict[str, Any] = {}
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False, envelope_overrides=None):
         captured["context"] = context
+        captured["envelope_overrides"] = envelope_overrides
         return {
             "status": "ok",
             "assistant_text": "done",
@@ -186,6 +263,641 @@ def test_line_route_sends_webhook_acknowledgement_when_reply_token_and_access_to
     assert event_result["reply"] == {"sent": False, "reason": "LINE reply token already used for webhook acknowledgement"}
 
 
+def test_line_reply_failure_auto_posts_when_enabled(monkeypatch):
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    event = normalize_line_event(
+        {
+            "type": "message",
+            "mode": "active",
+            "webhookEventId": "evt-expired",
+            "replyToken": "reply-expired",
+            "source": {"type": "user", "userId": "Utarget"},
+            "message": {"id": "m1", "type": "text", "text": "hello"},
+        },
+        verified=True,
+        destination="Udestination",
+    )
+    event.received_at = int(time.time() * 1000) - 70_000
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True, "status": 200, "body": {}},
+    )
+
+    result = LineResponseAdapter().send(
+        {"provider": "line", "messages": [{"type": "text", "text": "done"}]},
+        event=event,
+        context={"line_auto_post_on_reply_failure": True},
+    )
+
+    assert result["sent"] is True
+    assert result["mode"] == "reply_failed_auto_post"
+    assert result["post"]["sent"] is True
+    assert calls == [
+        {
+            "url": "https://api.line.me/v2/bot/message/push",
+            "headers": {"Authorization": "Bearer line-access-token"},
+            "body": {"to": "Utarget", "messages": [{"type": "text", "text": "done"}]},
+        }
+    ]
+
+
+def test_line_reply_invalid_recommends_post_when_auto_post_off(monkeypatch):
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    event = normalize_line_event(
+        {
+            "type": "message",
+            "mode": "active",
+            "webhookEventId": "evt-invalid",
+            "replyToken": "reply-invalid",
+            "source": {"type": "user", "userId": "Utarget"},
+            "message": {"id": "m1", "type": "text", "text": "hello"},
+        },
+        verified=True,
+        destination="Udestination",
+    )
+    calls: list[dict[str, Any]] = []
+
+    def fake_post(url, headers, body):
+        calls.append({"url": url, "headers": headers, "body": body})
+        return {"ok": False, "status": 400, "body": {"message": "Invalid reply token"}}
+
+    monkeypatch.setattr(line_adapter_module, "post_json", fake_post)
+
+    result = LineResponseAdapter().send(
+        {"provider": "line", "messages": [{"type": "text", "text": "done"}]},
+        event=event,
+        context={"line_auto_post_on_reply_failure": False},
+    )
+
+    assert result["sent"] is False
+    assert result["error_code"] == "LINE_REPLY_TOKEN_UNAVAILABLE"
+    assert result["post_recommended"] is True
+    assert "push/post" in result["reason"]
+    assert len(calls) == 1
+    assert calls[0]["url"] == "https://api.line.me/v2/bot/message/reply"
+
+
+def test_line_model_slash_command_replies_with_current_models(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        conversation={"strategy": "external_key", "model": "opencode-go/kimi-k2.6"},
+    )
+    settings_path = tmp_path / "frontend_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hook": {
+                    "response_trigger_mode": "prefix",
+                    "trigger_prefix": "#",
+                    "trigger_model": "judge/model",
+                    "answer_model": "answer/default",
+                    "line_slash_commands_enabled": True,
+                },
+                "models": {"preferred_model": "global/default"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True, "status": 200, "body": {}},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-model",
+                "replyToken": "reply-model",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "/model"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    sent_text = calls[0]["body"]["messages"][0]["text"]
+    assert event_result["line_command"]["name"] == "model"
+    assert "応答モデル: answer/default" in sent_text
+    assert "デフォルトモデル: global/default" in sent_text
+    assert "反応モード: prefix" in sent_text
+    assert "判断モデル: judge/model" in sent_text
+
+
+def test_line_group_slash_status_bypasses_disabled_source_and_missing_mention(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True, "status": 200, "body": {}},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-group-status",
+                "replyToken": "reply-group-status",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "/status"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    sent_text = calls[0]["body"]["messages"][0]["text"]
+    saved = ExternalSourceStore().get("line", "group", "Cgroup")
+    assert event_result["status"] == "ok"
+    assert event_result["line_command"]["name"] == "status"
+    assert "LINE status" in sent_text
+    assert "slash commands: on" in sent_text
+    assert "source: group" in sent_text
+    assert "source enabled: off" in sent_text
+    assert "group mention required: on" in sent_text
+    assert saved is not None
+    assert saved["enabled"] is False
+
+
+def test_line_approvals_slash_command_lists_pending_for_linked_chat(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    conversation = _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="UapprovalList")
+    approval = _reset_line_approval_store(monkeypatch, tmp_path)
+    request = _create_line_tool_approval(approval, conversation["id"])
+    sent_plans: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        LineResponseAdapter,
+        "send",
+        lambda self, plan, event=None, context=None: sent_plans.append(plan) or {"sent": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-approvals",
+                "replyToken": "reply-approvals",
+                "source": {"type": "user", "userId": "UapprovalList"},
+                "message": {"id": "m1", "type": "text", "text": "/approvals"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    sent_text = sent_plans[0]["messages"][0]["text"]
+    assert result["data"]["events"][0]["line_command"]["name"] == "approvals"
+    assert "承認待ち:" in sent_text
+    assert request["request_id"][-8:] in sent_text
+    assert "browser_computer" in sent_text
+    assert "/approve" in sent_text
+
+
+def test_line_approve_slash_command_approves_and_continues_linked_chat(monkeypatch, tmp_path):
+    from blocks.chat import send as chat_send  # noqa: E402
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    conversation = _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="UapprovalApprove")
+    approval = _reset_line_approval_store(monkeypatch, tmp_path)
+    request = _create_line_tool_approval(approval, conversation["id"])
+    captured: dict[str, Any] = {}
+
+    def fake_send_run(request_input, context):
+        captured["request"] = request_input
+        captured["context"] = context
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-approved",
+                "content": [{"type": "text", "text": "続行しました"}],
+            },
+        }
+
+    sent_plans: list[dict[str, Any]] = []
+    monkeypatch.setattr(chat_send, "run", fake_send_run)
+    monkeypatch.setattr(
+        LineResponseAdapter,
+        "send",
+        lambda self, plan, event=None, context=None: sent_plans.append(plan) or {"sent": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-approve",
+                "replyToken": "reply-approve",
+                "source": {"type": "user", "userId": "UapprovalApprove"},
+                "message": {"id": "m1", "type": "text", "text": f"/approve {request['request_id'][-8:]}"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    stored = approval.get_approval_request(request["request_id"])
+    followup = captured["request"]["message"]["metadata"]["approval_followup"]
+    sent_text = sent_plans[0]["messages"][0]["text"]
+    assert result["data"]["events"][0]["line_command"]["name"] == "approve"
+    assert stored["status"] == "approved"
+    assert captured["request"]["conversation_id"] == conversation["id"]
+    assert captured["request"]["tools"] == ["browser_computer"]
+    assert captured["request"]["params"]["tool_choice"] == "required"
+    assert followup["request_id"] == request["request_id"]
+    assert followup["tool_name"] == "browser_computer"
+    assert followup["approval_token"]
+    assert followup["payload"]["action"] == "computer.click"
+    assert "許可しました" in sent_text
+    assert "続行しました" in sent_text
+
+
+def test_line_deny_slash_command_denies_pending_approval(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    conversation = _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="UapprovalDeny")
+    approval = _reset_line_approval_store(monkeypatch, tmp_path)
+    request = _create_line_tool_approval(approval, conversation["id"])
+    sent_plans: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        LineResponseAdapter,
+        "send",
+        lambda self, plan, event=None, context=None: sent_plans.append(plan) or {"sent": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-deny",
+                "replyToken": "reply-deny",
+                "source": {"type": "user", "userId": "UapprovalDeny"},
+                "message": {"id": "m1", "type": "text", "text": f"/deny {request['request_id'][-8:]} 今はやめる"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    stored = approval.get_approval_request(request["request_id"])
+    sent_text = sent_plans[0]["messages"][0]["text"]
+    assert result["data"]["events"][0]["line_command"]["name"] == "deny"
+    assert stored["status"] == "denied"
+    assert "拒否しました" in sent_text
+
+
+def test_line_change_slash_command_links_source_to_existing_chat(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    conversation = ChatStore().create_conversation(model="stub/default")
+    conversation = ChatStore().update_conversation(conversation["id"], {"title": "LINE続き"}) or conversation
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True, "status": 200, "body": {}},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-change-chat",
+                "replyToken": "reply-change-chat",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": f"/change \"{conversation['id']}\""},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    sent_text = calls[0]["body"]["messages"][0]["text"]
+    saved = ExternalSourceStore().get("line", "group", "Cgroup")
+    assert result["data"]["events"][0]["line_command"]["name"] == "change"
+    assert saved is not None
+    assert saved["linked_conversation_id"] == conversation["id"]
+    assert saved["linked_conversation_title"] == "LINE続き"
+    assert conversation["id"] in sent_text
+    assert "LINE続き" in sent_text
+
+
+def test_line_newchat_slash_command_creates_linked_chat(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    sent_plans: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        LineResponseAdapter,
+        "send",
+        lambda self, plan, event=None, context=None: sent_plans.append(plan) or {"sent": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-newchat",
+                "replyToken": "reply-newchat",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "/newchat"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    saved = ExternalSourceStore().get("line", "group", "Cgroup")
+    linked_id = saved["linked_conversation_id"]
+    conversation = ChatStore().get_conversation(linked_id)
+    assert event_result["line_command"]["name"] == "newchat"
+    assert saved["enabled"] is True
+    assert conversation is not None
+    assert conversation["title"] == "line group Cgroup"
+    assert "新規チャットを開始しました。" in sent_plans[0]["messages"][0]["text"]
+    assert linked_id in sent_plans[0]["messages"][0]["text"]
+
+
+def test_line_plain_chatid_links_source_to_existing_chat(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    conversation = ChatStore().create_conversation(model="stub/default")
+    conversation = ChatStore().update_conversation(conversation["id"], {"title": "Plain ChatID"}) or conversation
+    sent_plans: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        LineResponseAdapter,
+        "send",
+        lambda self, plan, event=None, context=None: sent_plans.append(plan) or {"sent": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-plain-chatid",
+                "replyToken": "reply-plain-chatid",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": conversation["id"]},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    saved = ExternalSourceStore().get("line", "user", "Uactor")
+    assert event_result["external_chat_link"]["action"] == "linked"
+    assert saved["linked_conversation_id"] == conversation["id"]
+    assert saved["enabled"] is True
+    assert "この会話はchatid" in sent_plans[0]["messages"][0]["text"]
+    assert "Plain ChatID" in sent_plans[0]["messages"][0]["text"]
+
+
+def test_line_message_after_change_dispatches_to_linked_chat(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True, metadata={"group_room_mention_required": False})
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    conversation = ChatStore().create_conversation(model="stub/default")
+    store = ExternalSourceStore()
+    store.record_origin(
+        origin_from_external_event(
+            normalize_line_event(
+                {
+                    "type": "message",
+                    "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                    "message": {"id": "m-remember", "type": "text", "text": "hello"},
+                },
+                verified=True,
+                destination="Udestination",
+            )
+        ),
+        verified=True,
+    )
+    store.update_source("line", "group", "Cgroup", enabled=True)
+    store.set_linked_conversation("line", "group", "Cgroup", conversation["id"], title="LINE続き")
+    captured: dict[str, Any] = {}
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False, envelope_overrides=None):
+        captured["context"] = context
+        captured["envelope_overrides"] = envelope_overrides
+        return {
+            "status": "ok",
+            "assistant_text": "done",
+            "response_plan": {"provider": "line", "messages": [{"type": "text", "text": "done"}]},
+        }
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True, "status": 200, "body": {}},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-linked-chat",
+                "replyToken": "reply-linked-chat",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "続きやって"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    assert result["data"]["events"][0]["status"] == "ok"
+    assert captured["context"]["conversation_id"] == conversation["id"]
+    assert captured["envelope_overrides"] == {"target": {"conversation_id": conversation["id"], "direct": True}}
+
+
+def test_line_model_slash_command_suggests_candidates_for_partial_model(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    monkeypatch.setattr(
+        line_block,
+        "_resolve_line_model_query",
+        lambda query, limit=6: {
+            "query": query,
+            "exact": None,
+            "candidates": [
+                {
+                    "profile_id": "openai/gpt-5.1",
+                    "qualified_model_id": "openai/gpt-5.1",
+                    "label": "OpenAI / GPT-5.1",
+                    "configured": True,
+                },
+                {
+                    "profile_id": "openai/gpt-5-mini",
+                    "qualified_model_id": "openai/gpt-5-mini",
+                    "label": "OpenAI / GPT-5 mini",
+                    "configured": False,
+                },
+            ],
+        },
+    )
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True, "status": 200, "body": {}},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-model-candidates",
+                "replyToken": "reply-model-candidates",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "/model gpt"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    sent_text = calls[0]["body"]["messages"][0]["text"]
+    assert result["data"]["events"][0]["line_command"]["name"] == "model"
+    assert "モデル候補: gpt" in sent_text
+    assert "openai/gpt-5.1" in sent_text
+    assert "設定: /model <候補ID>" in sent_text
+
+
+def test_line_dispatch_error_replies_with_short_safe_notice(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="Uactor")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+
+    def fake_dispatch(*_args, **_kwargs):
+        return {
+            "status": "error",
+            "assistant_text": "",
+            "error": {"code": "PROVIDER_ERROR", "message": "secret provider details"},
+        }
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True, "status": 200, "body": {}},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-error-result",
+                "replyToken": "reply-error-result",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "hello"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    sent_text = calls[0]["body"]["messages"][0]["text"]
+    event_result = result["data"]["events"][0]
+    assert event_result["status"] == "error"
+    assert event_result["reply"]["sent"] is True
+    assert sent_text == "エラーが出ました。少し後で再送してね。"
+    assert "secret provider details" not in sent_text
+
+
+def test_line_dispatch_exception_replies_with_short_safe_notice(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="Uactor")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+
+    def fake_dispatch(*_args, **_kwargs):
+        raise RuntimeError("secret stack trace")
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True, "status": 200, "body": {}},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-error-exception",
+                "replyToken": "reply-error-exception",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "hello"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    sent_text = calls[0]["body"]["messages"][0]["text"]
+    event_result = result["data"]["events"][0]
+    assert event_result["status"] == "error"
+    assert event_result["error"]["code"] == "LINE_EVENT_PROCESSING_FAILED"
+    assert event_result["reply"]["sent"] is True
+    assert sent_text == "エラーが出ました。少し後で再送してね。"
+    assert "secret stack trace" not in sent_text
+
+
 def test_line_computer_use_fake_receive_acknowledges_and_preserves_japanese_prompt(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
     from blocks.chat import send as chat_send  # noqa: E402
@@ -207,6 +919,7 @@ def test_line_computer_use_fake_receive_acknowledges_and_preserves_japanese_prom
     monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", str(tmp_path / "integrations" / "event_locks"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="Uactor")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
     calls: list[dict[str, Any]] = []
     captured: dict[str, Any] = {}
@@ -324,6 +1037,7 @@ def test_line_computer_use_natural_message_invokes_line_biz_send_tools(monkeypat
     monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", str(tmp_path / "integrations" / "event_locks"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="Uactor")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
 
     line_calls: list[dict[str, Any]] = []
@@ -452,6 +1166,7 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
     monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", str(tmp_path / "integrations" / "event_locks"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="Uactor")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
 
     captured_invocations: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -536,10 +1251,11 @@ def test_line_route_does_not_acknowledge_normal_line_reply_mode(monkeypatch, tmp
 
     _install_line_endpoint(monkeypatch, tmp_path, enabled=True, metadata={"require_group_mention": False})
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="Uactor")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
     calls: list[dict[str, Any]] = []
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False, envelope_overrides=None):
         return {
             "status": "ok",
             "assistant_text": "normal reply",
@@ -584,10 +1300,10 @@ def test_line_route_preserves_top_level_destination_and_endpoint_policy(monkeypa
     from blocks.integrations import line as line_block  # noqa: E402
 
     _install_line_endpoint(monkeypatch, tmp_path, enabled=True, metadata={"require_group_mention": False})
-    _remember_line_group(monkeypatch, tmp_path)
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="group", source_id="Cgroup")
     captured: dict[str, Any] = {}
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision=None, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision=None, context, send_response, mentioned=False, envelope_overrides=None):
         captured["event"] = event
         captured["input_profile_id"] = input_profile_id
         captured["audience_policy"] = audience_policy
@@ -651,9 +1367,10 @@ def test_line_route_applies_endpoint_response_context(monkeypatch, tmp_path):
         },
     )
     captured: dict[str, Any] = {}
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="Uactor")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False, envelope_overrides=None):
         captured["input_profile_id"] = input_profile_id
         captured["audience_decision"] = audience_decision
         captured["context"] = context
@@ -710,9 +1427,10 @@ def test_line_route_builds_line_biz_prompt_from_chat_url(monkeypatch, tmp_path):
         },
     )
     captured: dict[str, Any] = {}
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="Uactor")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False, envelope_overrides=None):
         captured["context"] = context
         captured["audience_decision"] = audience_decision
         captured["mentioned"] = mentioned
@@ -821,12 +1539,13 @@ def test_line_computer_use_background_processing_is_opt_in(monkeypatch, tmp_path
         },
     )
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="Uactor")
     started = threading.Event()
     release = threading.Event()
     finished = threading.Event()
     captured: dict[str, Any] = {}
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False, envelope_overrides=None):
         started.set()
         release.wait(timeout=5)
         captured["input_profile_id"] = input_profile_id
@@ -888,9 +1607,10 @@ def test_line_background_processing_flag_does_not_affect_normal_line_mode(monkey
         response={"mode": "same_response", "background_processing": True},
     )
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="Uactor")
     captured: dict[str, Any] = {}
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False, envelope_overrides=None):
         captured["called"] = True
         return {
             "status": "ok",
@@ -932,6 +1652,7 @@ def test_line_computer_use_group_message_ignores_unaddressed_text(monkeypatch, t
         conversation={"strategy": "external_key", "model": "google/gemma-4-31b-it"},
         response={"mode": "computer_use_line_biz"},
     )
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="group", source_id="Cgroup")
     monkeypatch.setattr(LineResponseAdapter, "send", lambda self, plan, event=None, context=None: {"sent": False})
     payload = {
         "destination": "Udestination",
@@ -962,6 +1683,7 @@ def test_line_default_group_message_ignores_unaddressed_text(monkeypatch, tmp_pa
     from blocks.integrations import line as line_block  # noqa: E402
 
     _install_line_endpoint(monkeypatch, tmp_path, enabled=True, input_profile_id="line.default")
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="group", source_id="Cgroup")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
     monkeypatch.setattr(
         line_block,
@@ -995,6 +1717,7 @@ def test_line_default_group_message_ignores_plain_rumi_when_trigger_not_configur
     from blocks.integrations import line as line_block  # noqa: E402
 
     _install_line_endpoint(monkeypatch, tmp_path, enabled=True, input_profile_id="line.default")
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="group", source_id="Cgroup")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
     monkeypatch.setattr(
         line_block,
@@ -1029,10 +1752,11 @@ def test_line_default_group_message_dispatches_for_hash_trigger(monkeypatch, tmp
     from blocks.integrations import line as line_block  # noqa: E402
 
     _install_line_endpoint(monkeypatch, tmp_path, enabled=True, input_profile_id="line.default")
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="group", source_id="Cgroup")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
     captured: dict[str, Any] = {}
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False, envelope_overrides=None):
         captured["event"] = event
         captured["mentioned"] = mentioned
         captured["context"] = context
@@ -1083,10 +1807,11 @@ def test_line_default_group_message_dispatches_for_multiword_trigger_case_insens
         input_profile_id="line.default",
         metadata={"line_trigger_words": ["rumi bot"]},
     )
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="group", source_id="Cgroup")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
     captured: dict[str, Any] = {}
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False, envelope_overrides=None):
         captured["mentioned"] = mentioned
         captured["event"] = event
         return {
@@ -1125,6 +1850,7 @@ def test_line_group_message_ignores_recent_rumi_context_without_trigger(monkeypa
 
     _install_line_endpoint(monkeypatch, tmp_path, enabled=True, input_profile_id="line.default")
     _seed_line_group_conversation(monkeypatch, tmp_path, assistant_text="Which option should I use?")
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="group", source_id="Cgroup")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
     monkeypatch.setattr(
         line_block,
@@ -1158,10 +1884,11 @@ def test_line_direct_user_message_still_dispatches_without_mention(monkeypatch, 
     from blocks.integrations import line as line_block  # noqa: E402
 
     _install_line_endpoint(monkeypatch, tmp_path, enabled=True, input_profile_id="line.default")
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="user", source_id="Uactor")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
     captured: dict[str, Any] = {}
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False, envelope_overrides=None):
         captured["called"] = True
         captured["mentioned"] = mentioned
         captured["event"] = event
@@ -1206,10 +1933,10 @@ def test_line_computer_use_group_message_dispatches_when_saved_group_mentions_bo
         conversation={"strategy": "external_key", "model": "google/gemma-4-31b-it"},
         response={"mode": "computer_use_line_biz"},
     )
-    _remember_line_group(monkeypatch, tmp_path)
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="group", source_id="Cgroup")
     captured: dict[str, Any] = {}
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False, envelope_overrides=None):
         captured["event"] = event
         captured["audience_policy"] = audience_policy
         captured["audience_decision"] = audience_decision
@@ -1264,7 +1991,7 @@ def test_line_computer_use_group_message_dispatches_when_saved_group_mentions_bo
     assert captured["event"].metadata["line_mention"]["require_group_mention"] is True
 
 
-def test_line_computer_use_group_mention_from_unknown_source_is_denied(monkeypatch, tmp_path):
+def test_line_computer_use_group_mention_from_unknown_source_prompts_for_chatid(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
     _install_line_endpoint(
@@ -1277,14 +2004,15 @@ def test_line_computer_use_group_mention_from_unknown_source_is_denied(monkeypat
     )
 
     def fail_dispatch(*args, **kwargs):
-        raise AssertionError("dispatch_external_event should not run for denied source")
+        raise AssertionError("dispatch_external_event should not run before chatid link")
 
     monkeypatch.setattr(line_block, "dispatch_external_event", fail_dispatch)
-
-    def fail_send(*args, **kwargs):
-        raise AssertionError("reply should not send for denied source")
-
-    monkeypatch.setattr(LineResponseAdapter, "send", fail_send)
+    sent_plans: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        LineResponseAdapter,
+        "send",
+        lambda self, plan, event=None, context=None: sent_plans.append(plan) or {"sent": True},
+    )
     payload = {
         "destination": "Udestination",
         "events": [
@@ -1316,14 +2044,11 @@ def test_line_computer_use_group_mention_from_unknown_source_is_denied(monkeypat
 
     result = line_block.run(_signed_line_payload(payload), {})
 
-    denied = result["data"]["events"][0]
-    assert denied["status"] == "denied"
-    assert denied["policy"]["reason"] == "default deny"
-    assert denied["event"]["metadata"]["line_mention"] == {
-        "mentioned": True,
-        "require_group_mention": True,
-        "addressed": True,
-    }
+    event_result = result["data"]["events"][0]
+    assert event_result["status"] == "ok"
+    assert event_result["assistant_text"] == CHAT_LINK_PROMPT
+    assert event_result["external_chat_link"]["action"] == "prompt"
+    assert sent_plans[0]["messages"][0]["text"] == CHAT_LINK_PROMPT
     saved = ExternalSourceStore().get("line", "group", "Cunknown")
     assert saved is not None
     assert saved["enabled"] is False
@@ -1373,19 +2098,21 @@ def test_line_route_processes_signed_raw_payload_only(monkeypatch, tmp_path):
     assert ExternalSourceStore().get("line", "group", "Cinjected") is None
 
 
-def test_line_route_unknown_verified_source_is_saved_disabled_and_denied(monkeypatch, tmp_path):
+def test_line_route_unknown_verified_source_prompts_for_chatid(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
     _install_line_endpoint(monkeypatch, tmp_path, enabled=True, metadata={"require_group_mention": False})
 
     def fail_dispatch(*args, **kwargs):
-        raise AssertionError("dispatch_external_event should not run for denied source")
+        raise AssertionError("dispatch_external_event should not run before chatid link")
 
-    def fail_send(*args, **kwargs):
-        raise AssertionError("LINE reply should not be sent for denied source")
-
+    sent_plans: list[dict[str, Any]] = []
     monkeypatch.setattr(line_block, "dispatch_external_event", fail_dispatch)
-    monkeypatch.setattr(LineResponseAdapter, "send", fail_send)
+    monkeypatch.setattr(
+        LineResponseAdapter,
+        "send",
+        lambda self, plan, event=None, context=None: sent_plans.append(plan) or {"sent": True},
+    )
     payload = {
         "destination": "Udestination",
         "events": [
@@ -1403,10 +2130,11 @@ def test_line_route_unknown_verified_source_is_saved_disabled_and_denied(monkeyp
     result = line_block.run(_signed_line_payload(payload), {})
 
     assert result["status"] == "ok"
-    denied = result["data"]["events"][0]
-    assert denied["status"] == "denied"
-    assert denied["policy"]["reason"] == "default deny"
-    assert denied["reply"] == {"sent": False, "reason": "audience policy denied"}
+    event_result = result["data"]["events"][0]
+    assert event_result["status"] == "ok"
+    assert event_result["assistant_text"] == CHAT_LINK_PROMPT
+    assert event_result["external_chat_link"]["action"] == "prompt"
+    assert sent_plans[0]["messages"][0]["text"] == CHAT_LINK_PROMPT
     saved = ExternalSourceStore().get("line", "group", "Cunknown")
     assert saved is not None
     assert saved["enabled"] is False
@@ -1418,7 +2146,7 @@ def test_line_route_frontend_push_to_saved_origin_reaches_adapter(monkeypatch, t
     from blocks.integrations import line as line_block  # noqa: E402
 
     _install_line_endpoint(monkeypatch, tmp_path, enabled=True, metadata={"require_group_mention": False})
-    _remember_line_group(monkeypatch, tmp_path, group_id="Cgroup", allow_push=True)
+    _link_line_source_to_chat(monkeypatch, tmp_path, source_type="group", source_id="Cgroup", allow_push=True)
     settings_path = tmp_path / "frontend_settings.json"
     settings_path.write_text(
         json.dumps({"external_output": {"output_send_mode": "push_to_saved_origin"}}, ensure_ascii=False),
@@ -1427,7 +2155,7 @@ def test_line_route_frontend_push_to_saved_origin_reaches_adapter(monkeypatch, t
     monkeypatch.setenv("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", str(settings_path))
     calls: list[dict[str, Any]] = []
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False, envelope_overrides=None):
         assert audience_decision.allowed is True
         assert context["send_mode"] == "push_to_saved_origin"
         return {

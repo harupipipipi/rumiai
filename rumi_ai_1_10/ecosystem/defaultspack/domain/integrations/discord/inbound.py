@@ -5,12 +5,14 @@ from typing import Any, Dict
 from blocks._common import ok, error
 from blocks.integrations.common import allow_unsigned_webhook_dev, headers_from_request, raw_body_bytes, text_limit
 from domain.external.adapters.discord import DiscordResponseAdapter
+from domain.external.chat_link import envelope_overrides as chat_link_envelope_overrides, handle_chat_link_message
 from domain.external.normalizer import normalize_discord_interaction, normalize_discord_message
 from domain.external.pipeline import dispatch_external_event
 from domain.external.response import RumiResponse
 from domain.external.response_planner import ResponsePlanner
 from domain.integrations.http_client import post_json
 from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
+from domain.integrations.slash_commands import slash_command_execution_action
 
 
 DISCORD_PING = 1
@@ -58,12 +60,28 @@ def run(input_data, context):
 
 def _handle_interaction(input_data: Dict[str, Any], context, *, verified: bool = False) -> Dict[str, Any]:
     external_event = normalize_discord_interaction(input_data, verified=verified)
+    runtime_context = dict(context or {})
+    data = input_data.get("data") if isinstance(input_data.get("data"), dict) else {}
+    chat_link_result = handle_chat_link_message(
+        external_event,
+        runtime_context,
+        _interaction_text(data),
+        command_action_resolver=slash_command_execution_action,
+    )
+    if chat_link_result is not None:
+        return chat_link_result
+    dispatch_kwargs = {
+        "input_profile_id": "discord.default",
+        "audience_policy": {"default": "allow"},
+        "context": runtime_context,
+        "send_response": True,
+    }
+    overrides = chat_link_envelope_overrides(runtime_context)
+    if overrides:
+        dispatch_kwargs["envelope_overrides"] = overrides
     return dispatch_external_event(
         external_event,
-        input_profile_id="discord.default",
-        audience_policy={"default": "allow"},
-        context=context,
-        send_response=True,
+        **dispatch_kwargs,
     )
 
 
@@ -72,14 +90,29 @@ def _handle_message_create(input_data: Dict[str, Any], context, *, verified: boo
     author = data.get("author") if isinstance(data.get("author"), dict) else {}
     if author.get("bot"):
         return {"status": "ignored", "reason": "bot message", "assistant_text": ""}
-    channel_id = str(data.get("channel_id") or input_data.get("channel_id") or "")
     external_event = normalize_discord_message(input_data, verified=verified)
+    runtime_context = dict(context or {})
+    chat_link_result = handle_chat_link_message(
+        external_event,
+        runtime_context,
+        str(data.get("content") or ""),
+        command_action_resolver=slash_command_execution_action,
+    )
+    if chat_link_result is not None:
+        reply = _send_response_plan(chat_link_result["response_plan"], external_event)
+        return {**chat_link_result, "reply": reply}
+    dispatch_kwargs = {
+        "input_profile_id": "discord.default",
+        "audience_policy": {"default": "allow"},
+        "context": runtime_context,
+        "send_response": True,
+    }
+    overrides = chat_link_envelope_overrides(runtime_context)
+    if overrides:
+        dispatch_kwargs["envelope_overrides"] = overrides
     result = dispatch_external_event(
         external_event,
-        input_profile_id="discord.default",
-        audience_policy={"default": "allow"},
-        context=context,
-        send_response=True,
+        **dispatch_kwargs,
     )
     plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("discord").plan(RumiResponse.from_result(result))
     reply = _send_response_plan(plan, external_event)

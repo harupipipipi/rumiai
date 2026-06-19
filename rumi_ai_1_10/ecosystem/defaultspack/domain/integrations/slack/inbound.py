@@ -8,12 +8,14 @@ from typing import Any, Dict
 from blocks._common import ok, error
 from blocks.integrations.common import allow_unsigned_webhook_dev, headers_from_request, raw_body_bytes
 from domain.external.adapters.slack import SlackResponseAdapter
+from domain.external.chat_link import envelope_overrides as chat_link_envelope_overrides, handle_chat_link_message
 from domain.external.normalizer import normalize_slack_event
 from domain.external.pipeline import dispatch_external_event
 from domain.external.response import RumiResponse
 from domain.external.response_planner import ResponsePlanner
 from domain.external.token_store import read_external_token
 from domain.integrations.secrets import load_integration_secrets_into_env
+from domain.integrations.slash_commands import slash_command_execution_action
 
 
 def run(input_data, context):
@@ -44,12 +46,29 @@ def run(input_data, context):
     model = str(input_data.get("model") or "").strip()
     if model:
         external_event.metadata["model"] = model
+    runtime_context = dict(context or {})
+    chat_link_result = handle_chat_link_message(
+        external_event,
+        runtime_context,
+        text,
+        model=model or None,
+        command_action_resolver=slash_command_execution_action,
+    )
+    if chat_link_result is not None:
+        send_result = _send_response_plan(chat_link_result["response_plan"], external_event)
+        return ok({**chat_link_result, "verified": verification["verified"], "reply": send_result})
+    dispatch_kwargs = {
+        "input_profile_id": "slack.default",
+        "audience_policy": {"default": "allow"},
+        "context": runtime_context,
+        "send_response": True,
+    }
+    overrides = chat_link_envelope_overrides(runtime_context)
+    if overrides:
+        dispatch_kwargs["envelope_overrides"] = overrides
     result = dispatch_external_event(
         external_event,
-        input_profile_id="slack.default",
-        audience_policy={"default": "allow"},
-        context=context,
-        send_response=True,
+        **dispatch_kwargs,
     )
     plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("slack").plan(RumiResponse.from_result(result))
     send_result = _send_response_plan(plan, external_event)

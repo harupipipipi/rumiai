@@ -6,7 +6,9 @@ import hmac
 import json
 import logging
 import os
+import re
 import threading
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Dict
 
@@ -15,26 +17,50 @@ from blocks.integrations.common import allow_unsigned_webhook_dev, headers_from_
 from domain.external.adapters.line import LineResponseAdapter
 from domain.external.audience_policy import AudiencePolicy
 from domain.external.audience_policy_registry import AudiencePolicyRegistry
+from domain.external.chat_link import (
+    CHAT_LINK_PROMPT,
+    envelope_overrides as chat_link_envelope_overrides,
+    handle_chat_link_message,
+    linked_conversation_id as chat_linked_conversation_id,
+)
 from domain.external.normalizer import normalize_line_event
 from domain.external.pipeline import dispatch_external_event
 from domain.external.response import RumiResponse
 from domain.external.response_planner import ResponsePlanner
 from domain.external.source_store import ExternalSourceStore
 from domain.external.targeting import origin_from_external_event
-from domain.integrations.http_client import post_json
+from domain.frontend.command_registry import SlashCommandRegistry
+from domain.integrations.line.approval_commands import (
+    handle_line_approval_command,
+    pending_approval_count,
+)
 from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
 from domain.integrations.line.addressing import decide_line_addressing
+from domain.integrations.slash_commands import slash_command_execution_action
 from domain.webhook.endpoint import WebhookEndpoint
 from domain.webhook.endpoint_resolver import ProviderEndpointResolver
 
 
 _LOGGER = logging.getLogger(__name__)
 _LINE_WEBHOOK_ACK_TEXT = "\u5c4a\u3044\u305f\u3088\uff01"
+_LINE_LONG_TASK_NOTICE_TEXT = "40秒たちました。まだ処理中です。完了したらpush/postで送ります。"
+_LINE_SHORT_ERROR_TEXT = "エラーが出ました。少し後で再送してね。"
 _LINE_REPLY_DEADLINE_SECONDS = 60
 _LINE_REPLY_DEADLINE_PROMPT = (
     "LINE reply tokens expire about 1 minute after the webhook event. "
     "Keep the answer concise, finish within that deadline, and use the LINE reply response path when available."
 )
+_LINE_REPLY_GUIDANCE_PROMPT = (
+    "LINE replyは短命・1回のみ。最終回答はreply用に短く書く。"
+    "返信しない判断なら一度だけ「replyで送れます。送りますか？」と確認。"
+    "期限切れ/使用済みならpushを提案。"
+)
+_LINE_EXTERNAL_CHAT_ACTIONS = {"line_change_chat", "external_new_chat"}
+_LINE_APPROVAL_ACTION_TO_COMMAND = {
+    "open_approvals": "approvals",
+    "approve_pending_operation": "approve",
+    "deny_pending_operation": "deny",
+}
 
 
 def run(input_data, context):
@@ -61,7 +87,8 @@ def run(input_data, context):
     events = request_payload.get("events") if isinstance(request_payload.get("events"), list) else []
     results = []
     destination = str(request_payload.get("destination") or "")
-    model = str(request_payload.get("model") or endpoint.conversation.get("model") or "") or None
+    hook_settings = _frontend_hook_settings()
+    model = str(request_payload.get("model") or _line_response_model(endpoint, hook_settings) or "") or None
     for event in events:
         if not isinstance(event, dict):
             continue
@@ -72,6 +99,7 @@ def run(input_data, context):
             verified=bool(verification["verified"]),
             destination=destination,
             endpoint=endpoint,
+            hook_settings=hook_settings,
         )
         results.append(result)
     return ok({"verified": verification["verified"], "endpoint": endpoint.as_dict(), "events": results})
@@ -85,9 +113,11 @@ def _handle_event(
     verified: bool = False,
     destination: str = "",
     endpoint: WebhookEndpoint,
+    hook_settings: dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     if event.get("type") != "message":
         return {"ignored": True, "reason": "unsupported LINE event", "event_type": event.get("type")}
+    hook_settings = dict(hook_settings or {})
     external_event = normalize_line_event(event, verified=verified, destination=destination)
     if model:
         external_event.metadata["model"] = model
@@ -118,18 +148,65 @@ def _handle_event(
     runtime_context.setdefault("conversation", dict(endpoint.conversation))
     runtime_context.setdefault("source_record", source_record)
     runtime_context = _apply_endpoint_response_context(runtime_context, endpoint)
+    _apply_hook_context(runtime_context, hook_settings, endpoint=endpoint)
     runtime_context = _apply_line_reply_deadline_context(runtime_context, origin)
+    linked_conversation_id = chat_linked_conversation_id(runtime_context)
+    if linked_conversation_id:
+        runtime_context.setdefault("conversation_id", linked_conversation_id)
+        external_event.metadata["linked_conversation_id"] = linked_conversation_id
     policy = AudiencePolicyRegistry().resolve(endpoint.audience_policy_id, event=external_event)
+
+    # Slash commands bootstrap LINE groups before a source has been enabled or
+    # mentioned. Keep signature/rate/message-type policy, but allow this source.
+    if _line_slash_command_requested(event, hook_settings):
+        command_policy = _allow_current_source(policy, external_event)
+        command_decision = AudiencePolicy(command_policy).evaluate(external_event, mentioned=True)
+        if not command_decision.allowed:
+            return _policy_denied_result(external_event, command_decision)
+        command_result = _handle_line_command(
+            event,
+            external_event,
+            endpoint=endpoint,
+            context=runtime_context,
+            hook_settings=hook_settings,
+            audience_decision=command_decision,
+            audience_policy=command_policy,
+        )
+        if command_result is not None:
+            return command_result
+
+    chat_link_result = handle_chat_link_message(
+        external_event,
+        runtime_context,
+        _line_message_text(event),
+        model=model,
+        command_action_resolver=slash_command_execution_action,
+    )
+    if chat_link_result is not None:
+        reply = _send_response_plan(chat_link_result["response_plan"], external_event, context=runtime_context)
+        return {**chat_link_result, "reply": reply}
+
     if require_group_mention and not addressed:
         return _line_addressing_ignored_result(external_event, addressing)
+    reaction = _line_reaction_decision(event, external_event, hook_settings)
     if require_group_mention:
         policy = _require_audience_mention(policy)
         source = source_record.get("source") if isinstance(source_record, dict) else None
         if isinstance(source, dict) and source.get("enabled"):
             policy = _allow_current_scope(policy, external_event)
-    decision = AudiencePolicy(policy).evaluate(external_event, mentioned=addressed if require_group_mention else mentioned)
+    effective_mentioned = addressed if require_group_mention else (mentioned or bool(reaction.get("treat_as_mention")))
+    decision = AudiencePolicy(policy).evaluate(external_event, mentioned=effective_mentioned)
     if not decision.allowed:
         return _policy_denied_result(external_event, decision)
+    if not reaction.get("fire", True):
+        return {
+            "status": "ignored",
+            "assistant_text": "",
+            "reason": str(reaction.get("reason") or "line hook did not trigger"),
+            "event": external_event.as_dict(),
+            "policy": decision.as_dict(),
+            "reply": {"sent": False, "reason": "line hook trigger ignored"},
+        }
     acknowledgement = _send_line_webhook_acknowledgement(event, endpoint=endpoint)
     runtime_context.setdefault("line_webhook_acknowledgement", acknowledgement)
     if _should_process_line_event_in_background(endpoint):
@@ -160,18 +237,42 @@ def _dispatch_line_event(
     context: dict[str, Any],
     mentioned: bool = False,
 ) -> Dict[str, Any]:
-    result = dispatch_external_event(
-        external_event,
-        input_profile_id=input_profile_id,
-        audience_policy=audience_policy,
-        audience_decision=audience_decision,
-        context=context,
-        send_response=True,
-        mentioned=mentioned,
-    )
-    plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("line").plan(RumiResponse.from_result(result))
-    reply = _send_response_plan(plan, external_event, context=context)
-    return {**result, "reply": reply}
+    progress = _start_line_progress_notice(external_event, context)
+    try:
+        dispatch_kwargs = {
+            "input_profile_id": input_profile_id,
+            "audience_policy": audience_policy,
+            "audience_decision": audience_decision,
+            "context": context,
+            "send_response": True,
+            "mentioned": mentioned,
+        }
+        envelope_overrides = chat_link_envelope_overrides(context)
+        if envelope_overrides:
+            dispatch_kwargs["envelope_overrides"] = envelope_overrides
+        result = dispatch_external_event(external_event, **dispatch_kwargs)
+        if result.get("status") == "error":
+            reply = _send_line_error_notice(external_event, context=context)
+            return {**result, "reply": reply}
+        plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("line").plan(RumiResponse.from_result(result))
+        reply = _send_response_plan(plan, external_event, context=context)
+        return {**result, "reply": reply}
+    except Exception as exc:
+        _LOGGER.exception("LINE event processing failed")
+        reply = _send_line_error_notice(external_event, context=context)
+        return {
+            "status": "error",
+            "assistant_text": "",
+            "error": {
+                "code": "LINE_EVENT_PROCESSING_FAILED",
+                "message": "LINE event processing failed",
+                "detail": str(exc),
+            },
+            "event": external_event.as_dict(),
+            "reply": reply,
+        }
+    finally:
+        progress.cancel()
 
 
 def _dispatch_line_event_in_background(
@@ -198,6 +299,7 @@ def _dispatch_line_event_in_background(
                 mentioned=mentioned,
             )
         except Exception:
+            _send_line_error_notice(external_event, context=background_context)
             _LOGGER.exception("LINE background event processing failed event_id=%s", event_id or "<missing>")
 
     name_suffix = event_id or str(os.getpid())
@@ -223,6 +325,560 @@ def _send_response_plan(plan: dict[str, Any], external_event, *, context: dict[s
     if isinstance(action_plan, dict) and not action_plan.get("external_reply", True):
         return {"sent": False, "reason": "external reply suppressed by response prompt policy"}
     return LineResponseAdapter().send(plan, event=external_event, context=context)
+
+
+def _send_line_error_notice(external_event, *, context: dict[str, Any] | None = None) -> Dict[str, Any]:
+    notice_context = dict(context or {})
+    notice_context["line_auto_post_on_reply_failure"] = True
+    plan = {
+        "provider": "line",
+        "messages": [{"type": "text", "text": _LINE_SHORT_ERROR_TEXT}],
+        "metadata": {"line_error_notice": True},
+    }
+    result = LineResponseAdapter().send(plan, event=external_event, context=notice_context)
+    return {**result, "text": _LINE_SHORT_ERROR_TEXT}
+
+
+class _ProgressNotice:
+    def __init__(self, timer: threading.Timer | None) -> None:
+        self._timer = timer
+
+    def cancel(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+
+
+def _start_line_progress_notice(external_event, context: dict[str, Any] | None) -> _ProgressNotice:
+    context = context if isinstance(context, dict) else {}
+    hook_settings = context.get("hook_settings") if isinstance(context.get("hook_settings"), dict) else {}
+    if not _truthy(hook_settings.get("line_progress_post_enabled", True)):
+        return _ProgressNotice(None)
+    origin = origin_from_external_event(external_event)
+    if not origin.can_push or not origin.source_id:
+        return _ProgressNotice(None)
+    if not (_truthy(context.get("line_auto_post_on_reply_failure")) or _truthy(context.get("allow_push")) or _source_record_allows_push(context)):
+        return _ProgressNotice(None)
+    delay = _clamped_int(hook_settings.get("line_progress_notice_seconds"), 40, 5, 55)
+
+    def notify() -> None:
+        try:
+            LineResponseAdapter().send_text_push(origin.source_id, _LINE_LONG_TASK_NOTICE_TEXT)
+        except Exception:
+            _LOGGER.exception("LINE progress notice failed")
+
+    timer = threading.Timer(delay, notify)
+    timer.daemon = True
+    timer.start()
+    return _ProgressNotice(timer)
+
+
+def _source_record_allows_push(context: dict[str, Any]) -> bool:
+    record = context.get("source_record") if isinstance(context.get("source_record"), dict) else {}
+    source = record.get("source") if isinstance(record.get("source"), dict) else record
+    return bool(source.get("allow_push"))
+
+
+def _handle_line_command(
+    event: dict[str, Any],
+    external_event,
+    *,
+    endpoint: WebhookEndpoint,
+    context: dict[str, Any],
+    hook_settings: dict[str, Any],
+    audience_decision=None,
+    audience_policy: dict[str, Any] | None = None,
+) -> Dict[str, Any] | None:
+    if not _line_slash_command_requested(event, hook_settings):
+        return None
+    text = _line_message_text(event)
+    registry = SlashCommandRegistry()
+    commands = registry.list_commands()
+    parsed = _parse_line_slash_command(text, commands)
+    if parsed is None:
+        command_name = text[1:].strip().split(None, 1)[0] if text[1:].strip() else ""
+        text_response = _line_unknown_command_text(command_name, commands)
+        command_id = command_name
+        arg_text = ""
+    else:
+        command = parsed["command"]
+        command_id = str(command.get("id") or command.get("name") or "").strip()
+        arg_text = str(parsed.get("arg_text") or "").strip()
+        command_execution_type = _line_command_execution_type(command)
+        command_action = _line_command_execution_action(command)
+        if command_execution_type == "model_command" and command_action == "select_or_suggest_model":
+            text_response = _line_model_command(endpoint, hook_settings, arg_text)
+        elif command_action == "open_command_help":
+            text_response = _line_help_text(commands)
+        elif command_action == "show_status":
+            text_response = _line_status_text(
+                endpoint,
+                hook_settings,
+                context,
+                external_event,
+                commands=commands,
+                audience_decision=audience_decision,
+                audience_policy=audience_policy,
+            )
+        elif command_action in _LINE_EXTERNAL_CHAT_ACTIONS:
+            matched_name = str(parsed.get("matched_name") or command.get("name") or command_id).strip()
+            command_text = f"/{matched_name} {arg_text}".strip()
+            chat_link_result = handle_chat_link_message(
+                external_event,
+                context,
+                command_text,
+                model=_line_response_model(endpoint, hook_settings),
+                command_action_resolver=slash_command_execution_action,
+            )
+            text_response = str((chat_link_result or {}).get("assistant_text") or CHAT_LINK_PROMPT)
+        else:
+            approval_command_id = _line_approval_command_id(command)
+            if approval_command_id:
+                progress = _start_line_progress_notice(external_event, context) if approval_command_id == "approve" else _ProgressNotice(None)
+                try:
+                    approval_result = handle_line_approval_command(approval_command_id, arg_text, context)
+                except Exception:
+                    _LOGGER.exception("LINE approval command failed")
+                    approval_result = {"assistant_text": _LINE_SHORT_ERROR_TEXT}
+                finally:
+                    progress.cancel()
+                text_response = str(approval_result.get("assistant_text") or "承認コマンドを処理できませんでした。")
+            else:
+                args = _line_command_args(command, arg_text)
+                result = registry.execute(
+                    {
+                        "command": command.get("name") or command_id,
+                        "args": args,
+                        "mode": "chat",
+                        "conversation_id": context.get("conversation_id"),
+                    },
+                    context,
+                )
+                text_response = _line_format_registry_command_result(command, result, args)
+    plan = {"provider": "line", "messages": [{"type": "text", "text": text_response}], "metadata": {"line_command": command_id}}
+    reply = _send_response_plan(plan, external_event, context=context)
+    return {
+        "status": "ok",
+        "assistant_text": text_response,
+        "line_command": {"name": command_id, "args": arg_text},
+        "response_plan": plan,
+        "reply": reply,
+    }
+
+
+def _line_slash_command_requested(event: dict[str, Any], hook_settings: dict[str, Any]) -> bool:
+    if not _truthy(hook_settings.get("line_slash_commands_enabled", True)):
+        return False
+    text = _line_message_text(event)
+    return text.startswith("/") and not text.startswith("//")
+
+
+def _parse_line_slash_command(text: str, commands: list[dict[str, Any]]) -> dict[str, Any] | None:
+    body = str(text or "").strip().lstrip("/").strip()
+    if not body:
+        return None
+    candidates: list[tuple[int, dict[str, Any], str, str]] = []
+    for command in commands:
+        for name in _line_command_names(command):
+            rest = _line_command_rest(body, name)
+            if rest is not None:
+                candidates.append((len(name), command, name, rest))
+    if not candidates:
+        return None
+    _length, command, name, rest = sorted(candidates, key=lambda item: (-item[0], str(item[1].get("id") or "")))[0]
+    return {"command": command, "matched_name": name, "arg_text": rest}
+
+
+def _line_command_rest(body: str, name: str) -> str | None:
+    parts = [part for part in re.split(r"[\s_-]+", str(name or "").strip().lower()) if part]
+    if not parts:
+        return None
+    pattern = r"^" + r"[\s_-]+".join(re.escape(part) for part in parts) + r"(?:\s+|$)"
+    match = re.match(pattern, str(body or "").strip(), flags=re.IGNORECASE)
+    if match is None:
+        return None
+    return str(body or "").strip()[match.end():].strip()
+
+
+def _line_command_names(command: dict[str, Any]) -> list[str]:
+    names = [
+        str(command.get("id") or "").strip().lower().lstrip("/"),
+        str(command.get("name") or "").strip().lower().lstrip("/"),
+    ]
+    names.extend(str(alias or "").strip().lower().lstrip("/") for alias in command.get("aliases") or [])
+    return sorted({name for name in names if name}, key=len, reverse=True)
+
+
+def _line_command_execution_action(command: dict[str, Any]) -> str:
+    execution = command.get("execution") if isinstance(command.get("execution"), dict) else {}
+    return str(execution.get("action") or "").strip()
+
+
+def _line_command_execution_type(command: dict[str, Any]) -> str:
+    execution = command.get("execution") if isinstance(command.get("execution"), dict) else {}
+    return str(execution.get("type") or "").strip()
+
+
+def _line_approval_command_id(command: dict[str, Any]) -> str:
+    action = _line_command_execution_action(command)
+    if action in _LINE_APPROVAL_ACTION_TO_COMMAND:
+        return _LINE_APPROVAL_ACTION_TO_COMMAND[action]
+    command_id = str(command.get("id") or command.get("name") or "").strip().lower()
+    return command_id if command_id in set(_LINE_APPROVAL_ACTION_TO_COMMAND.values()) else ""
+
+
+def _line_command_args(command: dict[str, Any], arg_text: str) -> dict[str, Any]:
+    specs = [spec for spec in command.get("args", []) if isinstance(spec, dict)]
+    if not specs:
+        return {}
+    text = str(arg_text or "").strip()
+    if not text:
+        return {}
+    if len(specs) == 1:
+        return {str(specs[0].get("name") or "value"): text}
+
+    args: dict[str, Any] = {}
+    remaining = text
+    for index, spec in enumerate(specs):
+        name = str(spec.get("name") or "").strip()
+        if not name:
+            continue
+        if index == len(specs) - 1 or spec.get("type") == "string":
+            if remaining:
+                args[name] = remaining
+            break
+        token, _sep, rest = remaining.partition(" ")
+        if token:
+            args[name] = token
+        remaining = rest.strip()
+    return args
+
+
+def _line_model_status(endpoint: WebhookEndpoint, hook_settings: dict[str, Any]) -> str:
+    answer_model = _line_response_model(endpoint, hook_settings) or "(未設定)"
+    default_model = str(hook_settings.get("default_model") or "(未設定)")
+    trigger_mode = str(hook_settings.get("response_trigger_mode") or "always")
+    trigger_model = str(hook_settings.get("trigger_model") or "inherit")
+    line_model = str(hook_settings.get("line_model") or "")
+    lines = [
+        f"応答モデル: {answer_model}",
+        f"デフォルトモデル: {default_model}",
+        f"反応モード: {trigger_mode}",
+        f"判断モデル: {trigger_model}",
+    ]
+    if line_model:
+        lines.append(f"LINE個別モデル: {line_model}")
+    return "\n".join(lines)
+
+
+def _line_model_command(endpoint: WebhookEndpoint, hook_settings: dict[str, Any], query: str) -> str:
+    query = str(query or "").strip()
+    if not query:
+        return _line_model_status(endpoint, hook_settings)
+    resolution = _resolve_line_model_query(query, limit=6)
+    exact = resolution.get("exact") if isinstance(resolution, dict) else None
+    candidates = resolution.get("candidates") if isinstance(resolution, dict) else []
+    if isinstance(exact, dict) and exact.get("profile_id"):
+        return _set_line_endpoint_model(endpoint, str(exact["profile_id"]), hook_settings)
+    if candidates:
+        return _line_model_candidates_text(query, candidates)
+    return "一致するモデルが見つかりません。\n/model gpt のように短めに打つと候補を出します。"
+
+
+def _set_line_endpoint_model(endpoint: WebhookEndpoint, model: str, hook_settings: dict[str, Any]) -> str:
+    model = str(model or "").strip()
+    if not model:
+        return _line_model_status(endpoint, hook_settings)
+    try:
+        from domain.webhook.endpoint_store import WebhookEndpointStore
+
+        payload = endpoint.as_dict(redact=False)
+        conversation = dict(payload.get("conversation") if isinstance(payload.get("conversation"), dict) else {})
+        conversation["model"] = model
+        payload["conversation"] = conversation
+        WebhookEndpointStore().upsert(payload)
+        _persist_line_hook_model(model)
+        hook_settings["line_model"] = model
+        return f"LINE応答モデルを {model} にしました。"
+    except Exception as exc:
+        return f"モデル変更に失敗しました: {exc}"
+
+
+def _resolve_line_model_query(query: str, *, limit: int = 6) -> dict[str, Any]:
+    try:
+        from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+
+        service = ModelRuntimeSettingsService()
+        override = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", "").strip()
+        if override:
+            service._settings_path = Path(override)  # type: ignore[attr-defined]
+        resolution = service.resolve_model_candidates(query, limit=limit)
+    except Exception:
+        resolution = {"query": query, "exact": None, "candidates": []}
+    if resolution.get("exact") or resolution.get("candidates"):
+        return resolution
+
+    candidates = _fuzzy_line_model_candidates(query, limit=limit)
+    return {"query": query, "exact": None, "candidates": candidates}
+
+
+def _fuzzy_line_model_candidates(query: str, *, limit: int = 6) -> list[dict[str, Any]]:
+    cleaned = _normalize_match_text(query)
+    if not cleaned:
+        return []
+    try:
+        from domain.ai_client.model_search import search_models
+
+        models = search_models({"max_results": 100}).get("models", [])
+    except Exception:
+        models = []
+    scored: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        profile_id = str(item.get("profile_id") or item.get("qualified_model_id") or "").strip()
+        if not profile_id or profile_id in seen:
+            continue
+        fields = [
+            item.get("profile_id"),
+            item.get("qualified_model_id"),
+            item.get("provider_id"),
+            item.get("model_id"),
+            item.get("display_name"),
+            item.get("label"),
+        ]
+        score = max((SequenceMatcher(None, cleaned, _normalize_match_text(field)).ratio() for field in fields if str(field or "").strip()), default=0.0)
+        if score < 0.46:
+            continue
+        candidate = dict(item)
+        candidate["score"] = int(score * 100)
+        scored.append(candidate)
+        seen.add(profile_id)
+    scored.sort(key=lambda item: (-int(item.get("score") or 0), str(item.get("label") or item.get("profile_id") or "").casefold()))
+    return scored[:limit]
+
+
+def _line_model_candidates_text(query: str, candidates: list[dict[str, Any]]) -> str:
+    lines = [f"モデル候補: {query}"]
+    for index, candidate in enumerate(candidates[:6], start=1):
+        profile_id = str(candidate.get("profile_id") or candidate.get("qualified_model_id") or "").strip()
+        label = str(candidate.get("label") or candidate.get("display_name") or profile_id).strip()
+        status = "設定済み" if candidate.get("configured") else "未設定"
+        if candidate.get("local"):
+            status = "ローカル"
+        lines.append(f"{index}. {profile_id} ({label}, {status})")
+    lines.append("設定: /model <候補ID>")
+    return "\n".join(lines)
+
+
+def _persist_line_hook_model(model: str) -> None:
+    path = _frontend_settings_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    hook = data.get("hook") if isinstance(data.get("hook"), dict) else {}
+    hook["line_model"] = model
+    data["hook"] = hook
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _line_help_text(commands: list[dict[str, Any]]) -> str:
+    lines = ["使えるLINEコマンド:"]
+    for command in commands:
+        primary = str(command.get("name") or command.get("id") or "").strip()
+        if not primary:
+            continue
+        aliases = [str(alias) for alias in command.get("aliases") or [] if str(alias or "").strip()]
+        alias_text = f" ({', '.join('/' + alias for alias in aliases)})" if aliases else ""
+        label = str(command.get("label") or "").strip()
+        lines.append(f"/{primary}{alias_text} - {label}")
+    lines.append("承認: /approvals、/approve <id>、/deny <id>")
+    return text_limit("\n".join(lines), 5000)
+
+
+def _line_status_text(
+    endpoint: WebhookEndpoint,
+    hook_settings: dict[str, Any],
+    context: dict[str, Any],
+    external_event,
+    *,
+    commands: list[dict[str, Any]],
+    audience_decision=None,
+    audience_policy: dict[str, Any] | None = None,
+) -> str:
+    origin = origin_from_external_event(external_event)
+    source_record = context.get("source_record") if isinstance(context.get("source_record"), dict) else {}
+    source = source_record.get("source") if isinstance(source_record.get("source"), dict) else {}
+    linked_chat_id = chat_linked_conversation_id(context)
+    pending_approvals = pending_approval_count(context)
+    output = _frontend_external_output_settings()
+    token_configured = _line_channel_access_token_configured()
+    mention = external_event.metadata.get("line_mention") if isinstance(external_event.metadata, dict) else {}
+    decision_text = "allow" if bool(getattr(audience_decision, "allowed", False)) else "deny"
+    if hasattr(audience_decision, "reason"):
+        decision_text += f" ({audience_decision.reason})"
+    policy_default = str((audience_policy or {}).get("default") or "").strip() or "unknown"
+    lines = [
+        "LINE status",
+        f"hook: {'on' if hook_settings.get('enabled') else 'off'}",
+        f"slash commands: {'on' if hook_settings.get('line_slash_commands_enabled') else 'off'}",
+        f"model: {_line_response_model(endpoint, hook_settings) or '(未設定)'}",
+        f"default model: {hook_settings.get('default_model') or '(未設定)'}",
+        f"line model: {hook_settings.get('line_model') or '(未設定)'}",
+        f"answer model: {hook_settings.get('answer_model') or '(未設定)'}",
+        f"trigger: {hook_settings.get('response_trigger_mode') or 'always'} / prefix {hook_settings.get('trigger_prefix') or '#'}",
+        f"judge model: {hook_settings.get('trigger_model') or 'inherit'}",
+        f"chatid: {linked_chat_id or '(default)'}",
+        f"pending approvals: {pending_approvals}",
+        f"source: {origin.source_type} {_short_id(origin.source_id)}",
+        f"source enabled: {'on' if source.get('enabled') else 'off'}",
+        f"source push: {'on' if source.get('allow_push') else 'off'}",
+        f"group mention required: {'on' if mention.get('require_group_mention') else 'off'}",
+        f"mentioned: {'yes' if mention.get('mentioned') else 'no'}",
+        f"addressed: {'yes' if mention.get('addressed') else 'no'}",
+        f"policy: {decision_text}, default {policy_default}",
+        f"send mode: {output.get('output_send_mode') or 'reply_to_origin'}",
+        f"reply fallback: {'auto post' if hook_settings.get('line_auto_post_on_reply_failure') else 'ask/log'}",
+        f"progress post: {'on' if hook_settings.get('line_progress_post_enabled') else 'off'}",
+        f"LINE token: {'ok' if token_configured else 'missing'}",
+        "image reply: HTTPS JPEG/PNG URLなら対応",
+        f"commands: {len(commands)}",
+    ]
+    return "\n".join(lines)
+
+
+def _line_channel_access_token_configured() -> bool:
+    try:
+        from domain.external.token_store import read_external_token
+
+        return bool(read_external_token("line", kind="channel_access_token"))
+    except Exception:
+        return False
+
+
+def _line_unknown_command_text(name: str, commands: list[dict[str, Any]]) -> str:
+    suggestions = _line_command_suggestions(name, commands)
+    if suggestions:
+        return "コマンドが見つかりません。\n候補: " + ", ".join(f"/{item}" for item in suggestions)
+    return "コマンドが見つかりません。/help で一覧を見られます。"
+
+
+def _line_command_suggestions(name: str, commands: list[dict[str, Any]], *, limit: int = 5) -> list[str]:
+    needle = _normalize_match_text(name)
+    if not needle:
+        return [str(command.get("name") or command.get("id")) for command in commands[:limit] if command.get("name") or command.get("id")]
+    scored: list[tuple[float, str]] = []
+    seen: set[str] = set()
+    for command in commands:
+        primary = str(command.get("name") or command.get("id") or "").strip()
+        for candidate in _line_command_names(command):
+            normalized = _normalize_match_text(candidate)
+            if not normalized:
+                continue
+            score = SequenceMatcher(None, needle, normalized).ratio()
+            if needle in normalized or normalized in needle:
+                score += 0.35
+            if score < 0.48:
+                continue
+            display = primary or candidate
+            if display in seen:
+                continue
+            seen.add(display)
+            scored.append((score, display))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [item[1] for item in scored[:limit]]
+
+
+def _line_format_registry_command_result(command: dict[str, Any], result: dict[str, Any], args: dict[str, Any]) -> str:
+    command_name = str(command.get("name") or command.get("id") or "").strip()
+    if not isinstance(result, dict):
+        return f"/{command_name}: 実行結果を読み取れませんでした。"
+    if result.get("status") == "error":
+        err = result.get("error") if isinstance(result.get("error"), dict) else {}
+        code = str(err.get("code") or "ERROR")
+        message = str(err.get("message") or "失敗しました")
+        if code == "COMMAND_UNAVAILABLE":
+            return f"/{command_name}: このコマンドはLINEのchatモードでは使えません。"
+        return f"/{command_name}: {message}"
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    if data.get("requires_approval"):
+        return f"/{command_name}: 承認センターが必要です。LINEからは実行せず、defaultspack画面で確認してください。"
+    if data.get("executed"):
+        return _line_executed_command_text(command_name, data.get("result"))
+    action = str(data.get("action") or "").strip()
+    if action:
+        args_text = _line_args_text(args)
+        suffix = f" args: {args_text}" if args_text else ""
+        return f"/{command_name}: defaultspack画面用のコマンドです。action={action}{suffix}"
+    return f"/{command_name}: 受け付けました。"
+
+
+def _line_executed_command_text(command_name: str, result: Any) -> str:
+    if isinstance(result, dict):
+        if "level" in result:
+            return f"/{command_name}: thinking={result.get('level')}"
+        if "profile_id" in result:
+            return f"/{command_name}: model={result.get('profile_id')}"
+        compact = json.dumps(result, ensure_ascii=False, sort_keys=True)
+        return text_limit(f"/{command_name}: {compact}", 5000)
+    if result is None:
+        return f"/{command_name}: 完了しました。"
+    return text_limit(f"/{command_name}: {result}", 5000)
+
+
+def _line_args_text(args: dict[str, Any]) -> str:
+    if not args:
+        return ""
+    return ", ".join(f"{key}={value}" for key, value in args.items())
+
+
+def _normalize_match_text(value: Any) -> str:
+    return re.sub(r"[\s_-]+", " ", str(value or "").strip().casefold())
+
+
+def _short_id(value: str) -> str:
+    text = str(value or "").strip()
+    if len(text) <= 12:
+        return text or "(none)"
+    return text[:6] + "..." + text[-4:]
+
+
+def _line_reaction_decision(event: dict[str, Any], external_event, hook_settings: dict[str, Any]) -> dict[str, Any]:
+    if not _truthy(hook_settings.get("enabled", True)):
+        return {"fire": False, "reason": "hook disabled"}
+    mode = str(hook_settings.get("response_trigger_mode") or "always").strip().lower()
+    if mode == "always":
+        return {"fire": True, "reason": mode}
+    if mode == "auto":
+        return {"fire": True, "reason": mode, "treat_as_mention": True}
+    if mode != "prefix":
+        return {"fire": True, "reason": "unknown mode fallback"}
+    text = _line_message_text(event)
+    prefix = str(hook_settings.get("trigger_prefix") or "#").strip() or "#"
+    if not text.startswith(prefix):
+        return {"fire": False, "reason": f"missing trigger prefix {prefix}"}
+    stripped = text[len(prefix):].strip()
+    if stripped:
+        _set_line_message_text(external_event, stripped)
+    return {"fire": True, "reason": "trigger prefix matched", "treat_as_mention": True}
+
+
+def _line_message_text(event: dict[str, Any]) -> str:
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    return str(message.get("text") or "").strip()
+
+
+def _set_line_message_text(external_event, text: str) -> None:
+    for container in (
+        external_event.payload.get("message") if isinstance(external_event.payload, dict) else None,
+        external_event.metadata.get("message") if isinstance(external_event.metadata, dict) else None,
+    ):
+        if isinstance(container, dict):
+            container["text"] = text
 
 
 def _payload_from_raw_body(input_data, raw_body: bytes) -> tuple[dict[str, Any], str]:
@@ -272,6 +928,117 @@ def _frontend_external_output_settings() -> dict[str, Any]:
 def _frontend_settings_path() -> Path:
     override = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", "").strip()
     return Path(override) if override else Path(__file__).resolve().parents[3] / "user_data" / "shared" / "frontend_settings.json"
+
+
+def _frontend_hook_settings() -> dict[str, Any]:
+    path = _frontend_settings_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    hook = data.get("hook") if isinstance(data.get("hook"), dict) else {}
+    external_output = data.get("external_output") if isinstance(data.get("external_output"), dict) else {}
+    triggers = data.get("triggers") if isinstance(data.get("triggers"), dict) else {}
+    models = data.get("models") if isinstance(data.get("models"), dict) else {}
+    mode = str(hook.get("response_trigger_mode") or hook.get("trigger_mode") or "always").strip().lower()
+    if mode in {"ai", "llm"}:
+        mode = "auto"
+    if mode not in {"always", "prefix", "auto"}:
+        mode = "always"
+    return {
+        "enabled": _truthy(hook.get("enabled", True)),
+        "response_trigger_mode": mode,
+        "trigger_prefix": str(hook.get("trigger_prefix") or "#").strip() or "#",
+        "trigger_model": str(hook.get("trigger_model") or triggers.get("model") or "").strip(),
+        "answer_model": str(hook.get("answer_model") or hook.get("default_answer_model") or "").strip(),
+        "line_model": str(hook.get("line_model") or hook.get("line_default_model") or "").strip(),
+        "default_model": str(models.get("preferred_model") or "").strip(),
+        "line_auto_post_on_reply_failure": _truthy(
+            hook.get("line_auto_post_on_reply_failure")
+            or hook.get("auto_post_on_reply_failure")
+            or external_output.get("line_auto_post_on_reply_failure")
+        ),
+        "line_progress_post_enabled": _truthy(hook.get("line_progress_post_enabled", True)),
+        "line_progress_notice_seconds": _clamped_int(hook.get("line_progress_notice_seconds"), 40, 5, 55),
+        "line_slash_commands_enabled": _truthy(hook.get("line_slash_commands_enabled", True)),
+        "line_reply_guidance_prompt_enabled": _truthy(hook.get("line_reply_guidance_prompt_enabled", True)),
+    }
+
+
+def _line_response_model(endpoint: WebhookEndpoint, hook_settings: dict[str, Any] | None = None) -> str:
+    hook_settings = hook_settings if isinstance(hook_settings, dict) else {}
+    return str(
+        hook_settings.get("line_model")
+        or hook_settings.get("answer_model")
+        or endpoint.conversation.get("model")
+        or hook_settings.get("default_model")
+        or ""
+    ).strip()
+
+
+def _apply_hook_context(runtime_context: dict[str, Any], hook_settings: dict[str, Any], *, endpoint: WebhookEndpoint) -> None:
+    runtime_context.setdefault("hook_settings", dict(hook_settings))
+    if hook_settings.get("line_auto_post_on_reply_failure"):
+        runtime_context.setdefault("line_auto_post_on_reply_failure", True)
+    response = endpoint.response if isinstance(endpoint.response, dict) else {}
+    response_mode = str(response.get("mode") or "").strip().lower()
+    if (
+        hook_settings.get("line_reply_guidance_prompt_enabled")
+        and response_mode not in {"computer_use_line_biz", "computer_use_only"}
+        and not str(runtime_context.get("external_prompt_prefix") or "").strip()
+    ):
+        _append_prompt_prefix(runtime_context, _LINE_REPLY_GUIDANCE_PROMPT)
+    if str(hook_settings.get("response_trigger_mode") or "") == "auto":
+        trigger_model = str(hook_settings.get("trigger_model") or hook_settings.get("answer_model") or endpoint.conversation.get("model") or "").strip()
+        runtime_context["trigger_decision_config"] = {
+            "enabled": True,
+            "mode": "llm",
+            "default_action": "ignore",
+            "fallback_action": "ignore",
+            "filter_unrelated": True,
+            "llm": {
+                "model": trigger_model or "inherit",
+                "system_prompt": (
+                    "Decide if this LINE message is asking this bot to answer. "
+                    "Return JSON: action fire or ignore, send_response boolean, reason."
+                ),
+            },
+        }
+        runtime_context["trigger_decision_llm"] = _line_trigger_llm_client(trigger_model)
+
+
+def _append_prompt_prefix(runtime_context: dict[str, Any], text: str) -> None:
+    prompt = str(text or "").strip()
+    if not prompt:
+        return
+    current = str(runtime_context.get("external_prompt_prefix") or "").strip()
+    runtime_context["external_prompt_prefix"] = f"{current}\n{prompt}".strip() if current else prompt
+
+
+def _line_trigger_llm_client(model: str):
+    def decide(payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            from domain.ai_client.client import AIClient
+
+            selected_model = str(model or payload.get("model") or "").strip()
+            if selected_model == "inherit":
+                selected_model = ""
+            if not selected_model:
+                from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+
+                selected_model = ModelRuntimeSettingsService().get_preferred_model()
+            return AIClient().complete(
+                selected_model,
+                payload.get("messages") if isinstance(payload.get("messages"), list) else [],
+                [],
+                {"temperature": 0, "response_format": {"type": "json_object"}},
+            )
+        except Exception as exc:
+            return {"action": "fire", "send_response": True, "reason": f"auto trigger model unavailable: {exc}"}
+
+    return decide
 
 
 def _policy_denied_result(external_event, decision) -> Dict[str, Any]:
@@ -530,6 +1297,14 @@ def _truthy(value: Any) -> bool:
     return bool(value)
 
 
+def _clamped_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
 def _line_message_mentions_bot(event: dict[str, Any], *, destination: str = "") -> bool:
     message = event.get("message") if isinstance(event.get("message"), dict) else {}
     mention = message.get("mention") if isinstance(message.get("mention"), dict) else {}
@@ -616,6 +1391,30 @@ def _allow_current_scope(policy: dict[str, Any], external_event) -> dict[str, An
         and isinstance(rule.get("scope"), dict)
         and str(rule["scope"].get("type") or "") == scope.type
         and str(rule["scope"].get("id") or "") == scope.id
+        for rule in allow
+    ):
+        allow.append(scope_rule)
+    updated["allow"] = allow
+    return updated
+
+
+def _allow_current_source(policy: dict[str, Any], external_event) -> dict[str, Any]:
+    origin = origin_from_external_event(external_event)
+    if not origin.source_id:
+        return dict(policy or {})
+    updated = dict(policy or {})
+    allow = list(updated.get("allow")) if isinstance(updated.get("allow"), list) else []
+    scope_rule = {
+        "id": f"line-command-source:{origin.source_type}:{origin.source_id}",
+        "provider": origin.provider,
+        "scope": {"type": origin.source_type, "id": origin.source_id},
+    }
+    if not any(
+        isinstance(rule, dict)
+        and rule.get("provider") == scope_rule["provider"]
+        and isinstance(rule.get("scope"), dict)
+        and str(rule["scope"].get("type") or "") == origin.source_type
+        and str(rule["scope"].get("id") or "") == origin.source_id
         for rule in allow
     ):
         allow.append(scope_rule)
