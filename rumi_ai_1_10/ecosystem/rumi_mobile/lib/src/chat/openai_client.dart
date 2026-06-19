@@ -40,7 +40,8 @@ class OpenAiClient {
     });
     request.body = body;
 
-    final streamed = await _http.send(request).timeout(const Duration(seconds: 30));
+    final streamed =
+        await _http.send(request).timeout(const Duration(seconds: 30));
     if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
       final text = await streamed.stream.bytesToString();
       throw OpenAiException(
@@ -52,7 +53,6 @@ class OpenAiClient {
     final buffer = StringBuffer();
     await for (final chunk in streamed.stream.transform(utf8.decoder)) {
       if (_cancelled) {
-        await streamed.stream.drain<void>();
         break;
       }
       buffer.write(chunk);

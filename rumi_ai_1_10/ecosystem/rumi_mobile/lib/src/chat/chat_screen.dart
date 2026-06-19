@@ -75,8 +75,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final max = _scrollController.position.maxScrollExtent;
       if (animate) {
         _scrollController.animateTo(max,
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut);
+            duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
       } else {
         _scrollController.jumpTo(max);
       }
@@ -186,7 +185,8 @@ class _ChatScreenState extends State<ChatScreen> {
       await for (final delta
           in _client!.streamChat(config: config, history: history)) {
         buffer.write(delta);
-        await widget.store.updateMessage(convo.id, assistantId, buffer.toString(),
+        await widget.store.updateMessage(
+            convo.id, assistantId, buffer.toString(),
             pending: true);
         if (mounted) setState(() {});
         _scrollToBottom(animate: false);
@@ -309,8 +309,7 @@ class _ChatScreenState extends State<ChatScreen> {
             itemCount: convo.messages.length,
             itemBuilder: (context, index) {
               final message = convo.messages[index];
-              return MessageView(
-                  key: ValueKey(message.id), message: message);
+              return MessageView(key: ValueKey(message.id), message: message);
             },
           ),
         ),
