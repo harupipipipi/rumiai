@@ -1602,19 +1602,9 @@ def _attachment_audio_placeholders(attachments: list[dict[str, Any]]) -> list[di
 
 
 def _attachment_audio_transcript_blocks(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    blocks = []
-    for attachment in attachments:
-        if not isinstance(attachment, dict):
-            continue
-        mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
-        if not mime.startswith("audio/"):
-            continue
-        transcript = _attachment_audio_transcript(attachment)
-        if not transcript:
-            continue
-        name = str(attachment.get("name") or "ambient-recording").strip()[:200] or "ambient-recording"
-        blocks.append({"type": "text", "text": f"\n\n音声入力の文字起こし: {name}\n{transcript}"})
-    return blocks
+    from blocks.chat.materialize_context import materialized_audio_transcript_blocks
+
+    return materialized_audio_transcript_blocks(attachments)
 
 
 def _attachment_audio_transcript(attachment: dict[str, Any]) -> str:

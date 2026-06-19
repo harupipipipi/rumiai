@@ -164,6 +164,33 @@ def test_materialize_context_honors_text_aliases(tmp_path, monkeypatch):
         ChatStore._instance = None
 
 
+def test_materialized_audio_transcript_blocks_are_shared_for_ambient_recordings():
+    from blocks.chat.materialize_context import materialized_audio_transcript_blocks
+
+    blocks = materialized_audio_transcript_blocks(
+        [
+            {
+                "name": "ok-mark-recording.webm",
+                "type": "audio/webm",
+                "metadata": {"transcript": "hello こんにちは"},
+                "dataUrl": "data:audio/webm;base64,AAAA",
+            },
+            {
+                "name": "camera-frame.png",
+                "type": "image/png",
+                "transcript": "ignored",
+            },
+        ]
+    )
+
+    assert blocks == [
+        {
+            "type": "text",
+            "text": "\n\n音声入力の文字起こし: ok-mark-recording.webm\nhello こんにちは",
+        }
+    ]
+
+
 def test_materialize_context_honors_markdown_alias_and_metadata(tmp_path, monkeypatch):
     from blocks.chat import materialize_context
     from domain.chat.store import ChatStore
