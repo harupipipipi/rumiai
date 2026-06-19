@@ -168,6 +168,10 @@ fn defaultspack_health_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/api/health")
 }
 
+fn defaultspack_auth_probe_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/api/integrations/secrets")
+}
+
 fn read_defaultspack_port(env_vars: &[(String, String)]) -> AnyResult<u16> {
     for key in ["RUMI_DEFAULTSPACK_PORT", "DEFAULTS_HTTP_PORT"] {
         if let Some((_, value)) = env_vars.iter().find(|(env_key, _)| env_key == key) {
@@ -179,11 +183,32 @@ fn read_defaultspack_port(env_vars: &[(String, String)]) -> AnyResult<u16> {
     Ok(DEFAULTSPACK_DEFAULT_PORT)
 }
 
-fn check_defaultspack_http_ready(client: &reqwest::blocking::Client, port: u16) -> bool {
+fn check_defaultspack_health_ready(client: &reqwest::blocking::Client, port: u16) -> bool {
     client
         .get(defaultspack_health_url(port))
         .send()
         .is_ok_and(|response| response.status().is_success())
+}
+
+fn check_defaultspack_auth_ready(
+    client: &reqwest::blocking::Client,
+    port: u16,
+    api_token: &str,
+) -> bool {
+    client
+        .get(defaultspack_auth_probe_url(port))
+        .bearer_auth(api_token)
+        .send()
+        .is_ok_and(|response| response.status().is_success())
+}
+
+fn check_defaultspack_http_ready(
+    client: &reqwest::blocking::Client,
+    port: u16,
+    api_token: &str,
+) -> bool {
+    check_defaultspack_health_ready(client, port)
+        && check_defaultspack_auth_ready(client, port, api_token)
 }
 
 fn defaultspack_health_client() -> AnyResult<reqwest::blocking::Client> {
@@ -193,20 +218,24 @@ fn defaultspack_health_client() -> AnyResult<reqwest::blocking::Client> {
         .context("failed to build defaultspack health client")
 }
 
-fn is_defaultspack_http_ready(port: u16) -> bool {
+fn is_defaultspack_http_ready(port: u16, api_token: &str) -> bool {
     defaultspack_health_client()
-        .map(|client| check_defaultspack_http_ready(&client, port))
+        .map(|client| check_defaultspack_http_ready(&client, port, api_token))
         .unwrap_or(false)
 }
 
-fn wait_for_defaultspack_http_ready(port: u16, child: &mut Child) -> AnyResult<()> {
+fn wait_for_defaultspack_http_ready(
+    port: u16,
+    api_token: &str,
+    child: &mut Child,
+) -> AnyResult<()> {
     let client = defaultspack_health_client()?;
     let deadline = Instant::now() + DEFAULTSPACK_READY_TIMEOUT;
     let mut poll_count: u32 = 0;
 
     loop {
         poll_count += 1;
-        if check_defaultspack_http_ready(&client, port) {
+        if check_defaultspack_http_ready(&client, port, api_token) {
             info!(
                 "wait_for_defaultspack_http_ready: ready after {poll_count} polls on port {port}"
             );
@@ -365,6 +394,8 @@ export RUMI_USER_DATA
 
 RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')
 export RUMI_API_TOKEN
+RUMI_DEFAULTSPACK_LOCAL_TOKEN="$RUMI_API_TOKEN"
+export RUMI_DEFAULTSPACK_LOCAL_TOKEN
 RUMI_PANEL_BOOTSTRAP_SECRET=$(cat "$PANEL_BOOTSTRAP_SECRET_FILE" 2>/dev/null | tr -d '\n')
 export RUMI_PANEL_BOOTSTRAP_SECRET
 
@@ -613,8 +644,23 @@ fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
     };
     let url = defaultspack_window_url(metadata.port);
     info!("launch_defaultspack_desktop_impl: Defaultspack window URL will be {url}");
+    let api_token = read_desktop_api_token_from_config(config)
+        .context("failed to read Viewer local auth token for Defaultspack launch")?;
 
-    if !is_defaultspack_http_ready(metadata.port) {
+    if is_defaultspack_http_ready(metadata.port, &api_token) {
+        info!(
+            "launch_defaultspack_desktop_impl: health and local auth checks passed, server already ready at {url}"
+        );
+    } else if defaultspack_health_client()
+        .map(|client| check_defaultspack_health_ready(&client, metadata.port))
+        .unwrap_or(false)
+    {
+        bail!(
+            "Defaultspack is already running on http://127.0.0.1:{} but it does not accept the Viewer local auth token. Quit the stale Defaultspack process or free port {}, then launch again.",
+            metadata.port,
+            metadata.port
+        );
+    } else {
         info!("launch_defaultspack_desktop_impl: health check indicates server not ready, spawning...");
         let mut child = match spawn_defaultspack_local_server(config, &metadata) {
             Ok(c) => {
@@ -636,7 +682,7 @@ fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
                 return Err(e);
             }
         };
-        match wait_for_defaultspack_http_ready(metadata.port, &mut child) {
+        match wait_for_defaultspack_http_ready(metadata.port, &api_token, &mut child) {
             Ok(()) => info!("launch_defaultspack_desktop_impl: server became ready at {url}"),
             Err(e) => {
                 error!("launch_defaultspack_desktop_impl: wait_for_ready failed: {e:#}");
@@ -648,10 +694,6 @@ fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
                 return Err(e);
             }
         }
-    } else {
-        info!(
-            "launch_defaultspack_desktop_impl: health check passed, server already ready at {url}"
-        );
     }
 
     Ok(url)
@@ -851,6 +893,7 @@ fn spawn_defaultspack_local_server(
         .env("RUMI_APP_DIR", &config.app_dir)
         .env("RUMI_USER_DATA", &config.user_data_dir)
         .env("RUMI_API_TOKEN", &api_token)
+        .env("RUMI_DEFAULTSPACK_LOCAL_TOKEN", &api_token)
         .env("RUMI_PANEL_BOOTSTRAP_SECRET", &panel_bootstrap_secret)
         .current_dir(&metadata.app_working_dir)
         .stdin(Stdio::null())
@@ -1005,6 +1048,7 @@ mod tests {
         assert!(script.contains("exec \"$PACK_SHELL\" run \"defaultspack\""));
         assert!(!script.contains("--api-token"));
         assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
+        assert!(script.contains("export RUMI_DEFAULTSPACK_LOCAL_TOKEN"));
         assert!(!script.contains(".defaultspack_launch_request"));
         assert!(!script.contains("open -a \"Rumi AI\""));
     }
@@ -1031,6 +1075,7 @@ mod tests {
 
         assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
         assert!(script.contains("export DEFAULTS_HTTP_PORT='8766'"));
+        assert!(script.contains("export RUMI_DEFAULTSPACK_LOCAL_TOKEN"));
         assert!(script.contains("export RUMI_PANEL_BOOTSTRAP_SECRET"));
     }
 
@@ -1138,6 +1183,14 @@ mod tests {
         assert_eq!(
             defaultspack_window_url(DEFAULTSPACK_DEFAULT_PORT),
             "http://127.0.0.1:8766/chat"
+        );
+    }
+
+    #[test]
+    fn defaultspack_auth_probe_url_targets_sensitive_read_route() {
+        assert_eq!(
+            defaultspack_auth_probe_url(DEFAULTSPACK_DEFAULT_PORT),
+            "http://127.0.0.1:8766/api/integrations/secrets"
         );
     }
 
