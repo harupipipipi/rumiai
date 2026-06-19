@@ -1,0 +1,234 @@
+"""Device token store for scoped mobile authentication.
+
+Each paired mobile device receives a scoped device token (not the full-power
+HMAC key). Tokens are stored as hashes; the plaintext is returned only once
+at approval time. Tokens carry scopes and can be revoked individually.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import secrets
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .settings import default_store_path
+
+DEVICE_ACTIVE = "active"
+DEVICE_REVOKED = "revoked"
+
+DEFAULT_SCOPES = ["chat.read", "chat.write", "tools.observe"]
+ALL_SCOPES = DEFAULT_SCOPES + ["tools.approve", "credentials.request"]
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _devices_file(store_path: Path | None = None) -> Path:
+    root = Path(store_path).expanduser() if store_path is not None else default_store_path()
+    if root.name == "devices.json":
+        return root
+    return root / "devices.json"
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _generate_token() -> str:
+    return "dtk_" + secrets.token_urlsafe(32)
+
+
+def _confirmation_emoji() -> str:
+    emojis = ["🔵", "🌟", "🔴", "🟢", "🟡", "🟣", "⚡", "🌙", "☀️", "🔑"]
+    return secrets.choice(emojis)
+
+
+def _string_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return sorted({str(v).strip() for v in values if str(v).strip()})
+
+
+@dataclass
+class DeviceRecord:
+    device_id: str
+    label: str = ""
+    public_key: str = ""
+    fingerprint: str = ""
+    token_hash: str = ""
+    scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
+    status: str = DEVICE_ACTIVE
+    pairing_id: str = ""
+    confirmation_code: str = ""
+    created_at: int = field(default_factory=_now_ms)
+    updated_at: int = field(default_factory=_now_ms)
+    last_seen_at: int = 0
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "DeviceRecord":
+        return cls(
+            device_id=str(value.get("device_id") or value.get("id") or ""),
+            label=str(value.get("label") or ""),
+            public_key=str(value.get("public_key") or value.get("device_public_key") or ""),
+            fingerprint=str(value.get("fingerprint") or ""),
+            token_hash=str(value.get("token_hash") or ""),
+            scopes=_string_list(value.get("scopes")) or list(DEFAULT_SCOPES),
+            status=str(value.get("status") or DEVICE_ACTIVE),
+            pairing_id=str(value.get("pairing_id") or ""),
+            confirmation_code=str(value.get("confirmation_code") or ""),
+            created_at=int(value.get("created_at") or _now_ms()),
+            updated_at=int(value.get("updated_at") or _now_ms()),
+            last_seen_at=int(value.get("last_seen_at") or 0),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "device_id": self.device_id,
+            "label": self.label,
+            "public_key": self.public_key[:16] + "…" if len(self.public_key) > 16 else self.public_key,
+            "fingerprint": self.fingerprint,
+            "scopes": list(self.scopes),
+            "status": self.status,
+            "pairing_id": self.pairing_id,
+            "confirmation_code": self.confirmation_code,
+            "created_at": int(self.created_at),
+            "updated_at": int(self.updated_at),
+            "last_seen_at": int(self.last_seen_at),
+        }
+
+    @property
+    def active(self) -> bool:
+        return self.status == DEVICE_ACTIVE
+
+
+class DeviceStore:
+    def __init__(self, path: Path | None = None) -> None:
+        self.path = _devices_file(path)
+        self._data = self._load()
+
+    def list_devices(self) -> list[dict[str, Any]]:
+        return [d.as_dict() for d in self._devices().values()]
+
+    def get_device(self, device_id: str) -> DeviceRecord | None:
+        return self._devices().get(str(device_id or "").strip())
+
+    def verify_token(self, token: str) -> DeviceRecord | None:
+        """Look up a device by token hash. Returns the device if active."""
+        token_hash = _hash_token(token)
+        for device in self._devices().values():
+            if device.token_hash == token_hash and device.active:
+                return device
+        return None
+
+    def issue_token(
+        self,
+        device_id: str,
+        *,
+        label: str = "",
+        public_key: str = "",
+        fingerprint: str = "",
+        scopes: list[str] | None = None,
+        pairing_id: str = "",
+    ) -> tuple[DeviceRecord, str]:
+        """Create or refresh a device token. Returns (record, plaintext_token).
+
+        The plaintext token is returned ONLY here and never stored.
+        """
+        clean_id = str(device_id or "").strip()
+        if not clean_id:
+            raise ValueError("device_id is required")
+        devices = self._devices()
+        now = _now_ms()
+        plaintext = _generate_token()
+        resolved_scopes = _string_list(scopes) if scopes else list(DEFAULT_SCOPES)
+        code = f"{_confirmation_emoji()}・{secrets.randbelow(90) + 10}"
+        device = DeviceRecord(
+            device_id=clean_id,
+            label=label,
+            public_key=public_key,
+            fingerprint=fingerprint,
+            token_hash=_hash_token(plaintext),
+            scopes=resolved_scopes,
+            status=DEVICE_ACTIVE,
+            pairing_id=pairing_id,
+            confirmation_code=code,
+            created_at=devices[clean_id].created_at if clean_id in devices else now,
+            updated_at=now,
+        )
+        devices[clean_id] = device
+        self._save_devices(devices)
+        return device, plaintext
+
+    def revoke_device(self, device_id: str) -> DeviceRecord | None:
+        device = self.get_device(device_id)
+        if device is None:
+            return None
+        device.status = DEVICE_REVOKED
+        device.updated_at = _now_ms()
+        devices = self._devices()
+        devices[device_id] = device
+        self._save_devices(devices)
+        return device
+
+    def update_label(self, device_id: str, label: str) -> DeviceRecord | None:
+        device = self.get_device(device_id)
+        if device is None:
+            return None
+        device.label = label
+        device.updated_at = _now_ms()
+        devices = self._devices()
+        devices[device_id] = device
+        self._save_devices(devices)
+        return device
+
+    def touch(self, device_id: str) -> None:
+        device = self.get_device(device_id)
+        if device is None:
+            return
+        device.last_seen_at = _now_ms()
+        devices = self._devices()
+        devices[device_id] = device
+        self._save_devices(devices)
+
+    def _devices(self) -> dict[str, DeviceRecord]:
+        raw = self._data.setdefault("devices", {})
+        if not isinstance(raw, dict):
+            raw = {}
+            self._data["devices"] = raw
+        return {
+            key: DeviceRecord.from_dict(value)
+            for key, value in raw.items()
+            if isinstance(value, dict) and str(value.get("device_id") or key).strip()
+        }
+
+    def _load(self) -> dict[str, Any]:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        data.setdefault("schema_version", 1)
+        data.setdefault("devices", {})
+        return data
+
+    def _save_devices(self, devices: dict[str, DeviceRecord]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._data["schema_version"] = 1
+        self._data["updated_at"] = _now_ms()
+        self._data["devices"] = {did: d.as_dict() for did, d in devices.items()}
+        # Store token_hash separately (as_dict doesn't include it for safety)
+        for did, d in devices.items():
+            self._data["devices"][did]["token_hash"] = d.token_hash
+            self._data["devices"][did]["public_key"] = d.public_key
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps(self._data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        tmp.replace(self.path)

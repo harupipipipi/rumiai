@@ -237,6 +237,8 @@ class PackAPIHandler(
     _request_auth_mode: Optional[str] = None
     _panel_session: Optional[dict[str, Any]] = None
     _panel_session_cookie: Optional[str] = None
+    _authenticated_device_id: Optional[str] = None
+    _authenticated_scopes: list[str] = []
     _web_mounts: list[dict[str, Any]] = []           # web_mount テーブル（テーブル駆動静的配信）
     _pre_auth_table: list[dict[str, Any]] = []       # pre_auth_routes テーブル（テーブル駆動認証バイパス）
     _api_route_exact: dict[tuple[str, str], dict[str, Any]] = {}      # api_routes 完全一致テーブル {(METHOD, path): entry}
@@ -434,6 +436,12 @@ class PackAPIHandler(
             return True
         if self._is_fixed_pre_auth_route(method_upper, path):
             return True
+        # Mobile pairing claim/status are accessible without a device token
+        # (the device does not have one yet). Protected by pairing_id + code.
+        if method_upper in {"POST", "GET"} and path.startswith("/api/mobile/v1/pairings/"):
+            suffix = path[len("/api/mobile/v1/pairings/"):]
+            if suffix.endswith("/claim") or suffix.endswith("/status"):
+                return True
         # Provider webhooks must reach their own signature/shared-secret checks
         # before panel or bearer auth can apply.
         if method_upper == "POST":
@@ -958,6 +966,21 @@ class PackAPIHandler(
         if not auth_header.startswith("Bearer "):
             return False
         token = auth_header[7:]  # len("Bearer ") == 7
+
+        # 0. Device token (scoped mobile auth) — checked first for /api/mobile/v1/*
+        if token.startswith("dtk_"):
+            try:
+                from ecosystem.defaultspack.domain.p2p.device_store import DeviceStore
+                store = DeviceStore()
+                device = store.verify_token(token)
+                if device is not None:
+                    self._authenticated_device_id = device.device_id
+                    self._authenticated_scopes = list(device.scopes)
+                    store.touch(device.device_id)
+                    return True
+            except Exception:
+                pass
+            return False
 
         # 1. HMACKeyManager 経由で検証（ローテーション対応）
         if self._hmac_key_manager is not None:

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../domain/conversation_locator.dart';
 import 'chat_models.dart';
 
 class ChatDrawer extends StatelessWidget {
@@ -13,6 +14,7 @@ class ChatDrawer extends StatelessWidget {
     required this.onRename,
     required this.onPin,
     required this.onOpenSettings,
+    this.pcConnected = false,
   });
 
   final List<Conversation> conversations;
@@ -23,12 +25,18 @@ class ChatDrawer extends StatelessWidget {
   final ValueChanged<String> onRename;
   final ValueChanged<String> onPin;
   final VoidCallback onOpenSettings;
+  final bool pcConnected;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final pinned = conversations.where((c) => c.pinned).toList();
-    final others = conversations.where((c) => !c.pinned).toList();
+
+    final localPinned =
+        conversations.where((c) => c.pinned && !_isPc(c)).toList();
+    final localOthers =
+        conversations.where((c) => !c.pinned && !_isPc(c)).toList();
+    final pcPinned = conversations.where((c) => c.pinned && _isPc(c)).toList();
+    final pcOthers = conversations.where((c) => !c.pinned && _isPc(c)).toList();
 
     return SafeArea(
       child: Column(
@@ -67,9 +75,33 @@ class ChatDrawer extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               children: [
-                if (pinned.isNotEmpty) ...[
+                if (pcPinned.isNotEmpty || pcOthers.isNotEmpty) ...[
+                  _GroupHeader('PC会話'),
+                  for (final c in pcPinned)
+                    _ConversationTile(
+                      conversation: c,
+                      selected: c.id == activeId,
+                      onSelect: () => onSelect(c.id),
+                      onDelete: () => onDelete(c.id),
+                      onRename: () => onRename(c.id),
+                      onPin: () => onPin(c.id),
+                      offline: !pcConnected,
+                    ),
+                  for (final c in pcOthers)
+                    _ConversationTile(
+                      conversation: c,
+                      selected: c.id == activeId,
+                      onSelect: () => onSelect(c.id),
+                      onDelete: () => onDelete(c.id),
+                      onRename: () => onRename(c.id),
+                      onPin: () => onPin(c.id),
+                      offline: !pcConnected,
+                    ),
+                  const SizedBox(height: 8),
+                ],
+                if (localPinned.isNotEmpty) ...[
                   _GroupHeader('ピン留め'),
-                  for (final c in pinned)
+                  for (final c in localPinned)
                     _ConversationTile(
                       conversation: c,
                       selected: c.id == activeId,
@@ -81,7 +113,10 @@ class ChatDrawer extends StatelessWidget {
                   const SizedBox(height: 8),
                 ],
                 _GroupHeader('チャット'),
-                if (others.isEmpty && pinned.isEmpty)
+                if (localOthers.isEmpty &&
+                    localPinned.isEmpty &&
+                    pcOthers.isEmpty &&
+                    pcPinned.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(24),
                     child: Center(
@@ -89,7 +124,7 @@ class ChatDrawer extends StatelessWidget {
                           style: TextStyle(color: Colors.grey)),
                     ),
                   ),
-                for (final c in others)
+                for (final c in localOthers)
                   _ConversationTile(
                     conversation: c,
                     selected: c.id == activeId,
@@ -111,6 +146,8 @@ class ChatDrawer extends StatelessWidget {
       ),
     );
   }
+
+  bool _isPc(Conversation c) => c.authority == ConversationAuthorityKind.pc;
 }
 
 class _GroupHeader extends StatelessWidget {
@@ -136,6 +173,7 @@ class _ConversationTile extends StatelessWidget {
     required this.onDelete,
     required this.onRename,
     required this.onPin,
+    this.offline = false,
   });
 
   final Conversation conversation;
@@ -144,59 +182,65 @@ class _ConversationTile extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback onRename;
   final VoidCallback onPin;
+  final bool offline;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Material(
-      color: selected
-          ? theme.colorScheme.primaryContainer.withValues(alpha: 0.5)
-          : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
-      child: ListTile(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        leading: Icon(
-          conversation.pinned ? Icons.push_pin : Icons.chat_bubble_outline,
-          size: 18,
-          color: Colors.grey,
+    return Opacity(
+      opacity: offline ? 0.5 : 1.0,
+      child: Material(
+        color: selected
+            ? theme.colorScheme.primaryContainer.withValues(alpha: 0.5)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: ListTile(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          leading: Icon(
+            conversation.pinned ? Icons.push_pin : Icons.chat_bubble_outline,
+            size: 18,
+            color: offline ? Colors.red.shade300 : Colors.grey,
+          ),
+          title: Text(
+            conversation.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: offline ? const TextStyle(color: Colors.grey) : null,
+          ),
+          subtitle: Text(
+            conversation.preview,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: offline ? Colors.grey : null),
+          ),
+          trailing: PopupMenuButton<String>(
+            icon: const Icon(Icons.more_horiz, size: 18),
+            onSelected: (value) {
+              switch (value) {
+                case 'rename':
+                  onRename();
+                  break;
+                case 'pin':
+                  onPin();
+                  break;
+                case 'delete':
+                  onDelete();
+                  break;
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'rename', child: Text('名前を変更')),
+              PopupMenuItem(
+                  value: 'pin',
+                  child: Text(conversation.pinned ? 'ピン留め解除' : 'ピン留め')),
+              const PopupMenuItem(
+                  value: 'delete',
+                  child: Text('削除', style: TextStyle(color: Colors.redAccent))),
+            ],
+          ),
+          onTap: onSelect,
         ),
-        title: Text(
-          conversation.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        subtitle: Text(
-          conversation.preview,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 12),
-        ),
-        trailing: PopupMenuButton<String>(
-          icon: const Icon(Icons.more_horiz, size: 18),
-          onSelected: (value) {
-            switch (value) {
-              case 'rename':
-                onRename();
-                break;
-              case 'pin':
-                onPin();
-                break;
-              case 'delete':
-                onDelete();
-                break;
-            }
-          },
-          itemBuilder: (_) => [
-            const PopupMenuItem(value: 'rename', child: Text('名前を変更')),
-            PopupMenuItem(
-                value: 'pin',
-                child: Text(conversation.pinned ? 'ピン留め解除' : 'ピン留め')),
-            const PopupMenuItem(
-                value: 'delete',
-                child: Text('削除', style: TextStyle(color: Colors.redAccent))),
-          ],
-        ),
-        onTap: onSelect,
       ),
     );
   }

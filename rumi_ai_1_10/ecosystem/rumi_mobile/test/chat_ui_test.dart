@@ -9,7 +9,29 @@ import 'package:rumi_remote_app/src/chat/chat_screen.dart';
 import 'package:rumi_remote_app/src/chat/chat_store.dart';
 import 'package:rumi_remote_app/src/chat/composer_bar.dart';
 import 'package:rumi_remote_app/src/chat/message_view.dart';
+import 'package:rumi_remote_app/src/data/pc/device_store.dart';
 import 'package:rumi_remote_app/src/settings/api_config_store.dart';
+
+class _FakeSecureStorage implements SecureKeyValueStorage {
+  final Map<String, String> _values = {};
+
+  @override
+  Future<String?> read(String key) async => _values[key];
+
+  @override
+  Future<void> write(String key, String? value) async {
+    if (value == null) {
+      _values.remove(key);
+    } else {
+      _values[key] = value;
+    }
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    _values.remove(key);
+  }
+}
 
 void main() {
   setUp(() async {
@@ -25,10 +47,14 @@ void main() {
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(393, 852));
     final store = ChatStore();
-    final configStore = ApiConfigStore();
-    await tester
-        .pumpWidget(wrap(ChatScreen(store: store, configStore: configStore)));
-    // Let the async init (SharedPreferences load + create) complete.
+    final fakeStorage = _FakeSecureStorage();
+    final configStore = ApiConfigStore(storage: fakeStorage);
+    final deviceStore = MobileDeviceStore(storage: fakeStorage);
+    await tester.pumpWidget(wrap(ChatScreen(
+      store: store,
+      configStore: configStore,
+      deviceStore: deviceStore,
+    )));
     await tester
         .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
     await tester.pump();

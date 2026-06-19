@@ -7,6 +7,7 @@ import type { ModelSearchItem, SettingsSection } from "../lib/api";
 import { PlacementHtmlRenderer } from "../components/PlacementHtmlRenderer";
 import { ToolSettingsPanel } from "../components/ToolSettingsPanel";
 import { AppsSettingsPanel } from "../components/AppsSettingsPanel";
+import { CredentialTransferModal } from "../components/CredentialTransferModal";
 import { t } from "../lib/i18n";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
@@ -1685,6 +1686,14 @@ function SettingsField({
   const [apiSaveState, setApiSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [apiSaveError, setApiSaveError] = useState("");
   const [apiAvailability, setApiAvailability] = useState<ModelAvailabilityAfterKeySave | null>(null);
+  const [credentialTransfer, setCredentialTransfer] = useState<{
+    providerId: string;
+    providerLabel?: string;
+    apiKey?: string;
+    apiId?: string;
+    baseUrl?: string;
+    defaultModel?: string;
+  } | null>(null);
   const [tokenProvider, setTokenProvider] = useState("line");
   const [tokenName, setTokenName] = useState("main");
   const [tokenKind, setTokenKind] = useState("channel_access_token");
@@ -1965,6 +1974,10 @@ function SettingsField({
             candidate_models: [],
             reason: "Saved, but the backend did not confirm model availability. Choose a model route before using this key.",
           });
+          const savedProviderId = apiProvider;
+          const savedApiId = apiName;
+          const savedBaseUrl = apiBaseUrl.trim();
+          const savedDefaultModel = apiDefaultModel.trim();
           setApiSecret("");
           setApiBaseUrl("");
           setApiAllowedModels("");
@@ -1974,6 +1987,14 @@ function SettingsField({
           setApiSaveState("saved");
           onChange(sectionId, field.id, {
             action: "oauth_refresh",
+          });
+          setCredentialTransfer({
+            providerId: savedProviderId,
+            providerLabel: selectedProviderOption?.label,
+            apiKey: apiSecret,
+            apiId: savedApiId,
+            baseUrl: savedBaseUrl || undefined,
+            defaultModel: savedDefaultModel || undefined,
           });
         } catch (saveError) {
           setApiSaveState("idle");
@@ -2710,6 +2731,17 @@ function SettingsField({
         {control}
       </div>
       {field.help && <p className="text-[11px] text-zinc-500">{field.help}</p>}
+      {credentialTransfer && (
+        <CredentialTransferModal
+          providerId={credentialTransfer.providerId}
+          providerLabel={credentialTransfer.providerLabel}
+          apiKey={credentialTransfer.apiKey}
+          apiId={credentialTransfer.apiId}
+          baseUrl={credentialTransfer.baseUrl}
+          defaultModel={credentialTransfer.defaultModel}
+          onClose={() => setCredentialTransfer(null)}
+        />
+      )}
     </div>
   );
 }

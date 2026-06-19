@@ -59,3 +59,43 @@ class ChatErrorEvent extends ChatEvent {
     this.assistantMessageId,
   });
 }
+
+class ToolCallEvent extends ChatEvent {
+  final String toolId;
+  final String toolName;
+  final String status;
+  final Map<String, dynamic> arguments;
+  final String? summary;
+  final String? output;
+
+  const ToolCallEvent({
+    required super.locator,
+    required super.runId,
+    required this.toolId,
+    required this.toolName,
+    required this.status,
+    this.arguments = const {},
+    this.summary,
+    this.output,
+  });
+}
+
+class ApprovalEvent extends ChatEvent {
+  final String approvalId;
+  final String toolName;
+  final String prompt;
+  final Map<String, dynamic> arguments;
+  final bool approved;
+  final bool pending;
+
+  const ApprovalEvent({
+    required super.locator,
+    required super.runId,
+    required this.approvalId,
+    required this.toolName,
+    required this.prompt,
+    this.arguments = const {},
+    this.approved = false,
+    this.pending = true,
+  });
+}

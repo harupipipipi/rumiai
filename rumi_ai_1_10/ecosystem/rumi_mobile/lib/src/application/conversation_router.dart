@@ -11,10 +11,14 @@ class ConversationRouter {
         _pc = pc;
 
   final LocalConversationBackend _local;
-  final PcConversationBackend? _pc;
+  PcConversationBackend? _pc;
 
   LocalConversationBackend get local => _local;
   PcConversationBackend? get pc => _pc;
+
+  void setPc(PcConversationBackend? pc) {
+    _pc = pc;
+  }
 
   ConversationBackend backendFor(ConversationLocator locator) {
     return switch (locator.authority) {

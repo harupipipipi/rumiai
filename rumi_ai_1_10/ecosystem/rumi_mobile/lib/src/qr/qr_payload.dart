@@ -1,5 +1,5 @@
 import 'dart:convert';
-
+import '../data/pc/device_store.dart';
 import '../settings/api_config_store.dart';
 
 sealed class QrPayload {
@@ -36,6 +36,11 @@ class QrApiImport extends QrPayload {
   }
 }
 
+class QrPairingV2 extends QrPayload {
+  const QrPairingV2(this.payload);
+  final PairingV2Payload payload;
+}
+
 class QrUrl extends QrPayload {
   const QrUrl(this.url);
   final String url;
@@ -67,6 +72,10 @@ QrPayload parseQrPayload(String raw) {
                 '',
             model: (json['model'] as String?)?.trim(),
             label: (json['label'] as String?)?.trim(),
+          );
+        case 'rumi_pair_v2':
+          return QrPairingV2(
+            PairingV2Payload.fromJson(json),
           );
       }
     } catch (_) {
