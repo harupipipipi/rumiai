@@ -1,0 +1,17 @@
+# CI Health Check - MiMo V2.5 Pro
+name: Dev Health Check
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run development health check
+        run: bash scripts/dev-health-check.sh
