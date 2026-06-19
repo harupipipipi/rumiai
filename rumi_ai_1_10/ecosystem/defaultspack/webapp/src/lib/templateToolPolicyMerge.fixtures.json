@@ -1,0 +1,220 @@
+[
+  {
+    "name": "policyなし",
+    "policies": [],
+    "expected_policy": {}
+  },
+  {
+    "name": "allowlistなし",
+    "policies": [
+      {
+        "id": "open",
+        "projected_id": "template:open",
+        "policy": {
+          "default_enabled_tools": ["tool_b", "tool_a"],
+          "denied_tools": ["tool_b"]
+        }
+      }
+    ],
+    "expected_policy": {
+      "tool_denylist": ["tool_b"],
+      "default_enabled_tools": ["tool_a"],
+      "default_disabled_tools": ["tool_b"]
+    },
+    "expected_source_ids": ["open"],
+    "expected_projected_ids": ["template:open"]
+  },
+  {
+    "name": "明示的空allowlist",
+    "policies": [
+      {
+        "id": "none",
+        "projected_id": "template:none",
+        "policy": {
+          "allowed_tools": []
+        }
+      }
+    ],
+    "expected_policy": {
+      "tool_allowlist": []
+    }
+  },
+  {
+    "name": "2 allowlistの積集合",
+    "policies": [
+      {
+        "id": "a",
+        "projected_id": "template:a",
+        "policy": {
+          "allowed_tools": ["tool_a", "tool_b", "tool_c"]
+        }
+      },
+      {
+        "id": "b",
+        "projected_id": "template:b",
+        "policy": {
+          "allowlist": ["tool_b", "tool_c", "tool_d"]
+        }
+      }
+    ],
+    "expected_policy": {
+      "tool_allowlist": ["tool_b", "tool_c"]
+    }
+  },
+  {
+    "name": "3 policyのdeny和集合",
+    "request_disabled_tools": ["tool_d"],
+    "policies": [
+      {"id": "a", "policy": {"denied_tools": ["tool_a"]}},
+      {"id": "b", "policy": {"disabled_tools": ["tool_b"]}},
+      {"id": "c", "policy": {"default_disabled_tools": ["tool_c"]}}
+    ],
+    "expected_policy": {
+      "tool_denylist": ["tool_a", "tool_b", "tool_c", "tool_d"],
+      "default_disabled_tools": ["tool_a", "tool_b", "tool_c", "tool_d"]
+    }
+  },
+  {
+    "name": "default enabledのfilter",
+    "policies": [
+      {
+        "id": "filter",
+        "policy": {
+          "tool_allowlist": ["tool_a", "tool_c"],
+          "default_enabled_tools": ["tool_a", "tool_b", "tool_c"],
+          "tool_denylist": ["tool_c"]
+        }
+      }
+    ],
+    "expected_policy": {
+      "tool_allowlist": ["tool_a"],
+      "tool_denylist": ["tool_c"],
+      "default_enabled_tools": ["tool_a"],
+      "default_disabled_tools": ["tool_c"]
+    }
+  },
+  {
+    "name": "selected toolsのfilter",
+    "policies": [
+      {
+        "id": "selected",
+        "policy": {
+          "allowedToolIds": ["tool_a", "tool_b"],
+          "selected_tools": ["tool_a", "tool_c", "tool_b"],
+          "denied_tool_ids": ["tool_b"]
+        }
+      }
+    ],
+    "expected_policy": {
+      "tool_allowlist": ["tool_a"],
+      "tool_denylist": ["tool_b"],
+      "default_disabled_tools": ["tool_b"],
+      "selected_tools": ["tool_a"]
+    }
+  },
+  {
+    "name": "none優先",
+    "policies": [
+      {"id": "none", "policy": {"tool_choice": "none"}},
+      {"id": "required", "policy": {"tool_choice": "required"}}
+    ],
+    "expected_policy": {
+      "tool_choice": "none"
+    }
+  },
+  {
+    "name": "requiredとautoの競合",
+    "policies": [
+      {"id": "auto", "policy": {"tool_choice": "auto"}},
+      {"id": "required", "policy": {"tool_choice": "required"}}
+    ],
+    "expected_policy": {
+      "tool_choice": "auto"
+    },
+    "expected_diagnostic_codes": ["template.tool_policy.conflicting_tool_choice"]
+  },
+  {
+    "name": "dict tool choice競合",
+    "policies": [
+      {"id": "dict", "policy": {"tool_choice": {"type": "function", "function": {"name": "tool_a"}}}},
+      {"id": "required", "policy": {"tool_choice": "required"}}
+    ],
+    "expected_policy": {
+      "tool_choice": "auto"
+    },
+    "expected_diagnostic_codes": ["template.tool_policy.conflicting_tool_choice"]
+  },
+  {
+    "name": "parallel false優先",
+    "policies": [
+      {"id": "true", "policy": {"parallel_tool_calls": true}},
+      {"id": "false", "policy": {"parallel_tool_calls": false}}
+    ],
+    "expected_policy": {
+      "parallel_tool_calls": false
+    }
+  },
+  {
+    "name": "toggleable false優先",
+    "policies": [
+      {"id": "true", "policy": {"toggleable": true}},
+      {"id": "false", "policy": {"toggleable": false}}
+    ],
+    "expected_policy": {
+      "toggleable": false
+    }
+  },
+  {
+    "name": "params同値",
+    "policies": [
+      {"id": "a", "policy": {"params": {"temperature": 0.2}}},
+      {"id": "b", "policy": {"params": {"temperature": 0.2}}}
+    ],
+    "expected_policy": {
+      "params": {"temperature": 0.2}
+    }
+  },
+  {
+    "name": "params競合",
+    "policies": [
+      {"id": "a", "policy": {"params": {"temperature": 0.2, "top_p": 0.9}}},
+      {"id": "b", "policy": {"params": {"temperature": 0.8, "top_p": 0.9}}}
+    ],
+    "expected_policy": {
+      "params": {"top_p": 0.9}
+    },
+    "expected_diagnostic_codes": ["template.tool_policy.conflicting_param"]
+  },
+  {
+    "name": "duplicate source ID",
+    "policies": [
+      {"id": "same", "projected_id": "template:z", "policy": {"defaultEnabledTools": ["tool_a"]}},
+      {"id": "same", "projected_id": "template:a", "policy": {"default_enabled_tools": ["tool_b"]}}
+    ],
+    "expected_policy": {
+      "default_enabled_tools": ["tool_a", "tool_b"]
+    },
+    "expected_source_ids": ["same"],
+    "expected_projected_ids": ["template:a", "template:z"]
+  },
+  {
+    "name": "alias正規化",
+    "policies": [
+      {
+        "id": "alias",
+        "policy": {
+          "allowed_tool_ids": ["tool_a", "tool_b"],
+          "tool_blocklist": ["tool_b"],
+          "defaultEnabledTools": ["tool_a", "tool_b"],
+          "defaultDisabledTools": ["tool_c"]
+        }
+      }
+    ],
+    "expected_policy": {
+      "tool_allowlist": ["tool_a"],
+      "tool_denylist": ["tool_b", "tool_c"],
+      "default_enabled_tools": ["tool_a"],
+      "default_disabled_tools": ["tool_b", "tool_c"]
+    }
+  }
+]

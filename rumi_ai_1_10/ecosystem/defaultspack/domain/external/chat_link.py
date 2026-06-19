@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Callable
 
 from domain.external.source_store import ExternalSourceStore
 from domain.external.targeting import origin_from_external_event
@@ -9,8 +9,10 @@ from domain.external.targeting import origin_from_external_event
 
 CHAT_LINK_PROMPT = "chatidを入力するか、新規チャットをする場合は /newchat で。"
 
-_CHANGE_COMMANDS = {"change", "chatid", "usechat"}
-_NEWCHAT_COMMANDS = {"newchat", "new-chat", "new_chat"}
+_CHANGE_COMMAND_ACTION = "line_change_chat"
+_NEWCHAT_COMMAND_ACTION = "external_new_chat"
+_CHANGE_COMMANDS_FALLBACK = {"change", "chatid", "usechat"}
+_NEWCHAT_COMMANDS_FALLBACK = {"newchat", "new-chat", "new_chat"}
 _PLAIN_CHAT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,159}$")
 
 
@@ -40,17 +42,23 @@ def handle_chat_link_message(
     text: str,
     *,
     model: str | None = None,
+    command_action_resolver: Callable[[str], str] | None = None,
 ) -> dict[str, Any] | None:
     prepare_source_record(event, context)
     cleaned = _clean_message_text(text)
     command, arg = _parse_command(cleaned)
-    if command in _NEWCHAT_COMMANDS:
-        return _new_chat_result(event, context, model=model)
-    if command in _CHANGE_COMMANDS:
-        candidate = _strip_wrapping_quotes(arg)
-        if not candidate:
-            return _response(event.provider, CHAT_LINK_PROMPT, action="prompt")
-        return _link_existing_result(event, context, candidate)
+    if command:
+        command_action = _external_chat_command_action(
+            command,
+            command_action_resolver=command_action_resolver,
+        )
+        if command_action == _NEWCHAT_COMMAND_ACTION:
+            return _new_chat_result(event, context, model=model)
+        if command_action == _CHANGE_COMMAND_ACTION:
+            candidate = _strip_wrapping_quotes(arg)
+            if not candidate:
+                return _response(event.provider, CHAT_LINK_PROMPT, action="prompt")
+            return _link_existing_result(event, context, candidate)
 
     if cleaned and _PLAIN_CHAT_ID_RE.match(cleaned):
         conversation = _get_conversation(cleaned)
@@ -166,6 +174,25 @@ def _parse_command(text: str) -> tuple[str, str]:
         return "", ""
     command, _sep, rest = body.partition(" ")
     return command.strip().lower(), rest.strip()
+
+
+def _external_chat_command_action(
+    command_name: str,
+    *,
+    command_action_resolver: Callable[[str], str] | None = None,
+) -> str:
+    command_token = str(command_name or "").strip().lower().lstrip("/")
+    if not command_token:
+        return ""
+    if command_action_resolver is not None:
+        action = str(command_action_resolver(command_token) or "").strip()
+        if action in {_CHANGE_COMMAND_ACTION, _NEWCHAT_COMMAND_ACTION}:
+            return action
+    if command_token in _CHANGE_COMMANDS_FALLBACK:
+        return _CHANGE_COMMAND_ACTION
+    if command_token in _NEWCHAT_COMMANDS_FALLBACK:
+        return _NEWCHAT_COMMAND_ACTION
+    return ""
 
 
 def _clean_message_text(text: str) -> str:

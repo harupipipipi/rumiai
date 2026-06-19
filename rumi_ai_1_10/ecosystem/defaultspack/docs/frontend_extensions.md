@@ -2,6 +2,12 @@
 
 `defaultspack` の standalone frontend は「具体 UI を本体が知る」のではなく、backend が返す registry を読んで shell layout・右バー・設定・chat renderer を構成する。
 
+新しい settings field、composer input、AI input、tool policy、context policy、
+slash command、backend binding を組み合わせる場合は、まず
+[templates.md](templates.md) の RumiTemplate catalog を使う。frontend extension
+manifest は、承認済み pack が独自 renderer/module を配布する必要がある場合の
+別レイヤーであり、template JSON から任意 module を直接実行する経路ではない。
+
 ## まず知っておくこと
 
 - backend contract は `domain/frontend/registry.py`

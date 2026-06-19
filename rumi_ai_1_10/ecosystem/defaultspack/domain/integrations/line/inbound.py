@@ -31,12 +31,12 @@ from domain.external.source_store import ExternalSourceStore
 from domain.external.targeting import origin_from_external_event
 from domain.frontend.command_registry import SlashCommandRegistry
 from domain.integrations.line.approval_commands import (
-    LINE_APPROVAL_COMMAND_IDS,
     handle_line_approval_command,
     pending_approval_count,
 )
 from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
 from domain.integrations.line.addressing import decide_line_addressing
+from domain.integrations.slash_commands import slash_command_execution_action
 from domain.webhook.endpoint import WebhookEndpoint
 from domain.webhook.endpoint_resolver import ProviderEndpointResolver
 
@@ -55,6 +55,12 @@ _LINE_REPLY_GUIDANCE_PROMPT = (
     "返信しない判断なら一度だけ「replyで送れます。送りますか？」と確認。"
     "期限切れ/使用済みならpushを提案。"
 )
+_LINE_EXTERNAL_CHAT_ACTIONS = {"line_change_chat", "external_new_chat"}
+_LINE_APPROVAL_ACTION_TO_COMMAND = {
+    "open_approvals": "approvals",
+    "approve_pending_operation": "approve",
+    "deny_pending_operation": "deny",
+}
 
 
 def run(input_data, context):
@@ -174,6 +180,7 @@ def _handle_event(
         runtime_context,
         _line_message_text(event),
         model=model,
+        command_action_resolver=slash_command_execution_action,
     )
     if chat_link_result is not None:
         reply = _send_response_plan(chat_link_result["response_plan"], external_event, context=runtime_context)
@@ -396,11 +403,13 @@ def _handle_line_command(
         command = parsed["command"]
         command_id = str(command.get("id") or command.get("name") or "").strip()
         arg_text = str(parsed.get("arg_text") or "").strip()
-        if command_id == "model":
+        command_execution_type = _line_command_execution_type(command)
+        command_action = _line_command_execution_action(command)
+        if command_execution_type == "model_command" and command_action == "select_or_suggest_model":
             text_response = _line_model_command(endpoint, hook_settings, arg_text)
-        elif command_id == "help":
+        elif command_action == "open_command_help":
             text_response = _line_help_text(commands)
-        elif command_id == "status":
+        elif command_action == "show_status":
             text_response = _line_status_text(
                 endpoint,
                 hook_settings,
@@ -410,37 +419,41 @@ def _handle_line_command(
                 audience_decision=audience_decision,
                 audience_policy=audience_policy,
             )
-        elif command_id in {"change", "newchat"}:
-            command_text = f"/{command_id} {arg_text}".strip()
+        elif command_action in _LINE_EXTERNAL_CHAT_ACTIONS:
+            matched_name = str(parsed.get("matched_name") or command.get("name") or command_id).strip()
+            command_text = f"/{matched_name} {arg_text}".strip()
             chat_link_result = handle_chat_link_message(
                 external_event,
                 context,
                 command_text,
                 model=_line_response_model(endpoint, hook_settings),
+                command_action_resolver=slash_command_execution_action,
             )
             text_response = str((chat_link_result or {}).get("assistant_text") or CHAT_LINK_PROMPT)
-        elif command_id in LINE_APPROVAL_COMMAND_IDS:
-            progress = _start_line_progress_notice(external_event, context) if command_id == "approve" else _ProgressNotice(None)
-            try:
-                approval_result = handle_line_approval_command(command_id, arg_text, context)
-            except Exception:
-                _LOGGER.exception("LINE approval command failed")
-                approval_result = {"assistant_text": _LINE_SHORT_ERROR_TEXT}
-            finally:
-                progress.cancel()
-            text_response = str(approval_result.get("assistant_text") or "承認コマンドを処理できませんでした。")
         else:
-            args = _line_command_args(command, arg_text)
-            result = registry.execute(
-                {
-                    "command": command.get("name") or command_id,
-                    "args": args,
-                    "mode": "chat",
-                    "conversation_id": context.get("conversation_id"),
-                },
-                context,
-            )
-            text_response = _line_format_registry_command_result(command, result, args)
+            approval_command_id = _line_approval_command_id(command)
+            if approval_command_id:
+                progress = _start_line_progress_notice(external_event, context) if approval_command_id == "approve" else _ProgressNotice(None)
+                try:
+                    approval_result = handle_line_approval_command(approval_command_id, arg_text, context)
+                except Exception:
+                    _LOGGER.exception("LINE approval command failed")
+                    approval_result = {"assistant_text": _LINE_SHORT_ERROR_TEXT}
+                finally:
+                    progress.cancel()
+                text_response = str(approval_result.get("assistant_text") or "承認コマンドを処理できませんでした。")
+            else:
+                args = _line_command_args(command, arg_text)
+                result = registry.execute(
+                    {
+                        "command": command.get("name") or command_id,
+                        "args": args,
+                        "mode": "chat",
+                        "conversation_id": context.get("conversation_id"),
+                    },
+                    context,
+                )
+                text_response = _line_format_registry_command_result(command, result, args)
     plan = {"provider": "line", "messages": [{"type": "text", "text": text_response}], "metadata": {"line_command": command_id}}
     reply = _send_response_plan(plan, external_event, context=context)
     return {
@@ -493,6 +506,24 @@ def _line_command_names(command: dict[str, Any]) -> list[str]:
     ]
     names.extend(str(alias or "").strip().lower().lstrip("/") for alias in command.get("aliases") or [])
     return sorted({name for name in names if name}, key=len, reverse=True)
+
+
+def _line_command_execution_action(command: dict[str, Any]) -> str:
+    execution = command.get("execution") if isinstance(command.get("execution"), dict) else {}
+    return str(execution.get("action") or "").strip()
+
+
+def _line_command_execution_type(command: dict[str, Any]) -> str:
+    execution = command.get("execution") if isinstance(command.get("execution"), dict) else {}
+    return str(execution.get("type") or "").strip()
+
+
+def _line_approval_command_id(command: dict[str, Any]) -> str:
+    action = _line_command_execution_action(command)
+    if action in _LINE_APPROVAL_ACTION_TO_COMMAND:
+        return _LINE_APPROVAL_ACTION_TO_COMMAND[action]
+    command_id = str(command.get("id") or command.get("name") or "").strip().lower()
+    return command_id if command_id in set(_LINE_APPROVAL_ACTION_TO_COMMAND.values()) else ""
 
 
 def _line_command_args(command: dict[str, Any], arg_text: str) -> dict[str, Any]:

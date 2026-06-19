@@ -15,6 +15,7 @@ from domain.external.response import RumiResponse
 from domain.external.response_planner import ResponsePlanner
 from domain.external.token_store import read_external_token
 from domain.integrations.secrets import load_integration_secrets_into_env
+from domain.integrations.slash_commands import slash_command_execution_action
 
 
 def run(input_data, context):
@@ -46,7 +47,13 @@ def run(input_data, context):
     if model:
         external_event.metadata["model"] = model
     runtime_context = dict(context or {})
-    chat_link_result = handle_chat_link_message(external_event, runtime_context, text, model=model or None)
+    chat_link_result = handle_chat_link_message(
+        external_event,
+        runtime_context,
+        text,
+        model=model or None,
+        command_action_resolver=slash_command_execution_action,
+    )
     if chat_link_result is not None:
         send_result = _send_response_plan(chat_link_result["response_plan"], external_event)
         return ok({**chat_link_result, "verified": verification["verified"], "reply": send_result})

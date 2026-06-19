@@ -2,6 +2,12 @@
 
 defaults Pack に新機能を追加する手順を解説する。
 
+設定 UI、AI input、tool/context policy、composer command、function/route
+binding、permission metadata、backend service metadata、test contract を組み合わせる
+機能は、まず [templates.md](templates.md) の RumiTemplate として宣言する。
+block や domain module は実行権限を持つ builtin runtime 側に残し、template は
+その安全な runtime への metadata binding を担当する。
+
 ---
 
 ## 新しい block の追加手順

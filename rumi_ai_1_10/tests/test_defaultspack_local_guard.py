@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -64,7 +66,9 @@ def test_sensitive_coding_http_path_requires_csrf_for_local_origin():
 
     handler.headers = {"Origin": "http://localhost:8766", "X-Rumi-CSRF": "1"}
     assert handler._sensitive_request_error("POST", "/api/coding/terminal/exec") is None
-    assert handler._sensitive_request_error("POST", "/api/authority/requests/auth_1/approve") is None
+    assert (
+        handler._sensitive_request_error("POST", "/api/authority/requests/auth_1/approve") is None
+    )
 
     handler.headers = {"origin": "http://localhost:8766", "x-rumi-csrf": "1"}
     assert handler._sensitive_request_error("POST", "/api/coding/terminal/exec") is None
@@ -140,6 +144,30 @@ def test_dynamic_tool_post_routes_are_guarded():
         "CSRF_REQUIRED",
     )
 
+
+def test_route_metadata_sensitive_reads_server_route_table():
+    from transport.http import _RequestHandler
+
+    def handler(request_data, path_params):
+        return {"ok": True, "request_data": request_data, "path_params": path_params}
+
+    handler.__rumi_route_sensitive__ = True
+    request_handler = _RequestHandler.__new__(_RequestHandler)
+    request_handler.server_ref = SimpleNamespace(
+        _routes=[
+            (
+                "POST",
+                re.compile("^/api/template/sensitive$"),
+                handler,
+                "registry",
+                {},
+                "/api/template/sensitive",
+            )
+        ]
+    )
+
+    assert request_handler._route_metadata_sensitive("POST", "/api/template/sensitive") is True
+    assert request_handler._route_metadata_sensitive("GET", "/api/template/sensitive") is False
 
 
 def test_self_improvement_routes_are_guarded_as_sensitive_local_routes():

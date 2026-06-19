@@ -12,6 +12,7 @@ from domain.external.response import RumiResponse
 from domain.external.response_planner import ResponsePlanner
 from domain.integrations.http_client import post_json
 from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
+from domain.integrations.slash_commands import slash_command_execution_action
 
 
 DISCORD_PING = 1
@@ -61,7 +62,12 @@ def _handle_interaction(input_data: Dict[str, Any], context, *, verified: bool =
     external_event = normalize_discord_interaction(input_data, verified=verified)
     runtime_context = dict(context or {})
     data = input_data.get("data") if isinstance(input_data.get("data"), dict) else {}
-    chat_link_result = handle_chat_link_message(external_event, runtime_context, _interaction_text(data))
+    chat_link_result = handle_chat_link_message(
+        external_event,
+        runtime_context,
+        _interaction_text(data),
+        command_action_resolver=slash_command_execution_action,
+    )
     if chat_link_result is not None:
         return chat_link_result
     dispatch_kwargs = {
@@ -86,7 +92,12 @@ def _handle_message_create(input_data: Dict[str, Any], context, *, verified: boo
         return {"status": "ignored", "reason": "bot message", "assistant_text": ""}
     external_event = normalize_discord_message(input_data, verified=verified)
     runtime_context = dict(context or {})
-    chat_link_result = handle_chat_link_message(external_event, runtime_context, str(data.get("content") or ""))
+    chat_link_result = handle_chat_link_message(
+        external_event,
+        runtime_context,
+        str(data.get("content") or ""),
+        command_action_resolver=slash_command_execution_action,
+    )
     if chat_link_result is not None:
         reply = _send_response_plan(chat_link_result["response_plan"], external_event)
         return {**chat_link_result, "reply": reply}

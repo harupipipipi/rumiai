@@ -13,7 +13,8 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 from domain.chat.store import ChatStore  # noqa: E402
 from domain.external.adapters.discord import DiscordResponseAdapter  # noqa: E402
 from domain.external.adapters.slack import SlackResponseAdapter  # noqa: E402
-from domain.external.chat_link import CHAT_LINK_PROMPT  # noqa: E402
+from domain.external.chat_link import CHAT_LINK_PROMPT, handle_chat_link_message  # noqa: E402
+from domain.external.normalizer import normalize_slack_event  # noqa: E402
 from domain.external.source_store import ExternalSourceStore  # noqa: E402
 
 
@@ -190,3 +191,20 @@ def test_slack_plain_chatid_links_then_dispatches_to_linked_chat(monkeypatch, tm
     assert captured["context"]["conversation_id"] == conversation["id"]
     assert captured["envelope_overrides"] == {"target": {"conversation_id": conversation["id"], "direct": True}}
     assert sent_plans[-1]["messages"][0]["text"] == "done"
+
+
+def test_chat_link_commands_resolve_from_shared_slash_command_registry(monkeypatch, tmp_path):
+    _set_chat_link_paths(monkeypatch, tmp_path)
+    conversation = ChatStore().create_conversation(model="stub/default")
+    event = normalize_slack_event(_slack_message(f"/switch {conversation['id']}"), verified=True)
+
+    result = handle_chat_link_message(
+        event,
+        {},
+        f"/switch {conversation['id']}",
+        command_action_resolver=lambda name: "line_change_chat" if name == "switch" else "",
+    )
+
+    assert result is not None
+    assert result["external_chat_link"]["action"] == "linked"
+    assert result["external_chat_link"]["conversation_id"] == conversation["id"]

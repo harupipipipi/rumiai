@@ -41,6 +41,7 @@ def supports_colour():
         return False
     return sys.stdout.isatty()
 
+
 _USE_COLOUR = None
 
 
@@ -59,6 +60,7 @@ def c(code, text):
 
 
 # ── Markdown → terminal conversion ──────────────────────────
+
 
 def format_markdown(text):
     """Convert a Markdown string to terminal-friendly output.
@@ -158,6 +160,7 @@ def _inline_format(text):
 
 # ── Streaming display ───────────────────────────────────────
 
+
 def stream_print(text, delay=0.0):
     """Print *text* character by character for a streaming effect.
 
@@ -177,12 +180,14 @@ def stream_print_line(text=""):
 
 # ── JSON output ─────────────────────────────────────────────
 
+
 def format_json(data):
     """Pretty-print a dict/list as JSON."""
     return json.dumps(data, indent=2, ensure_ascii=False)
 
 
 # ── Response content extraction ─────────────────────────────
+
 
 def extract_text_from_response(response_data):
     """Extract plain text from a block response's data field.
@@ -223,6 +228,7 @@ def extract_text_from_response(response_data):
 
 
 # ── Prompt helpers ──────────────────────────────────────────
+
 
 def print_prompt(conversation_id=None):
     """Print the interactive prompt."""

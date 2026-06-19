@@ -1041,7 +1041,7 @@ def test_chat_stream_persists_terminal_ai_error_message(tmp_path, monkeypatch):
     ChatStore._instance = None
 
 
-def test_chat_stream_infers_computer_tools_before_engine_stream(tmp_path, monkeypatch):
+def test_chat_stream_explicit_empty_tools_blocks_computer_tool_inference(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from domain.chat.stream_engine import ChatRunEngine
     from domain.tool.schema_adapter import tool_name_from_definition
@@ -1088,8 +1088,8 @@ def test_chat_stream_infers_computer_tools_before_engine_stream(tmp_path, monkey
 
     events = list(result["events"])
     assert events[-1]["type"] == "done"
-    assert captured["tools"] == ["computer_use", "browser_computer"]
-    assert captured["user_requested_computer_use"] is True
+    assert captured["tools"] == []
+    assert captured.get("user_requested_computer_use") is not True
     ChatStore._instance = None
 
 

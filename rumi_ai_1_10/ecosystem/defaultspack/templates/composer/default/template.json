@@ -1,0 +1,415 @@
+{
+  "schema_version": 1,
+  "id": "rumi.composer.default",
+  "kind": "frontend",
+  "version": "1.0.0",
+  "status": "active",
+  "trust_level": "builtin",
+  "capabilities": {
+    "provides": [
+      "rumi.composer.default",
+      "rumi.composer.context_txt",
+      "rumi.context.materialize_txt"
+    ],
+    "requires": [],
+    "permissions": []
+  },
+  "metadata": {
+    "title": "Default Composer",
+    "template_kind": "frontend_template",
+    "local_first": true,
+    "description": "Declarative metadata for the default composer input surface and context materialization command."
+  },
+  "pieces": [
+    {
+      "id": "composer_shell_region",
+      "kind": "shell_region",
+      "order": 50,
+      "region": {
+        "id": "composer",
+        "part_id": "ai_chat",
+        "renderer": "composer",
+        "slot": "bottom",
+        "order": 50,
+        "enabled": true
+      }
+    },
+    {
+      "id": "composer_shell_renderer",
+      "kind": "shell_renderer",
+      "order": 51,
+      "renderer": {
+        "id": "composer",
+        "component": "Composer",
+        "regions": [
+          "composer"
+        ],
+        "fallback": "hidden"
+      }
+    },
+    {
+      "id": "default_composer_input",
+      "kind": "composer_input",
+      "order": 52,
+      "input": {
+        "id": "default_composer",
+        "region_id": "composer",
+        "renderer": "composer",
+        "part_id": "ai_chat",
+        "surface": "chat",
+        "enabled": true,
+        "placeholder": "メッセージを入力... /context text で会話をTXT化",
+        "help": "Template-composed composer: slash commands, mentions, files, voice, and optional context TXT materialization.",
+        "accepted_modalities": [
+          "text",
+          "files",
+          "images",
+          "voice"
+        ],
+        "feature_flags": {
+          "slash_commands": true,
+          "at_mentions": true,
+          "tool_mentions": true,
+          "file_attachments": true,
+          "voice_input": true,
+          "context_preview": true
+        },
+        "commands": [
+          "help",
+          "model",
+          "status",
+          "change",
+          "newchat",
+          "approvals",
+          "approve",
+          "deny",
+          "context_txt"
+        ],
+        "context_policy": "materialize_txt"
+      }
+    },
+    {
+      "id": "help_command",
+      "kind": "composer_command",
+      "order": 53,
+      "command": {
+        "id": "help",
+        "name": "help",
+        "label": "Help",
+        "description": "Show slash command help.",
+        "category": "chat",
+        "visibility": "default",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "execution": { "type": "frontend", "action": "open_command_help" }
+      }
+    },
+    {
+      "id": "model_command",
+      "kind": "composer_command",
+      "order": 54,
+      "command": {
+        "id": "model",
+        "name": "model",
+        "aliases": ["models"],
+        "label": "Model",
+        "description": "Select or search the active model.",
+        "category": "model",
+        "visibility": "default",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "args": [{ "name": "query", "type": "string", "required": false }],
+        "execution": { "type": "model_command", "action": "select_or_suggest_model" }
+      }
+    },
+    {
+      "id": "status_command",
+      "kind": "composer_command",
+      "order": 55,
+      "command": {
+        "id": "status",
+        "name": "status",
+        "label": "Status",
+        "description": "Show model, mode, tools, and context status.",
+        "category": "chat",
+        "visibility": "default",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "execution": { "type": "frontend", "action": "show_status" }
+      }
+    },
+    {
+      "id": "change_chat_command",
+      "kind": "composer_command",
+      "order": 56,
+      "command": {
+        "id": "change",
+        "name": "change",
+        "aliases": ["chatid", "usechat"],
+        "label": "Change Chat",
+        "description": "Continue a specific chat id from an external conversation.",
+        "category": "chat",
+        "visibility": "default",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "args": [{ "name": "chatid", "type": "string", "required": false }],
+        "execution": { "type": "frontend", "action": "line_change_chat" }
+      }
+    },
+    {
+      "id": "newchat_command",
+      "kind": "composer_command",
+      "order": 57,
+      "command": {
+        "id": "newchat",
+        "name": "newchat",
+        "aliases": ["new_chat", "new-chat"],
+        "label": "New External Chat",
+        "description": "Start a new chat for the current external conversation.",
+        "category": "chat",
+        "visibility": "default",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "execution": { "type": "frontend", "action": "external_new_chat" }
+      }
+    },
+    {
+      "id": "approvals_command",
+      "kind": "composer_command",
+      "order": 58,
+      "command": {
+        "id": "approvals",
+        "name": "approvals",
+        "aliases": ["approval", "pending"],
+        "label": "Approvals",
+        "description": "Open approval center or list pending approvals from external chat.",
+        "category": "settings",
+        "visibility": "advanced",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "execution": { "type": "frontend", "action": "open_approvals" }
+      }
+    },
+    {
+      "id": "approve_command",
+      "kind": "composer_command",
+      "order": 59,
+      "command": {
+        "id": "approve",
+        "name": "approve",
+        "aliases": ["allow", "ok"],
+        "label": "Approve",
+        "description": "Approve a pending operation from an external chat.",
+        "category": "settings",
+        "visibility": "advanced",
+        "risk": "medium",
+        "modes": ["chat", "coding", "agent"],
+        "args": [{ "name": "request", "type": "string", "required": false }],
+        "execution": { "type": "frontend", "action": "approve_pending_operation" }
+      }
+    },
+    {
+      "id": "deny_command",
+      "kind": "composer_command",
+      "order": 60,
+      "command": {
+        "id": "deny",
+        "name": "deny",
+        "aliases": ["reject", "no"],
+        "label": "Deny",
+        "description": "Deny a pending operation from an external chat.",
+        "category": "settings",
+        "visibility": "advanced",
+        "risk": "medium",
+        "modes": ["chat", "coding", "agent"],
+        "args": [{ "name": "request", "type": "string", "required": false }],
+        "execution": { "type": "frontend", "action": "deny_pending_operation" }
+      }
+    },
+    {
+      "id": "context_txt_command",
+      "kind": "composer_command",
+      "order": 61,
+      "command": {
+        "id": "context_txt",
+        "name": "context_txt",
+        "aliases": [
+          "context text",
+          "context-txt",
+          "context_text",
+          "long context txt",
+          "long-context-txt",
+          "long_context_txt"
+        ],
+        "label": "Context TXT",
+        "description": "Materialize the current conversation context as text.",
+        "category": "chat",
+        "visibility": "default",
+        "risk": "medium",
+        "modes": [
+          "chat",
+          "coding",
+          "agent"
+        ],
+        "args": [
+          {
+            "name": "scope",
+            "type": "string",
+            "required": false
+          }
+        ],
+        "execution": {
+          "type": "pack_block",
+          "qualified_name": "defaultspack:chat.materialize_context",
+          "mode": "materialize_txt"
+        }
+      }
+    },
+    {
+      "id": "materialize_txt_policy",
+      "kind": "context_policy",
+      "order": 62,
+      "policy": {
+        "id": "materialize_txt",
+        "mode": "materialize_txt",
+        "format": "text/plain",
+        "filename": "context.txt",
+        "command_id": "context_txt",
+        "source": "conversation_context",
+        "delivery": "composer_command"
+      }
+    },
+    {
+      "id": "default_tool_policy",
+      "kind": "tool_policy",
+      "order": 63,
+      "policy": {
+        "id": "default_tools",
+        "toggleable": true,
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "default_enabled_tools": [],
+        "default_disabled_tools": [],
+        "settings_defaults": {
+          "section_id": "tools",
+          "keep_selected_tools_after_send": true,
+          "tool_assist_mode": "all",
+          "tool_assist_limit": 8,
+          "default_target": ""
+        }
+      }
+    },
+    {
+      "id": "default_ai_input",
+      "kind": "ai_input",
+      "order": 64,
+      "input": {
+        "id": "default_ai_input",
+        "composer_input": "default_composer",
+        "context_policy": "materialize_txt",
+        "tool_policy": "default_tools",
+        "widgets": [
+          "web_search_toggle"
+        ],
+        "params": {}
+      }
+    },
+    {
+      "id": "web_search_toggle",
+      "kind": "composer_widget",
+      "order": 65,
+      "widget": {
+        "id": "web_search_toggle",
+        "tool_id": "web_search",
+        "label": "Web Search",
+        "description": "Toggle web search for this AI input.",
+        "widget_kind": "tool_toggle",
+        "enabled": true
+      }
+    },
+    {
+      "id": "tools_settings_section",
+      "kind": "settings_section",
+      "order": 66,
+      "section_id": "tools",
+      "label": "Tools",
+      "description": "Tool composer defaults and selection behavior.",
+      "fields": []
+    },
+    {
+      "id": "tool_default_target",
+      "kind": "settings_field",
+      "slot": "tools",
+      "order": 67,
+      "section_id": "tools",
+      "field_id": "default_target",
+      "type": "text",
+      "label": "Default Target",
+      "default": "",
+      "help": "Backcompat value for tool UIs that still read a shared default_target.",
+      "advanced": true
+    },
+    {
+      "id": "keep_selected_tools_after_send",
+      "kind": "settings_field",
+      "slot": "tools",
+      "order": 68,
+      "section_id": "tools",
+      "type": "toggle",
+      "label": "Keep Selected Tools",
+      "default": true,
+      "help": "Keep composer tool selections after a message is sent."
+    },
+    {
+      "id": "tool_assist_mode",
+      "kind": "settings_field",
+      "slot": "tools",
+      "order": 69,
+      "section_id": "tools",
+      "type": "select",
+      "label": "Tool Assist",
+      "default": "all",
+      "options": [
+        {"value": "all", "label": "All tools: expose every tool"},
+        {"value": "auto", "label": "Auto: always tools plus relevant vector matches"},
+        {"value": "vector", "label": "Vector: recommend relevant tools"},
+        {"value": "off", "label": "Off: only manually selected tools"}
+      ],
+      "help": "既定ではすべての tool を AI に渡します。Auto は常時読み込み宣言の tool と、入力文に関連する vector tool だけを渡します。"
+    },
+    {
+      "id": "tool_assist_limit",
+      "kind": "settings_field",
+      "slot": "tools",
+      "order": 70,
+      "section_id": "tools",
+      "type": "number",
+      "label": "Tool Assist Limit",
+      "default": 8,
+      "min": 1,
+      "max": 24,
+      "help": "Vector が AI に推薦する tool 数の上限です。",
+      "advanced": true
+    },
+    {
+      "id": "commands_settings_section",
+      "kind": "settings_section",
+      "order": 71,
+      "section_id": "commands",
+      "label": "Commands",
+      "description": "Slash command visibility and command palette behavior.",
+      "fields": []
+    },
+    {
+      "id": "show_advanced_commands",
+      "kind": "settings_field",
+      "slot": "commands",
+      "order": 72,
+      "section_id": "commands",
+      "type": "toggle",
+      "label": "Show Advanced Commands",
+      "default": false,
+      "help": "Advanced slash commandsを候補に含めます。hidden command は直接入力か将来の管理UI向けです。"
+    }
+  ]
+}

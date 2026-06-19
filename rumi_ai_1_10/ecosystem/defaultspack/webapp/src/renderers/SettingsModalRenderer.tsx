@@ -14,6 +14,23 @@ import { settingsApiResources } from "../features/settings/resources/settingsApi
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../features/settings/resources/useModelAvailability";
 import type { SettingsModalRendererProps } from "./types";
 import type { DesktopPermissionStatus, DesktopSystemInfo } from "../lib/desktopSystemInfo";
+import {
+  createSettingsFieldRendererRegistry,
+  SettingsFieldRendererHost,
+  type SettingsFieldRendererProps,
+} from "./settings/fieldRendererRegistry";
+import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
+
+const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry([
+  ...builtinSettingsFieldRendererEntries,
+  {
+    id: "builtin-settings-model-routing",
+    types: ["model_api_routes"],
+    renderers: ["model_routing", "model_api_routes", "ModelApiRoutesSettingsField"],
+    component: "ModelApiRoutesSettingsField",
+    render: ModelApiRoutesSettingsFieldRenderer,
+  },
+]);
 
 function formatReadonlyValue(value: unknown, fallback: unknown): string {
   const resolved = value ?? fallback ?? "";
@@ -1811,7 +1828,7 @@ function SettingsField({
         setRouteInlineAddOpen(false);
       };
       control = (
-        <div className="space-y-4">
+        <div className="space-y-4" data-settings-renderer="model_routing">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.42fr)]">
             <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">Model</span>
@@ -2781,6 +2798,14 @@ function SettingsField({
   );
 }
 
+function SettingsFieldFallback(props: SettingsFieldRendererProps) {
+  return <SettingsField {...props} field={props.field as SettingsSection["fields"][number]} />;
+}
+
+function ModelApiRoutesSettingsFieldRenderer(props: SettingsFieldRendererProps) {
+  return <SettingsField {...props} field={props.field as SettingsSection["fields"][number]} />;
+}
+
 export function SettingsModalRenderer({
   isOpen,
   activeSectionId: requestedSectionId,
@@ -2884,12 +2909,15 @@ export function SettingsModalRenderer({
       key={`${activeSection?.id}.${field.id}`}
       className={cn(
         "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
-        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || field.type === "external_tokens" || field.type === "public_url" || field.type === "model_api_routes" || field.type === "hook_status" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
+        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || String(field.type) === "api_key_setup" || field.type === "external_tokens" || field.type === "public_url" || field.type === "model_api_routes" || field.type === "hook_status" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
       )}
     >
-      <SettingsField
+      <SettingsFieldRendererHost
+        registry={settingsModalFieldRendererRegistry}
+        componentBindings={catalog?.component_bindings ?? []}
+        fallbackRenderer={SettingsFieldFallback}
         sectionId={activeSection?.id ?? ""}
-        field={field}
+        field={field as SettingsFieldRendererProps["field"]}
         value={
           field.type === "secret" && field.configured_field
             ? settingsValues[activeSection?.id ?? ""]?.[field.configured_field]

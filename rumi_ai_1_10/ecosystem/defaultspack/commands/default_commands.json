@@ -1,29 +1,5 @@
 [
   {
-    "id": "help",
-    "name": "help",
-    "label": "Help",
-    "description": "Show slash command help.",
-    "category": "chat",
-    "visibility": "default",
-    "risk": "low",
-    "modes": ["chat", "coding", "agent"],
-    "execution": { "type": "frontend", "action": "open_command_help" }
-  },
-  {
-    "id": "model",
-    "name": "model",
-    "aliases": ["models"],
-    "label": "Model",
-    "description": "Select or search the active model.",
-    "category": "model",
-    "visibility": "default",
-    "risk": "low",
-    "modes": ["chat", "coding", "agent"],
-    "args": [{ "name": "query", "type": "string", "required": false }],
-    "execution": { "type": "model_command", "action": "select_or_suggest_model" }
-  },
-  {
     "id": "think",
     "name": "think",
     "aliases": ["thinking", "t"],
@@ -95,31 +71,6 @@
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
     "execution": { "type": "frontend", "action": "new_conversation" }
-  },
-  {
-    "id": "change",
-    "name": "change",
-    "aliases": ["chatid", "usechat"],
-    "label": "Change Chat",
-    "description": "Continue a specific chat id from an external conversation.",
-    "category": "chat",
-    "visibility": "default",
-    "risk": "low",
-    "modes": ["chat", "coding", "agent"],
-    "args": [{ "name": "chatid", "type": "string", "required": false }],
-    "execution": { "type": "frontend", "action": "line_change_chat" }
-  },
-  {
-    "id": "newchat",
-    "name": "newchat",
-    "aliases": ["new_chat", "new-chat"],
-    "label": "New External Chat",
-    "description": "Start a new chat for the current external conversation.",
-    "category": "chat",
-    "visibility": "default",
-    "risk": "low",
-    "modes": ["chat", "coding", "agent"],
-    "execution": { "type": "frontend", "action": "external_new_chat" }
   },
   {
     "id": "clear",
@@ -202,17 +153,6 @@
     "modes": ["chat", "coding", "agent"],
     "args": [{ "name": "query", "type": "string", "required": false }],
     "execution": { "type": "frontend", "action": "open_tool_picker" }
-  },
-  {
-    "id": "status",
-    "name": "status",
-    "label": "Status",
-    "description": "Show model, mode, tools, and context status.",
-    "category": "chat",
-    "visibility": "default",
-    "risk": "low",
-    "modes": ["chat", "coding", "agent"],
-    "execution": { "type": "frontend", "action": "show_status" }
   },
   {
     "id": "settings",
@@ -440,44 +380,6 @@
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
     "execution": { "type": "frontend", "action": "open_permissions" }
-  },
-  {
-    "id": "approvals",
-    "name": "approvals",
-    "aliases": ["approval", "pending"],
-    "label": "Approvals",
-    "description": "Open approval center or list pending approvals from external chat.",
-    "category": "settings",
-    "visibility": "advanced",
-    "risk": "low",
-    "modes": ["chat", "coding", "agent"],
-    "execution": { "type": "frontend", "action": "open_approvals" }
-  },
-  {
-    "id": "approve",
-    "name": "approve",
-    "aliases": ["allow", "ok"],
-    "label": "Approve",
-    "description": "Approve a pending operation from an external chat.",
-    "category": "settings",
-    "visibility": "advanced",
-    "risk": "medium",
-    "modes": ["chat", "coding", "agent"],
-    "args": [{ "name": "request", "type": "string", "required": false }],
-    "execution": { "type": "frontend", "action": "approve_pending_operation" }
-  },
-  {
-    "id": "deny",
-    "name": "deny",
-    "aliases": ["reject", "no"],
-    "label": "Deny",
-    "description": "Deny a pending operation from an external chat.",
-    "category": "settings",
-    "visibility": "advanced",
-    "risk": "medium",
-    "modes": ["chat", "coding", "agent"],
-    "args": [{ "name": "request", "type": "string", "required": false }],
-    "execution": { "type": "frontend", "action": "deny_pending_operation" }
   },
   {
     "id": "usage",
