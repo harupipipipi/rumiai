@@ -2024,6 +2024,7 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/chat", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/coding", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/approval", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/prompts", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/static/{path}", handler_name="_handle_static_file"),
 ]
 

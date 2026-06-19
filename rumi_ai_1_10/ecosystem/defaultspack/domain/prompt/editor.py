@@ -37,9 +37,9 @@ def load_prompt_studio(input_data: dict[str, Any] | None = None) -> dict[str, An
     return {
         "profile_id": profile_id,
         "profile_workspace": profile_workspace_payload(ProfileWorkspaceManager().paths_for_profile(profile_id)),
-        "prompts": prompts,
+        "prompts": [_studio_nav_prompt_record(prompt) for prompt in prompts],
         "selected_prompt": selected,
-        "active_summary": active.get("summary", {}),
+        "active_summary": _studio_summary_payload(active.get("summary", {})),
         "traces": [],
     }
 
@@ -613,6 +613,128 @@ def _merge_prompt_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]
     )
 
 
+def _studio_nav_prompt_record(prompt: dict[str, Any]) -> dict[str, Any]:
+    record = {
+        key: copy.deepcopy(value)
+        for key, value in prompt.items()
+        if key
+        not in {
+            "body",
+            "content",
+            "validation",
+            "lint",
+            "versions",
+            "safety",
+            "source_chain",
+            "tool_signal",
+            "skill_signal",
+            "activation_detail",
+            "variables",
+            "created_at",
+            "updated_at",
+        }
+    }
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    compact_metadata: dict[str, Any] = {}
+    if metadata.get("prompt_usage_segment") is True:
+        compact_metadata["prompt_usage_segment"] = True
+    source_pack_id = str(metadata.get("source_pack_id") or "").strip()
+    if source_pack_id:
+        compact_metadata["source_pack_id"] = source_pack_id
+    if compact_metadata:
+        record["metadata"] = compact_metadata
+    else:
+        record.pop("metadata", None)
+    source_type = str(record.get("source_type") or "").strip()
+    source = str(record.get("source") or "").strip()
+    if source.startswith("/"):
+        record["source"] = source_type
+    if isinstance(record.get("preview"), str):
+        record["preview"] = str(record.get("preview") or "")[:140]
+    if isinstance(record.get("active_reason"), str):
+        record["active_reason"] = str(record.get("active_reason") or "")[:180]
+    if isinstance(record.get("description"), str):
+        record["description"] = str(record.get("description") or "")[:180]
+    return record
+
+
+def _studio_summary_payload(summary: Any) -> dict[str, Any]:
+    if not isinstance(summary, dict):
+        return {}
+    segments = _studio_summary_segments(summary.get("segments", []))
+    active_segments = [item for item in segments if item.get("status") == "active"]
+    disabled_segments = [item for item in segments if item.get("status") != "active"]
+    token_estimate = summary.get("token_estimate") if isinstance(summary.get("token_estimate"), dict) else {}
+    compact_token_estimate = {
+        "total": token_estimate.get("total", 0),
+        "by_port": copy.deepcopy(token_estimate.get("by_port") if isinstance(token_estimate.get("by_port"), dict) else {}),
+    }
+    return {
+        "trace_id": summary.get("trace_id"),
+        "profile_id": summary.get("profile_id"),
+        "conversation_id": summary.get("conversation_id"),
+        "run_id": summary.get("run_id"),
+        "active_count": summary.get("active_count", len(active_segments)),
+        "disabled_count": summary.get("disabled_count", len(disabled_segments)),
+        "token_estimate": compact_token_estimate,
+        "segments": segments,
+        "active_segments": active_segments,
+        "disabled_segments": disabled_segments,
+        "source_counts": copy.deepcopy(summary.get("source_counts") if isinstance(summary.get("source_counts"), dict) else {}),
+    }
+
+
+def _studio_summary_segments(segments: Any) -> list[dict[str, Any]]:
+    compact: list[dict[str, Any]] = []
+    for segment in segments if isinstance(segments, list) else []:
+        if not isinstance(segment, dict):
+            continue
+        kind = str(segment.get("kind") or "").strip()
+        source_type = str(segment.get("source_type") or "").strip()
+        port = str(segment.get("port") or "").strip()
+        if kind in {"tool-schema", "tool_schema"} or source_type == "tool_schema" or port == "tools":
+            continue
+        item = {
+            key: copy.deepcopy(segment.get(key))
+            for key in (
+                "id",
+                "edge_id",
+                "prompt_id",
+                "label",
+                "kind",
+                "port",
+                "status",
+                "enabled",
+                "source",
+                "source_type",
+                "tokens",
+                "reason",
+                "allow_disable",
+                "editable",
+                "readonly_reason",
+                "preview",
+                "explanation",
+                "input_role",
+                "source_priority",
+                "tool_signal",
+                "skill_signal",
+            )
+            if key in segment
+        }
+        if isinstance(segment.get("source_chain"), list):
+            item["source_chain"] = segment.get("source_chain")
+        safety = segment.get("safety_boundary")
+        if isinstance(safety, dict):
+            item["safety_boundary"] = {
+                "passive_text_only": bool(safety.get("passive_text_only", True)),
+                "can_grant_permissions": bool(safety.get("can_grant_permissions", False)),
+                "can_call_tools": bool(safety.get("can_call_tools", False)),
+                "can_mutate_chat_state": bool(safety.get("can_mutate_chat_state", False)),
+            }
+        compact.append(item)
+    return compact
+
+
 def _segment_records_from_active(segments: Any) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for segment in segments if isinstance(segments, list) else []:
@@ -620,6 +742,8 @@ def _segment_records_from_active(segments: Any) -> list[dict[str, Any]]:
             continue
         kind = str(segment.get("kind") or "").strip()
         source_type = str(segment.get("source_type") or "").strip()
+        if kind in {"tool-schema", "tool_schema"} or source_type == "tool_schema":
+            continue
         if kind in {"", "prompt", "pack", "component", "extension"}:
             continue
         if kind == "profile" and source_type != "profile_snapshot":

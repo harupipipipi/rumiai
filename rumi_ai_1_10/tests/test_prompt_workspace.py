@@ -117,6 +117,39 @@ class _EmptyPromptManager:
         return None
 
 
+class _LargePromptManager:
+    def __init__(self) -> None:
+        self.prompts = [
+            {
+                "id": f"large.prompt.{index}",
+                "name": f"large.prompt.{index}",
+                "body": "Large prompt body " + ("x" * 1800),
+                "content": "Large prompt body " + ("x" * 1800),
+                "description": "Prompt used to exercise compact Studio navigation.",
+                "variables": [],
+                "metadata": {
+                    "source": "pack",
+                    "source_pack_id": "large_pack",
+                    "path": f"/tmp/large_pack/prompts/large.prompt.{index}.system.md",
+                },
+                "read_only": True,
+            }
+            for index in range(90)
+        ]
+
+    def list_prompts(self):
+        return [dict(prompt) for prompt in self.prompts]
+
+    def get_prompt_by_name(self, prompt_id: str):
+        for prompt in self.prompts:
+            if prompt["name"] == prompt_id:
+                return dict(prompt)
+        return None
+
+    def get_prompt(self, prompt_id: str):
+        return self.get_prompt_by_name(prompt_id)
+
+
 def _profile(profile_id: str = "prompt-profile") -> dict:
     return {
         "version": 3,
@@ -368,6 +401,78 @@ def test_prompt_studio_loads_runtime_skill_segments_from_conversation_trace(monk
 
     assert any(item["source_type"] == "skill" and item["prompt_id"] == "runtime.matched_instructions" for item in segment_records)
     assert studio["active_summary"]["segments"][0]["skill_signal"]["matched"][0]["id"] == "qa/math-skill"
+
+
+def test_prompt_studio_load_payload_stays_compact_with_large_tool_catalog(monkeypatch, tmp_path: Path) -> None:
+    _setup_profile(monkeypatch, tmp_path)
+    body = "Large prompt body " + ("x" * 1800)
+    monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: _LargePromptManager())
+    monkeypatch.setattr(
+        "domain.prompt.editor._resolve_effective_prompt_for",
+        lambda _profile_id, prompt_id: {
+            "prompt_id": prompt_id,
+            "source_type": "pack_default",
+            "source": "/tmp/large_pack/prompts/large.prompt.0.system.md",
+            "content": body,
+            "final_content": body,
+            "source_chain": [
+                {
+                    "source_type": "pack_default",
+                    "path": "/tmp/large_pack/prompts/large.prompt.0.system.md",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "domain.prompt.editor.active_prompt_summary",
+        lambda _data: {
+            "summary": {
+                "trace_id": "active",
+                "profile_id": "prompt-profile",
+                "active_count": 2,
+                "disabled_count": 0,
+                "token_estimate": {
+                    "total": 5000,
+                    "by_port": {"system": 10, "tools": 4990},
+                    "by_node": {"tool_schema:huge": 4990},
+                },
+                "segments": [
+                    {
+                        "id": "prompt:large.prompt.0",
+                        "prompt_id": "large.prompt.0",
+                        "kind": "prompt",
+                        "port": "system",
+                        "status": "active",
+                        "source_type": "pack_default",
+                        "tokens": 10,
+                        "text": body,
+                    },
+                    {
+                        "id": "tool_schema:huge",
+                        "prompt_id": "huge",
+                        "kind": "tool-schema",
+                        "port": "tools",
+                        "status": "active",
+                        "source_type": "tool_schema",
+                        "tokens": 4990,
+                        "schema": {"description": "y" * 120_000},
+                    },
+                ],
+                "active_segments": [],
+                "disabled_segments": [],
+            },
+            "segments": [],
+        },
+    )
+
+    studio = load_prompt_studio({"profile_id": "prompt-profile", "prompt_id": "large.prompt.0"})
+    encoded = json.dumps(studio, ensure_ascii=False).encode("utf-8")
+
+    assert len(encoded) < 65_000
+    assert studio["selected_prompt"]["body"] == body
+    assert all("body" not in prompt and "content" not in prompt for prompt in studio["prompts"])
+    assert all(segment.get("source_type") != "tool_schema" for segment in studio["active_summary"]["segments"])
+    assert "by_node" not in studio["active_summary"]["token_estimate"]
 
 
 def test_prompt_studio_testbench_matches_skill_and_tool_schema(monkeypatch, tmp_path: Path) -> None:
