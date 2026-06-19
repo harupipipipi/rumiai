@@ -183,6 +183,18 @@ export function AppsSettingsPanel({ kernelBaseUrl, cloudflarePagesUrl }: AppsSet
     [pcBaseUrl, pcToken],
   );
   const apiImportText = useMemo(() => JSON.stringify(apiImportPayload), [apiImportPayload]);
+  const apiQr = useQrDataUrl(apiImportText);
+
+  const isLoopbackUrl = useMemo(() => {
+    const host = (() => {
+      try {
+        return new URL(pcBaseUrl.trim()).hostname;
+      } catch {
+        return "";
+      }
+    })();
+    return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "";
+  }, [pcBaseUrl]);
 
   return (
     <section className="space-y-6">
@@ -243,6 +255,11 @@ export function AppsSettingsPanel({ kernelBaseUrl, cloudflarePagesUrl }: AppsSet
           >
             <RefreshCw size={12} /> URLを再検出
           </button>
+          {isLoopbackUrl && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-200">
+              現在のURLはこのPC自身（localhost / 127.0.0.1）を指しています。スマホからは到達できません。PCのLAN IP（例: 192.168.x.x）を入力してください。
+            </div>
+          )}
           <QrCard
             title="PC接続QR"
             description="スマホの「PCに接続」からスキャン。"
@@ -289,8 +306,8 @@ export function AppsSettingsPanel({ kernelBaseUrl, cloudflarePagesUrl }: AppsSet
           <QrCard
             title="API/モデル インポートQR"
             description="kind=rumi_api。baseUrlとapiKeyを取り込みます。"
-            dataUrl={pcQr.dataUrl}
-            error={pcQr.error}
+            dataUrl={apiQr.dataUrl}
+            error={apiQr.error}
             emptyHint="URLとキーを入力するとQRが表示されます。"
           />
         </div>
