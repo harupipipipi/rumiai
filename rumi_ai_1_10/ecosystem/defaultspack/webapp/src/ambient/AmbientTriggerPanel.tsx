@@ -31,6 +31,7 @@ import {
   captureAudioEmbedding,
   deviceLabel,
   probeOsPermissions,
+  settleSpeechRecognitionTranscript,
   startPinchAudioRecorder,
   startPinchSpeechRecognition,
   startWakeListening,
@@ -177,6 +178,7 @@ export function AmbientTriggerPanel({
   const approvalTargetRef = useRef<Props["approvalTarget"]>(approvalTarget);
   const onApprovalGestureRef = useRef<Props["onApprovalGesture"]>(onApprovalGesture);
   const miniChatRequestSeqRef = useRef(0);
+  const previousSelectedCameraIdRef = useRef(selectedCameraId);
 
   const readoutBlocked = useCallback(() => pinchRecording || Boolean(pinchRecorderRef.current), [pinchRecording]);
   const miniFinalAnswerText = useMemo(
@@ -516,7 +518,7 @@ export function AmbientTriggerPanel({
         console.info("[ambient] camera video play was blocked", error);
       });
     }
-  }, [cameraStream, monitorEnabled]);
+  }, [cameraStream, monitorEnabled, settingsOpen, standalone]);
 
   useEffect(() => () => {
     gestureStopRef.current?.();
@@ -548,13 +550,19 @@ export function AmbientTriggerPanel({
     return pinchTranscriptRef.current.trim();
   }
 
+  async function settlePinchSpeechRecognition(): Promise<string> {
+    const recognition = pinchSpeechRecognitionRef.current;
+    pinchSpeechRecognitionRef.current = null;
+    return settleSpeechRecognitionTranscript(recognition, () => pinchTranscriptRef.current, { timeoutMs: 900 });
+  }
+
   const finishPinchRecording = useCallback(async (state: PinchState) => {
     const recorder = pinchRecorderRef.current;
     if (!recorder) return;
     pinchRecorderRef.current = null;
     setPinchRecording(false);
     setRecordingStartedAt(null);
-    const transcript = stopPinchSpeechRecognition();
+    const transcript = await settlePinchSpeechRecognition();
     setPinchTranscriptPreview("");
     setPinchDetectorStatus("sending");
     setMessage(`${ambientOperationLabels.sending}: 録音音声をAIへ送っています。`);
@@ -772,7 +780,45 @@ export function AmbientTriggerPanel({
       gestureStopRef.current = null;
       setTrackingFrame(null);
     };
-  }, [Boolean(approvalTarget), cameraStream, handlePinchState, monitorEnabled, rumiApprovalPending]);
+  }, [Boolean(approvalTarget), cameraStream, handlePinchState, monitorEnabled, rumiApprovalPending, settingsOpen, standalone]);
+
+  useEffect(() => {
+    const previous = previousSelectedCameraIdRef.current;
+    previousSelectedCameraIdRef.current = selectedCameraId;
+    if (previous === selectedCameraId) return;
+    if (!monitorEnabled || !allRumiPermissionsGranted || !allOsPermissionsGranted || rumiApprovalPending) return;
+    if (!navigator.mediaDevices?.getUserMedia) return;
+    let cancelled = false;
+    setPinchDetectorStatus("loading");
+    navigator.mediaDevices.getUserMedia({ video: videoCaptureConstraints(selectedCameraId || undefined) })
+      .then((stream) => {
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        setCameraStream((current) => {
+          current?.getTracks().forEach((track) => track.stop());
+          return stream;
+        });
+        void refreshDevices();
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setMessage(error instanceof Error ? error.message : "カメラを切り替えられませんでした。");
+          setPinchDetectorStatus(cameraStream ? "tracking" : "unavailable");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    allOsPermissionsGranted,
+    allRumiPermissionsGranted,
+    cameraStream,
+    monitorEnabled,
+    rumiApprovalPending,
+    selectedCameraId,
+  ]);
 
   async function refresh(options?: { probeOs?: boolean }) {
     const next = await ambientTriggerClient.status();
@@ -1543,6 +1589,9 @@ export function AmbientTriggerPanel({
             debug={cameraDebugOpen}
           />
         )}
+        {monitorEnabled && standalone && settingsOpen && (
+          <CameraStreamSink videoRef={videoRef} />
+        )}
 
         <div className="min-h-0 overflow-y-auto overscroll-contain">
         {standalone && settingsOpen ? (
@@ -1934,6 +1983,19 @@ function RecognitionMonitor({
         playsInline
       />
     </section>
+  );
+}
+
+function CameraStreamSink({ videoRef }: { videoRef: RefObject<HTMLVideoElement | null> }) {
+  return (
+    <video
+      ref={videoRef}
+      className="pointer-events-none absolute h-px w-px opacity-0"
+      autoPlay
+      muted
+      playsInline
+      aria-hidden="true"
+    />
   );
 }
 

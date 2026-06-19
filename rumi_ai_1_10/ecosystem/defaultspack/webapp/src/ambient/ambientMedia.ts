@@ -44,6 +44,11 @@ export type SpeechRecognitionLike = {
   abort: () => void;
 };
 
+export type SettledSpeechRecognitionOptions = {
+  abort?: boolean;
+  timeoutMs?: number;
+};
+
 type SpeechRecognitionConstructorLike = new () => SpeechRecognitionLike;
 
 type SpeechRecognitionWindow = Window & {
@@ -114,6 +119,51 @@ export function startPinchSpeechRecognition(onTranscript: (transcript: string) =
   } catch {
     return null;
   }
+}
+
+export function settleSpeechRecognitionTranscript(
+  recognition: SpeechRecognitionLike | null,
+  readTranscript: () => string,
+  options?: SettledSpeechRecognitionOptions,
+): Promise<string> {
+  const timeoutMs = Math.max(0, Math.min(Number(options?.timeoutMs ?? 900), 3000));
+  if (!recognition) return Promise.resolve(cleanTranscript(readTranscript()));
+  if (options?.abort) {
+    try {
+      recognition.abort();
+    } catch {
+      // Some webviews throw if recognition already stopped.
+    }
+    return Promise.resolve(cleanTranscript(readTranscript()));
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const previousOnEnd = recognition.onend;
+    const previousOnError = recognition.onerror;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      recognition.onend = previousOnEnd;
+      recognition.onerror = previousOnError;
+      resolve(cleanTranscript(readTranscript()));
+    };
+    recognition.onend = () => {
+      previousOnEnd?.();
+      finish();
+    };
+    recognition.onerror = (event) => {
+      previousOnError?.(event);
+      finish();
+    };
+    timer = setTimeout(finish, timeoutMs);
+    try {
+      recognition.stop();
+    } catch {
+      finish();
+    }
+  });
 }
 
 export async function startPinchAudioRecorder(deviceId?: string): Promise<ActiveAudioRecorder> {
@@ -267,6 +317,10 @@ function audioEmbedding(samples: number[]): number[] {
   }
   const norm = Math.sqrt(features.reduce((sum, item) => sum + item * item, 0)) || 1;
   return features.map((item) => item / norm);
+}
+
+function cleanTranscript(value: string): string {
+  return String(value || "").trim();
 }
 
 async function queryBrowserPermission(name: "microphone" | "camera"): Promise<string> {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import time
 import uuid
 from typing import Any
@@ -49,6 +50,7 @@ PINCH_RECORD_RELEASE_MODES = {"record_audio_release", "dispatch_audio", "submit_
 APPROVAL_GESTURE_MODES = {"approval_approve", "approval_reject", "swipe_approve", "swipe_reject"}
 ROUTING_MODES = {"selected_chat", "startup_new_chat", "always_new_chat"}
 AI_SEND_APPROVAL_TTL_SECONDS = 5 * 60
+logger = logging.getLogger(__name__)
 
 ALLOWED_ACTIONS = {
     "chat.message",
@@ -379,6 +381,26 @@ class AmbientTriggerRouter:
         )
         result = submit_input(envelope, context)
         status = str(result.get("status") if isinstance(result, dict) else "ok")
+        logger.info(
+            "ambient dispatch submitted",
+            extra={
+                "source": event.source,
+                "trigger": event.trigger,
+                "mode": event.mode,
+                "action_id": action_id,
+                "status": status,
+                "conversation_id_present": bool(target_conversation_id),
+                "model_ref": model_ref,
+                "input_length": len(input_text),
+                "attachment_count": len(attachments),
+                "audio_attachment_count": sum(
+                    1 for item in attachments if isinstance(item, dict) and _is_audio_attachment(item)
+                ),
+                "transcription_status": transcription_summary.get("status", ""),
+                "transcription_code": transcription_summary.get("code", ""),
+                "transcription_source": transcription_summary.get("source", ""),
+            },
+        )
         audit = self._record(
             event,
             status,
@@ -655,6 +677,20 @@ class AmbientTriggerRouter:
         supports_audio = _model_supports_audio(model_ref)
         transcript_text = audio_transcript_text([item for item in working if isinstance(item, dict)])
         transcription = audio_transcription_summary([item for item in working if isinstance(item, dict)])
+        logger.info(
+            "ambient audio dispatch preparing",
+            extra={
+                "event_id": event.event_id,
+                "source": event.source,
+                "trigger": event.trigger,
+                "mode": event.mode,
+                "model_ref": model_ref,
+                "target_supports_audio": supports_audio,
+                "audio_attachment_count": len(audio_indexes),
+                "provided_transcript_length": len(transcript_text),
+                "provided_transcription_status": transcription.get("status", ""),
+            },
+        )
         if transcript_text:
             transcription["status"] = transcription.get("status") or "provided"
         else:
@@ -667,6 +703,18 @@ class AmbientTriggerRouter:
                 target_supports_audio=supports_audio,
             )
             transcription = transcription_result_summary(result)
+            logger.info(
+                "ambient audio transcription completed",
+                extra={
+                    "event_id": event.event_id,
+                    "model_ref": model_ref,
+                    "target_supports_audio": supports_audio,
+                    "status": transcription.get("status", ""),
+                    "code": transcription.get("code", ""),
+                    "source": transcription.get("source", ""),
+                    "transcript_length": transcription.get("transcript_length", 0),
+                },
+            )
             if result.get("status") == "ok" and str(result.get("text") or "").strip():
                 by_index = {
                     int(item.get("index")): item
@@ -694,6 +742,15 @@ class AmbientTriggerRouter:
                     working[index] = attachment
                 transcript_text = audio_transcript_text([item for item in working if isinstance(item, dict)])
             elif not supports_audio:
+                logger.warning(
+                    "ambient audio dispatch blocked waiting for transcription",
+                    extra={
+                        "event_id": event.event_id,
+                        "model_ref": model_ref,
+                        "transcription_status": transcription.get("status", ""),
+                        "transcription_code": transcription.get("code", ""),
+                    },
+                )
                 return {
                     "blocked": True,
                     "input_text": input_text,

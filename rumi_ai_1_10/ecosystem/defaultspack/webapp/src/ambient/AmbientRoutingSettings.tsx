@@ -145,7 +145,6 @@ export function RoutingSettings({
           loading={modelLoading}
           placeholder="すべてから探す"
           variant="compact"
-          maxVisibleOptions={6}
           clearLabel="モデル指定を外す"
           onQueryChange={onModelQueryChange}
           onSearch={() => onModelSearch()}
@@ -242,7 +241,6 @@ export function CompactRoutingControl({
         loading={modelLoading}
         placeholder="モデルを探す"
         variant="compact"
-        maxVisibleOptions={6}
         clearLabel="指定を外す"
         onQueryChange={onModelQueryChange}
         onSearch={(query) => onModelSearch(query)}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Check, ChevronDown, Loader2, Search, X } from "lucide-react";
 
 import type { ModelSearchItem } from "../../lib/api";
@@ -49,6 +49,8 @@ export function ModelSearchPicker({
   onSearch?: (query: string) => void;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const [popoverStyle, setPopoverStyle] = useState<CSSProperties | null>(null);
   const open = controlledOpen ?? internalOpen;
   const trimmedQuery = query.trim();
   const remoteOptions = useMemo(() => remoteResults.map(modelSearchItemToModelSelectOption), [remoteResults]);
@@ -80,9 +82,46 @@ export function ModelSearchPicker({
 
   const compact = variant === "compact";
 
+  useLayoutEffect(() => {
+    if (!open) {
+      setPopoverStyle(null);
+      return undefined;
+    }
+    const update = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      const margin = 8;
+      const desiredWidth = Math.max(rect.width, compact ? 280 : 340);
+      const width = Math.min(desiredWidth, Math.max(220, viewportWidth - margin * 2));
+      const left = Math.min(Math.max(margin, rect.left), Math.max(margin, viewportWidth - width - margin));
+      const belowTop = rect.bottom + 6;
+      const belowHeight = Math.max(0, viewportHeight - belowTop - margin);
+      const aboveHeight = Math.max(0, rect.top - margin - 6);
+      const preferAbove = belowHeight < 220 && aboveHeight > belowHeight;
+      const maxHeight = Math.max(180, Math.min(compact ? 330 : 420, preferAbove ? aboveHeight : belowHeight));
+      const top = preferAbove ? Math.max(margin, rect.top - 6 - maxHeight) : belowTop;
+      setPopoverStyle({
+        left,
+        top,
+        width,
+        maxHeight,
+      });
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [compact, open]);
+
   return (
     <div className="relative min-w-0" data-model-search-picker={variant}>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setOpen(!open)}
         className={cn(
@@ -106,9 +145,10 @@ export function ModelSearchPicker({
           <button type="button" aria-label="モデル検索を閉じる" className="fixed inset-0 rumi-layer-panel cursor-default" onClick={() => setOpen(false)} />
           <div
             className={cn(
-              "absolute left-0 right-0 top-[calc(100%+6px)] rumi-layer-local-popover overflow-hidden border border-zinc-700 bg-zinc-950 shadow-2xl",
+              "fixed rumi-layer-local-popover flex flex-col overflow-hidden border border-zinc-700 bg-zinc-950 shadow-2xl",
               compact ? "rounded-md" : "rounded-lg",
             )}
+            style={popoverStyle ?? undefined}
           >
             <label className={cn(
               "m-2 flex items-center gap-2 border border-zinc-800 bg-black/30 px-3 text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300",
@@ -165,7 +205,10 @@ export function ModelSearchPicker({
                 <X size={12} />
               </button>
             )}
-            <div className={cn("overflow-y-auto border-t border-zinc-800 p-1", compact ? "max-h-48" : "max-h-72")}>
+            <div
+              className="min-h-0 overflow-y-auto border-t border-zinc-800 p-1"
+              style={popoverStyle?.maxHeight ? { maxHeight: Math.max(120, Number(popoverStyle.maxHeight) - 96) } : undefined}
+            >
               {visibleOptions.length > 0 ? visibleOptions.map((option) => {
                 const active = option.value === value || option.qualified_model_id === value;
                 const display = modelSelectDisplay(option);
