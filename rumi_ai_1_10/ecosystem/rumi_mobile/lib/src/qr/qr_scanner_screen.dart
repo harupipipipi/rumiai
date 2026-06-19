@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'qr_payload.dart';
 
@@ -20,9 +19,7 @@ class QrScannerScreen extends StatefulWidget {
 }
 
 class _QrScannerScreenState extends State<QrScannerScreen> {
-  final MobileScannerController _controller = MobileScannerController(
-    detectionSpeed: DetectionSpeed.noDuplicates,
-  );
+  final _controller = TextEditingController();
   bool _handled = false;
 
   @override
@@ -37,99 +34,107 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
         QrScanPurpose.general => 'QRスキャン',
       };
 
-  void _onDetect(BarcodeCapture capture) {
+  bool _matchesPurpose(QrPayload payload) {
+    switch (widget.purpose) {
+      case QrScanPurpose.apiImport:
+        return payload is QrApiImport;
+      case QrScanPurpose.pcConnect:
+        return payload is QrPcConnection || payload is QrPairingV2;
+      case QrScanPurpose.general:
+        return true;
+    }
+  }
+
+  void _submit() {
     if (_handled) return;
-    final barcodes = capture.barcodes;
-    if (barcodes.isEmpty) return;
-    final raw = barcodes.first.rawValue;
-    if (raw == null || raw.trim().isEmpty) return;
+    final raw = _controller.text.trim();
+    if (raw.isEmpty) return;
     _handled = true;
     final payload = parseQrPayload(raw);
     final mismatch = !_matchesPurpose(payload);
     Navigator.of(context).pop((payload, mismatch));
   }
 
-  bool _matchesPurpose(QrPayload payload) {
-    switch (widget.purpose) {
-      case QrScanPurpose.apiImport:
-        return payload is QrApiImport;
-      case QrScanPurpose.pcConnect:
-        return payload is QrPcConnection;
-      case QrScanPurpose.general:
-        return true;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_title),
-        actions: [
-          IconButton(
-            tooltip: 'ライト',
-            icon: const Icon(Icons.flash_on_outlined),
-            onPressed: () => _controller.toggleTorch(),
-          ),
-          IconButton(
-            tooltip: 'カメラ切替',
-            icon: const Icon(Icons.cameraswitch_outlined),
-            onPressed: () => _controller.switchCamera(),
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          MobileScanner(
-            controller: _controller,
-            onDetect: _onDetect,
-          ),
-          _ScanOverlay(hint: widget.hint ?? _title),
-        ],
-      ),
-    );
-  }
-}
-
-class _ScanOverlay extends StatelessWidget {
-  const _ScanOverlay({required this.hint});
-  final String hint;
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: SafeArea(
+      appBar: AppBar(title: Text(_title)),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Spacer(),
-            Center(
-              child: Container(
-                width: 260,
-                height: 260,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white70, width: 2),
-                ),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
               ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, size: 18, color: Colors.amber),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'シミュレータモード: QR内容をテキストで入力してください',
+                      style: TextStyle(fontSize: 12, color: Colors.amber),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(widget.hint ?? _title,
+                style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _controller,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'QR内容 (JSON または URL)',
+                hintText: '{"kind":"rumi_pc","baseUrl":"...","token":"..."}',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text('スキャン'),
+              onPressed: _submit,
             ),
             const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(12),
+            const Divider(),
+            const SizedBox(height: 12),
+            Text('サンプル', style: Theme.of(context).textTheme.labelMedium),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ActionChip(
+                  label: const Text('PC接続 (rumi_pc)'),
+                  onPressed: () {
+                    _controller.text =
+                        '{"kind":"rumi_pc","baseUrl":"http://192.168.1.10:8765","token":"test-token"}';
+                  },
                 ),
-                child: Text(
-                  hint,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                ActionChip(
+                  label: const Text('API (rumi_api)'),
+                  onPressed: () {
+                    _controller.text =
+                        '{"kind":"rumi_api","baseUrl":"https://api.openai.com/v1","apiKey":"sk-test","model":"gpt-4o-mini"}';
+                  },
                 ),
-              ),
+                ActionChip(
+                  label: const Text('ペアリングv2'),
+                  onPressed: () {
+                    _controller.text =
+                        '{"kind":"rumi_pair_v2","pairingId":"pair-abc","code":"7KMX-PQ2F","baseUrls":["http://192.168.1.10:8765"],"serverPublicKey":"","expiresAt":1781830000000}';
+                  },
+                ),
+              ],
             ),
-            const Spacer(),
           ],
         ),
       ),
