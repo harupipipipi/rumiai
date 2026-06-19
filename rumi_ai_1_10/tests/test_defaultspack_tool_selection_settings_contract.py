@@ -164,6 +164,79 @@ def test_catalog_ai_direct_sends_every_compact_candidate_to_selector(monkeypatch
     assert "properties" not in question
 
 
+def test_explicit_tool_helper_model_does_not_force_fast_route(monkeypatch):
+    from domain.chat import tool_selection_orchestrator
+    from domain.chat.tool_selection_schema import ToolSelectionRequest
+    from domain.chat.tool_selection_service import ToolSelectionService
+
+    captured = {}
+
+    def fake_call_model(input_data, context, *, call_handler=None):
+        del context, call_handler
+        captured["model_hint"] = input_data["model_hint"]
+        captured["required_capabilities"] = input_data["required_capabilities"]
+        return {
+            "status": "ok",
+            "model": "custom/slow-helper",
+            "output": {
+                "selected_tools": [
+                    {"tool_id": "web_search", "confidence": 0.8, "reason": "web search"}
+                ]
+            },
+        }
+
+    class FakeEmbeddingIndex:
+        def search(self, user_text, tools, *, limit, backend="auto", model=""):
+            del user_text, tools, limit, backend, model
+            return {
+                "tool_ids": ["web_search"],
+                "results": [],
+                "stage": "semantic",
+                "cache_hit": False,
+                "catalog_hash": "fake",
+                "duration_ms": 1,
+            }
+
+    monkeypatch.setattr(tool_selection_orchestrator, "call_model", fake_call_model)
+    monkeypatch.setattr("domain.chat.tool_selection_service.ToolEmbeddingIndex", lambda: FakeEmbeddingIndex())
+
+    decision = ToolSelectionService(
+        settings={
+            "models": {"utility_models": {"tool_selector": "custom/slow-helper"}},
+            "tools": {"selection_strategy": "catalog_ai", "catalog_ai_direct_limit": 20},
+        }
+    ).select(
+        "search the web",
+        _tools(),
+        selection=ToolSelectionRequest(mode="auto", strategy="catalog_ai"),
+    )
+
+    assert captured["model_hint"] == "custom/slow-helper"
+    assert captured["required_capabilities"] == []
+    assert decision.metrics["selector_model"] == "custom/slow-helper"
+
+
+def test_all_with_hints_prompt_includes_selector_recommendations():
+    from domain.chat import run_request
+
+    prompt = run_request._tool_selection_hints_prompt(
+        {
+            "tool_selection": {
+                "strategy": "all_with_hints",
+                "metrics": {
+                    "recommended_tools": [
+                        {"tool_id": "github_issue_search", "confidence": 0.91, "reason": "GitHub context"}
+                    ]
+                },
+            }
+        }
+    )
+
+    assert "Tool selection hints for all_with_hints strategy" in prompt
+    assert "github_issue_search" in prompt
+    assert "GitHub context" in prompt
+
+
 def test_semantic_auto_resolves_configured_embedding_model(monkeypatch):
     from domain.chat import tool_selection_service as service_module
     from domain.chat.tool_selection_schema import ToolSelectionRequest
@@ -300,6 +373,7 @@ def test_full_tool_selection_trace_creates_hidden_child_conversation(tmp_path, m
         strategy="catalog_ai",
         stage="catalog_ai_direct",
         selected_tools=[{"tool_id": "web_search"}],
+        metrics={"selector_model": "custom/tool-helper"},
     )
 
     run_request._persist_tool_selection_trace(
@@ -314,7 +388,9 @@ def test_full_tool_selection_trace_creates_hidden_child_conversation(tmp_path, m
     child = store.get_conversation(child_id)
     assert child["conversation_kind"] == "tool_selection_trace"
     assert child["parent_conversation_id"] == parent["id"]
+    assert child["model"] == "custom/tool-helper"
     assert child["metadata"]["hidden"] is True
+    assert child["metadata"]["selector_model"] == "custom/tool-helper"
     assert child["metadata"]["tool_selection_trace"] is True
     assert child["is_archived"] is True
     assert child["messages"][0]["metadata"]["hidden"] is True

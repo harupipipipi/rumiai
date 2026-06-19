@@ -67,6 +67,7 @@ class ToolSelectionResult:
     requires_tool_calling_model: bool = False
     candidate_count: int = 0
     stage: str = "keyword"
+    selector_model: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +76,7 @@ class ToolSelectionResult:
             "requires_tool_calling_model": self.requires_tool_calling_model,
             "candidate_count": self.candidate_count,
             "stage": self.stage,
+            "selector_model": self.selector_model,
         }
 
 

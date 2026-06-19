@@ -1969,8 +1969,10 @@ def _create_hidden_tool_selection_conversation(
         return ""
     try:
         store = ChatStore()
+        selector_model = _tool_selection_selector_model(resolved_context, decision, trace)
+        trace_model = selector_model or str(resolved_context.get("model") or "").strip()
         child = store.create_conversation(
-            model=str(resolved_context.get("model") or ""),
+            model=trace_model,
             parent_conversation_id=conversation_id,
             conversation_kind="tool_selection_trace",
             metadata={
@@ -1978,6 +1980,7 @@ def _create_hidden_tool_selection_conversation(
                 "tool_selection_trace": True,
                 "selection_id": trace.get("selection_id"),
                 "trace_mode": "full",
+                **({"selector_model": selector_model} if selector_model else {}),
             },
         )
         child_id = str(child.get("id") or "") if isinstance(child, dict) else ""
@@ -1995,6 +1998,7 @@ def _create_hidden_tool_selection_conversation(
                     "tool_selection_trace": True,
                     "selection_id": trace.get("selection_id"),
                     "trace_mode": "full",
+                    **({"selector_model": selector_model} if selector_model else {}),
                 },
             },
         )
@@ -2017,6 +2021,27 @@ def _create_hidden_tool_selection_conversation(
         return child_id
     except Exception:
         return ""
+
+
+def _tool_selection_selector_model(
+    resolved_context: dict[str, Any],
+    decision: Any,
+    trace: dict[str, Any],
+) -> str:
+    for source in (
+        trace,
+        decision.to_trace_dict() if hasattr(decision, "to_trace_dict") else {},
+        resolved_context.get("tool_selection") if isinstance(resolved_context.get("tool_selection"), dict) else {},
+    ):
+        metrics = source.get("metrics") if isinstance(source, dict) and isinstance(source.get("metrics"), dict) else {}
+        selector_model = (
+            str(metrics.get("selector_model") or source.get("selector_model") or "").strip()
+            if isinstance(source, dict)
+            else ""
+        )
+        if selector_model:
+            return selector_model
+    return ""
 
 
 def _read_frontend_settings() -> dict[str, Any]:

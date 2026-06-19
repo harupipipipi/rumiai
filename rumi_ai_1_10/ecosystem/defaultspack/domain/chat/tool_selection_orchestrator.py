@@ -47,9 +47,10 @@ class ToolSelectionOrchestrator:
                 candidate_count=len(always_tools),
                 stage="tool_loading",
             ).to_dict()
+        model_hint = _tool_selector_model_hint(settings)
         model_call = call_model(
             {
-                "model_hint": _tool_selector_model_hint(settings),
+                "model_hint": model_hint,
                 "question": (
                     "Select the minimum sufficient set of tools for the user message.\n"
                     "- Prefer read/search before write/execute.\n"
@@ -65,7 +66,7 @@ class ToolSelectionOrchestrator:
                 ),
                 "output_schema": "tool_recommendation",
                 "max_tokens": 800,
-                "required_capabilities": ["model.fast"],
+                "required_capabilities": _tool_selector_required_capabilities(model_hint),
             },
             {"_model_call_depth": 0},
             call_handler=self._call_handler,
@@ -83,6 +84,7 @@ class ToolSelectionOrchestrator:
             requires_tool_calling_model=bool(recommendations and supports_tools),
             candidate_count=len(always_tools) + len(candidates),
             stage=("catalog_ai_direct" if not prefilter else "utility_model") if isinstance(model_call, dict) and model_call.get("status") == "ok" else "keyword",
+            selector_model=_selector_model_from_model_call(model_call),
         ).to_dict()
 
 
@@ -110,7 +112,22 @@ def _tool_selector_model_hint(settings: dict[str, Any] | None) -> str:
     utility_models = models.get("utility_models") if isinstance(models.get("utility_models"), dict) else None
     if not isinstance(utility_models, dict):
         utility_models = settings.get("utility_models") if isinstance(settings.get("utility_models"), dict) else {}
-    return str(utility_models.get("tool_selector") or "").strip()
+    tools = settings.get("tools") if isinstance(settings.get("tools"), dict) else {}
+    return str(utility_models.get("tool_selector") or tools.get("selector_model") or "").strip()
+
+
+def _tool_selector_required_capabilities(model_hint: str) -> list[str]:
+    return [] if str(model_hint or "").strip() else ["model.fast"]
+
+
+def _selector_model_from_model_call(model_call: Any) -> str:
+    if not isinstance(model_call, dict):
+        return ""
+    direct = str(model_call.get("model") or "").strip()
+    if direct:
+        return direct
+    routing = model_call.get("routing") if isinstance(model_call.get("routing"), dict) else {}
+    return str(routing.get("selected_model") or "").strip()
 
 
 def _selected_ids(output: Any, fallback: list[str]) -> list[str]:

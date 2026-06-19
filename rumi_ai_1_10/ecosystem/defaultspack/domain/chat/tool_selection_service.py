@@ -128,7 +128,7 @@ class ToolSelectionService:
         if strategy == "all_with_hints":
             hints = self._semantic_candidates(user_text, eligible, context=context)
             hint_candidates = self._tools_by_ids(eligible, list(hints.get("tool_ids") or []))
-            hint_selected_ids, hint_stage, hint_fallbacks, hint_recommendations = self._select_with_utility_model(
+            hint_selected_ids, hint_stage, hint_fallbacks, hint_recommendations, hint_selector_model = self._select_with_utility_model(
                 user_text,
                 hint_candidates or eligible[: self._catalog_ai_direct_limit()],
                 strategy=strategy,
@@ -158,6 +158,7 @@ class ToolSelectionService:
                     "recommendation_order": hint_selected_ids or list(hints.get("tool_ids", [])),
                     "recommended_tools": [item.to_dict() for item in hint_recommendations],
                     "hint_stage": hint_stage,
+                    **({"selector_model": hint_selector_model} if hint_selector_model else {}),
                 },
                 cache_hit=bool(hints.get("cache_hit")),
             )
@@ -211,7 +212,7 @@ class ToolSelectionService:
             candidates = self._stable_merge(included, semantic_candidates)
             selector_prefilter = True
             selector_fallback_ids = semantic_ids
-        selected_ids, stage, fallbacks, recommendations = self._select_with_utility_model(
+        selected_ids, stage, fallbacks, recommendations, selector_model = self._select_with_utility_model(
             user_text,
             candidates,
             strategy=strategy,
@@ -241,7 +242,11 @@ class ToolSelectionService:
             fallbacks=[*list(semantic.get("fallbacks", [])), *fallbacks],
             recommendations=recommendations,
             cache_hit=bool(semantic.get("cache_hit")),
-            metrics={"semantic_search_ms": semantic.get("duration_ms", 0), "catalog_hash": semantic.get("catalog_hash", "")},
+            metrics={
+                "semantic_search_ms": semantic.get("duration_ms", 0),
+                "catalog_hash": semantic.get("catalog_hash", ""),
+                **({"selector_model": selector_model} if selector_model else {}),
+            },
         )
 
     def _static_eligible(
@@ -341,9 +346,9 @@ class ToolSelectionService:
         fallback_ids: list[str],
         context: dict[str, Any],
         prefilter: bool = True,
-    ) -> tuple[list[str], str, list[dict[str, Any]], list[ToolRecommendation]]:
+    ) -> tuple[list[str], str, list[dict[str, Any]], list[ToolRecommendation], str]:
         if not candidates:
-            return [], "empty_candidates", [], []
+            return [], "empty_candidates", [], [], ""
         limit = self._final_limit()
         try:
             result = ToolSelectionOrchestrator(call_handler=self._call_handler).select(
@@ -358,7 +363,8 @@ class ToolSelectionService:
             return fallback_ids[:limit], "semantic_fallback", [{"stage": "utility_model", "reason": str(exc)}], [
                 ToolRecommendation(tool_id=tool_id, confidence=0.5, reason="fallback after selector error")
                 for tool_id in fallback_ids[:limit]
-            ]
+            ], ""
+        selector_model = _selector_model_from_result(result)
         allowed_ids = {_tool_id(tool) for tool in candidates}
         selected_ids: list[str] = []
         recommendations: list[ToolRecommendation] = []
@@ -381,8 +387,8 @@ class ToolSelectionService:
             return fallback_ids[:limit], "semantic_fallback", [{"stage": stage, "reason": "selector_returned_no_valid_tools"}], [
                 ToolRecommendation(tool_id=tool_id, confidence=0.5, reason="fallback after invalid selector output")
                 for tool_id in fallback_ids[:limit]
-            ]
-        return selected_ids[:limit], stage, [], recommendations[:limit]
+            ], selector_model
+        return selected_ids[:limit], stage, [], recommendations[:limit], selector_model
 
     def _decision(
         self,
@@ -495,6 +501,16 @@ def _default_reason(tool: dict[str, Any]) -> str:
     if action in {"send", "execute", "computer", "delete"}:
         return "依頼された操作に必要なため"
     return "依頼内容に関連するため"
+
+
+def _selector_model_from_result(result: Any) -> str:
+    if not isinstance(result, dict):
+        return ""
+    direct = str(result.get("selector_model") or result.get("model") or "").strip()
+    if direct:
+        return direct
+    routing = result.get("routing") if isinstance(result.get("routing"), dict) else {}
+    return str(routing.get("selected_model") or "").strip()
 
 
 def _merge_targets(*groups: list[ToolTarget]) -> list[ToolTarget]:
