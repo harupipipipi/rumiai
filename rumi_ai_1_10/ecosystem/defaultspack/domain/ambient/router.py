@@ -14,6 +14,15 @@ from domain.input.submit import submit_input
 from .audit import AmbientAuditLog, sanitize_for_audit
 from .audio_classifier import cosine_similarity, embedding_from_payload, normalize
 from .event import AmbientTriggerEvent
+from .materialization import (
+    AMBIENT_FINGER_RECORDING_AI_INPUT_ID,
+    AMBIENT_FINGER_RECORDING_CONTEXT_POLICY_ID,
+    audio_passthrough_input_text,
+    audio_transcription_summary,
+    materialize_ambient_event_attachments,
+    transcription_result_summary,
+    with_ambient_template_tool_policy,
+)
 from .permission_check import missing_rumi_permissions
 from .store import AmbientStore
 from .transcription import (
@@ -286,6 +295,8 @@ class AmbientTriggerRouter:
         params = dict(event.payload.get("params") if isinstance(event.payload.get("params"), dict) else {})
         if model and not str(params.get("model") or params.get("profile_id") or "").strip():
             params["model"] = model
+        if _uses_finger_recording_template(event, attachments):
+            params = with_ambient_template_tool_policy(params)
         target_conversation_id = self._target_conversation_id(event, context, state, params=params)
         model_ref = self._model_ref_for_dispatch(event, context, state, target_conversation_id, params=params, routing=routing)
         if model_ref and routing.get("mode") != "selected_chat" and not str(params.get("model") or params.get("profile_id") or "").strip():
@@ -348,13 +359,23 @@ class AmbientTriggerRouter:
                             else {}
                         ),
                         **({"transcription": transcription_summary} if transcription_summary else {}),
+                        **(
+                            {
+                                "template": {
+                                    "ai_input_id": AMBIENT_FINGER_RECORDING_AI_INPUT_ID,
+                                    "context_policy_id": AMBIENT_FINGER_RECORDING_CONTEXT_POLICY_ID,
+                                }
+                            }
+                            if _uses_finger_recording_template(event, attachments)
+                            else {}
+                        ),
                         "metadata": event.metadata,
                     }
                 )
             },
             params=params,
             attachments=attachments,
-            tools=list(event.payload.get("tools") if isinstance(event.payload.get("tools"), list) else []),
+            tools=_tools_for_event(event, params),
         )
         result = submit_input(envelope, context)
         status = str(result.get("status") if isinstance(result, dict) else "ok")
@@ -481,7 +502,7 @@ class AmbientTriggerRouter:
             "has_text": bool(input_text.strip()),
             "attachment_count": len(attachments),
             "has_audio": any(_is_audio_attachment(item) for item in attachments if isinstance(item, dict)),
-            **({"transcription": _audio_transcription_summary(attachments)} if has_audio_transcript else {}),
+            **({"transcription": audio_transcription_summary(attachments)} if has_audio_transcript else {}),
             "conversation_id": (
                 _clean_string(event.payload.get("conversation_id")) if isinstance(event, AmbientTriggerEvent) else ""
             )
@@ -633,7 +654,7 @@ class AmbientTriggerRouter:
         working = [dict(item) if isinstance(item, dict) else item for item in attachments]
         supports_audio = _model_supports_audio(model_ref)
         transcript_text = audio_transcript_text([item for item in working if isinstance(item, dict)])
-        transcription = _audio_transcription_summary([item for item in working if isinstance(item, dict)])
+        transcription = audio_transcription_summary([item for item in working if isinstance(item, dict)])
         if transcript_text:
             transcription["status"] = transcription.get("status") or "provided"
         else:
@@ -645,7 +666,7 @@ class AmbientTriggerRouter:
                 target_model_ref=model_ref,
                 target_supports_audio=supports_audio,
             )
-            transcription = _transcription_result_summary(result)
+            transcription = transcription_result_summary(result)
             if result.get("status") == "ok" and str(result.get("text") or "").strip():
                 by_index = {
                     int(item.get("index")): item
@@ -705,7 +726,7 @@ class AmbientTriggerRouter:
                 else item
                 for item in working
             ]
-            fallback = _audio_passthrough_input_text(transcription)
+            fallback = audio_passthrough_input_text(transcription)
             return {"input_text": fallback, "attachments": working, "transcription": transcription}
 
         clean_attachments = [
@@ -769,33 +790,7 @@ class AmbientTriggerRouter:
         return False
 
     def _attachments_for_event(self, event: AmbientTriggerEvent) -> list[dict[str, Any]]:
-        raw = event.payload.get("attachments")
-        attachments = [dict(item) for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
-        audio_data_url = (
-            event.payload.get("audio_data_url")
-            or event.payload.get("audioDataUrl")
-            or event.payload.get("audio")
-        )
-        if isinstance(audio_data_url, str) and audio_data_url.strip():
-            mime_type = str(event.payload.get("audio_mime_type") or event.payload.get("mime_type") or "audio/webm")
-            attachments.append(
-                {
-                    "id": str(event.payload.get("audio_id") or event.event_id),
-                    "name": str(event.payload.get("audio_name") or "ambient-pinch-recording.webm"),
-                    "type": mime_type,
-                    "size": event.payload.get("audio_size"),
-                    "dataUrl": audio_data_url,
-                    "source": "ambient.camera_pinch_hold",
-                    "ephemeral": True,
-                    "do_not_persist": True,
-                }
-            )
-        for attachment in attachments:
-            if _is_audio_attachment(attachment):
-                attachment.setdefault("source", "ambient")
-                attachment.setdefault("ephemeral", True)
-                attachment.setdefault("do_not_persist", True)
-        return attachments
+        return materialize_ambient_event_attachments(event.payload, event_id=event.event_id)
 
     def _default_input_text(self, event: AmbientTriggerEvent, attachments: list[dict[str, Any]]) -> str:
         if any(_is_audio_attachment(item) for item in attachments):
@@ -811,6 +806,28 @@ class AmbientTriggerRouter:
 
 def _is_audio_attachment(attachment: dict[str, Any]) -> bool:
     return is_audio_attachment(attachment)
+
+
+def _uses_finger_recording_template(
+    event: AmbientTriggerEvent,
+    attachments: list[dict[str, Any]],
+) -> bool:
+    return (
+        event.source == "camera"
+        and event.trigger == "pinch"
+        and any(_is_audio_attachment(item) for item in attachments if isinstance(item, dict))
+    )
+
+
+def _tools_for_event(event: AmbientTriggerEvent, params: dict[str, Any]) -> list[Any]:
+    raw_tools = event.payload.get("tools")
+    if isinstance(raw_tools, list):
+        return list(raw_tools)
+    tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
+    selected_tools = tool_policy.get("selected_tools")
+    if isinstance(selected_tools, list):
+        return [item for item in selected_tools if str(item or "").strip()]
+    return []
 
 
 def _model_supports_audio(model_ref: str) -> bool:
@@ -833,46 +850,6 @@ def _local_transcription_status() -> dict[str, Any]:
             "configured": False,
             "reason": "ローカルWhisperの状態を確認できませんでした。",
         }
-
-
-def _audio_transcription_summary(attachments: list[dict[str, Any]]) -> dict[str, Any]:
-    audio_items = [item for item in attachments if isinstance(item, dict) and _is_audio_attachment(item)]
-    transcripts = [attachment_transcript(item) for item in audio_items]
-    transcripts = [text for text in transcripts if text]
-    if not audio_items:
-        return {}
-    source = next((attachment_transcript_source(item) for item in audio_items if attachment_transcript_source(item)), "")
-    model = next((attachment_transcript_model(item) for item in audio_items if attachment_transcript_model(item)), "")
-    status = next((str(item.get("transcription_status") or "").strip() for item in audio_items if str(item.get("transcription_status") or "").strip()), "")
-    return {
-        "status": status or ("provided" if transcripts else "missing"),
-        "source": source,
-        "model": model,
-        "attachment_count": len(audio_items),
-        "transcript_count": len(transcripts),
-        "transcript_length": sum(len(text) for text in transcripts),
-    }
-
-
-def _transcription_result_summary(result: dict[str, Any]) -> dict[str, Any]:
-    status = str(result.get("status") or "unavailable").strip()
-    text = str(result.get("text") or "")
-    return {
-        "status": status,
-        "source": str(result.get("source") or ""),
-        "model": str(result.get("model") or ""),
-        "code": str(result.get("code") or ""),
-        "reason": str(result.get("reason") or "")[:300],
-        "transcript_count": 1 if text.strip() else 0,
-        "transcript_length": len(text.strip()),
-    }
-
-
-def _audio_passthrough_input_text(transcription: dict[str, Any]) -> str:
-    status = str(transcription.get("status") or "unavailable").strip()
-    if status == "unavailable":
-        return "音声入力を添付しています。文字起こしは利用できませんでした。"
-    return "音声入力を添付しています。"
 
 
 def _clean_string(value: Any) -> str:

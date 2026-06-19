@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import type { Conversation } from "../lib/api";
 import { AUTHORITY_FOLLOWUP_TEXT, AUTHORITY_WAITING_TEXT } from "../lib/authorityApproval";
+import { buildAmbientDispatchTemplateContext, mergeAmbientDispatchMetadata } from "./ambientDispatchContext";
 import { AmbientMiniChat } from "./AmbientMiniChat";
 import {
   ambientConversationIdFromResult,
@@ -14,6 +15,7 @@ import {
   ambientMiniChatMessages,
   ambientPendingAuthorityApproval,
 } from "./ambientMiniChatState";
+import { ambientSelectedModelDisplay, ambientVisibleModelOptions } from "./ambientRouting";
 import type { AmbientStatus } from "./ambientTriggerClient";
 
 test("ambient mini chat resolves the linked conversation from routing state", () => {
@@ -237,6 +239,78 @@ test("ambient mini chat hides routing picker controls for the standalone normal 
   assert.equal(html.includes("Defaultspack"), false);
   assert.match(html, /次の送信で作成/);
   assert.match(html, /メッセージ/);
+});
+
+test("ambient compact routing model options use template modelSelect display shape", () => {
+  const models = [
+    {
+      profile_id: "google/gemini-2.5-flash",
+      display_name: "Gemini 2.5 Flash",
+      provider_id: "google",
+      provider_display_name: "Google",
+      model_id: "gemini-2.5-flash",
+      api_key_configured: true,
+      supports_tool_calling: true,
+    },
+    {
+      profile_id: "openai/gpt-4.1",
+      display_name: "GPT 4.1",
+      provider_id: "openai",
+      provider_display_name: "OpenAI",
+      model_id: "gpt-4.1",
+      requires_api_key: true,
+      api_key_configured: false,
+    },
+  ];
+
+  const selected = ambientSelectedModelDisplay("google/gemini-2.5-flash", models);
+  assert.equal(selected?.label, "Gemini 2.5 Flash");
+  assert.deepEqual(selected?.badges.map((badge) => badge.id), ["configured", "tools"]);
+
+  const visible = ambientVisibleModelOptions({
+    model: "google/gemini-2.5-flash",
+    modelQuery: "api key",
+    modelResults: models,
+    limit: 6,
+  });
+  assert.deepEqual(visible.map((option) => option.value), [
+    "google/gemini-2.5-flash",
+    "openai/gpt-4.1",
+  ]);
+});
+
+test("ambient dispatch context carries template model and selected tool policy metadata", () => {
+  const context = buildAmbientDispatchTemplateContext({
+    model: "google/gemini-2.5-flash",
+    templateParams: { max_output_tokens: 2048 },
+    templateToolPolicy: { policy_id: "template.default" },
+    selectedToolIds: ["local_file", "browser", "local_file", ""],
+  });
+
+  assert.deepEqual(context.eventPayload, {
+    model: "google/gemini-2.5-flash",
+    params: {
+      max_output_tokens: 2048,
+      model: "google/gemini-2.5-flash",
+      tool_selection: {
+        mode: "manual",
+        include: ["local_file", "browser"],
+        scope: "turn",
+        must_use: false,
+      },
+      tool_policy: {
+        policy_id: "template.default",
+        selected_tools: ["local_file", "browser"],
+      },
+    },
+    tools: ["local_file", "browser"],
+  });
+  assert.deepEqual(mergeAmbientDispatchMetadata({ panel: "ambient_mini_window" }, context), {
+    panel: "ambient_mini_window",
+    selected_model: "google/gemini-2.5-flash",
+    selected_tools: ["local_file", "browser"],
+    tool_selection_scope: "turn",
+  });
 });
 
 function status(routing: AmbientStatus["routing"]): AmbientStatus {

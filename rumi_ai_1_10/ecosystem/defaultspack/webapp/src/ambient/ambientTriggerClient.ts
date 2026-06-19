@@ -1,5 +1,5 @@
 import { defaultspackApiFetch } from "../lib/api";
-import type { AuthorityUiOperator } from "../lib/api";
+import type { AuthorityUiOperator, ToolSelectionRequest } from "../lib/api";
 
 export type AmbientPermissionId = "host.microphone.capture" | "host.camera.capture" | "ambient.trigger.dispatch" | string;
 
@@ -87,9 +87,19 @@ export type AmbientEventPayload = {
   action_id?: "chat.message" | "run.instruction" | "agent.delegate" | "defaults.console.input" | string;
   conversation_id?: string;
   input_text?: string;
+  model?: string;
+  profile_id?: string;
   next_action?: string;
   choice?: 2 | 3 | 4;
   decision?: "approve" | "reject" | string;
+  params?: {
+    model?: string;
+    profile_id?: string;
+    tool_selection?: ToolSelectionRequest;
+    tool_policy?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+  tools?: string[];
   metadata?: Record<string, unknown>;
   audio_embedding?: number[];
   samples?: number[];

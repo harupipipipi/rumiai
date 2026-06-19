@@ -1,6 +1,14 @@
 import type { ChatItem } from "../components/HistoryBoard";
 import type { Conversation, ModelSearchItem } from "../lib/api";
 import { formatRelativeTime } from "../lib/chat";
+import {
+  buildVisibleModelOptions,
+  findSelectedModelOption,
+  modelSearchItemToModelSelectOption,
+  modelSelectDisplay,
+  type ModelSelectDisplay,
+  type ModelSelectOption,
+} from "../features/models";
 import type { AmbientRoutingConfig, AmbientRoutingMode } from "./ambientTriggerClient";
 
 export type NormalizedAmbientRouting = {
@@ -67,22 +75,37 @@ export function routingLabel(
   return "毎回新しいチャット";
 }
 
-export function modelIdForSearchItem(item: ModelSearchItem): string {
-  return String(item.profile_id || item.qualified_model_id || item.model_id || item.display_name || item.label || "").trim();
+export function ambientModelSelectOptions(modelResults: ModelSearchItem[]): ModelSelectOption[] {
+  return modelResults
+    .map(modelSearchItemToModelSelectOption)
+    .filter((option) => Boolean(option.value));
 }
 
-export function modelLabelForSearchItem(item: ModelSearchItem): string {
-  const id = modelIdForSearchItem(item);
-  const label = String(item.display_name || item.label || id).trim();
-  const provider = String(item.provider_display_name || item.provider_id || "").trim();
-  return provider && !label.includes(provider) ? `${label} · ${provider}` : label;
+export function ambientSelectedModelDisplay(model: string, modelResults: ModelSearchItem[] = []): ModelSelectDisplay | null {
+  const selected = findSelectedModelOption([], model, ambientModelSelectOptions(modelResults));
+  return selected ? modelSelectDisplay(selected) : null;
 }
 
-export function modelLabelFromId(value: string): string {
-  const text = value.trim();
-  if (!text) return "未指定";
-  const withoutProviderPrefix = text.includes("/") ? text.split("/").slice(1).join("/") : text;
-  return withoutProviderPrefix || text;
+export function ambientVisibleModelOptions({
+  model,
+  modelQuery,
+  modelResults,
+  limit = 6,
+}: {
+  model: string;
+  modelQuery: string;
+  modelResults: ModelSearchItem[];
+  limit?: number;
+}): ModelSelectOption[] {
+  const remoteOptions = ambientModelSelectOptions(modelResults);
+  const selected = findSelectedModelOption([], model, remoteOptions);
+  return buildVisibleModelOptions({
+    options: [],
+    selected,
+    remoteOptions,
+    query: modelQuery,
+    resultLimit: limit,
+  }).slice(0, limit);
 }
 
 function cleanOptionalText(value: unknown): string | null {

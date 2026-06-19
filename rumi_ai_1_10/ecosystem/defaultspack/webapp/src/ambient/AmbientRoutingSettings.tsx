@@ -4,8 +4,9 @@ import { ChevronUp, ExternalLink, Loader2, MessageSquare, RefreshCcw, Search, Sh
 import { HistoryBoard, type ChatItem } from "../components/HistoryBoard";
 import type { ModelSearchItem } from "../lib/api";
 import { cn } from "../lib/cn";
+import { modelSelectDisplay, type ModelSelectOption } from "../features/models";
 import type { AmbientRoutingMode } from "./ambientTriggerClient";
-import { modelIdForSearchItem, modelLabelForSearchItem, modelLabelFromId } from "./ambientRouting";
+import { ambientSelectedModelDisplay, ambientVisibleModelOptions } from "./ambientRouting";
 
 export function RoutingSettings({
   busy,
@@ -59,7 +60,9 @@ export function RoutingSettings({
   onAiSendApprovalRequiredChange: (enabled: boolean) => void;
 }) {
   const [modelChangeOpen, setModelChangeOpen] = useState(false);
-  const modelLabel = model ? modelLabelFromId(model) : "未指定";
+  const modelDisplay = ambientSelectedModelDisplay(model, modelResults);
+  const modelLabel = modelDisplay?.label ?? "未指定";
+  const visibleModelOptions = ambientVisibleModelOptions({ model, modelQuery, modelResults, limit: 6 });
 
   return (
     <section className="space-y-2 border-l border-sky-400/35 pl-2">
@@ -201,25 +204,18 @@ export function RoutingSettings({
             )}
             {modelResults.length > 0 && (
               <div className="max-h-28 overflow-auto border-l border-zinc-800 pl-2">
-                {modelResults
-                  .map((item) => ({ item, id: modelIdForSearchItem(item) }))
-                  .filter(({ id }) => Boolean(id))
-                  .slice(0, 6)
-                  .map(({ item, id }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => {
-                        onModelChange(id);
-                        onModelCommit(id);
-                        onModelQueryChange("");
-                        setModelChangeOpen(false);
-                      }}
-                      className="block w-full truncate py-1 text-left text-[11px] text-zinc-300 hover:text-zinc-50"
-                    >
-                      {modelLabelForSearchItem(item)}
-                    </button>
-                  ))}
+                {visibleModelOptions.map((option) => (
+                  <CompactModelOptionButton
+                    key={option.value}
+                    option={option}
+                    onPick={(value) => {
+                      onModelChange(value);
+                      onModelCommit(value);
+                      onModelQueryChange("");
+                      setModelChangeOpen(false);
+                    }}
+                  />
+                ))}
               </div>
             )}
           </div>
@@ -263,7 +259,9 @@ export function CompactRoutingControl({
   onModelSearch: (query?: string) => void;
 }) {
   const [modelChangeOpen, setModelChangeOpen] = useState(false);
-  const modelLabel = model ? modelLabelFromId(model) : "モデル指定なし";
+  const modelDisplay = ambientSelectedModelDisplay(model, modelResults);
+  const modelLabel = modelDisplay?.label ?? "モデル指定なし";
+  const visibleModelOptions = ambientVisibleModelOptions({ model, modelQuery, modelResults, limit: 6 });
   const concreteChatId = mode === "selected_chat" ? selectedConversationId : mode === "startup_new_chat" ? sessionConversationId ?? null : null;
   const createsNewChat = mode === "startup_new_chat" || mode === "always_new_chat";
 
@@ -371,30 +369,49 @@ export function CompactRoutingControl({
           </div>
           {modelResults.length > 0 && (
             <div className="max-h-24 overflow-auto border-l border-zinc-800 pl-2">
-              {modelResults
-                .map((item) => ({ item, id: modelIdForSearchItem(item) }))
-                .filter(({ id }) => Boolean(id))
-                .slice(0, 6)
-                .map(({ item, id }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => {
-                      onModelChange(id);
-                      onModelCommit(id);
-                      onModelQueryChange("");
-                      setModelChangeOpen(false);
-                    }}
-                    className="block w-full truncate py-1 text-left text-[11px] text-zinc-300 hover:text-zinc-50"
-                  >
-                    {modelLabelForSearchItem(item)}
-                  </button>
-                ))}
+              {visibleModelOptions.map((option) => (
+                <CompactModelOptionButton
+                  key={option.value}
+                  option={option}
+                  onPick={(value) => {
+                    onModelChange(value);
+                    onModelCommit(value);
+                    onModelQueryChange("");
+                    setModelChangeOpen(false);
+                  }}
+                />
+              ))}
             </div>
           )}
         </div>
       )}
     </section>
+  );
+}
+
+function CompactModelOptionButton({
+  option,
+  onPick,
+}: {
+  option: ModelSelectOption;
+  onPick: (value: string) => void;
+}) {
+  const display = modelSelectDisplay(option);
+  const badge = display.badges[0];
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(option.value)}
+      className="flex w-full min-w-0 items-center gap-1.5 py-1 text-left text-[11px] text-zinc-300 hover:text-zinc-50"
+      title={display.subtitle || option.value}
+    >
+      <span className="min-w-0 flex-1 truncate">{display.label}</span>
+      {badge && (
+        <span className="shrink-0 rounded border border-zinc-700 px-1 py-0.5 text-[9px] text-zinc-500">
+          {badge.label}
+        </span>
+      )}
+    </button>
   );
 }
 

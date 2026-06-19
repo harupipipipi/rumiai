@@ -102,6 +102,10 @@ def test_pinch_and_agent_dispatch_share_ambient_router(monkeypatch, tmp_path):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
 
+    from domain.ambient.materialization import (
+        AMBIENT_FINGER_RECORDING_AI_INPUT_ID,
+        AMBIENT_FINGER_RECORDING_CONTEXT_POLICY_ID,
+    )
     from domain.ambient.router import AmbientTriggerRouter
 
     router = AmbientTriggerRouter()
@@ -155,6 +159,14 @@ def test_pinch_and_agent_dispatch_share_ambient_router(monkeypatch, tmp_path):
     assert envelope.delivery["action_id"] == "chat.message"
     assert envelope.input == "今日の予定を確認して"
     assert "pinch.webm" not in envelope.input
+    assert envelope.params["tool_policy"] == {
+        "template_ai_input_id": AMBIENT_FINGER_RECORDING_AI_INPUT_ID,
+        "template_tool_policy_id": "ambient_finger_recording_tools",
+    }
+    assert envelope.metadata["ambient"]["template"] == {
+        "ai_input_id": AMBIENT_FINGER_RECORDING_AI_INPUT_ID,
+        "context_policy_id": AMBIENT_FINGER_RECORDING_CONTEXT_POLICY_ID,
+    }
     assert envelope.attachments[0]["type"] == "audio/webm"
     assert "dataUrl" not in envelope.attachments[0]
     assert envelope.attachments[0]["do_not_persist"] is True
@@ -184,6 +196,34 @@ def test_pinch_and_agent_dispatch_share_ambient_router(monkeypatch, tmp_path):
     assert envelope.delivery["action_id"] == "agent.delegate"
     assert envelope.source["provider"] == "ambient"
     assert envelope.target["conversation_id"] == "conv-1"
+
+
+def test_ambient_audio_payload_aliases_materialize_ephemeral_attachment_metadata():
+    from domain.ambient.materialization import materialize_ambient_event_attachments
+
+    attachments = materialize_ambient_event_attachments(
+        {
+            "audioDataUrl": "data:audio/webm;base64,AAAA",
+            "audio_mime_type": "audio/webm",
+            "audio_name": "ambient-pinch-1.webm",
+            "audio_size": 4,
+            "transcription": "録音メモ",
+            "transcript_source": "web_speech_api",
+        },
+        event_id="evt-audio",
+    )
+
+    assert len(attachments) == 1
+    attachment = attachments[0]
+    assert attachment["name"] == "ambient-pinch-1.webm"
+    assert attachment["type"] == "audio/webm"
+    assert attachment["source"] == "ambient.camera_pinch_hold"
+    assert attachment["ephemeral"] is True
+    assert attachment["do_not_persist"] is True
+    assert attachment["transcription"] == "録音メモ"
+    assert attachment["transcript_source"] == "web_speech_api"
+    assert attachment["metadata"]["ambient_event_id"] == "evt-audio"
+    assert attachment["metadata"]["privacy"] == "ephemeral_audio"
 
 
 def test_debug_qa_ok_mark_dispatch_strips_media_and_keeps_transcript_metadata(monkeypatch, tmp_path):
@@ -359,6 +399,78 @@ def test_selected_chat_routing_passes_saved_model_as_turn_param(monkeypatch, tmp
     assert envelope.target["conversation_id"] == "conv-selected"
     assert envelope.chat["conversation_id"] == "conv-selected"
     assert envelope.params["model"] == "opencode-go/kimi-k2.6"
+    assert envelope.params["tool_policy"]["template_ai_input_id"] == "ambient_finger_recording"
+
+
+def test_finger_recording_dispatch_merges_template_policy_with_selected_tools(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+
+    payload = _pinch_audio_payload()
+    payload["params"] = {
+        "tool_selection": {
+            "mode": "manual",
+            "include": ["browser", "local_file"],
+            "scope": "turn",
+            "must_use": False,
+        },
+        "tool_policy": {
+            "selected_tools": ["browser", "local_file"],
+        },
+    }
+
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": "", "conversation_id": "conv-tools"}) as submit:
+        dispatched = router.submit_event(payload, {"conversation_id": "conv-tools"})
+
+    assert dispatched["status"] == "ok"
+    envelope = submit.call_args.args[0]
+    assert envelope.tools == ["browser", "local_file"]
+    assert envelope.params["tool_selection"] == {
+        "mode": "manual",
+        "include": ["browser", "local_file"],
+        "scope": "turn",
+        "must_use": False,
+    }
+    assert envelope.params["tool_policy"] == {
+        "selected_tools": ["browser", "local_file"],
+        "template_ai_input_id": "ambient_finger_recording",
+        "template_tool_policy_id": "ambient_finger_recording_tools",
+    }
+    assert envelope.metadata["ambient"]["template"] == {
+        "ai_input_id": "ambient_finger_recording",
+        "context_policy_id": "ambient_audio_transcript",
+    }
+
+
+def test_ambient_template_catalog_projects_settings_policy_and_external_hook():
+    from domain.templates.projectors import build_template_catalog
+
+    catalog = build_template_catalog(defaultspack_root=DEFAULTSPACK_ROOT)
+    template_ids = {item["id"] for item in catalog["templates"]}
+    ai_input_ids = {item["id"] for item in catalog["ai_inputs"]}
+    context_policy_ids = {item["id"] for item in catalog["context_policies"]}
+    tool_policy_ids = {item["id"] for item in catalog["tool_policies"]}
+    permission_ids = {item["permission_id"] for item in catalog["permissions"]}
+    external_template_ids = {item["id"] for item in catalog["external_io_templates"]}
+    ambient_section = next(item for item in catalog["settings_sections"] if item["id"] == "ambient")
+    ambient_fields = {item["id"]: item for item in ambient_section["fields"]}
+
+    assert "rumi.ambient_trigger.default" in template_ids
+    assert "ambient_finger_recording" in ai_input_ids
+    assert "ambient_audio_transcript" in context_policy_ids
+    assert "ambient_finger_recording_tools" in tool_policy_ids
+    assert {"host.microphone.capture", "host.camera.capture", "ambient.trigger.dispatch"} <= permission_ids
+    assert "ambient.input.webhook" in external_template_ids
+    assert ambient_fields["ambient.routing.model"]["type"] == "model_select"
+    assert ambient_fields["ambient.provider_keys"]["type"] == "api_key_setup"
 
 
 def test_always_new_chat_uses_selected_route_model_for_created_conversation(monkeypatch, tmp_path):

@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api, type Conversation, type ModelSearchItem } from "../lib/api";
+import { createModelSearchResources } from "../features/models";
 import { ambientTriggerClient, type AmbientRoutingConfig, type AmbientRoutingMode, type AmbientStatus } from "./ambientTriggerClient";
 import { conversationsToChatItems, normalizeRouting, routingLabel } from "./ambientRouting";
+
+const modelSearchResources = createModelSearchResources(api);
 
 export function useAmbientRouting({
   status,
@@ -161,7 +164,7 @@ export function useAmbientRouting({
     const trimmed = query.trim();
     setModelLoading(true);
     try {
-      const result = await api.searchModels({ query: trimmed, max_results: 12 });
+      const result = await modelSearchResources.searchModels({ query: trimmed, max_results: 12 });
       setModelResults(result.models ?? []);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "モデルを検索できませんでした。");

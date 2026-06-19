@@ -19,6 +19,7 @@ import { openDefaultsConsoleWindow, openFingerRecordingWindow, openAuthorityAppr
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { ambientTriggerClient, type AmbientStatus } from "./ambientTriggerClient";
 import { AmbientMiniChat } from "./AmbientMiniChat";
+import { buildAmbientDispatchTemplateContext, mergeAmbientDispatchMetadata } from "./ambientDispatchContext";
 import {
   ambientConversationIdFromResult,
   ambientLatestAssistantFinalText,
@@ -78,6 +79,10 @@ type Props = {
   finalAnswerText?: string | null;
   variant?: "floating" | "window";
   debugMode?: boolean;
+  selectedModel?: string | null;
+  selectedToolIds?: readonly string[] | null;
+  templateAiParams?: Record<string, unknown> | null;
+  templateToolPolicy?: Record<string, unknown> | null;
 };
 
 type MiniAuthorityApprovalResolution = {
@@ -98,6 +103,7 @@ const THUMB_TIP_INDEX = 4;
 const INDEX_TIP_INDEX = 8;
 const MINI_AUTHORITY_CONTINUATION_PENDING_ERROR = "承認後の続行がまだ完了していません。もう一度送信してください。";
 const MINI_AUTHORITY_CONTINUATION_POLL_DELAYS_MS = [700, 1400, 2400, 3600] as const;
+const EMPTY_SELECTED_TOOL_IDS: readonly string[] = [];
 const HAND_LANDMARK_CONNECTIONS = [
   [0, 1], [1, 2], [2, 3], [3, 4],
   [0, 5], [5, 6], [6, 7], [7, 8],
@@ -107,7 +113,19 @@ const HAND_LANDMARK_CONNECTIONS = [
   [0, 17],
 ] as const;
 
-export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarget, onApprovalGesture, finalAnswerText, variant = "floating", debugMode = false }: Props) {
+export function AmbientTriggerPanel({
+  conversationId,
+  onOpenInput,
+  approvalTarget,
+  onApprovalGesture,
+  finalAnswerText,
+  variant = "floating",
+  debugMode = false,
+  selectedModel,
+  selectedToolIds,
+  templateAiParams,
+  templateToolPolicy,
+}: Props) {
   const [status, setStatus] = useState<AmbientStatus | null>(null);
   const standalone = variant === "window";
   const [expanded, setExpanded] = useState(() => standalone);
@@ -243,6 +261,8 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const pendingApproval = status?.pending_approval ?? null;
   const visibleMessage = useMemo(() => ambientRenderableMessage(message), [message]);
   const ambientDispatchGranted = Boolean(status?.permissions.rumi["ambient.trigger.dispatch"]?.granted);
+  const selectedDispatchToolIds = selectedToolIds ?? EMPTY_SELECTED_TOOL_IDS;
+  const selectedDispatchToolIdsKey = selectedDispatchToolIds.join("\0");
   const explicitDebugConversationId = debugMode ? cleanString(conversationId) : null;
   const linkedAmbientConversationId = useMemo(
     () => explicitDebugConversationId ?? ambientLinkedConversationId(status, conversationId),
@@ -275,6 +295,18 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
   const inlineSettingsControlsVisible = !standalone;
   const miniChatRoutingSummary = standalone ? "次の送信で作成" : routingSummary;
   const debugQaVisible = standalone && debugMode;
+  const dispatchTemplateContext = useMemo(() => buildAmbientDispatchTemplateContext({
+    model: routingModel || selectedModel || "",
+    selectedToolIds: selectedDispatchToolIds,
+    templateParams: templateAiParams,
+    templateToolPolicy,
+  }), [
+    routingModel,
+    selectedDispatchToolIdsKey,
+    selectedModel,
+    templateAiParams,
+    templateToolPolicy,
+  ]);
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -540,18 +572,19 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         trigger: "pinch",
         mode: "dispatch_audio",
         action_id: "chat.message",
+        ...dispatchTemplateContext.eventPayload,
         input_text: transcript ? `文字起こし:\n${transcript}` : "録音音声を送信しました。文字起こしはまだありません。音声を確認して返答してください。",
         conversation_id: conversationIdRef.current || undefined,
         confidence: state.confidence,
         duration_ms: recording.durationMs,
-        metadata: {
+        metadata: mergeAmbientDispatchMetadata({
           panel: "ambient_mini_window",
           hand: state.hand,
           normalized_distance: state.normalizedDistance,
           hold_to_record: true,
           transcript_available: Boolean(transcript),
           ...(transcript ? { transcript_source: "web_speech_api" } : {}),
-        },
+        }, dispatchTemplateContext),
         attachments: [
           {
             id: `ambient-audio-${Date.now()}`,
@@ -586,7 +619,7 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
     } finally {
       setPinchDetectorStatus("tracking");
     }
-  }, [activateMiniConversationFromSubmitResult, loadMiniConversation]);
+  }, [activateMiniConversationFromSubmitResult, dispatchTemplateContext, loadMiniConversation]);
 
   useEffect(() => {
     if (!pinchRecording || !recordingStartedAt) return;
@@ -1086,12 +1119,13 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         trigger: "external_hook",
         mode: "preset_text",
         action_id: "chat.message",
+        ...dispatchTemplateContext.eventPayload,
         input_text: text,
         conversation_id: targetConversationId || undefined,
-        metadata: {
+        metadata: mergeAmbientDispatchMetadata({
           panel: "ambient_mini_window",
           manual_text_input: true,
-        },
+        }, dispatchTemplateContext),
       });
       const resultConversationId = activateMiniConversationFromSubmitResult(result, targetConversationId);
       const nextMessage = ambientResultMessage(result, "メッセージをAIに送信しました。");
@@ -1141,17 +1175,18 @@ export function AmbientTriggerPanel({ conversationId, onOpenInput, approvalTarge
         trigger: "pinch",
         mode: "dispatch_audio",
         action_id: "chat.message",
+        ...dispatchTemplateContext.eventPayload,
         input_text: inputText,
         conversation_id: miniConversationId || conversationIdRef.current || undefined,
         confidence: 1,
         duration_ms: 0,
-        metadata: {
+        metadata: mergeAmbientDispatchMetadata({
           panel: "ambient_mini_window",
           debug_qa: true,
           simulated_ok_mark: true,
           transcript,
           transcript_source: "debug_qa",
-        },
+        }, dispatchTemplateContext),
         attachments: [
           {
             id: `ambient-debug-audio-${Date.now()}`,

@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "id": "rumi.ambient_trigger.default",
+  "kind": "composite",
+  "version": "1.0.0",
+  "status": "active",
+  "trust_level": "builtin",
+  "capabilities": {
+    "provides": [
+      "rumi.ambient_trigger",
+      "rumi.finger_recording",
+      "rumi.ambient.external_hook"
+    ],
+    "requires": [],
+    "permissions": [
+      "host.microphone.capture",
+      "host.camera.capture",
+      "ambient.trigger.dispatch",
+      "model.invoke"
+    ]
+  },
+  "metadata": {
+    "title": "Ambient Trigger",
+    "template_kind": "ambient_trigger_template",
+    "local_first": true,
+    "description": "Declarative ambient voice and OK-mark recording settings, permissions, routing policy, and external hook metadata."
+  },
+  "pieces": [
+    {
+      "id": "ambient_settings_section",
+      "kind": "settings_section",
+      "order": 70,
+      "section_id": "ambient",
+      "label": "Ambient",
+      "description": "Voice wake, OK-mark recording, permissions, and dispatch routing.",
+      "fields": []
+    },
+    {
+      "id": "ambient_monitor_enabled",
+      "kind": "settings_field",
+      "slot": "ambient",
+      "order": 71,
+      "section_id": "ambient",
+      "field_id": "ambient.monitor.enabled",
+      "type": "toggle",
+      "label": "Ambient Monitor",
+      "default": false,
+      "help": "Turns voice wake and OK-mark recording monitoring on or off."
+    },
+    {
+      "id": "ambient_route_model",
+      "kind": "settings_field",
+      "slot": "ambient",
+      "order": 72,
+      "section_id": "ambient",
+      "field_id": "ambient.routing.model",
+      "type": "model_select",
+      "renderer": "model_select",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Ambient Send Model",
+      "default": "",
+      "data_source": "selectable_model_profiles",
+      "help": "Model used when finger recording creates or overrides a chat route."
+    },
+    {
+      "id": "ambient_ai_send_approval",
+      "kind": "settings_field",
+      "slot": "ambient",
+      "order": 73,
+      "section_id": "ambient",
+      "field_id": "ambient.routing.ai_send_approval_required",
+      "type": "toggle",
+      "label": "Confirm Before AI Send",
+      "default": false,
+      "help": "Requires an explicit confirmation before ambient recordings are sent to the model."
+    },
+    {
+      "id": "ambient_provider_key_setup",
+      "kind": "settings_field",
+      "slot": "ambient",
+      "order": 74,
+      "section_id": "ambient",
+      "field_id": "ambient.provider_keys",
+      "type": "api_key_setup",
+      "renderer": "api_key_setup",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Ambient Provider Keys",
+      "default": [],
+      "data_source": "provider_key_status",
+      "write_route": "/api/ui/settings",
+      "help": "Optional provider credentials used by the selected ambient send model."
+    },
+    {
+      "id": "ambient_status_data_source",
+      "kind": "function",
+      "order": 76,
+      "role": "data_source",
+      "data_source": "ambient_status",
+      "function_id": "ambient_status",
+      "permission_id": "ambient.trigger.dispatch",
+      "handler_ref": "blocks.ambient.status:run",
+      "route_path": "/api/ambient/status",
+      "method": "GET",
+      "returns": "ambient monitor state, Rumi permissions, OS permissions, routing, and audit tail"
+    },
+    {
+      "id": "ambient_event_submit_action",
+      "kind": "function",
+      "order": 77,
+      "role": "action",
+      "action_id": "ambient_event_submit",
+      "function_id": "ambient_event_submit",
+      "permission_id": "ambient.trigger.dispatch",
+      "handler_ref": "blocks.ambient.event_submit:run",
+      "route_path": "/api/ambient/events",
+      "method": "POST",
+      "requires_approval": true,
+      "pre_auth": true
+    },
+    {
+      "id": "ambient_monitor_service",
+      "kind": "backend_service",
+      "order": 78,
+      "service_id": "ambient_trigger_router",
+      "entrypoint": "domain.ambient.router",
+      "lifecycle": "local_monitor"
+    },
+    {
+      "id": "ambient_audio_context_policy",
+      "kind": "context_policy",
+      "order": 79,
+      "policy": {
+        "id": "ambient_audio_transcript",
+        "mode": "ambient_audio_transcript",
+        "format": "text/plain",
+        "source": "ambient_recording",
+        "delivery": "ambient_trigger",
+        "privacy": {
+          "store_audio": false,
+          "store_images": false,
+          "audit_event_only": true
+        }
+      }
+    },
+    {
+      "id": "ambient_finger_recording_tools",
+      "kind": "tool_policy",
+      "order": 80,
+      "policy": {
+        "id": "ambient_finger_recording_tools",
+        "toggleable": true,
+        "params": {
+          "ambient_trigger": true,
+          "audio_source": "finger_recording"
+        }
+      }
+    },
+    {
+      "id": "ambient_finger_recording_ai_input",
+      "kind": "ai_input",
+      "order": 81,
+      "input": {
+        "id": "ambient_finger_recording",
+        "label": "Finger Recording",
+        "description": "Use the transcript from an OK-mark held recording as the user input, with raw audio kept transient unless the target model accepts audio.",
+        "context_policy": "ambient_audio_transcript",
+        "tool_policy": "ambient_finger_recording_tools",
+        "accepted_modalities": [
+          "voice",
+          "audio",
+          "text"
+        ],
+        "modes": [
+          "ambient",
+          "finger_recording"
+        ],
+        "params": {
+          "ambient_input": true
+        }
+      }
+    },
+    {
+      "id": "ambient_microphone_permission",
+      "kind": "permission",
+      "order": 82,
+      "permission_id": "host.microphone.capture",
+      "scope": "ambient",
+      "risk": "high",
+      "reason": "Ambient voice wake and OK-mark recording need microphone capture only while monitoring is enabled."
+    },
+    {
+      "id": "ambient_camera_permission",
+      "kind": "permission",
+      "order": 83,
+      "permission_id": "host.camera.capture",
+      "scope": "ambient",
+      "risk": "high",
+      "reason": "OK-mark gesture recognition needs camera capture only while monitoring is enabled."
+    },
+    {
+      "id": "ambient_dispatch_permission",
+      "kind": "permission",
+      "order": 84,
+      "permission_id": "ambient.trigger.dispatch",
+      "scope": "ambient",
+      "risk": "medium",
+      "reason": "Ambient triggers can dispatch transcribed input into defaultspack."
+    },
+    {
+      "id": "ambient_model_invoke_permission",
+      "kind": "permission",
+      "order": 85,
+      "permission_id": "model.invoke",
+      "scope": "ai_client",
+      "risk": "high",
+      "reason": "Finger recording dispatch sends the transcribed user input to the selected AI model."
+    },
+    {
+      "id": "ambient_external_hook_template",
+      "kind": "external_io_template",
+      "order": 86,
+      "template": {
+        "id": "ambient.input.webhook",
+        "direction": "input",
+        "provider": "web",
+        "display_name": "Ambient Web Hook",
+        "summary": "Route a trusted local/web gesture or service hook into the same ambient trigger router used by voice wake and OK-mark recording.",
+        "setup_steps": [
+          "Select Ambient Web Hook.",
+          "Generate or copy the local defaultspack URL for /api/ambient/events.",
+          "Send source, trigger, action_id, input_text or transient audio fields to the endpoint.",
+          "Keep Rumi microphone/camera permission separate from OS microphone/camera permission."
+        ],
+        "input_profile_id": "ambient.webhook",
+        "endpoint": {
+          "id": "ambient-events",
+          "kind": "web",
+          "route": "/api/ambient/events",
+          "security": {
+            "mode": "local_authority"
+          }
+        },
+        "default_response": {
+          "mode": "store_only",
+          "include_source_context": false
+        },
+        "response_prompt": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "id": "ambient_template_contract",
+      "kind": "test_contract",
+      "order": 87,
+      "contract_id": "defaultspack.template.ambient_trigger.catalog",
+      "assertions": [
+        {"type": "template_projectable", "template_id": "rumi.ambient_trigger.default"},
+        {"type": "catalog_contains", "bucket": "ai_inputs", "match": {"id": "ambient_finger_recording"}},
+        {"type": "catalog_contains", "bucket": "context_policies", "match": {"id": "ambient_audio_transcript"}},
+        {"type": "catalog_contains", "bucket": "external_io_templates", "match": {"id": "ambient.input.webhook"}},
+        {"type": "setting_field_exists", "section_id": "ambient", "field_id": "ambient.routing.model", "field_type": "model_select"},
+        {"type": "setting_field_exists", "section_id": "ambient", "field_id": "ambient.provider_keys", "field_type": "api_key_setup"},
+        {"type": "permission_declared", "permission_id": "host.microphone.capture"},
+        {"type": "permission_declared", "permission_id": "host.camera.capture"},
+        {"type": "permission_declared", "permission_id": "ambient.trigger.dispatch"},
+        {"type": "tool_policy_resolves", "policy_id": "ambient_finger_recording_tools"},
+        {"type": "route_resolves", "method": "POST", "path": "/api/ambient/events"},
+        {"type": "function_registered", "function_id": "ambient_event_submit"}
+      ]
+    }
+  ]
+}
