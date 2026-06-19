@@ -1,12 +1,10 @@
-import { useState } from "react";
-import { ChevronUp, ExternalLink, Loader2, MessageSquare, RefreshCcw, Search, ShieldCheck, X } from "lucide-react";
+import { ChevronUp, ExternalLink, Loader2, MessageSquare, RefreshCcw, ShieldCheck, X } from "lucide-react";
 
 import { HistoryBoard, type ChatItem } from "../components/HistoryBoard";
 import type { ModelSearchItem } from "../lib/api";
 import { cn } from "../lib/cn";
-import { modelSelectDisplay, type ModelSelectOption } from "../features/models";
+import { ModelSearchPicker } from "../features/models";
 import type { AmbientRoutingMode } from "./ambientTriggerClient";
-import { ambientSelectedModelDisplay, ambientVisibleModelOptions } from "./ambientRouting";
 
 export function RoutingSettings({
   busy,
@@ -59,11 +57,6 @@ export function RoutingSettings({
   onModelSearch: () => void;
   onAiSendApprovalRequiredChange: (enabled: boolean) => void;
 }) {
-  const [modelChangeOpen, setModelChangeOpen] = useState(false);
-  const modelDisplay = ambientSelectedModelDisplay(model, modelResults);
-  const modelLabel = modelDisplay?.label ?? "未指定";
-  const visibleModelOptions = ambientVisibleModelOptions({ model, modelQuery, modelResults, limit: 6 });
-
   return (
     <section className="space-y-2 border-l border-sky-400/35 pl-2">
       <div className="flex items-center justify-between gap-2">
@@ -144,82 +137,24 @@ export function RoutingSettings({
       <div className="space-y-1.5 rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10px] font-semibold text-zinc-500">送信モデル</span>
-          {model && (
-            <span className="min-w-0 truncate rounded border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] text-emerald-100" title={model}>
-              モデル: {modelLabel}
-            </span>
-          )}
         </div>
-        {!modelChangeOpen && (
-          <button
-            type="button"
-            onClick={() => {
-              setModelChangeOpen(true);
-              onModelQueryChange("");
-            }}
-            disabled={busy}
-            className="ambient-mini-button w-full justify-between"
-          >
-            <span>{model ? "変更" : "モデルを選ぶ"}</span>
-            <Search size={13} />
-          </button>
-        )}
-        {modelChangeOpen && (
-          <div className="space-y-1.5">
-            <div className="flex gap-1.5">
-              <input
-                value={modelQuery}
-                onChange={(event) => onModelQueryChange(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    onModelSearch();
-                  }
-                  if (event.key === "Escape") {
-                    setModelChangeOpen(false);
-                  }
-                }}
-                placeholder="すべてから探す"
-                className="h-8 min-w-0 flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
-                autoFocus
-              />
-              <button type="button" onClick={onModelSearch} disabled={modelLoading} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
-                {modelLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-              </button>
-              <button type="button" onClick={() => setModelChangeOpen(false)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
-                <X size={13} />
-              </button>
-            </div>
-            {model && (
-              <button
-                type="button"
-                onClick={() => {
-                  onModelCommit("");
-                  setModelChangeOpen(false);
-                }}
-                className="text-[11px] text-zinc-400 hover:text-zinc-100"
-              >
-                モデル指定を外す
-              </button>
-            )}
-            {modelResults.length > 0 && (
-              <div className="max-h-28 overflow-auto border-l border-zinc-800 pl-2">
-                {visibleModelOptions.map((option) => (
-                  <CompactModelOptionButton
-                    key={option.value}
-                    option={option}
-                    onPick={(value) => {
-                      onModelChange(value);
-                      onModelCommit(value);
-                      onModelQueryChange("");
-                      setModelChangeOpen(false);
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        <ModelSearchPicker
+          value={model}
+          remoteResults={modelResults}
+          query={modelQuery}
+          loading={modelLoading}
+          placeholder="すべてから探す"
+          variant="compact"
+          maxVisibleOptions={6}
+          clearLabel="モデル指定を外す"
+          onQueryChange={onModelQueryChange}
+          onSearch={() => onModelSearch()}
+          onChange={(value) => {
+            onModelChange(value);
+            onModelCommit(value);
+            onModelQueryChange("");
+          }}
+        />
       </div>
     </section>
   );
@@ -258,10 +193,6 @@ export function CompactRoutingControl({
   onModelQueryChange: (value: string) => void;
   onModelSearch: (query?: string) => void;
 }) {
-  const [modelChangeOpen, setModelChangeOpen] = useState(false);
-  const modelDisplay = ambientSelectedModelDisplay(model, modelResults);
-  const modelLabel = modelDisplay?.label ?? "モデル指定なし";
-  const visibleModelOptions = ambientVisibleModelOptions({ model, modelQuery, modelResults, limit: 6 });
   const concreteChatId = mode === "selected_chat" ? selectedConversationId : mode === "startup_new_chat" ? sessionConversationId ?? null : null;
   const createsNewChat = mode === "startup_new_chat" || mode === "always_new_chat";
 
@@ -304,114 +235,24 @@ export function CompactRoutingControl({
         )}
       </div>
 
-      {!modelChangeOpen && (
-        <button
-          type="button"
-          onClick={() => {
-            setModelChangeOpen(true);
-            onModelQueryChange("");
-          }}
-          disabled={busy}
-          className={cn(
-            "inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border px-2 text-[11px] font-semibold transition",
-            model
-              ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100"
-              : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
-          )}
-          title={model || modelLabel}
-        >
-          <Search size={12} className="shrink-0" />
-          <span className="truncate">{modelLabel}</span>
-        </button>
-      )}
-
-      {modelChangeOpen && (
-        <div className="space-y-1.5">
-          <div className="flex gap-1.5">
-            <input
-              value={modelQuery}
-              onChange={(event) => onModelQueryChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  onModelSearch(modelQuery);
-                }
-                if (event.key === "Escape") {
-                  setModelChangeOpen(false);
-                }
-              }}
-              placeholder="モデルを探す"
-              className="h-8 min-w-0 flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
-              autoFocus
-            />
-            <button type="button" onClick={() => onModelSearch(modelQuery)} disabled={modelLoading} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
-              {modelLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-            </button>
-            <button type="button" onClick={() => setModelChangeOpen(false)} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100">
-              <X size={13} />
-            </button>
-          </div>
-          <div className="flex items-center justify-between gap-2 text-[11px]">
-            {model ? (
-              <button
-                type="button"
-                onClick={() => {
-                  onModelCommit("");
-                  setModelChangeOpen(false);
-                }}
-                className="text-zinc-400 hover:text-zinc-100"
-              >
-                指定を外す
-              </button>
-            ) : (
-              <span className="text-zinc-500">未指定ならDefaultspackの通常設定を使います。</span>
-            )}
-          </div>
-          {modelResults.length > 0 && (
-            <div className="max-h-24 overflow-auto border-l border-zinc-800 pl-2">
-              {visibleModelOptions.map((option) => (
-                <CompactModelOptionButton
-                  key={option.value}
-                  option={option}
-                  onPick={(value) => {
-                    onModelChange(value);
-                    onModelCommit(value);
-                    onModelQueryChange("");
-                    setModelChangeOpen(false);
-                  }}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      <ModelSearchPicker
+        value={model}
+        remoteResults={modelResults}
+        query={modelQuery}
+        loading={modelLoading}
+        placeholder="モデルを探す"
+        variant="compact"
+        maxVisibleOptions={6}
+        clearLabel="指定を外す"
+        onQueryChange={onModelQueryChange}
+        onSearch={(query) => onModelSearch(query)}
+        onChange={(value) => {
+          onModelChange(value);
+          onModelCommit(value);
+          onModelQueryChange("");
+        }}
+      />
     </section>
-  );
-}
-
-function CompactModelOptionButton({
-  option,
-  onPick,
-}: {
-  option: ModelSelectOption;
-  onPick: (value: string) => void;
-}) {
-  const display = modelSelectDisplay(option);
-  const badge = display.badges[0];
-  return (
-    <button
-      type="button"
-      onClick={() => onPick(option.value)}
-      className="flex w-full min-w-0 items-center gap-1.5 py-1 text-left text-[11px] text-zinc-300 hover:text-zinc-50"
-      title={display.subtitle || option.value}
-    >
-      <span className="min-w-0 flex-1 truncate">{display.label}</span>
-      {badge && (
-        <span className="shrink-0 rounded border border-zinc-700 px-1 py-0.5 text-[9px] text-zinc-500">
-          {badge.label}
-        </span>
-      )}
-    </button>
   );
 }
 

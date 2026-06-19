@@ -1313,14 +1313,20 @@ def _bearer_token(headers):
     return auth_header[7:].strip()
 
 
-def _ambient_browser_test_token_authorized(method, path, headers):
-    if str(method or "").upper() != "POST" or str(path or "") != "/api/ambient/events":
+def _browser_qa_token_authorized(method, path, headers):
+    if str(method or "").upper() != "POST":
+        return False
+    if str(path or "") not in {"/api/ambient/events", "/api/authority/browser-ui-operator"}:
         return False
     expected = os.environ.get("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "").strip()
     if not expected:
         return False
     provided = _header_value(headers, "X-Rumi-Approval-Browser-Token").strip()
     return bool(provided) and hmac.compare_digest(provided, expected)
+
+
+def _ambient_browser_test_token_authorized(method, path, headers):
+    return _browser_qa_token_authorized(method, path, headers)
 
 
 def _apply_ambient_browser_qa_context(context, payload):
@@ -1556,7 +1562,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         origin = self.headers.get("Origin", "")
         if not _is_allowed_sensitive_origin(origin):
             return (403, "origin not allowed for sensitive integration route", "ORIGIN_DENIED")
-        if _ambient_browser_test_token_authorized(method, path, self.headers):
+        if _browser_qa_token_authorized(method, path, self.headers):
             if (
                 method.upper() in {"POST", "PUT", "DELETE"}
                 and origin

@@ -127,6 +127,21 @@ pgrep -fl 'rumi-viewer|python.*-m app|python.*rumi_ai|pack-shell run defaultspac
 lsof -nP -iTCP:8766 -sTCP:LISTEN
 ```
 
+ブラウザから Authority approval を QA するときは、通常の local Bearer token ではなく、明示的なブラウザQAトークンを使います。viewer から defaultspack を開く前に同じ環境で token を渡してください。
+
+```bash
+cd rumi_viewer
+RUMI_AUTHORITY_BROWSER_TEST_TOKEN=ambient-browser-qa cargo tauri dev
+```
+
+ブラウザで開く URL には `browser_approval_token` を付けます。
+
+```text
+http://127.0.0.1:8766/approval?request_id=auth_xxx&browser_approval_token=ambient-browser-qa
+```
+
+`失敗: local auth token required` が出る場合は、まず `8766` を掴んでいる古い defaultspack がないかを確認してください。古い server はこの QA token を知らないため、正しい URL でも承認できません。
+
 ### `Open Defaultspack` が 403 で失敗する
 
 `defaultspack` の pack approval が済んでいても、desktop window として起動するには `desktop_app.execute` capability grant が別途必要です。`CapabilityGrantManager.check("defaultspack", "desktop_app.execute")` が `allowed: true` で、config の `allowed_packs` に `defaultspack` が含まれていることを確認してください。

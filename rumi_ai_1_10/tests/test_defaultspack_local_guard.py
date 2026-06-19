@@ -224,6 +224,67 @@ def test_ambient_browser_qa_token_can_submit_pre_auth_event(monkeypatch):
     )
 
 
+def test_browser_qa_token_can_mint_authority_ui_operator(monkeypatch):
+    from transport.http import _RequestHandler, _browser_qa_token_authorized
+
+    def handler(request_data, path_params):
+        return {"ok": True, "request_data": request_data, "path_params": path_params}
+
+    handler.__rumi_route_sensitive__ = True
+
+    request_handler = _RequestHandler.__new__(_RequestHandler)
+    request_handler.client_address = ("127.0.0.1", 54321)
+    request_handler.server_ref = SimpleNamespace(
+        _routes=[
+            (
+                "POST",
+                re.compile("^/api/authority/browser-ui-operator$"),
+                handler,
+                "registry",
+                {},
+                "/api/authority/browser-ui-operator",
+            )
+        ]
+    )
+
+    monkeypatch.setenv("RUMI_API_TOKEN", "local-secret")
+    monkeypatch.setenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "browser-secret")
+
+    request_handler.headers = {
+        "Origin": "http://127.0.0.1:8766",
+        "X-Rumi-CSRF": "1",
+        "X-Rumi-Approval-Browser-Token": "browser-secret",
+    }
+    assert _browser_qa_token_authorized(
+        "POST",
+        "/api/authority/browser-ui-operator",
+        request_handler.headers,
+    ) is True
+    assert request_handler._sensitive_request_error("POST", "/api/authority/browser-ui-operator") is None
+
+    request_handler.headers = {
+        "Origin": "http://127.0.0.1:8766",
+        "X-Rumi-CSRF": "1",
+        "X-Rumi-Approval-Browser-Token": "wrong",
+    }
+    assert _browser_qa_token_authorized(
+        "POST",
+        "/api/authority/browser-ui-operator",
+        request_handler.headers,
+    ) is False
+    assert request_handler._sensitive_request_error("POST", "/api/authority/browser-ui-operator") is None
+
+    request_handler.headers = {
+        "Origin": "http://127.0.0.1:8766",
+        "X-Rumi-Approval-Browser-Token": "browser-secret",
+    }
+    assert request_handler._sensitive_request_error("POST", "/api/authority/browser-ui-operator") == (
+        403,
+        "CSRF header required for sensitive local mutation",
+        "CSRF_REQUIRED",
+    )
+
+
 def test_ambient_browser_qa_context_flag_becomes_tool_server_approval():
     from transport.http import _AMBIENT_BROWSER_QA_CONTEXT_FLAG, _apply_ambient_browser_qa_context
 
