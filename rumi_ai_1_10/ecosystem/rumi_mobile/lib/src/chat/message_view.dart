@@ -184,7 +184,8 @@ class _TypingIndicatorState extends State<_TypingIndicator>
   }
 }
 
-Future<void> copyMessageContent(BuildContext context, ChatMessage message) async {
+Future<void> copyMessageContent(
+    BuildContext context, ChatMessage message) async {
   await Clipboard.setData(ClipboardData(text: message.content));
   if (context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(

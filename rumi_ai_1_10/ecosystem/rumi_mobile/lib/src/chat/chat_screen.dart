@@ -3,15 +3,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../application/conversation_router.dart';
+import '../data/local/local_chat_backend.dart';
+import '../domain/chat_event.dart';
+import '../domain/conversation_locator.dart';
 import '../settings/api_config_store.dart';
 import '../settings/settings_screen.dart';
 import '../app_theme.dart';
 import 'chat_drawer.dart';
-import 'chat_models.dart';
 import 'chat_store.dart';
 import 'composer_bar.dart';
 import 'message_view.dart';
-import 'openai_client.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -31,7 +33,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _uuid = const Uuid();
   final _scrollController = ScrollController();
   ApiConfig? _apiConfig;
-  OpenAiClient? _client;
+  late final ConversationRouter _router;
   bool _busy = false;
   bool _streaming = false;
   late Future<void> _initFuture;
@@ -39,6 +41,12 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _router = ConversationRouter(
+      local: LocalConversationBackend(
+        store: widget.store,
+        configStore: widget.configStore,
+      ),
+    );
     _initFuture = _init();
     _scrollController.addListener(_onScroll);
   }
@@ -47,7 +55,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
-    _client?.close();
+    _router.local.dispose();
     super.dispose();
   }
 
@@ -154,51 +162,39 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     final convo = widget.store.active ?? await widget.store.createAndPersist();
-    final userMsg = ChatMessage(
-      id: _uuid.v4(),
-      role: ChatRole.user,
-      content: text,
-      createdAt: DateTime.now(),
-    );
-    await widget.store.addMessage(convo.id, userMsg);
-    final assistantId = _uuid.v4();
-    final assistantMsg = ChatMessage(
-      id: assistantId,
-      role: ChatRole.assistant,
-      content: '',
-      createdAt: DateTime.now(),
-      pending: true,
-    );
-    await widget.store.addMessage(convo.id, assistantMsg);
+    final locator = ConversationLocator.local(convo.id);
+    final clientMessageId = _uuid.v4();
+    final expectedRevision = convo.revision;
+
     setState(() {
       _busy = true;
       _streaming = true;
     });
     _scrollToBottom();
 
-    _client?.close();
-    _client = OpenAiClient();
-    final history = List<ChatMessage>.from(convo.messages)
-      ..removeWhere((m) => m.id == assistantId);
-    final buffer = StringBuffer();
+    final backend = _router.backendFor(locator);
     try {
-      await for (final delta
-          in _client!.streamChat(config: config, history: history)) {
-        buffer.write(delta);
-        await widget.store.updateMessage(
-            convo.id, assistantId, buffer.toString(),
-            pending: true);
-        if (mounted) setState(() {});
-        _scrollToBottom(animate: false);
+      await for (final event in backend.sendMessage(
+        locator: locator,
+        text: text,
+        clientMessageId: clientMessageId,
+        expectedRevision: expectedRevision,
+      )) {
+        if (!mounted) break;
+        switch (event) {
+          case ChatDelta():
+            setState(() {});
+            _scrollToBottom(animate: false);
+            break;
+          case ChatErrorEvent():
+            break;
+          case ChatRunStarted():
+          case ChatMessageCommitted():
+          case ChatRunCompleted():
+          case ChatRunStopped():
+            break;
+        }
       }
-      await widget.store.updateMessage(convo.id, assistantId, buffer.toString(),
-          pending: false);
-    } catch (error) {
-      final message = buffer.toString().isEmpty
-          ? 'エラー: ${_friendlyError(error)}'
-          : '${buffer.toString()}\n\n_エラー: ${_friendlyError(error)}_';
-      await widget.store.updateMessage(convo.id, assistantId, message,
-          pending: false, error: true);
     } finally {
       if (mounted) {
         setState(() {
@@ -211,7 +207,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _stop() {
-    _client?.cancel();
+    final id = widget.store.active?.id;
+    if (id != null) {
+      _router.local.stop(id);
+    }
     setState(() => _streaming = false);
   }
 
@@ -225,11 +224,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
     );
-  }
-
-  String _friendlyError(Object error) {
-    if (error is OpenAiException) return error.message;
-    return '$error';
   }
 
   @override

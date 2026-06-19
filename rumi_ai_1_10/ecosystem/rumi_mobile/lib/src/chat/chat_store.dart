@@ -18,8 +18,9 @@ class ChatStore {
   List<Conversation> get conversations =>
       List<Conversation>.unmodifiable(_conversations);
 
-  Conversation? get active =>
-      _activeId == null ? null : _firstWhere(_conversations, (c) => c.id == _activeId);
+  Conversation? get active => _activeId == null
+      ? null
+      : _firstWhere(_conversations, (c) => c.id == _activeId);
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -35,8 +36,7 @@ class ChatStore {
       }
     }
     _activeId = prefs.getString(_kActiveConversationKey);
-    if (_activeId != null &&
-        !_conversations.any((c) => c.id == _activeId)) {
+    if (_activeId != null && !_conversations.any((c) => c.id == _activeId)) {
       _activeId = _conversations.isEmpty ? null : _conversations.first.id;
     }
     if (_activeId == null && _conversations.isNotEmpty) {
@@ -53,6 +53,11 @@ class ChatStore {
     } else {
       await prefs.remove(_kActiveConversationKey);
     }
+  }
+
+  void _bumpRevision(Conversation convo) {
+    convo.revision += 1;
+    convo.updatedAt = DateTime.now();
   }
 
   Conversation newConversation() {
@@ -91,7 +96,7 @@ class ChatStore {
     final convo = _firstWhere(_conversations, (c) => c.id == id);
     if (convo == null) return;
     convo.title = title.trim().isEmpty ? '新しいチャット' : title.trim();
-    convo.updatedAt = DateTime.now();
+    _bumpRevision(convo);
     await _persist();
   }
 
@@ -99,6 +104,7 @@ class ChatStore {
     final convo = _firstWhere(_conversations, (c) => c.id == id);
     if (convo == null) return;
     convo.pinned = !convo.pinned;
+    _bumpRevision(convo);
     await _persist();
   }
 
@@ -106,10 +112,12 @@ class ChatStore {
     final convo = _firstWhere(_conversations, (c) => c.id == conversationId);
     if (convo == null) return;
     convo.messages.add(message);
-    convo.updatedAt = DateTime.now();
-    if (convo.title == '新しいチャット' && message.role == ChatRole.user && message.content.trim().isNotEmpty) {
+    if (convo.title == '新しいチャット' &&
+        message.role == ChatRole.user &&
+        message.content.trim().isNotEmpty) {
       convo.title = _deriveTitle(message.content);
     }
+    _bumpRevision(convo);
     await _persist();
   }
 
@@ -123,7 +131,7 @@ class ChatStore {
     msg.content = content;
     if (pending != null) msg.pending = pending;
     if (error != null) msg.error = error;
-    convo.updatedAt = DateTime.now();
+    _bumpRevision(convo);
     await _persist();
   }
 
