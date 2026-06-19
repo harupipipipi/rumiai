@@ -1,8 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { Copy, Check, Smartphone, Apple, AppWindow, QrCode, RefreshCw } from "lucide-react";
+import {
+  ChevronDown,
+  Copy,
+  Check,
+  Smartphone,
+  Apple,
+  AppWindow,
+  QrCode,
+  RefreshCw,
+  Loader2,
+  Link2,
+  Trash2,
+  ShieldCheck,
+} from "lucide-react";
 
 import { cn } from "../lib/cn";
+import { mobileApiResources } from "../features/mobile/resources/mobileApiResources";
+import type { MobileDevice, P2PPairing } from "../features/mobile/resources/mobileApiResources";
+import { MobilePairingApproval } from "./MobilePairingApproval";
 
 type AppsSettingsPanelProps = {
   kernelBaseUrl?: string;
@@ -21,6 +37,16 @@ type ApiImportPayload = {
   apiKey: string;
   model?: string;
   label?: string;
+};
+
+type PairV2QrPayload = {
+  kind: "rumi_pair_v2";
+  version: 2;
+  pairingId: string;
+  code: string;
+  baseUrls: string[];
+  serverPublicKey: string;
+  expiresAt: number;
 };
 
 function useQrDataUrl(value: string): { dataUrl: string | null; error: string | null } {
@@ -151,7 +177,307 @@ function lanHost() {
   return host;
 }
 
-export function AppsSettingsPanel({ kernelBaseUrl, cloudflarePagesUrl }: AppsSettingsPanelProps) {
+function formatRelativeTime(isoString: string | undefined): string {
+  if (!isoString) return "不明";
+  const date = new Date(isoString);
+  const now = Date.now();
+  const diffMs = now - date.getTime();
+  if (diffMs < 0) return "たった今";
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 1) return "たった今";
+  if (diffMin < 60) return `${diffMin}分前`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}時間前`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}日前`;
+}
+
+function PairingV2Section() {
+  const [pairing, setPairing] = useState<P2PPairing | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [showApproval, setShowApproval] = useState(false);
+  const mountedRef = useRef(true);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current !== null) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      stopPolling();
+    };
+  }, [stopPolling]);
+
+  const startPairing = async () => {
+    setBusy(true);
+    setError("");
+    setPairing(null);
+    setShowApproval(false);
+    try {
+      const result = await mobileApiResources.startPairing({
+        capabilities: ["chat.read", "chat.write", "tools.observe"],
+      });
+      if (!mountedRef.current) return;
+      setPairing(result.pairing);
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : "ペアリングの開始に失敗しました");
+      }
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!pairing || pairing.status !== "pending") {
+      stopPolling();
+      return;
+    }
+    let disposed = false;
+    const poll = async () => {
+      try {
+        const status = await mobileApiResources.getPairingStatus(pairing.pairing_id);
+        if (disposed || !mountedRef.current) return;
+        if (status.status === "claimed") {
+          setShowApproval(true);
+          stopPolling();
+        } else if (status.status === "approved" || status.status === "rejected" || status.status === "expired") {
+          stopPolling();
+          if (status.status === "approved") {
+            setPairing((prev) => prev ? { ...prev, status: "approved" } : prev);
+          }
+        }
+      } catch {
+        // ignore transient poll errors
+      }
+    };
+    pollRef.current = setInterval(() => void poll(), 2000);
+    return () => {
+      disposed = true;
+      stopPolling();
+    };
+  }, [pairing, stopPolling]);
+
+  const qrPayload: PairV2QrPayload | null = pairing ? {
+    kind: "rumi_pair_v2",
+    version: 2,
+    pairingId: pairing.pairing_id,
+    code: pairing.code,
+    baseUrls: [window.location.origin],
+    serverPublicKey: "",
+    expiresAt: pairing.expires_at,
+  } : null;
+
+  const qrValue = qrPayload ? JSON.stringify(qrPayload) : "";
+  const qr = useQrDataUrl(qrValue);
+
+  const isExpired = pairing ? pairing.expires_at * 1000 < Date.now() : false;
+  const isFinished = pairing?.status === "approved" || pairing?.status === "rejected" || isExpired;
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+      <div className="flex items-center gap-2">
+        <Link2 size={15} className="text-zinc-400" />
+        <h4 className="text-sm font-medium text-zinc-100">スマホをペアリング</h4>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-zinc-500">
+        ペアリングQRを生成してスマホアプリでスキャンすると、PCと安全に接続できます。
+      </p>
+
+      {!pairing || isFinished ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void startPairing()}
+          className={cn(
+            "mt-3 inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition-colors",
+            busy
+              ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
+              : "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-500",
+          )}
+        >
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <Smartphone size={14} />}
+          ペアリングを開始
+        </button>
+      ) : (
+        <div className="mt-3 space-y-3">
+          <div className="flex items-center justify-center rounded-lg border border-zinc-800 bg-black/40 p-3">
+            {qr.dataUrl ? (
+              <img src={qr.dataUrl} alt="ペアリングQR" className="h-56 w-56" />
+            ) : (
+              <div className="flex h-56 w-56 items-center justify-center text-[11px] text-zinc-600">
+                {qr.error ? <span className="text-rose-300">{qr.error}</span> : "QRを生成中..."}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-center">
+            <div className="text-[11px] uppercase text-emerald-400">確認コード</div>
+            <div className="mt-1 text-lg font-semibold text-emerald-200">{pairing.code}</div>
+          </div>
+
+          <div className="text-center text-[11px] text-zinc-500">
+            スマホアプリでこのQRをスキャンしてください
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
+          {error}
+        </div>
+      )}
+
+      {pairing && showApproval && (
+        <MobilePairingApproval
+          pairingId={pairing.pairing_id}
+          onApproved={() => {
+            setShowApproval(false);
+            setPairing((prev) => prev ? { ...prev, status: "approved" } : prev);
+          }}
+          onRejected={() => {
+            setShowApproval(false);
+            setPairing((prev) => prev ? { ...prev, status: "rejected" } : prev);
+          }}
+          onExpired={() => {
+            setShowApproval(false);
+          }}
+          onClose={() => setShowApproval(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function DeviceManagementSection() {
+  const [devices, setDevices] = useState<MobileDevice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [revoking, setRevoking] = useState<string>("");
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const loadDevices = useCallback(async () => {
+    try {
+      const result = await mobileApiResources.listDevices();
+      if (mountedRef.current) setDevices(result.devices ?? []);
+    } catch {
+      // silent
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDevices();
+  }, [loadDevices]);
+
+  const handleRevoke = async (deviceId: string) => {
+    setRevoking(deviceId);
+    try {
+      await mobileApiResources.revokeDevice(deviceId);
+      if (mountedRef.current) {
+        setDevices((prev) => prev.filter((d) => d.device_id !== deviceId));
+      }
+    } catch {
+      // silent
+    } finally {
+      if (mountedRef.current) setRevoking("");
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+        <div className="flex items-center gap-2">
+          <Smartphone size={15} className="text-zinc-400" />
+          <h4 className="text-sm font-medium text-zinc-100">ペア済み端末</h4>
+        </div>
+        <div className="mt-3 flex items-center justify-center py-4 text-zinc-500">
+          <Loader2 size={16} className="animate-spin" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+      <div className="flex items-center gap-2">
+        <ShieldCheck size={15} className="text-zinc-400" />
+        <h4 className="text-sm font-medium text-zinc-100">ペア済み端末</h4>
+      </div>
+      <p className="mt-1 text-xs text-zinc-500">
+        ペアリング済みのモバイル端末を管理します。
+      </p>
+
+      {devices.length === 0 ? (
+        <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-center text-xs text-zinc-500">
+          ペア済みの端末はありません
+        </div>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {devices.map((device) => (
+            <div
+              key={device.device_id}
+              className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5"
+            >
+              <Smartphone size={14} className="shrink-0 text-zinc-400" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-zinc-200">{device.label}</div>
+                <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                  {device.scopes && device.scopes.length > 0 && (
+                    <span>{device.scopes.join(", ")}</span>
+                  )}
+                  {device.last_seen_at && (
+                    <span>最終接続: {formatRelativeTime(device.last_seen_at)}</span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={revoking === device.device_id}
+                onClick={() => void handleRevoke(device.device_id)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors",
+                  revoking === device.device_id
+                    ? "cursor-not-allowed border-zinc-800 text-zinc-600"
+                    : "border-zinc-700 text-zinc-400 hover:border-rose-600 hover:text-rose-300",
+                )}
+              >
+                {revoking === device.device_id ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <Trash2 size={12} />
+                )}
+                取り消し
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LegacyQrSection({
+  kernelBaseUrl,
+  cloudflarePagesUrl,
+}: {
+  kernelBaseUrl?: string;
+  cloudflarePagesUrl?: string;
+}) {
   const defaultPcBase = useMemo(() => {
     const host = lanHost();
     return kernelBaseUrl && kernelBaseUrl.trim().length > 0
@@ -164,6 +490,7 @@ export function AppsSettingsPanel({ kernelBaseUrl, cloudflarePagesUrl }: AppsSet
   const [pcBaseUrl, setPcBaseUrl] = useState(defaultPcBase);
   const [pcToken, setPcToken] = useState("");
   const [pagesUrl, setPagesUrl] = useState(cloudflarePagesUrl ?? "");
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     setPcBaseUrl(defaultPcBase);
@@ -196,6 +523,105 @@ export function AppsSettingsPanel({ kernelBaseUrl, cloudflarePagesUrl }: AppsSet
     return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "";
   }, [pcBaseUrl]);
 
+  return (
+    <details
+      className="rounded-lg border border-zinc-800 bg-zinc-950/40"
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+    >
+      <summary className="flex cursor-pointer items-center gap-2 p-4 text-sm text-zinc-400 hover:text-zinc-200">
+        <ChevronDown size={14} className={cn("transition-transform", open && "rotate-180")} />
+        上級者向け: 直接HMACキーで接続
+      </summary>
+      {open && (
+        <div className="space-y-4 px-4 pb-4">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+              <div className="flex items-center gap-2">
+                <Smartphone size={15} className="text-zinc-400" />
+                <h4 className="text-sm font-medium text-zinc-100">PC接続QR (Legacy)</h4>
+              </div>
+              <p className="text-xs leading-5 text-zinc-500">
+                スマホアプリでこのQRをスキャンすると、PCのKernel APIへ接続します。トークンは
+                <code className="mx-1 rounded bg-zinc-900 px-1 py-0.5 text-[10px] text-zinc-300">rumi_ai_1_10/user_data/hmac_keys.json</code>
+                のアクティブキーを貼り付けてください。
+              </p>
+              <CopyField label="Kernel API URL" value={pcBaseUrl} onChange={setPcBaseUrl} mono />
+              <CopyField label="Bearer token" value={pcToken} onChange={setPcToken} placeholder="HMACKeyManager().get_active_key()" mono />
+              <button
+                type="button"
+                onClick={() => setPcBaseUrl(defaultPcBase)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+              >
+                <RefreshCw size={12} /> URLを再検出
+              </button>
+              {isLoopbackUrl && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-200">
+                  現在のURLはこのPC自身（localhost / 127.0.0.1）を指しています。スマホからは到達できません。PCのLAN IP（例: 192.168.x.x）を入力してください。
+                </div>
+              )}
+              <QrCard
+                title="PC接続QR"
+                description="スマホの「PCに接続」からスキャン。"
+                dataUrl={pcQr.dataUrl}
+                error={pcQr.error}
+                emptyHint="URLとトークンを入力するとQRが表示されます。"
+              />
+            </div>
+
+            <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+              <div className="flex items-center gap-2">
+                <AppWindow size={15} className="text-zinc-400" />
+                <h4 className="text-sm font-medium text-zinc-100">Cloudflare Pages QR</h4>
+              </div>
+              <p className="text-xs leading-5 text-zinc-500">
+                スマホアプリのランディング/接続ガイドをCloudflare Pagesで公開したURLを入力するとQRを発行します。スマホでスキャンして開けます。
+              </p>
+              <CopyField
+                label="Cloudflare Pages URL"
+                value={pagesUrl}
+                onChange={setPagesUrl}
+                placeholder="https://rumi-mobile.pages.dev"
+                mono
+              />
+              <QrCard
+                title="Cloudflare Pages QR"
+                description="スマホカメラ/アプリでスキャンして開く。"
+                dataUrl={pagesQr.dataUrl}
+                error={pagesQr.error}
+                emptyHint="Pages URLを入力するとQRが表示されます。"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+            <div className="flex items-center gap-2">
+              <QrCode size={15} className="text-zinc-400" />
+              <h4 className="text-sm font-medium text-zinc-100">API/モデル インポート用ペイロード</h4>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">
+              上のPC接続情報をAPI/モデルインポート形式で出力します。スマホアプリの「APIをQRで取り込む」でこのQRをスキャンすると、APIキーとエンドポイントを取り込めます。
+            </p>
+            <div className="mt-3">
+              <QrCard
+                title="API/モデル インポートQR"
+                description="kind=rumi_api。baseUrlとapiKeyを取り込みます。"
+                dataUrl={apiQr.dataUrl}
+                error={apiQr.error}
+                emptyHint="URLとキーを入力するとQRが表示されます。"
+              />
+            </div>
+            <pre className="mt-3 overflow-x-auto rounded-lg border border-zinc-800 bg-black/40 p-3 text-[11px] leading-5 text-zinc-400">
+{apiImportText}
+            </pre>
+          </div>
+        </div>
+      )}
+    </details>
+  );
+}
+
+export function AppsSettingsPanel({ kernelBaseUrl, cloudflarePagesUrl }: AppsSettingsPanelProps) {
   return (
     <section className="space-y-6">
       <div className="space-y-1">
@@ -235,86 +661,11 @@ export function AppsSettingsPanel({ kernelBaseUrl, cloudflarePagesUrl }: AppsSet
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
-          <div className="flex items-center gap-2">
-            <Smartphone size={15} className="text-zinc-400" />
-            <h4 className="text-sm font-medium text-zinc-100">PC接続QR</h4>
-          </div>
-          <p className="text-xs leading-5 text-zinc-500">
-            スマホアプリでこのQRをスキャンすると、PCのKernel APIへ接続します。トークンは
-            <code className="mx-1 rounded bg-zinc-900 px-1 py-0.5 text-[10px] text-zinc-300">rumi_ai_1_10/user_data/hmac_keys.json</code>
-            のアクティブキーを貼り付けてください。
-          </p>
-          <CopyField label="Kernel API URL" value={pcBaseUrl} onChange={setPcBaseUrl} mono />
-          <CopyField label="Bearer token" value={pcToken} onChange={setPcToken} placeholder="HMACKeyManager().get_active_key()" mono />
-          <button
-            type="button"
-            onClick={() => setPcBaseUrl(defaultPcBase)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
-          >
-            <RefreshCw size={12} /> URLを再検出
-          </button>
-          {isLoopbackUrl && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-200">
-              現在のURLはこのPC自身（localhost / 127.0.0.1）を指しています。スマホからは到達できません。PCのLAN IP（例: 192.168.x.x）を入力してください。
-            </div>
-          )}
-          <QrCard
-            title="PC接続QR"
-            description="スマホの「PCに接続」からスキャン。"
-            dataUrl={pcQr.dataUrl}
-            error={pcQr.error}
-            emptyHint="URLとトークンを入力するとQRが表示されます。"
-          />
-        </div>
+      <PairingV2Section />
 
-        <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
-          <div className="flex items-center gap-2">
-            <AppWindow size={15} className="text-zinc-400" />
-            <h4 className="text-sm font-medium text-zinc-100">Cloudflare Pages QR</h4>
-          </div>
-          <p className="text-xs leading-5 text-zinc-500">
-            スマホアプリのランディング/接続ガイドをCloudflare Pagesで公開したURLを入力するとQRを発行します。スマホでスキャンして開けます。
-          </p>
-          <CopyField
-            label="Cloudflare Pages URL"
-            value={pagesUrl}
-            onChange={setPagesUrl}
-            placeholder="https://rumi-mobile.pages.dev"
-            mono
-          />
-          <QrCard
-            title="Cloudflare Pages QR"
-            description="スマホカメラ/アプリでスキャンして開く。"
-            dataUrl={pagesQr.dataUrl}
-            error={pagesQr.error}
-            emptyHint="Pages URLを入力するとQRが表示されます。"
-          />
-        </div>
-      </div>
+      <DeviceManagementSection />
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
-        <div className="flex items-center gap-2">
-          <QrCode size={15} className="text-zinc-400" />
-          <h4 className="text-sm font-medium text-zinc-100">API/モデル インポート用ペイロード</h4>
-        </div>
-        <p className="mt-1 text-xs leading-5 text-zinc-500">
-          上のPC接続情報をAPI/モデルインポート形式で出力します。スマホアプリの「APIをQRで取り込む」でこのQRをスキャンすると、APIキーとエンドポイントを取り込めます。
-        </p>
-        <div className="mt-3">
-          <QrCard
-            title="API/モデル インポートQR"
-            description="kind=rumi_api。baseUrlとapiKeyを取り込みます。"
-            dataUrl={apiQr.dataUrl}
-            error={apiQr.error}
-            emptyHint="URLとキーを入力するとQRが表示されます。"
-          />
-        </div>
-        <pre className="mt-3 overflow-x-auto rounded-lg border border-zinc-800 bg-black/40 p-3 text-[11px] leading-5 text-zinc-400">
-{apiImportText}
-        </pre>
-      </div>
+      <LegacyQrSection kernelBaseUrl={kernelBaseUrl} cloudflarePagesUrl={cloudflarePagesUrl} />
     </section>
   );
 }

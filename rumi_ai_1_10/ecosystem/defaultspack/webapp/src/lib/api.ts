@@ -903,7 +903,7 @@ export type P2PPeer = {
 export type P2PPairing = {
   pairing_id: string;
   code: string;
-  status: "pending" | "accepted" | "rejected" | "expired" | string;
+  status: "pending" | "claimed" | "approved" | "rejected" | "expired" | string;
   expires_at: number;
   created_at: number;
   peer_id?: string;
@@ -912,7 +912,12 @@ export type P2PPairing = {
   capabilities?: string[];
   allowed_company_ids?: string[];
   accepted_at?: number;
+  approved_at?: number;
   rejected_at?: number;
+  claimed_device_id?: string;
+  claimed_device_label?: string;
+  confirmation_code?: string;
+  requested_scopes?: string[];
   reason?: string;
 };
 
@@ -920,6 +925,43 @@ export type P2PStatusResponse = {
   p2p: P2PSettings;
   peer_count: number;
   approved_peer_count: number;
+};
+
+export type MobileDevice = {
+  device_id: string;
+  label: string;
+  platform?: string;
+  scopes?: string[];
+  status?: string;
+  last_seen_at?: string;
+  created_at?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type MobileDevicesResponse = {
+  devices: MobileDevice[];
+};
+
+export type MobilePairingStatus = {
+  pairing_id: string;
+  status: string;
+  claimed_device_id?: string;
+  claimed_device_label?: string;
+  confirmation_code?: string;
+  requested_scopes?: string[];
+  expires_at?: number;
+  approved_device_id?: string;
+  device_token?: string;
+};
+
+export type CredentialTransferPayload = {
+  device_id: string;
+  provider_id: string;
+  api_key?: string;
+  api_id?: string;
+  base_url?: string;
+  default_model?: string;
+  name?: string;
 };
 
 export type ConversationListOptions = {
@@ -3633,6 +3675,45 @@ export const api = {
     return request<{ session_id: string; merge_report: Record<string, unknown> }>(
       withQuery("/api/coding/agent/sessions/merge-report", { session_id: sessionId }),
       { cache: "no-store" },
+    );
+  },
+
+  getMobilePairingStatus(pairingId: string) {
+    return request<MobilePairingStatus>(
+      `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/status`,
+      { cache: "no-store" },
+    );
+  },
+
+  approveMobilePairing(pairingId: string) {
+    return request<{ ok: boolean; device_token?: string; device?: MobileDevice }>(
+      `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/approve`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+
+  rejectMobilePairing(pairingId: string, reason?: string) {
+    return request<{ ok: boolean }>(
+      `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/reject`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    );
+  },
+
+  listMobileDevices() {
+    return request<MobileDevicesResponse>("/api/mobile/v1/devices", { cache: "no-store" });
+  },
+
+  revokeMobileDevice(deviceId: string) {
+    return request<{ ok: boolean; device_id: string }>(
+      `/api/mobile/v1/devices/${encodeURIComponent(deviceId)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  createCredentialTransfer(payload: CredentialTransferPayload) {
+    return request<{ ok: boolean; transfer_id?: string }>(
+      "/api/mobile/v1/credential-transfers",
+      { method: "POST", body: JSON.stringify(payload) },
     );
   },
 };

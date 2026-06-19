@@ -1,3 +1,5 @@
+import '../domain/conversation_locator.dart';
+
 class ChatRole {
   const ChatRole._(this.value);
   final String value;
@@ -85,6 +87,7 @@ class Conversation {
     required this.updatedAt,
     this.pinned = false,
     this.revision = 0,
+    this.authority = ConversationAuthorityKind.local,
   });
 
   final String id;
@@ -94,6 +97,7 @@ class Conversation {
   DateTime updatedAt;
   bool pinned;
   int revision;
+  ConversationAuthorityKind authority;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -103,6 +107,7 @@ class Conversation {
         'updatedAt': updatedAt.toIso8601String(),
         'pinned': pinned,
         'revision': revision,
+        'authority': authority.name,
       };
 
   factory Conversation.fromJson(Map<String, dynamic> json) {
@@ -119,6 +124,10 @@ class Conversation {
           DateTime.now(),
       pinned: json['pinned'] as bool? ?? false,
       revision: (json['revision'] as num?)?.toInt() ?? 0,
+      authority: ConversationAuthorityKind.values.firstWhere(
+        (e) => e.name == json['authority'],
+        orElse: () => ConversationAuthorityKind.local,
+      ),
     );
   }
 

@@ -5,8 +5,12 @@ import 'package:uuid/uuid.dart';
 
 import '../application/conversation_router.dart';
 import '../data/local/local_chat_backend.dart';
+import '../data/pc/device_store.dart';
+import '../data/pc/pc_chat_backend.dart';
 import '../domain/chat_event.dart';
+import '../domain/connection_state.dart';
 import '../domain/conversation_locator.dart';
+import '../features/chat/connection_chip.dart';
 import '../settings/api_config_store.dart';
 import '../settings/settings_screen.dart';
 import '../app_theme.dart';
@@ -20,10 +24,12 @@ class ChatScreen extends StatefulWidget {
     super.key,
     required this.store,
     required this.configStore,
+    required this.deviceStore,
   });
 
   final ChatStore store;
   final ApiConfigStore configStore;
+  final MobileDeviceStore deviceStore;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -34,6 +40,9 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scrollController = ScrollController();
   ApiConfig? _apiConfig;
   late final ConversationRouter _router;
+  PcConversationBackend? _pcBackend;
+  PairedDevice? _pairedDevice;
+  DeviceConnectionView _connectionView = DeviceConnectionView.unpaired;
   bool _busy = false;
   bool _streaming = false;
   late Future<void> _initFuture;
@@ -56,6 +65,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _router.local.dispose();
+    _pcBackend?.close();
     super.dispose();
   }
 
@@ -67,15 +77,43 @@ class _ChatScreenState extends State<ChatScreen> {
       if (active == null) {
         await widget.store.createAndPersist();
       }
+      await _loadPcConnection();
     } catch (error, stack) {
       debugPrint('Rumi init error: $error\n$stack');
     }
     if (mounted) setState(() {});
   }
 
-  void _onScroll() {
-    // intentionally simple; auto-scroll handles new content
+  Future<void> _loadPcConnection() async {
+    final paired = await widget.deviceStore.loadPairedDevice();
+    if (paired != null && paired.deviceToken.isNotEmpty) {
+      final pc = paired.toPcConnection();
+      _pcBackend?.close();
+      _pcBackend = PcConversationBackend(
+        connection: pc,
+        deviceId: paired.deviceId,
+      );
+      _router.setPc(_pcBackend!);
+      _pairedDevice = paired;
+      _connectionView = DeviceConnectionView(
+        pairingState: PairingState.paired,
+        pcConnectionState: PcConnectionState.online,
+        canReadPcConversations: paired.canReadPcConversations,
+        canWritePcConversations: paired.canWritePcConversations,
+        canObservePcTools: paired.canObservePcTools,
+        canApprovePcTools: paired.canApprovePcTools,
+        canRequestCredentialCopy: paired.canRequestCredentialCopy,
+      );
+    } else {
+      _pcBackend?.close();
+      _pcBackend = null;
+      _router.setPc(null);
+      _pairedDevice = null;
+      _connectionView = DeviceConnectionView.unpaired;
+    }
   }
+
+  void _onScroll() {}
 
   void _scrollToBottom({bool animate = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -143,13 +181,18 @@ class _ChatScreenState extends State<ChatScreen> {
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => SettingsScreen(
         configStore: widget.configStore,
+        deviceStore: widget.deviceStore,
         onApiChanged: (next) {
           setState(() => _apiConfig = next);
         },
+        onDevicePaired: (device) async {
+          await _loadPcConnection();
+          if (mounted) setState(() {});
+        },
       ),
     ));
-    // refresh config after returning
     final refreshed = await widget.configStore.loadApi();
+    await _loadPcConnection();
     if (mounted) setState(() => _apiConfig = refreshed);
   }
 
@@ -192,6 +235,8 @@ class _ChatScreenState extends State<ChatScreen> {
           case ChatMessageCommitted():
           case ChatRunCompleted():
           case ChatRunStopped():
+          case ToolCallEvent():
+          case ApprovalEvent():
             break;
         }
       }
@@ -252,6 +297,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 Navigator.of(context).pop();
                 _openSettings();
               },
+              pcConnected: _connectionView.isPcOnline,
             ),
           ),
           appBar: AppBar(
@@ -268,6 +314,12 @@ class _ChatScreenState extends State<ChatScreen> {
               overflow: TextOverflow.ellipsis,
             ),
             actions: [
+              ConnectionChip(
+                connectionView: _connectionView,
+                pairedDevice: _pairedDevice,
+                onTap: _openSettings,
+              ),
+              const SizedBox(width: 4),
               IconButton(
                 tooltip: '新規チャット',
                 icon: const Icon(Icons.add_comment_outlined),

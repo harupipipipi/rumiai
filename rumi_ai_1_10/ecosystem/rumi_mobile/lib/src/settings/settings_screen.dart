@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../data/pc/device_store.dart';
 import '../data/pc/pc_catalog.dart';
 import '../data/pc/pc_catalog_client.dart';
+import '../data/pc/pc_pairing_client.dart';
 import '../qr/qr_payload.dart';
 import '../qr/qr_scanner_screen.dart';
 import 'api_config_store.dart';
@@ -11,11 +15,15 @@ class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,
     required this.configStore,
+    required this.deviceStore,
     required this.onApiChanged,
+    this.onDevicePaired,
   });
 
   final ApiConfigStore configStore;
+  final MobileDeviceStore deviceStore;
   final ValueChanged<ApiConfig> onApiChanged;
+  final ValueChanged<PairedDevice?>? onDevicePaired;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -24,14 +32,18 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late ApiConfig _config;
   late PcConnection? _pc;
+  PairedDevice? _pairedDevice;
+  DeviceIdentity? _deviceIdentity;
   bool _loading = true;
   bool _saving = false;
 
-  // PC catalog state
   PcBootstrap? _pcBootstrap;
   PcCatalog? _pcCatalog;
   bool _fetchingCatalog = false;
   String? _catalogError;
+
+  bool _pairingInProgress = false;
+  String? _pairingError;
 
   final _baseUrl = TextEditingController();
   final _apiKey = TextEditingController();
@@ -66,10 +78,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final api = await widget.configStore.loadApi();
     final pc = await widget.configStore.loadPc();
+    final paired = await widget.deviceStore.loadPairedDevice();
+    final identity = await widget.deviceStore.loadOrCreateIdentity();
     if (!mounted) return;
     setState(() {
       _config = api;
       _pc = pc;
+      _pairedDevice = paired;
+      _deviceIdentity = identity;
       _syncControllers();
       _loading = false;
     });
@@ -153,24 +169,161 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final result = await Navigator.of(context).push<(QrPayload, bool)>(
       MaterialPageRoute(
         builder: (_) => const QrScannerScreen(
-          purpose: QrScanPurpose.pcConnect,
-          hint: 'PCの「アプリ」欄に表示されたPC接続QRをスキャン',
+          purpose: QrScanPurpose.general,
+          hint: 'PC接続QRまたはペアリングQRをスキャン',
         ),
       ),
     );
     if (result == null) return;
     final (payload, mismatch) = result;
-    if (mismatch) {
-      _toast('このQRはPC接続形式ではありません');
-      return;
-    }
     if (payload is QrPcConnection) {
       setState(() {
         _pcUrl.text = payload.baseUrl;
         _pcToken.text = payload.token;
       });
       _toast('PC接続情報を取り込みました。保存してください。');
+    } else if (payload is QrPairingV2) {
+      await _startPairingV2(payload.payload);
+    } else {
+      _toast('このQRはPC接続形式ではありません');
     }
+  }
+
+  Future<void> _startPairingV2(PairingV2Payload payload) async {
+    if (payload.isExpired) {
+      _toast('QRコードの有効期限が切れています');
+      return;
+    }
+    final identity = _deviceIdentity;
+    if (identity == null) {
+      _toast('デバイスIDが利用できません');
+      return;
+    }
+
+    setState(() {
+      _pairingInProgress = true;
+      _pairingError = null;
+    });
+
+    final client = PcPairingClient();
+    try {
+      final selectedUrl =
+          payload.baseUrls.isNotEmpty ? payload.baseUrls.first : '';
+      if (selectedUrl.isEmpty) {
+        throw const PcPairingException('接続URLが見つかりません');
+      }
+
+      final tempPc = PcConnection(baseUrl: selectedUrl, token: '');
+      final claimResp = await client.claim(
+        tempPc,
+        pairingId: payload.pairingId,
+        code: payload.code,
+        device: identity,
+        requestedCapabilities: const [
+          'chat.read',
+          'chat.write',
+          'tools.observe',
+        ],
+      );
+
+      if (!mounted) return;
+      _toast('ペアリング要求を送信しました。PC側で承認してください。');
+
+      await _pollPairingUntilAccepted(
+        client: client,
+        pc: tempPc,
+        pairingId: claimResp.pairingId,
+        pcLabel: selectedUrl,
+        payload: payload,
+      );
+    } on PcPairingException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _pairingError = e.toString();
+        _pairingInProgress = false;
+      });
+      _toast('ペアリングエラー: ${e.message}');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _pairingError = '$e';
+        _pairingInProgress = false;
+      });
+      _toast('ペアリングエラー: $e');
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> _pollPairingUntilAccepted({
+    required PcPairingClient client,
+    required PcConnection pc,
+    required String pairingId,
+    required String pcLabel,
+    required PairingV2Payload payload,
+  }) async {
+    const maxAttempts = 60;
+    const interval = Duration(seconds: 2);
+
+    for (var i = 0; i < maxAttempts; i++) {
+      if (!mounted) return;
+      await Future<void>.delayed(interval);
+
+      try {
+        final statusResp = await client.pollStatus(pc, pairingId: pairingId);
+        if (statusResp.isAccepted) {
+          final token = statusResp.deviceToken ?? '';
+          final device = PairedDevice(
+            deviceId: _deviceIdentity!.deviceId,
+            deviceToken: token,
+            label: _deviceIdentity!.deviceLabel,
+            scopes: statusResp.scopes,
+            pcBaseUrl: pc.baseUrl,
+            pcLabel: statusResp.pcLabel ?? pcLabel,
+            pairingId: pairingId,
+          );
+          await widget.deviceStore.savePairedDevice(device);
+          final newPc = PcConnection(baseUrl: pc.baseUrl, token: token);
+          await widget.configStore.savePc(newPc);
+          if (!mounted) return;
+          setState(() {
+            _pairedDevice = device;
+            _pc = newPc;
+            _pcUrl.text = pc.baseUrl;
+            _pcToken.text = token;
+            _pairingInProgress = false;
+          });
+          widget.onDevicePaired?.call(device);
+          _toast('PCとのペアリングが完了しました');
+          return;
+        }
+      } on PcPairingException {
+        // continue polling
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _pairingInProgress = false;
+      _pairingError = 'タイムアウト: PC側で承認されませんでした';
+    });
+    _toast('ペアリングがタイムアウトしました');
+  }
+
+  Future<void> _unpair() async {
+    await widget.deviceStore.clear();
+    await widget.configStore.savePc(null);
+    if (!mounted) return;
+    setState(() {
+      _pairedDevice = null;
+      _pc = null;
+      _pcUrl.text = '';
+      _pcToken.text = '';
+      _pcBootstrap = null;
+      _pcCatalog = null;
+    });
+    widget.onDevicePaired?.call(null);
+    _toast('PCとの接続を解除しました');
   }
 
   void _toast(String message) {
@@ -325,73 +478,135 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: 'PCのdefaultspack Kernel APIへ接続する情報。',
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _pcUrl,
-              keyboardType: TextInputType.url,
-              decoration: const InputDecoration(
-                labelText: 'Kernel API URL',
-                hintText: 'http://192.168.x.x:8765',
-                prefixIcon: Icon(Icons.dns_outlined),
+            if (_pairedDevice != null) ...[
+              _PairedDeviceCard(
+                device: _pairedDevice!,
+                onUnpair: _unpair,
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _pcToken,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Bearer token',
-                prefixIcon: Icon(Icons.vpn_key_outlined),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('PC接続QRをスキャン'),
-                    onPressed: _scanPc,
+              const SizedBox(height: 12),
+            ],
+            if (_pairedDevice == null) ...[
+              if (_pairingInProgress) ...[
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardTheme.color,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                        color: Theme.of(context).dividerTheme.color ??
+                            Colors.transparent),
+                  ),
+                  child: Column(
+                    children: [
+                      const CircularProgressIndicator(),
+                      const SizedBox(height: 12),
+                      const Text('PC側の承認を待っています...'),
+                      if (_pairingError != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _pairingError!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    icon: const Icon(Icons.save_outlined),
-                    label: const Text('保存'),
-                    onPressed: _save,
+              ] else ...[
+                FilledButton.icon(
+                  icon: const Icon(Icons.qr_code_scanner),
+                  label: const Text('PCにQRでペアリング'),
+                  onPressed: _scanPc,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(46),
                   ),
+                ),
+                const SizedBox(height: 8),
+                const Center(
+                  child: Text('または',
+                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _pcUrl,
+                  keyboardType: TextInputType.url,
+                  decoration: const InputDecoration(
+                    labelText: 'Kernel API URL',
+                    hintText: 'http://192.168.x.x:8765',
+                    prefixIcon: Icon(Icons.dns_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _pcToken,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Bearer token',
+                    prefixIcon: Icon(Icons.vpn_key_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('PC接続QRをスキャン'),
+                        onPressed: _scanPc,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        icon: const Icon(Icons.save_outlined),
+                        label: const Text('保存'),
+                        onPressed: _save,
+                      ),
+                    ),
+                  ],
                 ),
               ],
-            ),
-            const SizedBox(height: 16),
-            FilledButton.tonalIcon(
-              icon: _fetchingCatalog
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.cloud_download_outlined),
-              label: const Text('PCからプロバイダー/モデルを取得'),
-              onPressed: _fetchingCatalog ? null : _fetchPcCatalog,
-            ),
-            if (_catalogError != null) ...[
+            ],
+            if (_pairingError != null && !_pairingInProgress) ...[
               const SizedBox(height: 8),
-              Text(_catalogError!,
+              Text(_pairingError!,
                   style: TextStyle(
                       fontSize: 12,
                       color: Theme.of(context).colorScheme.error)),
             ],
-            if (_pcBootstrap != null) ...[
-              const SizedBox(height: 12),
-              _PcInfoCard(bootstrap: _pcBootstrap!, catalog: _pcCatalog),
-            ],
-            if (_pcCatalog != null) ...[
-              const SizedBox(height: 12),
+            if (_pc != null && _pc!.isConfigured) ...[
+              const SizedBox(height: 16),
               FilledButton.tonalIcon(
-                icon: const Icon(Icons.checklist),
-                label: const Text('モデルを選択'),
-                onPressed: _pickModelFromCatalog,
+                icon: _fetchingCatalog
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.cloud_download_outlined),
+                label: const Text('PCからプロバイダー/モデルを取得'),
+                onPressed: _fetchingCatalog ? null : _fetchPcCatalog,
               ),
+              if (_catalogError != null) ...[
+                const SizedBox(height: 8),
+                Text(_catalogError!,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.error)),
+              ],
+              if (_pcBootstrap != null) ...[
+                const SizedBox(height: 12),
+                _PcInfoCard(bootstrap: _pcBootstrap!, catalog: _pcCatalog),
+              ],
+              if (_pcCatalog != null) ...[
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  icon: const Icon(Icons.checklist),
+                  label: const Text('モデルを選択'),
+                  onPressed: _pickModelFromCatalog,
+                ),
+              ],
             ],
             const SizedBox(height: 28),
             _SectionTitle(
@@ -422,6 +637,76 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
+  }
+}
+
+class _PairedDeviceCard extends StatelessWidget {
+  const _PairedDeviceCard({required this.device, required this.onUnpair});
+  final PairedDevice device;
+  final VoidCallback onUnpair;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: Theme.of(context).dividerTheme.color ?? Colors.transparent),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.check_circle, size: 18, color: scheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'PC接続済み',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'PC: ${device.pcLabel}',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          Text(
+            'デバイス: ${device.label}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          if (device.scopes.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: device.scopes
+                  .map((s) => Chip(
+                        label: Text(s, style: const TextStyle(fontSize: 10)),
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ))
+                  .toList(),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              icon: const Icon(Icons.link_off, size: 16),
+              label: const Text('切断'),
+              onPressed: onUnpair,
+              style: TextButton.styleFrom(foregroundColor: scheme.error),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
