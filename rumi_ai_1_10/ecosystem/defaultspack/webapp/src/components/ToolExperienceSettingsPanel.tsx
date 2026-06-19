@@ -625,7 +625,7 @@ export function ToolExperienceSettingsPanel({
       </section>
       <div className="grid gap-4 xl:grid-cols-2">
         <ModelPicker
-          label="Tool helper model"
+          label="Tool補助モデル"
           note="機能カタログを読む補助AIです。自由入力ではなく、登録済みモデルから選びます。"
           value={stringValue(utilityModels.tool_selector ?? toolSettings.selector_model)}
           models={chatModels}
@@ -634,7 +634,7 @@ export function ToolExperienceSettingsPanel({
           onChange={(value) => updateUtilityModel("tool_selector", value)}
         />
         <ModelPicker
-          label="Embedding model"
+          label="ベクトルモデル"
           note="ベクトル選定に使う埋め込みモデルです。未設定ならローカル語句選定にフォールバックします。"
           value={stringValue(toolSettings.embedding_model)}
           models={embeddingModels}

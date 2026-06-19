@@ -847,8 +847,8 @@ test("composer approval menu opens action permissions while selection modes live
   await expect(page.getByText("すべて読み込む＋おすすめを付ける")).toBeVisible();
   await expect(page.getByText("全ツールスキーマをそのまま渡します")).toBeVisible();
   await expect(page.getByText("軽量キーワードで選ぶ")).toBeVisible();
-  await expect(page.getByText("Tool helper model")).toBeVisible();
-  await expect(page.getByText("Embedding model")).toBeVisible();
+  await expect(page.getByText("Tool補助モデル")).toBeVisible();
+  await expect(page.getByText("ベクトルモデル")).toBeVisible();
   await expect(page.getByText("Text Embedding 004")).toBeVisible();
 });
 

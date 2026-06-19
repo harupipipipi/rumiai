@@ -111,7 +111,7 @@ const TOOL_SERVICE_LABELS: Record<string, { label: string; description: string }
   notion: { label: "Notion", description: "NotionページやDB" },
   memory: { label: "Memory", description: "記憶、知識、会話コンテキスト" },
   artifacts: { label: "Artifacts", description: "成果物ファイルとプレビュー" },
-  mcp: { label: "MCP", description: "MCP接続と外部サーバーTool" },
+  mcp: { label: "MCP", description: "MCP接続と外部サーバー機能" },
   system: { label: "System", description: "Rumi内部のシステム機能" },
   other: { label: "Other", description: "その他の機能" },
 };
@@ -1800,6 +1800,10 @@ export function RightSidebar({
               <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} onPanelAction={onPanelAction} />
                         ) : (
                           <div className="space-y-3">
+                            <div className="px-1">
+                              <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">今回のおすすめ</p>
+                              <p className="mt-0.5 text-[10px] leading-4 text-zinc-500">自動選定、承認待ち、利用不可の状態をまとめます。</p>
+                            </div>
                             <ToolManagerWidget
                               tools={toolManagerBaseItems}
                               disabledToolIds={disabledToolIds}
@@ -1878,9 +1882,51 @@ export function RightSidebar({
                                 </div>
                               )}
                             </div>
+                            {(pinnedRailItems.length > 0 || pinnedRightSidebarPlacements.length > 0) && (
+                              <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">ピン留め</p>
+                                  <span className="text-[10px] text-zinc-600">{pinnedRailItems.length + pinnedRightSidebarPlacements.length}</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  {pinnedRailItems.map((item) => (
+                                    <button
+                                      key={item.id}
+                                      type="button"
+                                      onClick={() => setActivePanel(item.id)}
+                                      className="flex min-w-0 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/55 px-2 py-1.5 text-left text-zinc-300 transition-colors hover:bg-zinc-900 hover:text-zinc-100"
+                                    >
+                                      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500">
+                                        {iconForItem(item)}
+                                      </span>
+                                      <span className="min-w-0">
+                                        <span className="block truncate text-[11px] font-medium">{item.label}</span>
+                                        <span className="block truncate text-[9px] text-zinc-500">機能</span>
+                                      </span>
+                                    </button>
+                                  ))}
+                                  {pinnedRightSidebarPlacements.map((placement) => (
+                                    <button
+                                      key={placement.id}
+                                      type="button"
+                                      onClick={() => triggerPlacement(placement.id)}
+                                      className="flex min-w-0 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/55 px-2 py-1.5 text-left text-zinc-300 transition-colors hover:bg-zinc-900 hover:text-zinc-100"
+                                    >
+                                      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500">
+                                        {railIcon(placementIcon(placement.id), 15)}
+                                      </span>
+                                      <span className="min-w-0">
+                                        <span className="block truncate text-[11px] font-medium">{placement.label}</span>
+                                        <span className="block truncate text-[9px] text-zinc-500">{placement.description ?? "ウィジェット"}</span>
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                             <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
                               <div className="mb-2 flex items-center justify-between gap-2">
-                                <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Services</p>
+                                <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">接続</p>
                                 <div className="inline-grid grid-cols-2 rounded-md border border-zinc-800 bg-zinc-950 p-0.5">
                                   {(["turn", "conversation"] as const).map((scope) => (
                                     <button
@@ -1893,7 +1939,7 @@ export function RightSidebar({
                                         toolSelectionScope === scope ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-200",
                                       )}
                                     >
-                                      {scope === "turn" ? "今回" : "この会話"}
+                                      {scope === "turn" ? "今回" : "この会話で使う"}
                                     </button>
                                   ))}
                                 </div>
@@ -1918,8 +1964,8 @@ export function RightSidebar({
                                           </div>
                                           <p className="mt-0.5 truncate text-[10px] text-zinc-500">{service.description}</p>
                                           <div className="mt-1 flex flex-wrap gap-1 text-[9px] text-zinc-500">
-                                            <span className="rounded bg-zinc-900 px-1.5 py-0.5">{service.items.length} tools</span>
-                                            {pinnedCount > 0 && <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-200">{pinnedCount} pinned</span>}
+                                            <span className="rounded bg-zinc-900 px-1.5 py-0.5">{service.items.length} 機能</span>
+                                            {pinnedCount > 0 && <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-200">{pinnedCount} ピン留め</span>}
                                             {conversationSelected && <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-sky-200">会話固定</span>}
                                           </div>
                                         </div>
@@ -1972,14 +2018,14 @@ export function RightSidebar({
                 {allToolTags.length > 0 && (
                   <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
                     <div className="mb-2 flex items-center justify-between gap-2">
-                      <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Tags</p>
+                      <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">タグ</p>
                       {activeTagFilter && (
                         <button
                           type="button"
                           onClick={() => setActiveTagFilter(null)}
                           className="text-[10px] text-zinc-500 hover:text-zinc-200"
                         >
-                          clear
+                          解除
                         </button>
                       )}
                     </div>
@@ -2011,7 +2057,7 @@ export function RightSidebar({
                           onClick={() => setToolsEnabled(toolsWithTag(activeTagFilter), true)}
                           className="rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200 hover:bg-emerald-500/15"
                         >
-                          tagを今回使う
+                          タグを今回使う
                         </button>
                         <button
                           type="button"
@@ -2021,7 +2067,7 @@ export function RightSidebar({
                             activeTagFilter === "danger" ? "bg-red-500/10 text-red-200 hover:bg-red-500/15" : "bg-zinc-900 text-zinc-300 hover:bg-zinc-800",
                           )}
                         >
-                          tag指定を解除
+                          タグ指定を解除
                         </button>
                       </div>
                     )}
@@ -2029,13 +2075,13 @@ export function RightSidebar({
                 )}
                 <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">選定ログ</p>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">最近使った</p>
                     <button
                       type="button"
                       onClick={() => setActivePanel("__tool_filter_log__")}
                       className="text-[10px] text-zinc-500 hover:text-zinc-200"
                     >
-                      open
+                      開く
                     </button>
                   </div>
                   <ToolFilterLogWidget entries={toolFilterEntries.slice(0, 4)} />
@@ -2122,7 +2168,7 @@ export function RightSidebar({
                             <span className="rounded px-1.5 py-0.5 text-[9px] bg-zinc-900 text-zinc-400">一覧から隠す</span>
                           )}
                           {item.tool_info?.requires_approval && (
-                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-sky-500/10 text-sky-200">Needs approval</span>
+                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-sky-500/10 text-sky-200">承認が必要</span>
                           )}
                           {blockedEntry && (
                             <span className="rounded px-1.5 py-0.5 text-[9px] bg-amber-500/10 text-amber-200">
@@ -2252,7 +2298,7 @@ export function RightSidebar({
                   ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
                   : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
               )}
-              title="Pin widget"
+              title="ウィジェットをピン留め"
             >
               <Plus size={16} className="h-4 w-4 shrink-0" />
             </button>
@@ -2265,8 +2311,8 @@ export function RightSidebar({
                   onPointerDown={(event) => event.stopPropagation()}
                 >
                   <div className="border-b border-zinc-800 px-3 py-2">
-                    <p className="text-[11px] font-semibold text-zinc-200">Pin to sidebar</p>
-                    <p className="text-[10px] text-zinc-500">vertical / configurable</p>
+                    <p className="text-[11px] font-semibold text-zinc-200">サイドバーにピン留め</p>
+                    <p className="text-[10px] text-zinc-500">縦表示 / 設定可</p>
                   </div>
                   <div className="max-h-64 overflow-y-auto py-1">
                     {rightSidebarPlacementCandidates.map((manifest) => (
@@ -2289,7 +2335,7 @@ export function RightSidebar({
                       </button>
                     ))}
                     {rightSidebarPlacementCandidates.length === 0 && (
-                      <p className="px-3 py-3 text-[11px] text-zinc-500">追加できる candidate はありません。</p>
+                      <p className="px-3 py-3 text-[11px] text-zinc-500">追加できる候補はありません。</p>
                     )}
                   </div>
                 </div>
