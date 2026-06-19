@@ -403,6 +403,10 @@ def test_prompt_studio_testbench_matches_skill_and_tool_schema(monkeypatch, tmp_
     assert result["input"]["model_profile_id"] == "openai/gpt-5.1"
     assert skill_segment["skill_signal"]["matched"][0]["id"] == "qa/math-skill"
     assert result["selected_tool_segments"][0]["tool_signal"]["tool_id"] == "calculator"
+    assert "schema" not in result["selected_tool_segments"][0]
+    assert "text" not in result["selected_tool_segments"][0]
+    assert all("schema" not in segment and "text" not in segment for segment in result["candidate_tool_segments"])
+    assert all(segment["kind"] in {"skill", "context", "memory"} for segment in result["segments"])
     assert result["prompt_tool_analysis"]["prompt_can_call_tool"] is False
     assert result["safety_boundary"]["can_call_tools"] is False
     assert any(item["id"] == "safety" and item["status"] == "passive" for item in result["verdicts"])
@@ -439,6 +443,10 @@ def test_prompt_studio_testbench_uses_runtime_skill_registry(monkeypatch, tmp_pa
             "draft": "For arithmetic requests, inspect calculator relevance.",
             "user_text": "計算 QA: 12 * 8 を一文で確認して。",
             "selected_tools": ["calculator"],
+            "template_policy": {
+                "template_ai_input_ids": ["default_ai_input"],
+                "template_tool_policy_ids": ["default_tools"],
+            },
         },
         {},
     )
@@ -447,6 +455,18 @@ def test_prompt_studio_testbench_uses_runtime_skill_registry(monkeypatch, tmp_pa
 
     assert result["matched_skills"][0]["id"] == "qa/math-skill"
     assert "arithmetic format" in result["skill_instructions"]
+    template_resolution = result["template_tool_policy_resolution"]
+    assert template_resolution["applied"] is True
+    assert template_resolution["resolved_ai_input_ids"] == ["default_ai_input"]
+    assert template_resolution["resolved_template_tool_policy_ids"] == ["default_tools"]
+    assert template_resolution["resolved_template_tool_policy_projected_ids"] == [
+        "rumi.composer.default:default_tool_policy"
+    ]
+    assert result["prompt_tool_analysis"]["template_tool_policy"]["applied"] is True
+    assert any(
+        item["id"] == "template_tool_policy" and item["status"] == "matched"
+        for item in result["verdicts"]
+    )
 
 
 def test_readonly_prompt_save_creates_profile_override(monkeypatch, tmp_path: Path) -> None:

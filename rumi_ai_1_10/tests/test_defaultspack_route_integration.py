@@ -112,6 +112,12 @@ def test_template_function_routes_join_canonical_transport_registry():
         external_template_route.function_name == "defaultspack:external_io_upsert_custom_template"
     )
     assert external_template_route.sensitive is True
+    prompt_save_route = template_routes[("POST", "/api/prompts/editor/save")]
+    assert prompt_save_route.function_name == "defaultspack:prompt_editor_save"
+    assert prompt_save_route.defaults == {"action": "save"}
+    prompt_versions_route = canonical[("GET", "/api/prompts/{name}/versions")]
+    assert prompt_versions_route.function_name == "defaultspack:prompt_versions"
+    assert prompt_versions_route.path_inject == {"name": "name"}
 
 
 def test_inactive_template_function_routes_are_not_registered(tmp_path):

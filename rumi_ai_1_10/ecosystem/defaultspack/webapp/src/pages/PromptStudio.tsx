@@ -26,9 +26,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { PromptUsageSegmentCard } from "../components/prompts/PromptUsageSegmentCard";
 import { statusBadgeClass, tokenText } from "../components/prompts/promptSegmentView";
-import { api, type ModelProfile, type PromptStudioData, type PromptStudioPrompt, type PromptStudioTestResult, type PromptUsageSegment } from "../lib/api";
+import { api, type ModelProfile, type PromptStudioData, type PromptStudioPrompt, type PromptStudioTestResult, type PromptUsageSegment, type TemplateCatalogMetadataItem, type UICatalog } from "../lib/api";
 import { cn } from "../lib/cn";
 import { isLocaleSetting, normalizeLocale, supportedLocales, t, type LocaleSetting } from "../lib/i18n";
+import {
+  selectTemplateAiInput,
+  selectTemplateToolPolicy,
+  templateAiInputSourceIds,
+  templateToolPolicyReferencePayload,
+  templateToolPolicySettings,
+  templateToolPolicySourceIds,
+  type TemplateToolPolicySettings,
+} from "../lib/templateAiInput";
 
 type InspectorTab = "selected" | "test" | "diff" | "usage" | "variables";
 type PromptFilter = "all" | "active" | "editable" | "readonly" | "overrides";
@@ -161,12 +170,13 @@ function verdictTone(status?: string): string {
   if (status === "matched" || status === "selected" || status === "candidate") return "border-emerald-500/25 bg-emerald-500/10 text-emerald-100";
   if (status === "idle" || status === "not-selected" || status === "none") return "border-zinc-800 bg-zinc-950/70 text-zinc-400";
   if (status === "passive") return "border-cyan-500/25 bg-cyan-500/10 text-cyan-100";
+  if (status === "blocked") return "border-amber-500/25 bg-amber-500/10 text-amber-100";
   return "border-zinc-800 bg-zinc-950/70 text-zinc-300";
 }
 
 function localizedStudioVerdict(
   verdict: Record<string, string>,
-  counts: { skillCount: number; selectedToolSegmentCount: number; selectedToolCount: number; candidateCount: number },
+  counts: { skillCount: number; selectedToolSegmentCount: number; selectedToolCount: number; candidateCount: number; templatePolicyRequested: boolean; templatePolicyBlocked: boolean },
   msg: StudioMessage,
 ): { title: string; detail: string } {
   const id = String(verdict.id || "");
@@ -196,6 +206,16 @@ function localizedStudioVerdict(
         : msg("promptStudio.verdict.promptToToolNone"),
     };
   }
+  if (id === "template_tool_policy") {
+    return {
+      title: msg("promptStudio.verdict.templatePolicyTitle"),
+      detail: counts.templatePolicyBlocked
+        ? msg("promptStudio.verdict.templatePolicyBlocked")
+        : counts.templatePolicyRequested
+          ? msg("promptStudio.verdict.templatePolicyResolved")
+          : msg("promptStudio.verdict.templatePolicyNone"),
+    };
+  }
   if (id === "safety") {
     return {
       title: msg("promptStudio.verdict.safetyTitle"),
@@ -206,6 +226,23 @@ function localizedStudioVerdict(
     title: String(verdict.title || msg("promptStudio.promptFallbackName")),
     detail: String(verdict.detail || ""),
   };
+}
+
+function catalogTemplateLabel(template?: TemplateCatalogMetadataItem | null): string {
+  if (!template) return "";
+  const metadata = recordFromUnknown(template.metadata);
+  return String(metadata.title || template.label || template.id || "").trim();
+}
+
+function findCatalogTemplate(catalog: UICatalog | null, templateId: string, capability?: string): TemplateCatalogMetadataItem | null {
+  const templates = catalog?.templates ?? [];
+  const direct = templates.find((item) => item.id === templateId);
+  if (direct) return direct;
+  if (!capability) return null;
+  return templates.find((item) => {
+    const capabilities = recordFromUnknown(item.capabilities);
+    return listFromUnknown(capabilities.provides).map(String).includes(capability);
+  }) ?? null;
 }
 
 function localizedDecisionBoundary(value: unknown, msg: StudioMessage): string {
@@ -247,6 +284,12 @@ function PromptStudioTestPanel({
   testTools,
   modelProfiles,
   selectedModelProfileId,
+  templateAiInputIds,
+  templateToolPolicyIds,
+  templatePolicySettings,
+  modelSelectorTemplate,
+  promptWorkspaceTemplate,
+  promptCompactionTemplate,
   locale,
   busy,
   onInputChange,
@@ -259,6 +302,12 @@ function PromptStudioTestPanel({
   testTools: string;
   modelProfiles: ModelProfile[];
   selectedModelProfileId: string;
+  templateAiInputIds: string[];
+  templateToolPolicyIds: string[];
+  templatePolicySettings: TemplateToolPolicySettings;
+  modelSelectorTemplate: TemplateCatalogMetadataItem | null;
+  promptWorkspaceTemplate: TemplateCatalogMetadataItem | null;
+  promptCompactionTemplate: TemplateCatalogMetadataItem | null;
   locale: LocaleSetting;
   busy: string | null;
   onInputChange: (value: string) => void;
@@ -273,6 +322,14 @@ function PromptStudioTestPanel({
   const candidateSegments = result?.candidate_tool_segments ?? [];
   const candidates = result?.tool_candidates?.combined ?? [];
   const analysis = recordFromUnknown(result?.prompt_tool_analysis);
+  const templateResolution = recordFromUnknown(result?.template_tool_policy_resolution);
+  const templatePolicy = recordFromUnknown(templateResolution.policy);
+  const templateDiagnostics = listFromUnknown(templateResolution.diagnostics);
+  const resolvedAiInputIds = listFromUnknown(templateResolution.resolved_ai_input_ids).map(String);
+  const resolvedPolicyIds = listFromUnknown(templateResolution.resolved_template_tool_policy_ids).map(String);
+  const projectedPolicyIds = listFromUnknown(templateResolution.resolved_template_tool_policy_projected_ids).map(String);
+  const templatePolicyRequested = Boolean(templateResolution.id_requested || templateAiInputIds.length || templateToolPolicyIds.length);
+  const templatePolicyBlocked = Boolean(templateResolution.blocked || templatePolicy.template_policy_blocked);
   const segments = result?.segments ?? [];
   const selectedToolCount = splitCsvList(testTools).length;
   const selectedModelProfile = modelProfiles.find((profile) => profile.profile_id === selectedModelProfileId) ?? null;
@@ -286,8 +343,13 @@ function PromptStudioTestPanel({
       selectedToolSegmentCount: selectedToolSegments.length,
       selectedToolCount,
       candidateCount: candidates.length,
+      templatePolicyRequested,
+      templatePolicyBlocked,
     }, msg),
   }));
+  const modelTemplateLabel = catalogTemplateLabel(modelSelectorTemplate) || "rumi.model_selector.default";
+  const workspaceTemplateLabel = catalogTemplateLabel(promptWorkspaceTemplate) || "rumi.prompt_workspace.default";
+  const compactionTemplateLabel = catalogTemplateLabel(promptCompactionTemplate) || "rumi.backend.prompt_compaction.default";
   return (
     <div className="grid gap-3">
       <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
@@ -312,6 +374,28 @@ function PromptStudioTestPanel({
               <span className="min-w-0 truncate">{selectedModelProfile ? modelProfileSubtitle(selectedModelProfile) : msg("promptStudio.modelFallback")}</span>
             </div>
             <p className="mt-2 rounded-md border border-cyan-500/15 bg-cyan-500/5 p-2 text-[11px] leading-relaxed text-cyan-100/80">{msg("promptStudio.modelBoundary")}</p>
+            <div className="mt-2 grid gap-1 rounded-md border border-zinc-800 bg-black/20 p-2 text-[10px] text-zinc-500">
+              <div className="flex items-center justify-between gap-2">
+                <span>{msg("promptStudio.modelSelectorTemplate")}</span>
+                <span className="min-w-0 truncate font-mono text-zinc-300">{modelTemplateLabel}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span>{msg("promptStudio.promptWorkspaceTemplate")}</span>
+                <span className="min-w-0 truncate font-mono text-zinc-300">{workspaceTemplateLabel}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span>{msg("promptStudio.compactionCapability")}</span>
+                <span className="min-w-0 truncate font-mono text-zinc-300">{compactionTemplateLabel}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span>{msg("promptStudio.templateAiInput")}</span>
+                <span className="min-w-0 truncate font-mono text-zinc-300">{templateAiInputIds.join(", ") || msg("promptStudio.none")}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span>{msg("promptStudio.templateToolPolicy")}</span>
+                <span className="min-w-0 truncate font-mono text-zinc-300">{templateToolPolicyIds.join(", ") || msg("promptStudio.none")}</span>
+              </div>
+            </div>
           </div>
           <div className="min-w-0">
             <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600" htmlFor="prompt-studio-test-input">{msg("promptStudio.testInput")}</label>
@@ -390,6 +474,44 @@ function PromptStudioTestPanel({
                 {!candidates.length && <div className="rounded-md border border-dashed border-zinc-800 p-4 text-center text-xs text-zinc-500">{msg("promptStudio.noToolCandidate")}</div>}
               </div>
             </div>
+
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="text-xs font-semibold text-zinc-100">{msg("promptStudio.templatePolicy")}</div>
+                <span className={cn("rounded border px-1.5 py-0.5 font-mono text-[10px]", templatePolicyBlocked ? "border-amber-500/25 bg-amber-500/10 text-amber-100" : templatePolicyRequested ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100" : "border-zinc-800 bg-black/20 text-zinc-500")}>
+                  {templatePolicyBlocked ? msg("promptStudio.blocked") : templatePolicyRequested ? msg("promptStudio.applied") : msg("promptStudio.idle")}
+                </span>
+              </div>
+              <div className="grid gap-1 text-[11px] text-zinc-500">
+                <div className="flex items-center justify-between gap-2">
+                  <span>{msg("promptStudio.resolvedAiInput")}</span>
+                  <span className="min-w-0 truncate font-mono text-zinc-300">{resolvedAiInputIds.join(", ") || templateAiInputIds.join(", ") || msg("promptStudio.none")}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span>{msg("promptStudio.resolvedToolPolicy")}</span>
+                  <span className="min-w-0 truncate font-mono text-zinc-300">{resolvedPolicyIds.join(", ") || templateToolPolicyIds.join(", ") || msg("promptStudio.none")}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span>{msg("promptStudio.projectedIds")}</span>
+                  <span className="min-w-0 truncate font-mono text-zinc-300">{projectedPolicyIds.join(", ") || templatePolicySettings.projectedIds.join(", ") || msg("promptStudio.none")}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span>{msg("promptStudio.toolChoice")}</span>
+                  <span className="min-w-0 truncate font-mono text-zinc-300">{formatInspectorValue(templatePolicy.tool_choice ?? templatePolicySettings.toolChoice ?? msg("promptStudio.none"))}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span>{msg("promptStudio.allowedTools")}</span>
+                  <span className="min-w-0 truncate font-mono text-zinc-300">{listFromUnknown(templatePolicy.tool_allowlist).map(String).join(", ") || templatePolicySettings.allowedToolIds.join(", ") || msg("promptStudio.none")}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span>{msg("promptStudio.deniedTools")}</span>
+                  <span className="min-w-0 truncate font-mono text-zinc-300">{listFromUnknown(templatePolicy.tool_denylist).map(String).join(", ") || templatePolicySettings.deniedToolIds.join(", ") || msg("promptStudio.none")}</span>
+                </div>
+              </div>
+              {templateDiagnostics.length > 0 && (
+                <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/25 p-2 font-mono text-[10px] leading-relaxed text-zinc-400">{prettyJson(templateDiagnostics)}</pre>
+              )}
+            </div>
           </section>
 
           <section className="grid gap-2">
@@ -452,6 +574,7 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
   const [testTools, setTestTools] = useState("");
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [selectedModelProfileId, setSelectedModelProfileId] = useState(initialModelProfileId);
+  const [uiCatalog, setUiCatalog] = useState<UICatalog | null>(null);
   const [testResult, setTestResult] = useState<PromptStudioTestResult | null>(null);
   const [busy, setBusy] = useState<string | null>("load");
   const [error, setError] = useState<string | null>(null);
@@ -504,6 +627,20 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    void api.uiCatalog()
+      .then((catalog) => {
+        if (!cancelled) setUiCatalog(catalog);
+      })
+      .catch(() => {
+        if (!cancelled) setUiCatalog(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const selectedPrompt = useMemo(() => {
     const selected = data?.selected_prompt;
     if (selected && promptKey(selected) === selectedId) return selected;
@@ -536,6 +673,30 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
     [modelProfiles, selectedModelProfileId],
   );
   const selectedModel = modelProfileModel(selectedModelProfile) || selectedModelProfileId;
+  const templateAiInput = useMemo(() => selectTemplateAiInput(uiCatalog, "chat"), [uiCatalog]);
+  const templateToolPolicy = useMemo(
+    () => selectTemplateToolPolicy(uiCatalog, "chat", templateAiInput),
+    [templateAiInput, uiCatalog],
+  );
+  const templateAiInputIds = useMemo(() => templateAiInputSourceIds(templateAiInput), [templateAiInput]);
+  const templateToolPolicyIds = useMemo(() => templateToolPolicySourceIds(templateToolPolicy), [templateToolPolicy]);
+  const templatePolicySettings = useMemo(() => templateToolPolicySettings(templateToolPolicy), [templateToolPolicy]);
+  const templatePolicyPayload = useMemo(
+    () => templateToolPolicyReferencePayload(templateAiInput, templateToolPolicy),
+    [templateAiInput, templateToolPolicy],
+  );
+  const modelSelectorTemplate = useMemo(
+    () => findCatalogTemplate(uiCatalog, "rumi.model_selector.default", "rumi.model_selector"),
+    [uiCatalog],
+  );
+  const promptWorkspaceTemplate = useMemo(
+    () => findCatalogTemplate(uiCatalog, "rumi.prompt_workspace.default", "rumi.prompt_workspace"),
+    [uiCatalog],
+  );
+  const promptCompactionTemplate = useMemo(
+    () => findCatalogTemplate(uiCatalog, "rumi.backend.prompt_compaction.default", "rumi.prompt_compaction"),
+    [uiCatalog],
+  );
 
   useEffect(() => {
     const toolId = String(signalTool.tool_id || signalTool.tool_name || "").trim();
@@ -624,6 +785,10 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
       selected_tools: splitCsvList(testTools),
       model_profile_id: selectedModelProfileId || undefined,
       model: selectedModel || undefined,
+      template_policy: templatePolicyPayload,
+      request_context: {
+        template_policy: templatePolicyPayload,
+      },
     })
       .then((result) => {
         setTestResult(result);
@@ -1076,6 +1241,12 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
                 testTools={testTools}
                 modelProfiles={modelProfiles}
                 selectedModelProfileId={selectedModelProfileId}
+                templateAiInputIds={templateAiInputIds}
+                templateToolPolicyIds={templateToolPolicyIds}
+                templatePolicySettings={templatePolicySettings}
+                modelSelectorTemplate={modelSelectorTemplate}
+                promptWorkspaceTemplate={promptWorkspaceTemplate}
+                promptCompactionTemplate={promptCompactionTemplate}
                 locale={studioLocale}
                 busy={busy}
                 onInputChange={(value) => {

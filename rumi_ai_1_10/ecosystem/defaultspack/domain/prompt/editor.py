@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import difflib
 import json
 import re
@@ -16,7 +17,7 @@ from .effective import resolve_effective_prompt, validate_prompt_template
 from .manager import get_manager
 from .prompt_compactor import compact_prompt
 from .prompt_linter import lint_prompt
-from .usage import active_prompt_summary, append_runtime_prompt_segment, prompt_usage_from_trace
+from .usage import active_prompt_summary, append_runtime_prompt_segment, compact_prompt_usage_for_metadata, prompt_usage_from_trace
 
 
 _SAFE_PROMPT_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -244,12 +245,14 @@ def compact_prompt_text(input_data: dict[str, Any] | None = None) -> dict[str, A
 
 
 SkillEvaluator = Callable[..., dict[str, Any]]
+TemplatePolicyResolver = Callable[..., dict[str, Any]]
 
 
 def test_prompt_input(
     input_data: dict[str, Any] | None = None,
     *,
     skill_evaluator: SkillEvaluator | None = None,
+    template_policy_resolver: TemplatePolicyResolver | None = None,
 ) -> dict[str, Any]:
     data = input_data if isinstance(input_data, dict) else {}
     profile_id = _resolve_profile_id(data.get("profile_id"))
@@ -280,8 +283,14 @@ def test_prompt_input(
         }
     )
     usage = dict(active.get("summary") if isinstance(active.get("summary"), dict) else {})
+    template_policy_resolution = _resolve_studio_template_tool_policy(
+        data,
+        request_context=request_context,
+        resolver=template_policy_resolver,
+    )
     tool_catalog = _tool_catalog(data, usage.get("segments", []))
-    selected_tool_records = _selected_tool_records(tool_catalog, selected_tools)
+    policy_filtered_tools = _apply_template_tool_policy(tool_catalog, template_policy_resolution)
+    selected_tool_records = _selected_tool_records(policy_filtered_tools, selected_tools)
     skill_eval = _evaluate_studio_skills(
         data,
         user_text=user_text,
@@ -313,7 +322,11 @@ def test_prompt_input(
                 "metadata": {"matched_skills": matched_skills, "studio_test": True},
             },
         )
-    tool_candidates = _tool_candidates(prompt_body=prompt_body, user_text=user_text, tools=tool_catalog)
+    tool_candidates = _tool_candidates(
+        prompt_body=prompt_body,
+        user_text=user_text,
+        tools=policy_filtered_tools,
+    )
     segments = usage.get("segments") if isinstance(usage.get("segments"), list) else []
     selected_tool_segments = _tool_segments_for_ids(segments, selected_tools)
     candidate_tool_segments = _tool_segments_for_ids(
@@ -325,7 +338,16 @@ def test_prompt_input(
         selected_tool_segments=selected_tool_segments,
         matched_skills=matched_skills,
         tool_candidates=tool_candidates,
+        template_policy_resolution=template_policy_resolution,
     )
+    response_selected_tool_segments = _compact_segment_list(selected_tool_segments)
+    response_candidate_tool_segments = _compact_segment_list(candidate_tool_segments)
+    response_segments = _studio_test_response_segments(segments)
+    response_usage = compact_prompt_usage_for_metadata(usage)
+    response_usage["segments"] = response_segments
+    response_usage["active_segments"] = [segment for segment in response_segments if segment.get("status") == "active"]
+    response_usage["disabled_segments"] = [segment for segment in response_segments if segment.get("status") != "active"]
+    response_usage["response_segment_count"] = len(response_segments)
     return {
         "profile_id": profile_id,
         "prompt_id": prompt_id,
@@ -338,13 +360,13 @@ def test_prompt_input(
             "model_profile_id": model_profile_id,
             "model": model,
         },
-        "summary": usage,
-        "segments": segments,
+        "summary": response_usage,
+        "segments": response_segments,
         "matched_skills": matched_skills,
         "skill_instructions": skill_instructions,
         "selected_tool_records": selected_tool_records,
-        "selected_tool_segments": selected_tool_segments,
-        "candidate_tool_segments": candidate_tool_segments,
+        "selected_tool_segments": response_selected_tool_segments,
+        "candidate_tool_segments": response_candidate_tool_segments,
         "tool_candidates": tool_candidates,
         "prompt_tool_analysis": {
             "prompt_can_call_tool": False,
@@ -354,7 +376,9 @@ def test_prompt_input(
                 "Prompt text can make a tool look relevant, but it cannot attach, grant, or execute tools. "
                 "Only the tool registry, model/provider support, profile policy, and approval/authority path can make a tool callable."
             ),
+            "template_tool_policy": _template_policy_summary(template_policy_resolution),
         },
+        "template_tool_policy_resolution": template_policy_resolution,
         "safety_boundary": {
             "passive_text_only": True,
             "can_grant_permissions": False,
@@ -362,6 +386,163 @@ def test_prompt_input(
             "can_mutate_chat_state": False,
         },
         "verdicts": verdicts,
+    }
+
+
+def _resolve_studio_template_tool_policy(
+    data: dict[str, Any],
+    *,
+    request_context: dict[str, Any],
+    resolver: TemplatePolicyResolver | None,
+) -> dict[str, Any]:
+    request_policy = _template_policy_request(data, request_context)
+    if not request_policy:
+        return {
+            "id_requested": False,
+            "catalog_available": False,
+            "applied": False,
+            "blocked": False,
+            "policy": {},
+            "requested_ai_input_ids": [],
+            "requested_template_tool_policy_ids": [],
+            "resolved_ai_input_ids": [],
+            "resolved_template_tool_policy_ids": [],
+            "resolved_template_tool_policy_projected_ids": [],
+            "diagnostics": [],
+        }
+    if resolver is None:
+        return {
+            "id_requested": True,
+            "catalog_available": False,
+            "applied": False,
+            "blocked": True,
+            "policy": {"template_policy_blocked": True, "tool_choice": "none"},
+            "requested_ai_input_ids": _string_list(request_policy.get("template_ai_input_ids") or request_policy.get("ai_input_ids")),
+            "requested_template_tool_policy_ids": _string_list(request_policy.get("template_tool_policy_ids") or request_policy.get("tool_policy_ids")),
+            "resolved_ai_input_ids": [],
+            "resolved_template_tool_policy_ids": [],
+            "resolved_template_tool_policy_projected_ids": [],
+            "diagnostics": [
+                {
+                    "code": "template_policy_resolver_unavailable",
+                    "message": "Template tool policy ids were supplied, but no resolver was available.",
+                    "severity": "warning",
+                }
+            ],
+        }
+    metadata = {
+        "surface": "prompt_studio",
+        "studio_test": True,
+        "profile_id": data.get("profile_id"),
+        "conversation_id": data.get("conversation_id"),
+        "prompt_id": data.get("prompt_id") or data.get("name"),
+    }
+    try:
+        resolved = resolver(template_policy=request_policy, metadata=metadata)
+    except Exception as exc:
+        return {
+            "id_requested": True,
+            "catalog_available": False,
+            "applied": False,
+            "blocked": True,
+            "policy": {"template_policy_blocked": True, "tool_choice": "none"},
+            "requested_ai_input_ids": _string_list(request_policy.get("template_ai_input_ids") or request_policy.get("ai_input_ids")),
+            "requested_template_tool_policy_ids": _string_list(request_policy.get("template_tool_policy_ids") or request_policy.get("tool_policy_ids")),
+            "resolved_ai_input_ids": [],
+            "resolved_template_tool_policy_ids": [],
+            "resolved_template_tool_policy_projected_ids": [],
+            "diagnostics": [
+                {
+                    "code": "template_policy_resolution_failed",
+                    "message": str(exc),
+                    "severity": "warning",
+                }
+            ],
+        }
+    if not isinstance(resolved, dict):
+        return {"id_requested": True, "catalog_available": False, "applied": False, "blocked": True, "policy": {}, "diagnostics": []}
+    resolved.setdefault("policy", {})
+    resolved.setdefault("diagnostics", [])
+    return resolved
+
+
+def _template_policy_request(data: dict[str, Any], request_context: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    context_policy = request_context.get("template_policy")
+    if isinstance(context_policy, dict):
+        merged.update(context_policy)
+    explicit_policy = data.get("template_policy")
+    if isinstance(explicit_policy, dict):
+        merged.update(explicit_policy)
+    for key in (
+        "template_ai_input_id",
+        "template_ai_input_ids",
+        "ai_input_id",
+        "ai_input_ids",
+        "template_tool_policy_id",
+        "template_tool_policy_ids",
+        "tool_policy_id",
+        "tool_policy_ids",
+        "disabled_tools",
+    ):
+        if key in request_context and key not in merged:
+            merged[key] = request_context[key]
+        if key in data:
+            merged[key] = data[key]
+    return {key: value for key, value in merged.items() if value not in (None, "", [])}
+
+
+def _apply_template_tool_policy(
+    tools: list[dict[str, Any]],
+    resolution: dict[str, Any],
+) -> list[dict[str, Any]]:
+    policy = resolution.get("policy") if isinstance(resolution.get("policy"), dict) else {}
+    if not policy:
+        return tools
+    if resolution.get("blocked") or policy.get("template_policy_blocked") is True:
+        return []
+    allowlist = set(_string_list(policy.get("tool_allowlist") or policy.get("allowed_tools")))
+    denylist = set(_string_list(policy.get("tool_denylist") or policy.get("denied_tools")))
+    if not allowlist and not denylist:
+        return tools
+    filtered: list[dict[str, Any]] = []
+    for tool in tools:
+        identifiers = {
+            str(tool.get("tool_id") or "").strip(),
+            str(tool.get("name") or "").strip(),
+            str(tool.get("display_name") or "").strip(),
+        }
+        identifiers.discard("")
+        if denylist.intersection(identifiers):
+            continue
+        if allowlist and not allowlist.intersection(identifiers):
+            continue
+        filtered.append(tool)
+    return filtered
+
+
+def _template_policy_summary(resolution: dict[str, Any]) -> dict[str, Any]:
+    policy = resolution.get("policy") if isinstance(resolution.get("policy"), dict) else {}
+    return {
+        "id_requested": bool(resolution.get("id_requested")),
+        "applied": bool(resolution.get("applied")),
+        "blocked": bool(resolution.get("blocked")),
+        "catalog_available": bool(resolution.get("catalog_available")),
+        "requested_ai_input_ids": _string_list(resolution.get("requested_ai_input_ids")),
+        "requested_template_tool_policy_ids": _string_list(
+            resolution.get("requested_template_tool_policy_ids")
+        ),
+        "resolved_ai_input_ids": _string_list(resolution.get("resolved_ai_input_ids")),
+        "resolved_template_tool_policy_ids": _string_list(
+            resolution.get("resolved_template_tool_policy_ids")
+        ),
+        "resolved_template_tool_policy_projected_ids": _string_list(
+            resolution.get("resolved_template_tool_policy_projected_ids")
+        ),
+        "tool_allowlist": _string_list(policy.get("tool_allowlist")),
+        "tool_denylist": _string_list(policy.get("tool_denylist")),
+        "tool_choice": policy.get("tool_choice"),
+        "diagnostics": list(resolution.get("diagnostics") or []),
     }
 
 
@@ -1060,14 +1241,51 @@ def _tool_segments_for_ids(segments: list[Any], tool_ids: list[str]) -> list[dic
     return result
 
 
+def _studio_test_response_segments(segments: list[Any]) -> list[dict[str, Any]]:
+    focused = [
+        segment
+        for segment in segments
+        if isinstance(segment, dict) and str(segment.get("kind") or "") in {"skill", "context", "memory"}
+    ]
+    return _compact_segment_list(focused)
+
+
+def _compact_segment_list(segments: list[Any]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        key = (
+            str(segment.get("id") or ""),
+            str(segment.get("prompt_id") or ""),
+            str(segment.get("kind") or ""),
+            str(segment.get("status") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        compact = {item_key: copy.deepcopy(value) for item_key, value in segment.items() if item_key not in {"text", "schema"}}
+        text = str(segment.get("text") or "")
+        if text and not str(compact.get("preview") or "").strip():
+            compact["preview"] = " ".join(text.split())[:280]
+        if text:
+            compact["has_full_text"] = True
+        result.append(compact)
+    return result
+
+
 def _studio_test_verdicts(
     *,
     selected_tools: list[str],
     selected_tool_segments: list[dict[str, Any]],
     matched_skills: list[Any],
     tool_candidates: dict[str, Any],
+    template_policy_resolution: dict[str, Any],
 ) -> list[dict[str, str]]:
     candidates = tool_candidates.get("combined") if isinstance(tool_candidates.get("combined"), list) else []
+    policy_requested = bool(template_policy_resolution.get("id_requested"))
+    policy_blocked = bool(template_policy_resolution.get("blocked"))
     return [
         {
             "id": "skill",
@@ -1099,6 +1317,18 @@ def _studio_test_verdicts(
                 f"{len(candidates)} tool candidate{'s' if len(candidates) != 1 else ''} matched the prompt draft or test input."
                 if candidates
                 else "The prompt draft and test input did not produce a local tool candidate."
+            ),
+        },
+        {
+            "id": "template_tool_policy",
+            "status": "blocked" if policy_blocked else "matched" if policy_requested else "idle",
+            "title": "Template tool policy",
+            "detail": (
+                "Template tool policy blocked this Studio tool surface."
+                if policy_blocked
+                else "Template ai_input and tool_policy source ids resolved for this Studio test."
+                if policy_requested
+                else "No template ai_input or tool_policy source ids were supplied for this Studio test."
             ),
         },
         {

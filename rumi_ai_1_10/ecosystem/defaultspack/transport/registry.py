@@ -263,6 +263,7 @@ def template_http_route_specs(defaultspack_root: str | Path | None = None) -> Li
                 function_name=f"defaultspack:{function_id}",
                 block_module=str(item.get("block_module") or "").strip(),
                 defaults=dict(item.get("default_args") or {}),
+                path_inject=dict(item.get("path_inject") or {}),
                 pre_auth=bool(item.get("pre_auth")),
                 sensitive=bool(item.get("sensitive")),
             )

@@ -153,6 +153,7 @@ export type PromptStudioTestResult = {
     from_input?: Record<string, unknown>[];
   };
   prompt_tool_analysis?: Record<string, unknown>;
+  template_tool_policy_resolution?: Record<string, unknown>;
   safety_boundary?: Record<string, unknown>;
   verdicts?: Record<string, string>[];
 };
@@ -1509,6 +1510,13 @@ export type UICatalog = {
   context_policies?: TemplateContextPolicy[];
   composer_widgets?: TemplateCatalogMetadataItem[];
   external_io_templates?: TemplateCatalogMetadataItem[];
+  templates?: TemplateCatalogMetadataItem[];
+  actions?: TemplateCatalogMetadataItem[];
+  data_sources?: TemplateCatalogMetadataItem[];
+  api_routes?: TemplateCatalogMetadataItem[];
+  permissions?: TemplateCatalogMetadataItem[];
+  shell_regions?: ShellRegion[];
+  shell_renderers?: ShellRenderer[];
   extension_points: Array<{
     id: string;
     path: string;
@@ -2163,6 +2171,8 @@ export const api = {
     selected_tools?: string[];
     model_profile_id?: string;
     model?: string;
+    request_context?: Record<string, unknown>;
+    template_policy?: Record<string, unknown>;
   }) {
     return request<PromptStudioTestResult>("/api/prompts/test", {
       method: "POST",
