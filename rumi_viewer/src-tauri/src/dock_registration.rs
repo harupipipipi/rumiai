@@ -164,6 +164,29 @@ fn defaultspack_window_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/chat")
 }
 
+fn encode_url_fragment_value(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char)
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
+fn defaultspack_window_url_with_local_auth(port: u16, api_token: &str) -> AnyResult<String> {
+    let mut url = Url::parse(&defaultspack_window_url(port))
+        .with_context(|| format!("invalid defaultspack window port: {port}"))?;
+    url.set_fragment(Some(&format!(
+        "rumi_local_auth={}",
+        encode_url_fragment_value(api_token)
+    )));
+    Ok(url.to_string())
+}
+
 fn defaultspack_health_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/api/health")
 }
@@ -642,14 +665,14 @@ fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
             return Err(e);
         }
     };
-    let url = defaultspack_window_url(metadata.port);
-    info!("launch_defaultspack_desktop_impl: Defaultspack window URL will be {url}");
+    let base_url = defaultspack_window_url(metadata.port);
+    info!("launch_defaultspack_desktop_impl: Defaultspack window URL will be {base_url}");
     let api_token = read_desktop_api_token_from_config(config)
         .context("failed to read Viewer local auth token for Defaultspack launch")?;
 
     if is_defaultspack_http_ready(metadata.port, &api_token) {
         info!(
-            "launch_defaultspack_desktop_impl: health and local auth checks passed, server already ready at {url}"
+            "launch_defaultspack_desktop_impl: health and local auth checks passed, server already ready at {base_url}"
         );
     } else if defaultspack_health_client()
         .map(|client| check_defaultspack_health_ready(&client, metadata.port))
@@ -683,7 +706,7 @@ fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
             }
         };
         match wait_for_defaultspack_http_ready(metadata.port, &api_token, &mut child) {
-            Ok(()) => info!("launch_defaultspack_desktop_impl: server became ready at {url}"),
+            Ok(()) => info!("launch_defaultspack_desktop_impl: server became ready at {base_url}"),
             Err(e) => {
                 error!("launch_defaultspack_desktop_impl: wait_for_ready failed: {e:#}");
                 match child.try_wait() {
@@ -696,7 +719,7 @@ fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
         }
     }
 
-    Ok(url)
+    defaultspack_window_url_with_local_auth(metadata.port, &api_token)
 }
 
 fn focus_defaultspack_window(window: &tauri::WebviewWindow) -> AnyResult<()> {
@@ -1183,6 +1206,15 @@ mod tests {
         assert_eq!(
             defaultspack_window_url(DEFAULTSPACK_DEFAULT_PORT),
             "http://127.0.0.1:8766/chat"
+        );
+    }
+
+    #[test]
+    fn defaultspack_window_url_with_local_auth_uses_fragment() {
+        assert_eq!(
+            defaultspack_window_url_with_local_auth(DEFAULTSPACK_DEFAULT_PORT, "local+token/1=")
+                .unwrap(),
+            "http://127.0.0.1:8766/chat#rumi_local_auth=local%2Btoken%2F1%3D"
         );
     }
 

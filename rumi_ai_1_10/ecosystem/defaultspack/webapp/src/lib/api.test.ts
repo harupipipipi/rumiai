@@ -1306,6 +1306,77 @@ test("safe API requests do not include a local CSRF header", async () => {
   assert.equal(headers.get("X-Rumi-CSRF"), null);
 });
 
+test("API headers consume Viewer local auth from URL fragment", () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const values = new Map<string, string>();
+  let replacedUrl = "";
+  const fakeWindow = {
+    location: {
+      pathname: "/chat",
+      search: "?chat=c1",
+      hash: "#rumi_local_auth=local-token-1&panel=main",
+    },
+    history: {
+      state: { from: "test" },
+      replaceState: (_state: unknown, _title: string, url: string) => {
+        replacedUrl = url;
+        fakeWindow.location.hash = "#panel=main";
+      },
+    },
+  };
+
+  Object.defineProperty(globalThis, "window", { configurable: true, value: fakeWindow });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { title: "rumi DP" } });
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+    },
+  });
+
+  try {
+    const headers = defaultspackApiHeaders("GET");
+    assert.equal(headers.get("Authorization"), "Bearer local-token-1");
+    assert.equal(values.get("rumi-defaultspack-local-auth"), "local-token-1");
+    assert.equal(replacedUrl, "/chat?chat=c1#panel=main");
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+    if (previousDocument) Object.defineProperty(globalThis, "document", previousDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+    if (previousSessionStorage) Object.defineProperty(globalThis, "sessionStorage", previousSessionStorage);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});
+
+test("API headers keep explicit Authorization over Viewer local auth", () => {
+  const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => (key === "rumi-defaultspack-local-auth" ? "local-token-1" : null),
+      setItem: () => {},
+      removeItem: () => {},
+    },
+  });
+
+  try {
+    const headers = defaultspackApiHeaders("GET", { Authorization: "Bearer explicit-token" });
+    assert.equal(headers.get("Authorization"), "Bearer explicit-token");
+  } finally {
+    if (previousSessionStorage) Object.defineProperty(globalThis, "sessionStorage", previousSessionStorage);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});
+
 test("streamMessage includes a local CSRF header", async () => {
   const originalFetch = globalThis.fetch;
   let requestHeaders: Headers | null = null;
