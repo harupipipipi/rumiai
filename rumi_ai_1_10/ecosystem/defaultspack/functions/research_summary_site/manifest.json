@@ -1,0 +1,64 @@
+{
+  "function_id": "research_summary_site",
+  "description": "Create a browsable local research summary site.",
+  "tags": [
+    "research",
+    "artifact"
+  ],
+  "risk": "medium",
+  "requires": [
+    "research.report"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.research.summary_site",
+    "defaultspack.research.summary_site",
+    "defaults.research.summary.site",
+    "defaultspack.research.summary.site"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "title": {
+        "type": "string"
+      },
+      "query": {
+        "type": "string"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "sections": {
+        "type": "array"
+      },
+      "sources": {
+        "type": "array"
+      },
+      "output_path": {
+        "type": "string"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.research.summary_site",
+      "default_args": {}
+    }
+  }
+}

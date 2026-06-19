@@ -32,6 +32,7 @@ REQUESTED_AGENT_OS_TOOL_IDS = [
     "source_extract",
     "source_rank",
     "research_report_export",
+    "research_summary_site",
     "job_create",
     "job_status",
     "job_cancel",

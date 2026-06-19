@@ -5,6 +5,7 @@ from typing import Any
 
 from ._agent_os_common import err, ok, read_text_file, write_text_file, workspace
 from .export_tools import artifact_export
+from domain.research.summary_site import write_summary_site
 
 
 def source_extract(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -85,3 +86,13 @@ def wide_research(arguments: dict[str, Any], context: dict[str, Any] | None = No
 def research_report_export(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
     path = str(arguments.get("path") or arguments.get("report_path") or "research/report.md")
     return artifact_export({**arguments, "path": path, "format": str(arguments.get("format") or "html")}, context)
+
+
+def research_summary_site(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    try:
+        result = write_summary_site(arguments, context)
+        return ok(result, message="Research summary site created: {}".format(result.get("path")))
+    except ValueError as exc:
+        return err(str(exc), "INVALID_INPUT")
+    except Exception as exc:
+        return err(str(exc), "RESEARCH_SUMMARY_SITE_FAILED")
