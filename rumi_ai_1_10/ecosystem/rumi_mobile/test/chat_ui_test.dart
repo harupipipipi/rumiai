@@ -10,6 +10,7 @@ import 'package:rumi_remote_app/src/chat/chat_store.dart';
 import 'package:rumi_remote_app/src/chat/composer_bar.dart';
 import 'package:rumi_remote_app/src/chat/message_view.dart';
 import 'package:rumi_remote_app/src/data/pc/device_store.dart';
+import 'package:rumi_remote_app/src/domain/space.dart';
 import 'package:rumi_remote_app/src/settings/api_config_store.dart';
 
 class _FakeSecureStorage implements SecureKeyValueStorage {
@@ -85,9 +86,12 @@ void main() {
 
     await tester.pumpWidget(wrap(Scaffold(
       body: ChatDrawer(
+        spaces: const [Space.local],
+        activeSpaceId: Space.local.id,
         conversations: store.conversations,
         activeId: store.active?.id,
         onNewChat: () {},
+        onSelectSpace: (_) {},
         onSelect: (_) {},
         onDelete: (_) {},
         onRename: (_) {},

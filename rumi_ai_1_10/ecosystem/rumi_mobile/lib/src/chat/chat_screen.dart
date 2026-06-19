@@ -10,6 +10,7 @@ import '../data/pc/pc_chat_backend.dart';
 import '../domain/chat_event.dart';
 import '../domain/connection_state.dart';
 import '../domain/conversation_locator.dart';
+import '../domain/space.dart';
 import '../features/chat/connection_chip.dart';
 import '../settings/api_config_store.dart';
 import '../settings/settings_screen.dart';
@@ -47,6 +48,12 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _streaming = false;
   late Future<void> _initFuture;
 
+  List<Space> _spaces = [Space.local];
+  String _activeSpaceId = Space.local.id;
+  List<PcConversationItem> _pcConversations = [];
+  bool _loadingPc = false;
+  List<PairedDevice> _pairedDevices = [];
+
   @override
   void initState() {
     super.initState();
@@ -78,8 +85,83 @@ class _ChatScreenState extends State<ChatScreen> {
         await widget.store.createAndPersist();
       }
       await _loadPcConnection();
+      await _loadSpaces();
     } catch (error, stack) {
       debugPrint('Rumi init error: $error\n$stack');
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _loadSpaces() async {
+    _pairedDevices = await widget.deviceStore.loadPairedDevices();
+    final spaces = <Space>[Space.local];
+    for (final device in _pairedDevices) {
+      spaces.add(Space.fromPairedDevice(device));
+    }
+    _spaces = spaces;
+    if (!_spaces.any((s) => s.id == _activeSpaceId)) {
+      _activeSpaceId = Space.local.id;
+    }
+    if (_activeSpaceId != Space.local.id) {
+      await _loadPcConversations();
+    }
+  }
+
+  Future<void> _loadPcConversations() async {
+    final space = _spaces.where((s) => s.id == _activeSpaceId).firstOrNull;
+    if (space == null || !space.isPc) {
+      _pcConversations = [];
+      return;
+    }
+    final connection = space.pcConnection;
+    if (connection == null || !connection.isConfigured) {
+      _pcConversations = [];
+      return;
+    }
+    setState(() => _loadingPc = true);
+    try {
+      final backend = PcConversationBackend(
+          connection: connection, deviceId: space.deviceId);
+      final summaries = await backend.listConversations();
+      backend.close();
+      if (!mounted) return;
+      setState(() {
+        _pcConversations = summaries
+            .map((s) => PcConversationItem(
+                  id: s.id,
+                  title: s.title,
+                  messageCount: s.messageCount,
+                  updatedAt: s.updatedAt,
+                  pinned: s.pinned,
+                  preview: '',
+                ))
+            .toList();
+        _loadingPc = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _pcConversations = [];
+        _loadingPc = false;
+      });
+      _updateSpaceOffline(_activeSpaceId, true);
+    }
+  }
+
+  void _updateSpaceOffline(String spaceId, bool offline) {
+    _spaces = _spaces
+        .map((s) => s.id == spaceId ? s.copyWith(online: !offline) : s)
+        .toList();
+  }
+
+  Future<void> _selectSpace(String spaceId) async {
+    if (spaceId == _activeSpaceId) return;
+    setState(() {
+      _activeSpaceId = spaceId;
+      _pcConversations = [];
+    });
+    if (spaceId != Space.local.id) {
+      await _loadPcConversations();
     }
     if (mounted) setState(() {});
   }
@@ -187,12 +269,14 @@ class _ChatScreenState extends State<ChatScreen> {
         },
         onDevicePaired: (device) async {
           await _loadPcConnection();
+          await _loadSpaces();
           if (mounted) setState(() {});
         },
       ),
     ));
     final refreshed = await widget.configStore.loadApi();
     await _loadPcConnection();
+    await _loadSpaces();
     if (mounted) setState(() => _apiConfig = refreshed);
   }
 
@@ -271,6 +355,13 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  String _activeSpaceLabel() {
+    final space = _spaces.where((s) => s.id == _activeSpaceId).firstOrNull;
+    if (space == null) return '';
+    if (space.isLocal) return 'このスマホ';
+    return space.isOffline ? '${space.label} — オフライン' : space.label;
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<void>(
@@ -280,11 +371,19 @@ class _ChatScreenState extends State<ChatScreen> {
           drawer: Drawer(
             width: 320,
             child: ChatDrawer(
+              spaces: _spaces,
+              activeSpaceId: _activeSpaceId,
               conversations: widget.store.conversations,
+              pcConversations: _pcConversations,
+              loadingPc: _loadingPc,
               activeId: widget.store.active?.id,
               onNewChat: () {
                 Navigator.of(context).pop();
                 _newChat();
+              },
+              onSelectSpace: (spaceId) {
+                Navigator.of(context).pop();
+                _selectSpace(spaceId);
               },
               onSelect: (id) {
                 Navigator.of(context).pop();
@@ -297,7 +396,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 Navigator.of(context).pop();
                 _openSettings();
               },
-              pcConnected: _connectionView.isPcOnline,
             ),
           ),
           appBar: AppBar(
@@ -308,10 +406,23 @@ class _ChatScreenState extends State<ChatScreen> {
                 onPressed: () => Scaffold.of(context).openDrawer(),
               ),
             ),
-            title: Text(
-              widget.store.active?.title ?? 'Rumi',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.store.active?.title ?? 'Rumi',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  _activeSpaceLabel(),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w400,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
             ),
             actions: [
               ConnectionChip(

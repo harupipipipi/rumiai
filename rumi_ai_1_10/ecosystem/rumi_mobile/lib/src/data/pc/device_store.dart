@@ -133,6 +133,7 @@ class MobileDeviceStore {
 
   static const _identityKey = 'rumi.device.identity.v1';
   static const _pairedKey = 'rumi.paired_device.v1';
+  static const _pairedListKey = 'rumi.paired_devices.v1';
   static const _legacyPcKey = 'rumi.pc_connection.v1';
 
   final SecureKeyValueStorage _storage;
@@ -199,9 +200,59 @@ class MobileDeviceStore {
         await _storage.delete(_pairedKey);
       } else {
         await _storage.write(_pairedKey, jsonEncode(device.toJson()));
+        await addPairedDevice(device);
       }
     } catch (_) {
       // ignore secure storage failures
+    }
+  }
+
+  Future<List<PairedDevice>> loadPairedDevices() async {
+    try {
+      final raw = await _storage.read(_pairedListKey);
+      if (raw != null && raw.trim().isNotEmpty) {
+        final list = jsonDecode(raw) as List;
+        return list
+            .map((e) => PairedDevice.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+    } catch (_) {
+      // fall through
+    }
+    final devices = <PairedDevice>[];
+    final single = await loadPairedDevice();
+    if (single != null) {
+      devices.add(single);
+      await savePairedDevices(devices);
+    }
+    return devices;
+  }
+
+  Future<void> savePairedDevices(List<PairedDevice> devices) async {
+    try {
+      await _storage.write(
+        _pairedListKey,
+        jsonEncode(devices.map((d) => d.toJson()).toList()),
+      );
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  Future<void> addPairedDevice(PairedDevice device) async {
+    final devices = await loadPairedDevices();
+    devices.removeWhere((d) => d.deviceId == device.deviceId);
+    devices.add(device);
+    await savePairedDevices(devices);
+  }
+
+  Future<void> removePairedDevice(String deviceId) async {
+    final devices = await loadPairedDevices();
+    devices.removeWhere((d) => d.deviceId == deviceId);
+    await savePairedDevices(devices);
+    final single = await loadPairedDevice();
+    if (single != null && single.deviceId == deviceId) {
+      await _storage.delete(_pairedKey);
     }
   }
 
