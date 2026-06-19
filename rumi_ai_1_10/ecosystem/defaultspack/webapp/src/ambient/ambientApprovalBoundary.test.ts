@@ -146,6 +146,15 @@ test("ambient debug QA simulated OK payload avoids persistent media bytes", () =
   assert.match(miniChatSource, /data-testid="ambient-mini-chat-input"/);
 });
 
+test("ambient event submit forwards browser QA token header", () => {
+  const clientSource = readFileSync(resolve(SRC_ROOT, "ambient", "ambientTriggerClient.ts"), "utf8");
+
+  assert.match(clientSource, /readBrowserApprovalToken/);
+  assert.match(clientSource, /function browserApprovalHeaders\(\)/);
+  assert.match(clientSource, /"X-Rumi-Approval-Browser-Token": token/);
+  assert.match(clientSource, /submitEvent\(payload: AmbientEventPayload\)[\s\S]*headers: browserApprovalHeaders\(\)/);
+});
+
 test("ambient mini chat keeps a submitted conversation active over stale routing", () => {
   const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
 

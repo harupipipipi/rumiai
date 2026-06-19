@@ -303,6 +303,7 @@ class DefaultsHttpServer:
         for source_key, dest_key in (inject or {}).items():
             payload[dest_key] = path_params.get(source_key, "")
         context = self._build_context()
+        _apply_ambient_browser_qa_context(context, payload)
         # Standalone live-server scripts start transport with no kernel facade.
         # In that mode, capability bridge resolution can block while trying to
         # discover runtime services that do not exist. Call the block directly.
@@ -414,6 +415,7 @@ class DefaultsHttpServer:
         context = self._build_context()
         context["flow_id"] = "transport_function_route"
         context["_defaultspack_http_route_adapter"] = True
+        _apply_ambient_browser_qa_context(context, payload)
         try:
             from domain.function_runtime.bridge import invoke_function
 
@@ -1212,6 +1214,7 @@ _SENSITIVE_CHAT_PATH_RE = re.compile(
 _SENSITIVE_HUMAN_OPERATOR_PATH_RE = re.compile(
     r"^/api/human-operator/conversations/[^/]+/sessions/[^/]+(?:/messages)?$"
 )
+_AMBIENT_BROWSER_QA_CONTEXT_FLAG = "_ambient_browser_qa_pre_auth_approved"
 
 _LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -1310,6 +1313,26 @@ def _bearer_token(headers):
     return auth_header[7:].strip()
 
 
+def _ambient_browser_test_token_authorized(method, path, headers):
+    if str(method or "").upper() != "POST" or str(path or "") != "/api/ambient/events":
+        return False
+    expected = os.environ.get("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "").strip()
+    if not expected:
+        return False
+    provided = _header_value(headers, "X-Rumi-Approval-Browser-Token").strip()
+    return bool(provided) and hmac.compare_digest(provided, expected)
+
+
+def _apply_ambient_browser_qa_context(context, payload):
+    if not isinstance(context, dict) or not isinstance(payload, dict):
+        return
+    if payload.pop(_AMBIENT_BROWSER_QA_CONTEXT_FLAG, False) is not True:
+        return
+    context["_tool_server_approved"] = True
+    context["source"] = "ambient_browser_qa"
+    context["approval_id"] = "ambient_browser_qa"
+
+
 class _RequestHandler(http.server.BaseHTTPRequestHandler):
     server_ref = None
     protocol_version = "HTTP/1.1"
@@ -1401,6 +1424,9 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             if sensitive_error:
                 self._send_json(sensitive_error[0], error(sensitive_error[1], sensitive_error[2]))
                 return
+            request_data.pop(_AMBIENT_BROWSER_QA_CONTEXT_FLAG, None)
+            if _ambient_browser_test_token_authorized(method, path, self.headers):
+                request_data[_AMBIENT_BROWSER_QA_CONTEXT_FLAG] = True
 
             if source == "registry":
                 # Inject path parameters into request_data per route config
@@ -1414,6 +1440,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     context = self.server_ref._build_context()
                     context["_facade"] = self.server_ref.facade
+                    _apply_ambient_browser_qa_context(context, request_data)
                     result = handler(request_data, context)
             else:
                 request_data["_method"] = method
@@ -1529,6 +1556,14 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         origin = self.headers.get("Origin", "")
         if not _is_allowed_sensitive_origin(origin):
             return (403, "origin not allowed for sensitive integration route", "ORIGIN_DENIED")
+        if _ambient_browser_test_token_authorized(method, path, self.headers):
+            if (
+                method.upper() in {"POST", "PUT", "DELETE"}
+                and origin
+                and not self.headers.get("X-Rumi-CSRF", "").strip()
+            ):
+                return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
+            return None
         expected = _configured_local_auth_token()
         provided = _bearer_token(self.headers)
         if not expected:

@@ -912,7 +912,12 @@ def _prepared_user_content(
         if isinstance(content, list):
             content.extend(_attachment_text_blocks(attachments))
             content.extend(_attachment_image_blocks(attachments))
-            content.extend(_attachment_audio_transcript_blocks(attachments))
+            content.extend(
+                _attachment_audio_transcript_blocks(
+                    attachments,
+                    existing_text=_content_text_for_transcript_dedupe(content),
+                )
+            )
             audio_blocks = _attachment_audio_blocks(attachments)
             if audio_blocks:
                 runtime_content = list(content)
@@ -1601,10 +1606,48 @@ def _attachment_audio_placeholders(attachments: list[dict[str, Any]]) -> list[di
     return blocks
 
 
-def _attachment_audio_transcript_blocks(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    from blocks.chat.materialize_context import materialized_audio_transcript_blocks
+def _attachment_audio_transcript_blocks(
+    attachments: list[dict[str, Any]],
+    *,
+    existing_text: str = "",
+) -> list[dict[str, Any]]:
+    from blocks.chat.materialize_context import (
+        materialized_audio_transcript,
+        materialized_audio_transcript_blocks,
+    )
 
-    return materialized_audio_transcript_blocks(attachments)
+    existing_normalized = _normalize_transcript_for_dedupe(existing_text)
+    blocks: list[dict[str, Any]] = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        transcript = materialized_audio_transcript(attachment)
+        if transcript and existing_normalized:
+            transcript_normalized = _normalize_transcript_for_dedupe(transcript)
+            if transcript_normalized and transcript_normalized in existing_normalized:
+                continue
+        blocks.extend(materialized_audio_transcript_blocks([attachment]))
+    return blocks
+
+
+def _content_text_for_transcript_dedupe(content: list[Any]) -> str:
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if str(block.get("type") or "text") != "text":
+            continue
+        text = block.get("text")
+        if isinstance(text, str) and text.strip():
+            parts.append(text)
+    return "\n".join(parts)
+
+
+def _normalize_transcript_for_dedupe(value: str) -> str:
+    text = str(value or "")
+    text = re.sub(r"音声入力の文字起こし\s*[:：][^\n]*(?:\n|$)", "\n", text)
+    text = re.sub(r"^\s*文字起こし\s*[:：]\s*", "", text)
+    return re.sub(r"\s+", "", text)
 
 
 def _attachment_audio_transcript(attachment: dict[str, Any]) -> str:

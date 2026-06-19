@@ -191,6 +191,24 @@ def test_materialized_audio_transcript_blocks_are_shared_for_ambient_recordings(
     ]
 
 
+def test_chat_run_skips_audio_transcript_block_when_text_already_contains_transcript():
+    from domain.chat.run_request import _attachment_audio_transcript_blocks
+
+    blocks = _attachment_audio_transcript_blocks(
+        [
+            {
+                "name": "debug-ok-mark.webm",
+                "type": "audio/webm",
+                "metadata": {"transcript": "ブラウザQAのテストです。"},
+                "dataUrl": "data:audio/webm;base64,AAAA",
+            }
+        ],
+        existing_text="文字起こし:\nブラウザQAのテストです。",
+    )
+
+    assert blocks == []
+
+
 def test_materialize_context_honors_markdown_alias_and_metadata(tmp_path, monkeypatch):
     from blocks.chat import materialize_context
     from domain.chat.store import ChatStore

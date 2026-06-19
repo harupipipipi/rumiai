@@ -170,6 +170,103 @@ def test_route_metadata_sensitive_reads_server_route_table():
     assert request_handler._route_metadata_sensitive("GET", "/api/template/sensitive") is False
 
 
+def test_ambient_browser_qa_token_can_submit_pre_auth_event(monkeypatch):
+    from transport.http import _RequestHandler
+
+    def handler(request_data, path_params):
+        return {"ok": True, "request_data": request_data, "path_params": path_params}
+
+    handler.__rumi_route_pre_auth__ = True
+    request_handler = _RequestHandler.__new__(_RequestHandler)
+    request_handler.client_address = ("127.0.0.1", 54321)
+    request_handler.server_ref = SimpleNamespace(
+        _routes=[
+            (
+                "POST",
+                re.compile("^/api/ambient/events$"),
+                handler,
+                "registry",
+                {},
+                "/api/ambient/events",
+            )
+        ]
+    )
+
+    monkeypatch.setenv("RUMI_API_TOKEN", "local-secret")
+    monkeypatch.setenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "browser-secret")
+
+    request_handler.headers = {
+        "Origin": "http://localhost:8766",
+        "X-Rumi-CSRF": "1",
+        "X-Rumi-Approval-Browser-Token": "browser-secret",
+    }
+    assert request_handler._sensitive_request_error("POST", "/api/ambient/events") is None
+
+    request_handler.headers = {
+        "Origin": "http://localhost:8766",
+        "X-Rumi-CSRF": "1",
+        "X-Rumi-Approval-Browser-Token": "wrong",
+    }
+    assert request_handler._sensitive_request_error("POST", "/api/ambient/events") == (
+        401,
+        "local auth token required",
+        "AUTH_REQUIRED",
+    )
+
+    request_handler.headers = {
+        "Origin": "http://localhost:8766",
+        "X-Rumi-Approval-Browser-Token": "browser-secret",
+    }
+    assert request_handler._sensitive_request_error("POST", "/api/ambient/events") == (
+        403,
+        "CSRF header required for sensitive integration mutation",
+        "CSRF_REQUIRED",
+    )
+
+
+def test_ambient_browser_qa_context_flag_becomes_tool_server_approval():
+    from transport.http import _AMBIENT_BROWSER_QA_CONTEXT_FLAG, _apply_ambient_browser_qa_context
+
+    context = {}
+    payload = {_AMBIENT_BROWSER_QA_CONTEXT_FLAG: True, "input_text": "hello"}
+
+    _apply_ambient_browser_qa_context(context, payload)
+
+    assert payload == {"input_text": "hello"}
+    assert context["_tool_server_approved"] is True
+    assert context["source"] == "ambient_browser_qa"
+    assert context["approval_id"] == "ambient_browser_qa"
+
+
+def test_ambient_browser_qa_context_reaches_function_routes(monkeypatch):
+    from domain.function_runtime import bridge
+    from transport.http import DefaultsHttpServer, _AMBIENT_BROWSER_QA_CONTEXT_FLAG
+
+    captured = {}
+
+    def fake_invoke_function(function_name, args, context, **kwargs):
+        captured["function_name"] = function_name
+        captured["args"] = dict(args)
+        captured["context"] = dict(context)
+        captured["kwargs"] = dict(kwargs)
+        return {"status": "ok", "data": {"ok": True}}
+
+    monkeypatch.setattr(bridge, "invoke_function", fake_invoke_function)
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+
+    result = server._invoke_function_route(
+        "ambient_event_submit",
+        {_AMBIENT_BROWSER_QA_CONTEXT_FLAG: True, "input_text": "hello"},
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert captured["function_name"] == "ambient_event_submit"
+    assert captured["args"] == {"input_text": "hello"}
+    assert captured["context"]["_tool_server_approved"] is True
+    assert captured["context"]["source"] == "ambient_browser_qa"
+
+
 def test_self_improvement_routes_are_guarded_as_sensitive_local_routes():
     from domain.safety.local_guard import require_local_guard
     from transport.http import _RequestHandler, _is_sensitive_http_path
