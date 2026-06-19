@@ -718,10 +718,13 @@ class ChatStore:
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return None
-        from domain.chat.exporter import export_markdown, export_json
+        from domain.chat.exporter import export_markdown, export_json, export_text
         conv_copy = copy.deepcopy(conv)
-        if fmt == "json":
+        normalized_fmt = str(fmt or "markdown").strip().lower()
+        if normalized_fmt == "json":
             return export_json(conv_copy)
+        if normalized_fmt in {"text", "txt"}:
+            return export_text(conv_copy)
         return export_markdown(conv_copy)
 
     # ----------------------------------------------------------

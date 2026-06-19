@@ -98,7 +98,10 @@ def test_tool_recommender_expands_japanese_coding_file_terms():
         {"tool_id": "web_search", "summary": "Search web pages.", "tags": ["web"]},
     ]
 
-    assert recommend_tool_ids("コードを編集してファイルを修正", tools, limit=2)[0] == "coding_file_patch"
+    assert (
+        recommend_tool_ids("コードを編集してファイルを修正", tools, limit=2)[0]
+        == "coding_file_patch"
+    )
 
 
 def test_tool_search_returns_overview_and_schema_from_docs(tmp_path):
@@ -106,14 +109,21 @@ def test_tool_search_returns_overview_and_schema_from_docs(tmp_path):
 
     manifest = tmp_path / "manifest.json"
     manifest.write_text("{}", encoding="utf-8")
-    (tmp_path / "SKILL.md").write_text("Use this tool for parquet schema extraction and dataset docs.", encoding="utf-8")
+    (tmp_path / "SKILL.md").write_text(
+        "Use this tool for parquet schema extraction and dataset docs.", encoding="utf-8"
+    )
     tools = [
         {
             "tool_id": "dataset_schema",
             "name": "Dataset Schema",
             "summary": "",
             "tags": [],
-            "schema": {"parameters": {"type": "object", "properties": {"path": {"description": "dataset path"}}}},
+            "schema": {
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"description": "dataset path"}},
+                }
+            },
             "metadata": {"manifest_path": str(manifest)},
         }
     ]
@@ -134,7 +144,9 @@ def test_effective_tool_assist_defaults_to_auto_and_migrates_legacy_all():
     assert effective_tool_assist_mode({"tools": {"tool_assist_mode": "all"}}) == "auto"
     assert effective_tool_assist_mode({"tools": {"tool_assist_mode": "auto"}}) == "auto"
     assert effective_tool_assist_mode({"tools": {"tool_assist_mode": "vector"}}) == "vector"
-    assert effective_tool_assist_mode({"tools": {"tool_assist_mode": "all_schemas"}}) == "all_schemas"
+    assert (
+        effective_tool_assist_mode({"tools": {"tool_assist_mode": "all_schemas"}}) == "all_schemas"
+    )
 
 
 def test_tool_loading_defaults_to_vector_and_only_always_is_eager():
@@ -186,7 +198,9 @@ def test_select_relevant_keeps_always_tools_when_vector_matches_are_empty(monkey
     assert captured["candidate_ids"] == ["calculator"]
 
 
-def test_run_request_all_schemas_tool_assist_exposes_every_tool_when_explicitly_configured(monkeypatch):
+def test_run_request_all_schemas_tool_assist_exposes_every_tool_when_explicitly_configured(
+    monkeypatch,
+):
     from domain.chat import run_request
 
     fake_tools = [
@@ -377,8 +391,14 @@ def test_run_request_metadata_selected_tools_disables_auto_recommendation(monkey
         return [], []
 
     monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
-    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     run_request._available_tools(
@@ -400,8 +420,14 @@ def test_run_request_tool_selection_auto_preserves_settings_driven_selection(mon
         return [], []
 
     monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
-    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     run_request._available_tools(
@@ -432,8 +458,14 @@ def test_run_request_tool_selection_auto_merges_inferred_tools(monkeypatch):
         return [{"tool_id": item} for item in raw_tools], []
 
     monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
-    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     raw_tools, _provider_tools, _tool_context = run_request._available_tools(
@@ -443,7 +475,11 @@ def test_run_request_tool_selection_auto_merges_inferred_tools(monkeypatch):
     )
 
     assert calls == [None, ["computer_use", "browser_computer"]]
-    assert [tool["tool_id"] for tool in raw_tools] == ["tool_names", "computer_use", "browser_computer"]
+    assert [tool["tool_id"] for tool in raw_tools] == [
+        "tool_names",
+        "computer_use",
+        "browser_computer",
+    ]
 
 
 def test_run_request_tool_selection_none_blocks_auto_and_inferred_tools(monkeypatch):
@@ -463,8 +499,14 @@ def test_run_request_tool_selection_none_blocks_auto_and_inferred_tools(monkeypa
         return [], []
 
     monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
-    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     run_request._available_tools(
@@ -515,7 +557,9 @@ def test_run_request_tool_selection_must_use_requires_tool_choice(tmp_path, monk
         {
             "conversation_id": conversation["id"],
             "message": {"role": "user", "content": "must use calculator"},
-            "params": {"tool_selection": {"mode": "manual", "include": ["calculator"], "must_use": True}},
+            "params": {
+                "tool_selection": {"mode": "manual", "include": ["calculator"], "must_use": True}
+            },
         },
         {},
     )
@@ -568,11 +612,19 @@ def test_run_request_rejects_unimplemented_or_conflicting_tool_selection():
         }
 
     assert "mode=review" in validate_chat_run_input(payload({"mode": "review"}))
-    assert "scope=conversation" in validate_chat_run_input(payload({"mode": "auto", "scope": "conversation"}))
-    assert "review is not implemented" in validate_chat_run_input(payload({"mode": "auto", "review": True}))
+    assert "scope=conversation" in validate_chat_run_input(
+        payload({"mode": "auto", "scope": "conversation"})
+    )
+    assert "review is not implemented" in validate_chat_run_input(
+        payload({"mode": "auto", "review": True})
+    )
     assert "mode=none" in validate_chat_run_input(payload({"mode": "none", "must_use": True}))
-    assert "mode=none" in validate_chat_run_input(payload({"mode": "manual", "include": [], "must_use": True}))
-    assert "cannot include tools" in validate_chat_run_input(payload({"mode": "none", "include": ["web_search"]}))
+    assert "mode=none" in validate_chat_run_input(
+        payload({"mode": "manual", "include": [], "must_use": True})
+    )
+    assert "cannot include tools" in validate_chat_run_input(
+        payload({"mode": "none", "include": ["web_search"]})
+    )
     assert "mode must be" in validate_chat_run_input(payload({"mode": "sometimes"}))
 
 
@@ -586,8 +638,14 @@ def test_run_request_tool_selection_manual_empty_normalizes_to_none(monkeypatch)
         return [], []
 
     monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
-    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     _raw_tools, _provider_tools, tool_context = run_request._available_tools(
@@ -609,8 +667,14 @@ def test_run_request_tool_selection_exclude_wins_over_include(monkeypatch):
         return [{"tool_id": str(item)} for item in raw_tools], []
 
     monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
-    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     raw_tools, _provider_tools, tool_context = run_request._available_tools(
@@ -641,8 +705,14 @@ def test_run_request_tool_selection_takes_priority_over_legacy_tools(monkeypatch
         return [{"tool_id": str(item)} for item in raw_tools], []
 
     monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
-    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     raw_tools, _provider_tools, _tool_context = run_request._available_tools(
@@ -746,7 +816,7 @@ def test_assistant_tool_history_preserves_reasoning_content():
                     "type": "function",
                     "function": {
                         "name": "coding_terminal_exec",
-                        "arguments": "{\"command\": \"echo ok\"}",
+                        "arguments": '{"command": "echo ok"}',
                     },
                 }
             ],

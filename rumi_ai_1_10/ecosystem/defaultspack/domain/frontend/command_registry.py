@@ -31,6 +31,9 @@ ALLOWED_RUMI_FUNCTIONS = {
 PACK_BLOCK_ALLOWED_ORIGINS = (MANIFEST_ORIGIN_DEFAULT, MANIFEST_ORIGIN_PACK)
 PACK_BLOCK_ALLOWED_MODULE_PREFIXES = ("blocks.",)
 PACK_BLOCK_ALLOWED_PACK_IDS = {"defaultspack", "default"}
+TEMPLATE_COMMAND_KEYS = ("commands", "slash_commands", "slashCommands")
+TEMPLATE_ACTION_KEYS = ("actions",)
+TEMPLATE_TRUST_BUILTIN = "builtin"
 
 
 def ok(data: Any = None) -> dict[str, Any]:
@@ -68,44 +71,59 @@ class SlashCommandRegistry:
                 return command
         return None
 
-    def execute(self, payload: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    def execute(
+        self, payload: dict[str, Any], context: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         command = self.find_command(str(payload.get("command") or ""))
         if command is None:
             return error("command not found", "NOT_FOUND")
 
         mode = str(payload.get("mode") or "chat")
         if mode not in command.get("modes", []):
-            return error("command is not available in this mode", "COMMAND_UNAVAILABLE", details={"mode": mode})
+            return error(
+                "command is not available in this mode",
+                "COMMAND_UNAVAILABLE",
+                details={"mode": mode},
+            )
 
-        args_result = self._coerce_args(command, payload.get("args") if isinstance(payload.get("args"), dict) else {})
+        args_result = self._coerce_args(
+            command, payload.get("args") if isinstance(payload.get("args"), dict) else {}
+        )
         if isinstance(args_result, dict) and args_result.get("status") == "error":
             return args_result
         args = args_result
         if command.get("risk") == "high":
-            return ok({
-                "command": self._public_command(command),
-                "executed": False,
-                "requires_approval": True,
-                "message": "This command requires approval center confirmation.",
-            })
+            return ok(
+                {
+                    "command": self._public_command(command),
+                    "executed": False,
+                    "requires_approval": True,
+                    "message": "This command requires approval center confirmation.",
+                }
+            )
 
         execution = command.get("execution") if isinstance(command.get("execution"), dict) else {}
         execution_type = str(execution.get("type") or "frontend")
 
         if execution_type == "frontend":
-            return ok({
-                "command": self._public_command(command),
-                "executed": False,
-                "action": execution.get("action"),
-                "args": args,
-            })
+            return ok(
+                {
+                    "command": self._public_command(command),
+                    "executed": False,
+                    "action": execution.get("action"),
+                    "args": args,
+                }
+            )
 
         if execution_type == "model_command":
             return self._execute_model_command(command, execution, args)
 
         if execution_type == "rumi_function":
             if command.get("_manifest_origin") != MANIFEST_ORIGIN_DEFAULT:
-                return error("rumi_function execution is only allowed for built-in default commands", "INVALID_COMMAND")
+                return error(
+                    "rumi_function execution is only allowed for built-in default commands",
+                    "INVALID_COMMAND",
+                )
             qualified_name = str(execution.get("qualified_name") or "").strip()
             if not qualified_name:
                 return error("rumi_function command is missing qualified_name", "INVALID_COMMAND")
@@ -118,8 +136,15 @@ class SlashCommandRegistry:
             if isinstance(builtin_result, dict) and builtin_result.get("status") == "error":
                 return builtin_result
             if builtin_result is not None:
-                payload = {"command": self._public_command(command), "executed": True, "result": builtin_result}
-                if isinstance(builtin_result, dict) and str(builtin_result.get("message") or "").strip():
+                payload = {
+                    "command": self._public_command(command),
+                    "executed": True,
+                    "result": builtin_result,
+                }
+                if (
+                    isinstance(builtin_result, dict)
+                    and str(builtin_result.get("message") or "").strip()
+                ):
                     payload["message"] = str(builtin_result.get("message") or "")
                 return ok(payload)
             return error("rumi_function command is not allowlisted", "INVALID_COMMAND")
@@ -130,7 +155,11 @@ class SlashCommandRegistry:
         if execution_type == "pack_block":
             return self._execute_pack_block(command, execution, args, payload, context or {})
 
-        return error("unsupported command execution type", "INVALID_COMMAND", details={"type": execution_type})
+        return error(
+            "unsupported command execution type",
+            "INVALID_COMMAND",
+            details={"type": execution_type},
+        )
 
     def _execute_model_command(
         self,
@@ -140,17 +169,21 @@ class SlashCommandRegistry:
     ) -> dict[str, Any]:
         action = str(execution.get("action") or "")
         if action != "select_or_suggest_model":
-            return error("unsupported model command action", "INVALID_COMMAND", details={"action": action})
+            return error(
+                "unsupported model command action", "INVALID_COMMAND", details={"action": action}
+            )
 
         query = str(args.get("query") or "").strip()
         if not query:
-            return ok({
-                "command": self._public_command(command),
-                "executed": False,
-                "action": "open_model_picker",
-                "candidates": [],
-                "args": args,
-            })
+            return ok(
+                {
+                    "command": self._public_command(command),
+                    "executed": False,
+                    "action": "open_model_picker",
+                    "candidates": [],
+                    "args": args,
+                }
+            )
 
         try:
             from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
@@ -161,22 +194,26 @@ class SlashCommandRegistry:
             candidates = resolution.get("candidates", []) if isinstance(resolution, dict) else []
             if isinstance(exact, dict) and exact.get("profile_id"):
                 result = service.set_preferred_model(str(exact["profile_id"]))
-                return ok({
-                    "command": self._public_command(command),
-                    "executed": True,
-                    "result": result,
-                    "selected_model": exact,
-                    "args": args,
-                })
+                return ok(
+                    {
+                        "command": self._public_command(command),
+                        "executed": True,
+                        "result": result,
+                        "selected_model": exact,
+                        "args": args,
+                    }
+                )
             message = "No matching models found." if not candidates else "Choose a model candidate."
-            return ok({
-                "command": self._public_command(command),
-                "executed": False,
-                "action": "show_model_candidates",
-                "candidates": candidates,
-                "args": args,
-                "message": message,
-            })
+            return ok(
+                {
+                    "command": self._public_command(command),
+                    "executed": False,
+                    "action": "show_model_candidates",
+                    "candidates": candidates,
+                    "args": args,
+                    "message": message,
+                }
+            )
         except Exception as exc:
             return error(str(exc), "EXECUTION_FAILED")
 
@@ -190,7 +227,14 @@ class SlashCommandRegistry:
     ) -> dict[str, Any]:
         action = str(execution.get("action") or "")
         if action != "compact_conversation":
-            return ok({"command": self._public_command(command), "executed": False, "action": action, "args": args})
+            return ok(
+                {
+                    "command": self._public_command(command),
+                    "executed": False,
+                    "action": action,
+                    "args": args,
+                }
+            )
 
         conversation_id = str(payload.get("conversation_id") or "").strip()
         if conversation_id:
@@ -200,8 +244,18 @@ class SlashCommandRegistry:
             compact_input["conversation_id"] = conversation_id
             result = chat_compact_run(compact_input, context)
             if isinstance(result, dict) and result.get("status") == "ok":
-                return ok({"command": self._public_command(command), "executed": True, "result": result.get("data")})
-            return result if isinstance(result, dict) else error("compact command failed", "EXECUTION_FAILED")
+                return ok(
+                    {
+                        "command": self._public_command(command),
+                        "executed": True,
+                        "result": result.get("data"),
+                    }
+                )
+            return (
+                result
+                if isinstance(result, dict)
+                else error("compact command failed", "EXECUTION_FAILED")
+            )
 
         from blocks.context.compact import run as compact_run
 
@@ -214,8 +268,18 @@ class SlashCommandRegistry:
             context,
         )
         if isinstance(result, dict) and result.get("status") == "ok":
-            return ok({"command": self._public_command(command), "executed": True, "result": result.get("data")})
-        return result if isinstance(result, dict) else error("compact command failed", "EXECUTION_FAILED")
+            return ok(
+                {
+                    "command": self._public_command(command),
+                    "executed": True,
+                    "result": result.get("data"),
+                }
+            )
+        return (
+            result
+            if isinstance(result, dict)
+            else error("compact command failed", "EXECUTION_FAILED")
+        )
 
     def _execute_pack_block(
         self,
@@ -297,16 +361,22 @@ class SlashCommandRegistry:
         except Exception as exc:
             return error(f"pack_block execution failed: {exc}", "EXECUTION_FAILED")
         if isinstance(result, dict) and result.get("status") == "ok":
-            return ok({
+            data = result.get("data")
+            payload = {
                 "command": self._public_command(command),
                 "executed": True,
-                "result": result.get("data"),
-            })
+                "result": data,
+            }
+            if isinstance(data, dict) and str(data.get("message") or "").strip():
+                payload["message"] = str(data.get("message") or "")
+            return ok(payload)
         if isinstance(result, dict):
             return result
         return error("pack_block returned an unexpected response", "EXECUTION_FAILED")
 
-    def _execute_builtin_rumi_function(self, qualified_name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+    def _execute_builtin_rumi_function(
+        self, qualified_name: str, args: dict[str, Any]
+    ) -> dict[str, Any] | None:
         function_id = self._rumi_function_id(qualified_name)
         if function_id not in ALLOWED_RUMI_FUNCTIONS:
             return None
@@ -318,13 +388,24 @@ class SlashCommandRegistry:
             if function_id == "ai_get_preferred_model":
                 return {"profile_id": service.get_preferred_model()}
             if function_id == "ai_set_preferred_model":
-                return service.set_preferred_model(str(args.get("profile_id") or args.get("model") or ""))
+                return service.set_preferred_model(
+                    str(args.get("profile_id") or args.get("model") or "")
+                )
             if function_id == "ai_get_thinking_level":
-                return service.get_thinking_level(args.get("scope", "global"), args.get("profile_id"), args.get("conversation_id"))
+                return service.get_thinking_level(
+                    args.get("scope", "global"), args.get("profile_id"), args.get("conversation_id")
+                )
             if function_id == "ai_set_thinking_level":
-                return service.set_thinking_level(str(args.get("level") or ""), args.get("scope", "global"), args.get("profile_id"), args.get("conversation_id"))
+                return service.set_thinking_level(
+                    str(args.get("level") or ""),
+                    args.get("scope", "global"),
+                    args.get("profile_id"),
+                    args.get("conversation_id"),
+                )
             if function_id == "ai_get_effective_thinking_level":
-                return service.get_effective_thinking_level(args.get("profile_id"), args.get("conversation_id"))
+                return service.get_effective_thinking_level(
+                    args.get("profile_id"), args.get("conversation_id")
+                )
             if function_id == "ai_normalize_thinking_level":
                 return service.normalize_for_provider(
                     str(args.get("provider_id") or ""),
@@ -343,6 +424,7 @@ class SlashCommandRegistry:
     def _commands_with_errors(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         manifest_errors: list[dict[str, Any]] = []
         commands: list[dict[str, Any]] = []
+        template_commands = self._load_template_catalog_commands(manifest_errors)
         commands.extend(
             self._load_manifest_file(
                 self._pack_root / "commands" / "default_commands.json",
@@ -350,12 +432,234 @@ class SlashCommandRegistry:
                 manifest_errors,
             )
         )
-        commands.extend(self._load_manifest_dir(self._pack_root / "commands" / "manifests", MANIFEST_ORIGIN_PACK, manifest_errors))
-        commands.extend(self._load_manifest_dir(self._pack_root / "user_data" / "shared" / "commands", MANIFEST_ORIGIN_USER, manifest_errors))
+        commands.extend(template_commands[MANIFEST_ORIGIN_DEFAULT])
+        commands.extend(
+            self._load_manifest_dir(
+                self._pack_root / "commands" / "manifests", MANIFEST_ORIGIN_PACK, manifest_errors
+            )
+        )
+        commands.extend(
+            self._load_manifest_dir(
+                self._pack_root / "user_data" / "shared" / "commands",
+                MANIFEST_ORIGIN_USER,
+                manifest_errors,
+            )
+        )
+        commands.extend(template_commands[MANIFEST_ORIGIN_USER])
         normalized = [self._normalize(item) for item in commands if isinstance(item, dict)]
         return self._dedupe_by_id(normalized, manifest_errors), manifest_errors
 
-    def _load_manifest_dir(self, path: Path, origin: str, manifest_errors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _load_template_catalog_commands(
+        self, manifest_errors: list[dict[str, Any]]
+    ) -> dict[str, list[dict[str, Any]]]:
+        buckets: dict[str, list[dict[str, Any]]] = {
+            MANIFEST_ORIGIN_DEFAULT: [],
+            MANIFEST_ORIGIN_USER: [],
+        }
+        if not self._has_template_roots():
+            return buckets
+
+        try:
+            projectors = importlib.import_module("domain.templates.projectors")
+        except ModuleNotFoundError:
+            return buckets
+        except Exception as exc:
+            manifest_errors.append(
+                self._manifest_issue(
+                    "warning",
+                    "template_command_projection_failed",
+                    f"failed to import template projectors: {exc}",
+                    "domain.templates.projectors",
+                )
+            )
+            return buckets
+
+        build_template_catalog = getattr(projectors, "build_template_catalog", None)
+        if not callable(build_template_catalog):
+            return buckets
+
+        try:
+            catalog = build_template_catalog(defaultspack_root=self._pack_root)
+        except Exception as exc:
+            manifest_errors.append(
+                self._manifest_issue(
+                    "warning",
+                    "template_command_projection_failed",
+                    f"failed to project template commands: {exc}",
+                    self._pack_root / "templates",
+                )
+            )
+            return buckets
+        if not isinstance(catalog, dict):
+            return buckets
+
+        templates_by_id = self._template_summaries_by_id(catalog)
+        for command_item, projection in self._iter_template_command_items(catalog):
+            command = self._template_command_from_projection(
+                command_item, projection, templates_by_id
+            )
+            if command is None:
+                continue
+            origin = str(command.get("_manifest_origin") or MANIFEST_ORIGIN_USER)
+            if origin == MANIFEST_ORIGIN_DEFAULT:
+                buckets[MANIFEST_ORIGIN_DEFAULT].append(command)
+            else:
+                buckets[MANIFEST_ORIGIN_USER].append(command)
+        return buckets
+
+    def _has_template_roots(self) -> bool:
+        return any(
+            path.exists()
+            for path in (
+                self._pack_root / "templates",
+                self._pack_root / "user_data" / "shared" / "templates",
+            )
+        )
+
+    @classmethod
+    def _iter_template_command_items(
+        cls, catalog: dict[str, Any]
+    ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+        items: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for key in TEMPLATE_COMMAND_KEYS:
+            values = catalog.get(key)
+            if isinstance(values, list):
+                for item in values:
+                    items.extend(cls._extract_template_command_items(item, require_marker=False))
+        for key in TEMPLATE_ACTION_KEYS:
+            values = catalog.get(key)
+            if isinstance(values, list):
+                for item in values:
+                    items.extend(cls._extract_template_command_items(item, require_marker=True))
+        return items
+
+    @classmethod
+    def _extract_template_command_items(
+        cls,
+        item: Any,
+        *,
+        require_marker: bool,
+    ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+        if not isinstance(item, dict):
+            return []
+
+        extracted: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for key in TEMPLATE_COMMAND_KEYS:
+            nested_list = item.get(key)
+            if not isinstance(nested_list, list):
+                continue
+            for nested in nested_list:
+                if isinstance(nested, dict):
+                    extracted.append((nested, item))
+
+        for key in ("slash_command", "command"):
+            nested = item.get(key)
+            if isinstance(nested, dict):
+                extracted.append((nested, item))
+            elif nested is True:
+                extracted.append((item, item))
+
+        if extracted:
+            return extracted
+        if require_marker and not cls._looks_like_template_command(item):
+            return []
+        if not require_marker or cls._looks_like_template_command(item):
+            return [(item, item)]
+        return []
+
+    @staticmethod
+    def _looks_like_template_command(item: dict[str, Any]) -> bool:
+        if not any(str(item.get(key) or "").strip() for key in ("id", "name", "command_id")):
+            return False
+        return isinstance(item.get("execution"), dict)
+
+    @staticmethod
+    def _template_summaries_by_id(catalog: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        summaries: dict[str, dict[str, Any]] = {}
+        templates = catalog.get("templates")
+        if not isinstance(templates, list):
+            return summaries
+        for item in templates:
+            if not isinstance(item, dict):
+                continue
+            template_id = str(item.get("id") or "").strip()
+            if template_id:
+                summaries[template_id] = item
+        return summaries
+
+    @classmethod
+    def _template_command_from_projection(
+        cls,
+        command_item: dict[str, Any],
+        projection: dict[str, Any],
+        templates_by_id: dict[str, dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        command = deepcopy(command_item)
+        command_id = str(
+            command.get("id") or command.get("command_id") or command.get("name") or ""
+        ).strip()
+        if not command_id:
+            return None
+        command.setdefault("id", command_id)
+        command.setdefault("name", command.get("command_id") or command_id)
+        for key in (
+            "label",
+            "description",
+            "category",
+            "visibility",
+            "risk",
+            "modes",
+            "args",
+            "execution",
+            "override",
+        ):
+            if key not in command and key in projection:
+                command[key] = deepcopy(projection[key])
+
+        template_id = str(projection.get("template_id") or "").strip()
+        piece_id = str(projection.get("piece_id") or "").strip()
+        origin = projection.get("origin") if isinstance(projection.get("origin"), dict) else {}
+        source = str(
+            projection.get("source_path") or projection.get("_source") or origin.get("path") or ""
+        ).strip()
+        template_summary = templates_by_id.get(template_id, {})
+        trust_level = str(
+            projection.get("trust_level") or template_summary.get("trust_level") or ""
+        ).strip()
+
+        command["template_id"] = template_id
+        command["piece_id"] = piece_id
+        command["source_path"] = source
+        command["trust_level"] = trust_level
+        command["_manifest_origin"] = cls._manifest_origin_for_template_trust(trust_level)
+        command["_manifest_path"] = cls._template_source_label(template_id, piece_id, source)
+        command["_template_id"] = template_id
+        command["_template_piece_id"] = piece_id
+        command["_template_source"] = source
+        command["_template_trust_level"] = trust_level
+        command["_public_id"] = command_id
+        return command
+
+    @staticmethod
+    def _manifest_origin_for_template_trust(trust_level: str) -> str:
+        if str(trust_level or "").strip().lower() == TEMPLATE_TRUST_BUILTIN:
+            return MANIFEST_ORIGIN_DEFAULT
+        return MANIFEST_ORIGIN_USER
+
+    @staticmethod
+    def _template_source_label(template_id: str, piece_id: str, source: str) -> str:
+        details = []
+        if template_id:
+            details.append(f"template_id={template_id}")
+        if piece_id:
+            details.append(f"piece_id={piece_id}")
+        if source:
+            details.append(f"source={source}")
+        return "template command " + " ".join(details) if details else "template command"
+
+    def _load_manifest_dir(
+        self, path: Path, origin: str, manifest_errors: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         if not path.exists():
             return []
         items: list[dict[str, Any]] = []
@@ -363,12 +667,16 @@ class SlashCommandRegistry:
             items.extend(self._load_manifest_file(file_path, origin, manifest_errors))
         return items
 
-    def _load_manifest_file(self, path: Path, origin: str, manifest_errors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _load_manifest_file(
+        self, path: Path, origin: str, manifest_errors: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:
             if path.exists():
-                manifest_errors.append(self._manifest_issue("error", "command_manifest_invalid_json", str(exc), path))
+                manifest_errors.append(
+                    self._manifest_issue("error", "command_manifest_invalid_json", str(exc), path)
+                )
             return []
         items: list[dict[str, Any]]
         if isinstance(payload, list):
@@ -380,7 +688,14 @@ class SlashCommandRegistry:
             else:
                 items = [payload]
         else:
-            manifest_errors.append(self._manifest_issue("error", "command_manifest_invalid_shape", "command manifest must be an object or list", path))
+            manifest_errors.append(
+                self._manifest_issue(
+                    "error",
+                    "command_manifest_invalid_shape",
+                    "command manifest must be an object or list",
+                    path,
+                )
+            )
             return []
         tagged: list[dict[str, Any]] = []
         for item in items:
@@ -393,9 +708,12 @@ class SlashCommandRegistry:
     @staticmethod
     def _normalize(command: dict[str, Any]) -> dict[str, Any]:
         normalized = deepcopy(command)
-        command_id = str(normalized.get("id") or normalized.get("name") or "").strip().lower().lstrip("/")
+        command_id = (
+            str(normalized.get("id") or normalized.get("name") or "").strip().lower().lstrip("/")
+        )
         normalized["id"] = command_id
         normalized["name"] = str(normalized.get("name") or command_id).strip().lower().lstrip("/")
+        normalized["_public_id"] = command_id
         normalized["label"] = str(normalized.get("label") or normalized["name"])
         normalized["aliases"] = [
             str(alias).strip().lower().lstrip("/")
@@ -412,14 +730,18 @@ class SlashCommandRegistry:
         if not isinstance(modes, list) or not modes:
             normalized["modes"] = ["chat", "coding", "agent"]
         else:
-            normalized["modes"] = [mode for mode in (str(item) for item in modes) if mode in MODES] or ["chat", "coding", "agent"]
+            normalized["modes"] = [
+                mode for mode in (str(item) for item in modes) if mode in MODES
+            ] or ["chat", "coding", "agent"]
         if not isinstance(normalized.get("args"), list):
             normalized["args"] = []
         if not isinstance(normalized.get("execution"), dict):
             normalized["execution"] = {"type": "frontend", "action": normalized["id"]}
         return normalized
 
-    def _dedupe_by_id(self, commands: list[dict[str, Any]], manifest_errors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _dedupe_by_id(
+        self, commands: list[dict[str, Any]], manifest_errors: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         order: list[str] = []
         deduped: dict[str, dict[str, Any]] = {}
         token_owners: dict[str, dict[str, str]] = {}
@@ -429,14 +751,26 @@ class SlashCommandRegistry:
                 continue
             existing = deduped.get(command_id)
             if existing is not None:
+                if self._command_override_allows(command, existing):
+                    manifest_errors.append(
+                        self._manifest_issue(
+                            "info",
+                            "command_explicit_override",
+                            f"command id '{command_id}' from {self._source_label(command)} explicitly replaces {self._source_label(existing)}",
+                            command.get("_manifest_path"),
+                        )
+                    )
+                    deduped[command_id] = command
+                    continue
                 manifest_errors.append(
                     self._manifest_issue(
-                        "warning",
+                        "error",
                         "command_duplicate_id",
-                        f"command id '{command_id}' from {self._source_label(command)} overrides {self._source_label(existing)}",
+                        f"command id '{command_id}' from {self._source_label(command)} collides with {self._source_label(existing)}; keeping the first definition",
                         command.get("_manifest_path"),
                     )
                 )
+                continue
             if command_id not in deduped:
                 order.append(command_id)
             deduped[command_id] = command
@@ -447,12 +781,37 @@ class SlashCommandRegistry:
                         self._manifest_issue(
                             "warning",
                             "command_alias_override",
-                            f"{kind} '{token}' for command '{command_id}' overrides command '{owner['command_id']}'",
+                            f"{kind} '{token}' for command '{command_id}' from {self._source_label(command)} overrides command '{owner['command_id']}' from {owner['source']}",
                             command.get("_manifest_path"),
                         )
                     )
-                token_owners[token] = {"command_id": command_id, "source": self._source_label(command)}
+                token_owners[token] = {
+                    "command_id": command_id,
+                    "source": self._source_label(command),
+                }
         return [deduped[item] for item in order]
+
+    @staticmethod
+    def _command_override_allows(command: dict[str, Any], existing: dict[str, Any]) -> bool:
+        override = command.get("override")
+        if not isinstance(override, dict):
+            return False
+        if str(override.get("mode") or "").strip() != "replace":
+            return False
+        target_public_id = str(override.get("target_public_id") or "").strip().lower().lstrip("/")
+        if target_public_id and target_public_id != str(existing.get("id") or "").strip():
+            return False
+        target_projected_id = str(override.get("target_projected_id") or "").strip()
+        existing_projected_id = str(
+            existing.get("projected_id") or existing.get("_template_piece_id") or ""
+        ).strip()
+        if target_projected_id and target_projected_id != existing_projected_id:
+            return False
+        if command.get("_manifest_origin") != MANIFEST_ORIGIN_DEFAULT:
+            return False
+        if existing.get("_manifest_origin") not in {MANIFEST_ORIGIN_DEFAULT, None}:
+            return False
+        return bool(target_public_id or target_projected_id)
 
     @staticmethod
     def _coerce_args(command: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
@@ -463,7 +822,9 @@ class SlashCommandRegistry:
             name = str(spec.get("name") or "")
             if not name:
                 continue
-            if spec.get("required") is True and (name not in coerced or SlashCommandRegistry._missing_arg_value(coerced.get(name))):
+            if spec.get("required") is True and (
+                name not in coerced or SlashCommandRegistry._missing_arg_value(coerced.get(name))
+            ):
                 return error(
                     f"{name} is required",
                     "MISSING_ARGUMENT",
@@ -530,10 +891,22 @@ class SlashCommandRegistry:
 
     @staticmethod
     def _public_command(command: dict[str, Any]) -> dict[str, Any]:
-        return {key: deepcopy(value) for key, value in command.items() if not str(key).startswith("_manifest_")}
+        return {
+            key: deepcopy(value)
+            for key, value in command.items()
+            if not str(key).startswith(("_manifest_", "_template_"))
+        }
 
     @staticmethod
     def _source_label(command: dict[str, Any]) -> str:
+        template_id = str(command.get("_template_id") or "").strip()
+        if template_id:
+            piece_id = str(command.get("_template_piece_id") or "").strip()
+            trust_level = str(command.get("_template_trust_level") or "unknown").strip()
+            source = str(command.get("_template_source") or "").strip()
+            piece = f"/{piece_id}" if piece_id else ""
+            suffix = f" {source}" if source else ""
+            return f"{trust_level} template {template_id}{piece}{suffix}".strip()
         origin = str(command.get("_manifest_origin") or "unknown")
         path = str(command.get("_manifest_path") or "")
         return f"{origin} manifest {path}".strip()

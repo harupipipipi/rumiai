@@ -5,6 +5,13 @@
 
 Pack 開発者向けのガイドです。設計の全体像は [architecture.md](architecture.md)、運用手順は [operations.md](operations.md) を参照してください。
 
+defaultspack の設定 UI、AI input、tool/context policy、composer command、
+function/route binding、permission metadata、backend service metadata、test
+contract を合成する場合は
+[`../ecosystem/defaultspack/docs/templates.md`](../ecosystem/defaultspack/docs/templates.md)
+を参照してください。template は metadata composition のための形式であり、
+Pack 承認、secret、sandbox、audit、provider execution を置き換えるものではありません。
+
 ---
 
 ## 目次
