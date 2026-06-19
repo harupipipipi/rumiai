@@ -10,7 +10,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 |---|---|---|
 | 目的別にドキュメントを辿りたい | [`rumi_ai_1_10/docs/README.md`](./rumi_ai_1_10/docs/README.md) | 「何をしたいか」から読む順番を案内します |
 | 用語の意味を揃えたい | [`rumi_ai_1_10/docs/terminology.md`](./rumi_ai_1_10/docs/terminology.md) | `rule`, `skill`, `team workspace`, `subagent` 互換名の整理です |
-| とにかく起動したい | [`README.md`](./README.md) の `Start` | 最短の起動コマンドだけを載せています |
+| viewer で Defaultspack v2 まで起動したい | [`README.md`](./README.md) の `Start` | clone 後にまず試す viewer-first の起動手順です |
 | runtime / kernel の全体像を知りたい | [`rumi_ai_1_10/README.md`](./rumi_ai_1_10/README.md) | アーキテクチャと主要ディレクトリの説明があります |
 | コードを読まずに仕組みを理解したい | [`rumi_ai_1_10/docs/concepts/system-mechanism.md`](./rumi_ai_1_10/docs/concepts/system-mechanism.md) | 起動・Flow・承認・Grant の流れを文章で追えます |
 | まず動作確認したい（チュートリアル） | [`rumi_ai_1_10/docs/tutorials/runtime-quickstart.md`](./rumi_ai_1_10/docs/tutorials/runtime-quickstart.md) | `--health` から `/panel/` まで最短手順です |
@@ -38,7 +38,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 - Python 3.10+
 - Node.js 18+
 - npm
-- uv (`rumi_viewer` を触る場合)
+- uv (`rumi_viewer` を触る場合。下の手順では `.venv` に入れます)
 - Rust / Cargo (`rumi_viewer` を触る場合)
 - Flutter SDK (`rumi_mobile` を触る場合)
 
@@ -51,6 +51,7 @@ cd rumiai
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
+pip install uv
 pip install -r rumi_ai_1_10/requirements.txt
 pip install -r rumi_ai_1_10/requirements-dev.txt
 pip install -e ./rumi_ai_1_10
@@ -61,6 +62,22 @@ cd ../..
 ```
 
 ## Start
+
+まずは `rumi_viewer` から起動する導線を推奨します。別ターミナルで `python -m rumi_ai` を起動する必要はありません。`cargo tauri dev` が viewer 用の kernel を自動で用意して起動します。
+
+```bash
+source .venv/bin/activate
+cd rumi_viewer
+RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
+```
+
+viewer window が開いたら Home の `Open Defaultspack` を押します。Defaultspack v2 の独立 UI は通常 `http://127.0.0.1:8766/chat` で起動します。
+
+`RUMI_AUTO_APPROVE_LOCAL=true` はローカル開発用の明示 opt-in です。repo 同梱 pack の承認と、`Open Defaultspack` に必要な `defaultspack` 限定の `desktop_app.execute` Grant を用意します。
+
+### Terminal-only runtime
+
+kernel/runtime だけをターミナルから確認したい場合は、こちらを使います。viewer で Defaultspack v2 まで起動したい場合は上の `cargo tauri dev` を使ってください。
 
 ```bash
 source .venv/bin/activate
@@ -97,20 +114,24 @@ python -m rumi_ai
 ### Viewer development
 
 ```bash
+source .venv/bin/activate
 cd rumi_viewer/frontend
 npm install
 cd ..
-cargo tauri dev
+RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
 
 2 回目以降、`rumi_viewer/frontend/node_modules` が残っている場合は次だけで起動できます。
 
 ```bash
+source .venv/bin/activate
 cd rumi_viewer
-cargo tauri dev
+RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
 
 開発用 viewer は repo 内の `rumi_ai_1_10/` を自動検出して kernel を起動します。
+`cargo tauri dev` は viewer 用 kernel の Python 環境を作るために `uv` を探します。グローバルに `uv` を入れていない場合でも、上の setup で入れた repo の `.venv/bin/uv` を自動検出します。確実に合わせたい場合は `.venv` を有効化したまま起動してください。
+`RUMI_AUTO_APPROVE_LOCAL=true` は repo checkout でのローカル開発用 opt-in です。repo 同梱 pack の承認と、`Open Defaultspack` に必要な `defaultspack` 限定の `desktop_app.execute` Grant を用意します。
 `Open Defaultspack` は開発起動では repo 同梱の `defaultspack` を優先して開きます。
 起動時の詰まり方を含めたガイドは [`rumi_ai_1_10/docs/rumi_viewer_start.md`](./rumi_ai_1_10/docs/rumi_viewer_start.md) を参照してください。
 

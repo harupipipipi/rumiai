@@ -193,6 +193,13 @@ fn defaultspack_health_client() -> AnyResult<reqwest::blocking::Client> {
         .context("failed to build defaultspack health client")
 }
 
+fn defaultspack_grant_client() -> AnyResult<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .context("failed to build defaultspack grant client")
+}
+
 fn is_defaultspack_http_ready(port: u16) -> bool {
     defaultspack_health_client()
         .map(|client| check_defaultspack_http_ready(&client, port))
@@ -786,6 +793,65 @@ fn persist_desktop_api_token(config: &AppConfig, api_token: &str) -> AnyResult<P
     Ok(token_path)
 }
 
+fn auto_approve_local_enabled(dev_workspace: bool, env_value: Option<&str>) -> bool {
+    dev_workspace && env_value.is_some_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
+fn local_dev_auto_grant_enabled(config: &AppConfig) -> bool {
+    auto_approve_local_enabled(
+        config.is_dev_workspace(),
+        std::env::var("RUMI_AUTO_APPROVE_LOCAL").ok().as_deref(),
+    )
+}
+
+fn defaultspack_desktop_grant_payload(kernel_port: u16) -> Value {
+    serde_json::json!({
+        "principal_id": "defaultspack",
+        "permission_id": "desktop_app.execute",
+        "config": {
+            "allowed_packs": ["defaultspack"],
+            "max_token_lifetime": 3600,
+            "port": kernel_port,
+        },
+    })
+}
+
+fn maybe_grant_defaultspack_desktop_execute(config: &AppConfig, api_token: &str) -> AnyResult<()> {
+    if !local_dev_auto_grant_enabled(config) {
+        return Ok(());
+    }
+
+    let url = format!(
+        "http://127.0.0.1:{}/api/capability/grants/grant",
+        config.kernel_port
+    );
+    let payload = defaultspack_desktop_grant_payload(config.kernel_port);
+    info!("Granting local development desktop_app.execute for defaultspack");
+
+    let response = defaultspack_grant_client()?
+        .post(&url)
+        .bearer_auth(api_token)
+        .json(&payload)
+        .send()
+        .with_context(|| format!("failed to request defaultspack desktop grant at {url}"))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .context("failed to read defaultspack desktop grant response")?;
+    if !status.is_success() {
+        bail!("defaultspack desktop grant failed with {status}: {body}");
+    }
+
+    let data: Value =
+        serde_json::from_str(&body).context("invalid defaultspack desktop grant response JSON")?;
+    if data.get("success").and_then(|value| value.as_bool()) != Some(true) {
+        bail!("defaultspack desktop grant was not successful: {body}");
+    }
+
+    Ok(())
+}
+
 fn read_panel_bootstrap_secret_from_config(config: &AppConfig) -> AnyResult<String> {
     let path = config.panel_bootstrap_secret_path();
     let secret = fs::read_to_string(&path)
@@ -806,6 +872,7 @@ fn spawn_defaultspack_local_server(
         .ensure_pack_shell_path()
         .context("pack-shell binary is required to launch Defaultspack")?;
     let api_token = read_desktop_api_token_from_config(config)?;
+    maybe_grant_defaultspack_desktop_execute(config, &api_token)?;
     let panel_bootstrap_secret = read_panel_bootstrap_secret_from_config(config)?;
     let kernel_command = kernel_command_for_python(&config.venv_python());
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
@@ -865,6 +932,7 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
     let metadata = read_defaultspack_desktop_metadata(config)?;
 
     let api_token = read_desktop_api_token_from_config(config)?;
+    maybe_grant_defaultspack_desktop_execute(config, &api_token)?;
     let token_path = persist_desktop_api_token(config, &api_token)?;
     let panel_bootstrap_secret_path = config.panel_bootstrap_secret_path();
 
@@ -961,6 +1029,29 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("empty"));
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn auto_approve_local_enabled_requires_dev_workspace_and_true_env() {
+        assert!(auto_approve_local_enabled(true, Some("true")));
+        assert!(auto_approve_local_enabled(true, Some("TRUE")));
+        assert!(!auto_approve_local_enabled(false, Some("true")));
+        assert!(!auto_approve_local_enabled(true, Some("false")));
+        assert!(!auto_approve_local_enabled(true, None));
+    }
+
+    #[test]
+    fn defaultspack_desktop_grant_payload_is_scoped_to_defaultspack() {
+        let payload = defaultspack_desktop_grant_payload(8765);
+
+        assert_eq!(payload["principal_id"], "defaultspack");
+        assert_eq!(payload["permission_id"], "desktop_app.execute");
+        assert_eq!(
+            payload["config"]["allowed_packs"],
+            serde_json::json!(["defaultspack"])
+        );
+        assert_eq!(payload["config"]["max_token_lifetime"], 3600);
+        assert_eq!(payload["config"]["port"], 8765);
     }
 
     #[test]
@@ -1117,6 +1208,54 @@ mod tests {
         let err =
             read_defaultspack_port(&[("DEFAULTS_HTTP_PORT".into(), "nope".into())]).unwrap_err();
         assert!(err.to_string().contains("DEFAULTS_HTTP_PORT"));
+    }
+
+    #[test]
+    #[ignore = "requires the README viewer dev runtime to be running"]
+    fn readme_defaultspack_launch_smoke() {
+        let repo_root = env_path("RUMI_VIEWER_SMOKE_REPO_ROOT");
+        let user_data_dir = env_path("RUMI_VIEWER_SMOKE_USER_DATA");
+        let venv_dir = env_path("RUMI_VIEWER_SMOKE_VENV_DIR");
+        let app_dir = repo_root.join("rumi_ai_1_10");
+        let app_data_dir = user_data_dir
+            .parent()
+            .expect("RUMI_VIEWER_SMOKE_USER_DATA must have a parent app data directory")
+            .to_path_buf();
+
+        let config = AppConfig {
+            app_dir: app_dir.clone(),
+            rumi_home: app_dir,
+            python_dir: app_data_dir.join("python"),
+            uv_path: venv_dir.join(if cfg!(target_os = "windows") {
+                "Scripts/uv.exe"
+            } else {
+                "bin/uv"
+            }),
+            venv_dir,
+            user_data_dir,
+            log_dir: app_data_dir.join("logs"),
+            kernel_port: 8765,
+            dev_workspace_root: Some(repo_root),
+        };
+
+        let message = launch_defaultspack_desktop_impl(&config)
+            .expect("Open Defaultspack should launch the Defaultspack v2 desktop app");
+
+        println!("Defaultspack launch message: {message}");
+        assert!(
+            message.contains("8766") && message.contains("/chat"),
+            "unexpected Defaultspack launch message: {message}"
+        );
+        assert!(
+            is_defaultspack_http_ready(DEFAULTSPACK_DEFAULT_PORT),
+            "Defaultspack v2 HTTP health check did not become ready"
+        );
+    }
+
+    fn env_path(name: &str) -> PathBuf {
+        std::env::var_os(name)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| panic!("{name} is required for the README launch smoke test"))
     }
 
     #[test]

@@ -364,6 +364,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -374,6 +379,16 @@ jobs:
       - name: Install frontend dependencies
         working-directory: rumi_viewer/frontend
         run: npm ci
+
+      - name: Install README Python dependencies
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install uv
+          pip install -r rumi_ai_1_10/requirements.txt
+          pip install -r rumi_ai_1_10/requirements-dev.txt
+          pip install -e ./rumi_ai_1_10
 
       - name: Run frontend panel auth tests
         working-directory: rumi_viewer/frontend
@@ -391,6 +406,21 @@ jobs:
         with:
           shared-key: rumi-viewer-macos
           workspaces: rumi_viewer/src-tauri -> target
+
+      - name: Install Tauri CLI
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if cargo install tauri-cli --version "^2" --locked; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit "$status"
+            fi
+            sleep $((attempt * 20))
+          done
 
       - name: Bundle uv binary for offline startup
         run: |
@@ -441,6 +471,10 @@ jobs:
       - name: Run rumi viewer tests
         working-directory: rumi_viewer/src-tauri
         run: cargo test --locked
+
+      - name: Run README viewer Defaultspack launch smoke
+        timeout-minutes: 15
+        run: python .github/scripts/readme_viewer_defaultspack_smoke.py
 
   mac-computer-driver-smoke:
     if: >

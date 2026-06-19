@@ -139,6 +139,18 @@ fn reauthorize_panel_session(
 }
 
 #[tauri::command]
+fn get_panel_session_url(
+    config: tauri::State<'_, AppConfig>,
+    km: tauri::State<'_, Arc<Mutex<KernelManager>>>,
+) -> Result<String, String> {
+    let code = request_fresh_panel_session_code(&config, km.inner())
+        .map_err(|error| format!("panel session URL request failed: {error}"))?;
+    panel_session_url_for_current(None, config.kernel_port, &code)
+        .map(|url| url.to_string())
+        .map_err(|error| format!("failed to build panel session URL: {error}"))
+}
+
+#[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err("only http(s) URLs can be opened externally".into());
@@ -1428,6 +1440,7 @@ pub fn run() {
             get_setup_progress,
             restart_kernel,
             reauthorize_panel_session,
+            get_panel_session_url,
             open_external_url,
             open_authority_approval_window,
             authority_approval_context,

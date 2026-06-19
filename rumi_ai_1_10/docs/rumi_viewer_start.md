@@ -12,21 +12,27 @@ control panel frontend の source は `rumi_viewer/frontend` が所有し、kern
 
 ## 最短の起動手順
 
-repo ルートで次を実行します。
+README の `Clone and install` を済ませた repo ルートで次を実行します。
+別ターミナルで `python -m rumi_ai` を起動する必要はありません。viewer が kernel 用 Python 環境を作り、`python -m app` を自動起動します。
 
 ```bash
+source .venv/bin/activate
 cd rumi_viewer/frontend
 npm install
 cd ..
-cargo tauri dev
+RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
 
 2 回目以降、`rumi_viewer/frontend/node_modules` が残っている場合は次だけで起動できます。
 
 ```bash
+source .venv/bin/activate
 cd rumi_viewer
-cargo tauri dev
+RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
+
+`cargo tauri dev` は viewer 用 kernel の Python 環境を作るために `uv` を探します。グローバルに `uv` を入れていない場合でも、README の手順で `.venv` に入れた repo-local `uv` を自動検出します。確実に合わせたい場合は `.venv` を有効化したまま起動してください。
+`RUMI_AUTO_APPROVE_LOCAL=true` は repo checkout でのローカル開発用の明示 opt-in です。repo 同梱 pack の承認と、`Open Defaultspack` に必要な `defaultspack` 限定の `desktop_app.execute` Grant を用意します。手動の承認/Grant フローを確認したい場合は、この環境変数を外してください。
 
 開発起動では viewer が次を自動で行います。
 
@@ -45,11 +51,13 @@ cargo tauri dev
 例:
 
 ```bash
+source .venv/bin/activate
 cd rumi_viewer
 RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
 
 この opt-in を付けない通常の開発起動では、modified pack は再承認待ちのままです。
+また、`Open Defaultspack` に必要な `desktop_app.execute` Grant も自動では付与されません。
 
 ## 起動できたときの見え方
 
@@ -73,6 +81,14 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ### `Kernel directory not found`
 
 viewer が bundle 内の `app/` しか見ていないか、repo checkout を検出できていません。開発起動は repo ルート配下で行ってください。
+
+### `Python setup failed — uv setup failed`
+
+`uv` が見つからない状態で viewer が kernel 用 Python 環境を作ろうとしています。README の `Clone and install` で `pip install uv` まで実行しているか確認してください。repo の `.venv/bin/uv` も自動検出しますが、確実に合わせたい場合は repo ルートで `source .venv/bin/activate` してから `cargo tauri dev` を起動します。
+
+### `desktop_app.execute not granted for pack: defaultspack`
+
+ローカル開発で `Open Defaultspack` まで確認する場合は、repo checkout から `RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev` で viewer を起動してください。この opt-in は `defaultspack` に限定した `desktop_app.execute` Grant を用意します。配布版 / bundle 起動ではこの自動 Grant は使わず、通常の承認フローを使います。
 
 ### `panel bootstrap returned 401 Unauthorized`
 
