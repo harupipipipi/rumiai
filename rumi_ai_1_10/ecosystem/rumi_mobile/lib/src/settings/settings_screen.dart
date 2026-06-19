@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../data/pc/pc_catalog.dart';
+import '../data/pc/pc_catalog_client.dart';
 import '../qr/qr_payload.dart';
 import '../qr/qr_scanner_screen.dart';
 import 'api_config_store.dart';
@@ -24,6 +26,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late PcConnection? _pc;
   bool _loading = true;
   bool _saving = false;
+
+  // PC catalog state
+  PcBootstrap? _pcBootstrap;
+  PcCatalog? _pcCatalog;
+  bool _fetchingCatalog = false;
+  String? _catalogError;
 
   final _baseUrl = TextEditingController();
   final _apiKey = TextEditingController();
@@ -171,6 +179,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _fetchPcCatalog() async {
+    final pc = _pc;
+    if (pc == null || !pc.isConfigured) {
+      _toast('PC接続情報を保存してください。');
+      return;
+    }
+    setState(() {
+      _fetchingCatalog = true;
+      _catalogError = null;
+    });
+    final client = PcCatalogClient();
+    try {
+      final bootstrap = await client.fetchBootstrap(pc);
+      final catalog = await client.fetchCapabilities(pc);
+      if (!mounted) return;
+      setState(() {
+        _pcBootstrap = bootstrap;
+        _pcCatalog = catalog;
+        _fetchingCatalog = false;
+      });
+      _toast(
+          '${catalog.providers.length}プロバイダー / ${catalog.models.length}モデルを取得しました');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _catalogError = e.toString();
+        _fetchingCatalog = false;
+      });
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> _pickModelFromCatalog() async {
+    final catalog = _pcCatalog;
+    if (catalog == null) {
+      _toast('まず「PCから取得」してください。');
+      return;
+    }
+    final selected = await showModalBottomSheet<ModelEntry>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _PcModelPicker(catalog: catalog),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      _model.text = selected.modelId;
+      _label.text = selected.displayName;
+    });
+    _toast('${selected.displayName} を選択しました。保存してください。');
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -303,6 +363,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 16),
+            FilledButton.tonalIcon(
+              icon: _fetchingCatalog
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.cloud_download_outlined),
+              label: const Text('PCからプロバイダー/モデルを取得'),
+              onPressed: _fetchingCatalog ? null : _fetchPcCatalog,
+            ),
+            if (_catalogError != null) ...[
+              const SizedBox(height: 8),
+              Text(_catalogError!,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.error)),
+            ],
+            if (_pcBootstrap != null) ...[
+              const SizedBox(height: 12),
+              _PcInfoCard(bootstrap: _pcBootstrap!, catalog: _pcCatalog),
+            ],
+            if (_pcCatalog != null) ...[
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                icon: const Icon(Icons.checklist),
+                label: const Text('モデルを選択'),
+                onPressed: _pickModelFromCatalog,
+              ),
+            ],
             const SizedBox(height: 28),
             _SectionTitle(
               icon: Icons.apps_outlined,
@@ -408,5 +498,252 @@ class _ComingSoonCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _PcInfoCard extends StatelessWidget {
+  const _PcInfoCard({required this.bootstrap, required this.catalog});
+  final PcBootstrap bootstrap;
+  final PcCatalog? catalog;
+
+  @override
+  Widget build(BuildContext context) {
+    final caps = bootstrap.capabilities;
+    final configured = catalog?.configuredProviders ?? const [];
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: Theme.of(context).dividerTheme.color ?? Colors.transparent),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.desktop_windows, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(bootstrap.label,
+                    style: Theme.of(context).textTheme.titleSmall),
+              ),
+              Text(bootstrap.version,
+                  style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _CapChip(label: 'チャット', on: caps.chat),
+              _CapChip(label: 'ツール', on: caps.tools),
+              _CapChip(label: '承認', on: caps.approvals),
+              _CapChip(label: 'キー転送', on: caps.credentialTransfer),
+            ],
+          ),
+          if (catalog != null) ...[
+            const SizedBox(height: 10),
+            Text(
+                'プロバイダー ${catalog!.providers.length}件（設定済み ${configured.length}）/ モデル ${catalog!.models.length}件 / プロファイル ${catalog!.profiles.length}件 / テンプレート ${catalog!.templates.length}件',
+                style: Theme.of(context).textTheme.bodySmall),
+            if (configured.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: configured
+                    .map((p) => Chip(
+                          label: Text(p.displayName),
+                          avatar: const Icon(Icons.cloud_done, size: 16),
+                          visualDensity: VisualDensity.compact,
+                        ))
+                    .toList(),
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CapChip extends StatelessWidget {
+  const _CapChip({required this.label, required this.on});
+  final String label;
+  final bool on;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: on ? scheme.primary.withValues(alpha: 0.15) : null,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+            color: on ? scheme.primary.withValues(alpha: 0.4) : scheme.outline),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(on ? Icons.check_circle : Icons.remove_circle_outline,
+              size: 13, color: on ? scheme.primary : scheme.outline),
+          const SizedBox(width: 4),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 11,
+                  color: on ? scheme.primary : scheme.onSurfaceVariant)),
+        ],
+      ),
+    );
+  }
+}
+
+class _PcModelPicker extends StatefulWidget {
+  const _PcModelPicker({required this.catalog});
+  final PcCatalog catalog;
+
+  @override
+  State<_PcModelPicker> createState() => _PcModelPickerState();
+}
+
+class _PcModelPickerState extends State<_PcModelPicker> {
+  String? _selectedProvider;
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    final configured = widget.catalog.configuredProviders;
+    _selectedProvider =
+        configured.isNotEmpty ? configured.first.providerId : null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final providers = widget.catalog.providers;
+    final models = widget.catalog.models
+        .where((m) =>
+            _selectedProvider == null || m.providerId == _selectedProvider)
+        .where((m) =>
+            _query.isEmpty ||
+            m.displayName.toLowerCase().contains(_query.toLowerCase()) ||
+            m.modelId.toLowerCase().contains(_query.toLowerCase()))
+        .toList();
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.8,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) => Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Row(
+              children: [
+                Text('モデルを選択', style: Theme.of(context).textTheme.titleMedium),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('閉じる'),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: DropdownButtonFormField<String>(
+              initialValue: _selectedProvider,
+              decoration: const InputDecoration(
+                labelText: 'プロバイダー',
+                prefixIcon: Icon(Icons.cloud_outlined),
+                isDense: true,
+              ),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('すべて')),
+                ...providers.map((p) => DropdownMenuItem(
+                      value: p.providerId,
+                      child:
+                          Text('${p.displayName}${p.configured ? " ✓" : ""}'),
+                    )),
+              ],
+              onChanged: (v) => setState(() => _selectedProvider = v),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              decoration: const InputDecoration(
+                labelText: '検索',
+                prefixIcon: Icon(Icons.search),
+                isDense: true,
+              ),
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: ListView.builder(
+              controller: scrollController,
+              itemCount: models.length,
+              itemBuilder: (context, index) {
+                final m = models[index];
+                return ListTile(
+                  leading: Icon(
+                    m.supportsVision
+                        ? Icons.visibility_outlined
+                        : m.supportsThinking
+                            ? Icons.psychology_outlined
+                            : Icons.chat_outlined,
+                    size: 20,
+                  ),
+                  title: Text(m.displayName,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(
+                    '${m.providerId} · ${m.modelId}${m.maxContext > 0 ? " · ${_formatContext(m.maxContext)}" : ""}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  trailing: Wrap(
+                    spacing: 4,
+                    children: [
+                      if (m.supportsToolCalling)
+                        _MiniTag(icon: Icons.build_outlined),
+                      if (m.supportsVision)
+                        _MiniTag(icon: Icons.image_outlined),
+                    ],
+                  ),
+                  onTap: () => Navigator.pop(context, m),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatContext(int tokens) {
+    if (tokens >= 1000000) {
+      return '${(tokens / 1000000).toStringAsFixed(1)}M ctx';
+    }
+    if (tokens >= 1000) return '${(tokens / 1000).toStringAsFixed(0)}K ctx';
+    return '$tokens ctx';
+  }
+}
+
+class _MiniTag extends StatelessWidget {
+  const _MiniTag({required this.icon});
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Icon(icon, size: 14, color: Theme.of(context).colorScheme.outline);
   }
 }

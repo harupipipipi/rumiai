@@ -847,6 +847,8 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/p2p/pairing/reject", block_module="blocks.p2p.pairing_reject"),
     HttpRouteSpec("POST", "/api/p2p/messages/inbound", block_module="blocks.p2p.messages_inbound"),
     HttpRouteSpec("POST", "/api/p2p/messages/send", block_module="blocks.p2p.messages_send"),
+    HttpRouteSpec("GET", "/api/mobile/v1/bootstrap", block_module="blocks.mobile.bootstrap"),
+    HttpRouteSpec("GET", "/api/mobile/v1/capabilities", block_module="blocks.mobile.capabilities"),
     HttpRouteSpec("POST", "/api/agent/execute", block_module="blocks.agent.execute"),
     HttpRouteSpec(
         "POST",
