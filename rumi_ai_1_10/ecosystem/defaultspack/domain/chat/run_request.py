@@ -324,6 +324,21 @@ def prepare_chat_run(
         request_context["agent_id"] = resolved_agent_id
     _propagate_conversation_workspace(request_context, metadata, conversation_metadata)
     request_context.update(_approval_followup_tool_context(metadata))
+    raw_tool_policy = params.get("tool_policy")
+    if isinstance(raw_tool_policy, dict):
+        sanitized_tool_policy, ignored_tool_policy_keys = _sanitize_untrusted_chat_tool_policy(
+            raw_tool_policy
+        )
+        if ignored_tool_policy_keys:
+            params["tool_policy"] = sanitized_tool_policy
+            request_context["ignored_client_tool_policy_keys"] = sorted(
+                set(ignored_tool_policy_keys)
+            )
+            if isinstance(metadata, dict):
+                metadata["ignored_client_tool_policy_keys"] = sorted(
+                    set(ignored_tool_policy_keys)
+                )
+                store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
     template_tool_policy_resolution = _resolve_template_tool_policy(
         params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {},
         metadata=metadata,
@@ -1052,6 +1067,39 @@ def _runtime_user_content_override(metadata: dict[str, Any] | None) -> str:
 _WORKSPACE_ID_KEYS = ("workspace_id", "workspaceId")
 _WORKSPACE_ROOT_KEYS = ("workspace_root", "workspaceRoot", "rootPath")
 _MERGED_PROFILE_DICT_FIELDS = ("policy", "permissions", "metadata", "surfaces", "node_settings")
+_CLIENT_TOOL_POLICY_PRIVILEGED_TRUE_KEYS = {
+    "allow_browser",
+    "allow_client_supplied_approved",
+    "allow_direct_tool",
+    "allow_file_write",
+    "allow_git",
+    "allow_network",
+    "allow_shell",
+    "allow_terminal",
+    "direct_tool_execution",
+    "full_access",
+    "yolo_mode",
+}
+_CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS = {
+    "approval_token",
+    "approval_bypass",
+    "approval_granted",
+    "approved",
+    "bypass_approval",
+    "grant_approval",
+    "is_approved",
+    "server_approved",
+}
+_CLIENT_TOOL_POLICY_APPROVAL_WEAKENING_FALSE_KEYS = {
+    "delete_actions_require_approval",
+    "destructive_actions_require_approval",
+    "git_push_requires_approval",
+    "terminal_actions_require_approval",
+    "write_actions_require_approval",
+}
+_CLIENT_TOOL_POLICY_UNTRUSTED_STRUCTURAL_KEYS = {
+    "tool_permission_policy",
+}
 
 
 def _merge_profile_snapshot_sources(
@@ -1073,6 +1121,53 @@ def _merge_profile_snapshot_sources(
     if merged:
         merged.setdefault("profile_id", profile_id)
     return merged
+
+
+def _client_policy_value_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if value is None:
+        return False
+    return str(value).strip().lower() not in {"", "0", "false", "no", "off", "none", "null"}
+
+
+def _client_policy_value_false(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value is False
+    if isinstance(value, (int, float)):
+        return value == 0
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"0", "false", "no", "off"}
+
+
+def _sanitize_untrusted_chat_tool_policy(policy: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    sanitized: dict[str, Any] = {}
+    ignored: list[str] = []
+    for key, value in policy.items():
+        key_text = str(key or "").strip()
+        lower_key = key_text.lower()
+        if not key_text:
+            continue
+        if lower_key in _CLIENT_TOOL_POLICY_UNTRUSTED_STRUCTURAL_KEYS:
+            ignored.append(key_text)
+            continue
+        if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS and _client_policy_value_truthy(value):
+            ignored.append(key_text)
+            continue
+        if lower_key in _CLIENT_TOOL_POLICY_PRIVILEGED_TRUE_KEYS and _client_policy_value_truthy(value):
+            ignored.append(key_text)
+            continue
+        if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_WEAKENING_FALSE_KEYS and _client_policy_value_false(value):
+            ignored.append(key_text)
+            continue
+        if lower_key == "action_approval_mode" and str(value or "").strip().lower() == "full":
+            ignored.append(key_text)
+            continue
+        sanitized[key] = value
+    return sanitized, ignored
 
 
 @lru_cache(maxsize=64)

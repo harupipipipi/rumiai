@@ -215,6 +215,108 @@ def test_prepare_chat_run_loads_profile_policy_from_conversation_profile_id(tmp_
     ChatStore._instance = None
 
 
+def test_prepare_chat_run_does_not_trust_client_tool_policy_approval_bypass(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_APPROVAL_DB_PATH",
+        str(tmp_path / "approval.sqlite3"),
+    )
+    for name in (
+        "domain.safety.approval",
+        "domain.safety.approval_state_json",
+        "domain.safety.approval_store",
+    ):
+        sys.modules.pop(name, None)
+
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+    import domain.safety.approval as approval
+    from domain.tool.executor import ToolExecutor
+
+    approval.reset_approval_state_for_tests()
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(
+        model="stub/default",
+        metadata={"workspace_root": str(workspace_root)},
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "write a probe",
+                "metadata": {
+                    "workspace_root": str(workspace_root),
+                    "selected_tools": ["coding_file_write"],
+                },
+            },
+            "tools": ["coding_file_write"],
+            "params": {
+                "tool_policy": {
+                    "selected_tools": ["coding_file_write"],
+                    "action_approval_mode": "full",
+                    "yolo_mode": True,
+                    "allow_client_supplied_approved": True,
+                    "direct_tool_execution": True,
+                    "full_access": True,
+                    "allow_shell": True,
+                    "allow_file_write": True,
+                    "write_actions_require_approval": False,
+                    "tool_permission_policy": {
+                        "tools": {"coding_file_write": "allow"},
+                    },
+                },
+            },
+        },
+        {},
+    )
+
+    policy = prepared.request_context.get("profile_policy", {})
+    assert policy["selected_tools"] == ["coding_file_write"]
+    for key in (
+        "action_approval_mode",
+        "allow_client_supplied_approved",
+        "allow_file_write",
+        "allow_shell",
+        "direct_tool_execution",
+        "full_access",
+        "tool_permission_policy",
+        "yolo_mode",
+        "write_actions_require_approval",
+    ):
+        assert key not in policy
+    assert set(prepared.request_context["ignored_client_tool_policy_keys"]) == {
+        "action_approval_mode",
+        "allow_client_supplied_approved",
+        "allow_file_write",
+        "allow_shell",
+        "direct_tool_execution",
+        "full_access",
+        "tool_permission_policy",
+        "write_actions_require_approval",
+        "yolo_mode",
+    }
+
+    result = ToolExecutor().execute(
+        "coding_file_write",
+        {
+            "path": "api-bypass-probe.txt",
+            "content": "should not write",
+            "workspace_root": str(workspace_root),
+        },
+        prepared.tool_context,
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["approval_required"] is True
+    assert not (workspace_root / "api-bypass-probe.txt").exists()
+    ChatStore._instance = None
+
+
 def test_prepare_chat_run_merges_workspace_profile_with_catalog_profile(tmp_path, monkeypatch):
     from domain.chat.run_request import _profile_snapshot, prepare_chat_run
     from domain.chat.store import ChatStore
