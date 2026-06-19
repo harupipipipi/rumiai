@@ -97,9 +97,9 @@ class ApiConfigStore {
   final FlutterSecureStorage _storage;
 
   Future<ApiConfig> loadApi() async {
-    final raw = await _storage.read(key: _apiKey);
-    if (raw == null || raw.trim().isEmpty) return ApiConfig.defaults;
     try {
+      final raw = await _storage.read(key: _apiKey);
+      if (raw == null || raw.trim().isEmpty) return ApiConfig.defaults;
       return ApiConfig.fromJson(jsonDecode(raw) as Map<String, dynamic>);
     } catch (_) {
       return ApiConfig.defaults;
@@ -107,13 +107,17 @@ class ApiConfigStore {
   }
 
   Future<void> saveApi(ApiConfig config) async {
-    await _storage.write(key: _apiKey, value: jsonEncode(config.toJson()));
+    try {
+      await _storage.write(key: _apiKey, value: jsonEncode(config.toJson()));
+    } catch (_) {
+      // ignore secure storage failures (e.g. simulator keychain unavailable)
+    }
   }
 
   Future<PcConnection?> loadPc() async {
-    final raw = await _storage.read(key: _pcKey);
-    if (raw == null || raw.trim().isEmpty) return null;
     try {
+      final raw = await _storage.read(key: _pcKey);
+      if (raw == null || raw.trim().isEmpty) return null;
       return PcConnection.fromJson(jsonDecode(raw) as Map<String, dynamic>);
     } catch (_) {
       return null;
@@ -121,10 +125,14 @@ class ApiConfigStore {
   }
 
   Future<void> savePc(PcConnection? pc) async {
-    if (pc == null || !pc.isConfigured) {
-      await _storage.delete(key: _pcKey);
-      return;
+    try {
+      if (pc == null || !pc.isConfigured) {
+        await _storage.delete(key: _pcKey);
+        return;
+      }
+      await _storage.write(key: _pcKey, value: jsonEncode(pc.toJson()));
+    } catch (_) {
+      // ignore secure storage failures
     }
-    await _storage.write(key: _pcKey, value: jsonEncode(pc.toJson()));
   }
 }

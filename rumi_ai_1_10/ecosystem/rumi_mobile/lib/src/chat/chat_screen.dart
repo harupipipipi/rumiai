@@ -52,11 +52,15 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _init() async {
-    await widget.store.load();
-    _apiConfig = await widget.configStore.loadApi();
-    final active = widget.store.active;
-    if (active == null) {
-      await widget.store.createAndPersist();
+    try {
+      await widget.store.load();
+      _apiConfig = await widget.configStore.loadApi();
+      final active = widget.store.active;
+      if (active == null) {
+        await widget.store.createAndPersist();
+      }
+    } catch (error, stack) {
+      debugPrint('Rumi init error: $error\n$stack');
     }
     if (mounted) setState(() {});
   }
