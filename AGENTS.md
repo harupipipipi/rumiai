@@ -7,7 +7,7 @@ These notes are for coding agents working in this repository.
 - The canonical runtime implementation is `rumi_ai_1_10/`.
 - The canonical defaultspack implementation is `rumi_ai_1_10/ecosystem/defaultspack/`.
 - The canonical control-panel frontend is `rumi_ai_1_10/ecosystem/defaultspack/webapp/`.
-- The desktop shell lives in `rumi_viewer/`; the mobile client lives in `rumi_mobile/`.
+- The desktop shell lives in `rumi_viewer/`; the mobile client lives in `rumi_ai_1_10/ecosystem/rumi_mobile/`.
 
 ## Coding Workflow
 
