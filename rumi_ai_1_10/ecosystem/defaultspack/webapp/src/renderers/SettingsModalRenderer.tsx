@@ -6,6 +6,7 @@ import { cn } from "../lib/cn";
 import type { ModelSearchItem, SettingsSection } from "../lib/api";
 import { PlacementHtmlRenderer } from "../components/PlacementHtmlRenderer";
 import { ToolSettingsPanel } from "../components/ToolSettingsPanel";
+import { AppsSettingsPanel } from "../components/AppsSettingsPanel";
 import { t } from "../lib/i18n";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
@@ -2727,14 +2728,29 @@ export function SettingsModalRenderer({
   onOpenSection,
   onSettingChange,
 }: SettingsModalRendererProps) {
+  const mobileAppsSection = useMemo<SettingsSection>(
+    () => ({
+      id: "apps",
+      label: "アプリ",
+      description: "Rumi Mobileアプリの入手と、スマホ接続QR。",
+      fields: [],
+    }),
+    [],
+  );
+  const settingsSectionsWithApps = useMemo(
+    () => [mobileAppsSection, ...settingsSections],
+    [mobileAppsSection, settingsSections],
+  );
+  const kernelBaseUrl = typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8765` : "http://127.0.0.1:8765";
+  const cloudflarePagesUrl = String(settingsValues.apps?.cloudflare_pages_url ?? "").trim();
   const [activeSectionId, setActiveSectionId] = useState(settingsSections[0]?.id ?? "system");
   const [settingsSearch, setSettingsSearch] = useState("");
   const [placementMenuOpen, setPlacementMenuOpen] = useState(false);
   const normalizedSearch = settingsSearch.trim().toLowerCase();
   const sidebarSettings = settingsValues.sidebar ?? {};
   const placementManifestMap = useMemo(
-    () => new Map(buildBuiltinPlacementManifests(settingsSections).map((manifest) => [manifest.id, manifest])),
-    [settingsSections],
+    () => new Map(buildBuiltinPlacementManifests(settingsSectionsWithApps).map((manifest) => [manifest.id, manifest])),
+    [settingsSectionsWithApps],
   );
   const pinnedPlacements = useMemo(
     () => normalizePinnedPlacements(sidebarSettings.ui_placements),
@@ -2757,20 +2773,20 @@ export function SettingsModalRenderer({
     )))
   ), [pinnedPlacements, placementManifestMap]);
   const visibleSections = normalizedSearch
-    ? settingsSections.filter((section) => settingsSectionSearchText(section).includes(normalizedSearch))
-    : settingsSections;
+    ? settingsSectionsWithApps.filter((section) => settingsSectionSearchText(section).includes(normalizedSearch))
+    : settingsSectionsWithApps;
   useEffect(() => {
     if (!requestedSectionId) return;
-    if (settingsSections.some((section) => section.id === requestedSectionId)) {
+    if (settingsSectionsWithApps.some((section) => section.id === requestedSectionId)) {
       setActiveSectionId(requestedSectionId);
     }
-  }, [requestedSectionId, settingsSections]);
+  }, [requestedSectionId, settingsSectionsWithApps]);
   useEffect(() => {
     if (!normalizedSearch) return;
     if (!visibleSections.some((section) => section.id === activeSectionId)) {
-      setActiveSectionId(visibleSections[0]?.id ?? settingsSections[0]?.id ?? "system");
+      setActiveSectionId(visibleSections[0]?.id ?? settingsSectionsWithApps[0]?.id ?? "system");
     }
-  }, [activeSectionId, normalizedSearch, settingsSections, visibleSections]);
+  }, [activeSectionId, normalizedSearch, settingsSectionsWithApps, visibleSections]);
   useEffect(() => {
     if (!placementMenuOpen) return;
     const handlePointerDown = () => setPlacementMenuOpen(false);
@@ -2786,7 +2802,7 @@ export function SettingsModalRenderer({
   }, [placementMenuOpen]);
   const activeSection = visibleSections.find((section) => section.id === activeSectionId)
     ?? visibleSections[0]
-    ?? settingsSections[0];
+    ?? settingsSectionsWithApps[0];
   const primaryFields = activeSection?.fields.filter((field) => !field.advanced) ?? [];
   const advancedFields = activeSection?.fields.filter((field) => field.advanced) ?? [];
   const activeSectionOwnText = [
@@ -3040,6 +3056,12 @@ export function SettingsModalRenderer({
                     )}
                     {activeSection.id === "system_info" && (
                       <SystemInfoPanel info={desktopSystemInfo} />
+                    )}
+                    {activeSection.id === "apps" && (
+                      <AppsSettingsPanel
+                        kernelBaseUrl={kernelBaseUrl}
+                        cloudflarePagesUrl={cloudflarePagesUrl}
+                      />
                     )}
                     <div className="grid gap-4 lg:grid-cols-2">
                       {visiblePrimaryFields.map(renderField)}
