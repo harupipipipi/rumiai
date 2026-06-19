@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ChatStreamInterruptedError, api, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
+import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
 
@@ -73,6 +74,295 @@ test("slash command parsing supports multi-word aliases without treating them as
 
   const explicitOff = parseSlashCommandInput("/ultra yolo off", commands);
   assert.deepEqual(explicitOff?.args, { enabled: "off" });
+});
+
+test("slash command parsing can be disabled by template feature flags", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "context_txt",
+      name: "context-txt",
+      label: "Context TXT",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+    },
+  ];
+
+  assert.equal(parseSlashCommandInput("/context-txt handoff", commands, { enabled: false }), null);
+  assert.equal(parseSlashCommandInput("/context-txt handoff", commands)?.command.id, "context_txt");
+});
+
+test("composer command merge keeps backend command definitions authoritative", () => {
+  const backendCommands: ComposerCommandItem[] = [
+    {
+      id: "goal",
+      name: "goal",
+      label: "Goal",
+      category: "tools",
+      visibility: "default",
+      risk: "medium",
+      execution: { type: "pack_block", qualified_name: "defaultspack:goal.run" },
+    },
+  ];
+  const catalogCommands: ComposerCommandItem[] = [
+    {
+      id: "goal_template",
+      name: "goal",
+      label: "Goal Template",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "frontend", action: "template_goal_placeholder" },
+    },
+    {
+      id: "context_txt",
+      name: "context-txt",
+      label: "Context TXT",
+      description: "Write a context handoff file.",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+    },
+  ];
+
+  const merged = mergeComposerCommands(backendCommands, catalogCommands);
+  assert.deepEqual(merged.map((command) => command.id), ["goal", "context_txt"]);
+  assert.deepEqual(merged[0].execution, backendCommands[0].execution);
+  assert.equal(merged[0].risk, "medium");
+  assert.equal(parseSlashCommandInput("/goal frontend handoff", merged)?.command.id, "goal");
+  assert.equal(parseSlashCommandInput("/context-txt frontend handoff", merged)?.command.id, "context_txt");
+});
+
+test("composer command feedback surfaces pack block result messages and paths", () => {
+  const command: ComposerCommandItem = {
+    id: "context_txt",
+    name: "context-txt",
+    label: "Context TXT",
+    category: "tools",
+    visibility: "default",
+    risk: "low",
+    execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+  };
+
+  assert.equal(
+    composerCommandResultMessage({
+      command,
+      executed: true,
+      result: {
+        message: "context.txt updated",
+        path: "/tmp/rumi/context.txt",
+      },
+    }),
+    "context.txt updated\n/tmp/rumi/context.txt",
+  );
+  assert.equal(
+    composerCommandResultMessage({
+      command,
+      executed: true,
+      result: { path: "/tmp/rumi/context.txt" },
+    }),
+    "Command wrote /tmp/rumi/context.txt",
+  );
+});
+
+test("template ai input selects composer and tool policy metadata", () => {
+  const catalog = {
+    ai_inputs: [
+      {
+        id: "default_ai_input",
+        composer_input: "default_composer",
+        tool_policy: "agent_tools",
+        params: { model: "template/model", max_output_tokens: 2048 },
+        modes: ["agent" as const],
+      },
+    ],
+    composer_inputs: [
+      { id: "default_composer", placeholder: "Ask Rumi" },
+    ],
+    tool_policies: [
+      {
+        id: "agent_tools",
+        policy: {
+          default_enabled_tools: ["web_search"],
+          default_disabled_tools: ["terminal"],
+          allowed_tools: ["web_search", "local_file"],
+          denied_tools: ["browser_computer"],
+          tool_choice: "auto",
+          parallel_tool_calls: true,
+        },
+      },
+    ],
+  };
+
+  const aiInput = selectTemplateAiInput(catalog as any, "agent");
+  const composerInput = selectTemplateComposerInput(catalog as any, "agent", aiInput);
+  const toolPolicy = selectTemplateToolPolicy(catalog as any, "agent", aiInput);
+  const settings = templateToolPolicySettings(toolPolicy);
+
+  assert.equal(aiInput?.id, "default_ai_input");
+  assert.deepEqual(templateAiInputParamsPayload(aiInput), {
+    model: "template/model",
+    max_output_tokens: 2048,
+  });
+  assert.equal(composerInput?.id, "default_composer");
+  assert.equal(toolPolicy?.id, "agent_tools");
+  assert.deepEqual(settings.defaultEnabledToolIds, ["web_search"]);
+  assert.deepEqual(settings.defaultDisabledToolIds, ["browser_computer", "terminal"]);
+  assert.deepEqual(settings.allowedToolIds, ["local_file", "web_search"]);
+  assert.deepEqual(settings.deniedToolIds, ["browser_computer", "terminal"]);
+  assert.equal(settings.toolChoice, "auto");
+  assert.equal(settings.parallelToolCalls, true);
+});
+
+test("template ai input composes multiple active inputs and policies deterministically", () => {
+  const catalog = {
+    ai_inputs: [
+      {
+        id: "primary_ai",
+        composer_input: "primary_composer",
+        tool_policy: "primary_tools",
+        widgets: ["web_widget"],
+        modes: ["agent" as const],
+      },
+      {
+        id: "review_ai",
+        composer_input: "review_composer",
+        tool_policy: "review_tools",
+        widgets: ["review_widget"],
+        modes: ["agent" as const],
+      },
+      {
+        id: "coding_only_ai",
+        composer_input: "coding_composer",
+        modes: ["coding" as const],
+      },
+    ],
+    composer_inputs: [
+      {
+        id: "primary_composer",
+        placeholder: "Ask Rumi",
+        accepted_modalities: ["text"],
+        feature_flags: { slash_commands: false, file_attachments: true, voice_input: true },
+        modes: ["agent" as const],
+      },
+      {
+        id: "review_composer",
+        help: "Review context",
+        accepted_modalities: ["file", "text"],
+        feature_flags: { slash_commands: true, voice_input: false },
+        modes: ["agent" as const],
+      },
+      {
+        id: "coding_composer",
+        placeholder: "Coding only",
+        modes: ["coding" as const],
+      },
+    ],
+    tool_policies: [
+      {
+        id: "primary_tools",
+        policy: {
+          default_enabled_tools: ["web_search", "local_file"],
+          allowed_tools: ["web_search", "local_file"],
+          tool_choice: "auto",
+          parallel_tool_calls: true,
+        },
+        modes: ["agent" as const],
+      },
+      {
+        id: "review_tools",
+        policy: {
+          default_enabled_tools: ["web_search"],
+          default_disabled_tools: ["terminal"],
+          allowed_tools: ["web_search", "browser_computer"],
+          denied_tools: ["browser_computer"],
+          tool_choice: "required",
+          parallel_tool_calls: false,
+        },
+        modes: ["agent" as const],
+      },
+    ],
+  };
+
+  const aiInput = selectTemplateAiInput(catalog as any, "agent");
+  const composerInput = selectTemplateComposerInput(catalog as any, "agent", aiInput);
+  const toolPolicy = selectTemplateToolPolicy(catalog as any, "agent", aiInput);
+  const settings = templateToolPolicySettings(toolPolicy);
+
+  assert.equal(aiInput?.id, "composed_ai_input:primary_ai+review_ai");
+  assert.deepEqual(aiInput?.widgets, ["web_widget", "review_widget"]);
+  assert.equal(composerInput?.id, "composed_composer_input:primary_composer+review_composer");
+  assert.equal(composerInput?.placeholder, "Ask Rumi");
+  assert.deepEqual(composerInput?.accepted_modalities, ["text", "file"]);
+  assert.equal(templateFeatureFlagEnabled(composerInput, "slash_commands", true), false);
+  assert.deepEqual(composerInput?.feature_flags, { slash_commands: false, file_attachments: true, voice_input: false });
+  assert.match(toolPolicy?.id ?? "", /^composed_tool_policy:[0-9a-f]+$/);
+  assert.deepEqual(settings.ids, ["primary_tools", "review_tools"]);
+  assert.deepEqual(settings.allowedToolIds, ["web_search"]);
+  assert.equal(settings.hasAllowedToolRestriction, true);
+  assert.deepEqual(settings.deniedToolIds, ["browser_computer", "terminal"]);
+  assert.deepEqual(settings.defaultEnabledToolIds, ["web_search"]);
+  assert.deepEqual(settings.defaultDisabledToolIds, ["browser_computer", "terminal"]);
+  assert.equal(settings.toolChoice, "auto");
+  assert.deepEqual(settings.diagnostics.map((item) => item.code), ["template.tool_policy.conflicting_tool_choice"]);
+  assert.equal(settings.parallelToolCalls, false);
+});
+
+test("template composer widgets become safe tool toggle widgets", () => {
+  const catalog = {
+    composer_widgets: [
+      {
+        id: "web_search_toggle",
+        widget: {
+          tool_id: "web_search",
+          label: "Web",
+          widget_kind: "tool_toggle",
+        },
+      },
+      {
+        id: "unsafe_endpoint",
+        widget: {
+          label: "Unsafe",
+          widget_kind: "button",
+          action: { type: "call_endpoint", endpoint: "/api/anything" },
+        },
+      },
+    ],
+  };
+
+  const widgets = templateComposerWidgetsForInput(
+    catalog as any,
+    null,
+    null,
+    [{ id: "web_search", label: "Web Search", category: "tool" }],
+  );
+
+  assert.equal(widgets.length, 1);
+  assert.deepEqual(widgets[0], {
+    id: "web_search_toggle",
+    type: "tool",
+    label: "Web",
+    description: undefined,
+    enabled: true,
+    widgetKind: "tool_toggle",
+    action: { type: "toggle_tool", tool_id: "web_search" },
+    sourceItemId: "web_search",
+    icon: undefined,
+    metadata: {
+      source: "template_catalog_widget",
+      template_id: null,
+      piece_id: null,
+      widget_id: "web_search_toggle",
+      tool: {
+        id: "web_search",
+        label: "Web Search",
+        category: "tool",
+        tags: [],
+      },
+    },
+  });
 });
 
 test("ultra yolo restore state returns to the previous yolo mode", () => {
@@ -256,8 +546,8 @@ test("defaultspack API errors include status and recovery context", () => {
   assert.match(message, /権限|承認/);
 });
 
-test("selected tools are kept after send unless settings opt out", () => {
-  assert.equal(keepSelectedToolsAfterSend({}), true);
+test("selected tools are cleared after send unless settings opt in", () => {
+  assert.equal(keepSelectedToolsAfterSend({}), false);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: "false" } }), false);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: true } }), true);
 });
@@ -287,6 +577,7 @@ test("sendMessage serializes attachments and selected tools", async () => {
         { name: "photo.png", size: 1024, type: "image/png", truncated: false },
       ],
       tools: ["local_file"],
+      tool_selection: { mode: "manual", include: ["local_file"], scope: "turn", must_use: false },
       tool_policy: { selected_tools: ["local_file"] },
       metadata: { selected_tools: ["local_file"] },
     });
@@ -307,6 +598,7 @@ test("sendMessage serializes attachments and selected tools", async () => {
   assert.deepEqual(requestBody?.params, {
     thinking_level: "medium",
     tool_policy: { selected_tools: ["local_file"] },
+    tool_selection: { mode: "manual", include: ["local_file"], scope: "turn", must_use: false },
   });
 });
 
@@ -586,6 +878,44 @@ test("saveExternalToken serializes named token metadata", async () => {
     kind: "channel_access_token",
     value: "secret",
   });
+});
+
+test("streamMessage serializes auto tool selection without tools", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    const body = [
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"ok"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", {
+      params: { model: "template/model", max_output_tokens: 2048 },
+      thinking_level: "medium",
+      tool_selection: { mode: "auto", include: [], exclude: [], scope: "turn", must_use: false },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestBody?.tools, undefined);
+  assert.equal(requestBody?.params?.model, "template/model");
+  assert.equal(requestBody?.params?.max_output_tokens, 2048);
+  assert.equal(requestBody?.params?.thinking_level, "medium");
+  assert.deepEqual(requestBody?.params?.tool_selection, {
+    mode: "auto",
+    include: [],
+    exclude: [],
+    scope: "turn",
+    must_use: false,
+  });
+  assert.equal(requestBody?.params?.tool_choice, undefined);
 });
 
 test("deleteExternalToken serializes delete action", async () => {

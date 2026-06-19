@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 from typing import Any, Iterable
@@ -276,7 +277,10 @@ def _runtime_metrics(
 def _default_agent_run_store() -> Any | None:
     try:
         _ensure_import_roots()
-        from domain.agent_runtime.run_store import AgentRunStore
+        module = importlib.import_module("domain.agent_runtime.run_store")
+        AgentRunStore = getattr(module, "AgentRunStore", None)
+        if AgentRunStore is None:
+            return None
 
         return AgentRunStore()
     except Exception:

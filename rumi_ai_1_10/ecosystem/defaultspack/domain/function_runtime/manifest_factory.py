@@ -14,11 +14,13 @@ class FunctionSpec:
     tags: tuple[str, ...]
     risk: str = "low"
     block_module: str | None = None
+    handler_ref: str | None = None
     default_args: dict[str, Any] = field(default_factory=dict)
     aliases: tuple[str, ...] = ()
     requires: tuple[str, ...] = ()
     caller_requires: tuple[str, ...] = ()
     input_schema: dict[str, Any] | None = None
+    permission_id: str | None = None
 
 
 def _alias_pair(namespace: str, operation: str) -> tuple[str, str]:
@@ -79,7 +81,13 @@ def _spec(
 
 
 def manifest_for(spec: FunctionSpec) -> dict[str, Any]:
-    return {
+    defaultspack_extension = {
+        "block_module": spec.block_module,
+        "default_args": spec.default_args,
+    }
+    if spec.handler_ref:
+        defaultspack_extension["handler_ref"] = spec.handler_ref
+    manifest = {
         "function_id": spec.function_id,
         "description": spec.description,
         "tags": list(spec.tags),
@@ -93,12 +101,12 @@ def manifest_for(spec: FunctionSpec) -> dict[str, Any]:
         "input_schema": dict(spec.input_schema or OBJECT_SCHEMA),
         "output_schema": dict(ENVELOPE_SCHEMA),
         "extensions": {
-            "defaultspack": {
-                "block_module": spec.block_module,
-                "default_args": spec.default_args,
-            }
+            "defaultspack": defaultspack_extension
         },
     }
+    if spec.permission_id:
+        manifest["permission_id"] = spec.permission_id
+    return manifest
 
 
 AI_FUNCTIONS: tuple[FunctionSpec, ...] = (

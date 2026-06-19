@@ -38,6 +38,47 @@ def export_markdown(conversation):
     return "\n".join(lines)
 
 
+def export_text(conversation):
+    """Export a conversation as plain text without Markdown structure."""
+    lines = []
+    title = conversation.get("title", "Untitled")
+    lines.append("Title: " + str(title))
+    created_at = conversation.get("created_at", 0)
+    if created_at:
+        dt = datetime.datetime.fromtimestamp(created_at / 1000, tz=datetime.timezone.utc)
+        lines.append("Created: " + dt.isoformat())
+    lines.append("Model: " + str(conversation.get("model", "unknown")))
+    lines.append("")
+
+    messages = conversation.get("messages", [])
+    for msg in messages:
+        role = str(msg.get("role", "unknown")).capitalize()
+        lines.append(role + ":")
+        text = _message_text(msg)
+        if text:
+            lines.append(text)
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def export_json(conversation):
     """会話を JSON 文字列としてエクスポートする。"""
     return json.dumps(conversation, ensure_ascii=False, indent=2, default=str)
+
+
+def _message_text(msg):
+    raw_text = msg.get("raw_text", "")
+    if raw_text:
+        return str(raw_text)
+    content = msg.get("content", [])
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(part for part in parts if part)
+    return ""

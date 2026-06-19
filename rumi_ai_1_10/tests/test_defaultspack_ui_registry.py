@@ -48,16 +48,29 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                                 "id": "custom",
                                 "label": "Custom",
                                 "fields": [
-                                    {"id": "enabled", "label": "Enabled", "type": "toggle", "default": True}
+                                    {
+                                        "id": "enabled",
+                                        "label": "Enabled",
+                                        "type": "toggle",
+                                        "default": True,
+                                    }
                                 ],
                             }
                         ],
                         "chat_renderers": [
                             {"id": "text", "component": "CustomText", "block_types": ["text"]},
-                            {"id": "custom-renderer", "component": "Custom", "block_types": ["custom"]}
+                            {
+                                "id": "custom-renderer",
+                                "component": "Custom",
+                                "block_types": ["custom"],
+                            },
                         ],
                         "shell_renderers": [
-                            {"id": "composer", "component": "CustomComposer", "regions": ["composer"]}
+                            {
+                                "id": "composer",
+                                "component": "CustomComposer",
+                                "regions": ["composer"],
+                            }
                         ],
                     }
                 ),
@@ -69,8 +82,18 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                         "shell_layout": {
                             "id": "compact",
                             "regions": [
-                                {"id": "composer", "renderer": "composer", "order": 5, "enabled": True},
-                                {"id": "history", "renderer": "history_board", "order": 20, "enabled": False},
+                                {
+                                    "id": "composer",
+                                    "renderer": "composer",
+                                    "order": 5,
+                                    "enabled": True,
+                                },
+                                {
+                                    "id": "history",
+                                    "renderer": "history_board",
+                                    "order": 20,
+                                    "enabled": False,
+                                },
                             ],
                         }
                     }
@@ -85,7 +108,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         sidebar_ids = {item["id"] for item in catalog["sidebar"]["items"]}
         section_ids = {section["id"] for section in catalog["settings"]["sections"]}
-        renderers = {renderer["id"]: renderer for renderer in catalog["chat_rendering"]["renderers"]}
+        renderers = {
+            renderer["id"]: renderer for renderer in catalog["chat_rendering"]["renderers"]
+        }
         shell_renderers = {renderer["id"]: renderer for renderer in catalog["shell"]["renderers"]}
         regions = {region["id"]: region for region in catalog["shell"]["layout"]["regions"]}
         part_ids = {part["id"] for part in catalog["parts"]}
@@ -104,22 +129,36 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("operations-company", sidebar_ids)
         self.assertIn("collaboration", sidebar_ids)
         self.assertIn("share-export", sidebar_ids)
-        provider_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "provider-catalog")
+        provider_item = next(
+            item for item in catalog["sidebar"]["items"] if item["id"] == "provider-catalog"
+        )
         self.assertEqual(provider_item["ui"]["widget_kind"], "panel")
         self.assertEqual(provider_item["ui"]["composer_action"]["type"], "open_panel")
-        self.assertEqual(provider_item["ui"]["composer_action"]["target_item_id"], "provider-catalog")
-        computer_use_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "computer_use")
+        self.assertEqual(
+            provider_item["ui"]["composer_action"]["target_item_id"], "provider-catalog"
+        )
+        computer_use_item = next(
+            item for item in catalog["sidebar"]["items"] if item["id"] == "computer_use"
+        )
         self.assertEqual(computer_use_item["label"], "Computer Use")
         self.assertEqual(computer_use_item["panel"]["title"], "Computer Use")
-        browser_use_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "browser_use")
+        browser_use_item = next(
+            item for item in catalog["sidebar"]["items"] if item["id"] == "browser_use"
+        )
         browser_use_field_ids = {field["id"] for field in browser_use_item["panel"]["fields"]}
         self.assertEqual(browser_use_field_ids, {"default_target", "mode", "safety", "quality"})
         self.assertNotIn("url", browser_use_field_ids)
         self.assertNotIn("x", browser_use_field_ids)
-        self.assertIn("Runtime arguments: action, url", " ".join(browser_use_item["panel"]["notes"]))
-        web_search_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "web_search")
+        self.assertIn(
+            "Runtime arguments: action, url", " ".join(browser_use_item["panel"]["notes"])
+        )
+        web_search_item = next(
+            item for item in catalog["sidebar"]["items"] if item["id"] == "web_search"
+        )
         web_search_field_ids = {field["id"] for field in web_search_item["panel"]["fields"]}
-        self.assertEqual(web_search_field_ids, {"default_result_limit", "freshness_window", "safe_search"})
+        self.assertEqual(
+            web_search_field_ids, {"default_result_limit", "freshness_window", "safe_search"}
+        )
         self.assertNotIn("query", web_search_field_ids)
         for item in catalog["sidebar"]["items"]:
             if item.get("category") != "tool":
@@ -135,36 +174,43 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("custom-widget", sidebar_ids)
         self.assertIn("custom", section_ids)
         self.assertIn("system_info", section_ids)
-        system_info_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "system_info")
+        system_info_section = next(
+            section for section in catalog["settings"]["sections"] if section["id"] == "system_info"
+        )
         self.assertEqual(system_info_section["label"], "System Info")
-        tools_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "tools")
+        tools_section = next(
+            section for section in catalog["settings"]["sections"] if section["id"] == "tools"
+        )
         tools_field_ids = {field["id"] for field in tools_section["fields"]}
         self.assertIn("tool_assist_mode", tools_field_ids)
-        tool_assist_field = next(field for field in tools_section["fields"] if field["id"] == "tool_assist_mode")
-        self.assertEqual(catalog["settings"]["values"]["tools"]["tool_assist_mode"], "all")
+        tool_assist_field = next(
+            field for field in tools_section["fields"] if field["id"] == "tool_assist_mode"
+        )
+        self.assertEqual(catalog["settings"]["values"]["tools"]["settings_version"], 2)
+        self.assertEqual(catalog["settings"]["values"]["tools"]["tool_assist_mode"], "auto")
         tool_assist_options = {option["value"] for option in tool_assist_field["options"]}
         self.assertIn("auto", tool_assist_options)
         self.assertIn("vector", tool_assist_options)
-        general_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "general")
+        self.assertIn("all_schemas", tool_assist_options)
+        general_section = next(
+            section for section in catalog["settings"]["sections"] if section["id"] == "general"
+        )
         general_field_ids = {field["id"] for field in general_section["fields"]}
         self.assertIn("language", general_field_ids)
         self.assertEqual(catalog["settings"]["values"]["general"]["language"], "ja")
-        models_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "models")
+        models_section = next(
+            section for section in catalog["settings"]["sections"] if section["id"] == "models"
+        )
         models_field_ids = {field["id"] for field in models_section["fields"]}
-        self.assertIn("model_api_routes", models_field_ids)
-        route_field = next(field for field in models_section["fields"] if field["id"] == "model_api_routes")
-        self.assertEqual(route_field["type"], "model_api_routes")
-        self.assertIsInstance(route_field.get("options"), list)
-        self.assertTrue(route_field["options"])
-        self.assertIn("api_keys", route_field)
-        apis_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "apis")
-        apis_field_ids = {field["id"] for field in apis_section["fields"]}
-        self.assertIn("api_keys", apis_field_ids)
-        self.assertNotIn("model_api_routes", apis_field_ids)
+        self.assertEqual(len(models_field_ids), len(models_section["fields"]))
         self.assertIn("operations_company", section_ids)
         self.assertIn("mimo_coding_company", section_ids)
         self.assertIn("mimo-coding-company", sidebar_ids)
-        mimo_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "mimo_coding_company")
+        mimo_section = next(
+            section
+            for section in catalog["settings"]["sections"]
+            if section["id"] == "mimo_coding_company"
+        )
         mimo_field_ids = {field["id"] for field in mimo_section["fields"]}
         self.assertIn("docker_worker_count", mimo_field_ids)
         self.assertIn("docker_personas", mimo_field_ids)
@@ -189,6 +235,199 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(catalog["app"]["icon"], "/static/assets/icons/defaultspack-icon.png")
         self.assertEqual(catalog["diagnostics"], [])
 
+    def test_default_template_settings_fields_replace_legacy_base_fields(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with patch("domain.frontend.registry.AIClient") as mock_client:
+            mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+            catalog = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT).build_catalog()
+
+        section_ids = {section["id"] for section in catalog["settings"]["sections"]}
+        self.assertIn("calendar", section_ids)
+
+        tools_section = next(
+            section for section in catalog["settings"]["sections"] if section["id"] == "tools"
+        )
+        tools_field_ids = {field["id"] for field in tools_section["fields"]}
+        self.assertEqual(len(tools_field_ids), len(tools_section["fields"]))
+        tool_assist_field = next(
+            field for field in tools_section["fields"] if field["id"] == "tool_assist_mode"
+        )
+        self.assertEqual(tool_assist_field["template_id"], "rumi.composer.default")
+        self.assertIn("vector", {option["value"] for option in tool_assist_field["options"]})
+
+        models_section = next(
+            section for section in catalog["settings"]["sections"] if section["id"] == "models"
+        )
+        models_field_ids = {field["id"] for field in models_section["fields"]}
+        self.assertEqual(len(models_field_ids), len(models_section["fields"]))
+        preferred_model_field = next(
+            field for field in models_section["fields"] if field["id"] == "preferred_model"
+        )
+        self.assertEqual(preferred_model_field["type"], "model_select")
+        self.assertEqual(preferred_model_field["template_id"], "rumi.model_selector.default")
+        self.assertIn("model_api_routes", models_field_ids)
+        route_field = next(
+            field for field in models_section["fields"] if field["id"] == "model_api_routes"
+        )
+        self.assertEqual(route_field["type"], "model_api_routes")
+        self.assertEqual(route_field["template_id"], "rumi.backend.model_routing.default")
+        self.assertIsInstance(route_field.get("options"), list)
+        self.assertTrue(route_field["options"])
+        self.assertIn("api_keys", route_field)
+
+        apis_section = next(
+            section for section in catalog["settings"]["sections"] if section["id"] == "apis"
+        )
+        apis_field_ids = {field["id"] for field in apis_section["fields"]}
+        self.assertEqual(len(apis_field_ids), len(apis_section["fields"]))
+        self.assertIn("api_keys", apis_field_ids)
+        api_keys_field = next(
+            field for field in apis_section["fields"] if field["id"] == "api_keys"
+        )
+        self.assertEqual(api_keys_field["type"], "api_key_setup")
+        self.assertEqual(api_keys_field["template_id"], "rumi.api_keys.default")
+        self.assertNotIn("model_api_routes", apis_field_ids)
+
+        calendar_section = next(
+            section for section in catalog["settings"]["sections"] if section["id"] == "calendar"
+        )
+        self.assertTrue(calendar_section["fields"])
+        self.assertTrue(
+            all(
+                field.get("template_id") == "rumi.calendar.default"
+                for field in calendar_section["fields"]
+            )
+        )
+        commands_section = next(
+            section for section in catalog["settings"]["sections"] if section["id"] == "commands"
+        )
+        command_field = next(
+            field for field in commands_section["fields"] if field["id"] == "show_advanced_commands"
+        )
+        self.assertEqual(command_field["template_id"], "rumi.composer.default")
+
+    def test_catalog_merges_template_shell_projection_and_catalog_buckets(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        template_meta = {
+            "template_id": "template.shell",
+            "trust_level": "builtin",
+            "origin": {"kind": "template", "template_id": "template.shell"},
+            "_source": "templates/shell/template.json",
+        }
+        template_catalog = FrontendRegistry._empty_template_catalog()
+        template_catalog.update(
+            {
+                "commands": [
+                    {
+                        **template_meta,
+                        "id": "context_txt",
+                        "piece_id": "context_txt_command",
+                        "projected_id": "template.shell:context_txt_command",
+                    }
+                ],
+                "composer_inputs": [
+                    {
+                        **template_meta,
+                        "id": "default_composer",
+                        "piece_id": "default_composer_input",
+                        "projected_id": "template.shell:default_composer_input",
+                        "region_id": "composer",
+                        "renderer": "composer",
+                    }
+                ],
+                "context_policies": [
+                    {
+                        **template_meta,
+                        "id": "materialize_txt",
+                        "piece_id": "materialize_txt_policy",
+                        "projected_id": "template.shell:materialize_txt_policy",
+                    }
+                ],
+                "shell_regions": [
+                    {
+                        **template_meta,
+                        "id": "template_sidecar",
+                        "piece_id": "template_sidecar_region",
+                        "projected_id": "template.shell:template_sidecar_region",
+                        "part_id": "ai_chat",
+                        "renderer": "template_sidecar",
+                        "slot": "main",
+                        "order": 45,
+                        "enabled": True,
+                    },
+                    {
+                        **template_meta,
+                        "id": "composer",
+                        "piece_id": "composer_shell_region",
+                        "projected_id": "template.shell:composer_shell_region",
+                        "part_id": "ai_chat",
+                        "renderer": "composer",
+                        "slot": "bottom",
+                        "order": 1,
+                        "enabled": False,
+                    },
+                ],
+                "shell_renderers": [
+                    {
+                        **template_meta,
+                        "id": "template_sidecar",
+                        "piece_id": "template_sidecar_renderer",
+                        "projected_id": "template.shell:template_sidecar_renderer",
+                        "component": "TemplateSidecar",
+                        "regions": ["template_sidecar"],
+                        "fallback": "hidden",
+                    },
+                    {
+                        **template_meta,
+                        "id": "composer",
+                        "piece_id": "composer_shell_renderer",
+                        "projected_id": "template.shell:composer_shell_renderer",
+                        "component": "TemplateComposer",
+                        "regions": ["composer"],
+                        "fallback": "plain_text",
+                    },
+                ],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            with (
+                patch("domain.frontend.registry.AIClient") as mock_client,
+                patch.object(
+                    FrontendRegistry, "_template_catalog_metadata", return_value=template_catalog
+                ),
+            ):
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                catalog = FrontendRegistry(pack_root=pack_root).build_catalog()
+
+        regions = {region["id"]: region for region in catalog["shell"]["layout"]["regions"]}
+        renderers = {renderer["id"]: renderer for renderer in catalog["shell"]["renderers"]}
+
+        self.assertEqual({item["id"] for item in catalog["commands"]}, {"context_txt"})
+        self.assertEqual({item["id"] for item in catalog["composer_inputs"]}, {"default_composer"})
+        self.assertEqual({item["id"] for item in catalog["context_policies"]}, {"materialize_txt"})
+        self.assertEqual(
+            {item["id"] for item in catalog["shell_regions"]}, {"composer", "template_sidecar"}
+        )
+        self.assertEqual(
+            {item["id"] for item in catalog["shell_renderers"]}, {"composer", "template_sidecar"}
+        )
+        self.assertEqual(regions["template_sidecar"]["renderer"], "template_sidecar")
+        self.assertEqual(regions["template_sidecar"]["template_id"], "template.shell")
+        self.assertEqual(renderers["template_sidecar"]["component"], "TemplateSidecar")
+        self.assertEqual(renderers["template_sidecar"]["trust_level"], "builtin")
+        self.assertEqual(regions["composer"]["order"], 50)
+        self.assertTrue(regions["composer"]["enabled"])
+        self.assertEqual(regions["composer"]["template_id"], "template.shell")
+        self.assertEqual(renderers["composer"]["component"], "Composer")
+        self.assertEqual(renderers["composer"]["fallback"], "hidden")
+        self.assertEqual(
+            renderers["composer"]["projected_id"], "template.shell:composer_shell_renderer"
+        )
+
     def test_catalog_filters_profile_visibility_for_selected_frontend_ids(self):
         from core_runtime.profile_workspace import ProfileWorkspaceManager
         from domain.frontend.registry import FrontendRegistry
@@ -205,7 +444,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                                 "id": "research_sidebar",
                                 "label": "Research Sidebar",
                                 "category": "widget",
-                                "profile_visibility": {"selected_frontend_ids": ["research_sidebar"]},
+                                "profile_visibility": {
+                                    "selected_frontend_ids": ["research_sidebar"]
+                                },
                             },
                             {
                                 "id": "coding_sidebar",
@@ -433,8 +674,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                 catalog = FrontendRegistry(pack_root=pack_root).build_catalog()
 
         self.assertEqual(catalog["shell"]["layout"]["id"], "default_chat_shell")
-        self.assertTrue(any(region["id"] == "chat_messages" for region in catalog["shell"]["layout"]["regions"]))
-        self.assertTrue(any(item["code"] == "frontend_shell_invalid_json" for item in catalog["diagnostics"]))
+        self.assertTrue(
+            any(region["id"] == "chat_messages" for region in catalog["shell"]["layout"]["regions"])
+        )
+        self.assertTrue(
+            any(item["code"] == "frontend_shell_invalid_json" for item in catalog["diagnostics"])
+        )
 
     def test_catalog_reports_frontend_contract_diagnostics(self):
         from domain.frontend.registry import FrontendRegistry
@@ -454,7 +699,11 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                         ],
                         "shell_renderers": [
                             {"id": "bad_renderer", "component": "", "regions": "composer"},
-                            {"id": "remote_renderer", "component": "Remote", "module": "https://example.com/remote.js"},
+                            {
+                                "id": "remote_renderer",
+                                "component": "Remote",
+                                "module": "https://example.com/remote.js",
+                            },
                         ],
                     }
                 ),
@@ -465,7 +714,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                     {
                         "shell_layout": {
                             "regions": [
-                                {"id": "bad_region", "part_id": "missing_part", "renderer": "missing_renderer", "order": "first"},
+                                {
+                                    "id": "bad_region",
+                                    "part_id": "missing_part",
+                                    "renderer": "missing_renderer",
+                                    "order": "first",
+                                },
                             ]
                         }
                     }
@@ -531,7 +785,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                     }
                 )
 
-        haze_section = next(section for section in settings["sections"] if section["id"] == "computer_use_haze")
+        haze_section = next(
+            section for section in settings["sections"] if section["id"] == "computer_use_haze"
+        )
         field_types = {field["id"]: field["type"] for field in haze_section["fields"]}
         self.assertEqual(field_types["start_color"], "color")
         self.assertEqual(field_types["end_color"], "color")
@@ -615,7 +871,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             pack_root = Path(tmpdir)
-            shutil.copytree(DEFAULTSPACK_ROOT / "external_io_templates", pack_root / "external_io_templates")
+            shutil.copytree(
+                DEFAULTSPACK_ROOT / "external_io_templates", pack_root / "external_io_templates"
+            )
             with patch("domain.frontend.registry.AIClient") as mock_client:
                 mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
                 settings = FrontendRegistry(pack_root=pack_root).get_settings()
@@ -641,8 +899,13 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(output_fields["output_profile_id"]["type"], "select")
         self.assertEqual(output_fields["output_send_mode"]["type"], "select")
         self.assertEqual(output_fields["output_target_id"]["type"], "text")
-        self.assertNotIn("custom", {option["value"] for option in input_fields["input_provider"]["options"]})
-        self.assertNotIn("custom.input", {option["value"] for option in input_fields["input_template_id"]["options"]})
+        self.assertNotIn(
+            "custom", {option["value"] for option in input_fields["input_provider"]["options"]}
+        )
+        self.assertNotIn(
+            "custom.input",
+            {option["value"] for option in input_fields["input_template_id"]["options"]},
+        )
         self.assertNotIn("textarea", {field["type"] for field in input_fields.values()})
         self.assertNotIn("textarea", {field["type"] for field in output_fields.values()})
         self.assertEqual(sections["external_custom"]["fields"][-1]["type"], "textarea")
@@ -650,9 +913,17 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(values["external_input"]["default_response_mode"], "same_response")
         self.assertEqual(values["external_input"]["input_provider"], "line")
         self.assertEqual(values["external_input"]["input_template_id"], "line.input.default")
-        self.assertEqual(values["external_input"]["public_url_launcher"]["provider_id"], "cloudflare_quick_tunnel")
-        self.assertEqual(values["external_input"]["public_url_launcher"]["route_path"], "/api/integrations/line/webhook")
-        self.assertIn("/api/integrations/line/webhook", values["external_input"]["provider_route_copy"])
+        self.assertEqual(
+            values["external_input"]["public_url_launcher"]["provider_id"],
+            "cloudflare_quick_tunnel",
+        )
+        self.assertEqual(
+            values["external_input"]["public_url_launcher"]["route_path"],
+            "/api/integrations/line/webhook",
+        )
+        self.assertIn(
+            "/api/integrations/line/webhook", values["external_input"]["provider_route_copy"]
+        )
         self.assertEqual(values["external_output"]["output_send_mode"], "reply_to_origin")
         self.assertEqual(values["external_output"]["output_callback_token_id"], "main")
         self.assertIn("push fallback", values["external_output"]["output_setup_guide"])
@@ -664,14 +935,23 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         updated = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT)._refresh_derived_settings(
             {
                 **values,
-                "external_input": {**values["external_input"], "input_provider": "slack", "input_endpoint_id": "slack-main"},
+                "external_input": {
+                    **values["external_input"],
+                    "input_provider": "slack",
+                    "input_endpoint_id": "slack-main",
+                },
                 "external_output": {**values["external_output"], "output_provider": "discord"},
             }
         )
 
         self.assertEqual(updated["external_input"]["input_template_id"], "slack.input.default")
-        self.assertEqual(updated["external_input"]["public_url_launcher"]["route_path"], "/api/integrations/slack/events")
-        self.assertEqual(updated["external_output"]["output_template_id"], "discord.output.bot_channel")
+        self.assertEqual(
+            updated["external_input"]["public_url_launcher"]["route_path"],
+            "/api/integrations/slack/events",
+        )
+        self.assertEqual(
+            updated["external_output"]["output_template_id"], "discord.output.bot_channel"
+        )
         self.assertEqual(updated["external_output"]["output_profile_id"], "discord.bot_channel")
 
     def test_external_token_status_keeps_custom_provider_rows(self):
@@ -727,8 +1007,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             pack_root = Path(tmpdir)
-            shutil.copytree(DEFAULTSPACK_ROOT / "external_io_templates", pack_root / "external_io_templates")
-            endpoint_store = WebhookEndpointStore(pack_root / "user_data" / "shared" / "webhooks" / "endpoints.json")
+            shutil.copytree(
+                DEFAULTSPACK_ROOT / "external_io_templates", pack_root / "external_io_templates"
+            )
+            endpoint_store = WebhookEndpointStore(
+                pack_root / "user_data" / "shared" / "webhooks" / "endpoints.json"
+            )
             endpoint_store.upsert(
                 {
                     "id": "line-main",
@@ -776,7 +1060,45 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(values["debug"]["ai_request_logging"])
         self.assertEqual(values["debug"]["custom_debug_flag"], "keep-me")
         self.assertEqual(values["tools"]["default_target"], "current_browser")
-        self.assertTrue(values["tools"]["keep_selected_tools_after_send"])
+        self.assertFalse(values["tools"]["keep_selected_tools_after_send"])
+
+    def test_settings_migrates_legacy_tool_assist_all_to_safe_auto(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps({"tools": {"tool_assist_mode": "all"}}),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        self.assertEqual(values["tools"]["settings_version"], 2)
+        self.assertEqual(values["tools"]["tool_assist_mode"], "auto")
+
+    def test_settings_migrates_legacy_keep_selected_tools_after_send_true_to_false(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps({"tools": {"keep_selected_tools_after_send": True}}),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        self.assertEqual(values["tools"]["settings_version"], 2)
+        self.assertFalse(values["tools"]["keep_selected_tools_after_send"])
 
     def test_settings_migrates_model_api_routes_from_apis_to_models(self):
         from domain.frontend.registry import FrontendRegistry
@@ -813,7 +1135,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             pack_root = Path(tmpdir)
             with patch("domain.frontend.registry.AIClient") as mock_client:
-                mock_client.return_value.list_models.return_value = [{"id": "openrouter/tencent/hy3-preview:free"}]
+                mock_client.return_value.list_models.return_value = [
+                    {"id": "openrouter/tencent/hy3-preview:free"}
+                ]
                 registry = FrontendRegistry(pack_root=pack_root)
                 values = registry.update_settings({"models": {"openrouter_api_key": "or-secret"}})
                 reloaded = registry.get_settings()["values"]
@@ -836,7 +1160,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             pack_root = Path(tmpdir)
             with patch("domain.frontend.registry.AIClient") as mock_client:
-                mock_client.return_value.list_models.return_value = [{"id": "google/gemini-2.5-flash"}]
+                mock_client.return_value.list_models.return_value = [
+                    {"id": "google/gemini-2.5-flash"}
+                ]
                 registry = FrontendRegistry(pack_root=pack_root)
                 values = registry.update_settings({"models": {"google_api_key": "google-secret"}})
                 reloaded = registry.get_settings()["values"]
@@ -877,9 +1203,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                     )
 
             token_value = read_external_token("line", token_id="main", pack_root=pack_root)
-            settings_text = (pack_root / "user_data" / "shared" / "frontend_settings.json").read_text(
-                encoding="utf-8"
-            )
+            settings_text = (
+                pack_root / "user_data" / "shared" / "frontend_settings.json"
+            ).read_text(encoding="utf-8")
 
         self.assertIsInstance(values["external_output"]["external_tokens"], list)
         self.assertEqual(token_value, "")
@@ -934,7 +1260,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             store.set_secret("OPENROUTER_API_KEY", "or-secret", actor="test")
 
             with patch("domain.frontend.registry.AIClient") as mock_client:
-                mock_client.return_value.list_models.return_value = [{"id": "openrouter/tencent/hy3-preview:free"}]
+                mock_client.return_value.list_models.return_value = [
+                    {"id": "openrouter/tencent/hy3-preview:free"}
+                ]
                 values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
 
         self.assertEqual(values["models"]["openrouter_api_key"], "")
@@ -963,7 +1291,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             store.set_secret("GOOGLE_API_KEY", "google-secret", actor="test")
 
             with patch("domain.frontend.registry.AIClient") as mock_client:
-                mock_client.return_value.list_models.return_value = [{"id": "google/gemini-2.5-flash"}]
+                mock_client.return_value.list_models.return_value = [
+                    {"id": "google/gemini-2.5-flash"}
+                ]
                 values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
 
         self.assertEqual(values["models"]["google_api_key"], "")
@@ -1034,13 +1364,21 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from transport.http import DefaultsHttpServer
 
         server = DefaultsHttpServer(facade=object())
-        with patch("domain.function_runtime.bridge.invoke_function") as invoke_function, patch("transport.http.invoke_block") as invoke_block:
+        with (
+            patch("domain.function_runtime.bridge.invoke_function") as invoke_function,
+            patch("transport.http.invoke_block") as invoke_block,
+        ):
             invoke_function.return_value = {
                 "status": "error",
-                "error": {"code": "PACK_NOT_APPROVED", "message": "Pack not approved: defaultspack"},
+                "error": {
+                    "code": "PACK_NOT_APPROVED",
+                    "message": "Pack not approved: defaultspack",
+                },
             }
             invoke_block.return_value = {"status": "ok", "data": {"catalog": "fallback"}}
-            result = server._invoke_fallback_block("blocks.ui.catalog", {"_method": "GET", "_actual_method": "GET"}, {})
+            result = server._invoke_fallback_block(
+                "blocks.ui.catalog", {"_method": "GET", "_actual_method": "GET"}, {}
+            )
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["data"]["catalog"], "fallback")
@@ -1050,12 +1388,20 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from transport.http import DefaultsHttpServer
 
         server = DefaultsHttpServer(facade=object())
-        with patch("domain.function_runtime.bridge.invoke_function") as invoke_function, patch("transport.http.invoke_block") as invoke_block:
+        with (
+            patch("domain.function_runtime.bridge.invoke_function") as invoke_function,
+            patch("transport.http.invoke_block") as invoke_block,
+        ):
             invoke_function.return_value = {
                 "status": "error",
-                "error": {"code": "PACK_NOT_APPROVED", "message": "Pack not approved: defaultspack"},
+                "error": {
+                    "code": "PACK_NOT_APPROVED",
+                    "message": "Pack not approved: defaultspack",
+                },
             }
-            result = server._invoke_fallback_block("blocks.ui.catalog", {"_method": "GET", "_actual_method": "POST"}, {})
+            result = server._invoke_fallback_block(
+                "blocks.ui.catalog", {"_method": "GET", "_actual_method": "POST"}, {}
+            )
 
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["error"]["code"], "PACK_NOT_APPROVED")
@@ -1065,9 +1411,14 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from transport.http import DefaultsHttpServer
 
         server = DefaultsHttpServer(facade=None)
-        with patch("transport.http.invoke_block") as invoke_block, patch("domain.function_runtime.bridge.invoke_function") as invoke_function:
+        with (
+            patch("transport.http.invoke_block") as invoke_block,
+            patch("domain.function_runtime.bridge.invoke_function") as invoke_function,
+        ):
             invoke_block.return_value = {"status": "ok", "data": {"settings": True}}
-            result = server._invoke_fallback_block("blocks.ui.settings", {"_method": "GET", "_actual_method": "GET"}, {})
+            result = server._invoke_fallback_block(
+                "blocks.ui.settings", {"_method": "GET", "_actual_method": "GET"}, {}
+            )
 
         self.assertEqual(result["status"], "ok")
         invoke_block.assert_called_once()
@@ -1077,7 +1428,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from domain.chat import store as chat_store
 
         self.assertEqual(
-            chat_store._default_conversation_model(Path("/tmp/defaultspack-settings-does-not-exist.json")),
+            chat_store._default_conversation_model(
+                Path("/tmp/defaultspack-settings-does-not-exist.json")
+            ),
             "stub/default",
         )
 
@@ -1106,7 +1459,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         }
         self.assertEqual(model_fields["preferred_model"]["type"], "select")
         self.assertGreaterEqual(len(model_fields["preferred_model"]["options"]), 1)
-        model_option_values = {option["value"] for option in model_fields["preferred_model"]["options"]}
+        model_option_values = {
+            option["value"] for option in model_fields["preferred_model"]["options"]
+        }
         self.assertIn("google/gemini-2.5-flash", model_option_values)
         self.assertIn("google/gemma-4-26b-a4b-it", model_option_values)
         self.assertIn("stub/default", model_option_values)
@@ -1139,7 +1494,14 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                     conversation["id"],
                     {
                         "role": "assistant",
-                        "content": [{"type": "code", "filename": "demo.py", "language": "python", "text": "print('hi')"}],
+                        "content": [
+                            {
+                                "type": "code",
+                                "filename": "demo.py",
+                                "language": "python",
+                                "text": "print('hi')",
+                            }
+                        ],
                         "widget": {"type": "indicator", "label": "Running"},
                         "tool_logs": [
                             {
@@ -1205,7 +1567,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                     conversation_id=conversation["id"],
                     tools_called=["web_search"],
                     context_info={
-                        "knowledge_results": [{"content": "Knowledge body", "metadata": {"title": "Knowledge"}}],
+                        "knowledge_results": [
+                            {"content": "Knowledge body", "metadata": {"title": "Knowledge"}}
+                        ],
                         "memory_results": [{"content": "Memory body", "score": 0.8}],
                     },
                 )
@@ -1224,24 +1588,30 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(any(item.startswith("memory-") for item in preview_ids))
         self.assertTrue(any(item.startswith("tool-log-artifact-") for item in preview_ids))
         self.assertTrue(any(item.startswith("tool-log-inline-") for item in preview_ids))
-        self.assertFalse(any(
-            (item.get("data") or {}).get("path") == "/tmp/report.md"
-            for item in preview["previews"]
-        ))
-        self.assertFalse(any(
-            (item.get("data") or {}).get("path") in {"/tmp/pending.html", "/tmp/failed.html"}
-            for item in preview["previews"]
-        ))
+        self.assertFalse(
+            any(
+                (item.get("data") or {}).get("path") == "/tmp/report.md"
+                for item in preview["previews"]
+            )
+        )
+        self.assertFalse(
+            any(
+                (item.get("data") or {}).get("path") in {"/tmp/pending.html", "/tmp/failed.html"}
+                for item in preview["previews"]
+            )
+        )
         content_preview = next(
             item
             for item in preview["previews"]
             if (item.get("data") or {}).get("path") == "/tmp/readme.md"
         )
         self.assertEqual(content_preview["data"]["content"], "# Readme")
-        self.assertFalse(any(
-            (item.get("data") or {}).get("filename", "").endswith(".tool")
-            for item in preview["previews"]
-        ))
+        self.assertFalse(
+            any(
+                (item.get("data") or {}).get("filename", "").endswith(".tool")
+                for item in preview["previews"]
+            )
+        )
         self.assertTrue(any(item.startswith("widget-") for item in preview_ids))
         self.assertTrue(any(item.startswith("code-") for item in preview_ids))
 
@@ -1288,7 +1658,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             def _handle_static_file(self, request_data, path_params):
                 return {}
 
-        fallback_patterns = {compiled.pattern for _, compiled, _, _, _ in build_fallback_http_routes(FakeServer())}
+        fallback_patterns = {
+            compiled.pattern for _, compiled, _, _, _ in build_fallback_http_routes(FakeServer())
+        }
 
         self.assertEqual(result["status"], "ok")
         self.assertIn("/api/ui/catalog", registered_patterns)
@@ -1305,10 +1677,13 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
     def test_client_event_route_records_redacted_audit_entry(self):
         from blocks.ui.client_events import run
 
-        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
-            os.environ,
-            {"RUMI_DEFAULTSPACK_AUDIT_PATH": str(Path(tmpdir) / "audit.jsonl")},
-            clear=False,
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.dict(
+                os.environ,
+                {"RUMI_DEFAULTSPACK_AUDIT_PATH": str(Path(tmpdir) / "audit.jsonl")},
+                clear=False,
+            ),
         ):
             result = run(
                 {
@@ -1348,16 +1723,24 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("deepthink", ids)
         self.assertIn("compact", ids)
         self.assertIn("commit", ids)
-        self.assertEqual(next(command for command in commands if command["id"] == "commit")["risk"], "high")
+        self.assertEqual(
+            next(command for command in commands if command["id"] == "commit")["risk"], "high"
+        )
 
-        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+        with patch(
+            "domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService"
+        ) as service_cls:
             service = service_cls.return_value
             service.set_thinking_level.return_value = {"level": "high", "scope": "profile"}
             result = registry.execute(
                 {
                     "command": "thinking",
                     "mode": "chat",
-                    "args": {"level": "high", "scope": "profile", "profile_id": "google/gemma-4-31b-it"},
+                    "args": {
+                        "level": "high",
+                        "scope": "profile",
+                        "profile_id": "google/gemma-4-31b-it",
+                    },
                     "conversation_id": "conv-1",
                 },
                 {},
@@ -1376,7 +1759,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from domain.frontend.command_registry import SlashCommandRegistry
 
         registry = SlashCommandRegistry(DEFAULTSPACK_ROOT)
-        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+        with patch(
+            "domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService"
+        ) as service_cls:
             service = service_cls.return_value
             service.set_deepthink_enabled.return_value = {
                 "enabled": True,
@@ -1395,7 +1780,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
     def test_slash_command_registry_model_command_opens_picker_without_query(self):
         from domain.frontend.command_registry import SlashCommandRegistry
 
-        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+        with patch(
+            "domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService"
+        ) as service_cls:
             result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
                 {"command": "model", "mode": "chat", "args": {}},
                 {},
@@ -1422,14 +1809,19 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             "score": 1036,
             "label": "Stub / Stub Default",
         }
-        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+        with patch(
+            "domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService"
+        ) as service_cls:
             service = service_cls.return_value
             service.resolve_model_candidates.return_value = {
                 "query": "stub/default",
                 "exact": candidate,
                 "candidates": [candidate],
             }
-            service.set_preferred_model.return_value = {"profile_id": "stub/default", "settings": {}}
+            service.set_preferred_model.return_value = {
+                "profile_id": "stub/default",
+                "settings": {},
+            }
             result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
                 {"command": "model", "mode": "chat", "args": {"query": "stub/default"}},
                 {},
@@ -1449,7 +1841,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             {"profile_id": "openai/gpt-4o", "display_name": "GPT-4o", "score": 950},
             {"profile_id": "openrouter/openai/gpt-4o", "display_name": "GPT-4o", "score": 950},
         ]
-        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+        with patch(
+            "domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService"
+        ) as service_cls:
             service = service_cls.return_value
             service.resolve_model_candidates.return_value = {
                 "query": "GPT-4o",
@@ -1470,7 +1864,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
     def test_slash_command_registry_model_command_handles_unknown_query(self):
         from domain.frontend.command_registry import SlashCommandRegistry
 
-        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+        with patch(
+            "domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService"
+        ) as service_cls:
             service = service_cls.return_value
             service.resolve_model_candidates.return_value = {
                 "query": "missing-model",
@@ -1523,8 +1919,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             )
             registry = SlashCommandRegistry(pack_root)
 
-            off_result = registry.execute({"command": "flag", "mode": "chat", "args": {"enabled": "off"}}, {})
-            false_result = registry.execute({"command": "flag", "mode": "chat", "args": {"enabled": False}}, {})
+            off_result = registry.execute(
+                {"command": "flag", "mode": "chat", "args": {"enabled": "off"}}, {}
+            )
+            false_result = registry.execute(
+                {"command": "flag", "mode": "chat", "args": {"enabled": False}}, {}
+            )
             missing_result = registry.execute({"command": "flag", "mode": "chat", "args": {}}, {})
 
         self.assertEqual(off_result["status"], "ok")
@@ -1534,7 +1934,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(missing_result["status"], "error")
         self.assertEqual(missing_result["error"]["code"], "MISSING_ARGUMENT")
 
-    def test_slash_command_registry_rejects_user_manifest_rumi_function_and_non_allowlisted_default(self):
+    def test_slash_command_registry_rejects_user_manifest_rumi_function_and_non_allowlisted_default(
+        self,
+    ):
         from domain.frontend.command_registry import SlashCommandRegistry
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1550,7 +1952,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                             "id": "baddefault",
                             "name": "baddefault",
                             "modes": ["chat"],
-                            "execution": {"type": "rumi_function", "qualified_name": "defaultspack:not_allowlisted"},
+                            "execution": {
+                                "type": "rumi_function",
+                                "qualified_name": "defaultspack:not_allowlisted",
+                            },
                         }
                     ]
                 ),
@@ -1563,20 +1968,190 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                             "id": "userthink",
                             "name": "userthink",
                             "modes": ["chat"],
-                            "execution": {"type": "rumi_function", "qualified_name": "defaultspack:ai_set_thinking_level"},
+                            "execution": {
+                                "type": "rumi_function",
+                                "qualified_name": "defaultspack:ai_set_thinking_level",
+                            },
                         }
                     ]
                 ),
                 encoding="utf-8",
             )
             registry = SlashCommandRegistry(pack_root)
-            user_result = registry.execute({"command": "userthink", "mode": "chat", "args": {"level": "low"}}, {})
-            default_result = registry.execute({"command": "baddefault", "mode": "chat", "args": {}}, {})
+            user_result = registry.execute(
+                {"command": "userthink", "mode": "chat", "args": {"level": "low"}}, {}
+            )
+            default_result = registry.execute(
+                {"command": "baddefault", "mode": "chat", "args": {}}, {}
+            )
 
         self.assertEqual(user_result["status"], "error")
         self.assertEqual(user_result["error"]["code"], "INVALID_COMMAND")
         self.assertEqual(default_result["status"], "error")
         self.assertEqual(default_result["error"]["code"], "INVALID_COMMAND")
+
+    def test_slash_command_registry_loads_builtin_template_slash_command(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            defaults_path = pack_root / "commands" / "default_commands.json"
+            template_path = pack_root / "templates" / "context_txt" / "default" / "template.json"
+            defaults_path.parent.mkdir(parents=True, exist_ok=True)
+            template_path.parent.mkdir(parents=True, exist_ok=True)
+            defaults_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "context_txt",
+                            "name": "context_txt",
+                            "label": "Old Context",
+                            "modes": ["chat"],
+                            "execution": {"type": "frontend", "action": "old_context"},
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            template_path.write_text(
+                json.dumps(
+                    {
+                        "id": "rumi.test.context_txt",
+                        "kind": "frontend",
+                        "version": "1.0.0",
+                        "status": "active",
+                        "pieces": [
+                            {
+                                "id": "context_txt_action",
+                                "kind": "function",
+                                "role": "action",
+                                "action_id": "context_txt",
+                                "override": {
+                                    "mode": "replace",
+                                    "target_public_id": "context_txt",
+                                },
+                                "slash_command": {
+                                    "id": "context_txt",
+                                    "name": "context_txt",
+                                    "label": "Context TXT",
+                                    "category": "chat",
+                                    "modes": ["chat"],
+                                    "execution": {
+                                        "type": "pack_block",
+                                        "qualified_name": "defaultspack:chat.materialize_context",
+                                    },
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            registry = SlashCommandRegistry(pack_root)
+            command = next(item for item in registry.list_commands() if item["id"] == "context_txt")
+            duplicate = next(
+                item
+                for item in registry.manifest_errors()
+                if item["code"] == "command_explicit_override"
+            )
+
+        self.assertEqual(command["label"], "Context TXT")
+        self.assertEqual(command["execution"]["type"], "pack_block")
+        self.assertIn("explicitly replaces", duplicate["message"])
+        self.assertIn("template_id=rumi.test.context_txt", duplicate["source"])
+        self.assertIn("piece_id=context_txt_action", duplicate["source"])
+
+    def test_slash_command_registry_rejects_user_template_privileged_execution(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            template_path = (
+                pack_root / "user_data" / "shared" / "templates" / "user_commands" / "template.json"
+            )
+            template_path.parent.mkdir(parents=True, exist_ok=True)
+            template_path.write_text(
+                json.dumps(
+                    {
+                        "id": "rumi.test.user_commands",
+                        "kind": "frontend",
+                        "version": "1.0.0",
+                        "status": "active",
+                        "pieces": [
+                            {
+                                "id": "user_pack_action",
+                                "kind": "function",
+                                "role": "action",
+                                "action_id": "user_context_txt",
+                                "slash_command": {
+                                    "id": "user_context_txt",
+                                    "name": "user_context_txt",
+                                    "template_id": "rumi.composer.default",
+                                    "piece_id": "context_txt_command",
+                                    "source_path": "templates/composer/default/template.json",
+                                    "trust_level": "builtin",
+                                    "modes": ["chat"],
+                                    "execution": {
+                                        "type": "pack_block",
+                                        "qualified_name": "defaultspack:chat.materialize_context",
+                                    },
+                                },
+                            },
+                            {
+                                "id": "user_function_action",
+                                "kind": "function",
+                                "role": "action",
+                                "action_id": "user_think",
+                                "slash_command": {
+                                    "id": "user_think",
+                                    "name": "user_think",
+                                    "modes": ["chat"],
+                                    "execution": {
+                                        "type": "rumi_function",
+                                        "qualified_name": "defaultspack:ai_set_thinking_level",
+                                    },
+                                },
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            registry = SlashCommandRegistry(pack_root)
+            ids = {command["id"] for command in registry.list_commands()}
+            public_pack_command = next(
+                command
+                for command in registry.list_commands()
+                if command["id"] == "user_context_txt"
+            )
+            internal_pack_command = registry.find_command("user_context_txt")
+            pack_result = registry.execute({"command": "user_context_txt", "mode": "chat"}, {})
+            function_result = registry.execute(
+                {"command": "user_think", "mode": "chat", "args": {"level": "low"}},
+                {},
+            )
+
+        self.assertIn("user_context_txt", ids)
+        self.assertIn("user_think", ids)
+        self.assertIsNotNone(internal_pack_command)
+        self.assertEqual(internal_pack_command["_manifest_origin"], "user")
+        self.assertEqual(internal_pack_command["_template_id"], "rumi.test.user_commands")
+        self.assertEqual(internal_pack_command["_template_piece_id"], "user_pack_action")
+        self.assertEqual(internal_pack_command["_template_trust_level"], "user")
+        self.assertEqual(public_pack_command["template_id"], "rumi.test.user_commands")
+        self.assertEqual(public_pack_command["piece_id"], "user_pack_action")
+        self.assertEqual(public_pack_command["trust_level"], "user")
+        self.assertTrue(
+            public_pack_command["source_path"].endswith(
+                "user_data/shared/templates/user_commands/template.json"
+            )
+        )
+        self.assertEqual(pack_result["status"], "error")
+        self.assertEqual(pack_result["error"]["code"], "INVALID_COMMAND")
+        self.assertEqual(function_result["status"], "error")
+        self.assertEqual(function_result["error"]["code"], "INVALID_COMMAND")
 
     def test_ui_commands_get_returns_duplicate_manifest_warnings(self):
         from blocks.ui import commands as commands_block
@@ -1607,7 +2182,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.object(commands_block, "SlashCommandRegistry", lambda: SlashCommandRegistry(pack_root)):
+            with patch.object(
+                commands_block, "SlashCommandRegistry", lambda: SlashCommandRegistry(pack_root)
+            ):
                 result = commands_block.run({"_method": "GET"}, {})
 
         codes = {item["code"] for item in result["data"]["manifest_errors"]}
@@ -1697,7 +2274,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                         "name": "Oddly Named",
                         "summary": "No legacy grouping keywords",
                         "tags": [],
-                        "schema": {"parameters": {"type": "object", "properties": {}, "required": []}},
+                        "schema": {
+                            "parameters": {"type": "object", "properties": {}, "required": []}
+                        },
                         "execution": {"type": "local"},
                         "ui": {
                             "group_id": "declared_group",

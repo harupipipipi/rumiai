@@ -52,6 +52,13 @@ defaults Pack は4つのレイヤーで構成されています。
 
 **外部 API 層** は `domain/ai_client/` を通じて AI プロバイダー（OpenAI、Anthropic 等）と通信します。
 
+**Template composition 層**（`domain/templates/` と `templates/`）は、
+settings、composer、AI input、tool/context policy、commands、backend function
+bindings、route bindings、permissions、lifecycle metadata、test contracts を
+catalog に投影します。template は composition metadata を持ち、trust、
+approval、secret、sandbox、audit、provider execution は kernel/runtime 側に
+残ります。詳細は [templates.md](templates.md) を参照してください。
+
 ## Provider-Agnostic Chat IR
 
 The defaultspack chat stack uses Rumi Chat IR v2 as the internal representation

@@ -18,6 +18,18 @@ right sidebar / settings / composer 周辺で、Tool Manager, Tool Filter Log,
 YOLO toggle, Model Manager, Webhook Endpoints などを surface-aware に配置
 できる。
 
+defaultspack の template catalog は、この配置モデルを JSON で合成するための
+metadata layer である。`settings_field`, `composer_input`, `ai_input`,
+`tool_policy`, `composer_command`, `composer_widget` などの piece は catalog
+に投影され、既存の安全な renderer / command runtime に接続される。
+template renderer は任意の React module を実行する仕組みではなく、
+`SettingsFieldRendererHost` や composer が持つ allowlisted builtin renderer
+へ metadata を渡す。backend 実行も任意 `handler_ref` ではなく、builtin
+template から許可済み `pack_block` / registry entry へ接続する。
+
+RumiTemplate の schema、trust、activation、collision、AI input、tool policy、
+test contract、renderer security の詳細は [templates.md](templates.md) に集約している。
+
 
 ## 2. アーキテクチャ
 

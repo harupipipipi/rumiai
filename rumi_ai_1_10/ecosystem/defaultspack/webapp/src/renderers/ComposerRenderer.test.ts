@@ -23,6 +23,7 @@ import {
   toolMentionIdsFromText,
 } from "./ComposerRenderer";
 import { COMPOSER_BUTTON_DROP, COMPOSER_PANEL_DROP, COMPOSER_SELECTOR_DROP, COMPOSER_TOGGLE_DROP } from "../lib/toolUi";
+import type { ComposerCommandItem } from "../lib/api";
 
 test("composer file mention filters string context files", () => {
   const files = ["README.md", "src/App.tsx", "docs/context.md"];
@@ -267,6 +268,140 @@ test("composer chrome widgets declare layout widths separately from actions", ()
   assert.match(html, /class="[^"]*min-w-0 flex-1 truncate/);
   assert.match(html, /aria-label="Thinking level"/);
   assert.doesNotMatch(html, />thinking</);
+});
+
+test("composer renders template-provided slash command suggestions", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "context_txt",
+      name: "context-txt",
+      label: "Context TXT",
+      description: "Write a context handoff file.",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+    },
+  ];
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "/context",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      commands,
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onCommandSelect: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Commands/);
+  assert.match(html, /\/context-txt/);
+  assert.match(html, /Write a context handoff file/);
+});
+
+test("composer suppresses slash command suggestions when template disables slash commands", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "context_txt",
+      name: "context-txt",
+      label: "Context TXT",
+      description: "Write a context handoff file.",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+    },
+  ];
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "/context",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      commands,
+      composerInput: {
+        id: "no_slash_composer",
+        feature_flags: { slash_commands: false },
+      },
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onCommandSelect: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+    }),
+  );
+
+  assert.doesNotMatch(html, /Commands/);
+  assert.doesNotMatch(html, /\/context-txt/);
+  assert.doesNotMatch(html, /Write a context handoff file/);
+});
+
+test("composer input template metadata changes safe input copy without replacing the component", () => {
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      composerInput: {
+        id: "template.context_txt.input",
+        placeholder: "Ask with context.txt in mind",
+        help: "Uses template metadata for context handoff prompts.",
+        accepted_modalities: ["text", "file"],
+        feature_flags: { slash_commands: true, file_attachments: true },
+        component: "UntrustedRemoteComposer",
+        renderer: "remote-module",
+      },
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /textarea/);
+  assert.match(html, /placeholder="Ask with context\.txt in mind"/);
+  assert.match(html, /data-template-composer-input="template\.context_txt\.input"/);
+  assert.match(html, /Uses template metadata for context handoff prompts/);
+  assert.match(html, />Text</);
+  assert.match(html, />Files</);
+  assert.match(html, />Slash</);
+  assert.doesNotMatch(html, /UntrustedRemoteComposer/);
+  assert.doesNotMatch(html, /remote-module/);
 });
 
 test("new conversation composer input is not locked to one visual line", () => {
