@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { Layout } from '@/src/components/layout/Layout';
@@ -18,6 +18,7 @@ import { Settings } from '@/src/pages/Settings';
 import { ToastContainer } from '@/src/components/ui/ToastContainer';
 import { DialogContainer } from '@/src/components/ui/DialogContainer';
 import { bootstrapPanelSession, hasPendingPanelBootstrapCode } from '@/src/lib/api';
+import { applyAppearanceToRoot } from '@/src/lib/appearance';
 import { runtimeMonitorDelay } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
 
@@ -28,20 +29,9 @@ export default function App() {
   const addToast = useAppStore(state => state.addToast);
   const refreshRuntimeHealth = useAppStore(state => state.refreshRuntimeHealth);
 
-  useEffect(() => {
-    const root = document.documentElement;
-    root.classList.remove('theme-rumi', 'theme-minimal', 'theme-standard', 'theme-rounded');
-    root.classList.add(`theme-${theme.toLowerCase()}`);
-  }, [theme]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (colorMode === 'dark') {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-  }, [colorMode]);
+  useLayoutEffect(() => {
+    applyAppearanceToRoot(document.documentElement, { theme, colorMode });
+  }, [theme, colorMode]);
 
   useEffect(() => {
     if (!hasPendingPanelBootstrapCode()) {

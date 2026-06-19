@@ -1,23 +1,18 @@
 import { api } from "../../../lib/api";
 import type { ModelSearchResponse } from "../../../lib/api";
-import type { ModelAvailabilityAfterKeySave } from "./useModelAvailability";
+import { createProviderApiKeyResources, type ProviderKeySaveResult } from "../../apiKeys";
+import { createModelSearchResources } from "../../models";
 
-export type ProviderKeySaveResult = {
-  provider_id: string;
-  api_id?: string;
-  name?: string;
-  configured: boolean;
-  kind?: string;
-  model_availability?: ModelAvailabilityAfterKeySave;
-};
+const modelSearchResources = createModelSearchResources(api);
+const providerApiKeyResources = createProviderApiKeyResources<Parameters<typeof api.saveProviderApiKey>[2]>(api);
 
 export const settingsApiResources = {
   searchModels(payload: { query: string; max_results: number }) {
-    return api.searchModels(payload) as Promise<ModelSearchResponse>;
+    return modelSearchResources.searchModels(payload) as Promise<ModelSearchResponse>;
   },
 
   saveProviderApiKey(providerId: string, value: string, options?: Parameters<typeof api.saveProviderApiKey>[2]) {
-    return api.saveProviderApiKey(providerId, value, options) as Promise<ProviderKeySaveResult>;
+    return providerApiKeyResources.saveProviderApiKey(providerId, value, options) as Promise<ProviderKeySaveResult>;
   },
 
   startProviderOAuth(providerId: string) {

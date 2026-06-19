@@ -11,10 +11,15 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.external.io_templates import ExternalIOTemplateRegistry  # noqa: E402
 from domain.external.output_profile_registry import OutputProfileRegistry  # noqa: E402
+from domain.templates.projectors import build_template_catalog  # noqa: E402
 
 
 def test_builtin_external_io_templates_split_input_and_output():
-    catalog = ExternalIOTemplateRegistry(DEFAULTSPACK_ROOT).catalog()
+    template_catalog = build_template_catalog(defaultspack_root=DEFAULTSPACK_ROOT)
+    catalog = ExternalIOTemplateRegistry(
+        DEFAULTSPACK_ROOT,
+        template_items=template_catalog["external_io_templates"],
+    ).catalog()
     input_ids = {item["id"] for item in catalog["input"]}
     output_ids = {item["id"] for item in catalog["output"]}
 
@@ -39,6 +44,8 @@ def test_builtin_external_io_templates_split_input_and_output():
     assert discord_webhook["copy_paste_setup"]["output_profile_id"] == "discord.webhook"
     assert discord_webhook["copy_paste_setup"]["fields"][0]["paste"] is True
     line_input = next(item for item in catalog["input"] if item["id"] == "line.input.default")
+    assert line_input["origin"] == "template"
+    assert line_input["template_id"] == "rumi.external_io.default"
     assert line_input["copy_paste_setup"]["routes"] == ["/api/integrations/line/webhook"]
     assert line_input["copy_paste_setup"]["public_url"]["provider"] == "cloudflare_quick_tunnel"
     assert line_input["copy_paste_setup"]["public_url"]["route_path"] == "/api/integrations/line/webhook"

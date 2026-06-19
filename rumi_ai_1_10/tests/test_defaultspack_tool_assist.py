@@ -98,7 +98,10 @@ def test_tool_recommender_expands_japanese_coding_file_terms():
         {"tool_id": "web_search", "summary": "Search web pages.", "tags": ["web"]},
     ]
 
-    assert recommend_tool_ids("コードを編集してファイルを修正", tools, limit=2)[0] == "coding_file_patch"
+    assert (
+        recommend_tool_ids("コードを編集してファイルを修正", tools, limit=2)[0]
+        == "coding_file_patch"
+    )
 
 
 def test_tool_search_returns_overview_and_schema_from_docs(tmp_path):
@@ -106,14 +109,21 @@ def test_tool_search_returns_overview_and_schema_from_docs(tmp_path):
 
     manifest = tmp_path / "manifest.json"
     manifest.write_text("{}", encoding="utf-8")
-    (tmp_path / "SKILL.md").write_text("Use this tool for parquet schema extraction and dataset docs.", encoding="utf-8")
+    (tmp_path / "SKILL.md").write_text(
+        "Use this tool for parquet schema extraction and dataset docs.", encoding="utf-8"
+    )
     tools = [
         {
             "tool_id": "dataset_schema",
             "name": "Dataset Schema",
             "summary": "",
             "tags": [],
-            "schema": {"parameters": {"type": "object", "properties": {"path": {"description": "dataset path"}}}},
+            "schema": {
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"description": "dataset path"}},
+                }
+            },
             "metadata": {"manifest_path": str(manifest)},
         }
     ]
@@ -127,12 +137,16 @@ def test_tool_search_returns_overview_and_schema_from_docs(tmp_path):
     assert schema[0]["schema"]["parameters"]["properties"]["path"]["description"] == "dataset path"
 
 
-def test_effective_tool_assist_defaults_to_all_and_keeps_auto_mode():
+def test_effective_tool_assist_defaults_to_auto_and_migrates_legacy_all():
     from domain.chat.tool_recommender import effective_tool_assist_mode
 
-    assert effective_tool_assist_mode({}) == "all"
+    assert effective_tool_assist_mode({}) == "auto"
+    assert effective_tool_assist_mode({"tools": {"tool_assist_mode": "all"}}) == "auto"
     assert effective_tool_assist_mode({"tools": {"tool_assist_mode": "auto"}}) == "auto"
     assert effective_tool_assist_mode({"tools": {"tool_assist_mode": "vector"}}) == "vector"
+    assert (
+        effective_tool_assist_mode({"tools": {"tool_assist_mode": "all_schemas"}}) == "all_schemas"
+    )
 
 
 def test_tool_loading_defaults_to_vector_and_only_always_is_eager():
@@ -184,7 +198,9 @@ def test_select_relevant_keeps_always_tools_when_vector_matches_are_empty(monkey
     assert captured["candidate_ids"] == ["calculator"]
 
 
-def test_run_request_all_tool_assist_exposes_every_tool_when_tools_are_not_selected(monkeypatch):
+def test_run_request_all_schemas_tool_assist_exposes_every_tool_when_explicitly_configured(
+    monkeypatch,
+):
     from domain.chat import run_request
 
     fake_tools = [
@@ -200,7 +216,7 @@ def test_run_request_all_tool_assist_exposes_every_tool_when_tools_are_not_selec
             return next((tool for tool in fake_tools if tool["tool_id"] == tool_id), None)
 
     monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
-    monkeypatch.setattr(run_request, "effective_tool_assist_mode", lambda **_kwargs: "all")
+    monkeypatch.setattr(run_request, "effective_tool_assist_mode", lambda **_kwargs: "all_schemas")
 
     resolved, unknown = run_request._resolve_selected_tools(None, user_text="anything", context={})
 
@@ -249,7 +265,7 @@ def test_run_request_vector_tool_assist_recommends_when_tools_are_not_selected(m
     assert context["tool_assist"]["mode"] == "vector"
 
 
-def test_run_request_mimo_profile_prefers_vector_tool_assist_even_when_default_is_all(monkeypatch):
+def test_run_request_mimo_profile_filters_runtime_tools_before_auto_recommendation(monkeypatch):
     from domain.chat import run_request
 
     fake_tools = [
@@ -281,7 +297,7 @@ def test_run_request_mimo_profile_prefers_vector_tool_assist_even_when_default_i
             return next((tool for tool in fake_tools if tool["tool_id"] == tool_id), None)
 
     monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
-    monkeypatch.setattr(run_request, "effective_tool_assist_mode", lambda **_kwargs: "all")
+    monkeypatch.setattr(run_request, "effective_tool_assist_mode", lambda **_kwargs: "auto")
     monkeypatch.setattr(run_request, "tool_assist_limit", lambda **_kwargs: 4)
 
     context = {"profile_id": "defaultspack.mimo_coding_company"}
@@ -293,7 +309,7 @@ def test_run_request_mimo_profile_prefers_vector_tool_assist_even_when_default_i
 
     assert unknown == []
     assert [tool["tool_id"] for tool in resolved] == ["coding_file_read", "coding_file_search"]
-    assert context["tool_assist"]["mode"] == "vector"
+    assert context["tool_assist"]["mode"] == "auto"
 
 
 def test_run_request_auto_tool_assist_keeps_always_tools_and_vector_matches(monkeypatch):
@@ -375,8 +391,14 @@ def test_run_request_metadata_selected_tools_disables_auto_recommendation(monkey
         return [], []
 
     monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
-    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     run_request._available_tools(
@@ -386,6 +408,327 @@ def test_run_request_metadata_selected_tools_disables_auto_recommendation(monkey
     )
 
     assert captured["raw_tools"] == []
+
+
+def test_run_request_tool_selection_auto_preserves_settings_driven_selection(monkeypatch):
+    from domain.chat import run_request
+
+    captured = {}
+
+    def fake_resolve(raw_tools, **_kwargs):
+        captured["raw_tools"] = raw_tools
+        return [], []
+
+    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
+    monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
+
+    run_request._available_tools(
+        {},
+        {"params": {"tool_selection": {"mode": "auto"}}},
+        user_text="search the web",
+    )
+
+    assert captured["raw_tools"] is None
+
+
+def test_run_request_tool_selection_auto_merges_inferred_tools(monkeypatch):
+    from domain.chat import run_request
+
+    updated = run_request._with_inferred_tools(
+        {"params": {"tool_selection": {"mode": "auto"}}},
+        ["computer_use", "browser_computer"],
+    )
+
+    assert updated["tools"] == ["computer_use", "browser_computer"]
+
+    calls = []
+
+    def fake_resolve(raw_tools, **_kwargs):
+        calls.append(raw_tools)
+        if raw_tools is None:
+            return [{"tool_id": "tool_names"}], []
+        return [{"tool_id": item} for item in raw_tools], []
+
+    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
+    monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
+
+    raw_tools, _provider_tools, _tool_context = run_request._available_tools(
+        {},
+        updated,
+        user_text="open Chrome",
+    )
+
+    assert calls == [None, ["computer_use", "browser_computer"]]
+    assert [tool["tool_id"] for tool in raw_tools] == [
+        "tool_names",
+        "computer_use",
+        "browser_computer",
+    ]
+
+
+def test_run_request_tool_selection_none_blocks_auto_and_inferred_tools(monkeypatch):
+    from domain.chat import run_request
+
+    updated = run_request._with_inferred_tools(
+        {"params": {"tool_selection": {"mode": "none"}}},
+        ["computer_use", "browser_computer"],
+    )
+
+    assert "tools" not in updated
+
+    captured = {}
+
+    def fake_resolve(raw_tools, **_kwargs):
+        captured["raw_tools"] = raw_tools
+        return [], []
+
+    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
+    monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
+
+    run_request._available_tools(
+        {},
+        {"params": {"tool_selection": {"mode": "none"}}},
+        user_text="open Chrome",
+    )
+
+    assert captured["raw_tools"] == []
+
+
+def test_run_request_tool_selection_manual_does_not_require_tool_choice(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "use the calculator if needed"},
+            "params": {"tool_selection": {"mode": "manual", "include": ["calculator"]}},
+        },
+        {},
+    )
+
+    assert prepared.params.get("tool_choice") != "required"
+    ChatStore._instance = None
+
+
+def test_run_request_tool_selection_must_use_requires_tool_choice(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "must use calculator"},
+            "params": {
+                "tool_selection": {"mode": "manual", "include": ["calculator"], "must_use": True}
+            },
+        },
+        {},
+    )
+
+    assert prepared.params["tool_choice"] == "required"
+    ChatStore._instance = None
+
+
+def test_run_request_tool_selection_must_use_rejects_unknown_only_tools(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    try:
+        prepare_chat_run(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "must use the selected tool"},
+                "params": {
+                    "tool_selection": {
+                        "mode": "manual",
+                        "include": ["definitely_missing_tool"],
+                        "must_use": True,
+                    }
+                },
+            },
+            {},
+        )
+        raise AssertionError("must_use should fail when no eligible tool remains")
+    except ValueError as exc:
+        assert "must_use requires at least one eligible tool" in str(exc)
+    finally:
+        ChatStore._instance = None
+
+
+def test_run_request_rejects_unimplemented_or_conflicting_tool_selection():
+    from domain.chat.run_request import validate_chat_run_input
+
+    def payload(tool_selection):
+        return {
+            "conversation_id": "conv-1",
+            "message": {"role": "user", "content": "hello"},
+            "params": {"tool_selection": tool_selection},
+        }
+
+    assert "mode=review" in validate_chat_run_input(payload({"mode": "review"}))
+    assert "scope=conversation" in validate_chat_run_input(
+        payload({"mode": "auto", "scope": "conversation"})
+    )
+    assert "review is not implemented" in validate_chat_run_input(
+        payload({"mode": "auto", "review": True})
+    )
+    assert "mode=none" in validate_chat_run_input(payload({"mode": "none", "must_use": True}))
+    assert "mode=none" in validate_chat_run_input(
+        payload({"mode": "manual", "include": [], "must_use": True})
+    )
+    assert "cannot include tools" in validate_chat_run_input(
+        payload({"mode": "none", "include": ["web_search"]})
+    )
+    assert "mode must be" in validate_chat_run_input(payload({"mode": "sometimes"}))
+
+
+def test_run_request_tool_selection_manual_empty_normalizes_to_none(monkeypatch):
+    from domain.chat import run_request
+
+    captured = {}
+
+    def fake_resolve(raw_tools, **_kwargs):
+        captured["raw_tools"] = raw_tools
+        return [], []
+
+    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
+    monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
+
+    _raw_tools, _provider_tools, tool_context = run_request._available_tools(
+        {},
+        {"params": {"tool_selection": {"mode": "manual", "include": []}}},
+        user_text="search",
+    )
+
+    assert captured["raw_tools"] == []
+    assert tool_context["tool_selection"]["mode"] == "none"
+
+
+def test_run_request_tool_selection_exclude_wins_over_include(monkeypatch):
+    from domain.chat import run_request
+
+    def fake_resolve(raw_tools, **_kwargs):
+        if raw_tools is None:
+            return [], []
+        return [{"tool_id": str(item)} for item in raw_tools], []
+
+    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
+    monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
+
+    raw_tools, _provider_tools, tool_context = run_request._available_tools(
+        {},
+        {
+            "params": {
+                "tool_selection": {
+                    "mode": "manual",
+                    "include": ["web_search", "calculator"],
+                    "exclude": ["web_search"],
+                }
+            }
+        },
+        user_text="search",
+    )
+
+    assert [tool["tool_id"] for tool in raw_tools] == ["calculator"]
+    assert tool_context["tool_selection"]["exclude"] == ["web_search"]
+
+
+def test_run_request_tool_selection_takes_priority_over_legacy_tools(monkeypatch):
+    from domain.chat import run_request
+
+    captured = {}
+
+    def fake_resolve(raw_tools, **_kwargs):
+        captured["raw_tools"] = raw_tools
+        return [{"tool_id": str(item)} for item in raw_tools], []
+
+    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
+    monkeypatch.setattr(
+        run_request, "resolve_runtime_profile_context", lambda context: context or {}
+    )
+    monkeypatch.setattr(
+        run_request,
+        "filter_tool_definitions_for_runtime_profile",
+        lambda tools, *_args, **_kwargs: tools,
+    )
+    monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
+
+    raw_tools, _provider_tools, _tool_context = run_request._available_tools(
+        {},
+        {
+            "tools": ["web_search"],
+            "params": {
+                "tool_selection": {"mode": "manual", "include": ["calculator"]},
+                "tool_policy": {"selected_tools": ["web_search"]},
+            },
+        },
+        user_text="search",
+    )
+
+    assert captured["raw_tools"] == ["calculator"]
+    assert [tool["tool_id"] for tool in raw_tools] == ["calculator"]
 
 
 def test_run_request_selected_shell_tool_respects_profile_policy_yolo():
@@ -473,7 +816,7 @@ def test_assistant_tool_history_preserves_reasoning_content():
                     "type": "function",
                     "function": {
                         "name": "coding_terminal_exec",
-                        "arguments": "{\"command\": \"echo ok\"}",
+                        "arguments": '{"command": "echo ok"}',
                     },
                 }
             ],
@@ -490,7 +833,7 @@ def test_coding_tools_get_larger_default_tool_limit():
     assert _default_tool_limit_for_connected_tools(2, {"coding_terminal_exec"}) == 2
 
 
-def test_stream_defaults_omitted_tools_to_empty_selection():
+def test_stream_preserves_omitted_tools_for_auto_selection():
     from blocks.chat import stream
 
     original = {
@@ -501,8 +844,7 @@ def test_stream_defaults_omitted_tools_to_empty_selection():
 
     updated = stream._input_with_default_empty_tools(original)
 
-    assert updated is not original
-    assert updated["tools"] == []
+    assert updated is original
     assert "tools" not in original
 
 
