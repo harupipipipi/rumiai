@@ -4,6 +4,34 @@ Rumi AI is a modular AI runtime and tooling workspace.
 
 The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `rumi_ai/` provides a version-stable Python entrypoint. The canonical control panel frontend source lives in `rumi_viewer/frontend`; the kernel serves its built artifact at `/panel/`.
 
+## Quick Start (5 minutes)
+
+Get Rumi AI running in 5 minutes:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/harupipipipi/rumiai.git
+cd rumiai
+
+# 2. Set up Python environment
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+
+# 3. Install dependencies
+pip install -r rumi_ai_1_10/requirements.txt
+pip install -r rumi_ai_1_10/requirements-dev.txt
+pip install -e ./rumi_ai_1_10
+
+# 4. Run health check
+python -m rumi_ai --health
+
+# 5. Start the runtime
+python -m rumi_ai
+```
+
+After starting, open http://localhost:8080/panel/ in your browser to access the control panel.
+
 ## Read This When...
 
 | やりたいこと | まず読む場所 | 補足 |
@@ -145,6 +173,130 @@ python -m rumi_ai migrate-hmac
 - `rumi_viewer`: viewer-side application shell and canonical panel frontend source
 - `rumi_mobile`: mobile remote client for the bearer-auth Kernel Pack API
 - `rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/rumi_browser_companion`: unpacked Chromium extension for the defaultspack `browser_companion` tool
+
+## Troubleshooting
+
+### Common Issues
+
+#### 1. Health check fails with "disk probe DEGRADED/DOWN"
+
+**Problem**: `python -m rumi_ai --health` shows disk probe as DEGRADED or DOWN.
+
+**Solution**: This is usually a disk space issue, not a code problem.
+```bash
+# Check disk space
+df -h
+
+# Clean up unnecessary files
+rm -rf .venv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r rumi_ai_1_10/requirements.txt
+```
+
+#### 2. Port 8080 already in use
+
+**Problem**: `python -m rumi_ai` fails with "Address already in use".
+
+**Solution**: Kill the process using port 8080.
+```bash
+# Find process using port 8080
+lsof -i :8080
+
+# Kill the process
+kill -9 <PID>
+```
+
+#### 3. Viewer shows 401 error
+
+**Problem**: Opening the panel shows 401 Unauthorized.
+
+**Solution**: Check API token configuration.
+```bash
+# Check if API token is set
+echo $RUMI_API_TOKEN
+
+# Set API token if needed
+export RUMI_API_TOKEN="your-token-here"
+```
+
+#### 4. Frontend build fails
+
+**Problem**: `npm run build` fails in rumi_viewer/frontend.
+
+**Solution**: Clear node_modules and reinstall.
+```bash
+cd rumi_viewer/frontend
+rm -rf node_modules package-lock.json
+npm install
+npm run build
+```
+
+#### 5. Python import errors
+
+**Problem**: `ModuleNotFoundError` when running tests.
+
+**Solution**: Ensure you're in the virtual environment and package is installed.
+```bash
+source .venv/bin/activate
+pip install -e ./rumi_ai_1_10
+```
+
+### Getting Help
+
+If you encounter issues not covered here:
+
+1. Check the [documentation](./rumi_ai_1_10/docs/README.md)
+2. Search existing [GitHub Issues](https://github.com/harupipipipi/rumiai/issues)
+3. Create a new issue with:
+   - Steps to reproduce
+   - Expected behavior
+   - Actual behavior
+   - Error messages/logs
+
+## Contributing
+
+We welcome contributions! Please follow these guidelines:
+
+### Development Workflow
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Make your changes
+4. Run tests: `just tooling-test`
+5. Run linting: `just lint`
+6. Commit your changes: `git commit -m 'Add your feature'`
+7. Push to the branch: `git push origin feature/your-feature`
+8. Create a Pull Request
+
+### Code Style
+
+- Python: Follow PEP 8, use type hints
+- JavaScript/TypeScript: Use ESLint configuration
+- Rust: Follow rustfmt defaults
+
+### Testing
+
+- Add tests for new features
+- Ensure existing tests pass
+- Run focused tests: `python -m pytest tests/test_specific.py -q`
+
+### Pull Request Guidelines
+
+- Use the PR template provided
+- Include a clear description
+- Reference related issues
+- Ensure CI passes
+
+### Security
+
+- Never commit API keys or secrets
+- Follow security guidelines in [AGENTS.md](./AGENTS.md)
+- Report security issues privately
+
+## License
+
+This project is licensed under the terms specified in [LICENSE](./LICENSE).
 
 For architecture and runtime details, see [rumi_ai_1_10/README.md](./rumi_ai_1_10/README.md).
 
