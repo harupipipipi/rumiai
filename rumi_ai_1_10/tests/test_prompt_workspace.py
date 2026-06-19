@@ -23,6 +23,7 @@ from domain.prompt.usage import (  # noqa: E402
     prompt_usage_from_trace,
     toggle_prompt_edge,
 )
+from blocks.prompt.test import run as run_prompt_studio_test_block  # noqa: E402
 from transport.registry import _FALLBACK_HTTP_ROUTE_SPECS, prompt_http_route_specs  # noqa: E402
 
 
@@ -431,15 +432,18 @@ def test_prompt_studio_testbench_uses_runtime_skill_registry(monkeypatch, tmp_pa
     monkeypatch.setattr("core_runtime.ai_input_segments.resolve_effective_prompt", _fake_effective_prompt)
     monkeypatch.setattr("core_runtime.ai_input_segments.ToolRegistry", _ToolRegistryWithCalculator)
 
-    result = run_prompt_studio_test(
+    response = run_prompt_studio_test_block(
         {
             "profile_id": "prompt-profile",
             "prompt_id": "editable.system",
             "draft": "For arithmetic requests, inspect calculator relevance.",
             "user_text": "計算 QA: 12 * 8 を一文で確認して。",
             "selected_tools": ["calculator"],
-        }
+        },
+        {},
     )
+    assert response["status"] == "ok"
+    result = response["data"]
 
     assert result["matched_skills"][0]["id"] == "qa/math-skill"
     assert "arithmetic format" in result["skill_instructions"]

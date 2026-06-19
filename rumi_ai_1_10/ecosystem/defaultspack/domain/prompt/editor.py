@@ -5,7 +5,7 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from core_runtime.profile_paths import active_profile_id
 from core_runtime.ai_input_token_estimator import estimate_tokens
@@ -16,7 +16,6 @@ from .effective import resolve_effective_prompt, validate_prompt_template
 from .manager import get_manager
 from .prompt_compactor import compact_prompt
 from .prompt_linter import lint_prompt
-from ..skill_trigger import RuntimeSkillTriggerService
 from .usage import active_prompt_summary, append_runtime_prompt_segment, prompt_usage_from_trace
 
 
@@ -244,7 +243,14 @@ def compact_prompt_text(input_data: dict[str, Any] | None = None) -> dict[str, A
     return compact_prompt(text, target_chars=data.get("target_chars"))
 
 
-def test_prompt_input(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
+SkillEvaluator = Callable[..., dict[str, Any]]
+
+
+def test_prompt_input(
+    input_data: dict[str, Any] | None = None,
+    *,
+    skill_evaluator: SkillEvaluator | None = None,
+) -> dict[str, Any]:
     data = input_data if isinstance(input_data, dict) else {}
     profile_id = _resolve_profile_id(data.get("profile_id"))
     prompt_id = str(data.get("prompt_id") or data.get("name") or "").strip()
@@ -276,7 +282,12 @@ def test_prompt_input(input_data: dict[str, Any] | None = None) -> dict[str, Any
     usage = dict(active.get("summary") if isinstance(active.get("summary"), dict) else {})
     tool_catalog = _tool_catalog(data, usage.get("segments", []))
     selected_tool_records = _selected_tool_records(tool_catalog, selected_tools)
-    skill_eval = _evaluate_studio_skills(data, user_text=user_text, selected_tools=selected_tools)
+    skill_eval = _evaluate_studio_skills(
+        data,
+        user_text=user_text,
+        selected_tools=selected_tools,
+        skill_evaluator=skill_evaluator,
+    )
     matched_skills = skill_eval.get("matched", []) if isinstance(skill_eval, dict) else []
     skill_instructions = str(skill_eval.get("instructions") or "").strip() if isinstance(skill_eval, dict) else ""
     if skill_instructions:
@@ -866,17 +877,31 @@ def _tool_candidates(*, prompt_body: str, user_text: str, tools: list[dict[str, 
     }
 
 
-def _evaluate_studio_skills(data: dict[str, Any], *, user_text: str, selected_tools: list[str]) -> dict[str, Any]:
+def _evaluate_studio_skills(
+    data: dict[str, Any],
+    *,
+    user_text: str,
+    selected_tools: list[str],
+    skill_evaluator: SkillEvaluator | None = None,
+) -> dict[str, Any]:
     skills = data.get("skills") if "skills" in data and isinstance(data.get("skills"), list) else None
     context = data.get("request_context") if isinstance(data.get("request_context"), dict) else {}
     skill_context = {**context, "studio_test": True}
     forced_skills = _string_list(data.get("skills_forced") or data.get("selected_skills"))
     if forced_skills:
         skill_context["selected_skills"] = forced_skills
-    return RuntimeSkillTriggerService(skills).evaluate(
+    if skill_evaluator is not None:
+        return skill_evaluator(
+            skills=skills,
+            user_text=user_text,
+            selected_tools=selected_tools,
+            context=skill_context,
+        )
+    return _evaluate_inline_skills(
+        skills or [],
         user_text=user_text,
-        tool_names=selected_tools,
-        context=skill_context,
+        selected_tools=selected_tools,
+        forced_skills=forced_skills,
     )
 
 
