@@ -8,11 +8,13 @@ from blocks._common import ok, error, timestamp
 import base64
 import hmac
 import json
+import logging
 import re
 import signal
 import threading
 import http.server
 import urllib.parse
+from pathlib import Path
 
 from bridge.block_adapter import invoke_block
 from domain.safety.local_guard import (
@@ -29,6 +31,8 @@ from transport.registry import (
     flow_http_output_is_compatible,
     http_route_sort_key,
 )
+
+logger = logging.getLogger(__name__)
 
 
 _SAFE_GET_FALLBACK_BLOCKS = {
@@ -304,6 +308,7 @@ class DefaultsHttpServer:
             payload[dest_key] = path_params.get(source_key, "")
         context = self._build_context()
         _apply_ambient_browser_qa_context(context, payload)
+        _apply_defaultspack_local_ui_context(context, payload)
         # Standalone live-server scripts start transport with no kernel facade.
         # In that mode, capability bridge resolution can block while trying to
         # discover runtime services that do not exist. Call the block directly.
@@ -416,6 +421,14 @@ class DefaultsHttpServer:
         context["flow_id"] = "transport_function_route"
         context["_defaultspack_http_route_adapter"] = True
         _apply_ambient_browser_qa_context(context, payload)
+        _apply_defaultspack_local_ui_context(context, payload)
+        if context.get("_tool_server_approved") is True:
+            logger.info(
+                "defaultspack function route approved by local UI context: function=%s source=%s approval_id=%s",
+                function_name,
+                context.get("source"),
+                context.get("approval_id"),
+            )
         try:
             from domain.function_runtime.bridge import invoke_function
 
@@ -1201,6 +1214,8 @@ _SENSITIVE_INTEGRATION_PATHS = {
     "/api/recording/capture",
 }
 _SENSITIVE_INTEGRATION_METHOD_PATHS = {
+    "/api/ai/provider-key": {"POST"},
+    "/api/ambient/monitor/start": {"POST"},
     "/api/external/templates": {"POST", "PUT", "DELETE"},
 }
 _SENSITIVE_INTEGRATION_PREFIXES = (
@@ -1215,6 +1230,11 @@ _SENSITIVE_HUMAN_OPERATOR_PATH_RE = re.compile(
     r"^/api/human-operator/conversations/[^/]+/sessions/[^/]+(?:/messages)?$"
 )
 _AMBIENT_BROWSER_QA_CONTEXT_FLAG = "_ambient_browser_qa_pre_auth_approved"
+_LOCAL_UI_APPROVAL_CONTEXT_FLAG = "_defaultspack_local_ui_pre_auth_approved"
+_LOCAL_UI_APPROVAL_METHOD_PATHS = {
+    "/api/ai/provider-key": {"POST"},
+    "/api/ambient/monitor/start": {"POST"},
+}
 
 _LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -1298,12 +1318,47 @@ def _browser_api_origin_error(method, path, headers, client_address=None):
     return None
 
 
-def _configured_local_auth_token():
+def _configured_local_auth_tokens():
+    tokens = []
+    seen = set()
+
+    def add_token(value):
+        token = str(value or "").strip()
+        if token and token not in seen:
+            seen.add(token)
+            tokens.append(token)
+
     for key in ("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "RUMI_API_TOKEN", "RUMI_TOKEN"):
         value = os.environ.get(key, "").strip()
+        add_token(value)
+    for path in _local_auth_token_file_candidates():
+        try:
+            add_token(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return tokens
+
+
+def _configured_local_auth_token():
+    tokens = _configured_local_auth_tokens()
+    return tokens[0] if tokens else ""
+
+
+def _local_auth_token_file_candidates():
+    candidates = []
+
+    def add_candidate(path):
+        if path and path not in candidates:
+            candidates.append(path)
+
+    for env_key in ("RUMI_APP_DIR", "RUMI_HOME"):
+        value = os.environ.get(env_key, "").strip()
         if value:
-            return value
-    return ""
+            add_candidate(Path(value).expanduser() / ".desktop_api_token")
+    user_data = os.environ.get("RUMI_USER_DATA", "").strip()
+    if user_data:
+        add_candidate(Path(user_data).expanduser().parent / ".desktop_api_token")
+    return candidates
 
 
 def _bearer_token(headers):
@@ -1313,10 +1368,28 @@ def _bearer_token(headers):
     return auth_header[7:].strip()
 
 
+def _local_auth_token_authorized(headers):
+    provided = _bearer_token(headers)
+    if not provided:
+        return False
+    return any(hmac.compare_digest(provided, expected) for expected in _configured_local_auth_tokens())
+
+
+def _local_ui_approval_route_authorized(method, path, headers):
+    allowed_methods = _LOCAL_UI_APPROVAL_METHOD_PATHS.get(str(path or ""), set())
+    if str(method or "").upper() not in allowed_methods:
+        return False
+    return _local_auth_token_authorized(headers) or _browser_qa_token_authorized(method, path, headers)
+
+
 def _browser_qa_token_authorized(method, path, headers):
     if str(method or "").upper() != "POST":
         return False
-    if str(path or "") not in {"/api/ambient/events", "/api/authority/browser-ui-operator"}:
+    if str(path or "") not in {
+        "/api/ambient/events",
+        "/api/ambient/monitor/start",
+        "/api/authority/browser-ui-operator",
+    }:
         return False
     expected = os.environ.get("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "").strip()
     if not expected:
@@ -1337,6 +1410,16 @@ def _apply_ambient_browser_qa_context(context, payload):
     context["_tool_server_approved"] = True
     context["source"] = "ambient_browser_qa"
     context["approval_id"] = "ambient_browser_qa"
+
+
+def _apply_defaultspack_local_ui_context(context, payload):
+    if not isinstance(context, dict) or not isinstance(payload, dict):
+        return
+    if payload.pop(_LOCAL_UI_APPROVAL_CONTEXT_FLAG, False) is not True:
+        return
+    context["_tool_server_approved"] = True
+    context["source"] = "defaultspack_local_ui"
+    context["approval_id"] = "defaultspack_local_ui"
 
 
 class _RequestHandler(http.server.BaseHTTPRequestHandler):
@@ -1431,8 +1514,11 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json(sensitive_error[0], error(sensitive_error[1], sensitive_error[2]))
                 return
             request_data.pop(_AMBIENT_BROWSER_QA_CONTEXT_FLAG, None)
+            request_data.pop(_LOCAL_UI_APPROVAL_CONTEXT_FLAG, None)
             if _ambient_browser_test_token_authorized(method, path, self.headers):
                 request_data[_AMBIENT_BROWSER_QA_CONTEXT_FLAG] = True
+            if _local_ui_approval_route_authorized(method, path, self.headers):
+                request_data[_LOCAL_UI_APPROVAL_CONTEXT_FLAG] = True
 
             if source == "registry":
                 # Inject path parameters into request_data per route config
@@ -1570,11 +1656,9 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             ):
                 return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
             return None
-        expected = _configured_local_auth_token()
-        provided = _bearer_token(self.headers)
-        if not expected:
+        if not _configured_local_auth_tokens():
             return (403, "local auth token is not configured", "AUTH_REQUIRED")
-        if not provided or not hmac.compare_digest(provided, expected):
+        if not _local_auth_token_authorized(self.headers):
             return (401, "local auth token required", "AUTH_REQUIRED")
         if (
             method.upper() in {"POST", "PUT", "DELETE"}

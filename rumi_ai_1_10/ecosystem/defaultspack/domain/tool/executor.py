@@ -16,7 +16,10 @@ from domain.tool_policy.profile_permission import resolve_profile_tool_permissio
 from pathlib import Path
 import inspect
 import json
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 # P1-2: サンドボックス用の安全なビルトイン一覧
@@ -271,6 +274,18 @@ class ToolExecutor:
             if approval_error is not None:
                 return approval_error
             response = executor.execute(principal_id, request)
+            if getattr(response, "error_type", "") == "caller_requires_denied":
+                logger.warning(
+                    "tool capability caller_requires denied: tool=%s principal=%s request_type=%s qualified_name=%s approved=%s source=%s approval_id=%s context_keys=%s",
+                    _tool_approval_tool_name(tool_def) if isinstance(tool_def, dict) else "",
+                    principal_id,
+                    str(request.get("type") or ""),
+                    str(request.get("qualified_name") or request.get("permission_id") or ""),
+                    bool(isinstance(context, dict) and context.get("_tool_server_approved") is True),
+                    str((context or {}).get("source") or "") if isinstance(context, dict) else "",
+                    str((context or {}).get("approval_id") or "") if isinstance(context, dict) else "",
+                    sorted(str(key) for key in (context or {}).keys())[:40] if isinstance(context, dict) else [],
+                )
             if (
                 isinstance(context, dict)
                 and tool_server_approval_context_is_internal(context)

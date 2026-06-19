@@ -1049,6 +1049,16 @@ class CapabilityExecutor:
             ):
                 caller_ok = True
             if not caller_ok:
+                self._log_caller_requires_denied(
+                    principal_id=principal_id,
+                    caller_requires=caller_requires,
+                    request_context=request_context,
+                    principal_is_trusted_builtin=principal_is_trusted_builtin,
+                    caller_ok=caller_ok,
+                    permission_id=effective_permission_id,
+                    handler_id=handler_id,
+                    entry=entry,
+                )
                 resp = CapabilityResponse(success=False, error="Caller does not meet caller_requires",
                                           error_type="caller_requires_denied", latency_ms=(time.time() - start_time) * 1000)
                 self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
@@ -1455,6 +1465,16 @@ class CapabilityExecutor:
             ):
                 caller_ok = True
             if not caller_ok:
+                self._log_caller_requires_denied(
+                    principal_id=principal_id,
+                    caller_requires=entry.caller_requires,
+                    request_context=request_context,
+                    principal_is_trusted_builtin=principal_is_trusted_builtin,
+                    caller_ok=caller_ok,
+                    permission_id="function.call",
+                    handler_id=str(getattr(entry, "qualified_name", "") or ""),
+                    entry=entry,
+                )
                 resp = CapabilityResponse(success=False, error="Caller does not meet caller_requires",
                                           error_type="caller_requires_denied", latency_ms=(time.time() - start_time) * 1000)
                 self._audit(principal_id, "function.call", None, resp, args, request_id,
@@ -1620,6 +1640,84 @@ class CapabilityExecutor:
             return False
         required = {str(item or "").strip() for item in caller_requires or []}
         return bool(required) and required <= {"user.approved.high_risk"}
+
+    def _caller_requires_diagnostic(
+        self,
+        *,
+        principal_id,
+        caller_requires,
+        request_context,
+        principal_is_trusted_builtin,
+        caller_ok,
+        permission_id=None,
+        handler_id=None,
+        entry=None,
+    ) -> dict[str, Any]:
+        context = request_context if isinstance(request_context, dict) else {}
+        authority = context.get("authority") if isinstance(context.get("authority"), dict) else {}
+        approval_tokens = authority.get("approval_tokens")
+        approval_token_keys = sorted(str(key) for key in approval_tokens.keys()) if isinstance(approval_tokens, dict) else []
+        required = {str(item or "").strip() for item in caller_requires or []}
+        if not principal_is_trusted_builtin:
+            reason = "principal_not_trusted_builtin"
+        elif not isinstance(request_context, dict):
+            reason = "missing_request_context"
+        elif context.get("_tool_server_approved") is not True:
+            reason = "tool_server_approval_missing"
+        elif not (required and required <= {"user.approved.high_risk"}):
+            reason = "unsupported_caller_requirement"
+        elif not caller_ok:
+            reason = "permission_manager_or_context_denied"
+        else:
+            reason = "allowed"
+        return {
+            "reason": reason,
+            "principal_id": str(principal_id or ""),
+            "permission_id": str(permission_id or ""),
+            "handler_id": str(handler_id or ""),
+            "pack_id": str(getattr(entry, "pack_id", "") or "") if entry is not None else "",
+            "function_id": str(getattr(entry, "function_id", "") or "") if entry is not None else "",
+            "qualified_name": str(getattr(entry, "qualified_name", "") or "") if entry is not None else "",
+            "caller_requires": sorted(required),
+            "high_risk_approval_only": self._caller_requires_high_risk_approval_only(caller_requires),
+            "principal_is_trusted_builtin": bool(principal_is_trusted_builtin),
+            "context_is_dict": isinstance(request_context, dict),
+            "tool_server_approved": context.get("_tool_server_approved") is True,
+            "context_source": str(context.get("source") or ""),
+            "context_approval_id": str(context.get("approval_id") or ""),
+            "context_request_id": str(context.get("request_id") or ""),
+            "context_conversation_id": str(context.get("conversation_id") or ""),
+            "authority_principal_id": str(context.get("authority_principal_id") or ""),
+            "authority_request_id": str(authority.get("request_id") or ""),
+            "authority_permission_id": str(authority.get("permission_id") or ""),
+            "authority_has_token": bool(authority.get("approval_token")),
+            "authority_approval_token_keys": approval_token_keys,
+            "context_keys": sorted(str(key) for key in context.keys())[:40],
+        }
+
+    def _log_caller_requires_denied(
+        self,
+        *,
+        principal_id,
+        caller_requires,
+        request_context,
+        principal_is_trusted_builtin,
+        caller_ok,
+        permission_id=None,
+        handler_id=None,
+        entry=None,
+    ) -> None:
+        diagnostic = self._caller_requires_diagnostic(
+            principal_id=principal_id,
+            caller_requires=caller_requires,
+            request_context=request_context,
+            principal_is_trusted_builtin=principal_is_trusted_builtin,
+            caller_ok=caller_ok,
+            permission_id=permission_id,
+            handler_id=handler_id,
+            entry=entry,
+        )
+        logger.warning("caller_requires denied: %s", json.dumps(diagnostic, ensure_ascii=False, sort_keys=True))
 
     @staticmethod
     def _caller_requires_high_risk_approval_only(caller_requires):

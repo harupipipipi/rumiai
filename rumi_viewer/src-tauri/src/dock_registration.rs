@@ -187,6 +187,16 @@ fn defaultspack_window_url_with_local_auth(port: u16, api_token: &str) -> AnyRes
     Ok(url.to_string())
 }
 
+fn defaultspack_window_url_for_log(url: &str) -> String {
+    match Url::parse(url) {
+        Ok(mut parsed) => {
+            parsed.set_fragment(None);
+            parsed.to_string()
+        }
+        Err(_) => "<invalid defaultspack url>".to_string(),
+    }
+}
+
 fn defaultspack_health_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/api/health")
 }
@@ -622,7 +632,10 @@ pub(crate) fn launch_defaultspack_desktop_window_impl(
     info!("launch_defaultspack_desktop_impl: starting");
     let url = ensure_defaultspack_desktop_ready(config)?;
     open_defaultspack_tauri_window(app, &url)?;
-    info!("launch_defaultspack_desktop_impl: opened Tauri window {url}");
+    info!(
+        "launch_defaultspack_desktop_impl: opened Tauri window {}",
+        defaultspack_window_url_for_log(&url)
+    );
     Ok("Rumi Defaultspackを開きました".into())
 }
 
@@ -642,10 +655,15 @@ pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<
         );
     }
     let url = ensure_defaultspack_desktop_ready(config)?;
-    open::that_detached(&url).with_context(|| format!("failed to open {url}"))?;
-    info!("launch_defaultspack_desktop_impl: opened legacy external URL {url}");
+    open::that_detached(&url)
+        .with_context(|| format!("failed to open {}", defaultspack_window_url_for_log(&url)))?;
+    info!(
+        "launch_defaultspack_desktop_impl: opened legacy external URL {}",
+        defaultspack_window_url_for_log(&url)
+    );
     Ok(format!(
-        "Opening Rumi Defaultspack in debug browser at {url}"
+        "Opening Rumi Defaultspack in debug browser at {}",
+        defaultspack_window_url_for_log(&url)
     ))
 }
 
@@ -1215,6 +1233,16 @@ mod tests {
             defaultspack_window_url_with_local_auth(DEFAULTSPACK_DEFAULT_PORT, "local+token/1=")
                 .unwrap(),
             "http://127.0.0.1:8766/chat#rumi_local_auth=local%2Btoken%2F1%3D"
+        );
+    }
+
+    #[test]
+    fn defaultspack_window_url_for_log_strips_local_auth_fragment() {
+        assert_eq!(
+            defaultspack_window_url_for_log(
+                "http://127.0.0.1:8766/chat#rumi_local_auth=local%2Btoken%2F1%3D"
+            ),
+            "http://127.0.0.1:8766/chat"
         );
     }
 
