@@ -39,8 +39,8 @@ class ChatDrawer extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text('Rumi',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700)),
+                      style: theme.textTheme.titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w700)),
                 ),
                 IconButton(
                   tooltip: '新規チャット',
@@ -123,9 +123,7 @@ class _GroupHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
       child: Text(text,
           style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey)),
+              fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey)),
     );
   }
 }
@@ -195,8 +193,7 @@ class _ConversationTile extends StatelessWidget {
                 child: Text(conversation.pinned ? 'ピン留め解除' : 'ピン留め')),
             const PopupMenuItem(
                 value: 'delete',
-                child: Text('削除',
-                    style: TextStyle(color: Colors.redAccent))),
+                child: Text('削除', style: TextStyle(color: Colors.redAccent))),
           ],
         ),
         onTap: onSelect,

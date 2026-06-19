@@ -26,11 +26,11 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(393, 852));
     final store = ChatStore();
     final configStore = ApiConfigStore();
-    await tester.pumpWidget(
-        wrap(ChatScreen(store: store, configStore: configStore)));
+    await tester
+        .pumpWidget(wrap(ChatScreen(store: store, configStore: configStore)));
     // Let the async init (SharedPreferences load + create) complete.
-    await tester.runAsync(() => Future<void>.delayed(
-        const Duration(milliseconds: 30)));
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 30));
 
@@ -112,7 +112,8 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('pending assistant message shows typing indicator', (tester) async {
+  testWidgets('pending assistant message shows typing indicator',
+      (tester) async {
     await tester.binding.setSurfaceSize(const Size(393, 852));
     await tester.pumpWidget(wrap(Scaffold(
       body: MessageView(
@@ -143,8 +144,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final sendIcon = find.byIcon(Icons.arrow_upward_rounded);
-    final sendBtn = find.ancestor(
-        of: sendIcon, matching: find.bySubtype<IconButton>());
+    final sendBtn =
+        find.ancestor(of: sendIcon, matching: find.bySubtype<IconButton>());
     final textField = find.byType(TextField);
 
     expect(tester.widget<IconButton>(sendBtn).onPressed, isNull);

@@ -58,7 +58,8 @@ class _ComposerBarState extends State<ComposerBar> {
           decoration: BoxDecoration(
             color: theme.cardTheme.color,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: theme.dividerTheme.color ?? Colors.transparent),
+            border: Border.all(
+                color: theme.dividerTheme.color ?? Colors.transparent),
           ),
           padding: const EdgeInsets.fromLTRB(16, 4, 6, 4),
           child: Row(
@@ -80,8 +81,7 @@ class _ComposerBarState extends State<ComposerBar> {
                     focusedBorder: InputBorder.none,
                     filled: false,
                     isDense: true,
-                    contentPadding:
-                        const EdgeInsets.symmetric(vertical: 10),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
                   ),
                   onSubmitted: (_) => _send(),
                 ),
@@ -113,8 +113,11 @@ class _SendButton extends StatelessWidget {
       onPressed: enabled ? onSend : null,
       icon: const Icon(Icons.arrow_upward_rounded),
       style: IconButton.styleFrom(
-        backgroundColor: enabled ? theme.colorScheme.primary : theme.disabledColor,
-        foregroundColor: enabled ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface.withValues(alpha: 0.4),
+        backgroundColor:
+            enabled ? theme.colorScheme.primary : theme.disabledColor,
+        foregroundColor: enabled
+            ? theme.colorScheme.onPrimary
+            : theme.colorScheme.onSurface.withValues(alpha: 0.4),
         shape: const CircleBorder(),
         padding: EdgeInsets.zero,
         minimumSize: const Size(42, 42),

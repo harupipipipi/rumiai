@@ -11,7 +11,8 @@ ThemeData buildRumiTheme({bool dark = true}) {
     useMaterial3: true,
     colorScheme: scheme,
     brightness: dark ? Brightness.dark : Brightness.light,
-    scaffoldBackgroundColor: dark ? const Color(0xFF0E1116) : const Color(0xFFF7F8F9),
+    scaffoldBackgroundColor:
+        dark ? const Color(0xFF0E1116) : const Color(0xFFF7F8F9),
     canvasColor: dark ? const Color(0xFF14181E) : Colors.white,
     splashFactory: InkSparkle.splashFactory,
     appBarTheme: AppBarTheme(
@@ -28,17 +29,20 @@ ThemeData buildRumiTheme({bool dark = true}) {
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: dark ? const Color(0xFF232A33) : const Color(0xFFE5E7EB)),
+        side: BorderSide(
+            color: dark ? const Color(0xFF232A33) : const Color(0xFFE5E7EB)),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: dark ? const Color(0xFF2A323D) : const Color(0xFFD1D5DB)),
+        borderSide: BorderSide(
+            color: dark ? const Color(0xFF2A323D) : const Color(0xFFD1D5DB)),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: dark ? const Color(0xFF2A323D) : const Color(0xFFD1D5DB)),
+        borderSide: BorderSide(
+            color: dark ? const Color(0xFF2A323D) : const Color(0xFFD1D5DB)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
@@ -70,7 +74,7 @@ ThemeData buildRumiTheme({bool dark = true}) {
   );
 
   return base.copyWith(
-   extensions: [RumiColors.dark],
+    extensions: [RumiColors.dark],
   );
 }
 
@@ -126,7 +130,8 @@ class RumiColors extends ThemeExtension<RumiColors> {
       bubbleUser: Color.lerp(bubbleUser, other.bubbleUser, t)!,
       bubbleAssistant: Color.lerp(bubbleAssistant, other.bubbleAssistant, t)!,
       bubbleUserText: Color.lerp(bubbleUserText, other.bubbleUserText, t)!,
-      bubbleAssistantText: Color.lerp(bubbleAssistantText, other.bubbleAssistantText, t)!,
+      bubbleAssistantText:
+          Color.lerp(bubbleAssistantText, other.bubbleAssistantText, t)!,
       codeBackground: Color.lerp(codeBackground, other.codeBackground, t)!,
       accent: Color.lerp(accent, other.accent, t)!,
     );

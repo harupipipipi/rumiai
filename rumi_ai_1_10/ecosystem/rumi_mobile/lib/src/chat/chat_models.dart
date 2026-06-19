@@ -84,6 +84,7 @@ class Conversation {
     required this.createdAt,
     required this.updatedAt,
     this.pinned = false,
+    this.revision = 0,
   });
 
   final String id;
@@ -92,6 +93,7 @@ class Conversation {
   final DateTime createdAt;
   DateTime updatedAt;
   bool pinned;
+  int revision;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -100,6 +102,7 @@ class Conversation {
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
         'pinned': pinned,
+        'revision': revision,
       };
 
   factory Conversation.fromJson(Map<String, dynamic> json) {
@@ -110,11 +113,12 @@ class Conversation {
       id: json['id'] as String,
       title: json['title'] as String? ?? '新しいチャット',
       messages: list,
-      createdAt:
-          DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
-      updatedAt:
-          DateTime.tryParse(json['updatedAt'] as String? ?? '') ?? DateTime.now(),
+      createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ??
+          DateTime.now(),
+      updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
+          DateTime.now(),
       pinned: json['pinned'] as bool? ?? false,
+      revision: (json['revision'] as num?)?.toInt() ?? 0,
     );
   }
 

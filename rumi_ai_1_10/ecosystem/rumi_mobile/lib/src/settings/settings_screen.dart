@@ -80,7 +80,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   ApiConfig _buildConfig() => ApiConfig(
         baseUrl: _baseUrl.text.trim(),
         apiKey: _apiKey.text.trim(),
-        model: _model.text.trim().isEmpty ? ApiConfig.defaults.model : _model.text.trim(),
+        model: _model.text.trim().isEmpty
+            ? ApiConfig.defaults.model
+            : _model.text.trim(),
         label: _label.text.trim(),
         systemPrompt: _systemPrompt.text.trim(),
         temperature: _config.temperature,
@@ -92,7 +94,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await widget.configStore.saveApi(config);
     final pc = _pcUrl.text.trim().isEmpty || _pcToken.text.trim().isEmpty
         ? null
-        : PcConnection(baseUrl: _pcUrl.text.trim(), token: _pcToken.text.trim());
+        : PcConnection(
+            baseUrl: _pcUrl.text.trim(), token: _pcToken.text.trim());
     await widget.configStore.savePc(pc);
     if (!mounted) return;
     setState(() {
@@ -164,7 +167,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -399,8 +403,7 @@ class _ComingSoonCard extends StatelessWidget {
               border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
             ),
             child: Text('Coming soon',
-                style: TextStyle(
-                    fontSize: 11, color: Colors.amber.shade200)),
+                style: TextStyle(fontSize: 11, color: Colors.amber.shade200)),
           ),
         ],
       ),
