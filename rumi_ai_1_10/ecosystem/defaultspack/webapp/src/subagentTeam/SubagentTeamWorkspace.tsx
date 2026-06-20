@@ -20,7 +20,6 @@ import {
   Send,
   Search,
   ShieldCheck,
-  Sparkles,
   UserRound,
   UsersRound,
   type LucideIcon,
@@ -40,7 +39,6 @@ import {
   type SubagentTeamCreatorSettings,
   type SubagentTeamCreatorTestResponse,
   type SubagentTeamDecisionPreviewResponse,
-  type SubagentTeamRichSettings,
 } from "../lib/api";
 import { cn } from "../lib/cn";
 import {
@@ -110,45 +108,18 @@ const ROLE_ICON_REGISTRY: Record<string, LucideIcon> = {
   user: UserRound,
 };
 
-const fallbackRichSettings: SubagentTeamRichSettings = {
-  rich_enabled: false,
-  max_subagents: 5,
-  active_subagents: 5,
-  can_user_toggle: false,
-  can_creator_enable_rich: false,
-  reason: "Preview fallback. /rich requires the subagent-team API.",
-};
-
 const fallbackCreatorSettings: SubagentTeamCreatorSettings = {
   enabled: true,
   model: "decision-layer",
   lifecycle_only: true,
   can_manage_agents: true,
   can_enable_rich: false,
-  rich_gate_message: "Creator cannot enable /rich. User action is required.",
+  rich_gate_message: "Creator cannot enable elevated modes. User action is required.",
 };
 
 function roleIconForAgent(agent: CompanyAgent | undefined | null, fallbackId?: string | null): LucideIcon {
   if (fallbackId === "you" || fallbackId === "user") return ROLE_ICON_REGISTRY.user;
   return ROLE_ICON_REGISTRY[agentRoleKey(agent, fallbackId)] ?? ROLE_ICON_REGISTRY.agent;
-}
-
-function numericSetting(...values: unknown[]): number | null {
-  for (const value of values) {
-    const numeric = typeof value === "number" ? value : Number(value);
-    if (Number.isFinite(numeric)) return Math.max(0, Math.round(numeric));
-  }
-  return null;
-}
-
-function richSettingsFromResponse(payload: unknown): SubagentTeamRichSettings {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return fallbackRichSettings;
-  const record = payload as Record<string, unknown>;
-  const nested = record.settings ?? record.rich;
-  return {
-    ...record,
-    ...(nested && typeof nested === "object" && !Array.isArray(nested) ? nested as Record<string, unknown> : {}),
-  } as SubagentTeamRichSettings;
 }
 
 function creatorSettingsFromResponse(payload: unknown): SubagentTeamCreatorSettings {
@@ -159,28 +130,6 @@ function creatorSettingsFromResponse(payload: unknown): SubagentTeamCreatorSetti
     ...record,
     ...(nested && typeof nested === "object" && !Array.isArray(nested) ? nested as Record<string, unknown> : {}),
   } as SubagentTeamCreatorSettings;
-}
-
-function richEnabled(settings: SubagentTeamRichSettings): boolean {
-  return Boolean(settings.rich_enabled ?? settings.enabled);
-}
-
-function richLimit(settings: SubagentTeamRichSettings): number {
-  return numericSetting(settings.max_subagents, settings.maxSubagents, settings.limit) ?? 5;
-}
-
-function richActiveCount(settings: SubagentTeamRichSettings): number {
-  return numericSetting(settings.active_subagents, settings.activeSubagents, settings.current_subagents, settings.currentSubagents) ?? 0;
-}
-
-function creatorCanEnableRich(settings: SubagentTeamRichSettings | SubagentTeamCreatorSettings): boolean {
-  return Boolean(
-    settings.can_creator_enable_rich
-    ?? settings.canCreatorEnableRich
-    ?? settings.creator_can_enable_rich
-    ?? settings.can_enable_rich
-    ?? settings.canEnableRich,
-  );
 }
 
 function decisionTaskFromPreview(payload: SubagentTeamDecisionPreviewResponse, fallback: CompanyTask | null): CompanyTask | null {
@@ -327,25 +276,16 @@ function TreePreview({
 }
 
 function SignalBanner({
-  tone,
   icon,
   label,
   text,
 }: {
-  tone: "rich" | "pm";
   icon: ReactNode;
   label: string;
   text: string;
 }) {
   return (
-    <div
-      className={cn(
-        "rounded-lg border px-2.5 py-2",
-        tone === "rich"
-          ? "border-sky-500/20 bg-sky-500/10 text-sky-100"
-          : "border-amber-500/20 bg-amber-500/10 text-amber-100",
-      )}
-    >
+    <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-amber-100">
       <div className="mb-0.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide">
         <span className="shrink-0">{icon}</span>
         <span>{label}</span>
@@ -610,69 +550,6 @@ function ChannelMemberRow({
   );
 }
 
-function RichSettingsCard({
-  settings,
-  source,
-  error,
-  busy,
-  onToggle,
-}: {
-  settings: SubagentTeamRichSettings;
-  source: "api" | "preview";
-  error: string | null;
-  busy: boolean;
-  onToggle: () => void;
-}) {
-  const enabled = richEnabled(settings);
-  const canUserToggle = Boolean(settings.can_user_toggle ?? settings.canUserToggle ?? source === "api");
-  const disabled = busy || source !== "api" || !canUserToggle;
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950/55 p-3">
-      <div className="mb-2 flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-            <Sparkles size={12} className="text-sky-300" />
-            <span>/rich settings</span>
-          </div>
-          <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
-            {enabled ? "Rich team fanout is enabled." : "Rich team fanout is limited to five subagents."}
-          </p>
-        </div>
-        <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[9px]", enabled ? "border-sky-500/30 bg-sky-500/10 text-sky-200" : "border-zinc-800 bg-zinc-950 text-zinc-500")}>
-          {enabled ? "on" : "off"}
-        </span>
-      </div>
-      <div className="grid grid-cols-2 gap-1.5 text-[10px] text-zinc-500">
-        <div className="rounded border border-zinc-800 bg-black/20 px-2 py-1.5">
-          <span className="block text-zinc-600">Limit</span>
-          <span className="font-mono text-zinc-300">{richLimit(settings)}</span>
-        </div>
-        <div className="rounded border border-zinc-800 bg-black/20 px-2 py-1.5">
-          <span className="block text-zinc-600">Active</span>
-          <span className="font-mono text-zinc-300">{richActiveCount(settings)}</span>
-        </div>
-      </div>
-      <p className="mt-2 rounded border border-amber-500/20 bg-amber-500/10 px-2 py-1.5 text-[10px] leading-relaxed text-amber-100">
-        Creator cannot enable /rich. User action is required before a larger team can fan out.
-      </p>
-      {error && (
-        <p className="mt-2 line-clamp-2 rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[10px] text-zinc-500">
-          {error}
-        </p>
-      )}
-      <button
-        type="button"
-        onClick={onToggle}
-        disabled={disabled}
-        className="mt-2 h-8 w-full rounded-md border border-zinc-800 px-2 text-[11px] font-semibold text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:text-zinc-700"
-      >
-        {busy ? "Saving..." : enabled ? "Disable /rich" : "Enable /rich"}
-      </button>
-      <p className="mt-1 font-mono text-[9px] text-zinc-700">source:{source}</p>
-    </div>
-  );
-}
-
 function CreatorSettingsCard({
   settings,
   source,
@@ -706,9 +583,6 @@ function CreatorSettingsCard({
       <div className="mt-2 space-y-1 text-[10px] text-zinc-500">
         <p className="rounded border border-zinc-800 bg-black/20 px-2 py-1.5">
           Agent lifecycle: {settings.can_manage_agents ?? settings.canManageAgents ?? true ? "enabled" : "restricted"}
-        </p>
-        <p className="rounded border border-zinc-800 bg-black/20 px-2 py-1.5">
-          Rich authority: {creatorCanEnableRich(settings) ? "can request" : "cannot enable"}
         </p>
       </div>
       {error && <p className="mt-2 line-clamp-2 text-[10px] text-zinc-600">{error}</p>}
@@ -873,10 +747,6 @@ export function SubagentTeamWorkspace({
   const [decisionPreviewTask, setDecisionPreviewTask] = useState<CompanyTask | null>(null);
   const [decisionPreviewSource, setDecisionPreviewSource] = useState<"api" | "preview">("preview");
   const [decisionPreviewError, setDecisionPreviewError] = useState<string | null>(null);
-  const [richSettings, setRichSettings] = useState<SubagentTeamRichSettings>(() => fallbackRichSettings);
-  const [richSettingsSource, setRichSettingsSource] = useState<"api" | "preview">("preview");
-  const [richSettingsError, setRichSettingsError] = useState<string | null>(null);
-  const [richSettingsBusy, setRichSettingsBusy] = useState(false);
   const [creatorSettings, setCreatorSettings] = useState<SubagentTeamCreatorSettings>(() => fallbackCreatorSettings);
   const [creatorSettingsSource, setCreatorSettingsSource] = useState<"api" | "preview">("preview");
   const [creatorSettingsError, setCreatorSettingsError] = useState<string | null>(null);
@@ -1051,24 +921,13 @@ export function SubagentTeamWorkspace({
       conversationId: activeConversationId,
     };
 
-    const [richResult, creatorResult, decisionResult] = await Promise.allSettled([
-      api.getSubagentTeamRichSettings(context),
+    const [creatorResult, decisionResult] = await Promise.allSettled([
       api.getSubagentTeamCreatorSettings(context),
       api.getSubagentTeamCreatorDecisionPreview({
         ...context,
         channelId: activeThread.type === "channel" ? activeThread.id : null,
       }),
     ]);
-
-    if (richResult.status === "fulfilled") {
-      setRichSettings(richSettingsFromResponse(richResult.value));
-      setRichSettingsSource("api");
-      setRichSettingsError(null);
-    } else {
-      setRichSettings(fallbackRichSettings);
-      setRichSettingsSource("preview");
-      setRichSettingsError(richResult.reason instanceof Error ? richResult.reason.message : "Rich settings API unavailable.");
-    }
 
     if (creatorResult.status === "fulfilled") {
       setCreatorSettings(creatorSettingsFromResponse(creatorResult.value));
@@ -1244,25 +1103,6 @@ export function SubagentTeamWorkspace({
     }
   };
 
-  const handleToggleRich = async () => {
-    if (richSettingsSource !== "api" || richSettingsBusy) return;
-    setRichSettingsBusy(true);
-    setRichSettingsError(null);
-    try {
-      const result = await api.updateSubagentTeamRichSettings({
-        companyId: activeCompanyId,
-        conversationId: activeConversationId,
-        rich_enabled: !richEnabled(richSettings),
-      });
-      setRichSettings(richSettingsFromResponse(result));
-      setRichSettingsSource("api");
-    } catch (richError) {
-      setRichSettingsError(richError instanceof Error ? richError.message : "Could not update /rich settings.");
-    } finally {
-      setRichSettingsBusy(false);
-    }
-  };
-
   const handleCreatorTest = async () => {
     if (creatorSettingsSource !== "api" || creatorTestBusy) return;
     setCreatorTestBusy(true);
@@ -1273,7 +1113,7 @@ export function SubagentTeamWorkspace({
         conversationId: activeConversationId,
         channel_id: activeThread.type === "channel" ? activeThread.id : undefined,
         agent_id: activeThread.type === "dm" ? activeThread.id : undefined,
-        prompt: draft.trim() || "Validate team workspace routing, rich gate, and Creator lifecycle boundaries.",
+        prompt: draft.trim() || "Validate team workspace routing, elevated-mode gates, and Creator lifecycle boundaries.",
         metadata: subagentTeamWorkspaceMetadata({ source: "subagent_team_ui" }),
       });
       setCreatorTestResult(result);
@@ -1500,13 +1340,6 @@ export function SubagentTeamWorkspace({
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="grid gap-1.5 p-2">
               <SignalBanner
-                tone="rich"
-                icon={<Sparkles size={12} />}
-                label="Rich"
-                text={richEnabled(richSettings) ? "Rich mode is enabled for larger teams, files, history, and long-form context." : "Rich mode is off; Creator cannot exceed the five-subagent fanout gate."}
-              />
-              <SignalBanner
-                tone="pm"
                 icon={<ShieldCheck size={12} />}
                 label="PM"
                 text="PM summarizes handoffs and queues Creator decisions before subagents fan out."
@@ -1577,13 +1410,6 @@ export function SubagentTeamWorkspace({
               onStatusChange={setDecisionStatus}
             />
             <CreatorDecisionPreview task={effectiveDecisionTask} status={decisionStatus} onStatusChange={setDecisionStatus} />
-            <RichSettingsCard
-              settings={richSettings}
-              source={richSettingsSource}
-              error={richSettingsError}
-              busy={richSettingsBusy}
-              onToggle={handleToggleRich}
-            />
             <CreatorSettingsCard
               settings={creatorSettings}
               source={creatorSettingsSource}
