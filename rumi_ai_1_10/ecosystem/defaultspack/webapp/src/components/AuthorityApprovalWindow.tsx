@@ -32,6 +32,7 @@ import {
   rememberBrowserApprovalToken,
 } from "../lib/authorityApprovalBrowserToken";
 import { broadcastAuthorityApprovalSettlement } from "../lib/authorityApprovalEvents";
+import { defaultspackUrlWithStoredLocalAuth } from "../lib/defaultspackLocalAuth";
 import { closeCurrentWindow, getAuthorityApprovalContext, openFingerRecordingWindow } from "../lib/desktopApproval";
 import { cn } from "../lib/cn";
 
@@ -101,7 +102,7 @@ async function returnToFingerRecordingAfterApproval() {
   window.close();
   window.setTimeout(() => {
     if (document.hidden) return;
-    window.location.replace("/finger-recording?authority_approved=1");
+    window.location.replace(defaultspackUrlWithStoredLocalAuth("/finger-recording?authority_approved=1"));
   }, 250);
 }
 

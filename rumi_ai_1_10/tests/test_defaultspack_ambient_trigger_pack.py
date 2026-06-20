@@ -1314,6 +1314,23 @@ def test_ambient_routes_and_functions_are_registered():
     )
 
 
+def test_ambient_events_viewer_token_satisfies_local_ui_context(monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "viewer-local-token")
+
+    from transport import http
+
+    assert http._local_ui_approval_route_authorized(
+        "POST",
+        "/api/ambient/events",
+        {"Authorization": "Bearer viewer-local-token"},
+    )
+    assert not http._local_ui_approval_route_authorized(
+        "POST",
+        "/api/ambient/events",
+        {},
+    )
+
+
 def test_ambient_monitor_start_function_returns_host_stream_intent(monkeypatch):
     from core_runtime.host_intent import validate_host_intent
 

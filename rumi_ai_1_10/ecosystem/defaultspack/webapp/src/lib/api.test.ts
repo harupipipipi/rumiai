@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, defaultspackUrlWithLocalAuth, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
@@ -1372,6 +1372,35 @@ test("API headers keep explicit Authorization over Viewer local auth", () => {
     const headers = defaultspackApiHeaders("GET", { Authorization: "Bearer explicit-token" });
     assert.equal(headers.get("Authorization"), "Bearer explicit-token");
   } finally {
+    if (previousSessionStorage) Object.defineProperty(globalThis, "sessionStorage", previousSessionStorage);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});
+
+test("local auth URL helper carries Viewer token into child windows", () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { location: { origin: "http://127.0.0.1:8766" } },
+  });
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => (key === "rumi-defaultspack-local-auth" ? "local-token-1" : null),
+      setItem: () => {},
+      removeItem: () => {},
+    },
+  });
+
+  try {
+    assert.equal(
+      defaultspackUrlWithLocalAuth("/finger-recording?authority_approved=1"),
+      "/finger-recording?authority_approved=1#rumi_local_auth=local-token-1",
+    );
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
     if (previousSessionStorage) Object.defineProperty(globalThis, "sessionStorage", previousSessionStorage);
     else Reflect.deleteProperty(globalThis, "sessionStorage");
   }

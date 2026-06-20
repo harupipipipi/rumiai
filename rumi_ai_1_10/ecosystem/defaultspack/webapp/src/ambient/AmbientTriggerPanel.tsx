@@ -17,7 +17,7 @@ import {
 } from "../lib/authorityApprovalBrowserToken";
 import { openDefaultsConsoleWindow, openFingerRecordingWindow, openAuthorityApprovalWindow, openHostPermissionsPageWindow } from "../lib/desktopApproval";
 import { LayerPortal } from "../ui/layers/LayerPortal";
-import { ambientTriggerClient, type AmbientStatus } from "./ambientTriggerClient";
+import { ambientTriggerClient, type AmbientEventPayload, type AmbientStatus } from "./ambientTriggerClient";
 import { AmbientMiniChat } from "./AmbientMiniChat";
 import { buildAmbientDispatchTemplateContext, mergeAmbientDispatchMetadata } from "./ambientDispatchContext";
 import {
@@ -591,6 +591,7 @@ export function AmbientTriggerPanel({
         mode: "dispatch_audio",
         action_id: "chat.message",
         ...dispatchTemplateContext.eventPayload,
+        params: ambientParamsWithTranscriptionLanguage(dispatchTemplateContext.eventPayload.params),
         input_text: transcript ? `文字起こし:\n${transcript}` : "録音音声を送信しました。文字起こしはまだありません。音声を確認して返答してください。",
         conversation_id: conversationIdRef.current || undefined,
         confidence: state.confidence,
@@ -1211,6 +1212,7 @@ export function AmbientTriggerPanel({
         audio_size: recording.size,
         audio_name: `mic-transcription-test.${recording.extension}`,
         model: routingModel || undefined,
+        params: ambientParamsWithTranscriptionLanguage(undefined),
         metadata: {
           panel: "ambient_settings",
           test_kind: "transcription",
@@ -2254,6 +2256,23 @@ function focusComposer() {
     const composer = document.querySelector("textarea");
     if (composer instanceof HTMLTextAreaElement) composer.focus();
   }, 0);
+}
+
+function ambientParamsWithTranscriptionLanguage(params: AmbientEventPayload["params"] | undefined): AmbientEventPayload["params"] | undefined {
+  const next = recordValue(params) ? { ...params } : {};
+  const transcription = recordValue(next.transcription);
+  if (!cleanString(next.language) && !cleanString(transcription?.language)) {
+    const language = defaultAmbientTranscriptionLanguage();
+    if (language) next.language = language;
+  }
+  return Object.keys(next).length ? next : undefined;
+}
+
+function defaultAmbientTranscriptionLanguage(): string {
+  if (typeof navigator === "undefined") return "";
+  const raw = String(navigator.languages?.[0] || navigator.language || "").trim();
+  const primary = raw.split(/[-_]/)[0]?.toLowerCase() ?? "";
+  return /^[a-z]{2,3}$/.test(primary) ? primary : "";
 }
 
 function approvalDecisionForChoice(choice: 2 | 3 | 4, target: AmbientApprovalTarget | null | undefined): "approve" | "reject" | null {

@@ -1,5 +1,6 @@
 import type { ToolPreviewItem } from "../components/ToolPreview";
 import type { AuthorityApprovalScope } from "./authorityApproval";
+import { defaultspackUrlWithLocalAuthToken } from "./defaultspackLocalAuth";
 
 const PANEL_CSRF_STORAGE_KEY = "rumi-panel-csrf";
 const DEFAULTSPACK_CSRF_STORAGE_KEY = "rumi-defaultspack-csrf";
@@ -1730,6 +1731,10 @@ export function defaultspackApiHeaders(method: string, headers?: HeadersInit): H
     nextHeaders.set("X-Rumi-CSRF", getDefaultspackCsrfToken());
   }
   return nextHeaders;
+}
+
+export function defaultspackUrlWithLocalAuth(pathOrUrl: string): string {
+  return defaultspackUrlWithLocalAuthToken(pathOrUrl, getDefaultspackLocalAuthToken());
 }
 
 export function defaultspackApiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
