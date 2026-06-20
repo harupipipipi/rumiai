@@ -300,8 +300,11 @@ export function AmbientTriggerPanel({
   const miniAuthorityApproval = miniAuthorityApprovalResolved?.approval ?? null;
   const miniAuthorityApprovalResolving = Boolean(miniAuthorityApprovalCandidate && !miniAuthorityApprovalResolved);
   const miniAuthorityBlocksInput = miniAuthorityApprovalResolving || Boolean(miniAuthorityApproval);
-  const miniBrowserApprovalTokenRequired = Boolean(miniAuthorityApproval && !hasNativeAuthorityApprovalWindow() && !browserApprovalToken.trim());
-  const miniBrowserApprovalDirectUrl = miniAuthorityApproval && !hasNativeAuthorityApprovalWindow() && browserApprovalToken.trim()
+  const browserApprovalQaEnabled = standalone && debugMode;
+  const miniBrowserApprovalTokenRequired = Boolean(
+    browserApprovalQaEnabled && miniAuthorityApproval && !hasNativeAuthorityApprovalWindow() && !browserApprovalToken.trim(),
+  );
+  const miniBrowserApprovalDirectUrl = browserApprovalQaEnabled && miniAuthorityApproval && !hasNativeAuthorityApprovalWindow() && browserApprovalToken.trim()
     ? browserAuthorityApprovalPath(miniAuthorityApproval.requestId, browserApprovalToken.trim())
     : null;
   const inlineSettingsControlsVisible = !standalone;
@@ -931,7 +934,7 @@ export function AmbientTriggerPanel({
         if (!options?.auto) setMessage("AI使用の承認ウィンドウを開きました。");
         return;
       }
-      const nextBrowserApprovalToken = readBrowserApprovalToken();
+      const nextBrowserApprovalToken = browserApprovalQaEnabled ? readBrowserApprovalToken() : "";
       if (nextBrowserApprovalToken) {
         rememberBrowserApprovalToken(nextBrowserApprovalToken);
         setBrowserApprovalToken(nextBrowserApprovalToken);
@@ -945,7 +948,7 @@ export function AmbientTriggerPanel({
         setMiniChatError("ブラウザのポップアップがブロックされました。同じタブの承認リンクを開いてください。");
         return;
       }
-      if (!hasNativeAuthorityApprovalWindow()) {
+      if (browserApprovalQaEnabled && !hasNativeAuthorityApprovalWindow()) {
         setMiniChatError(null);
         if (!options?.auto) setMessage("ブラウザで承認するにはテストトークンを保存してください。");
         return;

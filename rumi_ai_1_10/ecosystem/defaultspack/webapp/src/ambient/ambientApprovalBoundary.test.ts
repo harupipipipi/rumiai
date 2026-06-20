@@ -35,11 +35,13 @@ test("ambient mini authority CTA resolves stale request metadata before opening"
   assert.doesNotMatch(source, /openAuthorityApprovalWindow\(approval\.requestId\)/);
 });
 
-test("ambient mini authority browser fallback opens only tokenized approval URLs", () => {
+test("ambient mini authority browser fallback is debug QA only and opens tokenized approval URLs", () => {
   const source = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
   const helperSource = readFileSync(resolve(SRC_ROOT, "lib", "authorityApprovalBrowserToken.ts"), "utf8");
 
-  assert.match(source, /const nextBrowserApprovalToken = readBrowserApprovalToken\(\)/);
+  assert.match(source, /const browserApprovalQaEnabled = standalone && debugMode/);
+  assert.match(source, /browserApprovalQaEnabled && miniAuthorityApproval && !hasNativeAuthorityApprovalWindow\(\) && browserApprovalToken\.trim\(\)/);
+  assert.match(source, /const nextBrowserApprovalToken = browserApprovalQaEnabled \? readBrowserApprovalToken\(\) : ""/);
   assert.match(source, /browserAuthorityApprovalPath\(resolvedApproval\.requestId, nextBrowserApprovalToken\)/);
   assert.match(source, /window\.open\(approvalUrl/);
   assert.match(source, /ブラウザで承認するにはテストトークンを保存してください。/);

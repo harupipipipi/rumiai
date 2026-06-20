@@ -464,7 +464,7 @@ test("authority approval window refreshes stale ui_operator once and retries onc
   assert.equal((source.match(/await submitApproveOnce\(\)/g) ?? []).length, 2);
 });
 
-test("authority approval browser route is read-only without token but can fetch browser ui_operator with token", () => {
+test("authority approval browser route is read-only without URL token but can fetch browser ui_operator with token", () => {
   const source = authorityApprovalWindowSource();
   const tokenSource = readFileSync(resolve(SRC_ROOT, "lib", "authorityApprovalBrowserToken.ts"), "utf8");
   const apiSource = readFileSync(resolve(SRC_ROOT, "lib", "api.ts"), "utf8");
@@ -472,7 +472,7 @@ test("authority approval browser route is read-only without token but can fetch 
 
   assert.match(source, /function hasNativeAuthorityApprovalContext\(\)/);
   assert.match(source, /readBrowserApprovalTokenFromLocation/);
-  assert.match(source, /readBrowserApprovalTokenFromStorage/);
+  assert.doesNotMatch(source, /readBrowserApprovalTokenFromStorage/);
   assert.match(tokenSource, /BROWSER_APPROVAL_TOKEN_STORAGE_KEY/);
   assert.match(tokenSource, /"browser_approval_token"/);
   assert.match(tokenSource, /"approval_browser_token"/);

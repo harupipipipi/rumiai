@@ -28,7 +28,6 @@ import {
 } from "../lib/authorityApproval";
 import {
   readBrowserApprovalTokenFromLocation,
-  readBrowserApprovalTokenFromStorage,
   rememberBrowserApprovalToken,
 } from "../lib/authorityApprovalBrowserToken";
 import { broadcastAuthorityApprovalSettlement } from "../lib/authorityApprovalEvents";
@@ -252,9 +251,7 @@ export function AuthorityApprovalWindow() {
     if (tokenFromLocation) {
       rememberBrowserApprovalToken(tokenFromLocation);
       setBrowserApprovalToken(tokenFromLocation);
-      return;
     }
-    setBrowserApprovalToken(readBrowserApprovalTokenFromStorage());
   }, []);
 
   const settleAuthorityRequest = useCallback((
