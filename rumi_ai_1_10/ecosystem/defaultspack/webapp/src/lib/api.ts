@@ -2139,9 +2139,9 @@ export const api = {
       profile_id: string;
       conversation_id?: string;
       summary: PromptUsageSummary;
-      segments: PromptUsageSegment[];
-      active_segments: PromptUsageSegment[];
-      disabled_segments: PromptUsageSegment[];
+      segments?: PromptUsageSegment[];
+      active_segments?: PromptUsageSegment[];
+      disabled_segments?: PromptUsageSegment[];
       token_estimate?: PromptUsageSummary["token_estimate"];
     }>(withQuery("/api/prompts/active", params));
   },

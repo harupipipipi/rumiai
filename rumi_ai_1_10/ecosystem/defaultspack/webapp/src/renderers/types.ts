@@ -231,6 +231,9 @@ export type RightSidebarRendererProps = {
   selectedProfile?: ModelProfile | null;
   toolFilterEntries?: ToolFilterEntry[];
   runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
+  promptUsage?: PromptUsageSummary | null;
+  promptProfileId?: string;
+  conversationId?: string | null;
   yoloMode?: boolean;
   workspaceTabs?: WorkspaceTab[];
   activeWorkspaceTabId?: string | null;
@@ -241,6 +244,9 @@ export type RightSidebarRendererProps = {
   onWorkspaceTabSelect?: (tabId: string) => void;
   onWorkspaceTabClose?: (tabId: string) => void;
   onWorkspaceTabCreate?: (kind: WorkspaceTabKind) => void;
+  onLoadPromptActive?: (params: { profile_id?: string; conversation_id?: string; include_text?: boolean }) => Promise<PromptUsageSummary>;
+  onTogglePromptEdge?: (payload: { profile_id?: string; conversation_id?: string; edge_id: string; enabled: boolean }) => Promise<PromptUsageSummary>;
+  onOpenPromptStudio?: (promptId?: string) => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;

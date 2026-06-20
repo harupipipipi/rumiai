@@ -105,19 +105,20 @@ def toggle_prompt_edge(input_data: dict[str, Any] | None = None, *, preview: boo
             profile_id,
             _profile_with_edge_state(raw_profile, edge_id=edge_id, enabled=enabled),
         )
+    prompt_summary = prompt_usage_from_graph_response(
+        response,
+        conversation_id=str(data.get("conversation_id") or ""),
+        run_id=str(data.get("run_id") or "toggle"),
+        trace_id="preview_toggle" if preview else "active",
+        include_text=bool(data.get("include_text", False)),
+    )
     return {
         "profile_id": profile_id,
         "edge_id": edge_id,
         "enabled": enabled,
         "preview": preview,
-        "ai_input": response.get("ai_input", {}),
-        "summary": prompt_usage_from_graph_response(
-            response,
-            conversation_id=str(data.get("conversation_id") or ""),
-            run_id=str(data.get("run_id") or "toggle"),
-            trace_id="preview_toggle" if preview else "active",
-            include_text=bool(data.get("include_text", False)),
-        ),
+        "ai_input": _compact_toggle_ai_input(response.get("ai_input", {})),
+        "summary": compact_prompt_usage_for_metadata(prompt_summary),
     }
 
 
@@ -167,21 +168,12 @@ def prompt_usage_from_graph_response(
 
 
 def compact_prompt_usage_for_metadata(usage: dict[str, Any]) -> dict[str, Any]:
-    segments = []
-    for segment in usage.get("segments", []) if isinstance(usage.get("segments"), list) else []:
-        if not isinstance(segment, dict):
-            continue
-        text = str(segment.get("text") or "")
-        compact = {
-            key: copy.deepcopy(value)
-            for key, value in segment.items()
-            if key not in {"text", "schema"}
-        }
-        if text and not str(compact.get("preview") or "").strip():
-            compact["preview"] = " ".join(text.split())[:280]
-        if text:
-            compact["has_full_text"] = True
-        segments.append(compact)
+    raw_segments = usage.get("segments") if isinstance(usage.get("segments"), list) else []
+    segments = [
+        _compact_prompt_usage_segment(segment)
+        for segment in raw_segments
+        if isinstance(segment, dict)
+    ]
     return {
         "trace_id": usage.get("trace_id"),
         "profile_id": usage.get("profile_id"),
@@ -189,11 +181,221 @@ def compact_prompt_usage_for_metadata(usage: dict[str, Any]) -> dict[str, Any]:
         "run_id": usage.get("run_id"),
         "active_count": usage.get("active_count", 0),
         "disabled_count": usage.get("disabled_count", 0),
-        "token_estimate": copy.deepcopy(usage.get("token_estimate", {})),
+        "token_estimate": _compact_token_estimate(usage.get("token_estimate", {})),
         "segments": segments,
-        "active_segments": [item for item in segments if item.get("status") == "active"],
-        "disabled_segments": [item for item in segments if item.get("status") != "active"],
     }
+
+
+def compact_active_prompt_summary_response(payload: dict[str, Any]) -> dict[str, Any]:
+    usage = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    compact_usage = compact_prompt_usage_for_metadata(usage)
+    return {
+        "profile_id": payload.get("profile_id") or compact_usage.get("profile_id"),
+        "conversation_id": payload.get("conversation_id") or compact_usage.get("conversation_id", ""),
+        "summary": compact_usage,
+        "token_estimate": compact_usage.get("token_estimate", {}),
+        "gate_decisions": _compact_list(payload.get("gate_decisions"), limit=20),
+        "diagnostics": _compact_list(payload.get("diagnostics"), limit=20),
+    }
+
+
+def _compact_token_estimate(value: Any) -> dict[str, Any]:
+    estimate = value if isinstance(value, dict) else {}
+    compact: dict[str, Any] = {}
+    total = estimate.get("total")
+    if isinstance(total, (int, float)):
+        compact["total"] = int(total)
+    by_port = estimate.get("by_port")
+    if isinstance(by_port, dict):
+        compact["by_port"] = {
+            str(key): int(amount)
+            for key, amount in by_port.items()
+            if isinstance(amount, (int, float))
+        }
+    return compact
+
+
+def _compact_toggle_ai_input(value: Any) -> dict[str, Any]:
+    ai_input = value if isinstance(value, dict) else {}
+    return {"disabled_edges": _compact_string_list(ai_input.get("disabled_edges"), limit=500)}
+
+
+def _compact_prompt_usage_segment(segment: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key in (
+        "id",
+        "edge_id",
+        "prompt_id",
+        "label",
+        "kind",
+        "port",
+        "status",
+        "enabled",
+        "source_type",
+        "tokens",
+        "allow_disable",
+        "editable",
+        "readonly_reason",
+        "input_role",
+        "source_priority",
+    ):
+        if key in segment:
+            compact[key] = copy.deepcopy(segment.get(key))
+    source = _compact_source(segment.get("source"))
+    if source:
+        compact["source"] = source
+    for key, limit in (("reason", 320), ("explanation", 320), ("preview", 280)):
+        text = _compact_text(segment.get(key), limit=limit)
+        if text:
+            compact[key] = text
+    text = str(segment.get("text") or "")
+    if text:
+        compact.setdefault("preview", _compact_text(text, limit=280))
+        compact["has_full_text"] = True
+    activation_detail = _compact_activation_detail(segment.get("activation_detail"))
+    if activation_detail:
+        compact["activation_detail"] = activation_detail
+    safety_boundary = _compact_safety_boundary(segment.get("safety_boundary"))
+    if safety_boundary:
+        compact["safety_boundary"] = safety_boundary
+    source_chain = _compact_source_chain(segment.get("source_chain"))
+    if source_chain:
+        compact["source_chain"] = source_chain
+    tool_signal = _compact_tool_signal(segment.get("tool_signal"))
+    if tool_signal:
+        compact["tool_signal"] = tool_signal
+    skill_signal = _compact_skill_signal(segment.get("skill_signal"))
+    if skill_signal:
+        compact["skill_signal"] = skill_signal
+    return compact
+
+
+def _compact_activation_detail(value: Any) -> dict[str, Any]:
+    detail = value if isinstance(value, dict) else {}
+    compact: dict[str, Any] = {}
+    for key in ("state", "port", "edge_id", "edge_kind"):
+        text = _compact_text(detail.get(key), limit=160)
+        if text:
+            compact[key] = text
+    for key in ("effect", "control", "reason", "trigger"):
+        text = _compact_text(detail.get(key), limit=260)
+        if text:
+            compact[key] = text
+    return compact
+
+
+def _compact_safety_boundary(value: Any) -> dict[str, Any]:
+    boundary = value if isinstance(value, dict) else {}
+    compact: dict[str, Any] = {}
+    for key in ("passive_text_only", "can_grant_permissions", "can_call_tools", "can_mutate_chat_state"):
+        if key in boundary:
+            compact[key] = bool(boundary.get(key))
+    summary = _compact_text(boundary.get("summary"), limit=260)
+    if summary:
+        compact["summary"] = summary
+    return compact
+
+
+def _compact_source_chain(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    compact: list[dict[str, Any]] = []
+    for item in value[:6]:
+        if not isinstance(item, dict):
+            continue
+        entry: dict[str, Any] = {}
+        for key in ("source_type", "layer", "selected", "prompt_id", "id", "reason"):
+            if key in item:
+                entry[key] = copy.deepcopy(item.get(key))
+        source = _compact_source(item.get("source") or item.get("path"))
+        if source:
+            entry["source"] = source
+        if entry:
+            compact.append(entry)
+    return compact
+
+
+def _compact_tool_signal(value: Any) -> dict[str, Any]:
+    signal = value if isinstance(value, dict) else {}
+    compact: dict[str, Any] = {}
+    for key in (
+        "tool_id",
+        "tool_name",
+        "display_name",
+        "provider_name",
+        "source_pack_id",
+        "selection_source",
+    ):
+        text = _compact_text(signal.get(key), limit=180)
+        if text:
+            compact[key] = text
+    for key in ("available_to_model", "prompt_can_call_tool"):
+        if key in signal:
+            compact[key] = bool(signal.get(key))
+    execution_boundary = _compact_text(signal.get("execution_boundary"), limit=260)
+    if execution_boundary:
+        compact["execution_boundary"] = execution_boundary
+    skills = _compact_string_list(signal.get("skills"), limit=8)
+    if skills:
+        compact["skills"] = skills
+    triggers = _compact_string_list(signal.get("skill_triggers"), limit=8)
+    if triggers:
+        compact["skill_triggers"] = triggers
+    return compact
+
+
+def _compact_skill_signal(value: Any) -> dict[str, Any]:
+    signal = value if isinstance(value, dict) else {}
+    compact: dict[str, Any] = {}
+    triggered_by = _compact_text(signal.get("triggered_by"), limit=260)
+    if triggered_by:
+        compact["triggered_by"] = triggered_by
+    if "prompt_can_call_tool" in signal:
+        compact["prompt_can_call_tool"] = bool(signal.get("prompt_can_call_tool"))
+    matched = signal.get("matched")
+    if isinstance(matched, list):
+        compact["matched"] = [
+            {
+                key: value
+                for key, value in {
+                    "id": _compact_text(item.get("id"), limit=160) if isinstance(item, dict) else "",
+                    "display_name": _compact_text(item.get("display_name"), limit=160) if isinstance(item, dict) else "",
+                    "triggers": _compact_string_list(item.get("triggers"), limit=8) if isinstance(item, dict) else [],
+                    "applies_to_tools": _compact_string_list(item.get("applies_to_tools"), limit=8) if isinstance(item, dict) else [],
+                }.items()
+                if value
+            }
+            for item in matched[:8]
+            if isinstance(item, dict)
+        ]
+    return compact
+
+
+def _compact_list(value: Any, *, limit: int) -> list[Any]:
+    if not isinstance(value, list):
+        return []
+    return copy.deepcopy(value[:limit])
+
+
+def _compact_string_list(value: Any, *, limit: int) -> list[str]:
+    return [_compact_text(item, limit=160) for item in _list_strings(value)[:limit] if _compact_text(item, limit=160)]
+
+
+def _compact_source(value: Any) -> str:
+    text = _compact_text(value, limit=180)
+    if not text:
+        return ""
+    normalized = text.replace("\\", "/")
+    if "/" in normalized:
+        return normalized.rsplit("/", 1)[-1] or normalized
+    return text
+
+
+def _compact_text(value: Any, *, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)] + "..."
 
 
 def append_runtime_prompt_segment(usage: dict[str, Any] | None, segment: dict[str, Any]) -> dict[str, Any]:

@@ -6,7 +6,6 @@ import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
-import { PromptCommandCenter } from "./components/prompts/PromptCommandCenter";
 import { WarmActionIcon } from "./components/WarmActionIcon";
 import {
   DEFAULT_WORKSPACE_TAB_ID,
@@ -22,7 +21,7 @@ import { PromptStudio } from "./pages/PromptStudio";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { authorityApprovalTitle, pendingAuthorityApproval } from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
@@ -2311,7 +2310,7 @@ function ChatApp() {
     }));
   }, [activeChatTitle, activeConversationId, activeWorkspaceTabId]);
   const activePromptUsage = latestActiveMetadata.prompt_usage && typeof latestActiveMetadata.prompt_usage === "object" && !Array.isArray(latestActiveMetadata.prompt_usage)
-    ? latestActiveMetadata.prompt_usage as { profile_id?: unknown }
+    ? latestActiveMetadata.prompt_usage as PromptUsageSummary
     : null;
   const activePromptProfileId = String(activeConversation?.metadata?.profile_id ?? activePromptUsage?.profile_id ?? "").trim() || undefined;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
@@ -5528,13 +5527,6 @@ function ChatApp() {
                     </div>
                   </div>
                 )}
-                <PromptCommandCenter
-                  profileId={activePromptProfileId}
-                  conversationId={activeConversationId}
-                  loadPromptActive={promptResources.getActiveSummary}
-                  togglePromptEdge={promptResources.toggleEdge}
-                  onOpenStudio={openPromptStudio}
-                />
                 {renderComposer(false)}
               </div>
             )}
@@ -5580,6 +5572,12 @@ function ChatApp() {
             selectedProfile={activeProfile}
             toolFilterEntries={toolFilterEntries}
             runtimeCapabilitySnapshot={runtimeCapabilitySnapshot}
+            promptUsage={activePromptUsage}
+            promptProfileId={activePromptProfileId}
+            conversationId={activeConversationId}
+            onLoadPromptActive={promptResources.getActiveSummary}
+            onTogglePromptEdge={promptResources.toggleEdge}
+            onOpenPromptStudio={openPromptStudio}
             yoloMode={yoloMode}
             workspaceTabs={workspaceTabs}
             activeWorkspaceTabId={activeWorkspaceTabId}

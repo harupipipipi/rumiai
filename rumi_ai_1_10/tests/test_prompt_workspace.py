@@ -19,10 +19,12 @@ from domain.prompt.editor import load_prompt_studio, rollback_prompt, save_promp
 from domain.prompt.usage import (  # noqa: E402
     active_prompt_summary,
     append_runtime_prompt_segment,
+    compact_active_prompt_summary_response,
     compact_prompt_usage_for_metadata,
     prompt_usage_from_trace,
     toggle_prompt_edge,
 )
+from blocks.prompt.active import run as run_prompt_active_block  # noqa: E402
 from blocks.prompt.test import run as run_prompt_studio_test_block  # noqa: E402
 from transport.registry import _FALLBACK_HTTP_ROUTE_SPECS, prompt_http_route_specs  # noqa: E402
 
@@ -473,6 +475,69 @@ def test_prompt_studio_load_payload_stays_compact_with_large_tool_catalog(monkey
     assert all("body" not in prompt and "content" not in prompt for prompt in studio["prompts"])
     assert all(segment.get("source_type") != "tool_schema" for segment in studio["active_summary"]["segments"])
     assert "by_node" not in studio["active_summary"]["token_estimate"]
+
+
+def test_prompt_active_block_payload_stays_compact_with_large_tool_catalog(monkeypatch) -> None:
+    huge_segment = {
+        "id": "tool_schema:huge",
+        "edge_id": "edge:tool_schema:huge->model_input:default.tools",
+        "prompt_id": "huge",
+        "label": "Huge Tool",
+        "kind": "tool-schema",
+        "port": "tools",
+        "status": "active",
+        "source": "/tmp/defaultspack/tools/huge/manifest.json",
+        "source_type": "tool_schema",
+        "source_chain": [{"source_type": "tool_schema", "path": "/tmp/defaultspack/tools/huge/manifest.json", "selected": True}],
+        "tokens": 4990,
+        "reason": "Tool schema exposed Huge Tool to the model.",
+        "allow_disable": True,
+        "editable": False,
+        "preview": "Huge tool schema preview",
+        "metadata": {"schema": "x" * 200_000, "source_chain": [{"path": "/tmp/defaultspack/tools/huge/manifest.json"}]},
+        "edge": {"metadata": {"full": "y" * 120_000}},
+        "schema": {"description": "z" * 120_000},
+    }
+    huge_payload = {
+        "profile_id": "prompt-profile",
+        "conversation_id": "chat-1",
+        "summary": {
+            "trace_id": "active",
+            "profile_id": "prompt-profile",
+            "conversation_id": "chat-1",
+            "run_id": "active",
+            "active_count": 1,
+            "disabled_count": 0,
+            "token_estimate": {
+                "total": 4990,
+                "by_port": {"tools": 4990},
+                "by_node": {"tool_schema:huge": 4990},
+            },
+            "segments": [huge_segment],
+            "active_segments": [huge_segment],
+            "disabled_segments": [],
+        },
+        "segments": [huge_segment],
+        "active_segments": [huge_segment],
+        "disabled_segments": [],
+        "token_estimate": {"total": 4990, "by_port": {"tools": 4990}, "by_node": {"tool_schema:huge": 4990}},
+        "graph": {"nodes": [{"metadata": "n" * 120_000}], "edges": []},
+        "ai_input": {"tool_schemas": [{"schema": "s" * 120_000}]},
+    }
+    monkeypatch.setattr("blocks.prompt.active.active_prompt_summary", lambda _input: huge_payload)
+
+    response = run_prompt_active_block({"profile_id": "prompt-profile"}, {})
+    encoded = json.dumps(response, ensure_ascii=False).encode("utf-8")
+    data = response["data"]
+
+    assert response["status"] == "ok"
+    assert len(encoded) < 20_000
+    assert "graph" not in data
+    assert "ai_input" not in data
+    assert "by_node" not in data["summary"]["token_estimate"]
+    assert "metadata" not in data["summary"]["segments"][0]
+    assert "schema" not in data["summary"]["segments"][0]
+    assert data["summary"]["segments"][0]["source"] == "manifest.json"
 
 
 def test_prompt_studio_testbench_matches_skill_and_tool_schema(monkeypatch, tmp_path: Path) -> None:
