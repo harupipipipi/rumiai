@@ -150,6 +150,7 @@ export const ambientTriggerClient = {
   startMonitor(options?: { voice_wake?: boolean; gesture_pinch?: boolean }) {
     return requestJson<AmbientStatus>("/api/ambient/monitor/start", {
       method: "POST",
+      headers: browserApprovalHeaders(),
       body: JSON.stringify(options ?? {}),
     });
   },
@@ -157,6 +158,7 @@ export const ambientTriggerClient = {
   stopMonitor() {
     return requestJson<AmbientStatus>("/api/ambient/monitor/stop", {
       method: "POST",
+      headers: browserApprovalHeaders(),
       body: JSON.stringify({}),
     });
   },

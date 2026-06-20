@@ -334,6 +334,7 @@ def test_ambient_monitor_start_requires_local_auth_and_marks_local_ui_context(mo
         DefaultsHttpServer,
         _LOCAL_UI_APPROVAL_CONTEXT_FLAG,
         _RequestHandler,
+        _browser_qa_token_authorized,
         _local_ui_approval_route_authorized,
     )
 
@@ -341,6 +342,7 @@ def test_ambient_monitor_start_requires_local_auth_and_marks_local_ui_context(mo
     request_handler.client_address = ("127.0.0.1", 54321)
     request_handler.server_ref = SimpleNamespace(_routes=[])
     monkeypatch.setenv("RUMI_API_TOKEN", "local-secret")
+    monkeypatch.setenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "browser-secret")
 
     request_handler.headers = {
         "Origin": "http://localhost:8766",
@@ -351,6 +353,18 @@ def test_ambient_monitor_start_requires_local_auth_and_marks_local_ui_context(mo
         "local auth token required",
         "AUTH_REQUIRED",
     )
+
+    request_handler.headers = {
+        "Origin": "http://localhost:8766",
+        "X-Rumi-CSRF": "1",
+        "X-Rumi-Approval-Browser-Token": "browser-secret",
+    }
+    assert _browser_qa_token_authorized(
+        "POST",
+        "/api/ambient/monitor/start",
+        request_handler.headers,
+    ) is True
+    assert request_handler._sensitive_request_error("POST", "/api/ambient/monitor/start") is None
 
     request_handler.headers = {
         "Origin": "http://localhost:8766",

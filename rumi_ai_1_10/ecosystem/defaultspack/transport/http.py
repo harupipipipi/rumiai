@@ -1193,6 +1193,7 @@ class DefaultsHttpServer:
             ".gif": "image/gif",
             ".svg": "image/svg+xml",
             ".ico": "image/x-icon",
+            ".wasm": "application/wasm",
         }
         ct = content_types.get(ext, "application/octet-stream")
         if ct.startswith("text/") or ct.startswith("application/j"):

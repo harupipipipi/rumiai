@@ -210,6 +210,21 @@ def test_mediapipe_wasm_mirror_matches_webapp_public_canonical():
         assert (mirror_dir / name).read_bytes() == (canonical_dir / name).read_bytes(), name
 
 
+def test_static_mediapipe_wasm_uses_browser_wasm_mime():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+
+    result = server._handle_static_file(
+        {},
+        {"path": "mediapipe/wasm/vision_wasm_internal.wasm"},
+    )
+
+    assert result["_static"] is True
+    assert result["content_type"] == "application/wasm"
+    assert isinstance(result["body"], bytes)
+
+
 def test_pack_api_dispatches_defaultspack_interface_routes(monkeypatch):
     from core_runtime.pack_api_server import PackAPIHandler
 

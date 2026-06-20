@@ -152,7 +152,15 @@ test("ambient event submit forwards browser QA token header", () => {
   assert.match(clientSource, /readBrowserApprovalToken/);
   assert.match(clientSource, /function browserApprovalHeaders\(\)/);
   assert.match(clientSource, /"X-Rumi-Approval-Browser-Token": token/);
+  assert.match(clientSource, /startMonitor\(options\?: \{ voice_wake\?: boolean; gesture_pinch\?: boolean \}\)[\s\S]*headers: browserApprovalHeaders\(\)/);
+  assert.match(clientSource, /stopMonitor\(\)[\s\S]*headers: browserApprovalHeaders\(\)/);
   assert.match(clientSource, /submitEvent\(payload: AmbientEventPayload\)[\s\S]*headers: browserApprovalHeaders\(\)/);
+});
+
+test("ambient action failures expand details so auth errors are visible", () => {
+  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+
+  assert.match(panelSource, /catch \(error\) \{\s*setExpanded\(true\);\s*setMessage\(error instanceof Error \? error\.message : "操作を完了できませんでした。"\)/);
 });
 
 test("real OK-mark recording routes audio through transcription before dispatch", () => {

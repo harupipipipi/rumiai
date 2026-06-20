@@ -870,6 +870,7 @@ export function AmbientTriggerPanel({
       else await refresh();
       if (success) setMessage(success);
     } catch (error) {
+      setExpanded(true);
       setMessage(error instanceof Error ? error.message : "操作を完了できませんでした。");
       await refresh({ probeOs: true }).catch(() => undefined);
     } finally {
