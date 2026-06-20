@@ -2471,7 +2471,7 @@ function ChatApp() {
         {
           id: "ultra-yolo",
           name: "Ultra YOLO",
-          description: "Ultra YOLO が ON です。承認が必要な coding / browser 操作まで自動許可されます。",
+          description: "Ultra YOLO が ON です。高権限の実行方針を要求しますが、承認カードとサーバー側の安全ポリシーは維持されます。",
           svgMarkup: dangerShieldSvg,
           tone: "danger",
           action: {
