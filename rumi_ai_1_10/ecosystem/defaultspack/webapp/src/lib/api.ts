@@ -1752,7 +1752,25 @@ function truncateApiErrorDetail(value: string, limit = 700): string {
   return `${text.slice(0, limit).trim()}...`;
 }
 
-function defaultspackApiStatusHint(status: number): string {
+function defaultspackApiCodeHint(code: string | undefined): string | null {
+  if (code === "AUTHORITY_BROWSER_TEST_DISABLED") {
+    return "ブラウザ承認QAは、このDefaultspack起動では有効化されていません。Rumi Viewerの承認ウィンドウで承認するか、ブラウザQA用tokenを付けて起動してください。";
+  }
+  if (code === "AUTHORITY_BROWSER_TOKEN_REQUIRED") {
+    return "ブラウザで承認するには、承認ページURLまたは設定に browser_approval_token が必要です。";
+  }
+  if (code === "AUTHORITY_BROWSER_TOKEN_INVALID") {
+    return "browser_approval_token がこのDefaultspack起動と一致していません。正しいtokenで開き直してください。";
+  }
+  if (code === "AUTHORITY_UI_OPERATOR_UNAVAILABLE") {
+    return "承認操作の署名secretがこのDefaultspack起動にありません。Rumi Viewerから起動し直すか、ブラウザQAでは Viewer と同じ RUMI_PANEL_BOOTSTRAP_SECRET を渡してください。";
+  }
+  return null;
+}
+
+function defaultspackApiStatusHint(status: number, code?: string): string {
+  const codeHint = defaultspackApiCodeHint(code);
+  if (codeHint) return codeHint;
   if (status === 400) return "リクエスト形式、モデル設定、添付ファイル、または選択中の tool が backend と噛み合っていません。";
   if (status === 401) return "認証が必要です。ログイン状態、APIキー、OAuth 接続を確認してください。";
   if (status === 403) return "権限または承認で拒否されました。承認カード、CSRF、APIキーの利用権限、モデルアクセス権を確認してください。";
@@ -1773,7 +1791,7 @@ export function explainDefaultspackApiError(
   const detail = error?.message ? truncateApiErrorDetail(error.message) : "";
   return [
     `${label}${code}`,
-    defaultspackApiStatusHint(status),
+    defaultspackApiStatusHint(status, error?.code),
     detail ? `詳細: ${detail}` : "",
   ].filter(Boolean).join("\n");
 }

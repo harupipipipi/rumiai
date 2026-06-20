@@ -546,6 +546,29 @@ test("defaultspack API errors include status and recovery context", () => {
   assert.match(message, /権限|承認/);
 });
 
+test("browser authority QA disabled errors explain the launch requirement", () => {
+  const message = explainDefaultspackApiError(404, {
+    code: "AUTHORITY_BROWSER_TEST_DISABLED",
+    message: "browser approval test endpoint is disabled",
+  }, "Not Found");
+
+  assert.match(message, /AUTHORITY_BROWSER_TEST_DISABLED/);
+  assert.match(message, /ブラウザ承認QA/);
+  assert.match(message, /Rumi Viewer/);
+  assert.doesNotMatch(message, /対象の会話、モデル、ファイル/);
+});
+
+test("authority ui operator unavailable errors explain the viewer signing secret requirement", () => {
+  const message = explainDefaultspackApiError(503, {
+    code: "AUTHORITY_UI_OPERATOR_UNAVAILABLE",
+    message: "authority ui_operator signing secret is unavailable",
+  }, "Service Unavailable");
+
+  assert.match(message, /AUTHORITY_UI_OPERATOR_UNAVAILABLE/);
+  assert.match(message, /署名secret/);
+  assert.match(message, /RUMI_PANEL_BOOTSTRAP_SECRET/);
+});
+
 test("selected tools are cleared after send unless settings opt in", () => {
   assert.equal(keepSelectedToolsAfterSend({}), false);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: "false" } }), false);

@@ -129,6 +129,23 @@ function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function authorityApprovalErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (message.includes("AUTHORITY_BROWSER_TEST_DISABLED")) {
+    return "このDefaultspackはブラウザ承認QAが無効な状態で起動しています。Rumi Viewerの別ウィンドウで承認するか、ブラウザQA用tokenを付けてViewer/Defaultspackを起動し直してください。";
+  }
+  if (message.includes("AUTHORITY_BROWSER_TOKEN_REQUIRED")) {
+    return "ブラウザで承認するには browser_approval_token が必要です。指で録音ウィンドウの承認設定にtokenを保存してから開き直してください。";
+  }
+  if (message.includes("AUTHORITY_BROWSER_TOKEN_INVALID")) {
+    return "browser_approval_token がこの起動と一致していません。正しいtokenで承認ページを開き直してください。";
+  }
+  if (message.includes("AUTHORITY_UI_OPERATOR_UNAVAILABLE")) {
+    return "承認操作に必要なRumi Viewerの署名secretがありません。Rumi Viewerから起動した承認ウィンドウで承認するか、ブラウザQA用に同じ署名secretを渡して起動し直してください。";
+  }
+  return message || "authority 承認に失敗しました。";
+}
+
 function windowTitle(request: AuthorityRequest | null): string {
   if (!request) return "Rumiの許可";
   return request.display_metadata?.title || authorityApprovalTitle(requestToApproval(request));
@@ -500,7 +517,7 @@ export function AuthorityApprovalWindow() {
         }
       }
     } catch (approvalError) {
-      setError(approvalError instanceof Error ? approvalError.message : "authority 承認に失敗しました。");
+      setError(authorityApprovalErrorMessage(approvalError));
     } finally {
       setAction(null);
     }
@@ -537,7 +554,7 @@ export function AuthorityApprovalWindow() {
         }
       }
     } catch (rejectionError) {
-      setError(rejectionError instanceof Error ? rejectionError.message : "authority 承認の拒否に失敗しました。");
+      setError(authorityApprovalErrorMessage(rejectionError));
     } finally {
       setAction(null);
     }

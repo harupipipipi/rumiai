@@ -134,6 +134,13 @@ cd rumi_viewer
 RUMI_AUTHORITY_BROWSER_TEST_TOKEN=ambient-browser-qa cargo tauri dev
 ```
 
+`pack-shell run defaultspack` を直接起動してブラウザQAする場合は、viewer が生成した署名secretも同じプロセスへ渡してください。tokenだけだと承認ページは開けても、承認操作に必要な `ui_operator` を署名できません。
+
+```bash
+export RUMI_AUTHORITY_BROWSER_TEST_TOKEN=ambient-browser-qa
+export RUMI_PANEL_BOOTSTRAP_SECRET="$(tr -d '\n' < "$HOME/Library/Application Support/dev.rumiai.app/.rumi_panel_bootstrap_secret")"
+```
+
 ブラウザで開く URL には `browser_approval_token` を付けます。
 
 ```text

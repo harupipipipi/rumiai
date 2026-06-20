@@ -491,3 +491,15 @@ test("authority approval browser route is read-only without token but can fetch 
   assert.match(apiSource, /"X-Rumi-Approval-Browser-Token": browserApprovalToken/);
   assert.match(resourceSource, /getBrowserAuthorityApprovalContext\(requestId: string, browserApprovalToken: string\)/);
 });
+
+test("authority approval window explains disabled browser QA approval", () => {
+  const source = authorityApprovalWindowSource();
+
+  assert.match(source, /function authorityApprovalErrorMessage/);
+  assert.match(source, /AUTHORITY_BROWSER_TEST_DISABLED/);
+  assert.match(source, /AUTHORITY_UI_OPERATOR_UNAVAILABLE/);
+  assert.match(source, /このDefaultspackはブラウザ承認QAが無効な状態で起動しています。/);
+  assert.match(source, /承認操作に必要なRumi Viewerの署名secretがありません。/);
+  assert.match(source, /setError\(authorityApprovalErrorMessage\(approvalError\)\)/);
+  assert.match(source, /setError\(authorityApprovalErrorMessage\(rejectionError\)\)/);
+});
