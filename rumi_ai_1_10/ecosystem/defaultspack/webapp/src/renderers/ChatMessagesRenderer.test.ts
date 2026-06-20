@@ -45,7 +45,7 @@ test("pending tool summary shows two names and the remaining count", () => {
   assert.equal(summary.summary, "web_search、browser、その他 1 個が見込まれました");
 });
 
-test("completed tool activity summary uses elapsed work span", () => {
+test("completed tool activity summary leads with grouped work category", () => {
   const summary = summarizeToolActivityGroups([
     {
       id: "files",
@@ -68,7 +68,7 @@ test("completed tool activity summary uses elapsed work span", () => {
     },
   ]);
 
-  assert.equal(summary.label, "3s作業しました");
+  assert.equal(summary.label, "ファイルを実行");
   assert.equal(summary.itemCount, 1);
   assert.equal(summary.runningCount, 0);
   assert.equal(summary.failedCount, 0);
@@ -98,7 +98,7 @@ test("running tool activity summary remains openable as active work", () => {
   ];
 
   assert.equal(hasRunningToolActivityGroups(groups), true);
-  assert.equal(summarizeToolActivityGroups(groups).label, "7s作業中");
+  assert.equal(summarizeToolActivityGroups(groups).label, "ブラウザ 作業中");
 });
 
 test("empty response warning waits until streaming draft is finalized", () => {

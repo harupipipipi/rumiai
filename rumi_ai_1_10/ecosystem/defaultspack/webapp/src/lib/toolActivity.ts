@@ -72,7 +72,25 @@ function terminalActionTitle(command: string): string {
   if (/^(npm|pnpm|yarn)\s+(run\s+)?lint\b/.test(lowered) || /^(ruff|eslint)\b/.test(lowered)) return "lint を実行";
   if (/^gh\s+(repo|pr|issue)\s+view\b/.test(lowered)) return "GitHub 情報を確認";
   if (/^gh\s+pr\s+(create|edit)\b/.test(lowered)) return "PR を更新";
+  if (/^gh\b/.test(lowered)) return "GitHub を操作";
+  if (/^git\b/.test(lowered)) return "Git を操作";
   return "ターミナルで作業";
+}
+
+function folderForTerminalCommand(args: Record<string, unknown>): { id: string; label: string } | null {
+  const command = pickString(args, ["command", "cmd"]).trim().toLowerCase();
+  if (!command) return null;
+  if (/^(git|gh)\b/.test(command)) return { id: "coding/git", label: "Git" };
+  if (/^(rg|grep|fd|find|sed|cat|less|head|tail|nl)\b/.test(command)) return { id: "coding/files", label: "ファイル" };
+  return null;
+}
+
+function activityFolderFor(toolName: string, args: Record<string, unknown>): { id: string; label: string } {
+  const lowerName = toolName.toLowerCase();
+  if (lowerName.includes("terminal") || lowerName.includes("shell") || lowerName.includes("exec")) {
+    return folderForTerminalCommand(args) ?? toolFolderFor(toolName);
+  }
+  return toolFolderFor(toolName);
 }
 
 function humanToolTitle(toolName: string, args: Record<string, unknown>, folderLabel: string, argumentSummary: string): string {
@@ -202,13 +220,54 @@ function isGenericCompletionSummary(summary: string, toolName: string): boolean 
   return Boolean(lowerToolName && normalized.startsWith(lowerToolName) && /\b(completed|complete|done)\b/.test(normalized));
 }
 
+function parseJsonRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text.startsWith("{") || !text.endsWith("}")) return null;
+  try {
+    const parsed = JSON.parse(text);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizedToolResultData(result: Record<string, unknown>): Record<string, unknown> {
+  const rawData = result.data && typeof result.data === "object" ? result.data as Record<string, unknown> : result;
+  const parsedResult = parseJsonRecord(rawData.result);
+  const widget = isRecord(rawData.widget) ? rawData.widget : {};
+  const data = { ...rawData, ...(parsedResult ?? {}), ...widget };
+  if (parsedResult) delete data.result;
+  return data;
+}
+
+function countArray(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function summarizeGitResult(data: Record<string, unknown>): string {
+  const commitHash = pickString(data, ["commit_hash", "commit"]);
+  if (commitHash) return `コミットしました: ${commitHash}`;
+  if (data.pushed === true) {
+    const branch = pickString(data, ["branch"]);
+    return branch ? `pushしました: ${branch}` : "pushしました";
+  }
+  const branch = pickString(data, ["branch"]);
+  if (branch || typeof data.clean === "boolean") {
+    const changedCount = countArray(data.staged) + countArray(data.modified) + countArray(data.untracked);
+    const state = data.clean === true ? "変更なし" : `${changedCount}件の変更`;
+    return branch ? `ブランチ ${branch} · ${state}` : state;
+  }
+  return "";
+}
+
 function summarizeToolResult(toolName: string, result: unknown): string {
   if (!result || typeof result !== "object") {
     const summary = compact(result, 120);
     return isGenericCompletionSummary(summary, toolName) ? "" : summary;
   }
   const record = result as Record<string, unknown>;
-  const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
+  const data = normalizedToolResultData(record);
   const lowerName = toolName.toLowerCase();
   if (lowerName.includes("file")) {
     const widget = isRecord(data.widget) ? data.widget : {};
@@ -221,6 +280,11 @@ function summarizeToolResult(toolName: string, result: unknown): string {
     if (typeof fileData.content === "string" || typeof data.result === "string") {
       return fileData.truncated === true ? `一部を読みました: ${label}` : `読みました: ${label}`;
     }
+  }
+  const command = pickString(data, ["command", "cmd"]).toLowerCase();
+  if (lowerName.includes("git") || /^(git|gh)\b/.test(command)) {
+    const gitSummary = summarizeGitResult(data);
+    if (gitSummary) return gitSummary;
   }
   if (lowerName.includes("terminal") || lowerName.includes("shell") || lowerName.includes("exec")) {
     const exitCode = pickString(data, ["exit_code"]);
@@ -474,7 +538,7 @@ export function buildToolActivityItems(
     .map((log, index): ToolActivityItem => {
       const toolName = String(log.tool_name);
       const args = log.arguments && typeof log.arguments === "object" ? log.arguments as Record<string, unknown> : {};
-      const folder = toolFolderFor(toolName);
+      const folder = activityFolderFor(toolName, args);
       const argumentSummary = summarizeToolArguments(toolName, args);
       const resultSummary = summarizeToolResult(toolName, log.result);
       const explicitSummary = isRecord(log.result) ? explicitToolText(log.result) : "";
@@ -521,7 +585,7 @@ export function buildToolActivityItems(
     .map((event, index): ToolActivityItem => {
       const toolName = String(event.tool_name);
       const args = event.arguments && typeof event.arguments === "object" ? event.arguments as Record<string, unknown> : {};
-      const folder = toolFolderFor(toolName);
+      const folder = activityFolderFor(toolName, args);
       const argumentSummary = summarizeToolArguments(toolName, args);
       const status = statusForEvent(event);
       const defaultDetail = status === "running" ? "使用中" : status === "failed" ? "失敗" : "";

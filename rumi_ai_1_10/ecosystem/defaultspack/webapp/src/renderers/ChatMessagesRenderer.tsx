@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { ArtifactPreviewDialog, type ArtifactPreviewDialogItem } from "../components/ArtifactPreviewDialog";
 import { cn } from "../lib/cn";
 import { elapsedDurationLabel, formatCompactDuration, timestampMs } from "../lib/duration";
-import { buildToolActivityGroups, toolFolderFor, type ToolActivityGroup } from "../lib/toolActivity";
+import { buildToolActivityGroups, toolFolderFor, type ToolActivityGroup, type ToolActivityStatus } from "../lib/toolActivity";
 import type { ChatContentBlock } from "../lib/api";
 import { chatMessageResources, type BrowserScreenshot } from "../features/chat/resources/chatMessageResources";
 import type { ChatMessagesRendererProps } from "./types";
@@ -587,9 +587,14 @@ export function summarizeToolActivityGroups(groups: ToolActivityGroup[]): ToolAc
   const itemCount = items.length;
   const failedCount = items.filter((item) => item.status === "failed").length;
   const runningCount = items.filter((item) => item.status === "running").length;
-  const duration = toolActivityDurationLabel(groups);
-  const label = duration
-    ? `${duration}${runningCount > 0 ? "作業中" : "作業しました"}`
+  const groupSummary = groups
+    .slice(0, 3)
+    .map((group) => group.items.length > 1 ? `${group.label} ${group.items.length}件` : group.label)
+    .join(" / ");
+  const hiddenGroupCount = Math.max(0, groups.length - 3);
+  const visibleSummary = hiddenGroupCount > 0 ? `${groupSummary} / 他${hiddenGroupCount}件` : groupSummary;
+  const label = visibleSummary
+    ? `${visibleSummary}${runningCount > 0 ? " 作業中" : "を実行"}`
     : runningCount > 0
       ? "toolを実行中"
       : `${itemCount}件のtoolを実行しました`;
@@ -599,6 +604,38 @@ export function summarizeToolActivityGroups(groups: ToolActivityGroup[]): ToolAc
     label: failedCount > 0 ? `${label}・${failedCount}件失敗` : label,
     runningCount,
   };
+}
+
+function toolActivityGroupStatus(group: ToolActivityGroup): ToolActivityStatus {
+  if (group.items.some((item) => item.status === "failed")) return "failed";
+  if (group.items.some((item) => item.status === "running")) return "running";
+  return "completed";
+}
+
+function toolActivityActionLabel(title: string, fallback: string): string {
+  const normalized = (title || fallback).split(":")[0]?.trim();
+  return normalized || fallback;
+}
+
+function summarizeToolActivityGroupDetail(group: ToolActivityGroup): string {
+  const counts = new Map<string, number>();
+  for (const item of group.items) {
+    const label = toolActivityActionLabel(item.title, item.toolName);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  const visible = [...counts.entries()].slice(0, 3).map(([label, count]) => (
+    count > 1 ? `${label} ${count}件` : label
+  ));
+  const hiddenCount = Math.max(0, counts.size - visible.length);
+  return hiddenCount > 0 ? `${visible.join("、")}、他${hiddenCount}種類` : visible.join("、");
+}
+
+function toolActivityGroupStatusText(group: ToolActivityGroup): string {
+  const failedCount = group.items.filter((item) => item.status === "failed").length;
+  const runningCount = group.items.filter((item) => item.status === "running").length;
+  if (failedCount > 0) return `${failedCount}件エラー`;
+  if (runningCount > 0) return `${runningCount}件実行中`;
+  return "";
 }
 
 function toolActivityStateForMessage(
@@ -997,7 +1034,7 @@ function ToolActivityToggle({
       type="button"
       aria-expanded={isOpen}
       aria-label={`toolログを${isOpen ? "閉じる" : "開く"}: ${summary.label}`}
-      className="inline-flex min-w-0 max-w-[min(260px,46vw)] shrink items-center gap-1.5 whitespace-nowrap text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-300 focus-visible:text-zinc-200 focus-visible:outline-none"
+      className="inline-flex min-w-0 max-w-[min(520px,62vw)] shrink items-center gap-1.5 whitespace-nowrap text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-300 focus-visible:text-zinc-200 focus-visible:outline-none"
       onClick={onToggle}
     >
       <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", summary.failedCount > 0 ? "bg-red-400" : summary.runningCount > 0 ? "animate-pulse bg-blue-300" : "bg-zinc-600")} />
@@ -1016,6 +1053,131 @@ function toolActivityIcon(groupId: string) {
   if (groupId.includes("file")) return FileText;
   if (groupId.includes("calculation")) return Calculator;
   return Wrench;
+}
+
+function ToolActivityItemRow({
+  groupId,
+  item,
+  onOpenToolPreview,
+  previewableCallIds,
+}: {
+  groupId: string;
+  item: ToolActivityGroup["items"][number];
+  onOpenToolPreview?: (previewId: string) => void;
+  previewableCallIds: Set<string>;
+}) {
+  const artifactPreviewId = item.artifacts?.find((artifact) => artifact.url)?.path;
+  const previewId = item.toolCallId && previewableCallIds.has(item.toolCallId) ? item.toolCallId : artifactPreviewId;
+  const hasPreview = Boolean(previewId);
+  const statusLabel = item.status === "failed" ? "エラー" : "";
+  const statusLine = [statusLabel, item.detail].filter(Boolean).join(" · ");
+  const Icon = toolActivityIcon(groupId);
+  const body = (
+    <>
+      <span className={cn(
+        "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border",
+        item.status === "failed"
+          ? "border-red-400/20 bg-red-400/10 text-red-300"
+          : item.status === "running"
+            ? "border-blue-300/20 bg-blue-300/10 text-blue-200"
+            : "border-zinc-800 bg-zinc-900/80 text-zinc-400",
+      )}>
+        <Icon size={14} />
+      </span>
+      <span className="min-w-0 max-w-full flex-1 overflow-hidden">
+        <span className="flex min-w-0 max-w-full items-baseline gap-2 text-[12px] leading-5 text-zinc-300">
+          <span className="min-w-0 flex-1 truncate">{item.title || item.detail || item.toolName}</span>
+          {item.durationLabel && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{item.durationLabel}</span>}
+        </span>
+        {statusLine && (
+          <span className={cn("block max-w-full truncate text-[11px] leading-5", item.status === "failed" ? "text-red-300" : "text-zinc-500")}>
+            {statusLine}
+          </span>
+        )}
+        {item.nextStep && (
+          <span className="block max-w-full truncate text-[11px] leading-5 text-zinc-600">{item.nextStep}</span>
+        )}
+        {!item.supported && item.rawJson && (
+          <code className="mt-1 block max-h-28 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-zinc-950/70 px-2 py-1.5 font-mono text-[10px] leading-4 text-zinc-500">
+            {item.rawJson}
+          </code>
+        )}
+      </span>
+    </>
+  );
+  return hasPreview ? (
+    <button
+      type="button"
+      className="group/tool -ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-zinc-900/55 focus-visible:bg-zinc-900/55 focus-visible:outline-none"
+      onClick={() => {
+        if (previewId) onOpenToolPreview?.(previewId);
+      }}
+    >
+      {body}
+    </button>
+  ) : (
+    <div className="-ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden px-1 py-1.5">
+      {body}
+    </div>
+  );
+}
+
+function ToolActivityGroupDisclosure({
+  group,
+  onOpenToolPreview,
+  previewableCallIds,
+}: {
+  group: ToolActivityGroup;
+  onOpenToolPreview?: (previewId: string) => void;
+  previewableCallIds: Set<string>;
+}) {
+  const Icon = toolActivityIcon(group.id);
+  const status = toolActivityGroupStatus(group);
+  const duration = toolActivityDurationLabel([group]);
+  const detail = summarizeToolActivityGroupDetail(group);
+  const statusText = toolActivityGroupStatusText(group);
+  const detailLine = [statusText, detail].filter(Boolean).join(" · ");
+  return (
+    <details className="rumi-tool-activity-group overflow-hidden rounded-lg border border-zinc-800/70 bg-zinc-950/35">
+      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 px-2.5 py-2 transition-colors hover:bg-zinc-900/45 focus-visible:bg-zinc-900/55 focus-visible:outline-none">
+        <span className={cn(
+          "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border",
+          status === "failed"
+            ? "border-red-400/20 bg-red-400/10 text-red-300"
+            : status === "running"
+              ? "border-blue-300/20 bg-blue-300/10 text-blue-200"
+              : "border-zinc-800 bg-zinc-900/80 text-zinc-400",
+        )}>
+          <Icon size={15} />
+        </span>
+        <span className="min-w-0 flex-1 overflow-hidden">
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-[13px] font-medium text-zinc-300">{group.label}</span>
+            <span className="shrink-0 rounded-full bg-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-500">{group.items.length}件</span>
+            {duration && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{duration}</span>}
+          </span>
+          {detailLine && (
+            <span className={cn("block truncate text-[11px] leading-5", status === "failed" ? "text-red-300" : "text-zinc-500")}>
+              {detailLine}
+            </span>
+          )}
+        </span>
+        <span className="shrink-0 text-[10px] text-zinc-600">詳細</span>
+        <ChevronRight size={14} className="rumi-tool-caret shrink-0 text-zinc-600" />
+      </summary>
+      <div className="grid min-w-0 gap-1.5 border-t border-zinc-800/65 px-3 py-2 pl-5">
+        {group.items.map((item) => (
+          <ToolActivityItemRow
+            key={item.id}
+            groupId={group.id}
+            item={item}
+            onOpenToolPreview={onOpenToolPreview}
+            previewableCallIds={previewableCallIds}
+          />
+        ))}
+      </div>
+    </details>
+  );
 }
 
 function ToolActivityTray({
@@ -1042,73 +1204,14 @@ function ToolActivityTray({
       .filter(Boolean),
   );
   return (
-    <div className="rumi-tool-activity mb-4 grid w-full gap-3 text-zinc-300">
+    <div className="rumi-tool-activity mb-4 grid w-full gap-2 text-zinc-300">
       {groups.map((group) => (
-        <div key={group.id} className="grid min-w-0 gap-1.5">
-          <div className="flex min-w-0 items-center gap-2 text-[12px] font-medium text-zinc-400">
-            <span className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
-            <span className="min-w-0 truncate">{group.label}</span>
-          </div>
-          <div className="ml-1.5 grid min-w-0 gap-1.5 border-l border-zinc-800/70 pl-4">
-            {group.items.map((item) => {
-              const artifactPreviewId = item.artifacts?.find((artifact) => artifact.url)?.path;
-              const previewId = item.toolCallId && previewableCallIds.has(item.toolCallId) ? item.toolCallId : artifactPreviewId;
-              const hasPreview = Boolean(previewId);
-              const statusLabel = item.status === "failed" ? "エラー" : "";
-              const statusLine = [statusLabel, item.detail].filter(Boolean).join(" · ");
-              const Icon = toolActivityIcon(group.id);
-              const body = (
-                <>
-                  <span className={cn(
-                    "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border",
-                    item.status === "failed"
-                      ? "border-red-400/20 bg-red-400/10 text-red-300"
-                      : item.status === "running"
-                        ? "border-blue-300/20 bg-blue-300/10 text-blue-200"
-                        : "border-zinc-800 bg-zinc-900/80 text-zinc-400",
-                  )}>
-                    <Icon size={14} />
-                  </span>
-                  <span className="min-w-0 max-w-full flex-1 overflow-hidden">
-                    <span className="flex min-w-0 max-w-full items-baseline gap-2 text-[13px] leading-5 text-zinc-300">
-                      <span className="min-w-0 flex-1 truncate">{item.title || item.detail || item.toolName}</span>
-                      {item.durationLabel && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{item.durationLabel}</span>}
-                    </span>
-                    {statusLine && (
-                      <span className={cn("block max-w-full truncate text-[11px] leading-5", item.status === "failed" ? "text-red-300" : "text-zinc-500")}>
-                        {statusLine}
-                      </span>
-                    )}
-                    {item.nextStep && (
-                      <span className="block max-w-full truncate text-[11px] leading-5 text-zinc-600">{item.nextStep}</span>
-                    )}
-                    {!item.supported && item.rawJson && (
-                      <code className="mt-1 block max-h-28 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-zinc-950/70 px-2 py-1.5 font-mono text-[10px] leading-4 text-zinc-500">
-                        {item.rawJson}
-                      </code>
-                    )}
-                  </span>
-                </>
-              );
-              return hasPreview ? (
-                <button
-                  key={item.id}
-                  type="button"
-                  className="group/tool -ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-zinc-900/55 focus-visible:bg-zinc-900/55 focus-visible:outline-none"
-                  onClick={() => {
-                    if (previewId) onOpenToolPreview?.(previewId);
-                  }}
-                >
-                  {body}
-                </button>
-              ) : (
-                <div key={item.id} className="-ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden px-1 py-1.5">
-                  {body}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <ToolActivityGroupDisclosure
+          key={group.id}
+          group={group}
+          onOpenToolPreview={onOpenToolPreview}
+          previewableCallIds={previewableCallIds}
+        />
       ))}
     </div>
   );
@@ -1187,13 +1290,13 @@ export function ChatMessagesRenderer({
                 ? toolActivityStateForMessage(message, activityNow)
                 : null;
               const isToolActivityOpen = toolActivity
-                ? openToolActivityByMessageId[message.id] ?? toolActivity.hasRunningItems
+                ? openToolActivityByMessageId[message.id] ?? false
                 : false;
               const isAuthorityPending = isAuthorityWaitingMessage(message);
               const toggleToolActivity = () => {
                 if (!toolActivity) return;
                 setOpenToolActivityByMessageId((current) => {
-                  const currentOpen = current[message.id] ?? toolActivity.hasRunningItems;
+                  const currentOpen = current[message.id] ?? false;
                   return { ...current, [message.id]: !currentOpen };
                 });
               };

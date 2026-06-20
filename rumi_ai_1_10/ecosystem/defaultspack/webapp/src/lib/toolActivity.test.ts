@@ -73,9 +73,84 @@ test("summarizes terminal commands as user-facing activity", () => {
   ]);
 
   const item = groups[0].items[0];
+  assert.equal(groups[0].id, "coding/git");
   assert.equal(item.title, "GitHub 情報を確認");
   assert.equal(item.detail, "終了コード 0");
   assert.equal(item.input, "gh repo view --json defaultBranchRef");
+});
+
+test("groups file-oriented terminal commands with file activity", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "coding_terminal_exec",
+      arguments: { command: "sed -n '1,80p' src/App.tsx" },
+      result: { status: "ok", data: { exit_code: 0, stdout: "import React from 'react';" } },
+    },
+  ]);
+
+  assert.equal(groups[0].id, "coding/files");
+  assert.equal(groups[0].label, "ファイル");
+  assert.equal(groups[0].items[0].title, "ファイルを確認");
+});
+
+test("keeps generic GitHub terminal commands inside Git activity", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "coding_terminal_exec",
+      arguments: { command: "gh pr list --state open" },
+      result: { status: "ok", data: { exit_code: 0, stdout: "" } },
+    },
+  ]);
+
+  assert.equal(groups[0].id, "coding/git");
+  assert.equal(groups[0].items[0].title, "GitHub を操作");
+});
+
+test("summarizes nested JSON string results instead of surfacing raw payloads", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "coding_git_status",
+      arguments: {},
+      result: {
+        status: "ok",
+        data: {
+          result: JSON.stringify({
+            branch: "main",
+            clean: false,
+            staged: [],
+            modified: ["src/App.tsx"],
+            untracked: ["notes.md"],
+          }),
+          widget: {
+            branch: "main",
+            clean: false,
+            staged: [],
+            modified: ["src/App.tsx"],
+            untracked: ["notes.md"],
+          },
+        },
+      },
+    },
+    {
+      tool_name: "coding_terminal_exec",
+      arguments: { command: "git branch -a" },
+      result: {
+        status: "ok",
+        data: {
+          result: JSON.stringify({
+            command: "git branch -a",
+            exit_code: 0,
+            stdout: "* main\n  remotes/origin/main\n",
+          }),
+        },
+      },
+    },
+  ]);
+
+  assert.equal(groups[0].items[0].detail, "ブランチ main · 2件の変更");
+  assert.equal(groups[0].items[1].detail, "終了コード 0");
+  assert.doesNotMatch(groups[0].items[0].detail, /[{"]/);
+  assert.doesNotMatch(groups[0].items[1].detail, /command|stdout/);
 });
 
 test("surfaces file edits without exposing the whole diff as the main activity", () => {

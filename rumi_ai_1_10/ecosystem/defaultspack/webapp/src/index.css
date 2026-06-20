@@ -528,6 +528,10 @@ body {
   transform: rotate(180deg);
 }
 
+.rumi-tool-activity-group[open] > summary .rumi-tool-caret {
+  transform: rotate(90deg);
+}
+
 .rumi-tool-card {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.025),
