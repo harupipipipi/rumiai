@@ -160,6 +160,7 @@ impl KernelManager {
             .args(["-m", "app"])
             .current_dir(&self.config.rumi_home)
             .env("RUMI_HOME", &self.config.rumi_home)
+            .env("RUMI_APP_DIR", &self.config.app_dir)
             .env("RUMI_USER_DATA", &self.config.user_data_dir)
             .env("RUMI_LOG_DIR", &self.config.log_dir)
             .env("RUMI_PORT", self.config.kernel_port.to_string())

@@ -271,6 +271,8 @@ export function AmbientTriggerPanel({
   const visibleMessage = useMemo(() => ambientRenderableMessage(message), [message]);
   const ambientDispatchGranted = Boolean(status?.permissions.rumi["ambient.trigger.dispatch"]?.granted);
   const micRumiPermissionGranted = Boolean(status?.permissions.rumi[AMBIENT_MIC_PERMISSION]?.granted);
+  const localTranscription = status?.local_transcription ?? null;
+  const localTranscriptionConfigured = Boolean(localTranscription?.configured);
   const selectedDispatchToolIds = selectedToolIds ?? EMPTY_SELECTED_TOOL_IDS;
   const selectedDispatchToolIdsKey = selectedDispatchToolIds.join("\0");
   const explicitDebugConversationId = debugMode ? cleanString(conversationId) : null;
@@ -1573,6 +1575,11 @@ export function AmbientTriggerPanel({
           <span className="text-[11px] font-semibold text-zinc-300">マイク確認</span>
           {micTestBusy || transcriptionTestBusy ? <Loader2 size={13} className="animate-spin text-sky-200" /> : null}
         </div>
+        <p className={cn("rounded-md border px-2 py-1 text-[11px] leading-5", localTranscriptionConfigured ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100" : "border-amber-400/25 bg-amber-400/10 text-amber-100")}>
+          文字起こし: {localTranscriptionConfigured
+            ? `ローカルWhisper OK${localTranscription?.command_label ? ` (${localTranscription.command_label})` : ""}`
+            : localTranscription?.reason || "ローカルWhisperを確認中です。"}
+        </p>
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
@@ -2192,7 +2199,7 @@ function ambientResultMessage(result: Record<string, unknown>, fallback: string)
       ? result.transcription as Record<string, unknown>
       : {};
     const detail = String(transcription.reason || transcription.code || "").trim();
-    return `${ambientOperationLabels.failed}: 録音を文字起こしできないため送信しませんでした。文字起こし対応モデルを設定してから再録音してください。${detail ? ` (${detail})` : ""}`;
+    return `${ambientOperationLabels.failed}: 録音を文字起こしできないため送信しませんでした。設定の「マイク確認」から文字起こしテストを実行してください。${detail ? ` (${detail})` : ""}`;
   }
   if (status === "ok" || reason === "trigger_dispatched") {
     return `${ambientOperationLabels.waitingResponse}: ${fallback} 返答を待っています。`;

@@ -4,10 +4,12 @@ import base64
 import binascii
 import importlib.util
 import os
+import platform
 import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -222,10 +224,24 @@ def _configured_command(env: os._Environ[str]) -> dict[str, str] | None:
                 "command": value,
                 "label": Path(value).name or value,
             }
+    for path in _bundled_command_candidates(env):
+        if _is_executable_file(path):
+            return {
+                "kind": _command_kind(path.name),
+                "command": str(path),
+                "label": path.name,
+            }
     for name in COMMON_COMMANDS:
         path = shutil.which(name)
         if path:
             return {"kind": _command_kind(name), "command": path, "label": name}
+    for path in _well_known_command_candidates():
+        if _is_executable_file(path):
+            return {
+                "kind": _command_kind(path.name),
+                "command": str(path),
+                "label": path.name,
+            }
     return None
 
 
@@ -234,6 +250,9 @@ def _configured_model(env: os._Environ[str]) -> str:
         value = str(env.get(key) or "").strip()
         if value:
             return value
+    for candidate in _bundled_model_candidates(env):
+        if candidate.exists():
+            return str(candidate)
     for candidate in _default_model_candidates(env):
         if candidate.exists():
             return str(candidate)
@@ -245,7 +264,113 @@ def _configured_ffmpeg(env: os._Environ[str]) -> str:
         value = str(env.get(key) or "").strip()
         if value:
             return value
+    for path in _bundled_ffmpeg_candidates(env):
+        if _is_executable_file(path):
+            return str(path)
     return shutil.which("ffmpeg") or ""
+
+
+def _bundled_command_candidates(env: os._Environ[str]) -> list[Path]:
+    names = _platform_binary_names(("whisper-cli", "main", "whisper.cpp", "whisper-cpp"))
+    return _candidate_files(_bundled_binary_dirs(env, "whisper"), names)
+
+
+def _bundled_ffmpeg_candidates(env: os._Environ[str]) -> list[Path]:
+    return _candidate_files(_bundled_binary_dirs(env, "ffmpeg"), _platform_binary_names(("ffmpeg",)))
+
+
+def _bundled_model_candidates(env: os._Environ[str]) -> list[Path]:
+    candidates: list[Path] = []
+    for app_dir in _runtime_app_dirs(env):
+        candidates.extend(
+            [
+                app_dir / "bundled" / "whisper" / "models" / DEFAULT_MODEL_FILENAME,
+                app_dir / "bundled" / "models" / "whisper" / DEFAULT_MODEL_FILENAME,
+                app_dir / "models" / "whisper" / DEFAULT_MODEL_FILENAME,
+            ]
+        )
+    return _dedupe_paths(candidates)
+
+
+def _bundled_binary_dirs(env: os._Environ[str], tool: str) -> list[Path]:
+    slug = _platform_slug()
+    dirs: list[Path] = []
+    for app_dir in _runtime_app_dirs(env):
+        dirs.extend(
+            [
+                app_dir / "bundled" / tool / slug / "bin",
+                app_dir / "bundled" / tool / slug,
+                app_dir / "bundled" / tool / "bin",
+                app_dir / "bundled" / tool,
+                app_dir / "bundled" / "bin",
+                app_dir / "bundled",
+            ]
+        )
+    return _dedupe_paths(dirs)
+
+
+def _runtime_app_dirs(env: os._Environ[str]) -> list[Path]:
+    candidates: list[Path] = []
+    for key in ("RUMI_APP_DIR", "RUMI_HOME"):
+        value = str(env.get(key) or "").strip()
+        if value:
+            candidates.append(Path(value).expanduser())
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "app.py").exists():
+            candidates.append(parent)
+            break
+    return _dedupe_paths(candidates)
+
+
+def _candidate_files(dirs: list[Path], names: list[str]) -> list[Path]:
+    return _dedupe_paths([directory / name for directory in dirs for name in names])
+
+
+def _is_executable_file(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    if sys.platform.startswith("win"):
+        return True
+    return os.access(path, os.X_OK)
+
+
+def _platform_binary_names(base_names: Sequence[str]) -> list[str]:
+    names: list[str] = []
+    for name in base_names:
+        names.append(f"{name}.exe" if sys.platform.startswith("win") else name)
+    return _dedupe_strings(names)
+
+
+def _platform_slug() -> str:
+    system = platform.system().lower() or sys.platform.lower()
+    machine = platform.machine().lower()
+    if machine in {"arm64", "aarch64"}:
+        arch = "aarch64"
+    elif machine in {"x86_64", "amd64"}:
+        arch = "x86_64"
+    else:
+        arch = machine or "unknown"
+    if system == "darwin":
+        os_name = "macos"
+    elif system.startswith("win"):
+        os_name = "windows"
+    elif system == "linux":
+        os_name = "linux"
+    else:
+        os_name = system or "unknown"
+    return f"{os_name}-{arch}"
+
+
+def _well_known_command_candidates() -> list[Path]:
+    names = _platform_binary_names(COMMON_COMMANDS)
+    roots = [
+        Path("/opt/homebrew/bin"),
+        Path("/usr/local/bin"),
+        Path("/usr/bin"),
+        Path.home() / ".local" / "bin",
+    ]
+    return _candidate_files(roots, names)
 
 
 def _default_model_candidates(env: os._Environ[str]) -> list[Path]:
@@ -785,6 +910,18 @@ def _dedupe_paths(values: list[Path]) -> list[Path]:
             continue
         seen.add(resolved)
         result.append(Path(resolved))
+    return result
+
+
+def _dedupe_strings(values: Sequence[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "")
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
     return result
 
 

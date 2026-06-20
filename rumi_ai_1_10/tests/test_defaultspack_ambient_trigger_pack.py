@@ -618,6 +618,36 @@ def test_ambient_transcription_test_runs_without_monitor_and_does_not_dispatch(m
     assert "data:audio" not in audit_text
 
 
+def test_local_whisper_status_detects_bundled_whisper_cpp(monkeypatch, tmp_path):
+    from domain.ambient.local_transcription import local_whisper_status
+
+    app_dir = tmp_path / "app"
+    bin_dir = app_dir / "bundled" / "whisper" / "bin"
+    model_dir = app_dir / "bundled" / "whisper" / "models"
+    bin_dir.mkdir(parents=True)
+    model_dir.mkdir(parents=True)
+    whisper_cli = bin_dir / "whisper-cli"
+    whisper_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    whisper_cli.chmod(0o755)
+    (model_dir / "ggml-tiny.bin").write_bytes(b"tiny")
+
+    monkeypatch.setenv("RUMI_APP_DIR", str(app_dir))
+    monkeypatch.delenv("RUMI_LOCAL_WHISPER_COMMAND", raising=False)
+    monkeypatch.delenv("RUMI_WHISPER_CPP_BIN", raising=False)
+    monkeypatch.delenv("WHISPER_CPP_BIN", raising=False)
+    monkeypatch.delenv("RUMI_LOCAL_WHISPER_MODEL", raising=False)
+    monkeypatch.delenv("WHISPER_CPP_MODEL", raising=False)
+    monkeypatch.delenv("RUMI_WHISPER_MODEL_PATH", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+
+    status = local_whisper_status()
+
+    assert status["configured"] is True
+    assert status["status"] == "local_whisper_configured"
+    assert status["command"] == str(whisper_cli)
+    assert status["model"] == str(model_dir / "ggml-tiny.bin")
+
+
 def test_text_model_audio_uses_local_whisper_fallback(monkeypatch, tmp_path):
     _clear_local_whisper_env(monkeypatch)
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))

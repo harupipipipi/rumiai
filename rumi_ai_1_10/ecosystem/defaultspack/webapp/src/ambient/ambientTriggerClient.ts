@@ -47,6 +47,16 @@ export type AmbientStatus = {
   input_aliases?: Record<string, string>;
   routing?: AmbientRoutingConfig;
   pending_approval?: AmbientPendingApproval | null;
+  local_transcription?: {
+    status?: string;
+    configured?: boolean;
+    command?: string;
+    command_label?: string;
+    model?: string;
+    ffmpeg?: string;
+    can_convert_audio?: boolean;
+    reason?: string;
+  };
 };
 
 export type AmbientRoutingMode = "selected_chat" | "startup_new_chat" | "always_new_chat";

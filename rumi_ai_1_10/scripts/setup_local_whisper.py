@@ -5,6 +5,10 @@ This script is intentionally opt-in. It never runs from app startup and it does
 not add Python package dependencies. On macOS it can install whisper.cpp through
 Homebrew when --install-brew is provided, and it can download the tiny GGML
 model when --download-model is provided.
+
+License note: whisper.cpp, OpenAI Whisper code, and OpenAI Whisper model
+weights are MIT licensed. The default model URL points at the MIT-licensed
+ggerganov/whisper.cpp GGML conversion repository.
 """
 
 from __future__ import annotations
@@ -30,6 +34,8 @@ from domain.ambient.local_transcription import (  # noqa: E402
 
 
 DEFAULT_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+DEFAULT_MODEL_LICENSE = "MIT"
+DEFAULT_MODEL_SOURCE = "https://huggingface.co/ggerganov/whisper.cpp"
 
 
 def main() -> int:
@@ -55,6 +61,11 @@ def main() -> int:
         action="store_true",
         help="Print shell exports for this setup.",
     )
+    parser.add_argument(
+        "--print-license",
+        action="store_true",
+        help="Print the local Whisper license/source summary.",
+    )
     args = parser.parse_args()
 
     if args.install_brew:
@@ -75,12 +86,20 @@ def main() -> int:
         model_path.parent.mkdir(parents=True, exist_ok=True)
         if not model_path.exists():
             print(f"Downloading {args.model_url} -> {model_path}")
+            print(f"Model source: {DEFAULT_MODEL_SOURCE} ({DEFAULT_MODEL_LICENSE})")
             urllib.request.urlretrieve(args.model_url, model_path)
         else:
             print(f"Model already exists: {model_path}")
 
     status = local_whisper_status()
     print(json.dumps(status, ensure_ascii=False, indent=2))
+
+    if args.print_license:
+        print()
+        print("Local Whisper license/source:")
+        print("- Engine: whisper.cpp (MIT)")
+        print("- Original code/model weights: OpenAI Whisper (MIT)")
+        print(f"- Default GGML model source: {DEFAULT_MODEL_SOURCE} ({DEFAULT_MODEL_LICENSE})")
 
     if args.print_env:
         command = status.get("command") or shutil.which("whisper-cli") or ""
