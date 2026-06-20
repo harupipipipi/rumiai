@@ -901,13 +901,21 @@ class ToolExecutor:
             tool_def = registry.get(tool_name) if registry is not None else {}
             tool_def = tool_def or {}
         if tool_name == "web_search":
-            from domain.research.providers import ExternalWebProvider
+            from domain.research.providers import ExternalWebProvider, compact_provider_result
 
             query = arguments.get("query", "")
             result = ExternalWebProvider().search(
                 query,
                 limit=int(arguments.get("limit", 5)),
                 allow_network=bool(arguments.get("allow_network", True)),
+                domains=arguments.get("domains"),
+                official_only=bool(arguments.get("official_only", False)),
+                fetch_pages=bool(arguments.get("fetch_pages", False)),
+            )
+            result = compact_provider_result(
+                result,
+                max_chars=arguments.get("max_chars") or arguments.get("max_output_chars"),
+                max_tokens=arguments.get("max_tokens") or arguments.get("max_output_tokens"),
             )
             return {
                 "result": result.summary,
@@ -1100,6 +1108,10 @@ class ToolExecutor:
             result = file_read_run(
                 {
                     "path": path,
+                    "start_line": arguments.get("start_line"),
+                    "end_line": arguments.get("end_line"),
+                    "max_chars": arguments.get("max_chars") or arguments.get("max_output_chars"),
+                    "max_tokens": arguments.get("max_tokens") or arguments.get("max_output_tokens"),
                 },
                 call_context,
             )

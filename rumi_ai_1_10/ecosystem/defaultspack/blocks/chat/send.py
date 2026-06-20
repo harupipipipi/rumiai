@@ -1105,7 +1105,31 @@ def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *,
             )
 
 
-def _compact_tool_log_value(value):
+_TOOL_LOG_LONG_TEXT_KEYS = {
+    "content",
+    "diff",
+    "output",
+    "result",
+    "stderr",
+    "stdout",
+    "text",
+}
+_TOOL_LOG_STRING_LIMIT = 1800
+_TOOL_LOG_LIST_LIMIT = 16
+
+
+def _truncate_tool_log_text(value, limit=_TOOL_LOG_STRING_LIMIT):
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    omitted = len(text) - limit
+    return "{}\n[tool log truncated: {} chars omitted]".format(
+        text[: max(0, limit - 48)].rstrip(),
+        omitted,
+    )
+
+
+def _compact_tool_log_value(value, key=""):
     value = _redact_sensitive_value(value)
     if isinstance(value, dict):
         compact = {}
@@ -1113,14 +1137,22 @@ def _compact_tool_log_value(value):
             if key in {"data_url", "dataUrl"} and isinstance(item, str) and item.startswith("data:image/"):
                 compact[key] = "[image data saved as artifact]"
             else:
-                compact[key] = _compact_tool_log_value(item)
+                compact[key] = _compact_tool_log_value(item, key=str(key))
         return compact
     if isinstance(value, list):
-        return [_compact_tool_log_value(item) for item in value]
+        compact_items = [_compact_tool_log_value(item, key=key) for item in value[:_TOOL_LOG_LIST_LIMIT]]
+        if len(value) > _TOOL_LOG_LIST_LIMIT:
+            compact_items.append({
+                "truncated": True,
+                "omitted_items": len(value) - _TOOL_LOG_LIST_LIMIT,
+            })
+        return compact_items
     if isinstance(value, str) and "data:image/" in value:
         import re
 
-        return re.sub(r"data:image/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+", "[image data saved as artifact]", value)
+        value = re.sub(r"data:image/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+", "[image data saved as artifact]", value)
+    if isinstance(value, str) and (key in _TOOL_LOG_LONG_TEXT_KEYS or len(value) > _TOOL_LOG_STRING_LIMIT * 2):
+        return _truncate_tool_log_text(value)
     return value
 
 
@@ -1326,6 +1358,27 @@ def _tool_result_summary(tool_name, result):
     if reason:
         return _truncate_text(reason)
     data = _tool_result_data(result)
+    lowered = str(tool_name or "").lower()
+    if "file" in lowered:
+        widget = data.get("widget") if isinstance(data.get("widget"), dict) else {}
+        file_data = {**data, **widget}
+        path = file_data.get("path")
+        basename = Path(str(path or "")).name if path else ""
+        label = basename or str(path or "").strip() or "file"
+        if file_data.get("written"):
+            return _truncate_text("Edited {}".format(label))
+        if file_data.get("patched"):
+            return _truncate_text("Patched {}".format(label))
+        if file_data.get("deleted"):
+            return _truncate_text("Deleted {}".format(label))
+        if isinstance(file_data.get("content"), str) or isinstance(data.get("result"), str):
+            if file_data.get("truncated"):
+                return _truncate_text("Read compact excerpt from {}".format(label))
+            return _truncate_text("Read {}".format(label))
+    if "terminal" in lowered or "shell" in lowered or "exec" in lowered:
+        exit_code = data.get("exit_code")
+        if exit_code is not None:
+            return _truncate_text("Command finished with exit code {}".format(exit_code))
     if tool_name in {"browser_computer", "browser_use", "computer_use"}:
         active_window = _tool_window_details(result, "active_window")
         selected_window = (

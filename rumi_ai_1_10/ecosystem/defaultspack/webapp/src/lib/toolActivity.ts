@@ -52,6 +52,69 @@ function compact(value: unknown, maxLength = 96): string {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
+function lastPathSegment(value: string): string {
+  const normalized = value.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalized.split("/").filter(Boolean).pop() || value;
+}
+
+function terminalActionTitle(command: string): string {
+  const text = command.trim();
+  const lowered = text.toLowerCase();
+  if (!text) return "ターミナルで作業";
+  if (/^(rg|grep|fd|find)\b/.test(lowered)) return "コードを検索";
+  if (/^(sed|cat|less|head|tail|nl)\b/.test(lowered)) return "ファイルを確認";
+  if (/^git\s+(status|diff|show|log|branch|rev-parse)\b/.test(lowered)) return "Git 状態を確認";
+  if (/^git\s+add\b/.test(lowered)) return "変更をステージ";
+  if (/^git\s+commit\b/.test(lowered)) return "コミットを作成";
+  if (/^git\s+push\b/.test(lowered)) return "変更を push";
+  if (/^(npm|pnpm|yarn)\s+(test|run\s+test)\b/.test(lowered) || /^(python\s+-m\s+pytest|pytest|cargo\s+test)\b/.test(lowered)) return "テストを実行";
+  if (/^(npm|pnpm|yarn)\s+(run\s+)?build\b/.test(lowered) || /^cargo\s+build\b/.test(lowered)) return "ビルドを実行";
+  if (/^(npm|pnpm|yarn)\s+(run\s+)?lint\b/.test(lowered) || /^(ruff|eslint)\b/.test(lowered)) return "lint を実行";
+  if (/^gh\s+(repo|pr|issue)\s+view\b/.test(lowered)) return "GitHub 情報を確認";
+  if (/^gh\s+pr\s+(create|edit)\b/.test(lowered)) return "PR を更新";
+  return "ターミナルで作業";
+}
+
+function humanToolTitle(toolName: string, args: Record<string, unknown>, folderLabel: string, argumentSummary: string): string {
+  const lowerName = toolName.toLowerCase();
+  if (lowerName.includes("terminal") || lowerName.includes("shell") || lowerName.includes("exec")) {
+    return terminalActionTitle(pickString(args, ["command", "cmd"]));
+  }
+  if (lowerName.includes("git")) {
+    if (lowerName.includes("push")) return "変更を push";
+    if (lowerName.includes("commit")) return "コミットを作成";
+    if (lowerName.includes("diff")) return "差分を確認";
+    if (lowerName.includes("branch")) return "ブランチを確認";
+    return "Git 状態を確認";
+  }
+  if (lowerName.includes("file")) {
+    const path = pickString(args, ["path", "filename", "directory", "glob"]);
+    const label = path ? lastPathSegment(path) : "";
+    if (lowerName.includes("write") || lowerName.includes("patch") || lowerName.includes("create") || lowerName.includes("delete")) {
+      return label ? `ファイルを編集: ${label}` : "ファイルを編集";
+    }
+    if (lowerName.includes("list")) {
+      return label ? `ファイル一覧を確認: ${label}` : "ファイル一覧を確認";
+    }
+    return label ? `ファイルを確認: ${label}` : "ファイルを確認";
+  }
+  if (lowerName.includes("search") || lowerName.includes("web") || lowerName.includes("reddit")) {
+    return argumentSummary ? `Webで検索: ${compact(argumentSummary, 56)}` : "Webで検索";
+  }
+  if (lowerName.includes("browser") || lowerName.includes("computer")) {
+    const action = pickString(args, ["action"]) || "画面を操作";
+    if (action.includes("screenshot")) return "画面を確認";
+    if (action.includes("click")) return "画面をクリック";
+    if (action.includes("type")) return "文字を入力";
+    if (action.includes("open")) return "ブラウザを開く";
+    return "画面を操作";
+  }
+  if (lowerName.includes("subagent") || lowerName.includes("agent") || lowerName.includes("delegate")) return "サブエージェントに依頼";
+  if (lowerName.includes("todo") || lowerName.includes("task")) return "タスクを整理";
+  if (lowerName.includes("calculator") || lowerName.includes("calc")) return argumentSummary ? `計算: ${argumentSummary}` : "計算";
+  return `${folderLabel}を使用`;
+}
+
 function jsonBlock(value: unknown, maxLength = 1600): string {
   let text = "";
   try {
@@ -146,6 +209,24 @@ function summarizeToolResult(toolName: string, result: unknown): string {
   }
   const record = result as Record<string, unknown>;
   const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
+  const lowerName = toolName.toLowerCase();
+  if (lowerName.includes("file")) {
+    const widget = isRecord(data.widget) ? data.widget : {};
+    const fileData = { ...data, ...widget };
+    const path = pickString(fileData, ["path"]);
+    const label = path ? lastPathSegment(path) : "ファイル";
+    if (fileData.written === true) return `保存しました: ${label}`;
+    if (fileData.patched === true) return `変更しました: ${label}`;
+    if (fileData.deleted === true) return `削除しました: ${label}`;
+    if (typeof fileData.content === "string" || typeof data.result === "string") {
+      return fileData.truncated === true ? `一部を読みました: ${label}` : `読みました: ${label}`;
+    }
+  }
+  if (lowerName.includes("terminal") || lowerName.includes("shell") || lowerName.includes("exec")) {
+    const exitCode = pickString(data, ["exit_code"]);
+    if (exitCode) return `終了コード ${exitCode}`;
+    if (data.approval_required === true) return "承認待ち";
+  }
   const direct = pickString(data, ["summary", "result", "message", "output", "title"]);
   if (direct) {
     const formatted = toolName.toLowerCase().includes("calc") ? formatCalculatorResult(direct) : direct;
@@ -398,6 +479,7 @@ export function buildToolActivityItems(
       const resultSummary = summarizeToolResult(toolName, log.result);
       const explicitSummary = isRecord(log.result) ? explicitToolText(log.result) : "";
       const supported = isSupportedToolActivity(toolName, explicitSummary);
+      const title = humanToolTitle(toolName, args, folder.label, argumentSummary);
       return {
         id: `log-${index}-${toolName}`,
         toolName,
@@ -405,7 +487,7 @@ export function buildToolActivityItems(
         folder: folder.id,
         folderLabel: folder.label,
         input: argumentSummary,
-        title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
+        title,
         detail: resultSummary,
         durationLabel: durationLabelFromLog(log),
         nextStep: undefined,
@@ -450,6 +532,7 @@ export function buildToolActivityItems(
         ? ""
         : eventMessage || defaultDetail;
       const supported = isSupportedToolActivity(toolName, explicitSummary);
+      const title = humanToolTitle(toolName, args, folder.label, argumentSummary);
       return {
         id: `event-${index}-${toolName}`,
         toolName,
@@ -457,7 +540,7 @@ export function buildToolActivityItems(
         folder: folder.id,
         folderLabel: folder.label,
         input: argumentSummary,
-        title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
+        title,
         detail: explicitSummary || resultSummary || fallbackDetail,
         durationLabel: durationLabelFromEvent(event, status, options.now),
         nextStep: pickString(event, ["next_step", "nextStep"]),

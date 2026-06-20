@@ -115,6 +115,41 @@ def _display_arg(arguments: dict[str, Any], keys: tuple[str, ...]) -> str:
     return ""
 
 
+def _basename(value: str) -> str:
+    text = str(value or "").replace("\\", "/").rstrip("/")
+    return text.split("/")[-1] if text else ""
+
+
+def _terminal_action_label(command: str) -> str:
+    text = str(command or "").strip()
+    lowered = text.lower()
+    if not text:
+        return "ターミナルで作業"
+    if lowered.startswith(("rg ", "grep ", "fd ", "find ")):
+        return "コードを検索"
+    if lowered.startswith(("sed ", "cat ", "less ", "head ", "tail ", "nl ")):
+        return "ファイルを確認"
+    if lowered.startswith(("git status", "git diff", "git show", "git log", "git branch", "git rev-parse")):
+        return "Git 状態を確認"
+    if lowered.startswith("git add"):
+        return "変更をステージ"
+    if lowered.startswith("git commit"):
+        return "コミットを作成"
+    if lowered.startswith("git push"):
+        return "変更を push"
+    if lowered.startswith(("npm test", "pnpm test", "yarn test", "python -m pytest", "pytest", "cargo test")):
+        return "テストを実行"
+    if lowered.startswith(("npm run build", "pnpm build", "pnpm run build", "yarn build", "cargo build")):
+        return "ビルドを実行"
+    if lowered.startswith(("npm run lint", "pnpm lint", "pnpm run lint", "yarn lint", "ruff ", "eslint ")):
+        return "lint を実行"
+    if lowered.startswith(("gh repo view", "gh pr view", "gh issue view")):
+        return "GitHub 情報を確認"
+    if lowered.startswith(("gh pr create", "gh pr edit")):
+        return "PR を更新"
+    return "ターミナルで作業"
+
+
 def _tool_display_action(tool_name: str, arguments: dict[str, Any]) -> str:
     lowered = str(tool_name or "").lower()
     if not isinstance(arguments, dict):
@@ -124,9 +159,24 @@ def _tool_display_action(tool_name: str, arguments: dict[str, Any]) -> str:
     if "search" in lowered or "web" in lowered or "reddit" in lowered:
         query = _display_arg(arguments, ("query", "q", "search_query", "text", "url"))
         return "検索: {}".format(query) if query else "検索"
+    if "git" in lowered:
+        if "push" in lowered:
+            return "変更を push"
+        if "commit" in lowered:
+            return "コミットを作成"
+        if "diff" in lowered:
+            return "差分を確認"
+        if "branch" in lowered:
+            return "ブランチを確認"
+        return "Git 状態を確認"
     if "file" in lowered:
         path = _display_arg(arguments, ("path", "filename", "directory", "glob"))
-        return "ファイル確認: {}".format(path) if path else "ファイル確認"
+        label = _basename(path) or path
+        if any(key in lowered for key in ("write", "patch", "create", "delete")):
+            return "ファイルを編集: {}".format(label) if label else "ファイルを編集"
+        if "list" in lowered:
+            return "ファイル一覧を確認: {}".format(label) if label else "ファイル一覧を確認"
+        return "ファイルを確認: {}".format(label) if label else "ファイルを確認"
     if "browser" in lowered or "computer" in lowered:
         action = _display_arg(arguments, ("action",)) or "画面操作"
         target = _display_arg(arguments, ("url", "app", "application", "browser", "name", "title"))
@@ -134,7 +184,7 @@ def _tool_display_action(tool_name: str, arguments: dict[str, Any]) -> str:
         return " ".join(part for part in (action, target, text) if part).strip()
     if "terminal" in lowered or "shell" in lowered or "exec" in lowered:
         command = _display_arg(arguments, ("command", "cmd"))
-        return "コマンド実行: {}".format(command) if command else "コマンド実行"
+        return _terminal_action_label(command)
     if "todo" in lowered:
         return _display_arg(arguments, ("title", "task", "action", "todo_id")) or "Todo更新"
     if "delegate" in lowered or "subagent" in lowered or "agent" in lowered:

@@ -1092,3 +1092,21 @@ def test_stream_engine_ir_finalizes_assistant_message(tmp_path, monkeypatch):
     assert stored["finish_reason"] == "stop"
     assert stored["metadata"]["provider_capabilities"]["provider_id"] == "openai"
     ChatStore._instance = None
+
+
+def test_compact_tool_log_value_truncates_large_outputs():
+    from blocks.chat.send import _compact_tool_log_value
+
+    compact = _compact_tool_log_value({
+        "status": "ok",
+        "data": {
+            "content": "x" * 5_000,
+            "stdout": "y" * 5_000,
+            "items": list(range(25)),
+        },
+    })
+
+    assert len(compact["data"]["content"]) < 2_000
+    assert "tool log truncated" in compact["data"]["content"]
+    assert len(compact["data"]["stdout"]) < 2_000
+    assert compact["data"]["items"][-1]["omitted_items"] == 9

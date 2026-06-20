@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, ChevronRight, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2 } from "lucide-react";
+import { AlertTriangle, Calculator, Check, ChevronRight, Clock, Copy, ExternalLink, FileText, GitBranch, Globe2, Image as ImageIcon, Loader2, Monitor, Terminal, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -1008,6 +1008,16 @@ function ToolActivityToggle({
   );
 }
 
+function toolActivityIcon(groupId: string) {
+  if (groupId.includes("web")) return Globe2;
+  if (groupId.includes("browser")) return Monitor;
+  if (groupId.includes("terminal")) return Terminal;
+  if (groupId.includes("git")) return GitBranch;
+  if (groupId.includes("file")) return FileText;
+  if (groupId.includes("calculation")) return Calculator;
+  return Wrench;
+}
+
 function ToolActivityTray({
   groups,
   isOpen,
@@ -1046,12 +1056,22 @@ function ToolActivityTray({
               const hasPreview = Boolean(previewId);
               const statusLabel = item.status === "failed" ? "エラー" : "";
               const statusLine = [statusLabel, item.detail].filter(Boolean).join(" · ");
+              const Icon = toolActivityIcon(group.id);
               const body = (
                 <>
-                  <span className={cn("mt-1 h-1.5 w-1.5 shrink-0 rounded-full", item.status === "failed" ? "bg-red-400" : item.status === "running" ? "animate-pulse bg-blue-300" : "bg-zinc-700")} />
+                  <span className={cn(
+                    "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border",
+                    item.status === "failed"
+                      ? "border-red-400/20 bg-red-400/10 text-red-300"
+                      : item.status === "running"
+                        ? "border-blue-300/20 bg-blue-300/10 text-blue-200"
+                        : "border-zinc-800 bg-zinc-900/80 text-zinc-400",
+                  )}>
+                    <Icon size={14} />
+                  </span>
                   <span className="min-w-0 max-w-full flex-1 overflow-hidden">
                     <span className="flex min-w-0 max-w-full items-baseline gap-2 text-[13px] leading-5 text-zinc-300">
-                      <span className="min-w-0 flex-1 truncate">{item.input || item.detail || item.toolName}</span>
+                      <span className="min-w-0 flex-1 truncate">{item.title || item.detail || item.toolName}</span>
                       {item.durationLabel && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{item.durationLabel}</span>}
                     </span>
                     {statusLine && (

@@ -208,6 +208,22 @@ def test_tool_executor_file_reader_delegates_and_unknown_tools_fail_closed(tmp_p
     assert "not implemented" in unknown["result"]
 
 
+def test_tool_executor_file_reader_honors_output_budget(tmp_path):
+    from domain.tool.executor import ToolExecutor
+
+    (tmp_path / "doc.txt").write_text("0123456789" * 80, encoding="utf-8")
+    read = ToolExecutor()._execute_local(
+        "file_reader",
+        {"path": "doc.txt", "max_chars": 220},
+        {"workspace_root": str(tmp_path)},
+    )
+
+    assert read["is_error"] is False
+    assert len(read["result"]) <= 220
+    assert read["widget"]["truncated"] is True
+    assert read["widget"]["original_size"] > read["widget"]["returned_size"]
+
+
 def test_coding_checkpoint_functions_are_dispatchable(tmp_path, monkeypatch):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
 

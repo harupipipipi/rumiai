@@ -24,10 +24,10 @@ test("groups real tool logs into folder-like sections", () => {
 
   assert.equal(groups.length, 2);
   assert.equal(groups[0].id, "calculation");
-  assert.equal(groups[0].items[0].title, "計算 / calculator: 13829+12312");
+  assert.equal(groups[0].items[0].title, "計算: 13829+12312");
   assert.equal(groups[0].items[0].detail, "26141");
   assert.equal(groups[1].id, "web/search");
-  assert.equal(groups[1].items[0].title, "Web検索 / web_search: 今日の天気 東京");
+  assert.equal(groups[1].items[0].title, "Webで検索: 今日の天気 東京");
 });
 
 test("polishes calculator result prose into the answer", () => {
@@ -60,7 +60,36 @@ test("uses running tool_call events when a log has not arrived yet", () => {
   assert.equal(groups.length, 1);
   assert.equal(groups[0].id, "coding/files");
   assert.equal(groups[0].items[0].status, "running");
-  assert.equal(groups[0].items[0].title, "ファイル / coding_file_list: src");
+  assert.equal(groups[0].items[0].title, "ファイル一覧を確認: src");
+});
+
+test("summarizes terminal commands as user-facing activity", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "coding_terminal_exec",
+      arguments: { command: "gh repo view --json defaultBranchRef" },
+      result: { status: "ok", data: { exit_code: 0, stdout: "{\"defaultBranchRef\":{\"name\":\"main\"}}" } },
+    },
+  ]);
+
+  const item = groups[0].items[0];
+  assert.equal(item.title, "GitHub 情報を確認");
+  assert.equal(item.detail, "終了コード 0");
+  assert.equal(item.input, "gh repo view --json defaultBranchRef");
+});
+
+test("surfaces file edits without exposing the whole diff as the main activity", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "coding_file_patch",
+      arguments: { path: "src/App.tsx", old: "before", new: "after" },
+      result: { status: "ok", data: { path: "src/App.tsx", patched: true, diff: "-before\n+after\n" } },
+    },
+  ]);
+
+  const item = groups[0].items[0];
+  assert.equal(item.title, "ファイルを編集: App.tsx");
+  assert.equal(item.detail, "変更しました: App.tsx");
 });
 
 test("updates streamed tool activity when a completion event arrives before the log", () => {
