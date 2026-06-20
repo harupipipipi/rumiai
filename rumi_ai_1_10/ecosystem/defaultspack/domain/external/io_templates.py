@@ -51,24 +51,21 @@ class ExternalIOTemplate:
 
 
 class ExternalIOTemplateRegistry:
-    def __init__(self, pack_root: Path | None = None) -> None:
+    def __init__(self, pack_root: Path | None = None, template_items: list[dict[str, Any]] | None = None) -> None:
         self.pack_root = pack_root or Path(__file__).resolve().parents[2]
+        self.template_items = [item for item in (template_items or []) if isinstance(item, dict)]
 
     def list_templates(self, *, direction: str | None = None) -> list[ExternalIOTemplate]:
         wanted = str(direction or "").strip().lower()
         templates: list[ExternalIOTemplate] = []
-        for directory, origin in self._template_dirs():
-            for path in sorted(directory.glob("*.template.yaml")):
-                template = self._load(path, origin=origin)
-                if template is None:
-                    continue
-                if wanted and template.direction != wanted:
-                    continue
-                templates.append(template)
+        templates.extend(self._load_yaml_templates(self.pack_root / "external_io_templates", origin="builtin"))
+        templates.extend(self._template_item_templates())
+        templates.extend(self._load_yaml_templates(self.custom_templates_dir, origin="custom"))
         deduped: dict[str, ExternalIOTemplate] = {}
         for template in templates:
             deduped[template.id] = template
-        return sorted(deduped.values(), key=self._sort_key)
+        values = [template for template in deduped.values() if not wanted or template.direction == wanted]
+        return sorted(values, key=self._sort_key)
 
     def catalog(self) -> dict[str, Any]:
         templates = [template.as_dict() for template in self.list_templates()]
@@ -116,6 +113,26 @@ class ExternalIOTemplateRegistry:
             (self.custom_templates_dir, "custom"),
         ]
 
+    def _load_yaml_templates(self, directory: Path, *, origin: str) -> list[ExternalIOTemplate]:
+        templates: list[ExternalIOTemplate] = []
+        for path in sorted(directory.glob("*.template.yaml")):
+            template = self._load(path, origin=origin)
+            if template is not None:
+                templates.append(template)
+        return templates
+
+    def _template_item_templates(self) -> list[ExternalIOTemplate]:
+        templates: list[ExternalIOTemplate] = []
+        for item in self.template_items:
+            template = ExternalIOTemplate.from_dict(
+                item,
+                origin="template",
+                path=str(item.get("_source") or item.get("path") or ""),
+            )
+            if self._validate(template) == "":
+                templates.append(template)
+        return templates
+
     @staticmethod
     def _load(path: Path, *, origin: str) -> ExternalIOTemplate | None:
         try:
@@ -145,8 +162,12 @@ class ExternalIOTemplateRegistry:
         return (origin_rank, direction_rank, provider_rank, template.id)
 
 
-def external_io_template_catalog(pack_root: Path | None = None) -> dict[str, Any]:
-    return ExternalIOTemplateRegistry(pack_root).catalog()
+def external_io_template_catalog(
+    pack_root: Path | None = None,
+    *,
+    template_items: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return ExternalIOTemplateRegistry(pack_root, template_items=template_items).catalog()
 
 
 def _safe_filename(value: str) -> str:

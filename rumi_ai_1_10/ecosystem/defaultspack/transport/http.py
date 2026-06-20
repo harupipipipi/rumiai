@@ -1,5 +1,6 @@
 import os
 import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from blocks._common import ok, error, timestamp
@@ -130,7 +131,9 @@ class DefaultsHttpServer:
                         pattern = entry.get("pattern")
                         handler = entry.get("handler")
                         flow_id = str(entry.get("flow_id") or "").strip()
-                        fallback_block_module = str(entry.get("fallback_block_module") or "").strip()
+                        fallback_block_module = str(
+                            entry.get("fallback_block_module") or ""
+                        ).strip()
                         path_inject = entry.get("path_inject", {})
                         method_key = str(method or "").upper()
                         pattern_key = str(pattern or "")
@@ -138,13 +141,16 @@ class DefaultsHttpServer:
                         if mapped_flow and not flow_id:
                             flow_id, fallback_block_module = mapped_flow
                         if method and pattern and flow_id:
+
                             def _flow_handler(
                                 request_data,
                                 path_params,
                                 *,
                                 route_flow_id=flow_id,
                                 route_fallback_block_module=fallback_block_module,
-                                route_path_inject=dict(path_inject) if isinstance(path_inject, dict) else {},
+                                route_path_inject=dict(path_inject)
+                                if isinstance(path_inject, dict)
+                                else {},
                                 route_method=str(method or "").upper(),
                             ):
                                 payload = dict(request_data or {})
@@ -156,8 +162,11 @@ class DefaultsHttpServer:
                                     route_path_inject,
                                     fallback_block_module=route_fallback_block_module,
                                 )
+
                             _flow_handler._defaultspack_flow_route_handler = True
-                            route_entries.append((method, pattern, _flow_handler, path_inject, index))
+                            route_entries.append(
+                                (method, pattern, _flow_handler, path_inject, index)
+                            )
                         elif method and pattern and callable(handler):
                             route_entries.append((method, pattern, handler, path_inject, index))
                     for method, pattern, handler, path_inject, index in sorted(
@@ -193,9 +202,7 @@ class DefaultsHttpServer:
 
     def start(self):
         _RequestHandler.server_ref = self
-        self._server = http.server.ThreadingHTTPServer(
-            (self.host, self.port), _RequestHandler
-        )
+        self._server = http.server.ThreadingHTTPServer((self.host, self.port), _RequestHandler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=False)
         self._thread.start()
         print("[defaults] HTTP server started on " + self.host + ":" + str(self.port))
@@ -217,7 +224,9 @@ class DefaultsHttpServer:
                 route_method, compiled, handler, source, path_inject, pattern = route[:6]
             else:
                 route_method, compiled, handler, source, path_inject = route
-                pattern = getattr(handler, "__rumi_route_pattern__", getattr(compiled, "pattern", path))
+                pattern = getattr(
+                    handler, "__rumi_route_pattern__", getattr(compiled, "pattern", path)
+                )
             if route_method != method:
                 continue
             m = compiled.match(path)
@@ -238,7 +247,11 @@ class DefaultsHttpServer:
             profile = ProfileWorkspaceManager().load_profile_yaml(profile_id)
         except Exception:
             return profile_id, {}
-        policy = profile.get("policy") if isinstance(profile, dict) and isinstance(profile.get("policy"), dict) else {}
+        policy = (
+            profile.get("policy")
+            if isinstance(profile, dict) and isinstance(profile.get("policy"), dict)
+            else {}
+        )
         return profile_id, policy
 
     def _route_allowed_by_active_profile(self, method, pattern):
@@ -253,7 +266,7 @@ class DefaultsHttpServer:
         if not isinstance(allowlist, list):
             allowlist = []
         route_key = f"{str(method or '').upper()} {str(pattern or '').strip()}"
-        return route_key in {str(item).strip() for item in allowlist if str(item or '').strip()}
+        return route_key in {str(item).strip() for item in allowlist if str(item or "").strip()}
 
     def _record_profile_blocked_route(self, method, pattern):
         profile_id, _policy = self._active_profile_policy()
@@ -329,7 +342,9 @@ class DefaultsHttpServer:
                     else:
                         return result
                 elif error_code == "PERMISSION_DENIED":
-                    if self._function_call_permission_fallback_allowed(module_name, payload, error_info):
+                    if self._function_call_permission_fallback_allowed(
+                        module_name, payload, error_info
+                    ):
                         pass
                     else:
                         return result
@@ -515,10 +530,7 @@ class DefaultsHttpServer:
 
     def _function_call_permission_fallback_allowed(self, module_name, payload, error_info):
         message = str((error_info or {}).get("message") or "")
-        return (
-            self._safe_get_fallback_allowed(module_name, payload)
-            and "function.call" in message
-        )
+        return self._safe_get_fallback_allowed(module_name, payload) and "function.call" in message
 
     # ---- Chat Handlers (fallback) ----
 
@@ -526,10 +538,14 @@ class DefaultsHttpServer:
         return self._invoke_fallback_block("blocks.chat.send", request_data, path_params)
 
     def _handle_chat_create(self, request_data, path_params):
-        return self._invoke_fallback_block("blocks.chat.create_conversation", request_data, path_params)
+        return self._invoke_fallback_block(
+            "blocks.chat.create_conversation", request_data, path_params
+        )
 
     def _handle_chat_list(self, request_data, path_params):
-        return self._invoke_fallback_block("blocks.chat.list_conversations", request_data, path_params)
+        return self._invoke_fallback_block(
+            "blocks.chat.list_conversations", request_data, path_params
+        )
 
     def _handle_chat_get(self, request_data, path_params):
         return self._invoke_fallback_block(
@@ -794,24 +810,66 @@ class DefaultsHttpServer:
                             "available": True,
                             "status": "running",
                         }
-                        reliable = bool(host_broker.get("available")) if isinstance(host_broker, dict) else False
-                        return ok({
-                            "source": "viewer_broker",
-                            "reliable": reliable,
-                            "app_name": "Rumi AI",
-                            "display_version": "",
-                            "viewer_version": "",
-                            "build_channel": "beta",
-                            "platform": sys.platform,
-                            "platform_release": _platform_release(),
-                            "permission_subject": str(payload.get("permission_subject") or "Rumi Viewer"),
-                            "host_broker": host_broker,
-                            "permissions": permissions,
-                        })
+                        reliable = (
+                            bool(host_broker.get("available"))
+                            if isinstance(host_broker, dict)
+                            else False
+                        )
+                        return ok(
+                            {
+                                "source": "viewer_broker",
+                                "reliable": reliable,
+                                "app_name": "Rumi AI",
+                                "display_version": "",
+                                "viewer_version": "",
+                                "build_channel": "beta",
+                                "platform": sys.platform,
+                                "platform_release": _platform_release(),
+                                "permission_subject": str(
+                                    payload.get("permission_subject") or "Rumi Viewer"
+                                ),
+                                "host_broker": host_broker,
+                                "permissions": permissions,
+                            }
+                        )
             except Exception:
                 pass
 
-            return ok({
+            return ok(
+                {
+                    "source": "fallback",
+                    "reliable": False,
+                    "app_name": "Rumi AI",
+                    "display_version": "",
+                    "viewer_version": "",
+                    "build_channel": "beta",
+                    "platform": sys.platform,
+                    "platform_release": _platform_release(),
+                    "permission_subject": "Rumi Viewer",
+                    "host_broker": {
+                        "enabled": False,
+                        "available": False,
+                        "status": "unavailable",
+                        "recovery": "Open Rumi Viewer and grant macOS permissions there.",
+                    },
+                    "permissions": [],
+                }
+            )
+
+        permissions = []
+        permissions.append(
+            {
+                "id": "macos_privacy",
+                "label": "macOS Privacy",
+                "status": "unsupported",
+                "granted": None,
+                "detail": "macOS permission checks are only available on macOS.",
+                "settings_hint": "",
+            }
+        )
+
+        return ok(
+            {
                 "source": "fallback",
                 "reliable": False,
                 "app_name": "Rumi AI",
@@ -824,39 +882,11 @@ class DefaultsHttpServer:
                 "host_broker": {
                     "enabled": False,
                     "available": False,
-                    "status": "unavailable",
-                    "recovery": "Open Rumi Viewer and grant macOS permissions there.",
+                    "status": "unsupported",
                 },
-                "permissions": [],
-            })
-
-        permissions = []
-        permissions.append({
-            "id": "macos_privacy",
-            "label": "macOS Privacy",
-            "status": "unsupported",
-            "granted": None,
-            "detail": "macOS permission checks are only available on macOS.",
-            "settings_hint": "",
-        })
-
-        return ok({
-            "source": "fallback",
-            "reliable": False,
-            "app_name": "Rumi AI",
-            "display_version": "",
-            "viewer_version": "",
-            "build_channel": "beta",
-            "platform": sys.platform,
-            "platform_release": _platform_release(),
-            "permission_subject": "Rumi Viewer",
-            "host_broker": {
-                "enabled": False,
-                "available": False,
-                "status": "unsupported",
-            },
-            "permissions": permissions,
-        })
+                "permissions": permissions,
+            }
+        )
 
     @staticmethod
     def _authority_http_error(result, default_code="AUTHORITY_ERROR"):
@@ -869,7 +899,9 @@ class DefaultsHttpServer:
         try:
             from core_runtime.authority import get_authority_service
 
-            return ok(get_authority_service().list_requests(str(request_data.get("status") or "all")))
+            return ok(
+                get_authority_service().list_requests(str(request_data.get("status") or "all"))
+            )
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
 
@@ -888,7 +920,11 @@ class DefaultsHttpServer:
 
     def _handle_authority_test_request(self, request_data, path_params):
         del path_params
-        if str(os.environ.get("RUMI_AUTHORITY_TEST_ENDPOINT") or "").strip().lower() not in {"1", "true", "yes"}:
+        if str(os.environ.get("RUMI_AUTHORITY_TEST_ENDPOINT") or "").strip().lower() not in {
+            "1",
+            "true",
+            "yes",
+        }:
             response = error("authority test endpoint is disabled", "AUTHORITY_TEST_DISABLED")
             response["_http_status"] = 404
             return response
@@ -949,15 +985,23 @@ class DefaultsHttpServer:
                 node_id=node_id,
             )
             data = decision.to_dict()
-            data["approval_url"] = f"/approval?request_id={decision.request_id}" if decision.request_id else None
+            data["approval_url"] = (
+                f"/approval?request_id={decision.request_id}" if decision.request_id else None
+            )
             return ok(data)
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
 
     def _handle_authority_approve(self, request_data, path_params):
         request_id = str((path_params or {}).get("request_id") or "").strip()
-        config = request_data.get("config") if isinstance(request_data.get("config"), dict) else None
-        ui_operator = request_data.get("ui_operator") if isinstance(request_data.get("ui_operator"), dict) else None
+        config = (
+            request_data.get("config") if isinstance(request_data.get("config"), dict) else None
+        )
+        ui_operator = (
+            request_data.get("ui_operator")
+            if isinstance(request_data.get("ui_operator"), dict)
+            else None
+        )
         try:
             from core_runtime.authority import get_authority_service
 
@@ -976,7 +1020,11 @@ class DefaultsHttpServer:
 
     def _handle_authority_deny(self, request_data, path_params):
         request_id = str((path_params or {}).get("request_id") or "").strip()
-        ui_operator = request_data.get("ui_operator") if isinstance(request_data.get("ui_operator"), dict) else None
+        ui_operator = (
+            request_data.get("ui_operator")
+            if isinstance(request_data.get("ui_operator"), dict)
+            else None
+        )
         try:
             from core_runtime.authority import get_authority_service
 
@@ -993,11 +1041,13 @@ class DefaultsHttpServer:
         return ok(result)
 
     def _handle_health(self, request_data, path_params):
-        return ok({
-            "status": "healthy",
-            "pack": "defaultspack",
-            "ts": timestamp(),
-        })
+        return ok(
+            {
+                "status": "healthy",
+                "pack": "defaultspack",
+                "ts": timestamp(),
+            }
+        )
 
     def _handle_context_info(self, request_data, path_params):
         interfaces = {}
@@ -1006,27 +1056,29 @@ class DefaultsHttpServer:
                 interfaces = self.facade.list_interfaces()
             except Exception:
                 interfaces = {}
-        return ok({
-            "pack": "defaultspack",
-            "interfaces": interfaces,
-            "ts": timestamp(),
-        })
+        return ok(
+            {
+                "pack": "defaultspack",
+                "interfaces": interfaces,
+                "ts": timestamp(),
+            }
+        )
 
     # ---- Static Handlers (fallback) ----
 
     def _handle_chat_redirect(self, request_data, path_params):
-        query = urllib.parse.urlencode({
-            key: value
-            for key, value in (request_data or {}).items()
-            if not str(key).startswith("_")
-        })
+        query = urllib.parse.urlencode(
+            {
+                key: value
+                for key, value in (request_data or {}).items()
+                if not str(key).startswith("_")
+            }
+        )
         location = "/chat" + (("?" + query) if query else "")
         return {"_redirect": True, "location": location, "status_code": 302}
 
     def _handle_static(self, request_data, path_params):
-        shell_path = os.path.join(
-            os.path.dirname(__file__), "..", "ui", "shell.html"
-        )
+        shell_path = os.path.join(os.path.dirname(__file__), "..", "ui", "shell.html")
         if os.path.isfile(shell_path):
             with open(shell_path, "r", encoding="utf-8") as f:
                 body = f.read()
@@ -1035,10 +1087,15 @@ class DefaultsHttpServer:
                 asset_path = os.path.join(ui_dir, asset_name)
                 if os.path.isfile(asset_path):
                     version = str(int(os.path.getmtime(asset_path)))
-                    body = body.replace(f"/static/{asset_name}", f"/static/{asset_name}?v={version}")
+                    body = body.replace(
+                        f"/static/{asset_name}", f"/static/{asset_name}?v={version}"
+                    )
             return {"_static": True, "content_type": "text/html; charset=utf-8", "body": body}
-        return {"_static": True, "content_type": "text/html; charset=utf-8",
-                "body": "<!DOCTYPE html><html><body><h1>defaults pack</h1><p>shell.html not found</p></body></html>"}
+        return {
+            "_static": True,
+            "content_type": "text/html; charset=utf-8",
+            "body": "<!DOCTYPE html><html><body><h1>defaults pack</h1><p>shell.html not found</p></body></html>",
+        }
 
     def _handle_static_file(self, request_data, path_params):
         rel_path = path_params.get("path", "")
@@ -1109,7 +1166,10 @@ def _is_sensitive_coding_path(path):
 
 
 def _matches_sensitive_prefix(path):
-    return any(path == prefix or path.startswith(prefix + "/") for prefix in _SENSITIVE_INTEGRATION_PREFIXES)
+    return any(
+        path == prefix or path.startswith(prefix + "/")
+        for prefix in _SENSITIVE_INTEGRATION_PREFIXES
+    )
 
 
 def _requires_sensitive_http_auth(method, path):
@@ -1225,7 +1285,9 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             path = parsed_url.path
             request_data = {
                 key: values[-1]
-                for key, values in urllib.parse.parse_qs(parsed_url.query, keep_blank_values=True).items()
+                for key, values in urllib.parse.parse_qs(
+                    parsed_url.query, keep_blank_values=True
+                ).items()
                 if values
             }
             request_data["_headers"] = {str(key): str(value) for key, value in self.headers.items()}
@@ -1240,7 +1302,9 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                     if "application/x-www-form-urlencoded" in content_type:
                         body_data = {
                             key: values[-1]
-                            for key, values in urllib.parse.parse_qs(raw_text, keep_blank_values=True).items()
+                            for key, values in urllib.parse.parse_qs(
+                                raw_text, keep_blank_values=True
+                            ).items()
                             if values
                         }
                     else:
@@ -1254,11 +1318,15 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                             return
                     request_data.update(body_data)
 
-            handler, path_params, source, path_inject, route_pattern = self.server_ref._match_route(method, path)
+            handler, path_params, source, path_inject, route_pattern = self.server_ref._match_route(
+                method, path
+            )
             if handler is None:
                 self._send_json(404, error("not found: " + method + " " + path))
                 return
-            if route_pattern and not self.server_ref._route_allowed_by_active_profile(method, route_pattern):
+            if route_pattern and not self.server_ref._route_allowed_by_active_profile(
+                method, route_pattern
+            ):
                 self.server_ref._record_profile_blocked_route(method, route_pattern)
                 self._send_json(
                     403,
@@ -1302,7 +1370,9 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 result = handler(request_data, path_params)
 
             if isinstance(result, dict) and result.get("_static"):
-                self._send_static(200, result.get("content_type", "text/html"), result.get("body", ""))
+                self._send_static(
+                    200, result.get("content_type", "text/html"), result.get("body", "")
+                )
             elif isinstance(result, dict) and result.get("_redirect"):
                 self._send_redirect(
                     int(result.get("status_code", 302)),
@@ -1357,7 +1427,9 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 if isinstance(event, bytes):
                     payload = event
                 else:
-                    payload = ("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode("utf-8")
+                    payload = ("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode(
+                        "utf-8"
+                    )
                 self.wfile.write(payload)
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
@@ -1389,6 +1461,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _sensitive_request_error(self, method, path):
+        route_sensitive = self._route_metadata_sensitive(method, path)
         coding_error = require_local_guard(
             path,
             method,
@@ -1399,7 +1472,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             return coding_error
         if _is_sensitive_coding_path(path):
             return None
-        if not _requires_sensitive_http_auth(method, path):
+        if not (route_sensitive or _requires_sensitive_http_auth(method, path)):
             return None
         origin = self.headers.get("Origin", "")
         if not _is_allowed_sensitive_origin(origin):
@@ -1417,6 +1490,29 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         ):
             return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
         return None
+
+    def _route_metadata_sensitive(self, method, path):
+        method = str(method or "").upper()
+        path = str(path or "")
+        server_ref = getattr(self, "server_ref", None)
+        for entry in getattr(server_ref, "_routes", []):
+            try:
+                route_method, compiled, handler = entry[0], entry[1], entry[2]
+            except Exception:
+                continue
+            if str(route_method or "").upper() != method:
+                continue
+            try:
+                matched = compiled.match(path)
+            except Exception:
+                matched = None
+            if not matched:
+                continue
+            return bool(
+                getattr(handler, "__rumi_route_sensitive__", False)
+                or getattr(handler, "__rumi_route_pre_auth__", False)
+            )
+        return False
 
     def _send_cors_headers(self):
         path = self.path.split("?")[0]
@@ -1454,6 +1550,7 @@ def _wait_for_signal():
     except AttributeError:
         # Windows does not have signal.pause(); poll instead.
         import time
+
         while True:
             time.sleep(86400)
 

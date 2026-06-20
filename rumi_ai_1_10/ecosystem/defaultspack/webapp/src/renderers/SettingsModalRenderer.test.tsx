@@ -4,6 +4,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { buildVisibleModelOptions, SettingsModalRenderer } from "./SettingsModalRenderer";
+import { createSettingsFieldRendererRegistry, SettingsFieldRendererHost } from "./settings/fieldRendererRegistry";
+import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
+import { apiKeySetupTargetFieldId } from "./settings/renderers/settingsFieldRendererUtils";
+import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
+import type { SettingsSection } from "../lib/api";
 
 function makeModelOption(index: number) {
   return {
@@ -14,6 +19,281 @@ function makeModelOption(index: number) {
     model_id: `model-${index}`,
   };
 }
+
+test("settings field renderer host falls back for unknown fields", () => {
+  const registry = createSettingsFieldRendererRegistry();
+  const field = {
+    id: "future_field",
+    label: "Future Field",
+    type: "future_field",
+    default: "default value",
+  } as TemplateSettingsField;
+
+  const html = renderToStaticMarkup(
+    createElement(SettingsFieldRendererHost, {
+      registry,
+      field,
+      sectionId: "demo",
+      value: "fallback value",
+      onChange: () => undefined,
+      fallbackRenderer: ({ value }) => createElement("span", { "data-fallback": "settings" }, String(value)),
+    }),
+  );
+
+  assert.match(html, /data-fallback="settings"/);
+  assert.match(html, /fallback value/);
+});
+
+test("settings field renderer registry routes new field types and catalog bindings", () => {
+  const registry = createSettingsFieldRendererRegistry([
+    {
+      id: "builtin-model-select",
+      types: ["model_select"],
+      render: ({ field, value }) => createElement("output", { "data-renderer": "model" }, `${field.id}:${String(value)}`),
+    },
+    {
+      id: "api-key-setup-binding",
+      component: "ApiKeySetupField",
+      render: ({ field }) => createElement("output", { "data-renderer": "api-key" }, field.id),
+    },
+    {
+      id: "provider-select-renderer",
+      renderers: ["provider_select.compact"],
+      render: ({ field }) => createElement("output", { "data-renderer": "provider" }, field.id),
+    },
+  ]);
+
+  const modelHtml = renderToStaticMarkup(
+    createElement(SettingsFieldRendererHost, {
+      registry,
+      field: {
+        id: "preferred_model",
+        label: "Preferred Model",
+        type: "model_select",
+      } as TemplateSettingsField,
+      sectionId: "models",
+      value: "google/gemini",
+      onChange: () => undefined,
+      fallbackRenderer: () => createElement("span", null, "fallback"),
+    }),
+  );
+  const apiKeyHtml = renderToStaticMarkup(
+    createElement(SettingsFieldRendererHost, {
+      registry,
+      componentBindings: [{ part_id: "api_key_setup", component: "ApiKeySetupField" }],
+      field: {
+        id: "provider_key",
+        label: "Provider Key",
+        type: "api_key_setup",
+        part_id: "api_key_setup",
+      } as TemplateSettingsField,
+      sectionId: "providers",
+      value: null,
+      onChange: () => undefined,
+      fallbackRenderer: () => createElement("span", null, "fallback"),
+    }),
+  );
+  const providerHtml = renderToStaticMarkup(
+    createElement(SettingsFieldRendererHost, {
+      registry,
+      field: {
+        id: "provider",
+        label: "Provider",
+        type: "provider_select",
+        renderer: "provider_select.compact",
+      } as TemplateSettingsField,
+      sectionId: "providers",
+      value: "google",
+      onChange: () => undefined,
+      fallbackRenderer: () => createElement("span", null, "fallback"),
+    }),
+  );
+
+  assert.match(modelHtml, /data-renderer="model"/);
+  assert.match(modelHtml, /preferred_model:google\/gemini/);
+  assert.match(apiKeyHtml, /data-renderer="api-key"/);
+  assert.match(apiKeyHtml, /provider_key/);
+  assert.match(providerHtml, /data-renderer="provider"/);
+  assert.match(providerHtml, /provider/);
+});
+
+test("builtin settings field renderer registry resolves template model_select renderer", () => {
+  const registry = createSettingsFieldRendererRegistry(builtinSettingsFieldRendererEntries);
+  const match = registry.resolve({
+    id: "preferred_model_template",
+    label: "Preferred Model",
+    type: "model_select",
+  } as TemplateSettingsField);
+
+  assert.equal(match?.entry.id, "builtin-settings-model-select");
+  assert.equal(match?.key, "model_select");
+});
+
+test("api_key_setup renderer actions target the rendered template field", () => {
+  assert.equal(apiKeySetupTargetFieldId({
+    id: "api_key_setup_template",
+    label: "API Setup",
+    type: "api_key_setup",
+  } as TemplateSettingsField), "api_key_setup_template");
+});
+
+test("SettingsModalRenderer renders template model_select with searchable model selector surface", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "models",
+          label: "Models",
+          fields: [
+            {
+              id: "preferred_model",
+              label: "Preferred Model",
+              type: "model_select",
+              options: [
+                {
+                  value: "google/gemini-2.5-flash",
+                  label: "Gemini 2.5 Flash",
+                  provider_id: "google",
+                  model_id: "gemini-2.5-flash",
+                  configured: true,
+                },
+              ],
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        models: {
+          preferred_model: "google/gemini-2.5-flash",
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="model_select"/);
+  assert.match(html, /Gemini 2.5 Flash/);
+  assert.doesNotMatch(html, /type="text"[^>]*google\/gemini-2\.5-flash/);
+});
+
+test("SettingsModalRenderer renders template api_key_setup with setup control", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "apis",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "apis",
+          label: "APIs",
+          fields: [
+            {
+              id: "api_key_setup_template",
+              label: "API Key Setup",
+              type: "api_key_setup",
+              provider_id: "openai",
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        apis: {
+          api_keys: [
+            {
+              provider_id: "openai",
+              label: "OpenAI",
+              apis: [{ api_id: "main", name: "main", configured: true }],
+            },
+          ],
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="api_key_setup"/);
+  assert.match(html, /openai:main:\*\*\*/);
+  assert.match(html, /placeholder="openai API key"/);
+  assert.match(html, />Save</);
+});
+
+test("SettingsModalRenderer renders template model_api_routes through registered model routing renderer", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "models",
+          label: "Models",
+          fields: [
+            {
+              id: "model_api_routes",
+              label: "Model API Variants",
+              type: "model_api_routes",
+              renderer: "model_routing",
+              options: [
+                {
+                  value: "google/gemini-2.5-flash",
+                  label: "Gemini 2.5 Flash",
+                  provider_id: "google",
+                  model_id: "gemini-2.5-flash",
+                  configured: true,
+                },
+              ],
+              api_keys: [
+                {
+                  provider_id: "google",
+                  label: "Google",
+                  apis: [{ api_id: "main", name: "main", configured: true }],
+                },
+              ],
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        models: {
+          preferred_model: "google/gemini-2.5-flash",
+          model_api_routes: "google/gemini-2.5-flash: google/main",
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="model_routing"/);
+  assert.match(html, /Gemini 2\.5 Flash/);
+  assert.match(html, /google\/main/);
+});
 
 test("Settings > Tools contains detailed tool settings", () => {
   const html = renderToStaticMarkup(

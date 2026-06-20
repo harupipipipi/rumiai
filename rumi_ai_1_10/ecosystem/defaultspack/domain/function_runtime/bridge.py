@@ -21,6 +21,29 @@ def _defaultspack_function_enabled(function_id: str) -> bool:
     return True
 
 
+_REQUEST_CONTEXT_KEYS = {
+    "_tool_server_approved",
+    "approval_id",
+    "conversation_id",
+    "request_id",
+    "source",
+    "tool_call_id",
+    "user_id",
+}
+
+
+def _sanitized_request_context(context: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(context, dict):
+        return {}
+    sanitized: dict[str, Any] = {}
+    for key in _REQUEST_CONTEXT_KEYS:
+        if key in context:
+            value = context[key]
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                sanitized[key] = value
+    return sanitized
+
+
 def ensure_defaultspack_functions_registered(container: Any | None = None) -> int:
     """Register generated defaultspack functions into the shared DI registry."""
     if container is None:
@@ -37,33 +60,38 @@ def ensure_defaultspack_functions_registered(container: Any | None = None) -> in
     if registry is None:
         return 0
 
-    functions_root = Path(__file__).resolve().parents[2] / "functions"
-    if not functions_root.is_dir():
-        return 0
     registered = 0
-    for function_dir in sorted(path for path in functions_root.iterdir() if path.is_dir()):
-        manifest_path = function_dir / "manifest.json"
-        if not manifest_path.is_file():
-            continue
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        function_id = str(manifest.get("function_id") or function_dir.name).strip()
-        if not function_id:
-            continue
-        if not _defaultspack_function_enabled(function_id):
-            continue
-        try:
-            if registry.register(
-                pack_id="defaultspack",
-                function_id=function_id,
-                manifest=manifest,
-                function_dir=function_dir,
-            ):
-                registered += 1
-        except Exception:
-            continue
+    try:
+        from .template_specs import register_template_functions
+
+        registered += register_template_functions(registry)
+    except Exception:
+        pass
+    functions_root = Path(__file__).resolve().parents[2] / "functions"
+    if functions_root.is_dir():
+        for function_dir in sorted(path for path in functions_root.iterdir() if path.is_dir()):
+            manifest_path = function_dir / "manifest.json"
+            if not manifest_path.is_file():
+                continue
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            function_id = str(manifest.get("function_id") or function_dir.name).strip()
+            if not function_id:
+                continue
+            if not _defaultspack_function_enabled(function_id):
+                continue
+            try:
+                if registry.register(
+                    pack_id="defaultspack",
+                    function_id=function_id,
+                    manifest=manifest,
+                    function_dir=function_dir,
+                ):
+                    registered += 1
+            except Exception:
+                continue
     return registered
 
 
@@ -87,6 +115,9 @@ def invoke_function(
         "args": dict(args or {}),
         "request_id": str((context or {}).get("request_id") or uuid.uuid4()),
     }
+    sanitized_context = _sanitized_request_context(context)
+    if sanitized_context:
+        request["context"] = sanitized_context
     if timeout_seconds is not None:
         request["timeout_seconds"] = timeout_seconds
     try:

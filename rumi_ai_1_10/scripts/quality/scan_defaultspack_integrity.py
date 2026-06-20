@@ -41,6 +41,37 @@ def _route_specs():
     return canonical_http_route_specs(include_always_available=True)
 
 
+def _template_function_manifests() -> dict[str, dict[str, Any]]:
+    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+    try:
+        from domain.function_runtime.template_specs import template_function_manifests
+
+        manifests = template_function_manifests(DEFAULTSPACK_ROOT)
+    except Exception:
+        return {}
+    return manifests if isinstance(manifests, dict) else {}
+
+
+def _physical_function_exists(function_id: str) -> bool:
+    return (DEFAULTSPACK_ROOT / "functions" / function_id / "manifest.json").is_file()
+
+
+def _physical_function_main_exists(function_id: str) -> bool:
+    return (DEFAULTSPACK_ROOT / "functions" / function_id / "main.py").is_file()
+
+
+def _template_function_entrypoint_exists(manifest: dict[str, Any]) -> bool:
+    entrypoint = str(manifest.get("entrypoint") or "main.py:run")
+    entrypoint_file = entrypoint.rsplit(":", 1)[0] if ":" in entrypoint else entrypoint
+    candidate = (DEFAULTSPACK_ROOT / "domain" / "function_runtime" / entrypoint_file).resolve()
+    try:
+        candidate.relative_to((DEFAULTSPACK_ROOT / "domain" / "function_runtime").resolve())
+    except ValueError:
+        return False
+    return candidate.is_file()
+
+
 def _module_path(block_module: str) -> Path:
     if block_module.startswith("ecosystem."):
         return ROOT / Path(block_module.replace(".", "/") + ".py")
@@ -92,6 +123,7 @@ def check_routes(errors: list[str]) -> None:
     sys.path.insert(0, str(DEFAULTSPACK_ROOT))
     from transport.registry import require_legacy_route_allowlisted
 
+    template_manifests = _template_function_manifests()
     seen: set[tuple[str, str]] = set()
     for spec in _route_specs():
         method = str(spec.method or "").upper()
@@ -109,11 +141,19 @@ def check_routes(errors: list[str]) -> None:
         ).strip()
 
         if function_id:
-            if not (DEFAULTSPACK_ROOT / "functions" / function_id / "manifest.json").is_file():
+            template_manifest = template_manifests.get(function_id)
+            has_physical_manifest = _physical_function_exists(function_id)
+            has_template_manifest = isinstance(template_manifest, dict)
+            if not (has_physical_manifest or has_template_manifest):
                 errors.append(
                     f"route references missing function manifest: {method} {pattern} -> {function_id}"
                 )
-            if not (DEFAULTSPACK_ROOT / "functions" / function_id / "main.py").is_file():
+            if has_template_manifest:
+                if not _template_function_entrypoint_exists(template_manifest):
+                    errors.append(
+                        f"route references missing template function entrypoint: {method} {pattern} -> {function_id}"
+                    )
+            elif not _physical_function_main_exists(function_id):
                 errors.append(
                     f"route references missing function main.py: {method} {pattern} -> {function_id}"
                 )

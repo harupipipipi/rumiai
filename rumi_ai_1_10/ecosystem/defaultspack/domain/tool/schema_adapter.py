@@ -540,12 +540,11 @@ def is_tool_rejected_by_policy(tool: Any, policy: Optional[Dict[str, Any]]) -> b
     )
     if tool_name and tool_name in denylist:
         return True
-    allowlist = _normalize_policy_tool_list(
-        policy.get("tool_allowlist")
-        or policy.get("enabled_tools")
-        or policy.get("allowed_tools")
+    allowlist, has_allowlist = _normalize_policy_tool_list_from_first_present(
+        policy,
+        ("tool_allowlist", "enabled_tools", "allowed_tools"),
     )
-    if allowlist and tool_name not in allowlist:
+    if has_allowlist and tool_name not in allowlist:
         return True
     category = _tool_metadata_value(tool, "category")
     action_type = _tool_metadata_value(tool, "action_type")
@@ -565,6 +564,16 @@ def _normalize_policy_tool_list(value: Any) -> Set[str]:
     if not isinstance(value, list):
         return set()
     return {str(item).strip() for item in value if str(item).strip()}
+
+
+def _normalize_policy_tool_list_from_first_present(
+    policy: Dict[str, Any],
+    keys: tuple[str, ...],
+) -> tuple[Set[str], bool]:
+    for key in keys:
+        if key in policy:
+            return _normalize_policy_tool_list(policy.get(key)), True
+    return set(), False
 
 
 def tool_requires_approval_by_policy(tool: Any, policy: Optional[Dict[str, Any]]) -> bool:

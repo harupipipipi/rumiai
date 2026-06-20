@@ -1271,7 +1271,8 @@ export type ComposerCommandExecution =
   | { type: "model_command"; action: string }
   | { type: "settings_patch"; section: string; field: string }
   | { type: "rumi_function"; qualified_name: string }
-  | { type: "chat_action"; action: string };
+  | { type: "chat_action"; action: string }
+  | { type: "pack_block"; qualified_name: string };
 
 export type ComposerCommandItem = {
   id: string;
@@ -1299,6 +1300,89 @@ export type ComposerCommandExecuteResult = {
   message?: string;
   candidates?: ModelCommandCandidate[];
   selected_model?: string | ModelCommandCandidate | null;
+};
+
+export type TemplateComposerInput = {
+  id: string;
+  label?: string;
+  description?: string;
+  placeholder?: string;
+  help?: string;
+  accepted_modalities?: string[];
+  feature_flags?: Record<string, boolean | string | number | null | undefined>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  component?: string;
+  renderer?: string;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateContextPolicy = {
+  id: string;
+  label?: string;
+  description?: string;
+  policy?: Record<string, unknown>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateToolPolicy = {
+  id: string;
+  label?: string;
+  description?: string;
+  toggleable?: boolean;
+  default_enabled_tools?: string[];
+  default_disabled_tools?: string[];
+  allowed_tools?: string[];
+  denied_tools?: string[];
+  tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
+  parallel_tool_calls?: boolean;
+  params?: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateAiInput = {
+  id: string;
+  label?: string;
+  description?: string;
+  composer_input?: string;
+  composer_input_id?: string;
+  context_policy?: string;
+  context_policy_id?: string;
+  tool_policy?: string;
+  tool_policy_id?: string;
+  widgets?: string[];
+  params?: Record<string, unknown>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateCatalogMetadataItem = {
+  id?: string;
+  label?: string;
+  description?: string;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type ShellRegion = {
@@ -1395,6 +1479,13 @@ export type UICatalog = {
     }>;
   };
   skills?: SkillCatalogItem[];
+  commands?: ComposerCommandItem[];
+  composer_inputs?: TemplateComposerInput[];
+  ai_inputs?: TemplateAiInput[];
+  tool_policies?: TemplateToolPolicy[];
+  context_policies?: TemplateContextPolicy[];
+  composer_widgets?: TemplateCatalogMetadataItem[];
+  external_io_templates?: TemplateCatalogMetadataItem[];
   extension_points: Array<{
     id: string;
     path: string;
@@ -1407,6 +1498,71 @@ export type UICatalog = {
     source: string;
   }>;
 };
+
+function normalizedCommandIdentity(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function commandIdentityKeys(command: ComposerCommandItem): string[] {
+  const keys = [
+    normalizedCommandIdentity(command.id),
+    normalizedCommandIdentity(command.name),
+  ].filter(Boolean);
+  return [...new Set(keys)];
+}
+
+export function mergeComposerCommands(
+  backendCommands: ComposerCommandItem[] = [],
+  catalogCommands: ComposerCommandItem[] = [],
+): ComposerCommandItem[] {
+  const merged: ComposerCommandItem[] = [];
+  const indexByKey = new Map<string, number>();
+
+  const upsert = (command: ComposerCommandItem, source: "backend" | "catalog") => {
+    const keys = commandIdentityKeys(command);
+    const existingIndex = keys.map((key) => indexByKey.get(key)).find((index) => index !== undefined);
+    if (existingIndex !== undefined) {
+      if (source === "catalog") {
+        return;
+      }
+      return;
+    }
+    merged.push(command);
+    const nextIndex = merged.length - 1;
+    keys.forEach((key) => indexByKey.set(key, nextIndex));
+  };
+
+  backendCommands.forEach((command) => upsert(command, "backend"));
+  catalogCommands.forEach((command) => upsert(command, "catalog"));
+  return merged;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function nonEmptyString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function composerCommandResultMessage(result: ComposerCommandExecuteResult): string | null {
+  const directMessage = nonEmptyString(result.message);
+  if (directMessage) return directMessage;
+
+  const resultPayload = objectRecord(result.result);
+  if (!resultPayload) return null;
+
+  const payloadMessage = nonEmptyString(resultPayload.message);
+  const path = nonEmptyString(resultPayload.path)
+    || nonEmptyString(resultPayload.file_path)
+    || nonEmptyString(resultPayload.artifact_path);
+  if (payloadMessage && path) return `${payloadMessage}\n${path}`;
+  if (payloadMessage) return payloadMessage;
+  if (path) return `Command wrote ${path}`;
+  return null;
+}
 
 type ApiOk<T> = {
   status: "ok";
@@ -1423,12 +1579,22 @@ type ApiError = {
 
 type ApiEnvelope<T> = ApiOk<T> | ApiError;
 
+export type ToolSelectionRequest = {
+  mode?: "auto" | "manual" | "none";
+  include?: string[];
+  exclude?: string[];
+  scope?: "turn";
+  must_use?: boolean;
+};
+
 type SendMessageOptions = {
   thinking_level?: string | null;
   deepthink_enabled?: boolean;
   tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
   parallel_tool_calls?: boolean;
+  params?: Record<string, unknown>;
   tool_policy?: Record<string, unknown>;
+  tool_selection?: ToolSelectionRequest;
   attachments?: ChatAttachment[];
   tools?: string[];
   metadata?: Record<string, unknown>;
@@ -1773,11 +1939,13 @@ function messageRequestBody(
     },
     tools: Array.isArray(options?.tools) ? options.tools : undefined,
     params: {
+      ...(options?.params ?? {}),
       thinking_level: options?.thinking_level ?? undefined,
       deepthink_enabled: options?.deepthink_enabled ?? undefined,
       tool_choice: options?.tool_choice ?? undefined,
       parallel_tool_calls: options?.parallel_tool_calls ?? undefined,
       tool_policy: options?.tool_policy ?? undefined,
+      tool_selection: options?.tool_selection ?? undefined,
     },
   };
 }

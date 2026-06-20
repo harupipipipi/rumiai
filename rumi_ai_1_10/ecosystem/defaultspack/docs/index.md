@@ -32,6 +32,7 @@ For the repo-wide glossary and migration guidance, see
 |---|---|
 | Frontend shell and routes | [frontend.md](frontend.md) |
 | Frontend extension points | [frontend_extensions.md](frontend_extensions.md) |
+| RumiTemplate composition platform | [templates.md](templates.md) |
 | UI and layout | [ui_and_layout.md](ui_and_layout.md) |
 | Chat module | [chat.md](chat.md) |
 | Agent runtime | [agent_runtime.md](agent_runtime.md) |
@@ -56,6 +57,7 @@ For the repo-wide glossary and migration guidance, see
 | Topic | Document |
 |---|---|
 | Extending defaultspack | [extending.md](extending.md) |
+| Template schema, trust, collision, lifecycle, and contracts | [templates.md](templates.md) |
 | Input profiles | [input-profiles.md](input-profiles.md) |
 | External inputs | [external-inputs.md](external-inputs.md) |
 | Webhooks | [webhooks.md](webhooks.md) |
