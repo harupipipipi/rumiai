@@ -572,6 +572,52 @@ def test_ambient_audio_release_without_transcript_transcribes_for_text_model(mon
     assert "data:audio" not in json.dumps(envelope.attachments, ensure_ascii=False)
 
 
+def test_ambient_transcription_test_runs_without_monitor_and_does_not_dispatch(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+
+    router = AmbientTriggerRouter()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+
+    transcript = "マイクテストです"
+    with (
+        patch(
+            "domain.ambient.router.transcribe_ambient_audio",
+            return_value={
+                "status": "ok",
+                "text": transcript,
+                "source": "local_whisper",
+                "model": "local-whisper",
+                "results": [{"index": 0, "text": transcript, "source": "local_whisper", "model": "local-whisper"}],
+            },
+        ) as transcribe,
+        patch("domain.ambient.router.submit_input") as submit,
+    ):
+        result = router.submit_event(
+            {
+                "source": "microphone",
+                "trigger": "transcription_test",
+                "mode": "transcribe_audio_test",
+                "audio_data_url": "data:audio/webm;base64,AAAA",
+                "audio_mime_type": "audio/webm",
+            }
+        )
+
+    assert result["status"] == "ok"
+    assert result["transcript"] == transcript
+    assert result["transcription"]["source"] == "local_whisper"
+    transcribe.assert_called_once()
+    assert transcribe.call_args.kwargs["target_supports_audio"] is False
+    submit.assert_not_called()
+
+    audit_text = (tmp_path / "ambient-audit.jsonl").read_text(encoding="utf-8")
+    assert transcript not in audit_text
+    assert "data:audio" not in audit_text
+
+
 def test_text_model_audio_uses_local_whisper_fallback(monkeypatch, tmp_path):
     _clear_local_whisper_env(monkeypatch)
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))

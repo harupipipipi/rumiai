@@ -196,6 +196,8 @@ class AmbientTriggerRouter:
             voice_result = self._handle_voice_wake(event, state)
             if voice_result is not None:
                 return voice_result
+        elif event.source == "microphone" and event.trigger == "transcription_test":
+            return self._handle_transcription_test(event, state)
         elif event.source == "camera" and event.trigger == "approval_gesture":
             if event.confidence < 0.5:
                 return self._record(event, "ignored", "approval_gesture.low_confidence")
@@ -242,6 +244,49 @@ class AmbientTriggerRouter:
             )
 
         return self._dispatch(event, action_id, context or {}, state=state, attachments=attachments)
+
+    def _handle_transcription_test(self, event: AmbientTriggerEvent, state: dict[str, Any]) -> dict[str, Any]:
+        attachments = self._attachments_for_event(event)
+        audio_items = [item for item in attachments if isinstance(item, dict) and _is_audio_attachment(item)]
+        if not audio_items:
+            return self._record(
+                event,
+                "transcription_unavailable",
+                "ambient.transcription_test.audio_missing",
+                transcription={
+                    "status": "unavailable",
+                    "code": "audio_payload_missing",
+                    "reason": "テスト用の録音音声がありません。",
+                },
+            )
+        routing = state.get("routing") if isinstance(state.get("routing"), dict) else {}
+        params = dict(event.payload.get("params") if isinstance(event.payload.get("params"), dict) else {})
+        result = transcribe_ambient_audio(
+            attachments,
+            payload=event.payload,
+            params=params,
+            routing=routing,
+            target_model_ref=_clean_string(event.payload.get("model")) or _clean_string(routing.get("model")),
+            target_supports_audio=False,
+        )
+        transcription = transcription_result_summary(result)
+        status = "ok" if result.get("status") == "ok" and str(result.get("text") or "").strip() else "transcription_unavailable"
+        record = self._record(
+            event,
+            status,
+            "ambient.transcription_test.completed" if status == "ok" else "ambient.transcription_test.unavailable",
+            transcription=transcription,
+            privacy={
+                "audio_saved": False,
+                "image_saved": False,
+                "frame_saved": False,
+                "image_uploaded": False,
+            },
+        )
+        return {
+            **record,
+            "transcript": str(result.get("text") or "").strip(),
+        }
 
     def _handle_voice_wake(self, event: AmbientTriggerEvent, state: dict[str, Any]) -> dict[str, Any] | None:
         embedding = embedding_from_payload(event.payload)
@@ -819,7 +864,14 @@ class AmbientTriggerRouter:
         return None
 
     def _event_can_run_without_monitor(self, event: AmbientTriggerEvent) -> bool:
-        return event.source == "hook" and event.trigger == "external_hook" and event.mode == "preset_text"
+        return (
+            event.source == "hook"
+            and event.trigger == "external_hook"
+            and event.mode == "preset_text"
+        ) or (
+            event.source == "microphone"
+            and event.trigger == "transcription_test"
+        )
 
     def _cooldown_reason(self, state: dict[str, Any]) -> str:
         service = state.get("services", {}).get("gesture_wake_monitor", {})

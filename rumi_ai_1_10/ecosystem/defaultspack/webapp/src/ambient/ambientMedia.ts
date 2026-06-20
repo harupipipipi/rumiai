@@ -9,6 +9,13 @@ export type ActiveAudioRecorder = {
   cancel: () => void;
 };
 
+export type MicrophoneInputTestResult = {
+  durationMs: number;
+  peak: number;
+  rms: number;
+  samples: number;
+};
+
 export type AmbientAudioRecording = {
   dataUrl: string;
   mimeType: string;
@@ -222,6 +229,49 @@ export async function startPinchAudioRecorder(deviceId?: string): Promise<Active
       stopTracks();
     },
   };
+}
+
+export async function testMicrophoneInput(durationMs = 1400, deviceId?: string): Promise<MicrophoneInputTestResult> {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("このブラウザではマイクを使用できません。");
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: audioCaptureConstraints(deviceId) });
+  const startedAt = performance.now();
+  try {
+    const AudioContextConstructor = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextConstructor) {
+      throw new Error("このブラウザでは音量テストを使用できません。");
+    }
+    const context = new AudioContextConstructor();
+    const source = context.createMediaStreamSource(stream);
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+    source.connect(analyser);
+    const buffer = new Float32Array(analyser.fftSize);
+    let peak = 0;
+    let totalSquares = 0;
+    let samples = 0;
+    const deadline = startedAt + Math.max(300, Math.min(durationMs, 5000));
+    while (performance.now() < deadline) {
+      analyser.getFloatTimeDomainData(buffer);
+      for (const value of buffer) {
+        const abs = Math.abs(value);
+        if (abs > peak) peak = abs;
+        totalSquares += value * value;
+      }
+      samples += buffer.length;
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
+    }
+    await context.close();
+    return {
+      durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      peak,
+      rms: samples > 0 ? Math.sqrt(totalSquares / samples) : 0,
+      samples,
+    };
+  } finally {
+    stream.getTracks().forEach((track) => track.stop());
+  }
 }
 
 export async function startWakeListening(onEmbedding: (embedding: number[]) => Promise<void>, deviceId?: string): Promise<() => void> {

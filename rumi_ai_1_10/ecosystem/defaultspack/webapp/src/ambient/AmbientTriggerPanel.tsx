@@ -35,6 +35,7 @@ import {
   startPinchAudioRecorder,
   startPinchSpeechRecognition,
   startWakeListening,
+  testMicrophoneInput,
   videoCaptureConstraints,
   type ActiveAudioRecorder,
   type SpeechRecognitionLike,
@@ -160,6 +161,12 @@ export function AmbientTriggerPanel({
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [debugTranscript, setDebugTranscript] = useState("ブラウザQAのテストです。");
   const [debugStatus, setDebugStatus] = useState("待機中です。");
+  const [micTestBusy, setMicTestBusy] = useState(false);
+  const [micTestStatus, setMicTestStatus] = useState("未実行");
+  const [micTestLevel, setMicTestLevel] = useState<number | null>(null);
+  const [transcriptionTestBusy, setTranscriptionTestBusy] = useState(false);
+  const [transcriptionTestStatus, setTranscriptionTestStatus] = useState("未実行");
+  const [transcriptionTestText, setTranscriptionTestText] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioStopRef = useRef<(() => void) | null>(null);
   const gestureStopRef = useRef<(() => void) | null>(null);
@@ -263,6 +270,7 @@ export function AmbientTriggerPanel({
   const pendingApproval = status?.pending_approval ?? null;
   const visibleMessage = useMemo(() => ambientRenderableMessage(message), [message]);
   const ambientDispatchGranted = Boolean(status?.permissions.rumi["ambient.trigger.dispatch"]?.granted);
+  const micRumiPermissionGranted = Boolean(status?.permissions.rumi[AMBIENT_MIC_PERMISSION]?.granted);
   const selectedDispatchToolIds = selectedToolIds ?? EMPTY_SELECTED_TOOL_IDS;
   const selectedDispatchToolIdsKey = selectedDispatchToolIds.join("\0");
   const explicitDebugConversationId = debugMode ? cleanString(conversationId) : null;
@@ -1137,6 +1145,94 @@ export function AmbientTriggerPanel({
     }
   }
 
+  async function runMicInputTest() {
+    if (!micRumiPermissionGranted || rumiApprovalPending) {
+      setMicTestStatus("Rumiのマイク利用許可を完了してください。");
+      setExpanded(true);
+      return;
+    }
+    if (pinchRecording || pinchRecorderRef.current) {
+      setMicTestStatus("録音中はマイクテストを実行できません。");
+      return;
+    }
+    setMicTestBusy(true);
+    setMicTestLevel(null);
+    setMicTestStatus("確認中です。1秒ほど話してください。");
+    try {
+      const result = await testMicrophoneInput(1400, selectedMicId || undefined);
+      const level = Math.max(result.peak, result.rms * 4);
+      setMicTestLevel(level);
+      if (level >= 0.03) {
+        setMicTestStatus(`入力OK: 音量 ${formatMicLevel(level)}`);
+        await ambientTriggerClient.checkOsPermissions({ [AMBIENT_MIC_PERMISSION]: "granted" }).catch(() => undefined);
+        await refresh().catch(() => undefined);
+      } else {
+        setMicTestStatus(`入力が小さいです: 音量 ${formatMicLevel(level)}。マイク選択やOS許可を確認してください。`);
+      }
+    } catch (error) {
+      setMicTestStatus(error instanceof Error ? error.message : "マイクテストに失敗しました。");
+      await ambientTriggerClient.checkOsPermissions({ [AMBIENT_MIC_PERMISSION]: "denied" }).catch(() => undefined);
+      await refresh().catch(() => undefined);
+    } finally {
+      setMicTestBusy(false);
+    }
+  }
+
+  async function runTranscriptionTest() {
+    if (!micRumiPermissionGranted || !ambientDispatchGranted || rumiApprovalPending) {
+      setTranscriptionTestStatus("Rumiのマイク/トリガー利用許可を完了してください。");
+      setExpanded(true);
+      return;
+    }
+    if (pinchRecording || pinchRecorderRef.current) {
+      setTranscriptionTestStatus("録音中は文字起こしテストを実行できません。");
+      return;
+    }
+    setTranscriptionTestBusy(true);
+    setTranscriptionTestText("");
+    setTranscriptionTestStatus("録音中です。3秒ほど話してください。");
+    let recorder: ActiveAudioRecorder | null = null;
+    try {
+      recorder = await startPinchAudioRecorder(selectedMicId || undefined);
+      await sleep(3200);
+      const recording = await recorder.stop();
+      recorder = null;
+      setTranscriptionTestStatus("文字起こし中です。");
+      const result = await ambientTriggerClient.submitEvent({
+        source: "microphone",
+        trigger: "transcription_test",
+        mode: "transcribe_audio_test",
+        action_id: "chat.message",
+        duration_ms: recording.durationMs,
+        audio_data_url: recording.dataUrl,
+        audio_mime_type: recording.mimeType,
+        audio_size: recording.size,
+        audio_name: `mic-transcription-test.${recording.extension}`,
+        model: routingModel || undefined,
+        metadata: {
+          panel: "ambient_settings",
+          test_kind: "transcription",
+        },
+      });
+      const transcript = String(result.transcript ?? "").trim();
+      const transcription = result.transcription && typeof result.transcription === "object"
+        ? result.transcription as Record<string, unknown>
+        : {};
+      if (transcript) {
+        setTranscriptionTestText(transcript);
+        setTranscriptionTestStatus(`文字起こしOK: ${String(transcription.source || transcription.model || "local")}`);
+      } else {
+        const detail = String(transcription.reason || transcription.code || result.reason || "").trim();
+        setTranscriptionTestStatus(detail ? `文字起こしできませんでした: ${detail}` : "文字起こしできませんでした。もう少し長く、はっきり話してください。");
+      }
+    } catch (error) {
+      setTranscriptionTestStatus(error instanceof Error ? error.message : "文字起こしテストに失敗しました。");
+    } finally {
+      recorder?.cancel();
+      setTranscriptionTestBusy(false);
+    }
+  }
+
   async function submitMiniChat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = miniInput.trim();
@@ -1472,6 +1568,52 @@ export function AmbientTriggerPanel({
           許可を再確認
         </button>
       </div>
+      <section className="space-y-2 rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold text-zinc-300">マイク確認</span>
+          {micTestBusy || transcriptionTestBusy ? <Loader2 size={13} className="animate-spin text-sky-200" /> : null}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => void runMicInputTest()}
+            disabled={rumiApprovalPending || !micRumiPermissionGranted || micTestBusy || transcriptionTestBusy}
+            className="ambient-mini-button"
+          >
+            <Mic size={14} />
+            入力テスト
+          </button>
+          <button
+            type="button"
+            onClick={() => void runTranscriptionTest()}
+            disabled={rumiApprovalPending || !micRumiPermissionGranted || !ambientDispatchGranted || micTestBusy || transcriptionTestBusy}
+            className="ambient-mini-button"
+          >
+            <Radio size={14} />
+            文字起こし
+          </button>
+        </div>
+        <div className="space-y-1 text-[11px] leading-5 text-zinc-400">
+          <p className={cn("flex items-center gap-1", micTestLevel !== null && micTestLevel >= 0.03 ? "text-emerald-200" : "")}>
+            {micTestLevel !== null && micTestLevel >= 0.03 ? <Check size={12} /> : null}
+            <span>{micTestStatus}</span>
+          </p>
+          {micTestLevel !== null && (
+            <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
+              <div
+                className="h-full rounded-full bg-emerald-400"
+                style={{ width: formatMicLevel(micTestLevel) }}
+              />
+            </div>
+          )}
+          <p>{transcriptionTestStatus}</p>
+          {transcriptionTestText && (
+            <p className="rounded-md border border-emerald-400/25 bg-emerald-400/10 px-2 py-1 text-emerald-100">
+              {transcriptionTestText}
+            </p>
+          )}
+        </div>
+      </section>
       <button
         type="button"
         onClick={() => setCameraDebugOpen((value) => !value)}
@@ -2025,6 +2167,11 @@ function formatRecordingTime(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function formatMicLevel(level: number): string {
+  if (!Number.isFinite(level)) return "0%";
+  return `${Math.round(Math.max(0, Math.min(1, level)) * 100)}%`;
 }
 
 function isAmbientStatus(value: unknown): value is AmbientStatus {

@@ -80,7 +80,7 @@ export type AmbientPendingApproval = {
 
 export type AmbientEventPayload = {
   source: "microphone" | "camera" | "hook" | string;
-  trigger: "voice_wake" | "pinch" | "gesture_choice" | "approval_gesture" | "external_hook" | string;
+  trigger: "voice_wake" | "transcription_test" | "pinch" | "gesture_choice" | "approval_gesture" | "external_hook" | string;
   event_id?: string;
   confidence?: number;
   duration_ms?: number;
@@ -104,6 +104,10 @@ export type AmbientEventPayload = {
   metadata?: Record<string, unknown>;
   audio_embedding?: number[];
   samples?: number[];
+  audio_data_url?: string;
+  audio_mime_type?: string;
+  audio_size?: number;
+  audio_name?: string;
   attachments?: Array<Record<string, unknown>>;
 };
 
