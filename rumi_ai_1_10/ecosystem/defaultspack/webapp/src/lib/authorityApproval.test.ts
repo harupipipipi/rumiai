@@ -17,6 +17,7 @@ import {
 } from "./authorityApproval";
 import {
   browserAuthorityApprovalPath,
+  browserApprovalTokenizedPath,
   readBrowserApprovalTokenFromLocation,
 } from "./authorityApprovalBrowserToken";
 
@@ -376,6 +377,14 @@ test("authority approval browser token helper accepts URL aliases and builds tok
     browserAuthorityApprovalPath("auth 1", "tok/en"),
     "/approval?request_id=auth+1&browser_approval_token=tok%2Fen",
   );
+  assert.equal(
+    browserApprovalTokenizedPath("/finger-recording?authority_approved=1", "tok/en"),
+    "/finger-recording?authority_approved=1&browser_approval_token=tok%2Fen",
+  );
+  assert.equal(
+    browserApprovalTokenizedPath("/finger-recording?browser_approval_token=existing", "tok/en"),
+    "/finger-recording?browser_approval_token=existing",
+  );
 });
 
 test("authority approval window approves exact request by default without related permission bundling", () => {
@@ -487,9 +496,21 @@ test("authority approval browser route is read-only without URL token but can fe
   assert.match(source, /displayedSettledStatus && \(/);
   assert.match(source, /このリクエストは処理済みです。追加の操作は不要です。/);
   assert.match(apiSource, /browserAuthorityUiOperator\(requestId: string, browserApprovalToken: string\)/);
+  assert.match(apiSource, /withQuery\("\/api\/authority\/browser-ui-operator", \{\s*browser_approval_token: browserApprovalToken,\s*\}\)/);
   assert.match(apiSource, /\/api\/authority\/browser-ui-operator/);
   assert.match(apiSource, /"X-Rumi-Approval-Browser-Token": browserApprovalToken/);
+  assert.match(apiSource, /request_id: requestId,\s*browser_approval_token: browserApprovalToken/s);
   assert.match(resourceSource, /getBrowserAuthorityApprovalContext\(requestId: string, browserApprovalToken: string\)/);
+});
+
+test("authority approval browser QA token is preserved across child window URLs", () => {
+  const appSource = readFileSync(resolve(SRC_ROOT, "App.tsx"), "utf8");
+  const source = authorityApprovalWindowSource();
+
+  assert.match(appSource, /browserApprovalTokenizedPath/);
+  assert.match(appSource, /defaultspackUrlWithLocalAuth\(browserApprovalTokenizedPath\("\/finger-recording"\)\)/);
+  assert.match(source, /browserApprovalTokenizedPath/);
+  assert.match(source, /defaultspackUrlWithStoredLocalAuth\(browserApprovalTokenizedPath\("\/finger-recording\?authority_approved=1"\)\)/);
 });
 
 test("authority approval window explains disabled browser QA approval", () => {

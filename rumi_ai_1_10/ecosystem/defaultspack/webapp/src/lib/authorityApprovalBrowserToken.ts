@@ -41,6 +41,27 @@ export function browserAuthorityApprovalPath(requestId: string, browserApprovalT
   return `/approval?${params.toString()}`;
 }
 
+export function browserApprovalTokenizedPath(pathOrUrl: string, browserApprovalToken = readBrowserApprovalToken()): string {
+  const token = browserApprovalToken.trim();
+  if (!token) return pathOrUrl;
+  try {
+    const hasWindow = typeof window !== "undefined";
+    const base = hasWindow ? window.location.origin : "http://127.0.0.1";
+    const relativeSameOriginPath = pathOrUrl.startsWith("/") && !pathOrUrl.startsWith("//");
+    const url = new URL(pathOrUrl, base);
+    if (!url.searchParams.get("browser_approval_token")?.trim()) {
+      url.searchParams.set("browser_approval_token", token);
+    }
+    if ((hasWindow && url.origin === window.location.origin) || (!hasWindow && relativeSameOriginPath)) {
+      return `${url.pathname}${url.search}${url.hash}`;
+    }
+    return url.toString();
+  } catch {
+    const separator = pathOrUrl.includes("?") ? "&" : "?";
+    return `${pathOrUrl}${separator}browser_approval_token=${encodeURIComponent(token)}`;
+  }
+}
+
 function locationSearch(): string {
   try {
     return typeof window === "undefined" ? "" : window.location.search;

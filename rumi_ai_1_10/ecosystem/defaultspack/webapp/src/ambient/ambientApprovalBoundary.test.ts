@@ -199,3 +199,15 @@ test("ambient mini chat keeps a submitted conversation active over stale routing
   assert.match(panelSource, /async function selectMiniChatRoutingConversation[\s\S]*setMiniConversationIdOverride\(null\)[\s\S]*selectConversationForRouting\(chatId\)/);
   assert.match(panelSource, /onSelect=\{\(chatId\) => void selectMiniChatRoutingConversation\(chatId\)\}/);
 });
+
+test("ambient debug QA marks completed model replies and clears transient input preview", () => {
+  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+
+  assert.match(panelSource, /function ambientResultHasAssistantReply\(result: Record<string, unknown>\): boolean/);
+  assert.match(panelSource, /cleanString\(record\.assistant_text\)/);
+  assert.match(panelSource, /cleanString\(record\.assistant_message_id\)/);
+  assert.match(panelSource, /cleanString\(dispatch\?\.assistant_text\)/);
+  assert.match(panelSource, /cleanString\(dispatch\?\.assistant_message_id\)/);
+  assert.match(panelSource, /if \(ambientResultHasAssistantReply\(result\)\) return `\$\{ambientOperationLabels\.done\}: AIの回答が届きました。`/);
+  assert.match(panelSource, /setDebugStatus\(nextMessage\);\s*setLatestSubmittedInput\(null\);/);
+});

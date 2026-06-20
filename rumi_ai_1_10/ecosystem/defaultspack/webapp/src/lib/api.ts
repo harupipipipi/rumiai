@@ -3137,13 +3137,16 @@ export const api = {
   },
 
   browserAuthorityUiOperator(requestId: string, browserApprovalToken: string) {
-    return request<AuthorityApprovalContext>("/api/authority/browser-ui-operator", {
+    return request<AuthorityApprovalContext>(withQuery("/api/authority/browser-ui-operator", {
+      browser_approval_token: browserApprovalToken,
+    }), {
       method: "POST",
       headers: {
         "X-Rumi-Approval-Browser-Token": browserApprovalToken,
       },
       body: JSON.stringify({
         request_id: requestId,
+        browser_approval_token: browserApprovalToken,
       }),
     });
   },

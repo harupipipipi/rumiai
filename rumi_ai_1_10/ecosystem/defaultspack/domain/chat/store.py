@@ -64,6 +64,7 @@ class ChatStore:
             cls._instance._storage_path = storage_path
             cls._instance._lock = threading.RLock()
             cls._instance._conversations = cls._instance._load_conversations()
+            cls._instance._loaded_storage_signature = cls._instance._storage_signature()
             if cls._instance._conversations:
                 try:
                     cls._instance._save_conversation_files()
@@ -72,6 +73,7 @@ class ChatStore:
         elif cls._instance._storage_path != storage_path:
             cls._instance._storage_path = storage_path
             cls._instance._conversations = cls._instance._load_conversations()
+            cls._instance._loaded_storage_signature = cls._instance._storage_signature()
             if cls._instance._conversations:
                 try:
                     cls._instance._save_conversation_files()
@@ -85,6 +87,21 @@ class ChatStore:
         if override:
             return Path(override)
         return Path(__file__).resolve().parents[2] / "user_data" / "shared" / "chat" / "conversations.json"
+
+    def _storage_signature(self):
+        try:
+            stat = self._storage_path.stat()
+            return stat.st_mtime_ns, stat.st_size
+        except OSError:
+            return None
+
+    def _refresh_if_storage_changed(self):
+        with self._lock:
+            current_signature = self._storage_signature()
+            if getattr(self, "_loaded_storage_signature", None) == current_signature:
+                return
+            self._conversations = self._load_conversations()
+            self._loaded_storage_signature = current_signature
 
     def _load_conversations(self):
         with self._lock:
@@ -168,6 +185,7 @@ class ChatStore:
             self._save_external_conversation_indexes()
             try:
                 self._atomic_write_json(self._storage_path, payload)
+                self._loaded_storage_signature = self._storage_signature()
             except OSError as exc:
                 if not self._is_transient_replace_error(exc):
                     raise
@@ -187,6 +205,7 @@ class ChatStore:
         group_id=None,
     ):
         with self._lock:
+            self._refresh_if_storage_changed()
             cid = _gen_id()
             now = _now_ms()
             parent_id = str(parent_conversation_id) if parent_conversation_id else None
@@ -225,6 +244,7 @@ class ChatStore:
             return copy.deepcopy(conv)
 
     def get_conversation(self, conversation_id):
+        self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return None
@@ -246,6 +266,7 @@ class ChatStore:
         query=None,
         include_messages=False,
     ):
+        self._refresh_if_storage_changed()
         filter_tags = self._normalize_filter_tags(tags)
         query_text = str(query or "").strip().casefold()
         results = []
@@ -310,6 +331,7 @@ class ChatStore:
 
     def update_conversation(self, conversation_id, updates):
         with self._lock:
+            self._refresh_if_storage_changed()
             conv = self._conversations.get(conversation_id)
             if conv is None:
                 return None
@@ -330,6 +352,7 @@ class ChatStore:
 
     def delete_conversation(self, conversation_id):
         with self._lock:
+            self._refresh_if_storage_changed()
             if conversation_id in self._conversations:
                 conv = self._conversations[conversation_id]
                 parent_id = conv.get("parent_conversation_id") if isinstance(conv, dict) else None
@@ -352,6 +375,7 @@ class ChatStore:
     # ----------------------------------------------------------
     def add_message(self, conversation_id, message_dict):
         with self._lock:
+            self._refresh_if_storage_changed()
             conv = self._conversations.get(conversation_id)
             if conv is None:
                 return None
@@ -387,6 +411,7 @@ class ChatStore:
             return copy.deepcopy(msg)
 
     def get_message(self, conversation_id, message_id):
+        self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return None
@@ -396,6 +421,7 @@ class ChatStore:
         return None
 
     def update_message(self, conversation_id, message_id, updates):
+        self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return None
@@ -412,6 +438,7 @@ class ChatStore:
         return None
 
     def delete_message(self, conversation_id, message_id):
+        self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return False
@@ -446,6 +473,7 @@ class ChatStore:
             tuple(list[msg], int) — (範囲内メッセージのリスト, start のインデックス)
             None — start または end が見つからない場合
         """
+        self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return None
@@ -470,6 +498,7 @@ class ChatStore:
         Returns:
             int — 削除されたメッセージ数
         """
+        self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return 0
@@ -513,6 +542,7 @@ class ChatStore:
         Returns:
             挿入されたメッセージの deepcopy、または失敗時 None
         """
+        self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return None
@@ -558,6 +588,7 @@ class ChatStore:
     # Search
     # ----------------------------------------------------------
     def search(self, query, conversation_id=None):
+        self._refresh_if_storage_changed()
         results = []
         q_lower = query.lower()
         targets = {}
@@ -586,6 +617,7 @@ class ChatStore:
         is_archived=None,
         role=None,
     ):
+        self._refresh_if_storage_changed()
         text_query = str(query or "").strip()
         if not text_query:
             return [], 0
@@ -663,6 +695,7 @@ class ChatStore:
     # Branch
     # ----------------------------------------------------------
     def branch(self, conversation_id, message_id):
+        self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return None
@@ -715,6 +748,7 @@ class ChatStore:
     # Export
     # ----------------------------------------------------------
     def export_conversation(self, conversation_id, fmt="markdown"):
+        self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return None
@@ -731,6 +765,7 @@ class ChatStore:
     # Message chain helper
     # ----------------------------------------------------------
     def get_message_chain(self, conversation_id, up_to_message_id):
+        self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return []
@@ -1005,6 +1040,7 @@ class ChatStore:
                 "conversations": self._conversations,
             }
             self._atomic_write_json(self._storage_path, payload)
+            self._loaded_storage_signature = self._storage_signature()
 
     def _save_conversation_file(self, conversation_id, conversation):
         with self._lock:

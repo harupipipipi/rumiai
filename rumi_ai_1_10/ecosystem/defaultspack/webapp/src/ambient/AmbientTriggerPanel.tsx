@@ -1365,6 +1365,7 @@ export function AmbientTriggerPanel({
       const nextMessage = ambientResultMessage(result, "ブラウザQAのOKマーク録音をAIに送信しました。");
       setMessage(nextMessage);
       setDebugStatus(nextMessage);
+      setLatestSubmittedInput(null);
       const resultStatus = String(result.status ?? "");
       if (resultStatus && resultStatus !== "ok" && resultStatus !== "approval_required") {
         setMiniChatError(nextMessage);
@@ -2221,9 +2222,22 @@ function ambientResultMessage(result: Record<string, unknown>, fallback: string)
     return `${ambientOperationLabels.failed}: 録音を文字起こしできないため送信しませんでした。設定の「マイク確認」から文字起こしテストを実行してください。${detail ? ` (${detail})` : ""}`;
   }
   if (status === "ok" || reason === "trigger_dispatched") {
+    if (ambientResultHasAssistantReply(result)) return `${ambientOperationLabels.done}: AIの回答が届きました。`;
     return `${ambientOperationLabels.waitingResponse}: ${fallback} 返答を待っています。`;
   }
   return `${ambientOperationLabels.failed}: ${String(result.reason ?? result.status ?? fallback)}`;
+}
+
+function ambientResultHasAssistantReply(result: Record<string, unknown>): boolean {
+  const record = recordValue(result);
+  if (!record) return false;
+  const dispatch = recordValue(record.dispatch_result) ?? recordValue(record.dispatch);
+  return Boolean(
+    cleanString(record.assistant_text)
+    || cleanString(record.assistant_message_id)
+    || cleanString(dispatch?.assistant_text)
+    || cleanString(dispatch?.assistant_message_id)
+  );
 }
 
 function ambientSubmittedConversationIdFromResult(result: Record<string, unknown> | null | undefined): string | null {

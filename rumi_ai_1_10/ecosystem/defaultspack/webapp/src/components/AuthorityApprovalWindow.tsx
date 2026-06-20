@@ -27,6 +27,7 @@ import {
   authorityRequestSettledStatus,
 } from "../lib/authorityApproval";
 import {
+  browserApprovalTokenizedPath,
   readBrowserApprovalTokenFromLocation,
   rememberBrowserApprovalToken,
 } from "../lib/authorityApprovalBrowserToken";
@@ -101,7 +102,7 @@ async function returnToFingerRecordingAfterApproval() {
   window.close();
   window.setTimeout(() => {
     if (document.hidden) return;
-    window.location.replace(defaultspackUrlWithStoredLocalAuth("/finger-recording?authority_approved=1"));
+    window.location.replace(defaultspackUrlWithStoredLocalAuth(browserApprovalTokenizedPath("/finger-recording?authority_approved=1")));
   }, 250);
 }
 

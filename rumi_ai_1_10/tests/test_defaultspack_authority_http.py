@@ -144,7 +144,7 @@ def test_authority_browser_ui_operator_endpoint_requires_valid_token(monkeypatch
     assert invalid["error"]["code"] == "AUTHORITY_BROWSER_TOKEN_INVALID"
 
 
-def test_authority_browser_ui_operator_endpoint_mints_signed_context(monkeypatch):
+def test_authority_browser_ui_operator_endpoint_mints_signed_context_with_body_token(monkeypatch):
     from ecosystem.defaultspack.transport.http import DefaultsHttpServer
     from core_runtime.authority.ui_operator import verify_ui_operator
 
@@ -166,6 +166,38 @@ def test_authority_browser_ui_operator_endpoint_mints_signed_context(monkeypatch
     verified, reason, normalized = verify_ui_operator(ui_operator, request_id="auth_1")
     assert verified is True, reason
     assert normalized["request_id"] == "auth_1"
+
+
+def test_authority_browser_ui_operator_endpoint_accepts_header_and_query_tokens(monkeypatch):
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+    from core_runtime.authority.ui_operator import verify_ui_operator
+
+    monkeypatch.setenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "browser-secret")
+    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "authority-signing-secret-" + ("x" * 32))
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+
+    by_header = server._handle_authority_browser_ui_operator(
+        {
+            "request_id": "auth_header",
+            "_headers": {"X-Rumi-Approval-Browser-Token": "browser-secret"},
+        },
+        {},
+    )
+    by_query = server._handle_authority_browser_ui_operator(
+        {
+            "request_id": "auth_query",
+            "browser_approval_token": "browser-secret",
+            "_headers": {},
+        },
+        {},
+    )
+
+    for result, request_id in ((by_header, "auth_header"), (by_query, "auth_query")):
+        assert result["status"] == "ok"
+        assert result["data"]["request_id"] == request_id
+        verified, reason, normalized = verify_ui_operator(result["data"]["ui_operator"], request_id=request_id)
+        assert verified is True, reason
+        assert normalized["request_id"] == request_id
 
 
 def test_authority_http_errors_preserve_status(monkeypatch):

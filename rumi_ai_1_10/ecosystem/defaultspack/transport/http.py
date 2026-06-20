@@ -1027,7 +1027,7 @@ class DefaultsHttpServer:
         headers = request_data.get("_headers") if isinstance(request_data.get("_headers"), dict) else {}
         provided = (
             _header_value(headers, "X-Rumi-Approval-Browser-Token").strip()
-            or str(request_data.get("browser_approval_token") or "").strip()
+            or _browser_qa_token_from_payload(request_data)
         )
         if not provided:
             response = error("browser approval token is required", "AUTHORITY_BROWSER_TOKEN_REQUIRED")
@@ -1379,14 +1379,31 @@ def _local_auth_token_authorized(headers):
     return any(hmac.compare_digest(provided, expected) for expected in _configured_local_auth_tokens())
 
 
-def _local_ui_approval_route_authorized(method, path, headers):
+_BROWSER_QA_TOKEN_KEYS = (
+    "browser_approval_token",
+    "approval_browser_token",
+    "browserApprovalToken",
+)
+
+
+def _browser_qa_token_from_payload(payload):
+    if not isinstance(payload, dict):
+        return ""
+    for key in _BROWSER_QA_TOKEN_KEYS:
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _local_ui_approval_route_authorized(method, path, headers, request_data=None):
     allowed_methods = _LOCAL_UI_APPROVAL_METHOD_PATHS.get(str(path or ""), set())
     if str(method or "").upper() not in allowed_methods:
         return False
-    return _local_auth_token_authorized(headers) or _browser_qa_token_authorized(method, path, headers)
+    return _local_auth_token_authorized(headers) or _browser_qa_token_authorized(method, path, headers, request_data)
 
 
-def _browser_qa_token_authorized(method, path, headers):
+def _browser_qa_token_authorized(method, path, headers, request_data=None):
     if str(method or "").upper() != "POST":
         return False
     if str(path or "") not in {
@@ -1398,12 +1415,15 @@ def _browser_qa_token_authorized(method, path, headers):
     expected = os.environ.get("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "").strip()
     if not expected:
         return False
-    provided = _header_value(headers, "X-Rumi-Approval-Browser-Token").strip()
+    provided = (
+        _header_value(headers, "X-Rumi-Approval-Browser-Token").strip()
+        or _browser_qa_token_from_payload(request_data)
+    )
     return bool(provided) and hmac.compare_digest(provided, expected)
 
 
-def _ambient_browser_test_token_authorized(method, path, headers):
-    return _browser_qa_token_authorized(method, path, headers)
+def _ambient_browser_test_token_authorized(method, path, headers, request_data=None):
+    return _browser_qa_token_authorized(method, path, headers, request_data)
 
 
 def _apply_ambient_browser_qa_context(context, payload):
@@ -1513,15 +1533,15 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             if origin_error:
                 self._send_json(origin_error[0], error(origin_error[1], origin_error[2]))
                 return
-            sensitive_error = self._sensitive_request_error(method, path)
+            sensitive_error = self._sensitive_request_error(method, path, request_data)
             if sensitive_error:
                 self._send_json(sensitive_error[0], error(sensitive_error[1], sensitive_error[2]))
                 return
             request_data.pop(_AMBIENT_BROWSER_QA_CONTEXT_FLAG, None)
             request_data.pop(_LOCAL_UI_APPROVAL_CONTEXT_FLAG, None)
-            if _ambient_browser_test_token_authorized(method, path, self.headers):
+            if _ambient_browser_test_token_authorized(method, path, self.headers, request_data):
                 request_data[_AMBIENT_BROWSER_QA_CONTEXT_FLAG] = True
-            if _local_ui_approval_route_authorized(method, path, self.headers):
+            if _local_ui_approval_route_authorized(method, path, self.headers, request_data):
                 request_data[_LOCAL_UI_APPROVAL_CONTEXT_FLAG] = True
 
             if source == "registry":
@@ -1635,7 +1655,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass
 
-    def _sensitive_request_error(self, method, path):
+    def _sensitive_request_error(self, method, path, request_data=None):
         route_sensitive = self._route_metadata_sensitive(method, path)
         coding_error = require_local_guard(
             path,
@@ -1652,7 +1672,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         origin = self.headers.get("Origin", "")
         if not _is_allowed_sensitive_origin(origin):
             return (403, "origin not allowed for sensitive integration route", "ORIGIN_DENIED")
-        if _browser_qa_token_authorized(method, path, self.headers):
+        if _browser_qa_token_authorized(method, path, self.headers, request_data):
             if (
                 method.upper() in {"POST", "PUT", "DELETE"}
                 and origin

@@ -1429,6 +1429,46 @@ test("local auth URL helper carries Viewer token into child windows", () => {
   }
 });
 
+test("browser authority ui operator forwards browser QA token in query header and body", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestHeaderToken = "";
+  let requestBody = "";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestHeaderToken = new Headers(init?.headers).get("X-Rumi-Approval-Browser-Token") ?? "";
+    requestBody = String(init?.body ?? "");
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        request_id: "auth_1",
+        ui_operator: {
+          version: 1,
+          kind: "ui_operator",
+          origin: "browser_qa",
+          window_label: "browser",
+          request_id: "auth_1",
+          issued_at: 1,
+          expires_at: 2,
+          nonce: "n",
+          signature: "s",
+        },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.browserAuthorityUiOperator("auth_1", "ambient-browser-qa");
+
+    assert.equal(result.request_id, "auth_1");
+    assert.equal(requestUrl, "/api/authority/browser-ui-operator?browser_approval_token=ambient-browser-qa");
+    assert.equal(requestHeaderToken, "ambient-browser-qa");
+    assert.equal(JSON.parse(requestBody).browser_approval_token, "ambient-browser-qa");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("streamMessage includes a local CSRF header", async () => {
   const originalFetch = globalThis.fetch;
   let requestHeaders: Headers | null = null;

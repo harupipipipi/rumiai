@@ -276,6 +276,36 @@ def test_browser_qa_token_can_mint_authority_ui_operator(monkeypatch):
 
     request_handler.headers = {
         "Origin": "http://127.0.0.1:8766",
+        "X-Rumi-CSRF": "1",
+    }
+    query_data = {"browser_approval_token": "browser-secret"}
+    assert _browser_qa_token_authorized(
+        "POST",
+        "/api/authority/browser-ui-operator",
+        request_handler.headers,
+        query_data,
+    ) is True
+    assert request_handler._sensitive_request_error(
+        "POST",
+        "/api/authority/browser-ui-operator",
+        query_data,
+    ) is None
+
+    invalid_query_data = {"browser_approval_token": "wrong"}
+    assert _browser_qa_token_authorized(
+        "POST",
+        "/api/authority/browser-ui-operator",
+        request_handler.headers,
+        invalid_query_data,
+    ) is False
+    assert request_handler._sensitive_request_error(
+        "POST",
+        "/api/authority/browser-ui-operator",
+        invalid_query_data,
+    ) is None
+
+    request_handler.headers = {
+        "Origin": "http://127.0.0.1:8766",
         "X-Rumi-Approval-Browser-Token": "browser-secret",
     }
     assert request_handler._sensitive_request_error("POST", "/api/authority/browser-ui-operator") == (
