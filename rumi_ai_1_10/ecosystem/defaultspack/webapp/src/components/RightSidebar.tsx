@@ -802,6 +802,7 @@ export function RightSidebar({
   promptUsage = null,
   promptProfileId,
   conversationId = null,
+  showChatPromptUsage = true,
   yoloMode = false,
   workspaceTabs = [],
   activeWorkspaceTabId = null,
@@ -814,6 +815,7 @@ export function RightSidebar({
   onWorkspaceTabCreate,
   onLoadPromptActive,
   onTogglePromptEdge,
+  onToggleChatPromptUsage,
   onOpenPromptStudio,
   onToolToggle,
   onToolBatchSet,
@@ -833,6 +835,7 @@ export function RightSidebar({
   promptUsage?: PromptUsageSummary | null;
   promptProfileId?: string;
   conversationId?: string | null;
+  showChatPromptUsage?: boolean;
   yoloMode?: boolean;
   workspaceTabs?: WorkspaceTab[];
   activeWorkspaceTabId?: string | null;
@@ -845,6 +848,7 @@ export function RightSidebar({
   onWorkspaceTabCreate?: (kind: WorkspaceTabKind) => void;
   onLoadPromptActive?: (params: { profile_id?: string; conversation_id?: string; include_text?: boolean }) => Promise<PromptUsageSummary>;
   onTogglePromptEdge?: (payload: { profile_id?: string; conversation_id?: string; edge_id: string; enabled: boolean }) => Promise<PromptUsageSummary>;
+  onToggleChatPromptUsage?: (visible: boolean) => void;
   onOpenPromptStudio?: (promptId?: string) => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
@@ -1666,6 +1670,8 @@ export function RightSidebar({
                 initialUsage={promptUsage}
                 loadPromptActive={onLoadPromptActive}
                 togglePromptEdge={onTogglePromptEdge}
+                showChatPromptUsage={showChatPromptUsage}
+                onToggleChatPromptUsage={onToggleChatPromptUsage}
                 onOpenStudio={onOpenPromptStudio}
               />
             ) : isToolFilterLogActive ? (

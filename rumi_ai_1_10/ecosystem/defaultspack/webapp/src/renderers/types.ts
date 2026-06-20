@@ -138,6 +138,7 @@ export type ChatMessagesRendererProps = {
   unknownBlockStrategy: string;
   showActivityInMessages: boolean;
   showWidgets: boolean;
+  showPromptUsageInMessages?: boolean;
   onSuggestionClick: (text: string) => void;
   onOpenToolPreview?: (previewId: string) => void;
   onLoadPromptTrace?: (traceId: string, profileId?: string) => Promise<PromptUsageSummary>;
@@ -234,6 +235,7 @@ export type RightSidebarRendererProps = {
   promptUsage?: PromptUsageSummary | null;
   promptProfileId?: string;
   conversationId?: string | null;
+  showChatPromptUsage?: boolean;
   yoloMode?: boolean;
   workspaceTabs?: WorkspaceTab[];
   activeWorkspaceTabId?: string | null;
@@ -246,6 +248,7 @@ export type RightSidebarRendererProps = {
   onWorkspaceTabCreate?: (kind: WorkspaceTabKind) => void;
   onLoadPromptActive?: (params: { profile_id?: string; conversation_id?: string; include_text?: boolean }) => Promise<PromptUsageSummary>;
   onTogglePromptEdge?: (payload: { profile_id?: string; conversation_id?: string; edge_id: string; enabled: boolean }) => Promise<PromptUsageSummary>;
+  onToggleChatPromptUsage?: (visible: boolean) => void;
   onOpenPromptStudio?: (promptId?: string) => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;

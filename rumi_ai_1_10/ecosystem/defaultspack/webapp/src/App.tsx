@@ -2178,6 +2178,7 @@ function ChatApp() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
+  const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => [
     createWorkspaceTab("chat", { id: DEFAULT_WORKSPACE_TAB_ID, title: "New Conversation" }),
   ]);
@@ -5406,6 +5407,7 @@ function ChatApp() {
                 unknownBlockStrategy={unknownBlockStrategy}
                 showActivityInMessages={showActivityInMessages}
                 showWidgets={showWidgets}
+                showPromptUsageInMessages={showPromptUsageInMessages}
                 onSuggestionClick={(text) => setInput(text)}
                 onOpenToolPreview={(previewId) => {
                   setActivePreviewId(previewId);
@@ -5575,8 +5577,10 @@ function ChatApp() {
             promptUsage={activePromptUsage}
             promptProfileId={activePromptProfileId}
             conversationId={activeConversationId}
+            showChatPromptUsage={showPromptUsageInMessages}
             onLoadPromptActive={promptResources.getActiveSummary}
             onTogglePromptEdge={promptResources.toggleEdge}
+            onToggleChatPromptUsage={setShowPromptUsageInMessages}
             onOpenPromptStudio={openPromptStudio}
             yoloMode={yoloMode}
             workspaceTabs={workspaceTabs}

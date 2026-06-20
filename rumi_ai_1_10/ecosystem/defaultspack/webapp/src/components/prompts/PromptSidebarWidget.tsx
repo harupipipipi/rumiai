@@ -1,4 +1,4 @@
-import { ChevronDown, Edit3, FileText, RefreshCw, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-react";
+import { ChevronDown, Edit3, Eye, EyeOff, FileText, RefreshCw, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { PromptUsageSegment, PromptUsageSummary } from "../../lib/api";
@@ -11,6 +11,8 @@ type PromptSidebarWidgetProps = {
   initialUsage?: PromptUsageSummary | null;
   loadPromptActive: (params: { profile_id?: string; conversation_id?: string; include_text?: boolean }) => Promise<PromptUsageSummary>;
   togglePromptEdge: (payload: { profile_id?: string; conversation_id?: string; edge_id: string; enabled: boolean }) => Promise<PromptUsageSummary>;
+  showChatPromptUsage?: boolean;
+  onToggleChatPromptUsage?: (visible: boolean) => void;
   onOpenStudio?: (promptId?: string) => void;
 };
 
@@ -58,6 +60,8 @@ export function PromptSidebarWidget({
   initialUsage = null,
   loadPromptActive,
   togglePromptEdge,
+  showChatPromptUsage = true,
+  onToggleChatPromptUsage,
   onOpenStudio,
 }: PromptSidebarWidgetProps) {
   const [summary, setSummary] = useState<PromptUsageSummary | null>(initialUsage);
@@ -172,6 +176,32 @@ export function PromptSidebarWidget({
         {error && (
           <div className="mt-2 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-5 text-amber-100">
             {error}
+          </div>
+        )}
+        {onToggleChatPromptUsage && (
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-zinc-800/80 bg-black/20 px-2.5 py-2">
+            <div className="min-w-0">
+              <div className="truncate text-[11px] font-medium text-zinc-300">チャット内の Prompt used</div>
+              <div className="mt-0.5 text-[10px] text-zinc-600">
+                {showChatPromptUsage ? "メッセージ下に表示中" : "メッセージ下では非表示"}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onToggleChatPromptUsage(!showChatPromptUsage)}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium",
+                showChatPromptUsage
+                  ? "border-cyan-500/35 bg-cyan-500/10 text-cyan-100"
+                  : "border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-200",
+              )}
+              aria-pressed={showChatPromptUsage}
+              aria-label={showChatPromptUsage ? "Hide Prompt used in chat" : "Show Prompt used in chat"}
+              title={showChatPromptUsage ? "Prompt usedをチャット内で非表示" : "Prompt usedをチャット内に表示"}
+            >
+              {showChatPromptUsage ? <Eye size={12} /> : <EyeOff size={12} />}
+              {showChatPromptUsage ? "On" : "Off"}
+            </button>
           </div>
         )}
       </div>

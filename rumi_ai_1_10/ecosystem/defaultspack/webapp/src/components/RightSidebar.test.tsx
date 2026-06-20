@@ -216,6 +216,29 @@ test("prompt sidebar widget lists prompt name and token count before details", (
   assert.doesNotMatch(html, /Selected by the active profile/);
 });
 
+test("prompt sidebar widget exposes chat prompt disclosure toggle", () => {
+  const html = renderToStaticMarkup(
+    createElement(PromptSidebarWidget, {
+      profileId: "default-profile",
+      initialUsage: {
+        active_count: 0,
+        token_estimate: { total: 0 },
+        segments: [],
+      },
+      loadPromptActive: async () => ({ segments: [] }),
+      togglePromptEdge: async () => ({ segments: [] }),
+      showChatPromptUsage: false,
+      onToggleChatPromptUsage: noop,
+      onOpenStudio: noop,
+    }),
+  );
+
+  assert.match(html, /チャット内の Prompt used/);
+  assert.match(html, /メッセージ下では非表示/);
+  assert.match(html, /aria-pressed="false"/);
+  assert.match(html, />Off</);
+});
+
 test("right sidebar floating menus clamp to the viewport", () => {
   assert.deepEqual(
     getRailFloatingMenuPosition(

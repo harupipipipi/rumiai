@@ -1141,6 +1141,7 @@ export function ChatMessagesRenderer({
   unknownBlockStrategy,
   showActivityInMessages,
   showWidgets,
+  showPromptUsageInMessages = true,
   onOpenToolPreview,
   onLoadPromptTrace,
 }: ChatMessagesRendererProps) {
@@ -1256,7 +1257,7 @@ export function ChatMessagesRenderer({
                       </div>
 
                       {showWidgets && message.widget && <WidgetCard widget={message.widget} />}
-                      {message.role === "agent" && <PromptUsageDisclosure usage={message.metadata?.promptUsage} loadPromptTrace={onLoadPromptTrace} />}
+                      {showPromptUsageInMessages && message.role === "agent" && <PromptUsageDisclosure usage={message.metadata?.promptUsage} loadPromptTrace={onLoadPromptTrace} />}
                     </div>
                       );
                     })()}
