@@ -91,6 +91,10 @@ export function toolFilterReasonLabel(reasonCode: string | undefined): string {
       return "承認が必要です";
     case "not_connected_to_profile":
       return "接続設定が不足しています";
+    case "not_attached_to_turn":
+      return "今回の実行に接続されていません";
+    case "unknown_selected_tool":
+      return "登録されていない機能です";
     case "requires_trusted_workspace":
       return "trusted workspace が必要です";
     case "missing_api_key":

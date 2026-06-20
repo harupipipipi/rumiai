@@ -677,6 +677,65 @@ def test_complete_turn_retries_wrapped_429_after_tool_use():
     assert any(event.get("type") == "ai_retry_scheduled" for event in engine._activity_events)
 
 
+def test_final_response_reports_unattached_requested_tools():
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+
+    provider_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "coding_file_read",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    unselected_entry = {
+        "tool_name": "coding_terminal_exec",
+        "status": "blocked",
+        "reason_code": "not_connected_to_profile",
+        "reason": "selected tool is not connected to the active runtime profile",
+    }
+    engine = ChatRunEngine(store=object(), client=object())
+    prepared = PreparedChatRun(
+        conversation_id="conv-1",
+        conversation={"id": "conv-1"},
+        input_data={},
+        request_id="req-1",
+        content=[],
+        metadata=None,
+        user_message={"id": "user-1"},
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        params={},
+        request_context={},
+        tool_context={
+            "requested_tool_ids": ["coding_file_read", "coding_terminal_exec"],
+            "unselected_requested_tools": [unselected_entry],
+        },
+        standard_messages=[],
+        user_text="run pwd",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=provider_tools,
+        provider_tools=provider_tools,
+        tools_called=["coding_file_read"],
+        connected_tool_names={"coding_file_read"},
+        call_handler=None,
+        model_routing={},
+    )
+
+    response = engine._final_response(
+        prepared,
+        {"content": [{"type": "text", "text": "done"}], "finish_reason": "stop"},
+    )
+
+    metadata = response["metadata"]
+    assert metadata["requested_tools"] == ["coding_file_read", "coding_terminal_exec"]
+    assert metadata["attached_tools"] == ["coding_file_read"]
+    assert metadata["unattached_requested_tools"] == ["coding_terminal_exec"]
+    assert metadata["tool_attachment_diagnostics"]["unselected_requested_tools"] == [unselected_entry]
+
+
 def test_stream_empty_thinking_retry_preserves_tools_for_tool_calls():
     from domain.chat.run_request import PreparedChatRun
     from domain.chat.stream_engine import ChatRunEngine

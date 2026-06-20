@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { extractLatestToolFilterContext, summarizeToolManager, toolFilterBlockedSummary, toolFilterReasonDetail } from "./toolStatus";
+import { extractLatestToolFilterContext, summarizeToolManager, toolFilterBlockedSummary, toolFilterReasonDetail, toolFilterReasonLabel } from "./toolStatus";
 
 test("extractLatestToolFilterContext reads the newest metadata payload", () => {
   const context = extractLatestToolFilterContext([
@@ -42,6 +42,12 @@ test("toolFilterReasonDetail explains vision blocks in friendly text", () => {
     }),
     "Vision対応モデルに切り替えると使えます。",
   );
+});
+
+test("toolFilterReasonLabel explains unattached requested tools", () => {
+  assert.equal(toolFilterReasonLabel("not_connected_to_profile"), "接続設定が不足しています");
+  assert.equal(toolFilterReasonLabel("not_attached_to_turn"), "今回の実行に接続されていません");
+  assert.equal(toolFilterReasonLabel("unknown_selected_tool"), "登録されていない機能です");
 });
 
 test("toolFilterBlockedSummary names the required model capability", () => {

@@ -2051,6 +2051,33 @@ class ChatRunEngine:
             finalized["metadata"] = metadata
         metadata = dict(finalized.get("metadata") or {})
         requested_tools = list(prepared.tools_called or [])
+        requested_tool_ids: list[str] = []
+        unselected_requested_tools: list[dict[str, Any]] = []
+        unknown_selected_tools: list[str] = []
+        if isinstance(prepared.tool_context, dict):
+            raw_requested_tool_ids = prepared.tool_context.get("requested_tool_ids")
+            if isinstance(raw_requested_tool_ids, list):
+                requested_tool_ids = [
+                    str(item).strip()
+                    for item in raw_requested_tool_ids
+                    if str(item or "").strip()
+                ]
+            raw_unselected = prepared.tool_context.get("unselected_requested_tools")
+            if isinstance(raw_unselected, list):
+                unselected_requested_tools = [
+                    dict(item)
+                    for item in raw_unselected
+                    if isinstance(item, dict)
+                ]
+            raw_unknown = prepared.tool_context.get("unknown_selected_tools")
+            if isinstance(raw_unknown, list):
+                unknown_selected_tools = [
+                    str(item).strip()
+                    for item in raw_unknown
+                    if str(item or "").strip()
+                ]
+        if requested_tool_ids:
+            requested_tools = list(dict.fromkeys([*requested_tool_ids, *requested_tools]))
         # When the approval-followup replay path transiently suppresses
         # ``provider_tools`` for the summary turn, ``tool_context`` holds a
         # snapshot of the originally attached tools so the finalised
@@ -2066,6 +2093,9 @@ class ChatRunEngine:
             name
             for name in (tool_name_from_definition(tool) for tool in attached_provider_tools_source)
             if name
+        ]
+        unattached_requested_tools = [
+            name for name in requested_tools if name not in set(attached_provider_tools)
         ]
         attached_tool_count = len(attached_provider_tools_source)
         executed_tools: list[str] = []
@@ -2084,6 +2114,8 @@ class ChatRunEngine:
                 "attached_tools": attached_provider_tools,
                 "attached_provider_tools": attached_provider_tools,
                 "executed_tools": executed_tools,
+                "unattached_requested_tools": unattached_requested_tools,
+                "unknown_selected_tools": unknown_selected_tools,
                 "thinking": {
                     "state": "completed" if finalized.get("finish_reason") != "error" else "failed",
                     **({"transcript": "".join(self._thinking_transcript_parts)} if self._thinking_transcript_parts else {}),
@@ -2097,6 +2129,15 @@ class ChatRunEngine:
                 "provider_capabilities": redact_sensitive_value(dict(prepared.provider_capabilities or {})),
             }
         )
+        if unattached_requested_tools or unselected_requested_tools or unknown_selected_tools:
+            metadata["tool_attachment_diagnostics"] = {
+                "requested_tools": requested_tools,
+                "attached_tools": attached_provider_tools,
+                "connected_tools": sorted(str(name) for name in prepared.connected_tool_names if name),
+                "unattached_requested_tools": unattached_requested_tools,
+                "unselected_requested_tools": unselected_requested_tools,
+                "unknown_selected_tools": unknown_selected_tools,
+            }
         if isinstance(prepared.request_context, dict) and isinstance(prepared.request_context.get("tool_selection"), dict):
             metadata["tool_selection"] = dict(prepared.request_context["tool_selection"])
         trace_metadata = self._write_provider_trace(prepared, finalized)

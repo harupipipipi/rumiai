@@ -2503,12 +2503,16 @@ export const api = {
     heartbeat_minutes?: number;
     review_interval_minutes?: number;
     qa_interval_minutes?: number;
+    max_tool_calls?: number;
     model?: string;
     vision_model?: string;
     fast_model?: string;
     qa_targets?: string[];
     docker_worker_count?: number;
     docker_personas?: string[];
+    workspace_id?: string | null;
+    workspace_label?: string | null;
+    workspace_root?: string | null;
     run_initial_review_now?: boolean;
     seed_tasks?: boolean;
     seed_knowledge?: boolean;

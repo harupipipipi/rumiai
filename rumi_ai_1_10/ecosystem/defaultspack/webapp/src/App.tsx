@@ -2444,14 +2444,14 @@ function ChatApp() {
   const rawAuthorityApproval = pendingAuthorityApproval(messages);
   const rawRuntimeApproval = pendingRuntimeApproval(messages);
   const settledRuntimeApprovalIdSet = useMemo(() => new Set(settledRuntimeApprovalIds), [settledRuntimeApprovalIds]);
-  const authorityApproval = !ultraYoloMode && rawAuthorityApproval && !settledRuntimeApprovalIdSet.has(rawAuthorityApproval.requestId)
+  const authorityApproval = rawAuthorityApproval && !settledRuntimeApprovalIdSet.has(rawAuthorityApproval.requestId)
     ? rawAuthorityApproval
     : null;
-  const runtimeApproval = !ultraYoloMode && rawRuntimeApproval && !settledRuntimeApprovalIdSet.has(rawRuntimeApproval.requestId)
+  const runtimeApproval = rawRuntimeApproval && !settledRuntimeApprovalIdSet.has(rawRuntimeApproval.requestId)
     ? rawRuntimeApproval
     : null;
-  const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
-  const visibleBrowserApproval = !ultraYoloMode ? browserApproval : null;
+  const staleRuntimeApprovalNotice = !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
+  const visibleBrowserApproval = browserApproval;
 
   useEffect(() => {
     if (!authorityApproval) {
@@ -2674,8 +2674,12 @@ function ChatApp() {
     try {
       const result = await api.listCodingWorkspaces();
       setCodingWorkspaces(result.workspaces);
-      setSelectedCodingWorkspaceId((current) => current ?? result.selected_workspace_id ?? result.workspaces[0]?.workspace_id ?? null);
-      return result;
+      let selectedWorkspaceId = result.selected_workspace_id ?? result.workspaces[0]?.workspace_id ?? null;
+      setSelectedCodingWorkspaceId((current) => {
+        selectedWorkspaceId = current ?? selectedWorkspaceId;
+        return selectedWorkspaceId;
+      });
+      return { ...result, selected_workspace_id: selectedWorkspaceId };
     } catch {
       setCodingWorkspaces([]);
       return { workspaces: [], selected_workspace_id: null };
@@ -2694,8 +2698,8 @@ function ChatApp() {
     ?? undefined;
   const effectiveConsoleKey = `${effectiveGroupId ?? "ungrouped"}:${effectiveWorkspaceId ?? "no-workspace"}`;
 
-  const loadCodingContext = useCallback(async () => {
-    const workspaceId = effectiveWorkspaceId;
+  const loadCodingContext = useCallback(async (workspaceIdOverride?: string | null) => {
+    const workspaceId = workspaceIdOverride ?? effectiveWorkspaceId;
     try {
       const [result, branchInfo] = await Promise.all([
         api.getCodingContext({ directory: codingDirectory, workspace_id: workspaceId }),
@@ -2765,7 +2769,7 @@ function ChatApp() {
 
   useEffect(() => {
     if (mode === "coding") {
-      void loadCodingWorkspaces().then(() => loadCodingContext());
+      void loadCodingWorkspaces().then((result) => loadCodingContext(result.selected_workspace_id ?? null));
     }
   }, [mode, loadCodingContext, loadCodingWorkspaces]);
 
@@ -4004,15 +4008,14 @@ function ChatApp() {
     handleModeChange("coding");
     setSelectedCodingWorkspaceId(workspaceId);
     void api.selectCodingWorkspace(workspaceId)
-      .then(() => loadCodingWorkspaces())
-      .then(() => loadCodingContext())
+      .then((selected) => loadCodingWorkspaces().then(() => loadCodingContext(selected.selected_workspace_id ?? workspaceId)))
       .catch((workspaceError) => setError(workspaceError instanceof Error ? workspaceError.message : "workspace selection failed."));
   };
 
   const handleCodingWorkspaceTrust = (workspaceId: string) => {
     void api.trustCodingWorkspace(workspaceId)
       .then(() => loadCodingWorkspaces())
-      .then(() => loadCodingContext())
+      .then(() => loadCodingContext(workspaceId))
       .catch((workspaceError) => setError(workspaceError instanceof Error ? workspaceError.message : "workspace trust failed."));
   };
 
@@ -4027,7 +4030,7 @@ function ChatApp() {
       const selected = await api.selectCodingWorkspace(created.workspace.workspace_id);
       setSelectedCodingWorkspaceId(selected.selected_workspace_id);
       await loadCodingWorkspaces();
-      await loadCodingContext();
+      await loadCodingContext(selected.selected_workspace_id);
       return created.workspace;
     } catch (workspaceError) {
       setError(workspaceError instanceof Error ? workspaceError.message : "workspace creation failed.");
@@ -4038,6 +4041,12 @@ function ChatApp() {
   const handleDirectorySelect = async () => {
     const selected = await api.selectDirectory("New Group の保存先フォルダを選択");
     return selected.cancelled ? null : selected.path;
+  };
+
+  const handleCodingWorkspacePickCreate = async () => {
+    const selected = await handleDirectorySelect();
+    if (!selected) return null;
+    return handleCodingWorkspaceCreate(selected);
   };
 
   const handlePrepareChatGroupStorage = async (rootPath: string) => {
@@ -4397,6 +4406,22 @@ function ChatApp() {
 
   const mimoCodingTargets = () => settingList(settingsValues.mimo_coding_company?.qa_targets);
   const mimoCodingPersonas = () => settingList(settingsValues.mimo_coding_company?.docker_personas);
+  const mimoCodingMaxToolCalls = () => Math.max(1, Math.min(200, settingNumber(settingsValues.mimo_coding_company?.max_tool_calls, 80)));
+  const selectedCodingWorkspaceRecord = () => (
+    effectiveWorkspaceId
+      ? codingWorkspaces.find((workspace) => workspace.workspace_id === effectiveWorkspaceId) ?? null
+      : null
+  );
+  const mimoCodingWorkspacePayload = () => {
+    const workspace = selectedCodingWorkspaceRecord();
+    const workspaceId = workspace?.workspace_id ?? activeConversationWorkspaceContext.workspaceId ?? effectiveWorkspaceId;
+    if (!workspaceId) return {};
+    return {
+      workspace_id: workspaceId,
+      workspace_label: workspace?.label ?? activeConversationWorkspaceContext.workspaceLabel ?? null,
+      workspace_root: workspace?.root_path ?? activeConversationWorkspaceContext.workspaceRoot ?? null,
+    };
+  };
 
   const handleStartMimoCodingCompany = async () => {
     setMimoCodingBusy(true);
@@ -4407,12 +4432,14 @@ function ChatApp() {
         heartbeat_minutes: Math.max(1, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.heartbeat_minutes, 30))),
         review_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.review_interval_minutes, 180))),
         qa_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.qa_interval_minutes, 240))),
+        max_tool_calls: mimoCodingMaxToolCalls(),
         model: preferredMimoCodingModel(),
         vision_model: preferredMimoVisionModel(),
         fast_model: preferredMimoFastModel(),
         qa_targets: mimoCodingTargets(),
         docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
         docker_personas: mimoCodingPersonas(),
+        ...mimoCodingWorkspacePayload(),
         run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
       });
       setMimoCodingStatus(status);
@@ -4431,13 +4458,13 @@ function ChatApp() {
       setMimoCodingStatus(refreshed);
       if (refreshed.conversation_id) {
         setError(null);
-        await loadConversation(refreshed.conversation_id);
+        handleHistoryClick(refreshed.conversation_id);
         return refreshed.conversation_id;
       }
       return null;
     }
     setError(null);
-    await loadConversation(mimoCodingStatus.conversation_id);
+    handleHistoryClick(mimoCodingStatus.conversation_id);
     return mimoCodingStatus.conversation_id;
   };
 
@@ -4524,12 +4551,14 @@ function ChatApp() {
           heartbeat_minutes: Math.max(1, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.heartbeat_minutes, 30))),
           review_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.review_interval_minutes, 180))),
           qa_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.qa_interval_minutes, 240))),
+          max_tool_calls: mimoCodingMaxToolCalls(),
           model: preferredMimoCodingModel(),
           vision_model: preferredMimoVisionModel(),
           fast_model: preferredMimoFastModel(),
           qa_targets: mimoCodingTargets(),
           docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
           docker_personas: mimoCodingPersonas(),
+          ...mimoCodingWorkspacePayload(),
           run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
         });
         setMimoCodingStatus(result as MimoCodingCompanyStatus);
@@ -4676,6 +4705,13 @@ function ChatApp() {
       }
       const isOperationsMode = isOperationsConversation(conversation);
       const isMimoCodingMode = isMimoCodingConversation(conversation);
+      const workspaceIdForRuntime = workspaceIdForSubmit ?? (isMimoCodingMode ? selectedCodingWorkspaceId : null);
+      const workspaceRecordForRuntime = workspaceIdForRuntime
+        ? codingWorkspaces.find((workspace) => workspace.workspace_id === workspaceIdForRuntime) ?? null
+        : null;
+      const workspaceLabelForRuntime = workspaceLabelForSubmit ?? workspaceRecordForRuntime?.label ?? null;
+      const workspaceRootForRuntime = workspaceRootForSubmit ?? workspaceRecordForRuntime?.root_path ?? null;
+      const shouldAttachWorkspaceToRuntime = isCodingWorkspaceSubmit || isMimoCodingMode;
       submittedConversationId = conversation.id;
       submittedConversationRuntimeId = conversation.id;
       const requestStartedAt = Date.now();
@@ -4959,6 +4995,7 @@ function ChatApp() {
             terminal_actions_require_approval: false,
             normal_status_silent: true,
             max_concurrent_children: 6,
+            max_tool_calls: mimoCodingMaxToolCalls(),
             ...(mimoCodingModelAllowlist.length ? { model_allowlist: mimoCodingModelAllowlist } : {}),
             ...(mimoCodingToolAllowlist.length ? { tool_allowlist: mimoCodingToolAllowlist } : {}),
           }
@@ -4984,7 +5021,7 @@ function ChatApp() {
           ...(ultraYoloMode ? { full_access: true } : {}),
           ...operationsPolicy,
           ...mimoCodingPolicy,
-          ...(isCodingWorkspaceSubmit && workspaceIdForSubmit ? { workspace_id: workspaceIdForSubmit } : {}),
+          ...(shouldAttachWorkspaceToRuntime && workspaceIdForRuntime ? { workspace_id: workspaceIdForRuntime } : {}),
           ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
@@ -5006,10 +5043,10 @@ function ChatApp() {
             conversation_strategy: "one_agent_one_conversation",
             internal_channel: "mimo-coding-company",
           } : {}),
-          ...(isCodingWorkspaceSubmit ? {
-            workspace_id: workspaceIdForSubmit,
-            workspace_label: workspaceLabelForSubmit,
-            workspace_root: workspaceRootForSubmit,
+          ...(shouldAttachWorkspaceToRuntime && workspaceIdForRuntime ? {
+            workspace_id: workspaceIdForRuntime,
+            workspace_label: workspaceLabelForRuntime,
+            workspace_root: workspaceRootForRuntime,
           } : {}),
           ...templateRequestPayload.toolPolicy,
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
@@ -5164,6 +5201,8 @@ function ChatApp() {
       selectedWorkspaceId={effectiveWorkspaceId}
       consoleScopeKey={effectiveConsoleKey}
       onWorkspaceSelect={handleCodingWorkspaceSelect}
+      onWorkspaceCreate={() => void handleCodingWorkspacePickCreate()}
+      onWorkspaceTrust={handleCodingWorkspaceTrust}
       onWorkspacesRefresh={() => void loadCodingWorkspaces()}
     />
   ) : null;
@@ -5462,6 +5501,8 @@ function ChatApp() {
                   selectedWorkspaceId={effectiveWorkspaceId}
                   consoleScopeKey={effectiveConsoleKey}
                   onWorkspaceSelect={handleCodingWorkspaceSelect}
+                  onWorkspaceCreate={() => void handleCodingWorkspacePickCreate()}
+                  onWorkspaceTrust={handleCodingWorkspaceTrust}
                   onWorkspacesRefresh={() => void loadCodingWorkspaces()}
                 />
               </div>

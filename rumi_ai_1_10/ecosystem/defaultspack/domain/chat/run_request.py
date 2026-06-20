@@ -88,6 +88,25 @@ _COMPUTER_USE_VIVALDI_TARGET_RE = re.compile(
 )
 _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
+_TOOL_MENTION_RE = re.compile(r"@([A-Za-z0-9_.:-]+)")
+_COMPUTER_USE_TOOL_IDS = {"computer_use", "browser_computer", "browser_use"}
+_CODING_PR_REQUEST_RE = re.compile(
+    r"pull\s*request|draft\s*pr|github\.com|git\s*hub|プルリク|"
+    r"(?<![A-Za-z])pr(?![A-Za-z]).{0,24}(出して|作って|作成|開いて|open|create)|"
+    r"(出して|作って|作成|開いて|open|create).{0,24}(?<![A-Za-z])pr(?![A-Za-z])",
+    re.IGNORECASE,
+)
+_CODING_PR_TOOL_IDS = [
+    "coding_file_list",
+    "coding_file_search",
+    "coding_file_read",
+    "coding_file_write",
+    "coding_terminal_exec",
+    "coding_git_status",
+    "coding_git_diff",
+    "coding_git_commit",
+    "coding_git_push",
+]
 
 @dataclass
 class NormalizedToolSelection:
@@ -275,7 +294,9 @@ def prepare_chat_run(
         params["deepthink_enabled"] = bool(model_settings.get("deepthink_enabled", False))
 
     request_context = _merge_active_startup_profile_context(context or {}, active_startup_profile)
-    if effective_inferred_tool_ids:
+    requested_tool_ids_for_policy = _requested_tool_ids_from_selection(tool_selection)
+    _apply_requested_tool_policy(request_context, requested_tool_ids_for_policy)
+    if _has_computer_use_tool(effective_inferred_tool_ids):
         request_context["user_requested_computer_use"] = True
         request_context = _apply_computer_use_context_preferences(request_context, user_text)
     request_context["conversation_id"] = conversation_id
@@ -496,6 +517,12 @@ def prepare_chat_run(
     _ensure_must_use_has_eligible_tools(tool_selection, raw_tools)
     provider_tools = adapt_tool_definitions(raw_tools)
     filter_entries = list(eligibility_result.get("entries") or [])
+    if isinstance(tool_context.get("unselected_requested_tools"), list):
+        filter_entries.extend(
+            entry
+            for entry in tool_context["unselected_requested_tools"]
+            if isinstance(entry, dict)
+        )
     compact_filter_entries = compact_tool_filter_entries(filter_entries)
     tool_context["tool_filter_result"] = filter_entries
     tool_context["runtime_capability_snapshot"] = runtime_snapshot.as_dict()
@@ -1230,6 +1257,176 @@ def _hydrate_profile_policy_from_profile_id(
     }
 
 
+def _profile_policy_tool_ids(policy: dict[str, Any] | None) -> list[str]:
+    if not isinstance(policy, dict):
+        return []
+    for key in ("tool_allowlist", "enabled_tools", "allowed_tools"):
+        if key not in policy:
+            continue
+        value = policy.get(key)
+        if isinstance(value, str):
+            value = [item.strip() for item in value.split(",")]
+        if not isinstance(value, list):
+            return []
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            tool_id = str(item or "").strip()
+            if not tool_id or tool_id in seen:
+                continue
+            seen.add(tool_id)
+            result.append(tool_id)
+        return result
+    return []
+
+
+def _profile_node_allowed_actions(profile: dict[str, Any] | None) -> list[str]:
+    if not isinstance(profile, dict):
+        return []
+    node_settings = profile.get("node_settings") if isinstance(profile.get("node_settings"), dict) else {}
+    tool_settings = (
+        node_settings.get("defaultspack.tool")
+        if isinstance(node_settings.get("defaultspack.tool"), dict)
+        else {}
+    )
+    actions = tool_settings.get("allowed_actions")
+    if not isinstance(actions, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in actions:
+        tool_id = str(item or "").strip()
+        if not tool_id or tool_id in seen:
+            continue
+        seen.add(tool_id)
+        result.append(tool_id)
+    return result
+
+
+def _profile_client_agent_id(profile: dict[str, Any] | None, fallback: Any = None) -> str:
+    fallback_id = str(fallback or "").strip()
+    if not isinstance(profile, dict):
+        return fallback_id
+    metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
+    node_settings = profile.get("node_settings") if isinstance(profile.get("node_settings"), dict) else {}
+    agent_settings = (
+        node_settings.get("defaultspack.agent")
+        if isinstance(node_settings.get("defaultspack.agent"), dict)
+        else {}
+    )
+    for value in (
+        fallback_id,
+        metadata.get("client_manager_agent_id"),
+        agent_settings.get("client_facing_role"),
+    ):
+        candidate = str(value or "").strip()
+        if candidate:
+            return candidate
+    return "agent"
+
+
+def _runtime_profile_agent_tool_refs(
+    runtime_profile: dict[str, Any] | None,
+    agent_id: Any = None,
+) -> list[str]:
+    if not isinstance(runtime_profile, dict):
+        return []
+    defaultspack = runtime_profile.get("defaultspack")
+    if not isinstance(defaultspack, dict):
+        return []
+    agents = defaultspack.get("agents")
+    if not isinstance(agents, dict):
+        return []
+    selected = agents.get(str(agent_id or "").strip()) if str(agent_id or "").strip() else None
+    if not isinstance(selected, dict) and len(agents) == 1:
+        selected = next(iter(agents.values()))
+    if not isinstance(selected, dict):
+        return []
+    tools = selected.get("tools")
+    if not isinstance(tools, list):
+        return []
+    return [str(tool).strip() for tool in tools if str(tool or "").strip()]
+
+
+def _merge_profile_tool_ids(*sources: Any) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for source in sources:
+        if not isinstance(source, list):
+            continue
+        for item in source:
+            tool_id = str(item or "").strip()
+            if not tool_id or tool_id in seen:
+                continue
+            seen.add(tool_id)
+            merged.append(tool_id)
+    return merged
+
+
+def _runtime_profile_with_policy_connected_tools(
+    runtime_profile: dict[str, Any] | None,
+    *,
+    profile_id: Any = None,
+    agent_id: Any = None,
+    requested_tool_ids: list[str] | None = None,
+) -> tuple[dict[str, Any] | None, str]:
+    base_profile = dict(runtime_profile) if isinstance(runtime_profile, dict) else {}
+    snapshot_profile_id = str(
+        profile_id
+        or base_profile.get("profile_id")
+        or (
+            base_profile.get("profile", {}).get("profile_id")
+            if isinstance(base_profile.get("profile"), dict)
+            else ""
+        )
+        or ""
+    ).strip()
+    if not base_profile and snapshot_profile_id:
+        base_profile = _profile_snapshot(snapshot_profile_id)
+    if not isinstance(base_profile, dict) or not base_profile:
+        return runtime_profile, str(agent_id or "").strip()
+
+    policy = base_profile.get("policy") if isinstance(base_profile.get("policy"), dict) else {}
+    policy_tool_ids = _profile_policy_tool_ids(policy) or _profile_node_allowed_actions(base_profile)
+    resolved_agent_id = _profile_client_agent_id(base_profile, fallback=agent_id)
+    current_tool_ids = _runtime_profile_agent_tool_refs(base_profile, resolved_agent_id)
+    tool_ids = _merge_profile_tool_ids(
+        current_tool_ids,
+        policy_tool_ids,
+        requested_tool_ids or [],
+    )
+    if current_tool_ids and tool_ids == current_tool_ids:
+        return base_profile, resolved_agent_id
+    if not tool_ids:
+        return base_profile, resolved_agent_id
+
+    patched = dict(base_profile)
+    defaultspack = (
+        dict(patched.get("defaultspack"))
+        if isinstance(patched.get("defaultspack"), dict)
+        else {}
+    )
+    agents = (
+        dict(defaultspack.get("agents"))
+        if isinstance(defaultspack.get("agents"), dict)
+        else {}
+    )
+    selected_agent = (
+        dict(agents.get(resolved_agent_id))
+        if isinstance(agents.get(resolved_agent_id), dict)
+        else {}
+    )
+    selected_agent.setdefault("node_instance_id", resolved_agent_id)
+    selected_agent.setdefault("node_id", "defaultspack.agent")
+    selected_agent["tools"] = list(tool_ids)
+    agents[resolved_agent_id] = selected_agent
+    defaultspack["agents"] = agents
+    patched["defaultspack"] = defaultspack
+    if snapshot_profile_id:
+        patched.setdefault("profile_id", snapshot_profile_id)
+    return patched, resolved_agent_id
+
+
 def _propagate_conversation_workspace(
     request_context: dict[str, Any],
     message_metadata: dict[str, Any] | None,
@@ -1629,6 +1826,7 @@ def _normalize_tool_selection(input_data: dict[str, Any]) -> NormalizedToolSelec
             raw_mode = "manual" if include else "auto"
         if raw_mode == "auto" and top_level_tools:
             include = _merge_tool_items(include, top_level_tools)
+            raw_mode = "manual"
         if raw_mode == "manual" and not include:
             raw_mode = "none"
         scope = str(raw_selection.get("scope") or "turn").strip().lower() or "turn"
@@ -1863,9 +2061,93 @@ def _profile_prefers_vector_tool_assist(context: dict[str, Any] | None) -> bool:
 
 
 def _infer_requested_tools_from_message(user_text: str) -> list[str]:
-    if not isinstance(user_text, str) or not _COMPUTER_USE_REQUEST_RE.search(user_text):
+    inferred: list[str] = []
+    seen: set[str] = set()
+
+    def add(tool_id: str) -> None:
+        value = str(tool_id or "").strip()
+        if not value or value in seen:
+            return
+        seen.add(value)
+        inferred.append(value)
+
+    if isinstance(user_text, str) and _COMPUTER_USE_REQUEST_RE.search(user_text):
+        add("computer_use")
+        add("browser_computer")
+
+    if isinstance(user_text, str) and _CODING_PR_REQUEST_RE.search(user_text):
+        for tool_id in _CODING_PR_TOOL_IDS:
+            add(tool_id)
+
+    for tool_id in _tool_mention_ids_from_text(user_text):
+        add(tool_id)
+
+    return inferred
+
+
+def _tool_mention_ids_from_text(user_text: str) -> list[str]:
+    if not isinstance(user_text, str) or "@" not in user_text:
         return []
-    return ["computer_use", "browser_computer"]
+    try:
+        registry = ToolRegistry()
+    except Exception:
+        return []
+    tool_ids: list[str] = []
+    seen: set[str] = set()
+    for match in _TOOL_MENTION_RE.finditer(user_text):
+        tool_id = str(match.group(1) or "").strip()
+        if not tool_id or tool_id in seen:
+            continue
+        try:
+            tool_def = registry.get(tool_id)
+        except Exception:
+            tool_def = None
+        if tool_def is None:
+            continue
+        seen.add(tool_id)
+        tool_ids.append(tool_id)
+    return tool_ids
+
+
+def _has_computer_use_tool(tool_ids: list[str]) -> bool:
+    return any(str(tool_id or "").strip() in _COMPUTER_USE_TOOL_IDS for tool_id in tool_ids)
+
+
+def _apply_requested_tool_policy(context: dict[str, Any], requested_tool_ids: list[str]) -> None:
+    if not isinstance(context, dict) or not requested_tool_ids:
+        return
+    profile_policy = context.get("profile_policy")
+    if isinstance(profile_policy, dict) and profile_policy.get("allow_shell") is False:
+        return
+    if not _requested_tool_ids_include_shell(requested_tool_ids):
+        return
+    updated_policy = dict(profile_policy) if isinstance(profile_policy, dict) else {}
+    updated_policy["allow_shell"] = True
+    context["profile_policy"] = updated_policy
+    context["user_requested_shell_tool"] = True
+
+
+def _requested_tool_ids_include_shell(tool_ids: list[str]) -> bool:
+    try:
+        registry = ToolRegistry()
+    except Exception:
+        return False
+    for tool_id in tool_ids:
+        candidate = str(tool_id or "").strip()
+        if not candidate:
+            continue
+        try:
+            tool_def = registry.get(candidate)
+        except Exception:
+            tool_def = None
+        if not isinstance(tool_def, dict):
+            continue
+        metadata = tool_def.get("metadata") if isinstance(tool_def.get("metadata"), dict) else {}
+        category = str(tool_def.get("category") or metadata.get("category") or "").strip()
+        action_type = str(tool_def.get("action_type") or metadata.get("action_type") or "").strip()
+        if category == "shell" or action_type == "shell":
+            return True
+    return False
 
 
 def _with_inferred_tools(
@@ -1947,6 +2229,69 @@ def _append_special_model_tools(
     return [*tools, *helper_tools]
 
 
+def _requested_tool_ids_from_selection(selection: NormalizedToolSelection) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+    for target in normalize_tool_targets(selection.include):
+        if target.kind != "tool":
+            continue
+        if target.id in seen:
+            continue
+        seen.add(target.id)
+        ids.append(target.id)
+    return ids
+
+
+def _tool_name_set(tools: list[dict[str, Any]]) -> set[str]:
+    return {
+        name
+        for name in (tool_name_from_definition(tool) for tool in tools)
+        if name
+    }
+
+
+def _unselected_requested_tool_entries(
+    requested_tool_ids: list[str],
+    selected_tool_ids: list[str],
+    registry_tools: list[dict[str, Any]],
+    profile_filtered_tools: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    selected = {str(tool_id).strip() for tool_id in selected_tool_ids if str(tool_id or "").strip()}
+    registry_names = _tool_name_set(registry_tools)
+    profile_names = _tool_name_set(profile_filtered_tools)
+    entries: list[dict[str, Any]] = []
+    for tool_id in requested_tool_ids:
+        if tool_id in selected:
+            continue
+        if tool_id not in registry_names:
+            reason_code = "unknown_selected_tool"
+            reason = "selected tool is not registered in the tool catalog"
+            suggestions = ["Remove the stale tool selection or install the missing tool."]
+        elif tool_id not in profile_names:
+            reason_code = "not_connected_to_profile"
+            reason = "selected tool is not connected to the active runtime profile"
+            suggestions = ["Connect the tool in the active runtime profile or choose a team workspace profile that includes it."]
+        else:
+            reason_code = "not_attached_to_turn"
+            reason = "selected tool was eligible in the catalog but was not attached for this turn"
+            suggestions = ["Check tool selection settings and this turn's disabled tools."]
+        entries.append(
+            {
+                "tool_name": tool_id,
+                "status": "blocked",
+                "reason_code": reason_code,
+                "reason": reason,
+                "required": {"selected_tools": [tool_id]},
+                "actual": {
+                    "selected_tool_ids": sorted(selected),
+                    "runtime_profile_connected_tools": sorted(profile_names),
+                },
+                "repair_suggestions": suggestions,
+            }
+        )
+    return entries
+
+
 def _available_tools(
     context: dict[str, Any],
     input_data: dict[str, Any],
@@ -1956,8 +2301,18 @@ def _available_tools(
     selection = _normalize_tool_selection(input_data)
     resolved_context = resolve_runtime_profile_context(context or {})
     resolved_context["tool_selection"] = _tool_selection_metadata(selection)
-    runtime_profile = resolved_context.get("runtime_profile")
-    agent_id = input_data.get("agent_id")
+    agent_id = input_data.get("agent_id") or resolved_context.get("agent_id")
+    requested_tool_ids = _requested_tool_ids_from_selection(selection)
+    runtime_profile, agent_id = _runtime_profile_with_policy_connected_tools(
+        resolved_context.get("runtime_profile"),
+        profile_id=resolved_context.get("profile_id"),
+        agent_id=agent_id,
+        requested_tool_ids=requested_tool_ids,
+    )
+    if isinstance(runtime_profile, dict):
+        resolved_context["runtime_profile"] = runtime_profile
+    if agent_id:
+        resolved_context["agent_id"] = agent_id
     try:
         settings = _read_frontend_settings()
         explicit_tool_definitions = [
@@ -1986,6 +2341,21 @@ def _available_tools(
         )
         filtered = list(decision.selected_tools)
         selection_trace = decision.to_trace_dict()
+        selected_tool_ids = [
+            tool_name_from_definition(tool)
+            for tool in filtered
+            if tool_name_from_definition(tool)
+        ]
+        if requested_tool_ids:
+            unselected_requested_tools = _unselected_requested_tool_entries(
+                requested_tool_ids,
+                selected_tool_ids,
+                registry_tools,
+                profile_filtered,
+            )
+            resolved_context["requested_tool_ids"] = requested_tool_ids
+            if unselected_requested_tools:
+                resolved_context["unselected_requested_tools"] = unselected_requested_tools
         resolved_context["tool_selection"] = {
             **resolved_context["tool_selection"],
             **selection_trace,
