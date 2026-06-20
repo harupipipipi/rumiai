@@ -226,6 +226,33 @@ def test_ambient_audio_payload_aliases_materialize_ephemeral_attachment_metadata
     assert attachment["metadata"]["privacy"] == "ephemeral_audio"
 
 
+def test_ambient_audio_payload_dedupes_top_level_and_attachment_audio():
+    from domain.ambient.materialization import materialize_ambient_event_attachments
+
+    attachments = materialize_ambient_event_attachments(
+        {
+            "audio_data_url": "data:audio/webm;base64,AAAA",
+            "audio_mime_type": "audio/webm",
+            "audio_name": "ok-mark-recording.webm",
+            "attachments": [
+                {
+                    "id": "ambient-audio-1",
+                    "name": "ok-mark-recording.webm",
+                    "type": "audio/webm",
+                    "dataUrl": "data:audio/webm;base64,AAAA",
+                    "ephemeral": True,
+                    "do_not_persist": True,
+                }
+            ],
+        },
+        event_id="evt-audio",
+    )
+
+    assert len(attachments) == 1
+    assert attachments[0]["id"] == "ambient-audio-1"
+    assert attachments[0]["metadata"]["ambient_event_id"] == "evt-audio"
+
+
 def test_debug_qa_ok_mark_dispatch_strips_media_and_keeps_transcript_metadata(monkeypatch, tmp_path):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))

@@ -22,6 +22,7 @@ export type AmbientRuntimeStatus =
   | "off"
   | "monitoring"
   | "recording"
+  | "transcribing"
   | "sending"
   | "paused"
   | "blocked"
@@ -34,6 +35,7 @@ export type AmbientUiState =
   | "readyOff"
   | "monitoring"
   | "recording"
+  | "transcribing"
   | "sending"
   | "paused"
   | "denied"
@@ -123,6 +125,13 @@ export const ambientCopyJa = {
       primary: "キャンセル",
       tone: "red",
     },
+    transcribing: {
+      badge: "文字起こし中",
+      headline: "録音音声を文字にしています",
+      body: "文字起こし後にAIへ送ります",
+      primary: "文字起こし中...",
+      tone: "purple",
+    },
     sending: {
       badge: "送信中",
       headline: "音声をAIに送っています",
@@ -204,6 +213,13 @@ export const ambientStateVisuals = {
     primaryButtonClass: "bg-red-400 text-zinc-950 hover:bg-red-300",
     badgeClass: "border-red-400/35 bg-red-500/10 text-red-100",
   },
+  transcribing: {
+    glyphIcon: "loader",
+    glyphClass: "border-violet-400/35 bg-violet-400/10 text-violet-100",
+    primaryIcon: "loader",
+    primaryButtonClass: "cursor-wait bg-violet-300 text-zinc-950 opacity-80",
+    badgeClass: "border-violet-400/30 bg-violet-400/10 text-violet-100",
+  },
   sending: {
     glyphIcon: "loader",
     glyphClass: "border-violet-400/35 bg-violet-400/10 text-violet-100",
@@ -267,6 +283,7 @@ export function deriveAmbientUiState(
     return "osPermissionNeeded";
   }
 
+  if (runtimeStatus === "transcribing") return "transcribing";
   if (runtimeStatus === "sending") return "sending";
   if (runtimeStatus === "recording") return "recording";
   if (runtimeStatus === "monitoring") return "monitoring";

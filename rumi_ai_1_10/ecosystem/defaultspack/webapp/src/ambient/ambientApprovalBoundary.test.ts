@@ -155,6 +155,28 @@ test("ambient event submit forwards browser QA token header", () => {
   assert.match(clientSource, /submitEvent\(payload: AmbientEventPayload\)[\s\S]*headers: browserApprovalHeaders\(\)/);
 });
 
+test("real OK-mark recording routes audio through transcription before dispatch", () => {
+  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+
+  assert.match(panelSource, /setPinchDetectorStatus\("transcribing"\)/);
+  assert.match(panelSource, /ambientOperationLabels\.transcribing/);
+  assert.match(panelSource, /audio_data_url: recording\.dataUrl/);
+  assert.match(panelSource, /audio_mime_type: recording\.mimeType/);
+  assert.match(panelSource, /audio_name: `ok-mark-recording\.\$\{recording\.extension\}`/);
+  assert.match(panelSource, /\.\.\.\(transcript \? \{ input_text: transcript \} : \{\}\)/);
+  assert.match(panelSource, /setLatestSubmittedInput\(transcript \|\| null\)/);
+  assert.doesNotMatch(panelSource, /録音音声を送信しました。文字起こしはまだありません。/);
+  assert.doesNotMatch(panelSource, /音声を確認して返答してください。/);
+});
+
+test("ambient readout toggle uses stable on off copy", () => {
+  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+
+  assert.match(panelSource, /aria-pressed=\{readoutEnabled\}/);
+  assert.match(panelSource, /readoutEnabled \? "オン" : "オフ"/);
+  assert.doesNotMatch(panelSource, /読み上げ: 再生中/);
+});
+
 test("ambient mini chat keeps a submitted conversation active over stale routing", () => {
   const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
 

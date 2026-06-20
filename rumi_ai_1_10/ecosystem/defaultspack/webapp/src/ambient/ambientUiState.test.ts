@@ -75,6 +75,7 @@ test("deriveAmbientUiState distinguishes off, monitoring, recording, and sending
     ["off", "readyOff"],
     ["monitoring", "monitoring"],
     ["recording", "recording"],
+    ["transcribing", "transcribing"],
     ["sending", "sending"],
   ];
   for (const [runtime, expected] of cases) {
@@ -112,6 +113,7 @@ test("ambient copy uses concrete recording and send state labels", () => {
   ]);
   assert.match(ambientCopyJa.gestureShort, /OKマーク/);
   assert.match(ambientCopyJa.states.monitoring.body, /指を開くと送信/);
+  assert.match(ambientCopyJa.states.transcribing.headline, /録音音声を文字/);
   assert.doesNotMatch(JSON.stringify(ambientCopyJa), /指をくっつけ/);
 });
 
@@ -134,6 +136,7 @@ test("ambient pending audio label never exposes generated audio filenames as inp
 
 test("ambient renderable message keeps actionable problems and hides routine status text", () => {
   assert.equal(ambientRenderableMessage("送信中: hello をテスト送信しています。"), null);
+  assert.equal(ambientRenderableMessage("文字起こし中: 録音音声を文字にしています。"), null);
   assert.equal(ambientRenderableMessage("返答待ち: 録音音声をAIに送信しました。返答を待っています。"), null);
   assert.equal(ambientRenderableMessage("完了: AIの回答が届きました。"), null);
   assert.equal(ambientRenderableMessage("待機中です。OKマークで録音開始、指を開くと送信します。"), null);

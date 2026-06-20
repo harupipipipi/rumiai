@@ -198,7 +198,6 @@ export function AmbientTriggerPanel({
     frontFlash,
     readoutEnabled,
     setReadoutEnabled,
-    readoutPlaying,
     stopSpeechReadout,
   } = useFinalAnswerBridge({
     finalAnswerText: finalAnswerText ?? miniFinalAnswerText,
@@ -247,6 +246,7 @@ export function AmbientTriggerPanel({
   const monitorEnabled = Boolean(status?.ambient_monitor.enabled);
   const runtimeStatus = useMemo<AmbientRuntimeStatus>(() => {
     if (pinchDetectorStatus === "unavailable") return "blocked";
+    if (pinchDetectorStatus === "transcribing") return "transcribing";
     if (pinchDetectorStatus === "sending") return "sending";
     if (pinchRecording || pinchDetectorStatus === "recording") return "recording";
     if (monitorEnabled) return "monitoring";
@@ -574,9 +574,9 @@ export function AmbientTriggerPanel({
     setRecordingStartedAt(null);
     const transcript = await settlePinchSpeechRecognition();
     setPinchTranscriptPreview("");
-    setPinchDetectorStatus("sending");
-    setMessage(`${ambientOperationLabels.sending}: 録音音声をAIへ送っています。`);
-    setLatestSubmittedInput(transcript || "録音音声を送信しました。文字起こしはまだありません。");
+    setPinchDetectorStatus("transcribing");
+    setMessage(`${ambientOperationLabels.transcribing}: 録音音声を文字にしています。`);
+    setLatestSubmittedInput(transcript || null);
     try {
       const recording = await recorder.stop();
       if (recording.size <= 0) {
@@ -585,6 +585,10 @@ export function AmbientTriggerPanel({
         setPinchDetectorStatus("tracking");
         return;
       }
+      if (transcript) {
+        setPinchDetectorStatus("sending");
+        setMessage(`${ambientOperationLabels.sending}: 文字起こしをAIへ送っています。`);
+      }
       const result = await ambientTriggerClient.submitEvent({
         source: "camera",
         trigger: "pinch",
@@ -592,10 +596,14 @@ export function AmbientTriggerPanel({
         action_id: "chat.message",
         ...dispatchTemplateContext.eventPayload,
         params: ambientParamsWithTranscriptionLanguage(dispatchTemplateContext.eventPayload.params),
-        input_text: transcript ? `文字起こし:\n${transcript}` : "録音音声を送信しました。文字起こしはまだありません。音声を確認して返答してください。",
+        ...(transcript ? { input_text: transcript } : {}),
         conversation_id: conversationIdRef.current || undefined,
         confidence: state.confidence,
         duration_ms: recording.durationMs,
+        audio_data_url: recording.dataUrl,
+        audio_mime_type: recording.mimeType,
+        audio_size: recording.size,
+        audio_name: `ok-mark-recording.${recording.extension}`,
         metadata: mergeAmbientDispatchMetadata({
           panel: "ambient_mini_window",
           hand: state.hand,
@@ -619,6 +627,7 @@ export function AmbientTriggerPanel({
           },
         ],
       });
+      setLatestSubmittedInput(null);
       setMessage(ambientResultMessage(result, "録音音声をAIに送信しました。"));
       const resultConversationId = activateMiniConversationFromSubmitResult(result, conversationIdRef.current);
       const resultStatus = String(result.status ?? "");
@@ -1481,6 +1490,7 @@ export function AmbientTriggerPanel({
       case "error":
         await refresh({ probeOs: true });
         return;
+      case "transcribing":
       case "sending":
         return;
     }
@@ -1493,13 +1503,14 @@ export function AmbientTriggerPanel({
         type="button"
         onClick={toggleReadoutEnabled}
         disabled={rumiApprovalPending}
+        aria-pressed={readoutEnabled}
         className={cn("ambient-mini-button w-full justify-between", readoutEnabled && "border-emerald-400/30 text-emerald-200")}
       >
         <span className="inline-flex min-w-0 items-center gap-2">
           {readoutEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
           <span className="truncate">読み上げ</span>
         </span>
-        <span className="shrink-0 text-[11px]">{readoutEnabled ? (readoutPlaying ? "読み上げ: 再生中" : "読み上げ: オン") : "読み上げ: オフ"}</span>
+        <span className="shrink-0 text-[11px]">{readoutEnabled ? "オン" : "オフ"}</span>
       </button>
       {allRumiPermissionsGranted && (
         <RoutingSettings
@@ -1763,7 +1774,7 @@ export function AmbientTriggerPanel({
           <button
             type="button"
             onClick={() => void handlePrimaryAction()}
-            disabled={busy || uiState === "sending" || rumiApprovalPending}
+            disabled={busy || uiState === "sending" || uiState === "transcribing" || rumiApprovalPending}
             className={cn(
               "inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold transition",
               primaryButtonClass(uiState),
@@ -2114,7 +2125,7 @@ function RecognitionMonitor({
         </div>
         <div className="min-w-0 flex-1">
           <span className={cn("inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium", toneClass)}>
-            {recording ? <Mic size={12} /> : hasHand ? <Hand size={12} /> : <Video size={12} />}
+            {status === "transcribing" ? <Loader2 size={12} className="animate-spin" /> : recording ? <Mic size={12} /> : hasHand ? <Hand size={12} /> : <Video size={12} />}
             <span className="truncate">{label}</span>
           </span>
           {frame?.handedness && frame.handedness !== "Unknown" && (
@@ -2157,6 +2168,7 @@ function landmarkPercent(value: number): number {
 
 function recognitionMonitorLabel(status: string, hasHand: boolean, recording: boolean, recordingSeconds: number): string {
   if (recording) return `録音中 ${formatRecordingTime(recordingSeconds)}・OKマークを崩すと送信`;
+  if (status === "transcribing") return "文字起こし中";
   if (status === "sending") return "送信中";
   if (status === "loading") return "合図の認識を準備中";
   if (status === "unavailable") return "合図待ちを開始できません";
@@ -2166,6 +2178,7 @@ function recognitionMonitorLabel(status: string, hasHand: boolean, recording: bo
 
 function recognitionMonitorToneClass(status: string, hasHand: boolean, recording: boolean): string {
   if (recording) return "border-red-300/45 bg-red-500/25 text-red-50";
+  if (status === "transcribing") return "border-violet-300/45 bg-violet-500/25 text-violet-50";
   if (status === "sending") return "border-violet-300/45 bg-violet-500/25 text-violet-50";
   if (status === "unavailable") return "border-red-300/45 bg-red-500/25 text-red-50";
   if (hasHand) return "border-emerald-300/45 bg-emerald-500/20 text-emerald-50";

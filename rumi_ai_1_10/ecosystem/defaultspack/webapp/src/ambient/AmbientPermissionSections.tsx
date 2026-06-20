@@ -71,6 +71,7 @@ export function gestureStatusLabel(status: string, monitorEnabled: boolean): str
   if (!monitorEnabled) return "未開始";
   if (status === "tracking") return "待機中";
   if (status === "recording") return "録音中";
+  if (status === "transcribing") return "文字起こし中";
   if (status === "sending") return "送信中";
   if (status === "loading") return "準備中";
   if (status === "unavailable") return "利用不可";

@@ -44,7 +44,7 @@ def materialize_ambient_event_attachments(
     raw = payload.get("attachments")
     attachments = [dict(item) for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
     recorded = recorded_audio_attachment_from_payload(payload, event_id=event_id)
-    if recorded is not None:
+    if recorded is not None and not _has_same_audio_payload(attachments, recorded):
         attachments.append(recorded)
     return [
         materialize_recorded_audio_metadata(attachment, event_id=event_id)
@@ -87,6 +87,26 @@ def recorded_audio_attachment_from_payload(
         if isinstance(value, str) and value.strip():
             attachment[source_key] = value.strip()
     return materialize_recorded_audio_metadata(attachment, event_id=event_id)
+
+
+def _has_same_audio_payload(attachments: list[dict[str, Any]], recorded: dict[str, Any]) -> bool:
+    recorded_audio = _audio_payload(recorded)
+    if not recorded_audio:
+        return False
+    return any(_audio_payload(attachment) == recorded_audio for attachment in attachments if is_audio_attachment(attachment))
+
+
+def _audio_payload(attachment: dict[str, Any]) -> str:
+    for key in ("dataUrl", "data_url", "audio", "audio_data_url", "audioDataUrl"):
+        value = attachment.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    metadata = attachment.get("metadata") if isinstance(attachment.get("metadata"), dict) else {}
+    for key in ("dataUrl", "data_url", "audio", "audio_data_url", "audioDataUrl"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 def materialize_recorded_audio_metadata(
