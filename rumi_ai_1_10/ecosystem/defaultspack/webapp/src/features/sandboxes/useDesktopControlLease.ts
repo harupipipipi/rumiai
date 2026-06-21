@@ -1,12 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { sandboxesApi } from "./api";
-import type { DesktopControlLease } from "./types";
+import type { DesktopControlLease, DesktopControlLeaseRenewal } from "./types";
 
 type DesktopControlClient = Pick<
   typeof sandboxesApi,
   "acquireDesktopControl" | "renewDesktopControl" | "releaseDesktopControl"
 >;
+
+export function mergeDesktopLeaseRenewal(
+  current: DesktopControlLease | null,
+  renewal: DesktopControlLeaseRenewal,
+): DesktopControlLease | null {
+  if (!current) return null;
+  return {
+    ...current,
+    seat_id: renewal.seat_id,
+    lease_id: renewal.lease_id ?? current.lease_id,
+    expires_at: renewal.expires_at,
+  };
+}
 
 export function useDesktopControlLease(
   seatId: string | null,
@@ -63,8 +76,8 @@ export function useDesktopControlLease(
       const currentLease = leaseRef.current;
       if (!currentLease) return;
       void client.renewDesktopControl(seatId, currentLease.lease_token)
-        .then((nextLease) => {
-          setLease(nextLease);
+        .then((renewedLease) => {
+          setLease((current) => mergeDesktopLeaseRenewal(current, renewedLease));
           setError(null);
         })
         .catch((renewError) => {

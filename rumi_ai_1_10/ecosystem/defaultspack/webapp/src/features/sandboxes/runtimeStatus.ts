@@ -1,3 +1,4 @@
+import { normalizeRuntimeStatus } from "./types";
 import type { RuntimeDoctorIssue, RuntimeDoctorResult, RuntimeProviderStatus, RuntimeProvidersResponse } from "./types";
 
 export type RuntimeAvailability =
@@ -17,12 +18,11 @@ export type RuntimeAvailability =
     };
 
 function providerIsReady(provider: RuntimeProviderStatus): boolean {
-  const status = provider.status.toLowerCase();
-  return provider.available === true || status === "ready" || status === "available";
+  return provider.ready === true;
 }
 
 function providerNeedsSetup(provider: RuntimeProviderStatus): boolean {
-  const status = provider.status.toLowerCase();
+  const status = normalizeRuntimeStatus(provider.status);
   return status === "needs_setup" || status === "installing" || status === "updating";
 }
 
@@ -32,7 +32,7 @@ export function providerLabel(provider: RuntimeProviderStatus | null | undefined
 }
 
 export function providerStatusTone(provider: RuntimeProviderStatus): "success" | "warning" | "danger" | "idle" {
-  const status = provider.status.toLowerCase();
+  const status = normalizeRuntimeStatus(provider.status);
   if (providerIsReady(provider)) return "success";
   if (providerNeedsSetup(provider)) return "warning";
   if (status === "error" || status === "failed" || status === "unavailable") return "danger";
@@ -82,7 +82,7 @@ export function runtimeAvailability(
     };
   }
 
-  if (providers.some(providerIsReady) || doctor?.status === "ready") {
+  if (providers.some(providerIsReady) || (providers.length === 0 && normalizeRuntimeStatus(doctor?.status) === "ready")) {
     return {
       status: "ready",
       selectedProvider,
@@ -92,7 +92,7 @@ export function runtimeAvailability(
     };
   }
 
-  if (providers.some(providerNeedsSetup) || doctor?.status === "needs_setup") {
+  if (providers.some(providerNeedsSetup) || normalizeRuntimeStatus(doctor?.status) === "needs_setup") {
     return {
       status: "needs_setup",
       selectedProvider,
@@ -102,7 +102,7 @@ export function runtimeAvailability(
     };
   }
 
-  if (doctor?.status === "error" || error) {
+  if (normalizeRuntimeStatus(doctor?.status) === "error" || error) {
     return {
       status: "error",
       selectedProvider,

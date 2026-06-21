@@ -6,11 +6,6 @@
   "display_name": "Pack Networked",
   "summary": "Approval-gated pack sandbox for tasks that need explicit outbound network access without ambient host credentials.",
   "source_pack_id": "rumi_sandbox_runtime_pack",
-  "trust": {
-    "origin": "builtin",
-    "trusted": true,
-    "authority": "rumi_sandbox_runtime_pack"
-  },
   "runtime": {
     "os": "linux",
     "provider": "auto",

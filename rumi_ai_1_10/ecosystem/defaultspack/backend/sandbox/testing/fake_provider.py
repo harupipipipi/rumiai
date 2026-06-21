@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Callable
 
 from ..models import (
     Diagnostic,
@@ -28,6 +29,7 @@ class FakeRuntimeProvider:
         ready: bool = True,
         platform: str = "test",
         guest_agent: FakeGuestAgent | None = None,
+        sandbox_id_factory: Callable[[], str] | None = None,
     ) -> None:
         self.provider_id = provider_id
         self.capabilities = frozenset(capabilities)
@@ -35,6 +37,7 @@ class FakeRuntimeProvider:
         self.platform = platform
         self.guest_agent = guest_agent or FakeGuestAgent()
         self.instances: dict[str, ProviderInstance] = {}
+        self._sandbox_id_factory = sandbox_id_factory
 
     def doctor(self, request: RuntimeRequirements) -> RuntimeProviderStatus:
         missing = tuple(sorted(request.required_capabilities - self.capabilities))
@@ -70,7 +73,7 @@ class FakeRuntimeProvider:
         return OperationResult(ok=True, provider_id=self.provider_id, operation_id="fake-uninstall", status="uninstalled")
 
     def create(self, spec: SandboxCreateSpec) -> ProviderInstance:
-        sandbox_id = str(uuid.uuid4())
+        sandbox_id = self._sandbox_id_factory() if self._sandbox_id_factory is not None else str(uuid.uuid4())
         instance = ProviderInstance(
             provider_id=self.provider_id,
             provider_instance_id=f"fake-{sandbox_id}",

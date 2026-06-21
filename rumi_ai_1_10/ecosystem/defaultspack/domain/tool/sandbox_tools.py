@@ -5,11 +5,12 @@ import shlex
 import sys
 from typing import Any
 
-from domain.coding.terminal import Terminal
 from domain.coding.terminal_policy import SHELL_ESCAPE_MARKERS
 from domain.tool_policy.internal_context import internal_tool_decision_allows
 
 from ._agent_os_common import err, now_slug, ok, write_text_file, workspace
+
+MANAGED_RUNTIME_NOT_READY = "MANAGED_RUNTIME_NOT_READY"
 
 
 def sandbox_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -22,30 +23,12 @@ def sandbox_exec(arguments: dict[str, Any], context: dict[str, Any] | None = Non
     argv = plan["argv"]
     if not argv:
         return err("'command' is required", "INVALID_INPUT")
-    try:
-        ws = workspace(context)
-        terminal = Terminal(str(ws.root))
-        result = terminal.execute(
-            argv,
-            cwd=arguments.get("cwd"),
-            timeout=_timeout_seconds(arguments.get("timeout")),
-            approved=True,
-        )
-        return ok(
-            {
-                "workspace": str(ws.root),
-                "argv": argv,
-                "template_id": str(arguments.get("template_id") or "tool.ephemeral"),
-                "managed_runtime": {
-                    "enabled": False,
-                    "mode": "compatibility_adapter",
-                    "reason": "managed runtime provider is not installed in this build",
-                },
-                **result,
-            }
-        )
-    except Exception as exc:
-        return err(str(exc), "SANDBOX_EXEC_FAILED")
+    return err(
+        "Managed sandbox runtime is not ready; sandbox_exec will not fall back to host execution.",
+        MANAGED_RUNTIME_NOT_READY,
+        argv=argv,
+        template_id=str(arguments.get("template_id") or "tool.ephemeral"),
+    )
 
 
 def python_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -58,6 +41,9 @@ def python_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None
         return err("'code' or 'script_path' is required", "INVALID_INPUT")
     try:
         ws = workspace(context)
+        if script_path:
+            resolved = ws.resolve(str(script_path), must_exist=True)
+            script_path = ws.relative(resolved)
         if code:
             script = ws.resolve(f".sandbox/python-{now_slug()}.py")
             write_text_file(script, str(code))
@@ -77,6 +63,9 @@ def node_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) 
         return err("'code' or 'script_path' is required", "INVALID_INPUT")
     try:
         ws = workspace(context)
+        if script_path:
+            resolved = ws.resolve(str(script_path), must_exist=True)
+            script_path = ws.relative(resolved)
         if code:
             script = ws.resolve(f".sandbox/node-{now_slug()}.js")
             write_text_file(script, str(code))
@@ -132,11 +121,3 @@ def _command_plan(arguments: dict[str, Any]) -> dict[str, Any]:
         except ValueError as exc:
             return {"error": f"invalid command string: {exc}", "code": "INVALID_INPUT"}
     return {"error": "'command' must be a string or argv array", "code": "INVALID_INPUT"}
-
-
-def _timeout_seconds(value: Any) -> int:
-    try:
-        timeout = int(value or 30)
-    except (TypeError, ValueError):
-        timeout = 30
-    return max(1, min(timeout, 600))

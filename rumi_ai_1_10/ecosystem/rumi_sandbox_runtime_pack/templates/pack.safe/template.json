@@ -6,11 +6,6 @@
   "display_name": "Pack Safe",
   "summary": "Default deny sandbox for trusted pack code that needs bounded execution without network, secrets, desktop, or host writes.",
   "source_pack_id": "rumi_sandbox_runtime_pack",
-  "trust": {
-    "origin": "builtin",
-    "trusted": true,
-    "authority": "rumi_sandbox_runtime_pack"
-  },
   "runtime": {
     "os": "linux",
     "provider": "auto",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+import threading
 from typing import Callable
 
 from .errors import FRAME_NOT_FOUND, SandboxContractError
@@ -47,6 +48,12 @@ class FrameFetchResult:
         return self.status_code == 204
 
 
+@dataclass(frozen=True)
+class CaptureReservation:
+    seat_id: str
+    reserved_at: float
+
+
 class FrameCache:
     def __init__(
         self,
@@ -60,14 +67,36 @@ class FrameCache:
         self._time_fn = time_fn or time.time
         self._frames: dict[str, DesktopFrame] = {}
         self._last_capture_at: dict[str, float] = {}
+        self._captures_in_flight: set[str] = set()
+        self._lock = threading.RLock()
 
     def should_capture(self, seat_id: str) -> bool:
         seat_id = require_canonical_id(seat_id, field="seat_id")
-        last = self._last_capture_at.get(seat_id)
-        return last is None or (self._time_fn() - last) >= self.min_capture_interval_seconds
+        with self._lock:
+            last = self._last_capture_at.get(seat_id)
+            return seat_id not in self._captures_in_flight and (
+                last is None or (self._time_fn() - last) >= self.min_capture_interval_seconds
+            )
+
+    def reserve_capture(self, seat_id: str) -> CaptureReservation | None:
+        seat_id = require_canonical_id(seat_id, field="seat_id")
+        with self._lock:
+            if seat_id in self._captures_in_flight:
+                return None
+            now = self._time_fn()
+            last = self._last_capture_at.get(seat_id)
+            if last is not None and (now - last) < self.min_capture_interval_seconds:
+                return None
+            self._captures_in_flight.add(seat_id)
+            self._last_capture_at[seat_id] = now
+            return CaptureReservation(seat_id=seat_id, reserved_at=now)
 
     def mark_capture_attempt(self, seat_id: str) -> None:
-        self._last_capture_at[require_canonical_id(seat_id, field="seat_id")] = self._time_fn()
+        self.reserve_capture(seat_id)
+
+    def release_capture(self, seat_id: str) -> None:
+        with self._lock:
+            self._captures_in_flight.discard(require_canonical_id(seat_id, field="seat_id"))
 
     def put_frame(
         self,
@@ -87,35 +116,41 @@ class FrameCache:
             raise ValueError("frame data exceeds cache limit")
         if width < 1 or height < 1:
             raise ValueError("frame dimensions must be positive")
-        previous = self._frames.get(seat_id)
-        frame = DesktopFrame(
-            seat_id=seat_id,
-            frame_seq=1 if previous is None else previous.frame_seq + 1,
-            data=data,
-            content_type=content_type,
-            width=width,
-            height=height,
-            captured_at=self._time_fn() if captured_at is None else captured_at,
-            source=source,
-        )
-        self._frames[seat_id] = frame
-        self._last_capture_at[seat_id] = frame.captured_at
-        return frame
+        with self._lock:
+            previous = self._frames.get(seat_id)
+            frame = DesktopFrame(
+                seat_id=seat_id,
+                frame_seq=1 if previous is None else previous.frame_seq + 1,
+                data=data,
+                content_type=content_type,
+                width=width,
+                height=height,
+                captured_at=self._time_fn() if captured_at is None else captured_at,
+                source=source,
+            )
+            self._frames[seat_id] = frame
+            self._last_capture_at[seat_id] = frame.captured_at
+            self._captures_in_flight.discard(seat_id)
+            return frame
 
     def get_frame(self, seat_id: str, *, after_seq: int | None = None) -> FrameFetchResult:
         seat_id = require_canonical_id(seat_id, field="seat_id")
-        frame = self._frames.get(seat_id)
-        if frame is None:
-            raise SandboxContractError(FRAME_NOT_FOUND, "No desktop frame has been captured", status_code=404)
-        if after_seq is not None and int(after_seq) >= frame.frame_seq:
-            return FrameFetchResult(status_code=204, frame_seq=frame.frame_seq, frame=None)
-        return FrameFetchResult(status_code=200, frame_seq=frame.frame_seq, frame=frame)
+        with self._lock:
+            frame = self._frames.get(seat_id)
+            if frame is None:
+                raise SandboxContractError(FRAME_NOT_FOUND, "No desktop frame has been captured", status_code=404)
+            if after_seq is not None and int(after_seq) >= frame.frame_seq:
+                return FrameFetchResult(status_code=204, frame_seq=frame.frame_seq, frame=None)
+            return FrameFetchResult(status_code=200, frame_seq=frame.frame_seq, frame=frame)
 
     def last_metadata(self, seat_id: str) -> dict[str, object] | None:
-        frame = self._frames.get(require_canonical_id(seat_id, field="seat_id"))
-        return None if frame is None else frame.metadata()
+        with self._lock:
+            frame = self._frames.get(require_canonical_id(seat_id, field="seat_id"))
+            return None if frame is None else frame.metadata()
 
     def discard(self, seat_id: str) -> None:
         seat_id = require_canonical_id(seat_id, field="seat_id")
-        self._frames.pop(seat_id, None)
-        self._last_capture_at.pop(seat_id, None)
+        with self._lock:
+            self._frames.pop(seat_id, None)
+            self._last_capture_at.pop(seat_id, None)
+            self._captures_in_flight.discard(seat_id)

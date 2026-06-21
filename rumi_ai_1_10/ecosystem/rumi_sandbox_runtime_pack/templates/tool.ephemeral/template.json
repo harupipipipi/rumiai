@@ -6,11 +6,6 @@
   "display_name": "Ephemeral Tool",
   "summary": "Short-lived no-network tool sandbox with strict resource and output limits.",
   "source_pack_id": "rumi_sandbox_runtime_pack",
-  "trust": {
-    "origin": "builtin",
-    "trusted": true,
-    "authority": "rumi_sandbox_runtime_pack"
-  },
   "runtime": {
     "os": "linux",
     "provider": "auto",

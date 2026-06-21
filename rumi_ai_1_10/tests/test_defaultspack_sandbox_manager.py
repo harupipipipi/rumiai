@@ -1,21 +1,60 @@
 from __future__ import annotations
 
-import base64
 import json
-import struct
+from collections.abc import Callable
 
 from ecosystem.defaultspack.backend.sandbox.gui_sandbox import GUISandbox
+from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
+from ecosystem.defaultspack.backend.sandbox.testing.fake_provider import FakeRuntimeProvider
 
 
-def _decode_data_uri(data_uri: str) -> bytes:
-    prefix = "data:image/png;base64,"
-    assert data_uri.startswith(prefix)
-    return base64.b64decode(data_uri.removeprefix(prefix), validate=True)
+def _registry(
+    *,
+    capabilities: set[str] | None = None,
+    ready: bool = True,
+    sandbox_id_factory: Callable[[], str] | None = None,
+) -> ProviderRegistry:
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities=capabilities or {"sandbox.exec", "sandbox.files", "sandbox.desktop", "sandbox.desktop_input"},
+            ready=ready,
+            sandbox_id_factory=sandbox_id_factory,
+        )
+    )
+    return registry
+
+
+def _manager(
+    tmp_path,
+    *,
+    capabilities: set[str] | None = None,
+    ready: bool = True,
+    gui_backend=None,
+    sandbox_id_factory: Callable[[], str] | None = None,
+) -> SandboxManager:
+    return SandboxManager(
+        state_dir=tmp_path,
+        gui_backend=gui_backend,
+        provider_registry=_registry(capabilities=capabilities, ready=ready, sandbox_id_factory=sandbox_id_factory),
+    )
+
+
+def test_sandbox_create_fails_closed_without_registered_provider(tmp_path):
+    manager = SandboxManager(state_dir=tmp_path)
+
+    created = manager.create()
+
+    assert created["ok"] is False
+    assert created["status_code"] == 503
+    assert created["code"] == "RUNTIME_PROVIDER_UNAVAILABLE"
+    assert "No registered runtime provider" in created["error"]
 
 
 def test_sandbox_registry_persists_instances_and_lifecycle(tmp_path):
-    manager = SandboxManager(state_dir=tmp_path)
+    manager = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files"})
 
     created = manager.create(image="ubuntu:24.04", display=False)
 
@@ -26,14 +65,15 @@ def test_sandbox_registry_persists_instances_and_lifecycle(tmp_path):
     registry_path = tmp_path / "sandboxes.json"
     assert registry_path.is_file()
 
-    reloaded = SandboxManager(state_dir=tmp_path)
+    reloaded = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files"})
     status = reloaded.status(sandbox_id)
     assert status["ok"] is True
     assert status["sandbox_id"] == sandbox_id
     assert status["image"] == "ubuntu:24.04"
     assert status["display"] is False
     assert status["status"] == "ready"
-    assert status["provider_id"] == "local_compat"
+    assert status["state"] == "ready"
+    assert status["provider_id"] == "fake-runtime"
     assert status["template_id"] == "tool.ephemeral"
 
     destroyed = reloaded.destroy(sandbox_id)
@@ -42,41 +82,33 @@ def test_sandbox_registry_persists_instances_and_lifecycle(tmp_path):
         "destroyed": True,
         "sandbox_id": sandbox_id,
         "status": "destroyed",
+        "state": "destroyed",
     }
 
-    lifecycle = SandboxManager(state_dir=tmp_path).status(sandbox_id)
+    lifecycle = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files"}).status(sandbox_id)
     assert lifecycle["status"] == "destroyed"
     assert lifecycle["destroyed_at"] is not None
     assert lifecycle["updated_at"] >= lifecycle["created_at"]
 
 
-def test_sandbox_screenshot_returns_deterministic_valid_png_data_uri(tmp_path):
-    manager = SandboxManager(state_dir=tmp_path)
+def test_sandbox_screenshot_fails_closed_without_backend(tmp_path):
+    manager = _manager(tmp_path)
     sandbox_id = manager.create()["sandbox_id"]
 
-    first = manager.screenshot(sandbox_id)
-    second = manager.screenshot(sandbox_id)
+    result = manager.screenshot(sandbox_id)
 
-    assert first["ok"] is True
-    assert first["source"] == "local_fallback"
-    assert first["gui_backend"] is False
-    assert first["format"] == "png"
-    assert first["mime_type"] == "image/png"
-    assert first["screenshot"] == first["data_uri"]
-    assert first["screenshot"] == second["screenshot"]
-    assert first["base64"] == second["base64"]
-    assert first["base64"] != "base64_placeholder"
-
-    raw = _decode_data_uri(first["data_uri"])
-    assert raw == base64.b64decode(first["base64"], validate=True)
-    assert raw.startswith(b"\x89PNG\r\n\x1a\n")
-    assert raw[12:16] == b"IHDR"
-    width, height = struct.unpack("!II", raw[16:24])
-    assert (width, height) == (2, 2)
+    assert result["ok"] is False
+    assert result["code"] == "SANDBOX_BACKEND_UNAVAILABLE"
+    assert result["status_code"] == 503
+    assert result["sandbox_id"] == sandbox_id
+    assert result["status"] == "ready"
+    assert result["gui_backend"] is False
+    assert result["action"] == "screenshot"
+    assert "screenshot" in result["error"]
 
 
 def test_sandbox_not_found_and_destroyed_errors_are_clear(tmp_path):
-    manager = SandboxManager(state_dir=tmp_path)
+    manager = _manager(tmp_path)
 
     missing = manager.screenshot("missing-sandbox")
     assert missing["ok"] is False
@@ -101,20 +133,17 @@ def test_sandbox_not_found_and_destroyed_errors_are_clear(tmp_path):
     assert click["code"] == "SANDBOX_NOT_RUNNING"
 
 
-def test_sandbox_destroy_marks_error_when_backend_teardown_fails(tmp_path):
+def test_sandbox_destroy_marks_failed_when_backend_teardown_fails(tmp_path):
     class Backend:
         def __init__(self):
             self.destroyed = []
-
-        def create_session(self, title):
-            return {"session_id": "backend-session-1"}
 
         def destroy_session(self, sandbox_id):
             self.destroyed.append(sandbox_id)
             return {"ok": False, "error": "teardown refused"}
 
     backend = Backend()
-    manager = SandboxManager(state_dir=tmp_path, gui_backend=backend)
+    manager = _manager(tmp_path, gui_backend=backend)
     sandbox_id = manager.create()["sandbox_id"]
 
     result = manager.destroy(sandbox_id)
@@ -122,18 +151,18 @@ def test_sandbox_destroy_marks_error_when_backend_teardown_fails(tmp_path):
     assert result["ok"] is False
     assert result["destroyed"] is False
     assert result["code"] == "SANDBOX_BACKEND_DESTROY_FAILED"
-    assert result["status"] == "error"
+    assert result["status"] == "failed"
     assert result["error"] == "teardown refused"
     assert backend.destroyed == [sandbox_id]
 
-    persisted = SandboxManager(state_dir=tmp_path).status(sandbox_id)
-    assert persisted["status"] == "error"
+    persisted = _manager(tmp_path).status(sandbox_id)
+    assert persisted["status"] == "failed"
     assert persisted["destroyed_at"] is None
     assert persisted["last_error"] == "teardown refused"
 
 
 def test_sandbox_input_actions_fail_closed_without_backend(tmp_path):
-    manager = SandboxManager(state_dir=tmp_path)
+    manager = _manager(tmp_path)
     sandbox_id = manager.create()["sandbox_id"]
 
     click = manager.click(sandbox_id, 10, 20)
@@ -159,7 +188,6 @@ def test_sandbox_input_actions_fail_closed_without_backend(tmp_path):
     status = manager.status(sandbox_id)
     assert status["ok"] is True
     assert status["status"] == "ready"
-    assert status["last_activity_at"] is None
     assert status["last_error"] is None
 
 
@@ -181,7 +209,7 @@ def test_sandbox_input_actions_route_to_backend_before_reporting_success(tmp_pat
             return {"ok": True, "backend_action": "scroll"}
 
     backend = Backend()
-    manager = SandboxManager(state_dir=tmp_path, gui_backend=backend)
+    manager = _manager(tmp_path, gui_backend=backend)
     sandbox_id = manager.create()["sandbox_id"]
 
     click = manager.click(sandbox_id, 10, 20)
@@ -208,9 +236,10 @@ def test_sandbox_input_actions_route_to_backend_before_reporting_success(tmp_pat
     assert manager.status(sandbox_id)["last_activity_at"] is not None
 
 
-def test_sandbox_manager_uses_gui_backend_session_for_input_actions(tmp_path):
+def test_sandbox_manager_uses_explicit_test_gui_backend_for_input_actions(tmp_path):
     backend = GUISandbox()
-    manager = SandboxManager(state_dir=tmp_path, gui_backend=backend)
+    session = backend.create_session("test desktop")
+    manager = _manager(tmp_path, gui_backend=backend, sandbox_id_factory=lambda: session.session_id)
     sandbox_id = manager.create()["sandbox_id"]
 
     result = manager.click(sandbox_id, 1, 2)
@@ -218,11 +247,11 @@ def test_sandbox_manager_uses_gui_backend_session_for_input_actions(tmp_path):
     assert result["ok"] is True
     assert result["clicked"] is True
     assert result["gui_backend"] is True
-    session = backend.get_session(sandbox_id)
-    assert session is not None
-    assert session.events[-1]["action"] == "click"
-    assert session.events[-1]["x"] == 1
-    assert session.events[-1]["y"] == 2
+    stored = backend.get_session(sandbox_id)
+    assert stored is session
+    assert stored.events[-1]["action"] == "click"
+    assert stored.events[-1]["x"] == 1
+    assert stored.events[-1]["y"] == 2
 
 
 def test_sandbox_input_backend_failures_do_not_gain_success_flags(tmp_path):
@@ -230,7 +259,7 @@ def test_sandbox_input_backend_failures_do_not_gain_success_flags(tmp_path):
         def click(self, sandbox_id, x, y):
             return {"ok": False, "error": "window missing", "clicked": True, "recorded": True}
 
-    manager = SandboxManager(state_dir=tmp_path, gui_backend=Backend())
+    manager = _manager(tmp_path, gui_backend=Backend())
     sandbox_id = manager.create()["sandbox_id"]
 
     result = manager.click(sandbox_id, 10, 20)
@@ -251,14 +280,14 @@ def test_sandbox_state_dir_env_override_is_used(monkeypatch, tmp_path):
     override = tmp_path / "local-state"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR", str(override))
 
-    manager = SandboxManager()
+    manager = SandboxManager(provider_registry=_registry())
     sandbox_id = manager.create()["sandbox_id"]
 
     registry_path = override / "sandboxes.json"
     assert manager.registry_path == registry_path
     payload = json.loads(registry_path.read_text(encoding="utf-8"))
     assert sandbox_id in payload["instances"]
-    assert SandboxManager().status(sandbox_id)["status"] == "ready"
+    assert SandboxManager(provider_registry=_registry()).status(sandbox_id)["status"] == "ready"
 
 
 def test_legacy_ready_registry_records_are_not_treated_as_live(tmp_path):

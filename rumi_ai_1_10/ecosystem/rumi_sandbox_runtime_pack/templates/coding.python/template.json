@@ -6,11 +6,6 @@
   "display_name": "Coding Python",
   "summary": "Managed Python coding sandbox with writable overlay, preview ports, explicit network policy, and approved read-only secrets.",
   "source_pack_id": "rumi_sandbox_runtime_pack",
-  "trust": {
-    "origin": "builtin",
-    "trusted": true,
-    "authority": "rumi_sandbox_runtime_pack"
-  },
   "runtime": {
     "os": "linux",
     "provider": "auto",

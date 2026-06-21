@@ -7,10 +7,10 @@ export type RuntimeStatusKind =
   | "needs_setup"
   | "installing"
   | "updating"
-  | "error"
-  | string;
+  | "failed"
+  | "error";
 
-export type RuntimeIssueSeverity = "info" | "warning" | "error" | string;
+export type RuntimeIssueSeverity = "info" | "warning" | "error";
 
 export type RuntimeDoctorIssue = {
   code: string;
@@ -37,6 +37,8 @@ export type RuntimeProviderStatus = {
   label?: string;
   status: RuntimeStatusKind;
   available?: boolean;
+  installed?: boolean;
+  ready?: boolean;
   selected?: boolean;
   managed?: boolean;
   platform?: string;
@@ -76,8 +78,7 @@ export type RuntimeOperationStatus =
   | "health_checking"
   | "completed"
   | "failed"
-  | "cancelled"
-  | string;
+  | "cancelled";
 
 export type RuntimeOperation = {
   operation_id: string;
@@ -91,7 +92,7 @@ export type RuntimeOperation = {
   updated_at?: string;
 };
 
-export type SandboxTemplateKind = "pack" | "coding" | "desktop" | "tool" | string;
+export type SandboxTemplateKind = "pack" | "coding" | "desktop" | "tool" | "unknown";
 
 export type SandboxTemplate = {
   template_id: string;
@@ -117,11 +118,25 @@ export type SandboxInstance = {
   sandbox_id: string;
   template_id?: string;
   name?: string;
-  status: string;
+  status: SandboxState;
+  state?: SandboxState;
   provider_id?: string | null;
   created_at?: string;
   updated_at?: string;
 };
+
+export type SandboxState =
+  | "creating"
+  | "provisioning"
+  | "starting"
+  | "ready"
+  | "busy"
+  | "stopping"
+  | "stopped"
+  | "failed"
+  | "destroying"
+  | "destroyed"
+  | "unknown";
 
 export type DesktopStatus =
   | "creating"
@@ -130,8 +145,9 @@ export type DesktopStatus =
   | "running"
   | "stopped"
   | "failed"
+  | "destroying"
   | "destroyed"
-  | string;
+  | "unknown";
 
 export type DesktopResolution = {
   width: number;
@@ -139,7 +155,7 @@ export type DesktopResolution = {
 };
 
 export type DesktopControlState = {
-  holder?: "ai" | "human" | "none" | string;
+  holder?: "ai" | "human" | "none" | "unknown";
   lease_expires_at?: string | null;
   conflict_code?: string | null;
   message?: string | null;
@@ -226,13 +242,23 @@ export type DesktopFrameView = {
   received_at: number;
 };
 
-export type DesktopControlLease = {
+export type DesktopControlLeaseGrant = {
   seat_id: string;
   lease_id?: string;
   lease_token: string;
   expires_at: string;
-  holder?: "human" | string;
+  holder?: "human" | "unknown";
 };
+
+export type DesktopControlLeaseRenewal = {
+  seat_id: string;
+  lease_id?: string;
+  expires_at: string;
+  acquired_at?: number | string;
+  owner_id?: string;
+};
+
+export type DesktopControlLease = DesktopControlLeaseGrant;
 
 export type DesktopInputRequest =
   | {
@@ -268,3 +294,59 @@ export type DesktopInputRequest =
       client_action_id?: string;
       request_id?: string;
     };
+
+const runtimeStatuses: RuntimeStatusKind[] = [
+  "ready",
+  "available",
+  "unavailable",
+  "needs_setup",
+  "installing",
+  "updating",
+  "failed",
+  "error",
+];
+
+const sandboxStates: SandboxState[] = [
+  "creating",
+  "provisioning",
+  "starting",
+  "ready",
+  "busy",
+  "stopping",
+  "stopped",
+  "failed",
+  "destroying",
+  "destroyed",
+  "unknown",
+];
+
+const desktopStatuses: DesktopStatus[] = [
+  "creating",
+  "provisioning",
+  "starting",
+  "running",
+  "stopped",
+  "failed",
+  "destroying",
+  "destroyed",
+  "unknown",
+];
+
+export function normalizeRuntimeStatus(value: unknown): RuntimeStatusKind {
+  const status = String(value || "").toLowerCase();
+  return runtimeStatuses.includes(status as RuntimeStatusKind) ? status as RuntimeStatusKind : "unavailable";
+}
+
+export function normalizeSandboxState(value: unknown): SandboxState {
+  const state = String(value || "").toLowerCase();
+  if (state === "error") return "failed";
+  return sandboxStates.includes(state as SandboxState) ? state as SandboxState : "unknown";
+}
+
+export function normalizeDesktopStatus(value: unknown): DesktopStatus {
+  const raw = String(value || "").toLowerCase();
+  if (raw === "ready" || raw === "busy") return "running";
+  if (desktopStatuses.includes(raw as DesktopStatus)) return raw as DesktopStatus;
+  const status = normalizeSandboxState(raw);
+  return desktopStatuses.includes(status as DesktopStatus) ? status as DesktopStatus : "unknown";
+}

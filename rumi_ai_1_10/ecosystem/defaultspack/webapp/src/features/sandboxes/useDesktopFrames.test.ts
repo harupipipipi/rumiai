@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { DesktopFramePoller, type DesktopFrameFetcher } from "./useDesktopFrames";
+import { DesktopFramePoller, isRunningStatus, type DesktopFrameFetcher } from "./useDesktopFrames";
 import type { DesktopFrameResult } from "./types";
 
 function frame(seq: number): DesktopFrameResult {
@@ -63,4 +63,11 @@ test("DesktopFramePoller aborts the in-flight request", async () => {
   assert.ok(signalFromRequest);
   assert.equal((signalFromRequest as AbortSignal).aborted, true);
   assert.equal(poller.hasInFlightRequest(), false);
+});
+
+test("isRunningStatus accepts backend ready and busy sandbox states", () => {
+  assert.equal(isRunningStatus("running"), true);
+  assert.equal(isRunningStatus("ready"), true);
+  assert.equal(isRunningStatus("busy"), true);
+  assert.equal(isRunningStatus("stopped"), false);
 });

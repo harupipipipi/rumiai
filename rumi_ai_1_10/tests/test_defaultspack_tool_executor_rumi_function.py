@@ -766,7 +766,7 @@ def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
     assert result["widget"]["approval_required"] is True
 
 
-def test_sandbox_exec_runs_only_with_internal_tool_decision(tmp_path):
+def test_sandbox_exec_fails_closed_after_internal_tool_decision_until_managed_runtime_exists(tmp_path):
     from domain.tool.executor import ToolExecutor
     from domain.tool_policy.internal_context import seal_tool_context
 
@@ -777,9 +777,9 @@ def test_sandbox_exec_runs_only_with_internal_tool_decision(tmp_path):
 
     result = ToolExecutor().execute("sandbox_exec", {"command": "pwd"}, context)
 
-    assert result["is_error"] is False
-    assert str(tmp_path) in result["widget"]["data"]["stdout"]
-    assert result["widget"]["data"]["argv"] == ["pwd"]
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
+    assert result["widget"]["error"]["argv"] == ["pwd"]
 
 
 def test_sandbox_exec_rejects_shell_strings_after_internal_tool_decision(tmp_path):
@@ -804,6 +804,42 @@ def test_sandbox_exec_direct_call_requires_server_side_approval(tmp_path):
 
     assert result["is_error"] is True
     assert result["widget"]["error"]["code"] == "SANDBOX_APPROVAL_REQUIRED"
+
+
+def test_python_exec_script_path_must_stay_inside_workspace_even_when_approved(tmp_path):
+    from domain.tool.sandbox_tools import python_exec
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+    outside.write_text("print('outside')", encoding="utf-8")
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = python_exec({"script_path": f"../{outside.name}"}, context)
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "PYTHON_EXEC_FAILED"
+    assert "escapes artifact root" in result["widget"]["error"]["message"]
+
+
+def test_node_exec_script_path_must_stay_inside_workspace_even_when_code_is_present(tmp_path):
+    from domain.tool.sandbox_tools import node_exec
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.js"
+    outside.write_text("console.log('outside')", encoding="utf-8")
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = node_exec({"code": "console.log('inside')", "script_path": f"../{outside.name}"}, context)
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "NODE_EXEC_FAILED"
+    assert "escapes artifact root" in result["widget"]["error"]["message"]
 
 
 def test_package_install_plan_never_executes_packages(tmp_path):

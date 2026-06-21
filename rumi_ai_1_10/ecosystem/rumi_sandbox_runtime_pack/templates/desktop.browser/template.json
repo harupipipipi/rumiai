@@ -7,11 +7,6 @@
   "summary": "Ubuntu desktop seat that launches managed Chromium with an ephemeral profile unless persistence is explicitly approved.",
   "source_pack_id": "rumi_sandbox_runtime_pack",
   "extends": "desktop.ubuntu",
-  "trust": {
-    "origin": "builtin",
-    "trusted": true,
-    "authority": "rumi_sandbox_runtime_pack"
-  },
   "runtime": {
     "os": "ubuntu",
     "provider": "auto",

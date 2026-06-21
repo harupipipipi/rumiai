@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { sandboxesApi } from "./api";
+import { normalizeDesktopStatus } from "./types";
 import type { DesktopFrameQuality, DesktopFrameResult, DesktopFrameView } from "./types";
 
 export type DesktopFrameFetcher = (
@@ -87,8 +88,8 @@ function isDocumentHidden(): boolean {
   return typeof document !== "undefined" && document.visibilityState === "hidden";
 }
 
-function isRunningStatus(status: string | undefined): boolean {
-  return status === "running";
+export function isRunningStatus(status: string | undefined): boolean {
+  return normalizeDesktopStatus(status) === "running";
 }
 
 function cadenceFor(options: { selected: boolean; hasLease: boolean }): number {

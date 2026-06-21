@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from ecosystem.defaultspack.backend.sandbox.control_lease import ControlLeaseManager
@@ -146,6 +148,22 @@ def test_control_lease_conflict_expiry_and_token_hash_storage() -> None:
     assert next_grant.owner_id == "human-2"
 
 
+def test_control_lease_acquire_is_atomic_for_parallel_requests() -> None:
+    manager = ControlLeaseManager(ttl_seconds=30)
+
+    def acquire(index: int):
+        try:
+            return ("ok", manager.acquire("seat-1", f"human-{index}").owner_id)
+        except SandboxContractError as exc:
+            return ("error", exc.code)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(acquire, range(8)))
+
+    assert sum(1 for status, _ in results if status == "ok") == 1
+    assert sum(1 for status, code in results if status == "error" and code == DESKTOP_CONTROL_CONFLICT) == 7
+
+
 def test_desktop_input_requires_valid_lease_and_redacts_typed_text_from_audit() -> None:
     clock = Clock()
     lease_manager = ControlLeaseManager(ttl_seconds=30, time_fn=clock, token_factory=lambda: "lease-token")
@@ -200,6 +218,22 @@ def test_frame_cache_after_seq_returns_not_modified_without_advancing_frame() ->
     assert second.frame_seq == first.frame_seq + 1
     assert fetched.status_code == 200
     assert fetched.frame == second
+
+
+def test_frame_cache_reserve_capture_is_single_flight_per_seat() -> None:
+    cache = FrameCache(min_capture_interval_seconds=0)
+
+    def reserve(_index: int) -> bool:
+        return cache.reserve_capture("seat-1") is not None
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(reserve, range(8)))
+
+    assert results.count(True) == 1
+    assert results.count(False) == 7
+
+    cache.put_frame("seat-1", b"frame-one", content_type="image/png", width=2, height=2)
+    assert cache.reserve_capture("seat-1") is not None
 
 
 def test_fake_provider_create_lifecycle_is_local_only_contract_state() -> None:

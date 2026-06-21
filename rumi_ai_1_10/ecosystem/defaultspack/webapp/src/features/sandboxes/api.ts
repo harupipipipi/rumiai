@@ -1,7 +1,9 @@
 import { defaultspackApiFetch, explainDefaultspackApiError } from "../../lib/api";
+import { normalizeDesktopStatus, normalizeSandboxState } from "./types";
 import type {
   CreateDesktopRequest,
-  DesktopControlLease,
+  DesktopControlLeaseGrant,
+  DesktopControlLeaseRenewal,
   DesktopFrameQuality,
   DesktopFrameResult,
   DesktopInputRequest,
@@ -62,6 +64,22 @@ function stringHeader(response: Response, names: string[], fallback: string | nu
     if (value && value.trim()) return value.trim();
   }
   return fallback;
+}
+
+function normalizeSandboxInstance(instance: SandboxInstance): SandboxInstance {
+  const state = normalizeSandboxState(instance.state ?? instance.status);
+  return {
+    ...instance,
+    state,
+    status: state,
+  };
+}
+
+function normalizeDesktopInstance(instance: DesktopInstance): DesktopInstance {
+  return {
+    ...instance,
+    status: normalizeDesktopStatus(instance.status),
+  };
 }
 
 export async function fetchDesktopFrame(
@@ -138,11 +156,13 @@ export const sandboxesApi = {
   },
 
   listSandboxes() {
-    return request<{ sandboxes: SandboxInstance[] }>("/api/sandboxes", { cache: "no-store" });
+    return request<{ sandboxes: SandboxInstance[] }>("/api/sandboxes", { cache: "no-store" })
+      .then((payload) => ({ sandboxes: payload.sandboxes.map(normalizeSandboxInstance) }));
   },
 
   listDesktops() {
-    return request<{ desktops: DesktopInstance[] }>("/api/desktops", { cache: "no-store" });
+    return request<{ desktops: DesktopInstance[] }>("/api/desktops", { cache: "no-store" })
+      .then((payload) => ({ desktops: payload.desktops.map(normalizeDesktopInstance) }));
   },
 
   createDesktop(payload: CreateDesktopRequest) {
@@ -152,28 +172,28 @@ export const sandboxesApi = {
         ...payload,
         request_id: payload.request_id ?? requestId("desktop-create"),
       }),
-    });
+    }).then(normalizeDesktopInstance);
   },
 
   startDesktop(seatId: string) {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/start`, {
       method: "POST",
       body: JSON.stringify({ request_id: requestId("desktop-start") }),
-    });
+    }).then(normalizeDesktopInstance);
   },
 
   stopDesktop(seatId: string) {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/stop`, {
       method: "POST",
       body: JSON.stringify({ request_id: requestId("desktop-stop") }),
-    });
+    }).then(normalizeDesktopInstance);
   },
 
   restartDesktop(seatId: string) {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/restart`, {
       method: "POST",
       body: JSON.stringify({ request_id: requestId("desktop-restart") }),
-    });
+    }).then(normalizeDesktopInstance);
   },
 
   deleteDesktop(seatId: string) {
@@ -186,14 +206,14 @@ export const sandboxesApi = {
   fetchDesktopFrame,
 
   acquireDesktopControl(seatId: string) {
-    return request<DesktopControlLease>(`/api/desktops/${encodeId(seatId)}/control/acquire`, {
+    return request<DesktopControlLeaseGrant>(`/api/desktops/${encodeId(seatId)}/control/acquire`, {
       method: "POST",
       body: JSON.stringify({ request_id: requestId("desktop-control-acquire") }),
     });
   },
 
   renewDesktopControl(seatId: string, leaseToken: string) {
-    return request<DesktopControlLease>(`/api/desktops/${encodeId(seatId)}/control/renew`, {
+    return request<DesktopControlLeaseRenewal>(`/api/desktops/${encodeId(seatId)}/control/renew`, {
       method: "POST",
       body: JSON.stringify({
         lease_token: leaseToken,

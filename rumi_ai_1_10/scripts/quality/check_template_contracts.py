@@ -94,9 +94,8 @@ def _validate_managed_template(template_id: str, template: dict[str, Any]) -> li
     if template.get("source_pack_id") != "rumi_sandbox_runtime_pack":
         errors.append(f"{prefix}: source_pack_id must be rumi_sandbox_runtime_pack")
 
-    trust = template.get("trust") if isinstance(template.get("trust"), dict) else {}
-    if trust.get("origin") != "builtin" or trust.get("trusted") is not True:
-        errors.append(f"{prefix}: trust must mark builtin trusted origin")
+    if "trust" in template:
+        errors.append(f"{prefix}: trust must be projected by the loader, not self-declared in template JSON")
 
     contract = template.get("contract") if isinstance(template.get("contract"), dict) else {}
     for flag in sorted(REQUIRED_MANAGED_CONTRACT_FLAGS):

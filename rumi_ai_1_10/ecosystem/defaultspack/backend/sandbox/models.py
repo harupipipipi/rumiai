@@ -226,6 +226,8 @@ class WorkspaceBinding:
 class SandboxInstance:
     sandbox_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
+    image: str = "ubuntu:22.04"
+    display: bool = False
     template_id: str = "pack.safe"
     template_version: str = "0"
     provider_id: str = ""

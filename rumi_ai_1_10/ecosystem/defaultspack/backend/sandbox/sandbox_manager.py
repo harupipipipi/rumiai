@@ -1,22 +1,34 @@
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import os
 import platform
-import struct
 import tempfile
 import threading
 import time
-import uuid
-import zlib
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from .errors import RUNTIME_PROVIDER_UNAVAILABLE, SandboxContractError
+from .models import (
+    DesktopSpec,
+    FilesystemPolicy,
+    LifecyclePolicy,
+    NetworkPolicy,
+    ProviderInstance,
+    ResolvedSandboxTemplate,
+    ResourceLimits,
+    SandboxCreateSpec,
+    SandboxInstance,
+    RuntimeRequirements,
+    SecretsPolicy,
+    WorkspaceBinding,
+    model_to_dict,
+)
+from .provider_registry import ProviderRegistry
 
-REGISTRY_SCHEMA_VERSION = 2
+
+REGISTRY_SCHEMA_VERSION = 3
 CREATING = "creating"
 PROVISIONING = "provisioning"
 STARTING = "starting"
@@ -27,10 +39,8 @@ STOPPED = "stopped"
 FAILED = "failed"
 DESTROYING = "destroying"
 DESTROYED = "destroyed"
-ERROR = "error"
 LEGACY_PLACEHOLDER_PROVIDER = "legacy_placeholder"
-LOCAL_COMPAT_PROVIDER = "local_compat"
-VALID_STATUSES = {
+VALID_STATES = {
     CREATING,
     PROVISIONING,
     STARTING,
@@ -41,115 +51,11 @@ VALID_STATUSES = {
     FAILED,
     DESTROYING,
     DESTROYED,
-    ERROR,
 }
-RUNNING_STATUSES = {READY, BUSY}
-TERMINAL_STATUSES = {DESTROYED, ERROR, FAILED}
+RUNNING_STATES = {READY, BUSY}
+TERMINAL_STATES = {DESTROYED, FAILED}
 SUPPORTED_MODEL_MODES = {"fast", "heavy"}
 STATE_DIR_ENV = "RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR"
-
-
-@dataclass
-class SandboxInstance:
-    sandbox_id: str = ""
-    image: str = "ubuntu:22.04"
-    display: bool = True
-    status: str = "ready"
-    template_id: str = "tool.ephemeral"
-    template_version: str = "compat"
-    provider_id: str = LOCAL_COMPAT_PROVIDER
-    provider_instance_id: Optional[str] = None
-    runtime_id: Optional[str] = None
-    capabilities: tuple[str, ...] = ()
-    created_at: float = 0.0
-    updated_at: float = 0.0
-    started_at: Optional[float] = None
-    stopped_at: Optional[float] = None
-    destroyed_at: Optional[float] = None
-    last_activity_at: Optional[float] = None
-    last_error: Optional[str] = None
-    generation: int = 1
-    recovery_token_hash: Optional[str] = None
-
-    def __post_init__(self) -> None:
-        if not self.sandbox_id:
-            self.sandbox_id = str(uuid.uuid4())
-        if not self.created_at:
-            self.created_at = time.time()
-        if not self.updated_at:
-            self.updated_at = self.created_at
-        if not self.provider_instance_id and self.provider_id != LEGACY_PLACEHOLDER_PROVIDER:
-            self.provider_instance_id = self.sandbox_id
-        if self.status not in VALID_STATUSES:
-            self.last_error = f"Unknown persisted status {self.status!r}; marked error"
-            self.status = ERROR
-            self.updated_at = time.time()
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "sandbox_id": self.sandbox_id,
-            "image": self.image,
-            "display": self.display,
-            "status": self.status,
-            "template_id": self.template_id,
-            "template_version": self.template_version,
-            "provider_id": self.provider_id,
-            "provider_instance_id": self.provider_instance_id,
-            "runtime_id": self.runtime_id,
-            "capabilities": list(self.capabilities),
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "started_at": self.started_at,
-            "stopped_at": self.stopped_at,
-            "destroyed_at": self.destroyed_at,
-            "last_activity_at": self.last_activity_at,
-            "last_error": self.last_error,
-            "generation": self.generation,
-            "recovery_token_hash": self.recovery_token_hash,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any], *, legacy: bool = False) -> "SandboxInstance":
-        status = str(data.get("status") or READY)
-        provider_id = str(data.get("provider_id") or LOCAL_COMPAT_PROVIDER)
-        provider_instance_id = data.get("provider_instance_id")
-        last_error = str(data.get("last_error")) if data.get("last_error") is not None else None
-        stopped_at = _optional_float(data.get("stopped_at"))
-        if legacy and status == READY and not provider_instance_id:
-            status = STOPPED
-            provider_id = LEGACY_PLACEHOLDER_PROVIDER
-            stopped_at = _optional_float(data.get("updated_at")) or _optional_float(data.get("created_at"))
-            last_error = "Migrated prototype sandbox; old fake-ready instances are not treated as live."
-        return cls(
-            sandbox_id=str(data.get("sandbox_id") or ""),
-            image=str(data.get("image") or "ubuntu:22.04"),
-            display=bool(data.get("display", True)),
-            status=status,
-            template_id=str(data.get("template_id") or ("desktop.ubuntu" if data.get("display", True) else "tool.ephemeral")),
-            template_version=str(data.get("template_version") or "compat"),
-            provider_id=provider_id,
-            provider_instance_id=str(provider_instance_id) if provider_instance_id is not None else None,
-            runtime_id=str(data.get("runtime_id")) if data.get("runtime_id") is not None else None,
-            capabilities=_string_tuple(data.get("capabilities")),
-            created_at=_float_or_zero(data.get("created_at")),
-            updated_at=_float_or_zero(data.get("updated_at")),
-            started_at=_optional_float(data.get("started_at")),
-            stopped_at=stopped_at,
-            destroyed_at=_optional_float(data.get("destroyed_at")),
-            last_activity_at=_optional_float(data.get("last_activity_at")),
-            last_error=last_error,
-            generation=max(1, int(_float_or_zero(data.get("generation") or 1))),
-            recovery_token_hash=str(data.get("recovery_token_hash")) if data.get("recovery_token_hash") is not None else None,
-        )
-
-    def touch(self, *, status: Optional[str] = None, error: Optional[str] = None) -> None:
-        now = time.time()
-        self.updated_at = now
-        self.last_activity_at = now
-        if status is not None:
-            self.status = status
-        if error is not None:
-            self.last_error = error
 
 
 class SandboxManager:
@@ -159,38 +65,79 @@ class SandboxManager:
         *,
         registry_path: str | Path | None = None,
         gui_backend: Any | None = None,
+        provider_registry: ProviderRegistry | None = None,
     ) -> None:
         self.state_dir = Path(state_dir) if state_dir is not None else self._default_state_dir()
         self.registry_path = (
             Path(registry_path) if registry_path is not None else self.state_dir / "sandboxes.json"
         )
+        # GUI backend injection is intentionally test-only until a managed provider
+        # owns desktop capture/input in production.
         self._gui_backend = gui_backend
+        self._provider_registry = provider_registry or ProviderRegistry()
         self._lock = threading.RLock()
         self._instances: Dict[str, SandboxInstance] = {}
         self._model_mode: str = "fast"
         self._load_registry()
 
-    def create(self, image: str = "ubuntu:22.04", display: bool = True) -> Dict[str, Any]:
+    def create(
+        self,
+        image: str = "ubuntu:22.04",
+        display: bool = True,
+        *,
+        provider_id: str | None = None,
+    ) -> Dict[str, Any]:
         image = str(image or "").strip() or "ubuntu:22.04"
         display = bool(display)
-        backend_session_id, backend_error = self._create_backend_session_id(image=image)
-        if backend_error is not None:
-            return backend_error
+        template = self._template_for_create(image=image, display=display)
+        requirements = RuntimeRequirements(
+            template_id=template.template_id,
+            required_capabilities=template.provider_requirements,
+            provider_id=provider_id,
+        )
+        try:
+            provider = self._provider_registry.resolve(provider_id or "auto", requirements)
+            provider_instance = provider.create(
+                SandboxCreateSpec(
+                    name=f"Sandbox {image}",
+                    template=template,
+                    provider_id=provider.provider_id,
+                    metadata={"image": image, "display": display},
+                )
+            )
+            started = provider.start(provider_instance)
+        except SandboxContractError as exc:
+            return exc.to_dict()
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": f"Managed runtime provider failed to create sandbox: {exc}",
+                "code": RUNTIME_PROVIDER_UNAVAILABLE,
+                "status_code": 503,
+            }
 
         with self._lock:
             now = time.time()
-            capabilities = ("sandbox.exec", "sandbox.files")
-            if display:
-                capabilities = capabilities + ("sandbox.desktop", "sandbox.desktop_input")
             inst = SandboxInstance(
-                sandbox_id=backend_session_id or "",
+                sandbox_id=started.sandbox_id,
+                name=f"Sandbox {image}",
                 image=image,
                 display=display,
-                status=READY,
-                template_id="desktop.ubuntu" if display else "tool.ephemeral",
-                provider_id=LOCAL_COMPAT_PROVIDER,
-                capabilities=capabilities,
-                started_at=now,
+                template_id=template.template_id,
+                template_version=template.template_version,
+                provider_id=started.provider_id,
+                provider_instance_id=started.provider_instance_id,
+                runtime_id=started.runtime_id,
+                state=_canonical_state(started.state),
+                created_at=now,
+                updated_at=now,
+                started_at=now if _canonical_state(started.state) in RUNNING_STATES else None,
+                capabilities=template.provider_requirements,
+                resource_limits=template.resources,
+                workspace_binding=WorkspaceBinding(),
+                network_policy=template.network,
+                desktop_spec=template.desktop,
+                generation=max(1, int(started.generation or 1)),
             )
             self._instances[inst.sandbox_id] = inst
             self._save_registry()
@@ -198,7 +145,8 @@ class SandboxManager:
                 "ok": True,
                 "created": True,
                 "sandbox_id": inst.sandbox_id,
-                "status": inst.status,
+                "status": inst.state,
+                "state": inst.state,
                 "template_id": inst.template_id,
                 "provider_id": inst.provider_id,
                 "registry_path": str(self.registry_path),
@@ -209,44 +157,30 @@ class SandboxManager:
             inst = self._instances.get(str(sandbox_id))
             if inst is None:
                 return self._not_found(sandbox_id)
-            if inst.status == DESTROYED:
+            if inst.state == DESTROYED:
                 return {
                     "ok": True,
                     "destroyed": True,
                     "sandbox_id": inst.sandbox_id,
-                    "status": inst.status,
+                    "status": inst.state,
+                    "state": inst.state,
                 }
 
         teardown_error = self._backend_teardown(inst)
         if teardown_error is not None:
-            with self._lock:
-                current = self._instances.get(inst.sandbox_id)
-                if current is not None and current.status != DESTROYED:
-                    now = time.time()
-                    current.status = ERROR
-                    current.updated_at = now
-                    current.last_activity_at = now
-                    current.last_error = teardown_error
-                    self._save_registry()
-            return {
-                "ok": False,
-                "destroyed": False,
-                "sandbox_id": inst.sandbox_id,
-                "status": ERROR,
-                "error": teardown_error,
-                "code": "SANDBOX_BACKEND_DESTROY_FAILED",
-                "status_code": 502,
-                "gui_backend": True,
-            }
+            return self._mark_failed(inst.sandbox_id, teardown_error, code="SANDBOX_BACKEND_DESTROY_FAILED")
+
+        provider_error = self._provider_destroy(inst)
+        if provider_error is not None:
+            return self._mark_failed(inst.sandbox_id, provider_error, code="SANDBOX_PROVIDER_DESTROY_FAILED")
 
         with self._lock:
             inst = self._instances.get(str(sandbox_id))
             if inst is None:
                 return self._not_found(sandbox_id)
-            if inst.status != DESTROYED:
+            if inst.state != DESTROYED:
                 now = time.time()
-                inst.status = DESTROYING
-                inst.status = DESTROYED
+                inst.state = DESTROYED
                 inst.destroyed_at = now
                 inst.stopped_at = now
                 inst.updated_at = now
@@ -257,7 +191,8 @@ class SandboxManager:
                 "ok": True,
                 "destroyed": True,
                 "sandbox_id": inst.sandbox_id,
-                "status": inst.status,
+                "status": inst.state,
+                "state": inst.state,
             }
 
     def screenshot(self, sandbox_id: str) -> Dict[str, Any]:
@@ -273,23 +208,7 @@ class SandboxManager:
         if backend_result is not None:
             return backend_result
 
-        image_base64 = _fallback_png_base64()
-        data_uri = f"data:image/png;base64,{image_base64}"
-        return {
-            "ok": True,
-            "sandbox_id": inst.sandbox_id,
-            "status": inst.status,
-            "screenshot": data_uri,
-            "data_uri": data_uri,
-            "base64": image_base64,
-            "image_base64": image_base64,
-            "format": "png",
-            "mime_type": "image/png",
-            "width": 2,
-            "height": 2,
-            "source": "local_fallback",
-            "gui_backend": False,
-        }
+        return self._backend_unavailable(inst, "screenshot")
 
     def click(self, sandbox_id: str, x: int, y: int) -> Dict[str, Any]:
         with self._lock:
@@ -357,11 +276,11 @@ class SandboxManager:
             inst = self._instances.get(str(sandbox_id))
             if inst is None:
                 return self._not_found(sandbox_id)
-            return {"ok": True, **inst.to_dict()}
+            return {"ok": True, **self._instance_to_dict(inst)}
 
     def list_instances(self) -> List[Dict[str, Any]]:
         with self._lock:
-            return [instance.to_dict() for instance in self._instances.values()]
+            return [self._instance_to_dict(instance) for instance in self._instances.values()]
 
     @staticmethod
     def _default_state_dir() -> Path:
@@ -421,7 +340,7 @@ class SandboxManager:
             for raw in iterable:
                 if not isinstance(raw, dict):
                     continue
-                inst = SandboxInstance.from_dict(raw, legacy=schema_version < REGISTRY_SCHEMA_VERSION)
+                inst = self._instance_from_dict(raw, legacy=schema_version < REGISTRY_SCHEMA_VERSION)
                 instances[inst.sandbox_id] = inst
             self._instances = instances
 
@@ -436,7 +355,7 @@ class SandboxManager:
             "model_mode": self._model_mode,
             "updated_at": time.time(),
             "instances": {
-                sandbox_id: inst.to_dict()
+                sandbox_id: self._instance_to_dict(inst)
                 for sandbox_id, inst in sorted(self._instances.items())
             },
         }
@@ -454,23 +373,25 @@ class SandboxManager:
         inst = self._instances.get(str(sandbox_id))
         if inst is None:
             return None, self._not_found(sandbox_id)
-        if inst.status in TERMINAL_STATUSES:
+        if inst.state in TERMINAL_STATES:
             return None, {
                 "ok": False,
-                "error": f"Sandbox is {inst.status}: {sandbox_id}",
+                "error": f"Sandbox is {inst.state}: {sandbox_id}",
                 "code": "SANDBOX_NOT_RUNNING",
                 "status_code": 409,
                 "sandbox_id": str(sandbox_id),
-                "status": inst.status,
+                "status": inst.state,
+                "state": inst.state,
             }
-        if inst.status not in RUNNING_STATUSES:
+        if inst.state not in RUNNING_STATES:
             return None, {
                 "ok": False,
-                "error": f"Sandbox is not running ({inst.status}): {sandbox_id}",
+                "error": f"Sandbox is not running ({inst.state}): {sandbox_id}",
                 "code": "SANDBOX_NOT_RUNNING",
                 "status_code": 409,
                 "sandbox_id": str(sandbox_id),
-                "status": inst.status,
+                "status": inst.state,
+                "state": inst.state,
             }
         return inst, None
 
@@ -484,52 +405,50 @@ class SandboxManager:
             "sandbox_id": str(sandbox_id),
         }
 
-    def _create_backend_session_id(
-        self,
-        *,
-        image: str,
-    ) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
-        backend = self._gui_backend
-        method = getattr(backend, "create_session", None) if backend is not None else None
-        if not callable(method):
-            return None, None
+    def _mark_failed(self, sandbox_id: str, message: str, *, code: str) -> Dict[str, Any]:
+        with self._lock:
+            inst = self._instances.get(str(sandbox_id))
+            if inst is not None and inst.state != DESTROYED:
+                now = time.time()
+                inst.state = FAILED
+                inst.updated_at = now
+                inst.last_activity_at = now
+                inst.last_error = message
+                self._save_registry()
+        return {
+            "ok": False,
+            "destroyed": False,
+            "sandbox_id": str(sandbox_id),
+            "status": FAILED,
+            "state": FAILED,
+            "error": message,
+            "code": code,
+            "status_code": 502,
+            "gui_backend": code == "SANDBOX_BACKEND_DESTROY_FAILED",
+        }
 
+    def _provider_destroy(self, inst: SandboxInstance) -> Optional[str]:
+        if inst.provider_id == LEGACY_PLACEHOLDER_PROVIDER:
+            return None
         try:
-            session = method(f"Sandbox {image}")
+            provider = self._provider_registry.get(inst.provider_id)
+            provider.destroy(self._provider_instance(inst))
+        except SandboxContractError as exc:
+            return exc.message
         except Exception as exc:
-            return None, {
-                "ok": False,
-                "error": f"GUI backend create_session failed: {exc}",
-                "code": "SANDBOX_BACKEND_CREATE_FAILED",
-                "status_code": 502,
-                "gui_backend": True,
-            }
+            return f"Managed runtime provider destroy failed: {exc}"
+        return None
 
-        session_id = self._backend_session_id(session)
-        if session_id is None:
-            return None, {
-                "ok": False,
-                "error": "GUI backend create_session returned an invalid session",
-                "code": "SANDBOX_BACKEND_CREATE_FAILED",
-                "status_code": 502,
-                "gui_backend": True,
-            }
-        return session_id, None
-
-    @staticmethod
-    def _backend_session_id(session: Any) -> Optional[str]:
-        if isinstance(session, str):
-            raw_session_id: Any = session
-        elif isinstance(session, dict):
-            raw_session_id = session.get("session_id") or session.get("sandbox_id")
-        else:
-            raw_session_id = getattr(session, "session_id", None) or getattr(
-                session,
-                "sandbox_id",
-                None,
-            )
-        session_id = str(raw_session_id or "").strip()
-        return session_id or None
+    def _provider_instance(self, inst: SandboxInstance) -> ProviderInstance:
+        return ProviderInstance(
+            provider_id=inst.provider_id,
+            provider_instance_id=inst.provider_instance_id,
+            sandbox_id=inst.sandbox_id,
+            runtime_id=inst.runtime_id,
+            state=inst.state,
+            opaque_state={"template_id": inst.template_id},
+            generation=inst.generation,
+        )
 
     def _backend_screenshot(self, inst: SandboxInstance) -> Optional[Dict[str, Any]]:
         if self._gui_backend is None or not hasattr(self._gui_backend, "screenshot"):
@@ -543,7 +462,8 @@ class SandboxManager:
                 "code": "SANDBOX_SCREENSHOT_FAILED",
                 "status_code": 502,
                 "sandbox_id": inst.sandbox_id,
-                "status": inst.status,
+                "status": inst.state,
+                "state": inst.state,
             }
         if not isinstance(result, dict):
             return {
@@ -552,11 +472,13 @@ class SandboxManager:
                 "code": "SANDBOX_SCREENSHOT_FAILED",
                 "status_code": 502,
                 "sandbox_id": inst.sandbox_id,
-                "status": inst.status,
+                "status": inst.state,
+                "state": inst.state,
             }
         result.setdefault("ok", True)
         result.setdefault("sandbox_id", inst.sandbox_id)
-        result.setdefault("status", inst.status)
+        result.setdefault("status", inst.state)
+        result.setdefault("state", inst.state)
         result.setdefault("gui_backend", True)
         return result
 
@@ -619,7 +541,8 @@ class SandboxManager:
             normalized.setdefault("code", "SANDBOX_BACKEND_ACTION_FAILED")
             normalized.setdefault("status_code", 502)
             normalized.setdefault("sandbox_id", inst.sandbox_id)
-            normalized.setdefault("status", inst.status)
+            normalized.setdefault("status", inst.state)
+            normalized.setdefault("state", inst.state)
             normalized.setdefault("gui_backend", True)
             normalized.setdefault("action", action)
             self._strip_input_success_flags(normalized)
@@ -628,7 +551,8 @@ class SandboxManager:
         normalized["ok"] = True
         normalized.setdefault(success_key, True)
         normalized.setdefault("sandbox_id", inst.sandbox_id)
-        normalized.setdefault("status", inst.status)
+        normalized.setdefault("status", inst.state)
+        normalized.setdefault("state", inst.state)
         normalized.setdefault("gui_backend", True)
         normalized.setdefault("action", action)
         for key, value in payload.items():
@@ -681,11 +605,12 @@ class SandboxManager:
     def _backend_unavailable(self, inst: SandboxInstance, action: str) -> Dict[str, Any]:
         return {
             "ok": False,
-            "error": f"Sandbox input backend unavailable for {action}",
+            "error": f"Sandbox backend unavailable for {action}",
             "code": "SANDBOX_BACKEND_UNAVAILABLE",
             "status_code": 503,
             "sandbox_id": inst.sandbox_id,
-            "status": inst.status,
+            "status": inst.state,
+            "state": inst.state,
             "gui_backend": False,
             "action": action,
         }
@@ -702,7 +627,8 @@ class SandboxManager:
             "code": "SANDBOX_BACKEND_ACTION_FAILED",
             "status_code": 502,
             "sandbox_id": inst.sandbox_id,
-            "status": inst.status,
+            "status": inst.state,
+            "state": inst.state,
             "gui_backend": True,
             "action": action,
         }
@@ -715,10 +641,89 @@ class SandboxManager:
     def _touch_ready_instance(self, sandbox_id: str) -> None:
         with self._lock:
             inst = self._instances.get(str(sandbox_id))
-            if inst is None or inst.status not in RUNNING_STATUSES:
+            if inst is None or inst.state not in RUNNING_STATES:
                 return
             inst.touch()
             self._save_registry()
+
+    def _template_for_create(self, *, image: str, display: bool) -> ResolvedSandboxTemplate:
+        capabilities = {"sandbox.exec", "sandbox.files"}
+        allowed_operations = {"exec", "files.read", "files.write"}
+        desktop = None
+        template_id = "tool.ephemeral"
+        if display:
+            capabilities.update({"sandbox.desktop", "sandbox.desktop_input"})
+            allowed_operations.add("desktop.input")
+            desktop = DesktopSpec(enabled=True, width=1440, height=900, display_backend="x11")
+            template_id = "desktop.ubuntu"
+        return ResolvedSandboxTemplate(
+            template_id=template_id,
+            template_version="1",
+            runtime_os="linux",
+            provider_requirements=frozenset(capabilities),
+            packages=(),
+            desktop=desktop,
+            filesystem=FilesystemPolicy(mode="ephemeral_overlay", workspace_access="none"),
+            network=NetworkPolicy(mode="off"),
+            secrets=SecretsPolicy(mode="denied"),
+            resources=ResourceLimits(cpu_count=1, memory_mb=2048, timeout_ms=600_000),
+            lifecycle=LifecyclePolicy(ttl_seconds=900, persistent=False, destroy_on_exit=True),
+            allowed_operations=frozenset(allowed_operations),
+            source_template_ids=(template_id, image),
+        )
+
+    def _instance_to_dict(self, inst: SandboxInstance) -> Dict[str, Any]:
+        payload = model_to_dict(inst)
+        payload["status"] = inst.state
+        payload["state"] = inst.state
+        return payload
+
+    def _instance_from_dict(self, data: Dict[str, Any], *, legacy: bool = False) -> SandboxInstance:
+        raw_state = data.get("state", data.get("status", READY))
+        state = _canonical_state(raw_state)
+        provider_id = str(data.get("provider_id") or "")
+        provider_instance_id = str(data.get("provider_instance_id") or "")
+        last_error = str(data.get("last_error")) if data.get("last_error") is not None else None
+        stopped_at = _optional_float(data.get("stopped_at"))
+        if legacy and state == READY and not provider_instance_id:
+            state = STOPPED
+            provider_id = LEGACY_PLACEHOLDER_PROVIDER
+            stopped_at = _optional_float(data.get("updated_at")) or _optional_float(data.get("created_at"))
+            last_error = "Migrated prototype sandbox; old fake-ready instances are not treated as live."
+        display = bool(data.get("display", True))
+        return SandboxInstance(
+            sandbox_id=str(data.get("sandbox_id") or ""),
+            name=str(data.get("name") or ""),
+            image=str(data.get("image") or "ubuntu:22.04"),
+            display=display,
+            template_id=str(data.get("template_id") or ("desktop.ubuntu" if display else "tool.ephemeral")),
+            template_version=str(data.get("template_version") or "compat"),
+            provider_id=provider_id,
+            provider_instance_id=provider_instance_id,
+            runtime_id=str(data.get("runtime_id") or ""),
+            state=state,
+            created_at=_float_or_now(data.get("created_at")),
+            updated_at=_float_or_now(data.get("updated_at")),
+            started_at=_optional_float(data.get("started_at")),
+            stopped_at=stopped_at,
+            destroyed_at=_optional_float(data.get("destroyed_at")),
+            last_activity_at=_optional_float(data.get("last_activity_at")),
+            last_error=last_error,
+            capabilities=frozenset(_string_tuple(data.get("capabilities"))),
+            resource_limits=ResourceLimits(),
+            workspace_binding=WorkspaceBinding(),
+            network_policy=NetworkPolicy(),
+            desktop_spec=DesktopSpec(enabled=True) if display else None,
+            generation=max(1, int(_float_or_zero(data.get("generation") or 1))),
+            recovery_token_hash=str(data.get("recovery_token_hash")) if data.get("recovery_token_hash") is not None else None,
+        )
+
+
+def _canonical_state(value: Any) -> str:
+    state = str(value or READY).strip().lower()
+    if state == "error":
+        return FAILED
+    return state if state in VALID_STATES else FAILED
 
 
 def _float_or_zero(value: Any) -> float:
@@ -726,6 +731,11 @@ def _float_or_zero(value: Any) -> float:
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _float_or_now(value: Any) -> float:
+    parsed = _float_or_zero(value)
+    return parsed or time.time()
 
 
 def _optional_float(value: Any) -> Optional[float]:
@@ -738,42 +748,6 @@ def _optional_float(value: Any) -> Optional[float]:
 
 
 def _string_tuple(value: Any) -> tuple[str, ...]:
-    if not isinstance(value, (list, tuple, set)):
+    if not isinstance(value, (list, tuple, set, frozenset)):
         return ()
     return tuple(str(item) for item in value if str(item))
-
-
-def _fallback_png_base64() -> str:
-    return base64.b64encode(_fallback_png_bytes()).decode("ascii")
-
-
-def _fallback_png_bytes() -> bytes:
-    width = 2
-    height = 2
-    pixels = [
-        (32, 36, 44, 255),
-        (98, 157, 207, 255),
-        (44, 54, 62, 255),
-        (121, 196, 149, 255),
-    ]
-    rows = []
-    for row_index in range(height):
-        start = row_index * width
-        row_pixels = pixels[start : start + width]
-        rows.append(b"\x00" + b"".join(bytes(pixel) for pixel in row_pixels))
-
-    signature = b"\x89PNG\r\n\x1a\n"
-    ihdr = struct.pack("!IIBBBBB", width, height, 8, 6, 0, 0, 0)
-    idat = zlib.compress(b"".join(rows), level=9)
-    return (
-        signature
-        + _png_chunk(b"IHDR", ihdr)
-        + _png_chunk(b"IDAT", idat)
-        + _png_chunk(b"IEND", b"")
-    )
-
-
-def _png_chunk(kind: bytes, data: bytes) -> bytes:
-    checksum = binascii.crc32(kind)
-    checksum = binascii.crc32(data, checksum) & 0xFFFFFFFF
-    return struct.pack("!I", len(data)) + kind + data + struct.pack("!I", checksum)

@@ -6,11 +6,6 @@
   "display_name": "Ubuntu Desktop",
   "summary": "Hidden Ubuntu desktop seat using Xvfb and Openbox with snapshot/input capability and no host home mount.",
   "source_pack_id": "rumi_sandbox_runtime_pack",
-  "trust": {
-    "origin": "builtin",
-    "trusted": true,
-    "authority": "rumi_sandbox_runtime_pack"
-  },
   "runtime": {
     "os": "ubuntu",
     "provider": "auto",
