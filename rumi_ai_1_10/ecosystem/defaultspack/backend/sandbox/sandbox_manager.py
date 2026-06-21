@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import platform
+import hashlib
+import secrets
 import tempfile
 import threading
 import time
@@ -11,10 +13,14 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .errors import RUNTIME_PROVIDER_UNAVAILABLE, SandboxContractError
 from .models import (
+    DesktopAccessPolicy,
+    DesktopProvisioningPlan,
+    DesktopRuleConfig,
     DesktopSpec,
     FilesystemPolicy,
     LifecyclePolicy,
     NetworkPolicy,
+    PackageSpec,
     ProviderInstance,
     ResolvedSandboxTemplate,
     ResourceLimits,
@@ -56,6 +62,7 @@ RUNNING_STATES = {READY, BUSY}
 TERMINAL_STATES = {DESTROYED, FAILED}
 SUPPORTED_MODEL_MODES = {"fast", "heavy"}
 STATE_DIR_ENV = "RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR"
+DESKTOP_ACCESS_MODES = {"owner_only", "shared_link", "key_required", "request_required"}
 
 
 class SandboxManager:
@@ -90,6 +97,13 @@ class SandboxManager:
         template_id: str | None = None,
         width: int | None = None,
         height: int | None = None,
+        role: str | None = None,
+        rules: Any | None = None,
+        access_mode: str | None = None,
+        access_key: str | None = None,
+        access_request_required: bool | None = None,
+        provisioning: Any | None = None,
+        assigned_agent_id: str | None = None,
     ) -> Dict[str, Any]:
         image = str(image or "").strip() or "ubuntu:22.04"
         display = bool(display)
@@ -105,6 +119,28 @@ class SandboxManager:
             template_id=template.template_id,
             required_capabilities=template.provider_requirements,
             provider_id=provider_id,
+        )
+        access_policy, access_key_hash = _desktop_access_from_create(
+            mode=access_mode,
+            access_key=access_key,
+            request_required=access_request_required,
+        )
+        if access_policy.key_required and not access_key_hash:
+            return {
+                "ok": False,
+                "error": "Desktop access mode key_required requires an access_key.",
+                "code": "DESKTOP_ACCESS_KEY_MISSING",
+                "status_code": 400,
+            }
+        rule_config = _desktop_rules_from_create(role=role, rules=rules)
+        template_provisioning = _desktop_provisioning_from_create(
+            _load_sandbox_template(template.template_id).get("provisioning"),
+            default_packages=template.packages,
+        )
+        provisioning_plan = (
+            _desktop_provisioning_from_create(provisioning, default_packages=template_provisioning.packages)
+            if provisioning is not None
+            else template_provisioning
         )
         try:
             provider = self._provider_registry.resolve(provider_id or "auto", requirements)
@@ -148,7 +184,12 @@ class SandboxManager:
                 workspace_binding=WorkspaceBinding(),
                 network_policy=template.network,
                 desktop_spec=template.desktop,
+                desktop_rules=rule_config,
+                desktop_access=access_policy,
+                desktop_provisioning=provisioning_plan,
+                assigned_agent_id=_optional_clean_string(assigned_agent_id),
                 generation=max(1, int(started.generation or 1)),
+                desktop_access_key_hash=access_key_hash,
             )
             self._instances[inst.sandbox_id] = inst
             self._save_registry()
@@ -161,6 +202,7 @@ class SandboxManager:
                 "template_id": inst.template_id,
                 "provider_id": inst.provider_id,
                 "registry_path": str(self.registry_path),
+                "desktop_access": model_to_dict(inst.desktop_access),
             }
 
     def destroy(self, sandbox_id: str) -> Dict[str, Any]:
@@ -335,6 +377,89 @@ class SandboxManager:
     def list_instances(self) -> List[Dict[str, Any]]:
         with self._lock:
             return [self._instance_to_dict(instance) for instance in self._instances.values()]
+
+    def update_desktop_rules(
+        self,
+        seat_id: str,
+        *,
+        role: str | None = None,
+        rules: Any | None = None,
+        access_mode: str | None = None,
+        access_key: str | None = None,
+        access_request_required: bool | None = None,
+    ) -> Dict[str, Any]:
+        with self._lock:
+            inst = self._instances.get(str(seat_id))
+            if inst is None:
+                return self._not_found(seat_id)
+            if not inst.display:
+                return {
+                    "ok": False,
+                    "error": f"Sandbox is not a desktop seat: {seat_id}",
+                    "code": "DESKTOP_RULES_NOT_SUPPORTED",
+                    "status_code": 409,
+                    "sandbox_id": str(seat_id),
+                }
+            if role is not None or rules is not None:
+                inst.desktop_rules = _desktop_rules_from_create(
+                    role=role if role is not None else inst.desktop_rules.role,
+                    rules=rules if rules is not None else inst.desktop_rules.rule_ids,
+                    instructions=inst.desktop_rules.instructions,
+                )
+            if access_mode is not None or access_key is not None or access_request_required is not None:
+                wants_key_required = str(access_mode or inst.desktop_access.mode or "").strip().lower() == "key_required"
+                if wants_key_required and access_key is None and not inst.desktop_access_key_hash:
+                    return {
+                        "ok": False,
+                        "error": "Desktop access mode key_required requires an access_key.",
+                        "code": "DESKTOP_ACCESS_KEY_MISSING",
+                        "status_code": 400,
+                        "sandbox_id": str(seat_id),
+                    }
+                access_policy, access_key_hash = _desktop_access_from_create(
+                    mode=access_mode or inst.desktop_access.mode,
+                    access_key=access_key,
+                    request_required=access_request_required
+                    if access_request_required is not None
+                    else inst.desktop_access.request_required,
+                    previous_key_hint=inst.desktop_access.key_hint,
+                    previous_key_required=inst.desktop_access.key_required,
+                )
+                inst.desktop_access = access_policy
+                if access_key is not None:
+                    inst.desktop_access_key_hash = access_key_hash
+                elif access_policy.mode != "key_required":
+                    inst.desktop_access_key_hash = None
+            inst.touch()
+            self._save_registry()
+            return {"ok": True, **self._instance_to_dict(inst)}
+
+    def validate_desktop_access(self, seat_id: str, access_key: str | None = None) -> Dict[str, Any]:
+        with self._lock:
+            inst = self._instances.get(str(seat_id))
+            if inst is None:
+                return self._not_found(seat_id)
+            policy = inst.desktop_access
+            if policy.mode == "request_required" or policy.request_required:
+                return {
+                    "ok": False,
+                    "error": "Desktop access requires an approved access request.",
+                    "code": "DESKTOP_ACCESS_REQUEST_REQUIRED",
+                    "status_code": 403,
+                    "sandbox_id": inst.sandbox_id,
+                }
+            if policy.mode != "key_required" and not policy.key_required:
+                return {"ok": True, "sandbox_id": inst.sandbox_id}
+            if _verify_access_key(inst.desktop_access_key_hash, access_key):
+                return {"ok": True, "sandbox_id": inst.sandbox_id}
+            return {
+                "ok": False,
+                "error": "Desktop access key is required.",
+                "code": "DESKTOP_ACCESS_KEY_REQUIRED",
+                "status_code": 403,
+                "sandbox_id": inst.sandbox_id,
+                "key_hint": policy.key_hint,
+            }
 
     @staticmethod
     def _default_state_dir() -> Path:
@@ -738,26 +863,32 @@ class SandboxManager:
         width: int | None = None,
         height: int | None = None,
     ) -> ResolvedSandboxTemplate:
+        raw_template = _load_sandbox_template(template_id or ("desktop.ubuntu" if display else "tool.ephemeral"))
+        runtime = raw_template.get("runtime") if isinstance(raw_template.get("runtime"), dict) else {}
+        policy = raw_template.get("policy") if isinstance(raw_template.get("policy"), dict) else {}
         capabilities = {"sandbox.exec", "sandbox.files"}
         allowed_operations = {"exec", "files.read", "files.write"}
         desktop = None
         resolved_template_id = str(template_id or "tool.ephemeral")
+        packages = _packages_from_template_runtime(runtime)
         if display:
             capabilities = {"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"}
             allowed_operations = {"desktop.input", "desktop.observe", "desktop.snapshot"}
+            desktop_policy = policy.get("desktop") if isinstance(policy.get("desktop"), dict) else {}
             desktop = DesktopSpec(
                 enabled=True,
-                width=int(width or 1440),
-                height=int(height or 900),
-                display_backend="xvfb_openbox",
+                width=int(width or desktop_policy.get("width") or 1440),
+                height=int(height or desktop_policy.get("height") or 900),
+                display_backend=str(desktop_policy.get("display_backend") or "xvfb_openbox"),
+                preset=str(desktop_policy.get("starter") or desktop_policy.get("preset") or "") or None,
             )
             resolved_template_id = str(template_id or "desktop.ubuntu")
         return ResolvedSandboxTemplate(
             template_id=resolved_template_id,
-            template_version="1",
-            runtime_os="linux",
+            template_version=str(raw_template.get("version") or "1"),
+            runtime_os=str(runtime.get("os") or "linux"),
             provider_requirements=frozenset(capabilities),
-            packages=(),
+            packages=packages,
             desktop=desktop,
             filesystem=FilesystemPolicy(mode="ephemeral_overlay", workspace_access="none"),
             network=NetworkPolicy(mode="off"),
@@ -765,7 +896,7 @@ class SandboxManager:
             resources=ResourceLimits(cpu_count=1, memory_mb=2048, timeout_ms=600_000),
             lifecycle=LifecyclePolicy(ttl_seconds=900, persistent=False, destroy_on_exit=True),
             allowed_operations=frozenset(allowed_operations),
-            source_template_ids=(resolved_template_id, image),
+            source_template_ids=tuple(str(item) for item in (raw_template.get("extends"), resolved_template_id, image) if item),
         )
 
     def _instance_to_dict(self, inst: SandboxInstance) -> Dict[str, Any]:
@@ -810,8 +941,12 @@ class SandboxManager:
             workspace_binding=WorkspaceBinding(),
             network_policy=NetworkPolicy(),
             desktop_spec=DesktopSpec(enabled=True) if display else None,
+            desktop_rules=_desktop_rules_from_dict(data.get("desktop_rules")),
+            desktop_access=_desktop_access_from_dict(data.get("desktop_access")),
+            desktop_provisioning=_desktop_provisioning_from_dict(data.get("desktop_provisioning")),
             generation=max(1, int(_float_or_zero(data.get("generation") or 1))),
             recovery_token_hash=str(data.get("recovery_token_hash")) if data.get("recovery_token_hash") is not None else None,
+            desktop_access_key_hash=str(data.get("desktop_access_key_hash")) if data.get("desktop_access_key_hash") is not None else None,
         )
 
     def _provider_agent(self, inst: SandboxInstance):
@@ -851,3 +986,192 @@ def _string_tuple(value: Any) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple, set, frozenset)):
         return ()
     return tuple(str(item) for item in value if str(item))
+
+
+def _optional_clean_string(value: Any, *, max_len: int = 512) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return text[:max_len]
+
+
+def _clean_string_list(value: Any, *, max_items: int = 24, max_len: int = 512) -> tuple[str, ...]:
+    if isinstance(value, str):
+        raw = [line.strip() for line in value.replace(",", "\n").splitlines()]
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        raw = [str(item).strip() for item in value]
+    else:
+        raw = []
+    result: list[str] = []
+    for item in raw:
+        if not item:
+            continue
+        clipped = item[:max_len]
+        if clipped not in result:
+            result.append(clipped)
+        if len(result) >= max_items:
+            break
+    return tuple(result)
+
+
+def _desktop_rules_from_create(
+    *,
+    role: Any = None,
+    rules: Any = None,
+    instructions: Any = None,
+) -> DesktopRuleConfig:
+    instruction_text = str(instructions or "").strip()
+    if isinstance(rules, dict):
+        role = rules.get("role", role)
+        instruction_text = str(rules.get("instructions") or rules.get("prompt") or instruction_text).strip()
+        rules = rules.get("rules") or rules.get("rule_ids") or []
+    return DesktopRuleConfig(
+        role=_optional_clean_string(role, max_len=160),
+        instructions=instruction_text[:4000],
+        rule_ids=_clean_string_list(rules, max_items=32, max_len=256),
+    )
+
+
+def _desktop_rules_from_dict(value: Any) -> DesktopRuleConfig:
+    if not isinstance(value, dict):
+        return DesktopRuleConfig()
+    return _desktop_rules_from_create(
+        role=value.get("role"),
+        rules=value.get("rule_ids") or value.get("rules"),
+        instructions=value.get("instructions"),
+    )
+
+
+def _desktop_access_from_create(
+    *,
+    mode: str | None = None,
+    access_key: str | None = None,
+    request_required: bool | None = None,
+    previous_key_hint: str | None = None,
+    previous_key_required: bool = False,
+) -> tuple[DesktopAccessPolicy, str | None]:
+    normalized_mode = str(mode or "owner_only").strip().lower()
+    if normalized_mode not in DESKTOP_ACCESS_MODES:
+        normalized_mode = "owner_only"
+    key_text = str(access_key or "")
+    key_required = normalized_mode == "key_required" or (previous_key_required and normalized_mode == "key_required")
+    key_hint = _access_key_hint(key_text) if key_text else (previous_key_hint if key_required else None)
+    key_hash = _hash_access_key(key_text) if key_text else None
+    request_flag = bool(request_required) or normalized_mode == "request_required"
+    return (
+        DesktopAccessPolicy(
+            mode=normalized_mode,
+            key_required=key_required,
+            request_required=request_flag,
+            key_hint=key_hint,
+            link_enabled=normalized_mode == "shared_link",
+        ),
+        key_hash,
+    )
+
+
+def _desktop_access_from_dict(value: Any) -> DesktopAccessPolicy:
+    if not isinstance(value, dict):
+        return DesktopAccessPolicy()
+    mode = str(value.get("mode") or "owner_only")
+    if mode not in DESKTOP_ACCESS_MODES:
+        mode = "owner_only"
+    return DesktopAccessPolicy(
+        mode=mode,
+        key_required=bool(value.get("key_required")),
+        request_required=bool(value.get("request_required")),
+        key_hint=str(value.get("key_hint")) if value.get("key_hint") is not None else None,
+        link_enabled=bool(value.get("link_enabled")),
+    )
+
+
+def _desktop_provisioning_from_create(
+    value: Any,
+    *,
+    default_packages: tuple[PackageSpec, ...] = (),
+) -> DesktopProvisioningPlan:
+    if not isinstance(value, dict):
+        return DesktopProvisioningPlan(packages=default_packages)
+    packages = _packages_from_template_runtime({"packages": value.get("packages")})
+    return DesktopProvisioningPlan(
+        packages=packages or default_packages,
+        apps=_clean_string_list(value.get("apps"), max_items=32, max_len=160),
+        mcp_servers=_clean_string_list(value.get("mcp_servers") or value.get("tools"), max_items=32, max_len=160),
+        status=str(value.get("status") or "declared")[:80],
+    )
+
+
+def _desktop_provisioning_from_dict(value: Any) -> DesktopProvisioningPlan:
+    if not isinstance(value, dict):
+        return DesktopProvisioningPlan()
+    return DesktopProvisioningPlan(
+        packages=_packages_from_template_runtime({"packages": value.get("packages")}),
+        apps=_clean_string_list(value.get("apps"), max_items=32, max_len=160),
+        mcp_servers=_clean_string_list(value.get("mcp_servers"), max_items=32, max_len=160),
+        status=str(value.get("status") or "declared")[:80],
+    )
+
+
+def _hash_access_key(access_key: str) -> str:
+    salt = secrets.token_hex(16)
+    digest = hashlib.sha256(f"{salt}:{access_key}".encode("utf-8")).hexdigest()
+    return f"sha256:{salt}:{digest}"
+
+
+def _verify_access_key(stored_hash: str | None, access_key: str | None) -> bool:
+    if not stored_hash or not access_key:
+        return False
+    try:
+        scheme, salt, digest = stored_hash.split(":", 2)
+    except ValueError:
+        return False
+    if scheme != "sha256":
+        return False
+    candidate = hashlib.sha256(f"{salt}:{access_key}".encode("utf-8")).hexdigest()
+    return secrets.compare_digest(candidate, digest)
+
+
+def _access_key_hint(access_key: str) -> str | None:
+    text = str(access_key or "")
+    if not text:
+        return None
+    return f"ends:{text[-4:]}" if len(text) >= 4 else "set"
+
+
+def _load_sandbox_template(template_id: str | None) -> dict[str, Any]:
+    clean_id = str(template_id or "").strip()
+    if not clean_id or "/" in clean_id or "\\" in clean_id or ".." in clean_id:
+        return {}
+    template_path = (
+        Path(__file__).resolve().parents[3]
+        / "rumi_sandbox_runtime_pack"
+        / "templates"
+        / clean_id
+        / "template.json"
+    )
+    try:
+        raw = json.loads(template_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _packages_from_template_runtime(runtime: dict[str, Any]) -> tuple[PackageSpec, ...]:
+    raw_packages = runtime.get("packages") if isinstance(runtime, dict) else []
+    if not isinstance(raw_packages, list):
+        return ()
+    packages: list[PackageSpec] = []
+    for raw in raw_packages:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip()
+        if not name:
+            continue
+        packages.append(
+            PackageSpec(
+                name=name[:160],
+                version=str(raw.get("version"))[:80] if raw.get("version") is not None else None,
+                source=str(raw.get("manager") or raw.get("source") or "")[:80] or None,
+            )
+        )
+    return tuple(packages)

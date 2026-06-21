@@ -11,6 +11,7 @@ type DesktopGridProps = {
   selectedSeatId: string | null;
   density: DesktopDensity;
   leaseSeatId: string | null;
+  accessKeys?: Record<string, string>;
   controlBusy?: boolean;
   onSelect: (seatId: string) => void;
   onTakeOver: (seatId: string) => void;
@@ -44,6 +45,7 @@ export function DesktopGrid({
   selectedSeatId,
   density,
   leaseSeatId,
+  accessKeys = {},
   controlBusy = false,
   onSelect,
   onTakeOver,
@@ -91,6 +93,7 @@ export function DesktopGrid({
           selected={desktop.seat_id === selectedSeatId}
           dense={density === "dense"}
           hasLease={desktop.seat_id === leaseSeatId}
+          accessKey={accessKeys[desktop.seat_id] || null}
           controlBusy={controlBusy && desktop.seat_id === selectedSeatId}
           onSelect={onSelect}
           onTakeOver={() => onTakeOver(desktop.seat_id)}

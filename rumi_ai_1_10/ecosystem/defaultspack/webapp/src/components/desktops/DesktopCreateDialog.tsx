@@ -22,6 +22,13 @@ const RESOLUTIONS: DesktopResolution[] = [
   { width: 1920, height: 1080 },
 ];
 
+function splitList(value: string): string[] {
+  return value
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function resolutionLabel(resolution: DesktopResolution): string {
   return `${resolution.width} x ${resolution.height}`;
 }
@@ -50,6 +57,12 @@ export function DesktopCreateDialog({
   const [workspaceId, setWorkspaceId] = useState("");
   const [workspaceAccess, setWorkspaceAccess] = useState("read_write");
   const [assignedAgent, setAssignedAgent] = useState("");
+  const [role, setRole] = useState("");
+  const [ruleText, setRuleText] = useState("");
+  const [accessMode, setAccessMode] = useState<"owner_only" | "shared_link" | "key_required" | "request_required">("owner_only");
+  const [accessKey, setAccessKey] = useState("");
+  const [provisioningApps, setProvisioningApps] = useState("");
+  const [provisioningMcp, setProvisioningMcp] = useState("");
 
   const effectiveTemplateId = templateId || firstTemplate;
   const selectedTemplate = templates.find((template) => template.template_id === effectiveTemplateId) ?? templates[0] ?? null;
@@ -79,6 +92,19 @@ export function DesktopCreateDialog({
       workspace_id: workspaceId.trim() || null,
       workspace_access: workspaceAccess,
       assigned_agent: assignedAgent.trim() || null,
+      role: role.trim() || null,
+      rules: ruleText.trim() ? { role: role.trim() || null, rule_ids: splitList(ruleText) } : null,
+      access: {
+        mode: accessMode,
+        request_required: accessMode === "request_required",
+        ...(accessMode === "key_required" && accessKey ? { access_key: accessKey } : {}),
+      },
+      provisioning: provisioningApps.trim() || provisioningMcp.trim()
+        ? {
+            apps: splitList(provisioningApps),
+            mcp_servers: splitList(provisioningMcp),
+          }
+        : null,
     });
   };
 
@@ -222,6 +248,72 @@ export function DesktopCreateDialog({
                 <input
                   value={assignedAgent}
                   onChange={(event) => setAssignedAgent(event.target.value)}
+                  className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                />
+              </label>
+
+              <label className="grid gap-1.5 text-xs text-zinc-400">
+                <span>Role</span>
+                <input
+                  value={role}
+                  onChange={(event) => setRole(event.target.value)}
+                  placeholder="coding assistant"
+                  className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                />
+              </label>
+
+              <label className="grid gap-1.5 text-xs text-zinc-400">
+                <span>Access</span>
+                <select
+                  value={accessMode}
+                  onChange={(event) => setAccessMode(event.target.value as typeof accessMode)}
+                  className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                >
+                  <option value="owner_only">Owner only</option>
+                  <option value="shared_link">Shared link</option>
+                  <option value="key_required">Key required</option>
+                  <option value="request_required">Request required</option>
+                </select>
+              </label>
+
+              {accessMode === "key_required" && (
+                <label className="grid gap-1.5 text-xs text-zinc-400">
+                  <span>Access key</span>
+                  <input
+                    value={accessKey}
+                    onChange={(event) => setAccessKey(event.target.value)}
+                    type="password"
+                    className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                  />
+                </label>
+              )}
+
+              <label className="grid gap-1.5 text-xs text-zinc-400 md:col-span-2">
+                <span>Rules</span>
+                <input
+                  value={ruleText}
+                  onChange={(event) => setRuleText(event.target.value)}
+                  placeholder="browser-only, keep workspace clean"
+                  className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                />
+              </label>
+
+              <label className="grid gap-1.5 text-xs text-zinc-400">
+                <span>Apps</span>
+                <input
+                  value={provisioningApps}
+                  onChange={(event) => setProvisioningApps(event.target.value)}
+                  placeholder={selectedTemplate?.provisioning?.apps?.join(", ") || "Template default"}
+                  className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                />
+              </label>
+
+              <label className="grid gap-1.5 text-xs text-zinc-400">
+                <span>MCP servers</span>
+                <input
+                  value={provisioningMcp}
+                  onChange={(event) => setProvisioningMcp(event.target.value)}
+                  placeholder={selectedTemplate?.provisioning?.mcp_servers?.join(", ") || "playwright"}
                   className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
                 />
               </label>

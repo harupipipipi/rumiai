@@ -27,8 +27,11 @@ export function DesktopMonitorWorkspace() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [accessKeys, setAccessKeys] = useState<Record<string, string>>({});
+  const [accessMessage, setAccessMessage] = useState<string | null>(null);
   const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
-  const control = useDesktopControlLease(selectedSeatId);
+  const selectedAccessKey = selectedSeatId ? accessKeys[selectedSeatId] || "" : "";
+  const control = useDesktopControlLease(selectedSeatId, sandboxesApi, selectedAccessKey);
 
   const runningCount = useMemo(
     () => desktopInstances.desktops.filter((desktop) => desktop.status === "running").length,
@@ -45,9 +48,22 @@ export function DesktopMonitorWorkspace() {
     ?? null;
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const linkedSeatId = new URLSearchParams(window.location.search).get("desktop");
+    if (!linkedSeatId) return;
+    if (desktopInstances.desktops.some((desktop) => desktop.seat_id === linkedSeatId)) {
+      setSelectedSeatId(linkedSeatId);
+    }
+  }, [desktopInstances.desktops]);
+
+  useEffect(() => {
     if (selectedSeatId && desktopInstances.desktops.some((desktop) => desktop.seat_id === selectedSeatId)) return;
     setSelectedSeatId(desktopInstances.desktops[0]?.seat_id ?? null);
   }, [desktopInstances.desktops, selectedSeatId]);
+
+  useEffect(() => {
+    setAccessMessage(null);
+  }, [selectedSeatId]);
 
   useEffect(() => {
     if (!pendingTakeoverSeatId || selectedSeatId !== pendingTakeoverSeatId) return;
@@ -79,6 +95,12 @@ export function DesktopMonitorWorkspace() {
     setCreateError(null);
     try {
       const desktop = await sandboxesApi.createDesktop(request);
+      if (request.access?.access_key) {
+        setAccessKeys((current) => ({
+          ...current,
+          [desktop.seat_id]: request.access?.access_key || "",
+        }));
+      }
       setSelectedSeatId(desktop.seat_id);
       setIsCreateOpen(false);
       await desktopInstances.refresh();
@@ -98,7 +120,7 @@ export function DesktopMonitorWorkspace() {
       if (action === "start") await sandboxesApi.startDesktop(seatId);
       if (action === "restart") await sandboxesApi.restartDesktop(seatId);
       if (action === "stop") await sandboxesApi.stopDesktop(seatId);
-      if (action === "delete") await sandboxesApi.deleteDesktop(seatId);
+      if (action === "delete") await sandboxesApi.deleteDesktop(seatId, accessKeys[seatId] || undefined);
       if (action === "delete" && seatId === selectedSeatId) {
         setSelectedSeatId(null);
       }
@@ -106,7 +128,7 @@ export function DesktopMonitorWorkspace() {
     } catch (error) {
       setActionError(error instanceof Error ? error.message : `Desktop ${action} failed.`);
     }
-  }, [desktopInstances, selectedSeatId]);
+  }, [accessKeys, desktopInstances, selectedSeatId]);
 
   const handleTakeOver = useCallback((seatId: string) => {
     setActionError(null);
@@ -127,13 +149,32 @@ export function DesktopMonitorWorkspace() {
       y,
       button: "left",
       lease_token: token,
+      access_key: accessKeys[seatId] || undefined,
     }).then(() => {
       setActionError(null);
     }).catch((error) => {
       setActionError(error instanceof Error ? error.message : "Desktop input failed.");
       void desktopInstances.refresh();
     });
-  }, [control.lease?.lease_token, desktopInstances, selectedSeatId]);
+  }, [accessKeys, control.lease?.lease_token, desktopInstances, selectedSeatId]);
+
+  const handleAccessKeyChange = useCallback((seatId: string, accessKey: string) => {
+    setAccessKeys((current) => ({
+      ...current,
+      [seatId]: accessKey,
+    }));
+  }, []);
+
+  const handleRequestAccess = useCallback((seatId: string) => {
+    setAccessMessage(null);
+    void sandboxesApi.requestDesktopAccess(seatId, "Requested from the Desktops workspace.")
+      .then((result) => {
+        setAccessMessage(result.message || "Access request recorded.");
+      })
+      .catch((error) => {
+        setActionError(error instanceof Error ? error.message : "Desktop access request failed.");
+      });
+  }, []);
 
   const providerNotice = (runtime.availability.status !== "ready" || runtime.operation || runtime.error || diagnosticsCopied) ? (
     <DesktopProviderNotice
@@ -186,6 +227,7 @@ export function DesktopMonitorWorkspace() {
                 selectedSeatId={selectedSeatId}
                 density={density}
                 leaseSeatId={control.lease?.seat_id ?? null}
+                accessKeys={accessKeys}
                 controlBusy={control.busy}
                 onSelect={setSelectedSeatId}
                 onTakeOver={handleTakeOver}
@@ -199,8 +241,12 @@ export function DesktopMonitorWorkspace() {
               <DesktopInspector
                 desktop={selectedDesktop}
                 hasLease={Boolean(control.lease)}
+                accessKey={selectedDesktop ? accessKeys[selectedDesktop.seat_id] || "" : ""}
                 leaseError={control.error}
                 actionError={actionError}
+                accessMessage={accessMessage}
+                onAccessKeyChange={handleAccessKeyChange}
+                onRequestAccess={handleRequestAccess}
               />
             </div>
           )}

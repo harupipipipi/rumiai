@@ -193,6 +193,38 @@ class LifecyclePolicy:
 
 
 @dataclass(frozen=True)
+class DesktopRuleConfig:
+    role: str | None = None
+    instructions: str = ""
+    rule_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "rule_ids", tuple(self.rule_ids))
+
+
+@dataclass(frozen=True)
+class DesktopAccessPolicy:
+    mode: str = "owner_only"
+    key_required: bool = False
+    request_required: bool = False
+    key_hint: str | None = None
+    link_enabled: bool = False
+
+
+@dataclass(frozen=True)
+class DesktopProvisioningPlan:
+    packages: tuple[PackageSpec, ...] = ()
+    apps: tuple[str, ...] = ()
+    mcp_servers: tuple[str, ...] = ()
+    status: str = "declared"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "packages", tuple(self.packages))
+        object.__setattr__(self, "apps", tuple(self.apps))
+        object.__setattr__(self, "mcp_servers", tuple(self.mcp_servers))
+
+
+@dataclass(frozen=True)
 class ResolvedSandboxTemplate:
     template_id: str
     template_version: str
@@ -246,9 +278,13 @@ class SandboxInstance:
     workspace_binding: WorkspaceBinding = field(default_factory=WorkspaceBinding)
     network_policy: NetworkPolicy = field(default_factory=NetworkPolicy)
     desktop_spec: DesktopSpec | None = None
+    desktop_rules: DesktopRuleConfig = field(default_factory=DesktopRuleConfig)
+    desktop_access: DesktopAccessPolicy = field(default_factory=DesktopAccessPolicy)
+    desktop_provisioning: DesktopProvisioningPlan = field(default_factory=DesktopProvisioningPlan)
     assigned_agent_id: str | None = None
     generation: int = 0
     recovery_token_hash: str | None = None
+    desktop_access_key_hash: str | None = None
 
     def __post_init__(self) -> None:
         self.capabilities = frozenset(self.capabilities)

@@ -24,6 +24,7 @@ export function mergeDesktopLeaseRenewal(
 export function useDesktopControlLease(
   seatId: string | null,
   client: DesktopControlClient = sandboxesApi,
+  accessKey?: string | null,
 ) {
   const [lease, setLease] = useState<DesktopControlLease | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,7 +40,7 @@ export function useDesktopControlLease(
     if (!seatId || !currentLease) return;
     setBusy(true);
     try {
-      await client.releaseDesktopControl(seatId, currentLease.lease_token);
+      await client.releaseDesktopControl(seatId, currentLease.lease_token, accessKey);
       setLease(null);
       setError(null);
     } catch (releaseError) {
@@ -47,13 +48,13 @@ export function useDesktopControlLease(
     } finally {
       setBusy(false);
     }
-  }, [client, seatId]);
+  }, [accessKey, client, seatId]);
 
   const acquire = useCallback(async () => {
     if (!seatId) return null;
     setBusy(true);
     try {
-      const nextLease = await client.acquireDesktopControl(seatId);
+      const nextLease = await client.acquireDesktopControl(seatId, accessKey);
       setLease(nextLease);
       setError(null);
       return nextLease;
@@ -63,7 +64,7 @@ export function useDesktopControlLease(
     } finally {
       setBusy(false);
     }
-  }, [client, seatId]);
+  }, [accessKey, client, seatId]);
 
   useEffect(() => {
     setLease(null);
@@ -75,7 +76,7 @@ export function useDesktopControlLease(
     const interval = window.setInterval(() => {
       const currentLease = leaseRef.current;
       if (!currentLease) return;
-      void client.renewDesktopControl(seatId, currentLease.lease_token)
+      void client.renewDesktopControl(seatId, currentLease.lease_token, accessKey)
         .then((renewedLease) => {
           setLease((current) => mergeDesktopLeaseRenewal(current, renewedLease));
           setError(null);
@@ -96,15 +97,15 @@ export function useDesktopControlLease(
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", releaseOnHide);
     };
-  }, [client, lease?.lease_token, release, seatId]);
+  }, [accessKey, client, lease?.lease_token, release, seatId]);
 
   useEffect(() => {
     return () => {
       const currentLease = leaseRef.current;
       if (!seatId || !currentLease) return;
-      void client.releaseDesktopControl(seatId, currentLease.lease_token).catch(() => undefined);
+      void client.releaseDesktopControl(seatId, currentLease.lease_token, accessKey).catch(() => undefined);
     };
-  }, [client, seatId]);
+  }, [accessKey, client, seatId]);
 
   return {
     lease,

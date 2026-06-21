@@ -111,6 +111,7 @@ export type SandboxTemplate = {
     summary?: string;
     mode?: string;
   };
+  provisioning?: DesktopProvisioning;
   isolation?: RuntimeIsolationFacts;
 };
 
@@ -161,6 +162,28 @@ export type DesktopControlState = {
   message?: string | null;
 };
 
+export type DesktopRules = {
+  role?: string | null;
+  instructions?: string;
+  rule_ids?: string[];
+};
+
+export type DesktopAccessPolicy = {
+  mode?: "owner_only" | "shared_link" | "key_required" | "request_required";
+  key_required?: boolean;
+  request_required?: boolean;
+  key_hint?: string | null;
+  link_enabled?: boolean;
+};
+
+export type DesktopProvisioning = {
+  packages?: Array<{ name?: string; version?: string | null; source?: string | null }>;
+  apps?: string[];
+  mcp_servers?: string[];
+  status?: string;
+  default?: boolean;
+};
+
 export type DesktopFrameMetadata = {
   frame_seq?: number | null;
   width?: number | null;
@@ -182,6 +205,10 @@ export type DesktopInstance = {
   resolution?: DesktopResolution | null;
   frame?: DesktopFrameMetadata | null;
   assigned_agent?: string | null;
+  role?: string | null;
+  rules?: DesktopRules | string[] | null;
+  access_policy?: DesktopAccessPolicy | null;
+  provisioning?: DesktopProvisioning | null;
   control?: DesktopControlState | null;
   isolation?: RuntimeIsolationFacts | null;
   network_policy?: {
@@ -210,6 +237,14 @@ export type CreateDesktopRequest = {
   workspace_id?: string | null;
   workspace_access?: string | null;
   assigned_agent?: string | null;
+  role?: string | null;
+  rules?: DesktopRules | string[] | null;
+  access?: {
+    mode?: "owner_only" | "shared_link" | "key_required" | "request_required";
+    access_key?: string;
+    request_required?: boolean;
+  };
+  provisioning?: DesktopProvisioning | null;
   request_id?: string;
 };
 
@@ -267,6 +302,7 @@ export type DesktopInputRequest =
       y: number;
       button?: "left" | "middle" | "right";
       lease_token: string;
+      access_key?: string;
       client_action_id?: string;
       request_id?: string;
     }
@@ -274,6 +310,7 @@ export type DesktopInputRequest =
       action: "key";
       key: string;
       lease_token: string;
+      access_key?: string;
       client_action_id?: string;
       request_id?: string;
     }
@@ -281,6 +318,7 @@ export type DesktopInputRequest =
       action: "type_text";
       text: string;
       lease_token: string;
+      access_key?: string;
       client_action_id?: string;
       request_id?: string;
     }
@@ -291,6 +329,7 @@ export type DesktopInputRequest =
       delta_x?: number;
       delta_y?: number;
       lease_token: string;
+      access_key?: string;
       client_action_id?: string;
       request_id?: string;
     };

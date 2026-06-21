@@ -821,6 +821,72 @@
       "path": "/api/coding/workspaces/{workspace_id}/trust",
       "flow_id": "coding_workspace",
       "description": "Trust a coding workspace for mutations"
+    },
+    {
+      "method": "GET",
+      "path": "/api/desktops",
+      "flow_id": "managed_runtime",
+      "description": "List managed desktop seats"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops",
+      "flow_id": "managed_runtime",
+      "description": "Create a managed desktop seat"
+    },
+    {
+      "method": "GET",
+      "path": "/api/desktops/{seat_id}",
+      "flow_id": "managed_runtime",
+      "description": "Get a managed desktop seat"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/desktops/{seat_id}",
+      "flow_id": "managed_runtime",
+      "description": "Delete a managed desktop seat"
+    },
+    {
+      "method": "GET",
+      "path": "/api/desktops/{seat_id}/frame",
+      "flow_id": "managed_runtime",
+      "description": "Fetch a managed desktop frame"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/input",
+      "flow_id": "managed_runtime",
+      "description": "Send human desktop input with a control lease"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/rules",
+      "flow_id": "managed_runtime",
+      "description": "Update desktop role, rules, or access policy"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/access-requests",
+      "flow_id": "managed_runtime",
+      "description": "Request access to a protected desktop"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/control/acquire",
+      "flow_id": "managed_runtime",
+      "description": "Acquire a desktop human-control lease"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/control/renew",
+      "flow_id": "managed_runtime",
+      "description": "Renew a desktop human-control lease"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/control/release",
+      "flow_id": "managed_runtime",
+      "description": "Release a desktop human-control lease"
     }
   ]
 }

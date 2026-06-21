@@ -1,0 +1,72 @@
+{
+  "id": "desktop_create",
+  "description": "Create an approved managed desktop seat from a desktop template.",
+  "metadata": {
+    "aliases": ["desktop.create", "new desktop", "ubuntu desktop"],
+    "keywords": ["desktop", "seat", "ubuntu", "template", "computer use", "chrome"]
+  },
+  "config": {
+    "tool_id": "desktop_create",
+    "name": "Desktop Create",
+    "summary": "Create an approved managed desktop seat.",
+    "tool_category": "desktop",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": ["desktop", "sandbox", "computer_use"],
+    "ui": {
+      "group_id": "desktop",
+      "group_label": "Desktop",
+      "group_icon": "monitor",
+      "item_icon": "monitor-plus",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Desktop Create",
+      "composer_description": "Create an approved managed desktop seat from a template.",
+      "composer_icon": "monitor-plus"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string" },
+          "template_id": { "type": "string", "default": "desktop.ubuntu" },
+          "provider_id": { "type": ["string", "null"] },
+          "resolution": {
+            "type": "object",
+            "properties": {
+              "width": { "type": "integer" },
+              "height": { "type": "integer" }
+            }
+          },
+          "role": { "type": "string" },
+          "rules": {
+            "description": "Role instructions or rule ids that the desktop loader should expose when this desktop is used."
+          },
+          "access": {
+            "type": "object",
+            "properties": {
+              "mode": { "type": "string", "enum": ["owner_only", "shared_link", "key_required", "request_required"] },
+              "access_key": { "type": "string" },
+              "request_required": { "type": "boolean" }
+            }
+          },
+          "provisioning": {
+            "type": "object",
+            "properties": {
+              "apps": { "type": "array", "items": { "type": "string" } },
+              "packages": { "type": "array", "items": { "type": "object" } },
+              "mcp_servers": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.desktop_tools:desktop_create"
+    }
+  }
+}

@@ -92,6 +92,7 @@
         "templates/coding.python/template.json",
         "templates/coding.rust/template.json",
         "templates/desktop.browser/template.json",
+        "templates/desktop.coding/template.json",
         "templates/desktop.ubuntu/template.json",
         "templates/pack.networked/template.json",
         "templates/pack.safe/template.json",

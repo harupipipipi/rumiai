@@ -2,12 +2,14 @@ import { defaultspackApiFetch, explainDefaultspackApiError } from "../../lib/api
 import { normalizeDesktopStatus, normalizeSandboxState } from "./types";
 import type {
   CreateDesktopRequest,
+  DesktopAccessPolicy,
   DesktopControlLeaseGrant,
   DesktopControlLeaseRenewal,
   DesktopFrameQuality,
   DesktopFrameResult,
   DesktopInputRequest,
   DesktopInstance,
+  DesktopRules,
   RuntimeDoctorResult,
   RuntimeOperation,
   RuntimeProvidersResponse,
@@ -87,6 +89,7 @@ export async function fetchDesktopFrame(
   options: {
     afterSeq?: number | null;
     quality?: DesktopFrameQuality;
+    accessKey?: string | null;
     signal?: AbortSignal;
   } = {},
 ): Promise<DesktopFrameResult> {
@@ -99,6 +102,7 @@ export async function fetchDesktopFrame(
     method: "GET",
     headers: {
       Accept: "image/webp,image/jpeg,image/png",
+      ...(options.accessKey ? { "X-Rumi-Desktop-Access-Key": options.accessKey } : {}),
     },
     cache: "no-store",
     signal: options.signal,
@@ -196,36 +200,75 @@ export const sandboxesApi = {
     }).then(normalizeDesktopInstance);
   },
 
-  deleteDesktop(seatId: string) {
+  deleteDesktop(seatId: string, accessKey?: string | null) {
     return request<{ deleted: boolean; seat_id: string }>(`/api/desktops/${encodeId(seatId)}`, {
       method: "DELETE",
+      headers: {
+        ...(accessKey ? { "X-Rumi-Desktop-Access-Key": accessKey } : {}),
+      },
       body: JSON.stringify({ request_id: requestId("desktop-delete") }),
     });
   },
 
+  updateDesktopRules(
+    seatId: string,
+    payload: {
+      role?: string | null;
+      rules?: DesktopRules | string[] | null;
+      access?: DesktopAccessPolicy & { access_key?: string };
+      access_key?: string;
+    },
+  ) {
+    return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/rules`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...payload,
+        request_id: requestId("desktop-rules"),
+      }),
+    }).then(normalizeDesktopInstance);
+  },
+
+  requestDesktopAccess(seatId: string, reason?: string) {
+    return request<{ seat_id: string; request_id: string; status: "pending"; message?: string }>(
+      `/api/desktops/${encodeId(seatId)}/access-requests`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          reason,
+          request_id: requestId("desktop-access"),
+        }),
+      },
+    );
+  },
+
   fetchDesktopFrame,
 
-  acquireDesktopControl(seatId: string) {
+  acquireDesktopControl(seatId: string, accessKey?: string | null) {
     return request<DesktopControlLeaseGrant>(`/api/desktops/${encodeId(seatId)}/control/acquire`, {
       method: "POST",
-      body: JSON.stringify({ request_id: requestId("desktop-control-acquire") }),
+      body: JSON.stringify({
+        access_key: accessKey || undefined,
+        request_id: requestId("desktop-control-acquire"),
+      }),
     });
   },
 
-  renewDesktopControl(seatId: string, leaseToken: string) {
+  renewDesktopControl(seatId: string, leaseToken: string, accessKey?: string | null) {
     return request<DesktopControlLeaseRenewal>(`/api/desktops/${encodeId(seatId)}/control/renew`, {
       method: "POST",
       body: JSON.stringify({
+        access_key: accessKey || undefined,
         lease_token: leaseToken,
         request_id: requestId("desktop-control-renew"),
       }),
     });
   },
 
-  releaseDesktopControl(seatId: string, leaseToken: string) {
+  releaseDesktopControl(seatId: string, leaseToken: string, accessKey?: string | null) {
     return request<{ released: boolean; seat_id: string }>(`/api/desktops/${encodeId(seatId)}/control/release`, {
       method: "POST",
       body: JSON.stringify({
+        access_key: accessKey || undefined,
         lease_token: leaseToken,
         request_id: requestId("desktop-control-release"),
       }),

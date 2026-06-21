@@ -1,0 +1,45 @@
+{
+  "id": "desktop_access_request",
+  "description": "Request access to a managed desktop that is protected by approval policy.",
+  "metadata": {
+    "aliases": ["desktop.access.request", "request desktop access"],
+    "keywords": ["desktop", "access", "approval", "request"]
+  },
+  "config": {
+    "tool_id": "desktop_access_request",
+    "name": "Desktop Access Request",
+    "summary": "Request access to a protected desktop.",
+    "tool_category": "desktop",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": ["desktop", "access", "approval"],
+    "ui": {
+      "group_id": "desktop",
+      "group_label": "Desktop",
+      "group_icon": "monitor",
+      "item_icon": "key-round",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Desktop Access",
+      "composer_description": "Request access to a protected desktop.",
+      "composer_icon": "key-round"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "seat_id": { "type": "string" },
+          "desktop_id": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.desktop_tools:desktop_access_request"
+    }
+  }
+}

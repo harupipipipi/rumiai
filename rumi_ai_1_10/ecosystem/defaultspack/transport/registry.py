@@ -1790,6 +1790,20 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     ),
     HttpRouteSpec(
         "POST",
+        "/api/desktops/{seat_id}/rules",
+        block_module="blocks.sandbox.api",
+        path_inject={"seat_id": "seat_id"},
+        defaults={"_handler": "desktop_rules_update"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/desktops/{seat_id}/access-requests",
+        block_module="blocks.sandbox.api",
+        path_inject={"seat_id": "seat_id"},
+        defaults={"_handler": "desktop_access_request"},
+    ),
+    HttpRouteSpec(
+        "POST",
         "/api/desktops/{seat_id}/control/acquire",
         block_module="blocks.sandbox.api",
         path_inject={"seat_id": "seat_id"},

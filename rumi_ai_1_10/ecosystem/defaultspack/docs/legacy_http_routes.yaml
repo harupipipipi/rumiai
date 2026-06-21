@@ -1855,6 +1855,20 @@ legacy_routes:
   reason: managed runtime contract fallback while provider implementation lands
   remove_after: v2.5
 - method: POST
+  pattern: /api/desktops/{seat_id}/rules
+  legacy_block_module: blocks.sandbox.api
+  replacement_function_id: ''
+  owner: sandbox
+  reason: managed runtime contract fallback while provider implementation lands
+  remove_after: v2.5
+- method: POST
+  pattern: /api/desktops/{seat_id}/access-requests
+  legacy_block_module: blocks.sandbox.api
+  replacement_function_id: ''
+  owner: sandbox
+  reason: managed runtime contract fallback while provider implementation lands
+  remove_after: v2.5
+- method: POST
   pattern: /api/desktops/{seat_id}/control/acquire
   legacy_block_module: blocks.sandbox.api
   replacement_function_id: ''

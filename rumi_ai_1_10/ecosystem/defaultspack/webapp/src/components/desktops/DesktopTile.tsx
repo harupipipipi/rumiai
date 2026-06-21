@@ -12,6 +12,7 @@ type DesktopTileProps = {
   selected: boolean;
   dense?: boolean;
   hasLease: boolean;
+  accessKey?: string | null;
   controlBusy?: boolean;
   onSelect: (seatId: string) => void;
   onTakeOver: () => void;
@@ -42,6 +43,7 @@ export function DesktopTile({
   selected,
   dense = false,
   hasLease,
+  accessKey,
   controlBusy = false,
   onSelect,
   onTakeOver,
@@ -58,6 +60,7 @@ export function DesktopTile({
     status: desktop.status,
     selected,
     hasControlLease: hasLease,
+    accessKey,
   });
   const resolution = frame
     ? { width: frame.width, height: frame.height }

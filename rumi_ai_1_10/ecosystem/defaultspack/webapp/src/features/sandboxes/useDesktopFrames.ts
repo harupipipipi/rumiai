@@ -9,6 +9,7 @@ export type DesktopFrameFetcher = (
   options: {
     afterSeq?: number | null;
     quality?: DesktopFrameQuality;
+    accessKey?: string | null;
     signal?: AbortSignal;
   },
 ) => Promise<DesktopFrameResult>;
@@ -26,12 +27,14 @@ export class DesktopFramePoller {
   private readonly seatId: string;
   private readonly quality: DesktopFrameQuality;
   private readonly fetcher: DesktopFrameFetcher;
+  private readonly accessKey?: string | null;
   private readonly onFrame?: (frame: Extract<DesktopFrameResult, { status: "frame" }>) => void;
   private readonly onError?: (error: unknown) => void;
 
   constructor(options: {
     seatId: string;
     quality: DesktopFrameQuality;
+    accessKey?: string | null;
     fetcher: DesktopFrameFetcher;
     initialSeq?: number | null;
     onFrame?: (frame: Extract<DesktopFrameResult, { status: "frame" }>) => void;
@@ -39,6 +42,7 @@ export class DesktopFramePoller {
   }) {
     this.seatId = options.seatId;
     this.quality = options.quality;
+    this.accessKey = options.accessKey;
     this.fetcher = options.fetcher;
     this.lastSeq = options.initialSeq ?? null;
     this.onFrame = options.onFrame;
@@ -66,6 +70,7 @@ export class DesktopFramePoller {
       const result = await this.fetcher(this.seatId, {
         afterSeq: this.lastSeq,
         quality: this.quality,
+        accessKey: this.accessKey,
         signal: controller.signal,
       });
       if (result.status === "frame") {
@@ -103,12 +108,14 @@ export function useDesktopFrame({
   status,
   selected,
   hasControlLease,
+  accessKey,
   fetcher = sandboxesApi.fetchDesktopFrame,
 }: {
   seatId: string;
   status?: string;
   selected: boolean;
   hasControlLease: boolean;
+  accessKey?: string | null;
   fetcher?: DesktopFrameFetcher;
 }) {
   const [frame, setFrame] = useState<DesktopFrameView | null>(null);
@@ -149,6 +156,7 @@ export function useDesktopFrame({
       pollerRef.current = new DesktopFramePoller({
         seatId,
         quality,
+        accessKey,
         fetcher,
         initialSeq: frame?.frame_seq ?? null,
         onFrame: handleFrame,
@@ -165,12 +173,12 @@ export function useDesktopFrame({
       setError(null);
     }
     setIsPolling(false);
-  }, [fetcher, frame?.frame_seq, handleFrame, quality, seatId, status]);
+  }, [accessKey, fetcher, frame?.frame_seq, handleFrame, quality, seatId, status]);
 
   useEffect(() => {
     pollerRef.current?.abort();
     pollerRef.current = null;
-  }, [fetcher, quality, seatId]);
+  }, [accessKey, fetcher, quality, seatId]);
 
   useEffect(() => {
     if (!isRunningStatus(status)) return;

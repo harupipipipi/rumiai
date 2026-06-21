@@ -354,6 +354,117 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
     assert agent.desktop_inputs[0].action == "click"
 
 
+def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    lease_manager = ControlLeaseManager(ttl_seconds=30, token_factory=lambda: "lease-token")
+    agent = CaptureGuestAgent(lease_manager=lease_manager, width=800, height=600)
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities={"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"},
+            guest_agent=agent,
+            sandbox_id_factory=lambda: "seat-locked",
+        )
+    )
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=lease_manager,
+    )
+    api._reset_service_for_tests(service)
+    try:
+        missing_key = api.run(
+            {
+                "_handler": "desktops_create",
+                "template_id": "desktop.ubuntu",
+                "provider_id": "fake-runtime",
+                "access": {"mode": "key_required"},
+            },
+            {},
+        )
+        created = api.run(
+            {
+                "_handler": "desktops_create",
+                "template_id": "desktop.coding",
+                "provider_id": "fake-runtime",
+                "role": "browser operator",
+                "rules": {"rule_ids": ["browser-only"]},
+                "access": {"mode": "key_required", "access_key": "correct-key"},
+            },
+            {},
+        )
+        denied = api.run({"_handler": "desktop_get", "seat_id": "seat-locked"}, {})
+        allowed = api.run(
+            {"_handler": "desktop_get", "seat_id": "seat-locked", "access_key": "correct-key"},
+            {},
+        )
+        updated = api.run(
+            {
+                "_handler": "desktop_rules_update",
+                "seat_id": "seat-locked",
+                "access_key": "correct-key",
+                "role": "coding desktop",
+                "rules": ["playwright-ok"],
+            },
+            {},
+        )
+        ai_click = api.run(
+            {
+                "_handler": "desktop_ai_input",
+                "seat_id": "seat-locked",
+                "access_key": "correct-key",
+                "action": "click",
+                "client_action_id": "ai-1",
+                "x": 10,
+                "y": 10,
+            },
+            {},
+        )
+        lease = api.run(
+            {
+                "_handler": "desktop_control_acquire",
+                "seat_id": "seat-locked",
+                "access_key": "correct-key",
+            },
+            {},
+        )
+        ai_conflict = api.run(
+            {
+                "_handler": "desktop_ai_input",
+                "seat_id": "seat-locked",
+                "access_key": "correct-key",
+                "action": "click",
+                "client_action_id": "ai-2",
+                "x": 10,
+                "y": 10,
+            },
+            {},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert missing_key["status"] == "error"
+    assert missing_key["error"]["code"] == "DESKTOP_ACCESS_KEY_MISSING"
+    assert created["status"] == "ok"
+    assert created["data"]["access_policy"]["key_required"] is True
+    assert created["data"]["access_policy"]["key_hint"] == "ends:-key"
+    assert "correct-key" not in str(created)
+    assert denied["status"] == "error"
+    assert denied["error"]["code"] == "DESKTOP_ACCESS_KEY_REQUIRED"
+    assert allowed["status"] == "ok"
+    assert allowed["data"]["rules"]["role"] == "browser operator"
+    assert updated["status"] == "ok"
+    assert updated["data"]["rules"]["role"] == "coding desktop"
+    assert updated["data"]["rules"]["rule_ids"] == ["playwright-ok"]
+    assert ai_click["status"] == "ok"
+    assert lease["data"]["lease_token"] == "lease-token"
+    assert ai_conflict["status"] == "error"
+    assert ai_conflict["error"]["code"] == DESKTOP_CONTROL_CONFLICT
+
+
 def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
     from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
@@ -364,6 +475,8 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert ("POST", "/api/runtime/ensure", "blocks.sandbox.api") in routes
     assert ("GET", "/api/sandbox/templates", "blocks.sandbox.api") in routes
     assert ("GET", "/api/desktops", "blocks.sandbox.api") in routes
+    assert ("POST", "/api/desktops/{seat_id}/rules", "blocks.sandbox.api") in routes
+    assert ("POST", "/api/desktops/{seat_id}/access-requests", "blocks.sandbox.api") in routes
     providers = api.run({"_handler": "runtime_providers"}, {})
     doctor = api.run({"_handler": "runtime_doctor"}, {})
     ensure = api.run({"_handler": "runtime_ensure"}, {})
@@ -376,6 +489,9 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert ensure["data"]["status"] == "failed"
     assert ensure["data"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
     assert {template["template_id"] for template in templates["data"]["templates"]} >= {"desktop.ubuntu", "tool.ephemeral"}
+    coding_template = next(template for template in templates["data"]["templates"] if template["template_id"] == "desktop.coding")
+    assert "google-chrome-stable" in {app["name"] for app in coding_template["provisioning"]["packages"]}
+    assert "playwright" in coding_template["provisioning"]["mcp_servers"]
     assert desktops["data"]["desktops"] == []
 
 

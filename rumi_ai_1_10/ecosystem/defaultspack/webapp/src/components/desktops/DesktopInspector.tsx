@@ -1,4 +1,5 @@
-import { AlertTriangle, Bot, Cpu, Monitor, Network, Shield, UserCheck } from "lucide-react";
+import { useMemo, useState } from "react";
+import { AlertTriangle, Bot, ClipboardCheck, Copy, Cpu, KeyRound, Link2, ListChecks, Monitor, Network, PackageCheck, Shield, UserCheck } from "lucide-react";
 
 import { cn } from "../../lib/cn";
 import type { DesktopInstance, RuntimeIsolationFacts } from "../../features/sandboxes/types";
@@ -6,8 +7,12 @@ import type { DesktopInstance, RuntimeIsolationFacts } from "../../features/sand
 type DesktopInspectorProps = {
   desktop: DesktopInstance | null;
   hasLease: boolean;
+  accessKey?: string;
   leaseError?: string | null;
   actionError?: string | null;
+  accessMessage?: string | null;
+  onAccessKeyChange?: (seatId: string, accessKey: string) => void;
+  onRequestAccess?: (seatId: string) => void;
 };
 
 function factRow(label: string, value: string, tone: "default" | "warning" = "default") {
@@ -38,7 +43,42 @@ function isolationRows(isolation: RuntimeIsolationFacts | null | undefined, prov
   return rows;
 }
 
-export function DesktopInspector({ desktop, hasLease, leaseError, actionError }: DesktopInspectorProps) {
+function desktopRuleIds(desktop: DesktopInstance): string[] {
+  if (Array.isArray(desktop.rules)) return desktop.rules;
+  return desktop.rules?.rule_ids ?? [];
+}
+
+function desktopRole(desktop: DesktopInstance): string | null {
+  if (Array.isArray(desktop.rules)) return desktop.role ?? null;
+  return desktop.rules?.role ?? desktop.role ?? null;
+}
+
+export function DesktopInspector({
+  desktop,
+  hasLease,
+  accessKey = "",
+  leaseError,
+  actionError,
+  accessMessage,
+  onAccessKeyChange,
+  onRequestAccess,
+}: DesktopInspectorProps) {
+  const [copiedAction, setCopiedAction] = useState<string | null>(null);
+  const shareLink = useMemo(() => {
+    if (!desktop?.seat_id || typeof window === "undefined") return "";
+    const url = new URL(window.location.href);
+    url.searchParams.set("desktop", desktop.seat_id);
+    return url.toString();
+  }, [desktop?.seat_id]);
+
+  const copyText = (label: string, text: string) => {
+    if (!navigator.clipboard?.writeText) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopiedAction(label);
+      window.setTimeout(() => setCopiedAction(null), 1600);
+    });
+  };
+
   if (!desktop) {
     return (
       <aside className="rounded-lg border border-zinc-800/70 bg-[#0a0a0c] p-4">
@@ -53,7 +93,35 @@ export function DesktopInspector({ desktop, hasLease, leaseError, actionError }:
     <aside className="grid gap-3 rounded-lg border border-zinc-800/70 bg-[#0a0a0c] p-4 text-xs">
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-zinc-100">{desktop.name}</p>
-        <p className="mt-1 truncate font-mono text-[11px] text-zinc-500">{desktop.seat_id}</p>
+        <div className="mt-1 flex items-center gap-1">
+          <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500">{desktop.seat_id}</p>
+          <button
+            type="button"
+            title="Copy desktop id"
+            onClick={() => copyText("id", desktop.seat_id)}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100"
+          >
+            <Copy size={13} />
+          </button>
+          <button
+            type="button"
+            title="Copy desktop link"
+            onClick={() => copyText("link", shareLink)}
+            disabled={!shareLink}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-40"
+          >
+            <Link2 size={13} />
+          </button>
+          <button
+            type="button"
+            title="Copy use-this-desktop prompt"
+            onClick={() => copyText("use", `Use desktop ${desktop.seat_id} for this task.`)}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100"
+          >
+            <ClipboardCheck size={13} />
+          </button>
+        </div>
+        {copiedAction && <p className="mt-1 text-[11px] text-emerald-300">Copied {copiedAction}.</p>}
       </div>
 
       <section>
@@ -90,6 +158,62 @@ export function DesktopInspector({ desktop, hasLease, leaseError, actionError }:
           {factRow("Workspace", desktop.workspace?.label || desktop.workspace?.workspace_id || "None")}
           {factRow("Access", desktop.workspace?.access || "Backend policy")}
           {factRow("Network", desktop.network_policy?.summary || desktop.network_policy?.default || "Backend policy")}
+        </div>
+      </section>
+
+      <section>
+        <div className="mb-2 flex items-center gap-1.5 text-zinc-300">
+          <ListChecks size={13} />
+          <span className="font-semibold">Role/rules</span>
+        </div>
+        <div className="rounded-md border border-zinc-800 bg-zinc-950/60 px-3">
+          {factRow("Role", desktopRole(desktop) || "Default")}
+          {factRow("Rules", desktopRuleIds(desktop).length ? desktopRuleIds(desktop).join(", ") : "None")}
+        </div>
+      </section>
+
+      <section>
+        <div className="mb-2 flex items-center gap-1.5 text-zinc-300">
+          <KeyRound size={13} />
+          <span className="font-semibold">Access</span>
+        </div>
+        <div className="rounded-md border border-zinc-800 bg-zinc-950/60 px-3">
+          {factRow("Mode", desktop.access_policy?.mode || "owner_only")}
+          {factRow("Key", desktop.access_policy?.key_required ? desktop.access_policy.key_hint || "Required" : "Not required", desktop.access_policy?.key_required ? "warning" : "default")}
+          {factRow("Request", desktop.access_policy?.request_required ? "Required" : "No")}
+        </div>
+        {desktop.access_policy?.key_required && (
+          <label className="mt-2 grid gap-1 text-zinc-500">
+            <span>Access key</span>
+            <input
+              type="password"
+              value={accessKey}
+              onChange={(event) => onAccessKeyChange?.(desktop.seat_id, event.target.value)}
+              className="h-8 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-100 outline-none focus:border-zinc-600"
+            />
+          </label>
+        )}
+        {desktop.access_policy?.request_required && (
+          <button
+            type="button"
+            onClick={() => onRequestAccess?.(desktop.seat_id)}
+            className="mt-2 h-8 rounded-md border border-zinc-800 px-3 text-xs font-medium text-zinc-300 hover:bg-zinc-900"
+          >
+            Request access
+          </button>
+        )}
+        {accessMessage && <p className="mt-2 text-[11px] text-emerald-300">{accessMessage}</p>}
+      </section>
+
+      <section>
+        <div className="mb-2 flex items-center gap-1.5 text-zinc-300">
+          <PackageCheck size={13} />
+          <span className="font-semibold">Provisioning</span>
+        </div>
+        <div className="rounded-md border border-zinc-800 bg-zinc-950/60 px-3">
+          {factRow("Apps", desktop.provisioning?.apps?.length ? desktop.provisioning.apps.join(", ") : "Template default")}
+          {factRow("MCP", desktop.provisioning?.mcp_servers?.length ? desktop.provisioning.mcp_servers.join(", ") : "None")}
+          {factRow("Status", desktop.provisioning?.status || "declared")}
         </div>
       </section>
 
