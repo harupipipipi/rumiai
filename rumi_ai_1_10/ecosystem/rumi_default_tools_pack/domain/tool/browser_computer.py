@@ -255,6 +255,26 @@ class BrowserComputerController:
         if metadata is not None:
             result["edge_haze"] = metadata
 
+    @staticmethod
+    def _edge_haze_result(edge_haze: Any) -> dict[str, Any] | None:
+        if not isinstance(edge_haze, dict):
+            return None
+        result: dict[str, Any] = {
+            "attempted": bool(edge_haze.get("attempted")),
+            "started": bool(edge_haze.get("started")),
+        }
+        for key in ("action", "sequence_id", "lease_path"):
+            value = edge_haze.get(key)
+            if isinstance(value, str) and value:
+                result[key] = value
+        return result
+
+    @classmethod
+    def _attach_edge_haze_result(cls, result: dict[str, Any], edge_haze: Any) -> None:
+        metadata = cls._edge_haze_result(edge_haze)
+        if metadata is not None:
+            result["edge_haze"] = metadata
+
     def _open_url(self, url: str, *, payload: dict[str, Any], dry_run: bool, yolo_mode: bool) -> dict[str, Any]:
         if not url.startswith(("http://", "https://", "file://")):
             raise ValueError("'url' must start with http://, https://, or file://")

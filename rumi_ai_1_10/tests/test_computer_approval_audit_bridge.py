@@ -112,6 +112,28 @@ def test_pid_event_function_requires_approval_before_service(tmp_path, monkeypat
     assert "approval_token" not in result
 
 
+def test_observe_function_requires_approval_before_service(tmp_path, monkeypatch):
+    """The standalone observe function must not capture screen state without approval."""
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    from ecosystem.rumi_default_tools_pack.functions import _computer_approval
+    from ecosystem.rumi_default_tools_pack.functions.computer_observe import main
+
+    approval_controller = BrowserComputerController(artifact_root=tmp_path / "artifacts")
+    approval_controller._approval_path = tmp_path / "shared" / "approvals.json"
+    monkeypatch.setattr(_computer_approval, "BrowserComputerController", lambda: approval_controller)
+    monkeypatch.setattr(
+        main,
+        "_get_service",
+        lambda: (_ for _ in ()).throw(AssertionError("service must not be used before approval")),
+    )
+
+    result = main.run({}, {"app": "VictimApp"})
+
+    assert result["action"] == "computer.observe"
+    assert result["requires_approval"] is True
+    assert "approval_token" not in result
+
+
 # --- Permission model tests ---
 
 def test_click_is_high_risk():

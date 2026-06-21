@@ -114,6 +114,37 @@ def test_observe_delegates_to_seat_with_approval(controller):
     svc.observe.assert_called_once()
 
 
+def test_attach_edge_haze_result_ignores_non_metadata(controller):
+    result: dict[str, object] = {"action": "computer.click"}
+
+    controller._attach_edge_haze_result(result, None)
+
+    assert "edge_haze" not in result
+
+
+def test_attach_edge_haze_result_adds_metadata(controller):
+    result: dict[str, object] = {"action": "computer.click"}
+
+    controller._attach_edge_haze_result(
+        result,
+        {
+            "attempted": True,
+            "started": False,
+            "action": "computer.click",
+            "sequence_id": "seq-1",
+            "lease_path": "/tmp/edge-haze.json",
+        },
+    )
+
+    assert result["edge_haze"] == {
+        "attempted": True,
+        "started": False,
+        "action": "computer.click",
+        "sequence_id": "seq-1",
+        "lease_path": "/tmp/edge-haze.json",
+    }
+
+
 def test_doctor_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc
