@@ -25,6 +25,7 @@ def check_host_intent_authority(
     principal_id: str,
     request_id: str | None = None,
     approval_token: str | None = None,
+    consume_approval_token: bool = True,
 ) -> dict[str, Any]:
     definition = get_host_permission_definition(intent.operation)
     decision = service.check(
@@ -35,6 +36,7 @@ def check_host_intent_authority(
         conversation_id=intent.conversation_id or None,
         request_id=request_id,
         approval_token=approval_token,
+        consume_approval_token=consume_approval_token,
     )
     event = decision.to_dict()
     if decision.approval_required:

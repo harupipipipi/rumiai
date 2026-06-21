@@ -389,9 +389,11 @@ def test_host_intent_executor_dispatches_approved_stream_to_viewer_broker(monkey
     from ecosystem.defaultspack.domain.safety import approval
 
     captured: dict[str, object] = {}
+    authority_checks: list[dict] = []
 
     class Authority:
         def check(self, **kwargs):
+            authority_checks.append(kwargs)
             captured["authority_check"] = kwargs
             return AuthorityDecision(
                 allowed=True,
@@ -457,6 +459,7 @@ def test_host_intent_executor_dispatches_approved_stream_to_viewer_broker(monkey
     assert captured["execution_token"]["function_id"] == "host_microphone_capture"
     assert captured["execution_token"]["pack_id"] == "rumi_ambient_trigger_pack"
     assert captured["execution_token"]["conversation_id"] == "conv-1"
+    assert [item.get("consume_approval_token") for item in authority_checks] == [False, True]
 
 
 def test_host_intent_exec_guarded_has_confirmation_phrase_and_approves(tmp_path, monkeypatch):
@@ -513,6 +516,88 @@ def test_host_intent_exec_guarded_has_confirmation_phrase_and_approves(tmp_path,
     assert retry["success"] is False
     assert retry["status"] == "host_broker_unavailable"
     assert retry["error_type"] == "host_broker_unavailable"
+
+    retry_again = HostIntentExecutor().handle(
+        payload,
+        principal_id="third_party_pack",
+        caller_pack_id="third_party_pack",
+        caller_function_id="run_shell",
+        request_context={
+            "conversation_id": "conv-1",
+            **_authority_context("host.process.exec_guarded", first["request_id"], approved["token"]),
+        },
+    )
+
+    assert retry_again["success"] is False
+    assert retry_again["status"] == "host_broker_unavailable"
+
+
+def test_host_intent_broker_error_does_not_consume_authority_token(tmp_path, monkeypatch):
+    from core_runtime.host_intent.executor import HostIntentExecutor
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+    from ecosystem.defaultspack.domain.safety import approval
+
+    service = _authority_service(tmp_path, monkeypatch)
+    monkeypatch.setattr("core_runtime.host_intent.executor.get_authority_service", lambda: service)
+
+    class FailingBroker:
+        def available(self):
+            return True
+
+        def execute_intent(self, payload):
+            raise RuntimeError("viewer broker http 503")
+
+    monkeypatch.setattr(ViewerBrokerClient, "from_environment", classmethod(lambda cls: FailingBroker()))
+    monkeypatch.setattr(approval, "issue_execution_token", lambda *args, **kwargs: "viewer-execution-token")
+
+    payload = {
+        "type": "host_intent",
+        "operation": "host.process.exec_guarded",
+        "args": {"argv": ["/bin/echo", "hello"]},
+        "caller": {
+            "pack_id": "third_party_pack",
+            "function_id": "run_shell",
+        },
+        "host_function_id": "host_process_exec_guarded",
+    }
+    first = HostIntentExecutor().handle(
+        payload,
+        principal_id="third_party_pack",
+        caller_pack_id="third_party_pack",
+        caller_function_id="run_shell",
+        request_context={"conversation_id": "conv-1"},
+    )
+    phrase = first["confirmation_phrase"]
+    approved = service.approve_request(
+        first["request_id"],
+        scope="once",
+        config={"confirmation_text": phrase},
+        ui_operator=_ui_operator(first["request_id"]),
+    )
+
+    context = {
+        "conversation_id": "conv-1",
+        **_authority_context("host.process.exec_guarded", first["request_id"], approved["token"]),
+    }
+    failed = HostIntentExecutor().handle(
+        payload,
+        principal_id="third_party_pack",
+        caller_pack_id="third_party_pack",
+        caller_function_id="run_shell",
+        request_context=context,
+    )
+    failed_again = HostIntentExecutor().handle(
+        payload,
+        principal_id="third_party_pack",
+        caller_pack_id="third_party_pack",
+        caller_function_id="run_shell",
+        request_context=context,
+    )
+
+    assert failed["status"] == "host_broker_error"
+    assert failed["success"] is False
+    assert failed_again["status"] == "host_broker_error"
+    assert failed_again["success"] is False
 
 
 def test_host_intent_executor_fails_closed_without_viewer_broker(monkeypatch):

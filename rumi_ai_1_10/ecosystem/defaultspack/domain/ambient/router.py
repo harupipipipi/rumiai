@@ -4,6 +4,7 @@ import copy
 import logging
 import time
 import uuid
+from dataclasses import replace
 from typing import Any
 
 from domain.chat.store import ChatStore
@@ -26,6 +27,7 @@ from .materialization import (
 from .permission_check import missing_rumi_permissions
 from .store import AmbientStore
 from .transcription import (
+    RAW_AUDIO_ATTACHMENT_KEYS,
     attachment_transcript,
     attachment_transcript_model,
     attachment_transcript_source,
@@ -62,6 +64,7 @@ ALLOWED_ACTIONS = {
 
 _SESSION_CONVERSATION_IDS: dict[str, str] = {}
 _PENDING_AI_SEND_APPROVALS: dict[str, dict[str, Any]] = {}
+_PENDING_AI_SEND_AUDIO_BLOBS: dict[str, dict[str, Any]] = {}
 
 
 class AmbientTriggerRouter:
@@ -137,22 +140,25 @@ class AmbientTriggerRouter:
             }
         event = pending["event"]
         action_id = str(pending.get("action_id") or self._action_id(event))
-        self._record(
-            event,
-            "approved",
-            "ambient.ai_send_approval_accepted",
-            action_id=action_id,
-            approval_request_id=pending["request_id"],
-        )
-        return self._dispatch(
-            event,
-            action_id,
-            copy.deepcopy(pending.get("context") if isinstance(pending.get("context"), dict) else {}),
-            state=copy.deepcopy(pending.get("state") if isinstance(pending.get("state"), dict) else self.store.read()),
-            attachments=copy.deepcopy(pending.get("attachments") if isinstance(pending.get("attachments"), list) else []),
-            require_approval=False,
-            approval_request_id=pending["request_id"],
-        )
+        try:
+            self._record(
+                event,
+                "approved",
+                "ambient.ai_send_approval_accepted",
+                action_id=action_id,
+                approval_request_id=pending["request_id"],
+            )
+            return self._dispatch(
+                event,
+                action_id,
+                copy.deepcopy(pending.get("context") if isinstance(pending.get("context"), dict) else {}),
+                state=copy.deepcopy(pending.get("state") if isinstance(pending.get("state"), dict) else self.store.read()),
+                attachments=_rehydrate_pending_audio_media(pending),
+                require_approval=False,
+                approval_request_id=pending["request_id"],
+            )
+        finally:
+            _delete_pending_audio_blobs(pending)
 
     def deny_pending(self, request_id: str, reason: str = "") -> dict[str, Any]:
         pending = self._pop_pending(request_id)
@@ -162,16 +168,19 @@ class AmbientTriggerRouter:
                 "reason": "ambient.ai_send_approval_not_found",
                 "request_id": str(request_id or ""),
             }
-        event = pending["event"]
-        action_id = str(pending.get("action_id") or self._action_id(event))
-        return self._record(
-            event,
-            "denied",
-            "ambient.ai_send_approval_denied",
-            action_id=action_id,
-            approval_request_id=pending["request_id"],
-            denied_reason=str(reason or "").strip(),
-        )
+        try:
+            event = pending["event"]
+            action_id = str(pending.get("action_id") or self._action_id(event))
+            return self._record(
+                event,
+                "denied",
+                "ambient.ai_send_approval_denied",
+                action_id=action_id,
+                approval_request_id=pending["request_id"],
+                denied_reason=str(reason or "").strip(),
+            )
+        finally:
+            _delete_pending_audio_blobs(pending)
 
     def submit_event(self, payload: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
         event = AmbientTriggerEvent.from_payload(payload)
@@ -501,17 +510,27 @@ class AmbientTriggerRouter:
     ) -> dict[str, Any]:
         now = time.time()
         request_id = f"ambient_ai_send_{uuid.uuid4().hex}"
+        expires_at = now + AI_SEND_APPROVAL_TTL_SECONDS
+        store_path = self._store_path_key()
+        pending_event = replace(event, payload=_strip_raw_audio_from_payload(event.payload))
+        pending_attachments, audio_blob_ids = _detach_pending_audio_media(
+            attachments,
+            request_id=request_id,
+            store_path=store_path,
+            expires_at_epoch=expires_at,
+        )
         pending = {
             "request_id": request_id,
-            "store_path": self._store_path_key(),
-            "event": event,
+            "store_path": store_path,
+            "event": pending_event,
             "action_id": action_id,
             "context": copy.deepcopy(context if isinstance(context, dict) else {}),
             "state": copy.deepcopy(state if isinstance(state, dict) else {}),
-            "attachments": copy.deepcopy(attachments),
+            "attachments": pending_attachments,
+            "audio_blob_ids": audio_blob_ids,
             "input_text": str(input_text or ""),
             "created_at_epoch": now,
-            "expires_at_epoch": now + AI_SEND_APPROVAL_TTL_SECONDS,
+            "expires_at_epoch": expires_at,
             "created_at": _epoch_iso(now),
         }
         self._prune_pending()
@@ -549,6 +568,7 @@ class AmbientTriggerRouter:
         now = time.time()
         if float(pending.get("expires_at_epoch") or 0) <= now:
             _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
+            _delete_pending_audio_blobs(pending)
             event = pending.get("event")
             if isinstance(event, AmbientTriggerEvent):
                 self._record(
@@ -569,7 +589,16 @@ class AmbientTriggerRouter:
             if float(pending.get("expires_at_epoch") or 0) <= now
         ]
         for request_id in expired:
-            _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
+            pending = _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
+            if pending is not None:
+                _delete_pending_audio_blobs(pending)
+        expired_blobs = [
+            blob_id
+            for blob_id, blob in _PENDING_AI_SEND_AUDIO_BLOBS.items()
+            if float(blob.get("expires_at_epoch") or 0) <= now
+        ]
+        for blob_id in expired_blobs:
+            _PENDING_AI_SEND_AUDIO_BLOBS.pop(blob_id, None)
 
     def _pending_summary(self, pending: dict[str, Any]) -> dict[str, Any]:
         event = pending.get("event")
@@ -983,6 +1012,112 @@ def _uses_finger_recording_template(
         and event.trigger == "pinch"
         and any(_is_audio_attachment(item) for item in attachments if isinstance(item, dict))
     )
+
+
+def _detach_pending_audio_media(
+    attachments: list[dict[str, Any]],
+    *,
+    request_id: str,
+    store_path: str,
+    expires_at_epoch: float,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    clean_attachments: list[dict[str, Any]] = []
+    blob_ids: list[str] = []
+    for index, attachment in enumerate(attachments):
+        if not isinstance(attachment, dict):
+            clean_attachments.append(attachment)
+            continue
+        item = dict(attachment)
+        if not _is_audio_attachment(item):
+            clean_attachments.append(item)
+            continue
+        media = _raw_audio_media_from_attachment(item)
+        clean_item = strip_audio_media(item)
+        if media:
+            blob_id = f"{request_id}:{index}:{uuid.uuid4().hex}"
+            _PENDING_AI_SEND_AUDIO_BLOBS[blob_id] = {
+                "store_path": store_path,
+                "expires_at_epoch": expires_at_epoch,
+                "media": media,
+            }
+            metadata = dict(clean_item.get("metadata") if isinstance(clean_item.get("metadata"), dict) else {})
+            metadata["ambient_audio_blob_id"] = blob_id
+            clean_item["metadata"] = metadata
+            blob_ids.append(blob_id)
+        clean_attachments.append(clean_item)
+    return clean_attachments, blob_ids
+
+
+def _rehydrate_pending_audio_media(pending: dict[str, Any]) -> list[dict[str, Any]]:
+    attachments = pending.get("attachments") if isinstance(pending.get("attachments"), list) else []
+    store_path = str(pending.get("store_path") or "")
+    now = time.time()
+    result: list[dict[str, Any]] = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            result.append(attachment)
+            continue
+        item = dict(attachment)
+        metadata = dict(item.get("metadata") if isinstance(item.get("metadata"), dict) else {})
+        blob_id = str(metadata.get("ambient_audio_blob_id") or "").strip()
+        blob = _PENDING_AI_SEND_AUDIO_BLOBS.get(blob_id) if blob_id else None
+        if (
+            blob is not None
+            and str(blob.get("store_path") or "") == store_path
+            and float(blob.get("expires_at_epoch") or 0) > now
+        ):
+            media = blob.get("media") if isinstance(blob.get("media"), dict) else {}
+            attachment_media = media.get("attachment") if isinstance(media.get("attachment"), dict) else {}
+            for key, value in attachment_media.items():
+                item[key] = value
+            metadata_media = media.get("metadata") if isinstance(media.get("metadata"), dict) else {}
+            metadata.update(metadata_media)
+        metadata.pop("ambient_audio_blob_id", None)
+        if metadata:
+            item["metadata"] = metadata
+        elif "metadata" in item:
+            item.pop("metadata", None)
+        result.append(item)
+    return result
+
+
+def _delete_pending_audio_blobs(pending: dict[str, Any]) -> None:
+    blob_ids = pending.get("audio_blob_ids") if isinstance(pending.get("audio_blob_ids"), list) else []
+    for blob_id in blob_ids:
+        _PENDING_AI_SEND_AUDIO_BLOBS.pop(str(blob_id), None)
+
+
+def _strip_raw_audio_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    clean = dict(payload if isinstance(payload, dict) else {})
+    for key in RAW_AUDIO_ATTACHMENT_KEYS:
+        clean.pop(key, None)
+    raw_attachments = clean.get("attachments")
+    if isinstance(raw_attachments, list):
+        clean["attachments"] = [
+            strip_audio_media(item) if isinstance(item, dict) and _is_audio_attachment(item) else item
+            for item in raw_attachments
+        ]
+    return clean
+
+
+def _raw_audio_media_from_attachment(attachment: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    media: dict[str, dict[str, Any]] = {}
+    attachment_media = {
+        key: attachment[key]
+        for key in RAW_AUDIO_ATTACHMENT_KEYS
+        if key in attachment and attachment.get(key) is not None
+    }
+    if attachment_media:
+        media["attachment"] = attachment_media
+    metadata = attachment.get("metadata") if isinstance(attachment.get("metadata"), dict) else {}
+    metadata_media = {
+        key: metadata[key]
+        for key in RAW_AUDIO_ATTACHMENT_KEYS
+        if key in metadata and metadata.get(key) is not None
+    }
+    if metadata_media:
+        media["metadata"] = metadata_media
+    return media
 
 
 def _tools_for_event(event: AmbientTriggerEvent, params: dict[str, Any]) -> list[Any]:

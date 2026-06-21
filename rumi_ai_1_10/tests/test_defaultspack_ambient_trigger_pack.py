@@ -1355,6 +1355,7 @@ def test_ai_send_approval_pending_summary_does_not_expose_audio_data(monkeypatch
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
 
+    from domain.ambient import router as router_module
     from domain.ambient.router import AmbientTriggerRouter
 
     router = AmbientTriggerRouter()
@@ -1374,6 +1375,15 @@ def test_ai_send_approval_pending_summary_does_not_expose_audio_data(monkeypatch
     assert summary["attachment_count"] == 1
     assert "data:audio" not in json.dumps(summary)
     assert "AAAA" not in json.dumps(summary)
+    stored = router_module._PENDING_AI_SEND_APPROVALS[pending["approval_request_id"]]
+    assert "data:audio" not in repr(stored)
+    assert "AAAA" not in repr(stored)
+    blob_ids = stored["audio_blob_ids"]
+    assert len(blob_ids) == 1
+    assert blob_ids[0] in router_module._PENDING_AI_SEND_AUDIO_BLOBS
+
+    router.deny_pending(pending["approval_request_id"])
+    assert blob_ids[0] not in router_module._PENDING_AI_SEND_AUDIO_BLOBS
 
 
 def test_ambient_preset_hello_uses_submit_input_path_without_approval_mode(monkeypatch, tmp_path):

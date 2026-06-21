@@ -744,7 +744,6 @@ export function AmbientTriggerPanel({
         conversation_id: requestedConversationId || undefined,
         confidence: state.confidence,
         duration_ms: recording.durationMs,
-        audio_data_url: recording.dataUrl,
         audio_mime_type: recording.mimeType,
         audio_size: recording.size,
         audio_name: `ok-mark-recording.${recording.extension}`,

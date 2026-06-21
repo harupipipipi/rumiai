@@ -181,9 +181,15 @@ test("real OK-mark recording routes audio through transcription before dispatch"
 
   assert.match(panelSource, /setPinchDetectorStatus\("transcribing"\)/);
   assert.match(panelSource, /ambientOperationLabels\.transcribing/);
-  assert.match(panelSource, /audio_data_url: recording\.dataUrl/);
+  const pinchSubmitStart = panelSource.indexOf('source: "camera",\n        trigger: "pinch",\n        mode: "dispatch_audio"');
+  assert.notEqual(pinchSubmitStart, -1);
+  const pinchSubmitEnd = panelSource.indexOf("      });", pinchSubmitStart);
+  assert.notEqual(pinchSubmitEnd, -1);
+  const pinchSubmitSource = panelSource.slice(pinchSubmitStart, pinchSubmitEnd);
+  assert.doesNotMatch(pinchSubmitSource, /audio_data_url: recording\.dataUrl/);
   assert.match(panelSource, /audio_mime_type: recording\.mimeType/);
   assert.match(panelSource, /audio_name: `ok-mark-recording\.\$\{recording\.extension\}`/);
+  assert.match(panelSource, /dataUrl: recording\.dataUrl/);
   assert.match(panelSource, /\.\.\.\(transcript \? \{ input_text: transcript \} : \{\}\)/);
   assert.match(panelSource, /setLatestSubmittedInput\(transcript \|\| null\)/);
   assert.doesNotMatch(panelSource, /録音音声を送信しました。文字起こしはまだありません。/);

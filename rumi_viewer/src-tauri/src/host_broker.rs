@@ -623,6 +623,14 @@ fn validate_host_intent_approval_token(
     shared: &HostBrokerShared,
     intent: &NormalizedHostIntent,
 ) -> std::result::Result<(), ApprovalValidationError> {
+    validate_host_intent_approval_token_with_consume(shared, intent, true)
+}
+
+fn validate_host_intent_approval_token_with_consume(
+    shared: &HostBrokerShared,
+    intent: &NormalizedHostIntent,
+    consume: bool,
+) -> std::result::Result<(), ApprovalValidationError> {
     let token = intent.approval_token.as_deref().unwrap_or_default();
     let binding = host_intent_binding_payload(intent);
     let raw_function_id = intent
@@ -639,6 +647,7 @@ fn validate_host_intent_approval_token(
         &binding,
         intent.caller_pack_id.as_deref().unwrap_or_default(),
         intent.conversation_id.as_deref().unwrap_or_default(),
+        consume,
     )
 }
 
@@ -833,6 +842,32 @@ fn execute_host_stream_start(shared: &HostBrokerShared, request: HostBrokerInten
     if normalized.approval_token.is_none() {
         return host_intent_missing_approval_response(shared, &normalized, audit_id);
     }
+    if let Err(error) = validate_host_intent_approval_token_with_consume(shared, &normalized, false) {
+        return host_intent_approval_error_response(shared, &normalized, audit_id, error);
+    }
+    if !host_stream_backend_available(shared, &normalized) {
+        return serialize_intent_response(
+            &shared.config,
+            host_intent_audit_entry(
+                audit_id.clone(),
+                &normalized,
+                true,
+                false,
+                Some("stream_backend_unavailable".to_string()),
+            ),
+            HostBrokerIntentResponse {
+                ok: false,
+                operation: normalized.operation,
+                stream_id: None,
+                result: None,
+                error: Some(HostBrokerError {
+                    code: "HOST_STREAM_BACKEND_UNAVAILABLE".to_string(),
+                    message: "This Viewer build cannot start host media streams because no capture backend is registered.".to_string(),
+                }),
+                audit_id,
+            },
+        );
+    }
     if let Err(error) = validate_host_intent_approval_token(shared, &normalized) {
         return host_intent_approval_error_response(shared, &normalized, audit_id, error);
     }
@@ -858,6 +893,13 @@ fn execute_host_stream_start(shared: &HostBrokerShared, request: HostBrokerInten
             audit_id,
         },
     )
+}
+
+fn host_stream_backend_available(
+    _shared: &HostBrokerShared,
+    _intent: &NormalizedHostIntent,
+) -> bool {
+    false
 }
 
 fn execute_host_stream_stop(
@@ -1260,6 +1302,7 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
             &helper_args,
             request.pack_id.as_deref().unwrap_or_default(),
             request.conversation_id.as_deref().unwrap_or_default(),
+            true,
         );
         if let Err(error) = validation {
             return serialize_run_response(
@@ -1590,6 +1633,7 @@ fn validate_approval_token(
     helper_args: &Value,
     pack_id: &str,
     conversation_id: &str,
+    consume: bool,
 ) -> std::result::Result<(), ApprovalValidationError> {
     let payload = decode_approval_token(&shared.config, token)?;
     if payload.version != APPROVAL_TOKEN_VERSION {
@@ -1661,7 +1705,9 @@ fn validate_approval_token(
             "token_used",
         ));
     }
-    used.insert(payload.jti);
+    if consume {
+        used.insert(payload.jti);
+    }
     Ok(())
 }
 
@@ -2196,6 +2242,7 @@ mod tests {
             &json!({"x": 10, "y": 10}),
             "defaultspack",
             "conv-1",
+            true,
         );
 
         let error = result.expect_err("fake token should be rejected");
@@ -2231,6 +2278,7 @@ mod tests {
             &args,
             "defaultspack",
             "conv-1",
+            true,
         );
 
         let error = result.expect_err("wrong action should be rejected");
@@ -2267,6 +2315,7 @@ mod tests {
             &changed_args,
             "defaultspack",
             "conv-1",
+            true,
         );
 
         let error = result.expect_err("changed args should be rejected");
@@ -2302,6 +2351,7 @@ mod tests {
             &args,
             "defaultspack",
             "conv-1",
+            true,
         );
 
         let error = result.expect_err("expired token should be rejected");
@@ -2509,12 +2559,18 @@ mod tests {
         let mut request = host_microphone_stream_request(Some(token), stream);
         request.args = args;
 
-        let started = execute_host_stream_start(&shared, request);
+        let started = execute_host_stream_start(&shared, request.clone());
+        let retried = execute_host_stream_start(&shared, request);
 
         assert_eq!(started.get("stream_id").and_then(Value::as_str), None,);
         assert_eq!(started.get("ok").and_then(Value::as_bool), Some(false));
         assert_eq!(
             started.pointer("/error/code").and_then(Value::as_str),
+            Some("HOST_STREAM_BACKEND_UNAVAILABLE")
+        );
+        assert_eq!(retried.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            retried.pointer("/error/code").and_then(Value::as_str),
             Some("HOST_STREAM_BACKEND_UNAVAILABLE")
         );
         let _ = fs::remove_dir_all(temp_dir);

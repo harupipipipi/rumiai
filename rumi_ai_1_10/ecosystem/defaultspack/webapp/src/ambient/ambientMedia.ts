@@ -30,6 +30,11 @@ export type WakeListeningOptions = {
   retryDelayMs?: number;
 };
 
+type AudioEmbeddingSampler = {
+  capture: (durationMs: number) => Promise<number[]>;
+  stop: () => Promise<void>;
+};
+
 type SpeechRecognitionAlternativeLike = {
   transcript?: string;
 };
@@ -99,6 +104,45 @@ export async function captureAudioEmbedding(durationMs: number, deviceId?: strin
   } finally {
     stream.getTracks().forEach((track) => track.stop());
   }
+}
+
+async function createAudioEmbeddingSampler(deviceId?: string): Promise<AudioEmbeddingSampler> {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("このブラウザではマイクを使用できません。");
+  }
+  const AudioContextClass = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) {
+    throw new Error("このブラウザでは音声解析を使用できません。");
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: audioCaptureConstraints(deviceId) });
+  const context = new AudioContextClass();
+  const source = context.createMediaStreamSource(stream);
+  const analyser = context.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+  let stopped = false;
+  return {
+    async capture(durationMs: number) {
+      if (stopped) return [];
+      const samples: number[] = [];
+      const data = new Float32Array(analyser.fftSize);
+      const startedAt = performance.now();
+      while (!stopped && performance.now() - startedAt < durationMs) {
+        analyser.getFloatTimeDomainData(data);
+        for (let index = 0; index < data.length; index += 32) {
+          samples.push(data[index]);
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 60));
+      }
+      return audioEmbedding(samples);
+    },
+    async stop() {
+      if (stopped) return;
+      stopped = true;
+      stream.getTracks().forEach((track) => track.stop());
+      await context.close().catch(() => undefined);
+    },
+  };
 }
 
 export function startPinchSpeechRecognition(onTranscript: (transcript: string) => void): SpeechRecognitionLike | null {
@@ -286,16 +330,24 @@ export async function startWakeListening(
   options?: WakeListeningOptions,
 ): Promise<() => void> {
   let stopped = false;
-  const captureEmbedding = options?.captureEmbedding ?? captureAudioEmbedding;
+  const injectedCaptureEmbedding = options?.captureEmbedding;
+  const sampler = injectedCaptureEmbedding ? null : await createAudioEmbeddingSampler(deviceId);
   const retryDelayMs = Math.max(10, Math.min(Number(options?.retryDelayMs ?? 900), 10_000));
   const delay = () => new Promise((resolve) => setTimeout(resolve, retryDelayMs));
   const captureAndDispatch = async () => {
-    const embedding = await captureEmbedding(700, deviceId);
+    const embedding = injectedCaptureEmbedding
+      ? await injectedCaptureEmbedding(700, deviceId)
+      : await sampler!.capture(700);
     if (stopped) return;
     await onEmbedding(embedding);
   };
 
-  await captureAndDispatch();
+  try {
+    await captureAndDispatch();
+  } catch (error) {
+    await sampler?.stop();
+    throw error;
+  }
 
   async function loop() {
     while (!stopped) {
@@ -306,6 +358,7 @@ export async function startWakeListening(
       } catch (error) {
         if (stopped) return;
         stopped = true;
+        await sampler?.stop();
         options?.onError?.(error);
         return;
       }
@@ -314,6 +367,7 @@ export async function startWakeListening(
   void loop();
   return () => {
     stopped = true;
+    void sampler?.stop();
   };
 }
 
