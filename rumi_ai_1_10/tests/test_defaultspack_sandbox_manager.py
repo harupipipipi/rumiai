@@ -33,6 +33,8 @@ def test_sandbox_registry_persists_instances_and_lifecycle(tmp_path):
     assert status["image"] == "ubuntu:24.04"
     assert status["display"] is False
     assert status["status"] == "ready"
+    assert status["provider_id"] == "local_compat"
+    assert status["template_id"] == "tool.ephemeral"
 
     destroyed = reloaded.destroy(sandbox_id)
     assert destroyed == {
@@ -257,3 +259,36 @@ def test_sandbox_state_dir_env_override_is_used(monkeypatch, tmp_path):
     payload = json.loads(registry_path.read_text(encoding="utf-8"))
     assert sandbox_id in payload["instances"]
     assert SandboxManager().status(sandbox_id)["status"] == "ready"
+
+
+def test_legacy_ready_registry_records_are_not_treated_as_live(tmp_path):
+    registry_path = tmp_path / "sandboxes.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "instances": {
+                    "legacy-seat": {
+                        "sandbox_id": "legacy-seat",
+                        "image": "ubuntu:22.04",
+                        "display": True,
+                        "status": "ready",
+                        "created_at": 10,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager = SandboxManager(state_dir=tmp_path)
+    status = manager.status("legacy-seat")
+    screenshot = manager.screenshot("legacy-seat")
+
+    assert status["ok"] is True
+    assert status["status"] == "stopped"
+    assert status["provider_id"] == "legacy_placeholder"
+    assert "fake-ready" in status["last_error"]
+    assert screenshot["ok"] is False
+    assert screenshot["code"] == "SANDBOX_NOT_RUNNING"
+    assert screenshot["status"] == "stopped"

@@ -16,11 +16,35 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 
-REGISTRY_SCHEMA_VERSION = 1
+REGISTRY_SCHEMA_VERSION = 2
+CREATING = "creating"
+PROVISIONING = "provisioning"
+STARTING = "starting"
 READY = "ready"
+BUSY = "busy"
+STOPPING = "stopping"
+STOPPED = "stopped"
+FAILED = "failed"
+DESTROYING = "destroying"
 DESTROYED = "destroyed"
 ERROR = "error"
-TERMINAL_STATUSES = {DESTROYED, ERROR}
+LEGACY_PLACEHOLDER_PROVIDER = "legacy_placeholder"
+LOCAL_COMPAT_PROVIDER = "local_compat"
+VALID_STATUSES = {
+    CREATING,
+    PROVISIONING,
+    STARTING,
+    READY,
+    BUSY,
+    STOPPING,
+    STOPPED,
+    FAILED,
+    DESTROYING,
+    DESTROYED,
+    ERROR,
+}
+RUNNING_STATUSES = {READY, BUSY}
+TERMINAL_STATUSES = {DESTROYED, ERROR, FAILED}
 SUPPORTED_MODEL_MODES = {"fast", "heavy"}
 STATE_DIR_ENV = "RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR"
 
@@ -31,11 +55,21 @@ class SandboxInstance:
     image: str = "ubuntu:22.04"
     display: bool = True
     status: str = "ready"
+    template_id: str = "tool.ephemeral"
+    template_version: str = "compat"
+    provider_id: str = LOCAL_COMPAT_PROVIDER
+    provider_instance_id: Optional[str] = None
+    runtime_id: Optional[str] = None
+    capabilities: tuple[str, ...] = ()
     created_at: float = 0.0
     updated_at: float = 0.0
+    started_at: Optional[float] = None
+    stopped_at: Optional[float] = None
     destroyed_at: Optional[float] = None
     last_activity_at: Optional[float] = None
     last_error: Optional[str] = None
+    generation: int = 1
+    recovery_token_hash: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not self.sandbox_id:
@@ -44,7 +78,9 @@ class SandboxInstance:
             self.created_at = time.time()
         if not self.updated_at:
             self.updated_at = self.created_at
-        if self.status not in {READY, DESTROYED, ERROR}:
+        if not self.provider_instance_id and self.provider_id != LEGACY_PLACEHOLDER_PROVIDER:
+            self.provider_instance_id = self.sandbox_id
+        if self.status not in VALID_STATUSES:
             self.last_error = f"Unknown persisted status {self.status!r}; marked error"
             self.status = ERROR
             self.updated_at = time.time()
@@ -55,25 +91,55 @@ class SandboxInstance:
             "image": self.image,
             "display": self.display,
             "status": self.status,
+            "template_id": self.template_id,
+            "template_version": self.template_version,
+            "provider_id": self.provider_id,
+            "provider_instance_id": self.provider_instance_id,
+            "runtime_id": self.runtime_id,
+            "capabilities": list(self.capabilities),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "started_at": self.started_at,
+            "stopped_at": self.stopped_at,
             "destroyed_at": self.destroyed_at,
             "last_activity_at": self.last_activity_at,
             "last_error": self.last_error,
+            "generation": self.generation,
+            "recovery_token_hash": self.recovery_token_hash,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SandboxInstance":
+    def from_dict(cls, data: Dict[str, Any], *, legacy: bool = False) -> "SandboxInstance":
+        status = str(data.get("status") or READY)
+        provider_id = str(data.get("provider_id") or LOCAL_COMPAT_PROVIDER)
+        provider_instance_id = data.get("provider_instance_id")
+        last_error = str(data.get("last_error")) if data.get("last_error") is not None else None
+        stopped_at = _optional_float(data.get("stopped_at"))
+        if legacy and status == READY and not provider_instance_id:
+            status = STOPPED
+            provider_id = LEGACY_PLACEHOLDER_PROVIDER
+            stopped_at = _optional_float(data.get("updated_at")) or _optional_float(data.get("created_at"))
+            last_error = "Migrated prototype sandbox; old fake-ready instances are not treated as live."
         return cls(
             sandbox_id=str(data.get("sandbox_id") or ""),
             image=str(data.get("image") or "ubuntu:22.04"),
             display=bool(data.get("display", True)),
-            status=str(data.get("status") or READY),
+            status=status,
+            template_id=str(data.get("template_id") or ("desktop.ubuntu" if data.get("display", True) else "tool.ephemeral")),
+            template_version=str(data.get("template_version") or "compat"),
+            provider_id=provider_id,
+            provider_instance_id=str(provider_instance_id) if provider_instance_id is not None else None,
+            runtime_id=str(data.get("runtime_id")) if data.get("runtime_id") is not None else None,
+            capabilities=_string_tuple(data.get("capabilities")),
             created_at=_float_or_zero(data.get("created_at")),
             updated_at=_float_or_zero(data.get("updated_at")),
+            started_at=_optional_float(data.get("started_at")),
+            stopped_at=stopped_at,
             destroyed_at=_optional_float(data.get("destroyed_at")),
             last_activity_at=_optional_float(data.get("last_activity_at")),
-            last_error=str(data.get("last_error")) if data.get("last_error") is not None else None,
+            last_error=last_error,
+            generation=max(1, int(_float_or_zero(data.get("generation") or 1))),
+            recovery_token_hash=str(data.get("recovery_token_hash")) if data.get("recovery_token_hash") is not None else None,
         )
 
     def touch(self, *, status: Optional[str] = None, error: Optional[str] = None) -> None:
@@ -112,11 +178,19 @@ class SandboxManager:
             return backend_error
 
         with self._lock:
+            now = time.time()
+            capabilities = ("sandbox.exec", "sandbox.files")
+            if display:
+                capabilities = capabilities + ("sandbox.desktop", "sandbox.desktop_input")
             inst = SandboxInstance(
                 sandbox_id=backend_session_id or "",
                 image=image,
                 display=display,
                 status=READY,
+                template_id="desktop.ubuntu" if display else "tool.ephemeral",
+                provider_id=LOCAL_COMPAT_PROVIDER,
+                capabilities=capabilities,
+                started_at=now,
             )
             self._instances[inst.sandbox_id] = inst
             self._save_registry()
@@ -125,6 +199,8 @@ class SandboxManager:
                 "created": True,
                 "sandbox_id": inst.sandbox_id,
                 "status": inst.status,
+                "template_id": inst.template_id,
+                "provider_id": inst.provider_id,
                 "registry_path": str(self.registry_path),
             }
 
@@ -169,8 +245,10 @@ class SandboxManager:
                 return self._not_found(sandbox_id)
             if inst.status != DESTROYED:
                 now = time.time()
+                inst.status = DESTROYING
                 inst.status = DESTROYED
                 inst.destroyed_at = now
+                inst.stopped_at = now
                 inst.updated_at = now
                 inst.last_activity_at = now
                 inst.last_error = None
@@ -327,9 +405,11 @@ class SandboxManager:
             if isinstance(data, dict):
                 raw_instances = data.get("instances", {})
                 mode = str(data.get("model_mode") or "fast")
+                schema_version = int(_float_or_zero(data.get("schema_version") or 0))
                 self._model_mode = mode if mode in SUPPORTED_MODEL_MODES else "fast"
             else:
                 raw_instances = data
+                schema_version = 0
 
             instances: Dict[str, SandboxInstance] = {}
             if isinstance(raw_instances, dict):
@@ -341,7 +421,7 @@ class SandboxManager:
             for raw in iterable:
                 if not isinstance(raw, dict):
                     continue
-                inst = SandboxInstance.from_dict(raw)
+                inst = SandboxInstance.from_dict(raw, legacy=schema_version < REGISTRY_SCHEMA_VERSION)
                 instances[inst.sandbox_id] = inst
             self._instances = instances
 
@@ -378,6 +458,15 @@ class SandboxManager:
             return None, {
                 "ok": False,
                 "error": f"Sandbox is {inst.status}: {sandbox_id}",
+                "code": "SANDBOX_NOT_RUNNING",
+                "status_code": 409,
+                "sandbox_id": str(sandbox_id),
+                "status": inst.status,
+            }
+        if inst.status not in RUNNING_STATUSES:
+            return None, {
+                "ok": False,
+                "error": f"Sandbox is not running ({inst.status}): {sandbox_id}",
                 "code": "SANDBOX_NOT_RUNNING",
                 "status_code": 409,
                 "sandbox_id": str(sandbox_id),
@@ -626,7 +715,7 @@ class SandboxManager:
     def _touch_ready_instance(self, sandbox_id: str) -> None:
         with self._lock:
             inst = self._instances.get(str(sandbox_id))
-            if inst is None or inst.status in TERMINAL_STATUSES:
+            if inst is None or inst.status not in RUNNING_STATUSES:
                 return
             inst.touch()
             self._save_registry()
@@ -646,6 +735,12 @@ def _optional_float(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple, set)):
+        return ()
+    return tuple(str(item) for item in value if str(item))
 
 
 def _fallback_png_base64() -> str:

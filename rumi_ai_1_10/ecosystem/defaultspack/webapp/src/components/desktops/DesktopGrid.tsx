@@ -1,0 +1,104 @@
+import { Monitor } from "lucide-react";
+
+import { cn } from "../../lib/cn";
+import type { DesktopInstance } from "../../features/sandboxes/types";
+import type { DesktopDensity } from "./DesktopToolbar";
+import { DesktopTile } from "./DesktopTile";
+
+type DesktopGridProps = {
+  desktops: DesktopInstance[];
+  loading?: boolean;
+  selectedSeatId: string | null;
+  density: DesktopDensity;
+  leaseSeatId: string | null;
+  controlBusy?: boolean;
+  onSelect: (seatId: string) => void;
+  onTakeOver: (seatId: string) => void;
+  onReturnToAI: () => void;
+  onInputClick: (seatId: string, x: number, y: number) => void;
+  onStart: (seatId: string) => void;
+  onRestart: (seatId: string) => void;
+  onStop: (seatId: string) => void;
+  onDelete: (seatId: string) => void;
+};
+
+function DesktopSkeleton() {
+  return (
+    <div className="min-h-[280px] animate-pulse rounded-lg border border-zinc-800/70 bg-[#0a0a0c] p-3">
+      <div className="flex items-center gap-2">
+        <div className="h-8 w-8 rounded-md bg-zinc-900" />
+        <div className="grid flex-1 gap-2">
+          <div className="h-3 w-2/5 rounded bg-zinc-900" />
+          <div className="h-2 w-1/4 rounded bg-zinc-900" />
+        </div>
+      </div>
+      <div className="mt-3 h-40 rounded-md bg-black" />
+      <div className="mt-3 h-8 rounded-md bg-zinc-900" />
+    </div>
+  );
+}
+
+export function DesktopGrid({
+  desktops,
+  loading = false,
+  selectedSeatId,
+  density,
+  leaseSeatId,
+  controlBusy = false,
+  onSelect,
+  onTakeOver,
+  onReturnToAI,
+  onInputClick,
+  onStart,
+  onRestart,
+  onStop,
+  onDelete,
+}: DesktopGridProps) {
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2 min-[1400px]:grid-cols-3">
+        <DesktopSkeleton />
+        <DesktopSkeleton />
+        <DesktopSkeleton />
+      </div>
+    );
+  }
+
+  if (desktops.length === 0) {
+    return (
+      <div className="flex min-h-[360px] items-center justify-center rounded-lg border border-zinc-800/70 bg-[#0a0a0c]">
+        <div className="max-w-sm px-5 text-center">
+          <Monitor size={28} className="mx-auto text-zinc-600" />
+          <p className="mt-3 text-sm font-semibold text-zinc-200">No desktop seats</p>
+          <p className="mt-1 text-xs text-zinc-500">The backend returned an empty desktop list.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn(
+      "grid grid-cols-1 gap-3 min-[900px]:grid-cols-2",
+      density === "dense" ? "min-[1400px]:grid-cols-4" : "min-[1400px]:grid-cols-3",
+    )}>
+      {desktops.map((desktop) => (
+        <DesktopTile
+          key={desktop.seat_id}
+          desktop={desktop}
+          selected={desktop.seat_id === selectedSeatId}
+          dense={density === "dense"}
+          hasLease={desktop.seat_id === leaseSeatId}
+          controlBusy={controlBusy && desktop.seat_id === selectedSeatId}
+          onSelect={onSelect}
+          onTakeOver={() => onTakeOver(desktop.seat_id)}
+          onReturnToAI={onReturnToAI}
+          onInputClick={(x, y) => onInputClick(desktop.seat_id, x, y)}
+          onStart={() => onStart(desktop.seat_id)}
+          onRestart={() => onRestart(desktop.seat_id)}
+          onStop={() => onStop(desktop.seat_id)}
+          onDelete={() => onDelete(desktop.seat_id)}
+        />
+      ))}
+    </div>
+  );
+}

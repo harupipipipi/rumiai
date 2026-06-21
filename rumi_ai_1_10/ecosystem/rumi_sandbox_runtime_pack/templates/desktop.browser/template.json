@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "kind": "rumi.sandbox.template",
+  "id": "desktop.browser",
+  "version": "1.0.0",
+  "display_name": "Browser Desktop",
+  "summary": "Ubuntu desktop seat that launches managed Chromium with an ephemeral profile unless persistence is explicitly approved.",
+  "source_pack_id": "rumi_sandbox_runtime_pack",
+  "extends": "desktop.ubuntu",
+  "trust": {
+    "origin": "builtin",
+    "trusted": true,
+    "authority": "rumi_sandbox_runtime_pack"
+  },
+  "runtime": {
+    "os": "ubuntu",
+    "provider": "auto",
+    "provider_requirements": [
+      "sandbox.exec",
+      "sandbox.files",
+      "sandbox.resource_limits",
+      "sandbox.desktop",
+      "sandbox.desktop_input",
+      "sandbox.snapshot",
+      "sandbox.network_policy"
+    ],
+    "capabilities": [
+      "sandbox.desktop",
+      "sandbox.desktop_input",
+      "sandbox.snapshot",
+      "sandbox.exec",
+      "sandbox.network.allowlist"
+    ],
+    "packages": [
+      {
+        "manager": "guest",
+        "name": "chromium",
+        "version": "managed"
+      },
+      {
+        "manager": "guest",
+        "name": "xvfb",
+        "version": "managed"
+      },
+      {
+        "manager": "guest",
+        "name": "openbox",
+        "version": "managed"
+      }
+    ]
+  },
+  "policy": {
+    "filesystem": {
+      "mode": "ephemeral_overlay",
+      "workspace": {
+        "access": "none",
+        "requires_user_selection": false,
+        "writeback_requires_approval": true
+      },
+      "host_mounts": [],
+      "arbitrary_host_mounts": false
+    },
+    "network": {
+      "mode": "limited_or_approval_gated",
+      "allowlist": [],
+      "requires_approval": true
+    },
+    "secrets": {
+      "mode": "deny",
+      "ambient": false,
+      "mounts": []
+    },
+    "desktop": {
+      "enabled": true,
+      "display_backend": "xvfb_openbox",
+      "visible_host_window": false,
+      "width": 1440,
+      "height": 900,
+      "starter": "browser",
+      "browser": {
+        "engine": "chromium",
+        "profile": "ephemeral",
+        "persistence_requires_approval": true,
+        "allowed_url_schemes": [
+          "http",
+          "https"
+        ]
+      }
+    },
+    "resources": {
+      "cpu": 2,
+      "memory_mb": 4096,
+      "timeout_seconds": 14400,
+      "max_output_bytes": 4194304
+    },
+    "lifecycle": {
+      "ttl_seconds": 14400,
+      "persistence": "ephemeral",
+      "destroy_on_idle": true
+    },
+    "approvals": {
+      "network_broaden": "required",
+      "secret_mount": "deny",
+      "host_writeback": "required",
+      "persistence": "required"
+    }
+  },
+  "allowed_operations": [
+    "desktop.observe",
+    "desktop.input.with_lease",
+    "desktop.snapshot",
+    "sandbox.exec.argv"
+  ],
+  "user_overrides": {
+    "narrow_only": true,
+    "allowed_fields": [
+      "name",
+      "resolution",
+      "browser.url",
+      "browser.profile_persistence",
+      "workspace.binding",
+      "network.allowlist",
+      "agent_assignment"
+    ]
+  },
+  "contract": {
+    "no_backend_entrypoint": true,
+    "no_provider_command": true,
+    "no_arbitrary_host_mounts": true,
+    "no_privileged_mode": true,
+    "no_ambient_host_environment": true,
+    "public_exec_requires_argv": true,
+    "human_control_requires_lease": true
+  }
+}

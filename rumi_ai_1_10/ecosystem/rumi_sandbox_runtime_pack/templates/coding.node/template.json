@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "kind": "rumi.sandbox.template",
+  "id": "coding.node",
+  "version": "1.0.0",
+  "display_name": "Coding Node",
+  "summary": "Managed Node.js coding sandbox with writable overlay, preview ports, explicit network policy, and approved read-only secrets.",
+  "source_pack_id": "rumi_sandbox_runtime_pack",
+  "trust": {
+    "origin": "builtin",
+    "trusted": true,
+    "authority": "rumi_sandbox_runtime_pack"
+  },
+  "runtime": {
+    "os": "linux",
+    "provider": "auto",
+    "provider_requirements": [
+      "sandbox.exec",
+      "sandbox.files",
+      "sandbox.overlay_workspace",
+      "sandbox.port_forward",
+      "sandbox.network_policy",
+      "sandbox.resource_limits"
+    ],
+    "capabilities": [
+      "sandbox.exec",
+      "sandbox.files.read",
+      "sandbox.files.write",
+      "sandbox.files.apply_patch",
+      "sandbox.port_forward"
+    ],
+    "packages": [
+      {
+        "manager": "guest",
+        "name": "node",
+        "version": "20+"
+      },
+      {
+        "manager": "guest",
+        "name": "npm",
+        "version": "10+"
+      }
+    ]
+  },
+  "policy": {
+    "filesystem": {
+      "mode": "writable_overlay",
+      "workspace": {
+        "access": "overlay",
+        "requires_user_selection": true,
+        "writeback_requires_approval": true
+      },
+      "host_mounts": [],
+      "arbitrary_host_mounts": false
+    },
+    "network": {
+      "mode": "project_policy_or_first_use_approval",
+      "allowlist": [],
+      "requires_approval": true
+    },
+    "secrets": {
+      "mode": "explicit_read_only",
+      "ambient": false,
+      "mounts": [],
+      "requires_approval": true
+    },
+    "desktop": {
+      "enabled": false
+    },
+    "resources": {
+      "cpu": 2,
+      "memory_mb": 4096,
+      "timeout_seconds": 7200,
+      "max_output_bytes": 8388608
+    },
+    "lifecycle": {
+      "ttl_seconds": 14400,
+      "persistence": "branch_session",
+      "destroy_on_idle": false
+    },
+    "approvals": {
+      "network_broaden": "required",
+      "package_install": "required",
+      "secret_mount": "required",
+      "host_writeback": "required",
+      "persistence": "project_policy"
+    }
+  },
+  "allowed_operations": [
+    "sandbox.exec.argv",
+    "sandbox.files.read",
+    "sandbox.files.write",
+    "sandbox.files.apply_patch",
+    "sandbox.port.expose",
+    "sandbox.diff.export"
+  ],
+  "user_overrides": {
+    "narrow_only": true,
+    "allowed_fields": [
+      "name",
+      "workspace.binding",
+      "network.allowlist",
+      "ports",
+      "secrets.read_only_ids"
+    ]
+  },
+  "contract": {
+    "no_backend_entrypoint": true,
+    "no_provider_command": true,
+    "no_arbitrary_host_mounts": true,
+    "no_privileged_mode": true,
+    "no_ambient_host_environment": true,
+    "public_exec_requires_argv": true
+  }
+}

@@ -30,7 +30,16 @@
         "type": "object",
         "additionalProperties": true,
         "properties": {
-          "command": {},
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Preferred command argument vector. Public callers must use argv arrays, not shell strings."
+          },
+          "command": {
+            "description": "Legacy compatibility input. Strings are parsed without shell syntax; arrays are treated as argv."
+          },
           "cwd": {
             "type": "string"
           },
@@ -38,9 +47,7 @@
             "type": "integer"
           }
         },
-        "required": [
-          "command"
-        ]
+        "required": []
       }
     },
     "execution": {
