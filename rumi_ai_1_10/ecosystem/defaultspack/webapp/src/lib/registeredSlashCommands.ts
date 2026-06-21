@@ -180,6 +180,17 @@ function commandIdentityTokens(command: ComposerCommandItem): string[] {
     .filter(Boolean);
 }
 
+function registerCommandIdentityTokens(
+  tokenOwners: Map<string, number>,
+  command: ComposerCommandItem,
+  index: number,
+  extraTokens: string[] = [],
+): void {
+  for (const token of [...commandIdentityTokens(command), ...extraTokens]) {
+    tokenOwners.set(token, index);
+  }
+}
+
 export function registeredSlashCommandsFromSettings(value: unknown): ComposerCommandItem[] {
   const records = Array.isArray(value) ? value : [];
   const commands: ComposerCommandItem[] = [];
@@ -226,7 +237,7 @@ export function mergeRegisteredSlashCommands(
   const merged = [...baseCommands];
   const tokenOwners = new Map<string, number>();
   merged.forEach((command, index) => {
-    for (const token of commandIdentityTokens(command)) tokenOwners.set(token, index);
+    registerCommandIdentityTokens(tokenOwners, command, index);
   });
 
   for (const command of registeredCommands) {
@@ -239,11 +250,12 @@ export function mergeRegisteredSlashCommands(
         visibility: "default",
         aliases: [...new Set([...(existing.aliases ?? []), ...(command.aliases ?? [])])],
       };
+      registerCommandIdentityTokens(tokenOwners, merged[existingIndex], existingIndex, tokens);
       continue;
     }
     const nextIndex = merged.length;
     merged.push(command);
-    tokens.forEach((token) => tokenOwners.set(token, nextIndex));
+    registerCommandIdentityTokens(tokenOwners, command, nextIndex, tokens);
   }
   return merged;
 }

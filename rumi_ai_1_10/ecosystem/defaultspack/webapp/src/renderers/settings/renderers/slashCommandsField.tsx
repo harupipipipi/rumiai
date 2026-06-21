@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import {
@@ -11,6 +12,7 @@ import type { SettingsFieldRendererProps } from "../fieldRendererRegistry";
 import { SettingsFieldShell } from "./settingsFieldRendererUtils";
 
 type SlashCommandDraft = {
+  rowId: string;
   name: string;
   action: RegisteredSlashCommandActionId;
   aliases: string;
@@ -18,7 +20,9 @@ type SlashCommandDraft = {
   enabled: boolean;
 };
 
-function recordFromUnknown(value: unknown): SlashCommandDraft | null {
+type SlashCommandDraftFields = Omit<SlashCommandDraft, "rowId">;
+
+function recordFromUnknown(value: unknown): SlashCommandDraftFields | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const action = String(record.action ?? "toggle_yolo") as RegisteredSlashCommandActionId;
@@ -32,13 +36,27 @@ function recordFromUnknown(value: unknown): SlashCommandDraft | null {
   };
 }
 
-function normalizeDrafts(value: unknown): SlashCommandDraft[] {
+function normalizeDraftFields(value: unknown): SlashCommandDraftFields[] {
   return (Array.isArray(value) ? value : [])
     .map(recordFromUnknown)
-    .filter((item): item is SlashCommandDraft => Boolean(item));
+    .filter((item): item is SlashCommandDraftFields => Boolean(item));
 }
 
-function serializeDrafts(drafts: SlashCommandDraft[]): RegisteredSlashCommandRecord[] {
+function recordsSignature(records: RegisteredSlashCommandRecord[]): string {
+  return JSON.stringify(records);
+}
+
+export function slashCommandDraftRowsFromValue(
+  value: unknown,
+  createRowId: () => string,
+): SlashCommandDraft[] {
+  return normalizeDraftFields(value).map((draft) => ({
+    ...draft,
+    rowId: createRowId(),
+  }));
+}
+
+export function serializeSlashCommandDrafts(drafts: SlashCommandDraft[]): RegisteredSlashCommandRecord[] {
   return drafts
     .map((draft) => ({
       name: normalizeRegisteredSlashCommandName(draft.name),
@@ -50,31 +68,61 @@ function serializeDrafts(drafts: SlashCommandDraft[]): RegisteredSlashCommandRec
     .filter((item) => item.name);
 }
 
+export function appendEmptySlashCommandDraft(drafts: SlashCommandDraft[], rowId: string): SlashCommandDraft[] {
+  return [
+    ...drafts,
+    { rowId, name: "", action: "toggle_yolo", aliases: "", description: "", enabled: true },
+  ];
+}
+
 export function BuiltinSlashCommandsRenderer({ sectionId, field, value, onChange }: SettingsFieldRendererProps) {
-  const drafts = normalizeDrafts(value ?? field.default);
-  const updateDraft = (index: number, patch: Partial<SlashCommandDraft>) => {
-    const next = drafts.map((draft, draftIndex) => (
-      draftIndex === index ? { ...draft, ...patch } : draft
-    ));
-    onChange(sectionId, field.id, serializeDrafts(next));
+  const sourceValue = value ?? field.default;
+  const sourceSignature = recordsSignature(serializeSlashCommandDrafts(slashCommandDraftRowsFromValue(sourceValue, () => "")));
+  const rowCounterRef = useRef(0);
+  const lastEmittedSignatureRef = useRef<string | null>(null);
+  const lastObservedSourceSignatureRef = useRef(sourceSignature);
+  const nextRowId = () => {
+    rowCounterRef.current += 1;
+    return `slash-command-draft-${rowCounterRef.current}`;
   };
-  const removeDraft = (index: number) => {
-    onChange(sectionId, field.id, serializeDrafts(drafts.filter((_, draftIndex) => draftIndex !== index)));
+  const [drafts, setDrafts] = useState(() => slashCommandDraftRowsFromValue(sourceValue, nextRowId));
+  const emitDrafts = (next: SlashCommandDraft[]) => {
+    const serialized = serializeSlashCommandDrafts(next);
+    lastEmittedSignatureRef.current = recordsSignature(serialized);
+    onChange(sectionId, field.id, serialized);
+  };
+  const updateDraft = (rowId: string, patch: Partial<SlashCommandDraftFields>) => {
+    const next = drafts.map((draft) => (
+      draft.rowId === rowId ? { ...draft, ...patch } : draft
+    ));
+    setDrafts(next);
+    emitDrafts(next);
+  };
+  const removeDraft = (rowId: string) => {
+    const next = drafts.filter((draft) => draft.rowId !== rowId);
+    setDrafts(next);
+    emitDrafts(next);
   };
   const addDraft = () => {
-    onChange(sectionId, field.id, serializeDrafts([
-      ...drafts,
-      { name: "", action: "toggle_yolo", aliases: "", description: "", enabled: true },
-    ]));
+    setDrafts(appendEmptySlashCommandDraft(drafts, nextRowId()));
   };
   const addYolo = () => {
     const hasYolo = drafts.some((draft) => normalizeRegisteredSlashCommandName(draft.name) === "yolo");
     if (hasYolo) return;
-    onChange(sectionId, field.id, serializeDrafts([
+    const next = [
       ...drafts,
-      { name: "yolo", action: "toggle_yolo", aliases: "", description: "会話で /yolo と打つとYOLOを切り替えます。", enabled: true },
-    ]));
+      { rowId: nextRowId(), name: "yolo", action: "toggle_yolo" as const, aliases: "", description: "会話で /yolo と打つとYOLOを切り替えます。", enabled: true },
+    ];
+    setDrafts(next);
+    emitDrafts(next);
   };
+
+  useEffect(() => {
+    if (sourceSignature === lastObservedSourceSignatureRef.current) return;
+    lastObservedSourceSignatureRef.current = sourceSignature;
+    if (sourceSignature === lastEmittedSignatureRef.current) return;
+    setDrafts(slashCommandDraftRowsFromValue(sourceValue, nextRowId));
+  }, [sourceSignature]);
 
   return (
     <SettingsFieldShell field={field}>
@@ -102,15 +150,15 @@ export function BuiltinSlashCommandsRenderer({ sectionId, field, value, onChange
           </p>
         ) : (
           <div className="space-y-2">
-            {drafts.map((draft, index) => (
-              <div key={`${index}-${draft.name || "new"}`} className="grid gap-2 rounded-md border border-zinc-800 bg-zinc-950/50 p-2 md:grid-cols-[minmax(120px,0.9fr)_minmax(160px,1fr)_minmax(140px,1fr)_32px]">
+            {drafts.map((draft) => (
+              <div key={draft.rowId} className="grid gap-2 rounded-md border border-zinc-800 bg-zinc-950/50 p-2 md:grid-cols-[minmax(120px,0.9fr)_minmax(160px,1fr)_minmax(140px,1fr)_32px]">
                 <label className="min-w-0 space-y-1">
                   <span className="block text-[11px] text-zinc-500">Command</span>
                   <div className="flex min-w-0 items-center rounded-md border border-zinc-800 bg-zinc-900 px-2 focus-within:border-zinc-600">
                     <span className="text-zinc-500">/</span>
                     <input
                       value={draft.name}
-                      onChange={(event) => updateDraft(index, { name: event.target.value })}
+                      onChange={(event) => updateDraft(draft.rowId, { name: event.target.value })}
                       placeholder="yolo"
                       className="h-8 min-w-0 flex-1 bg-transparent px-1 text-sm text-zinc-200 outline-none placeholder:text-zinc-600"
                     />
@@ -120,7 +168,7 @@ export function BuiltinSlashCommandsRenderer({ sectionId, field, value, onChange
                   <span className="block text-[11px] text-zinc-500">Action</span>
                   <select
                     value={draft.action}
-                    onChange={(event) => updateDraft(index, { action: event.target.value as RegisteredSlashCommandActionId })}
+                    onChange={(event) => updateDraft(draft.rowId, { action: event.target.value as RegisteredSlashCommandActionId })}
                     className="h-8 w-full rounded-md border border-zinc-800 bg-zinc-900 px-2 text-sm text-zinc-200 outline-none"
                   >
                     {REGISTERED_SLASH_COMMAND_ACTIONS.map((action) => (
@@ -134,14 +182,14 @@ export function BuiltinSlashCommandsRenderer({ sectionId, field, value, onChange
                   <span className="block text-[11px] text-zinc-500">Aliases</span>
                   <input
                     value={draft.aliases}
-                    onChange={(event) => updateDraft(index, { aliases: event.target.value })}
+                    onChange={(event) => updateDraft(draft.rowId, { aliases: event.target.value })}
                     placeholder="go, run"
                     className="h-8 w-full rounded-md border border-zinc-800 bg-zinc-900 px-2 text-sm text-zinc-200 outline-none placeholder:text-zinc-600"
                   />
                 </label>
                 <button
                   type="button"
-                  onClick={() => removeDraft(index)}
+                  onClick={() => removeDraft(draft.rowId)}
                   className="mt-5 flex h-8 w-8 items-center justify-center rounded-md border border-zinc-800 text-zinc-500 hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-200"
                   title="Remove command"
                   aria-label="Remove command"
@@ -152,7 +200,7 @@ export function BuiltinSlashCommandsRenderer({ sectionId, field, value, onChange
                   <input
                     type="checkbox"
                     checked={draft.enabled}
-                    onChange={(event) => updateDraft(index, { enabled: event.target.checked })}
+                    onChange={(event) => updateDraft(draft.rowId, { enabled: event.target.checked })}
                     className="h-4 w-4 accent-emerald-500"
                   />
                   <span className="text-xs text-zinc-400">Enabled</span>

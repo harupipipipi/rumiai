@@ -185,6 +185,29 @@ test("registered slash commands merge into composer catalog without replacing bu
   assert.equal(parseSlashCommandInput("/doit", merged)?.command.id, "registered:doit");
 });
 
+test("registered slash command aliases are claimed after built-in merges", () => {
+  const builtInYolo: ComposerCommandItem = {
+    id: "yolo",
+    name: "yolo",
+    label: "Yolo Approvals",
+    category: "mode",
+    visibility: "hidden",
+    risk: "medium",
+    execution: { type: "frontend", action: "toggle_yolo" },
+  };
+  const registered = registeredSlashCommandsFromSettings([
+    { name: "yolo", action: "toggle_yolo", aliases: ["go"] },
+    { name: "go", action: "open_settings" },
+  ]);
+
+  const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].id, "yolo");
+  assert.deepEqual(merged[0].aliases, ["go"]);
+  assert.equal(parseSlashCommandInput("/go", merged)?.command.id, "yolo");
+});
+
 test("composer command feedback surfaces pack block result messages and paths", () => {
   const command: ComposerCommandItem = {
     id: "context_txt",

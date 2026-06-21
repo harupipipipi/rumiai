@@ -6,6 +6,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { buildVisibleModelOptions, SettingsModalRenderer } from "./SettingsModalRenderer";
 import { createSettingsFieldRendererRegistry, SettingsFieldRendererHost } from "./settings/fieldRendererRegistry";
 import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
+import {
+  appendEmptySlashCommandDraft,
+  serializeSlashCommandDrafts,
+  slashCommandDraftRowsFromValue,
+} from "./settings/renderers/slashCommandsField";
 import { apiKeySetupTargetFieldId } from "./settings/renderers/settingsFieldRendererUtils";
 import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
 import type { SettingsSection } from "../lib/api";
@@ -231,6 +236,23 @@ test("SettingsModalRenderer renders template slash command registration field", 
   assert.match(html, /value="yolo"/);
   assert.match(html, /value="go"/);
   assert.match(html, /YOLO/);
+});
+
+test("slash command settings keep unsaved empty rows with stable row ids", () => {
+  let nextId = 0;
+  const rows = slashCommandDraftRowsFromValue([], () => `row-${++nextId}`);
+  const withEmptyRow = appendEmptySlashCommandDraft(rows, "row-new");
+
+  assert.equal(withEmptyRow.length, 1);
+  assert.equal(withEmptyRow[0].rowId, "row-new");
+  assert.equal(withEmptyRow[0].name, "");
+  assert.deepEqual(serializeSlashCommandDrafts(withEmptyRow), []);
+
+  const namedRows = withEmptyRow.map((row) => ({ ...row, name: "ship" }));
+  assert.equal(namedRows[0].rowId, "row-new");
+  assert.deepEqual(serializeSlashCommandDrafts(namedRows), [
+    { name: "ship", action: "toggle_yolo", aliases: [], description: "", enabled: true },
+  ]);
 });
 
 test("SettingsModalRenderer hides ambient detail fields until finger recording is enabled", () => {
