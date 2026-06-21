@@ -45,6 +45,9 @@ const HELPER_TIMEOUT: Duration = Duration::from_secs(45);
 const APPROVAL_TOKEN_VERSION: &str = "v1";
 const HOST_BROKER_DISABLED_REASON: &str =
     "Viewer host broker is only enabled on macOS and Windows.";
+const IMPLEMENTED_HOST_OPERATIONS: &[&str] =
+    &["host.permission.status", "host.permission.open_settings"];
+const IMPLEMENTED_HOST_STREAM_OPERATIONS: &[&str] = &[];
 
 const ARG_HASH_IGNORE_KEYS: &[&str] = &[
     "approval_token",
@@ -564,15 +567,11 @@ fn normalize_host_operation(operation: &str) -> String {
 }
 
 fn host_operation_allowed(operation: &str) -> bool {
-    matches!(
-        operation,
-        "host.permission.status" | "host.permission.open_settings"
-    )
+    IMPLEMENTED_HOST_OPERATIONS.contains(&operation)
 }
 
 fn host_operation_stream_allowed(operation: &str) -> bool {
-    let _ = operation;
-    false
+    IMPLEMENTED_HOST_STREAM_OPERATIONS.contains(&operation)
 }
 
 fn host_intent_stream_enabled(stream: &Value) -> bool {
@@ -2113,6 +2112,53 @@ mod tests {
             status.recovery.as_deref(),
             Some(HOST_BROKER_DISABLED_REASON)
         );
+    }
+
+    #[test]
+    fn host_intent_runner_allowlist_matches_canonical_registry_subset() {
+        let registry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("rumi_ai_1_10")
+            .join("core_runtime")
+            .join("host_permissions")
+            .join("default_registry.json");
+        let registry: Value = serde_json::from_str(
+            &fs::read_to_string(&registry_path).expect("canonical registry should be readable"),
+        )
+        .expect("canonical registry should parse");
+        let registry = registry
+            .as_object()
+            .expect("canonical registry should be a JSON object");
+
+        for operation in IMPLEMENTED_HOST_OPERATIONS {
+            assert!(
+                registry.contains_key(*operation),
+                "{operation} must exist in canonical host permission registry"
+            );
+        }
+        for operation in IMPLEMENTED_HOST_STREAM_OPERATIONS {
+            let definition = registry.get(*operation).unwrap_or_else(|| {
+                panic!("{operation} must exist in canonical host permission registry")
+            });
+            assert_eq!(
+                definition.get("stream_allowed").and_then(Value::as_bool),
+                Some(true),
+                "{operation} must be stream_allowed before Viewer broker advertises it"
+            );
+        }
+        for operation in registry.keys() {
+            assert_eq!(
+                host_operation_allowed(operation),
+                IMPLEMENTED_HOST_OPERATIONS.contains(&operation.as_str()),
+                "{operation} host intent exposure must match implemented runner allowlist"
+            );
+            assert_eq!(
+                host_operation_stream_allowed(operation),
+                IMPLEMENTED_HOST_STREAM_OPERATIONS.contains(&operation.as_str()),
+                "{operation} host stream exposure must match implemented stream runner allowlist"
+            );
+        }
     }
 
     #[test]
