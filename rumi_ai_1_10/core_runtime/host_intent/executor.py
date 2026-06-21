@@ -108,14 +108,22 @@ def _dispatch_to_viewer_broker(intent: HostIntent, *, request_id: str | None = N
             _defaultspack_module("domain", "host_bridge", "viewer_broker_client")
         )
         approval = importlib.import_module(_defaultspack_module("domain", "safety", "approval"))
-    except Exception:
-        return None
+    except Exception as exc:
+        return _host_broker_initialization_failed("broker_modules_import_failed", exc)
 
     ViewerBrokerClient = getattr(broker_client_module, "ViewerBrokerClient", None)
-    if ViewerBrokerClient is None:
-        return None
-    client = ViewerBrokerClient.from_environment()
-    if not client.available():
+    from_environment = getattr(ViewerBrokerClient, "from_environment", None)
+    issue_execution_token = getattr(approval, "issue_execution_token", None)
+    if ViewerBrokerClient is None or not callable(from_environment):
+        return _host_broker_initialization_failed("viewer_broker_client_missing")
+    if not callable(issue_execution_token):
+        return _host_broker_initialization_failed("approval_token_issuer_missing")
+    try:
+        client = from_environment()
+        broker_available = bool(client.available())
+    except Exception as exc:
+        return _host_broker_initialization_failed("viewer_broker_client_initialization_failed", exc)
+    if not broker_available:
         return {
             "status": "host_broker_unavailable",
             "success": False,
@@ -124,15 +132,18 @@ def _dispatch_to_viewer_broker(intent: HostIntent, *, request_id: str | None = N
             "message": "Host intent is approved, but Rumi Viewer host broker is unavailable.",
         }
 
-    execution_token = approval.issue_execution_token(
-        request_id or f"host_intent:{intent.operation}:{intent.args_hash[:12]}",
-        intent.args_hash,
-        expires_at=int(time.time()) + 300,
-        operation=intent.operation,
-        function_id=intent.host_function_id or intent.operation,
-        pack_id=intent.caller_pack_id,
-        conversation_id=intent.conversation_id,
-    )
+    try:
+        execution_token = issue_execution_token(
+            request_id or f"host_intent:{intent.operation}:{intent.args_hash[:12]}",
+            intent.args_hash,
+            expires_at=int(time.time()) + 300,
+            operation=intent.operation,
+            function_id=intent.host_function_id or intent.operation,
+            pack_id=intent.caller_pack_id,
+            conversation_id=intent.conversation_id,
+        )
+    except Exception as exc:
+        return _host_broker_initialization_failed("approval_token_issue_failed", exc)
     payload = intent.to_dict()
     payload["approval_token"] = execution_token
     try:
@@ -151,6 +162,19 @@ def _dispatch_to_viewer_broker(intent: HostIntent, *, request_id: str | None = N
         "success": success,
         "error_type": None if success else "host_broker_error",
         "host_broker": broker_response if isinstance(broker_response, dict) else {},
+    }
+
+
+def _host_broker_initialization_failed(reason: str, exc: Exception | None = None) -> dict[str, Any]:
+    host_broker: dict[str, Any] = {"available": False, "initialization_error": reason}
+    if exc is not None:
+        host_broker["error"] = str(exc)
+    return {
+        "status": "host_broker_initialization_failed",
+        "success": False,
+        "error_type": "host_broker_initialization_failed",
+        "host_broker": host_broker,
+        "message": "Host intent is approved, but Rumi Viewer host broker could not be initialized.",
     }
 
 

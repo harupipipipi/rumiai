@@ -561,6 +561,153 @@ def test_host_intent_executor_fails_closed_without_viewer_broker(monkeypatch):
     assert result["host_broker"] == {"available": False}
 
 
+def test_host_intent_executor_fails_closed_when_broker_module_import_fails(monkeypatch):
+    from core_runtime.authority.models import AuthorityDecision
+    from core_runtime.host_intent import executor as host_intent_executor
+    from core_runtime.host_intent.executor import HostIntentExecutor
+
+    class Authority:
+        def check(self, **kwargs):
+            return AuthorityDecision(
+                allowed=True,
+                permission_id=kwargs["permission_id"],
+                principal_id=kwargs["principal_id"],
+                reason="approved",
+                risk_level="high",
+                resource=kwargs["resource"],
+            )
+
+    real_import_module = host_intent_executor.importlib.import_module
+
+    def fake_import_module(name):
+        if name.endswith("viewer_broker_client"):
+            raise ImportError("viewer broker client missing")
+        return real_import_module(name)
+
+    monkeypatch.setattr(host_intent_executor, "get_authority_service", lambda: Authority())
+    monkeypatch.setattr(host_intent_executor.importlib, "import_module", fake_import_module)
+
+    result = HostIntentExecutor().handle(
+        {
+            "type": "host_intent",
+            "operation": "host.permission.status",
+            "args": {},
+            "caller": {
+                "pack_id": "rumi_ambient_trigger_pack",
+                "function_id": "ambient_monitor_start",
+            },
+        },
+        principal_id="rumi_ambient_trigger_pack",
+        caller_pack_id="rumi_ambient_trigger_pack",
+        caller_function_id="ambient_monitor_start",
+        request_context={"conversation_id": "conv-1"},
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "host_broker_initialization_failed"
+    assert result["error_type"] == "host_broker_initialization_failed"
+    assert result["host_broker"]["available"] is False
+    assert result["host_broker"]["initialization_error"] == "broker_modules_import_failed"
+
+
+def test_host_intent_executor_fails_closed_when_approval_module_import_fails(monkeypatch):
+    from core_runtime.authority.models import AuthorityDecision
+    from core_runtime.host_intent import executor as host_intent_executor
+    from core_runtime.host_intent.executor import HostIntentExecutor
+
+    class Authority:
+        def check(self, **kwargs):
+            return AuthorityDecision(
+                allowed=True,
+                permission_id=kwargs["permission_id"],
+                principal_id=kwargs["principal_id"],
+                reason="approved",
+                risk_level="high",
+                resource=kwargs["resource"],
+            )
+
+    real_import_module = host_intent_executor.importlib.import_module
+
+    def fake_import_module(name):
+        if name.endswith("safety.approval"):
+            raise ImportError("approval token module missing")
+        return real_import_module(name)
+
+    monkeypatch.setattr(host_intent_executor, "get_authority_service", lambda: Authority())
+    monkeypatch.setattr(host_intent_executor.importlib, "import_module", fake_import_module)
+
+    result = HostIntentExecutor().handle(
+        {
+            "type": "host_intent",
+            "operation": "host.permission.status",
+            "args": {},
+            "caller": {
+                "pack_id": "rumi_ambient_trigger_pack",
+                "function_id": "ambient_monitor_start",
+            },
+        },
+        principal_id="rumi_ambient_trigger_pack",
+        caller_pack_id="rumi_ambient_trigger_pack",
+        caller_function_id="ambient_monitor_start",
+        request_context={"conversation_id": "conv-1"},
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "host_broker_initialization_failed"
+    assert result["error_type"] == "host_broker_initialization_failed"
+    assert result["host_broker"]["available"] is False
+    assert result["host_broker"]["initialization_error"] == "broker_modules_import_failed"
+
+
+def test_host_intent_executor_fails_closed_when_broker_class_is_missing(monkeypatch):
+    from core_runtime.authority.models import AuthorityDecision
+    from core_runtime.host_intent import executor as host_intent_executor
+    from core_runtime.host_intent.executor import HostIntentExecutor
+
+    class Authority:
+        def check(self, **kwargs):
+            return AuthorityDecision(
+                allowed=True,
+                permission_id=kwargs["permission_id"],
+                principal_id=kwargs["principal_id"],
+                reason="approved",
+                risk_level="high",
+                resource=kwargs["resource"],
+            )
+
+    real_import_module = host_intent_executor.importlib.import_module
+
+    def fake_import_module(name):
+        if name.endswith("viewer_broker_client"):
+            return SimpleNamespace()
+        return real_import_module(name)
+
+    monkeypatch.setattr(host_intent_executor, "get_authority_service", lambda: Authority())
+    monkeypatch.setattr(host_intent_executor.importlib, "import_module", fake_import_module)
+
+    result = HostIntentExecutor().handle(
+        {
+            "type": "host_intent",
+            "operation": "host.permission.status",
+            "args": {},
+            "caller": {
+                "pack_id": "rumi_ambient_trigger_pack",
+                "function_id": "ambient_monitor_start",
+            },
+        },
+        principal_id="rumi_ambient_trigger_pack",
+        caller_pack_id="rumi_ambient_trigger_pack",
+        caller_function_id="ambient_monitor_start",
+        request_context={"conversation_id": "conv-1"},
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "host_broker_initialization_failed"
+    assert result["error_type"] == "host_broker_initialization_failed"
+    assert result["host_broker"]["available"] is False
+    assert result["host_broker"]["initialization_error"] == "viewer_broker_client_missing"
+
+
 def test_direct_host_function_from_non_host_pack_becomes_critical_authority_request(monkeypatch):
     from core_runtime.authority.models import AuthorityDecision
     from core_runtime.capability_executor import CapabilityExecutor
