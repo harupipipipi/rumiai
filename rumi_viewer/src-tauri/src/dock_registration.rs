@@ -1203,10 +1203,22 @@ mod tests {
 
     #[test]
     fn config_token_prefers_active_hmac_store_over_stale_cache() {
+        let thread_name = std::thread::current()
+            .name()
+            .unwrap_or("test")
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
         let root = std::env::temp_dir().join(format!(
             "rumi_dock_token_precedence_{}_{}",
             std::process::id(),
-            std::thread::current().name().unwrap_or("test")
+            thread_name
         ));
         let config = test_config(&root);
         fs::create_dir_all(&config.user_data_dir).unwrap();

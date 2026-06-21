@@ -36,6 +36,13 @@ def _static_shell(request_data, context):
     }
 
 
+def _authority_browser_ui_operator(request_data, context):
+    del context
+    from transport.http import DefaultsHttpServer
+
+    return DefaultsHttpServer(None)._handle_authority_browser_ui_operator(request_data, {})
+
+
 def run(context):
     pack_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     if pack_root not in sys.path:
@@ -58,11 +65,16 @@ def run(context):
             {"id": "conversation_id"},
         ),
         ("POST", "/api/ui/select-directory", _lazy("blocks.ui.select_directory"), {}),
+        ("GET", "/chat", _static_shell, {}),
         ("GET", "/defaultspack", _static_shell, {}),
         ("GET", "/pack/defaultspack", _static_shell, {}),
+        ("GET", "/approval", _static_shell, {}),
+        ("POST", "/api/authority/browser-ui-operator", _authority_browser_ui_operator, {}),
+        ("GET", "/ambient", _static_shell, {}),
         ("GET", "/ambient-debug", _static_shell, {}),
         ("GET", "/finger-recording", _static_shell, {}),
         ("GET", "/console", _static_shell, {}),
+        ("GET", "/host-permissions", _static_shell, {}),
     ]
 
     for method, pattern, handler, path_inject in routes:
