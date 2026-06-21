@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from pathlib import Path
 import sys
 import uuid
 from typing import Any, Mapping
@@ -109,8 +110,15 @@ class LinuxNativeProvider:
 
     def update(self, request: UpdateRuntimeRequest, progress: ProgressSink) -> OperationResult:
         del request
-        progress.emit(ProgressEvent(operation_id="linux-native-update", stage="noop", message="Linux native desktop runtime has no bundled updater yet", percent=100))
-        return OperationResult(ok=True, provider_id=self.provider_id, operation_id="linux-native-update", status="completed")
+        progress.emit(ProgressEvent(operation_id="linux-native-update", stage="not_ready", message="Linux native desktop runtime has no bundled updater yet", percent=0))
+        return OperationResult(
+            ok=False,
+            provider_id=self.provider_id,
+            operation_id="linux-native-update",
+            status="failed",
+            requires_user_action=True,
+            user_action="Linux native runtime update is not implemented in this build.",
+        )
 
     def uninstall(self, request: UninstallRuntimeRequest, progress: ProgressSink) -> OperationResult:
         del request
@@ -240,29 +248,39 @@ class LinuxNativeGuestAgent:
 
     def capture_frame(self, sandbox_id: str, seat_id: str) -> dict[str, object]:
         screenshot = self._session.screenshot()
+        screenshot_path = str(screenshot.get("path") or "")
         data_url = str(screenshot.get("data_url") or "")
-        if not data_url.startswith("data:image/png;base64,"):
-            return {
-                "ok": False,
+        response: dict[str, object] | None = None
+        try:
+            if not data_url.startswith("data:image/png;base64,"):
+                return {
+                    "ok": False,
+                    "sandbox_id": sandbox_id,
+                    "seat_id": seat_id,
+                    "error": str(screenshot.get("reason") or screenshot.get("error") or "Desktop frame capture failed."),
+                }
+            data = base64.b64decode(data_url.split(",", 1)[1])
+            response = {
+                "ok": True,
                 "sandbox_id": sandbox_id,
                 "seat_id": seat_id,
-                "error": str(screenshot.get("reason") or screenshot.get("error") or "Desktop frame capture failed."),
+                "content_type": "image/png",
+                "data": data,
+                "width": int(getattr(self._session.config, "width", 0) or 0),
+                "height": int(getattr(self._session.config, "height", 0) or 0),
+                "source": "linux_native_x11",
+                "metadata": {
+                    "display": getattr(self._session, "display", None),
+                    "path": screenshot_path or None,
+                    "path_deleted": False,
+                },
             }
-        data = base64.b64decode(data_url.split(",", 1)[1])
-        return {
-            "ok": True,
-            "sandbox_id": sandbox_id,
-            "seat_id": seat_id,
-            "content_type": "image/png",
-            "data": data,
-            "width": int(getattr(self._session.config, "width", 0) or 0),
-            "height": int(getattr(self._session.config, "height", 0) or 0),
-            "source": "linux_native_x11",
-            "metadata": {
-                "display": getattr(self._session, "display", None),
-                "path": screenshot.get("path"),
-            },
-        }
+            return response
+        finally:
+            path_deleted = _unlink_capture_file(screenshot_path)
+            metadata = response.get("metadata") if response is not None else None
+            if isinstance(metadata, dict):
+                metadata["path_deleted"] = path_deleted
 
     def desktop_input(
         self,
@@ -306,3 +324,15 @@ class LinuxNativeGuestAgent:
         if request.action == "key":
             return self._session.keypress(str(request.key or ""))
         return {"executed": False, "reason": "Unsupported desktop input action."}
+
+
+def _unlink_capture_file(path: str) -> bool:
+    if not path:
+        return False
+    try:
+        capture_path = Path(path)
+        existed = capture_path.exists()
+        capture_path.unlink(missing_ok=True)
+        return existed and not capture_path.exists()
+    except OSError:
+        return False

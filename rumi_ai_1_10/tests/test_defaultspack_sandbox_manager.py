@@ -4,9 +4,11 @@ import json
 from collections.abc import Callable
 
 from ecosystem.defaultspack.backend.sandbox.gui_sandbox import GUISandbox
+from ecosystem.defaultspack.backend.sandbox.models import ProviderInstance, ReconcileResult
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.testing.fake_provider import FakeRuntimeProvider
+from ecosystem.defaultspack.backend.sandbox.errors import SandboxContractError
 
 
 def _registry(
@@ -19,7 +21,16 @@ def _registry(
     registry.register(
         FakeRuntimeProvider(
             provider_id="fake-runtime",
-            capabilities=capabilities or {"sandbox.exec", "sandbox.files", "sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"},
+            capabilities=capabilities
+            or {
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+                "sandbox.desktop",
+                "sandbox.desktop_input",
+                "sandbox.snapshot",
+            },
             ready=ready,
             sandbox_id_factory=sandbox_id_factory,
         )
@@ -54,7 +65,7 @@ def test_sandbox_create_fails_closed_without_registered_provider(tmp_path):
 
 
 def test_sandbox_registry_persists_instances_and_lifecycle(tmp_path):
-    manager = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files"})
+    manager = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"})
 
     created = manager.create(image="ubuntu:24.04", display=False)
 
@@ -65,7 +76,7 @@ def test_sandbox_registry_persists_instances_and_lifecycle(tmp_path):
     registry_path = tmp_path / "sandboxes.json"
     assert registry_path.is_file()
 
-    reloaded = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files"})
+    reloaded = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"})
     status = reloaded.status(sandbox_id)
     assert status["ok"] is True
     assert status["sandbox_id"] == sandbox_id
@@ -89,6 +100,122 @@ def test_sandbox_registry_persists_instances_and_lifecycle(tmp_path):
     assert lifecycle["status"] == "destroyed"
     assert lifecycle["destroyed_at"] is not None
     assert lifecycle["updated_at"] >= lifecycle["created_at"]
+
+
+def test_sandbox_registry_reconciles_missing_runtime_session_to_stopped(tmp_path):
+    registry_path = tmp_path / "sandboxes.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "instances": {
+                    "seat-1": {
+                        "sandbox_id": "seat-1",
+                        "name": "Desktop",
+                        "image": "ubuntu:22.04",
+                        "display": True,
+                        "template_id": "desktop.ubuntu",
+                        "provider_id": "fake-runtime",
+                        "provider_instance_id": "fake-seat-1",
+                        "runtime_id": "fake-runtime",
+                        "state": "ready",
+                        "created_at": 10,
+                        "updated_at": 11,
+                        "desktop_spec": {"enabled": True, "width": 800, "height": 600},
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class ReconcileStoppedProvider(FakeRuntimeProvider):
+        def reconcile(self, persisted: ProviderInstance) -> ReconcileResult:
+            return ReconcileResult(
+                instance=ProviderInstance(
+                    provider_id=persisted.provider_id,
+                    provider_instance_id=persisted.provider_instance_id,
+                    sandbox_id=persisted.sandbox_id,
+                    runtime_id=persisted.runtime_id,
+                    state="stopped",
+                    opaque_state=persisted.opaque_state,
+                    generation=persisted.generation,
+                ),
+                changed=True,
+            )
+
+    registry = ProviderRegistry()
+    registry.register(ReconcileStoppedProvider(provider_id="fake-runtime"))
+
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    status = manager.status("seat-1")
+    persisted = json.loads(registry_path.read_text(encoding="utf-8"))
+
+    assert status["status"] == "stopped"
+    assert status["stopped_at"] is not None
+    assert "startup reconcile" in status["last_error"]
+    assert persisted["instances"]["seat-1"]["state"] == "stopped"
+
+
+def test_sandbox_create_rolls_back_provider_instance_when_start_fails(tmp_path):
+    class StartFailProvider(FakeRuntimeProvider):
+        def start(self, instance: ProviderInstance) -> ProviderInstance:
+            raise SandboxContractError("FAKE_START_FAILED", "start failed", status_code=503)
+
+    provider = StartFailProvider(
+        provider_id="fake-runtime",
+        capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"},
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+
+    created = manager.create(display=False, provider_id="fake-runtime", template_id="tool.ephemeral")
+
+    assert created["ok"] is False
+    assert created["code"] == "FAKE_START_FAILED"
+    assert provider.instances == {}
+    assert manager.list_instances() == []
+
+
+def test_sandbox_unknown_template_is_rejected(tmp_path):
+    manager = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"})
+
+    created = manager.create(display=False, provider_id="fake-runtime", template_id="missing.template")
+
+    assert created["ok"] is False
+    assert created["code"] == "SANDBOX_TEMPLATE_NOT_FOUND"
+
+
+def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path):
+    manager = _manager(tmp_path)
+
+    created = manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.coding",
+        assigned_agent_id="agent-1",
+        workspace_id="workspace-1",
+        workspace_access="read_only",
+    )
+    assert created["ok"] is True
+
+    sandbox_id = created["sandbox_id"]
+    status = manager.status(sandbox_id)
+    assert status["template_id"] == "desktop.coding"
+    assert status["network_policy"]["mode"] == "project_policy_or_first_use_approval"
+    assert status["resource_limits"]["memory_mb"] == 4096
+    assert status["workspace_binding"]["mode"] == "read_only"
+    assert status["assigned_agent_id"] == "agent-1"
+    assert "desktop.mcp.install.request" in status["capabilities"]
+
+    reloaded = _manager(tmp_path)
+    reloaded_status = reloaded.status(sandbox_id)
+
+    assert reloaded_status["network_policy"]["mode"] == "project_policy_or_first_use_approval"
+    assert reloaded_status["resource_limits"]["timeout_ms"] == 14_400_000
+    assert reloaded_status["desktop_spec"]["width"] == 1440
+    assert reloaded_status["assigned_agent_id"] == "agent-1"
 
 
 def test_sandbox_screenshot_fails_closed_without_backend(tmp_path):

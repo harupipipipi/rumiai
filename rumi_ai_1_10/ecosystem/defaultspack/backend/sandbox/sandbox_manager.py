@@ -111,13 +111,16 @@ class SandboxManager:
     ) -> Dict[str, Any]:
         image = str(image or "").strip() or "ubuntu:22.04"
         display = bool(display)
-        template = self._template_for_create(
-            image=image,
-            display=display,
-            template_id=template_id,
-            width=width,
-            height=height,
-        )
+        try:
+            template = self._template_for_create(
+                image=image,
+                display=display,
+                template_id=template_id,
+                width=width,
+                height=height,
+            )
+        except SandboxContractError as exc:
+            return exc.to_dict()
         instance_name = str(name or f"Sandbox {image}").strip() or f"Sandbox {image}"
         requirements = RuntimeRequirements(
             template_id=template.template_id,
@@ -152,6 +155,9 @@ class SandboxManager:
             if provisioning is not None
             else template_provisioning
         )
+        provider = None
+        provider_instance: ProviderInstance | None = None
+        started: ProviderInstance | None = None
         try:
             provider = self._provider_registry.resolve(provider_id or "auto", requirements)
             provider_instance = provider.create(
@@ -164,8 +170,12 @@ class SandboxManager:
             )
             started = provider.start(provider_instance)
         except SandboxContractError as exc:
+            if provider is not None and provider_instance is not None:
+                self._destroy_provider_instance(provider, provider_instance)
             return exc.to_dict()
         except Exception as exc:
+            if provider is not None and provider_instance is not None:
+                self._destroy_provider_instance(provider, provider_instance)
             return {
                 "ok": False,
                 "error": f"Managed runtime provider failed to create sandbox: {exc}",
@@ -173,47 +183,60 @@ class SandboxManager:
                 "status_code": 503,
             }
 
-        with self._lock:
-            now = time.time()
-            inst = SandboxInstance(
-                sandbox_id=started.sandbox_id,
-                name=instance_name,
-                image=image,
-                display=display,
-                template_id=template.template_id,
-                template_version=template.template_version,
-                provider_id=started.provider_id,
-                provider_instance_id=started.provider_instance_id,
-                runtime_id=started.runtime_id,
-                state=_canonical_state(started.state),
-                created_at=now,
-                updated_at=now,
-                started_at=now if _canonical_state(started.state) in RUNNING_STATES else None,
-                capabilities=template.provider_requirements,
-                resource_limits=template.resources,
-                workspace_binding=workspace_binding,
-                network_policy=template.network,
-                desktop_spec=template.desktop,
-                desktop_rules=rule_config,
-                desktop_access=access_policy,
-                desktop_provisioning=provisioning_plan,
-                assigned_agent_id=_optional_clean_string(assigned_agent_id),
-                generation=max(1, int(started.generation or 1)),
-                desktop_access_key_hash=access_key_hash,
-            )
-            self._instances[inst.sandbox_id] = inst
-            self._save_registry()
+        assert provider is not None
+        assert started is not None
+        now = time.time()
+        inst = SandboxInstance(
+            sandbox_id=started.sandbox_id,
+            name=instance_name,
+            image=image,
+            display=display,
+            template_id=template.template_id,
+            template_version=template.template_version,
+            provider_id=started.provider_id,
+            provider_instance_id=started.provider_instance_id,
+            runtime_id=started.runtime_id,
+            state=_canonical_state(started.state),
+            created_at=now,
+            updated_at=now,
+            started_at=now if _canonical_state(started.state) in RUNNING_STATES else None,
+            capabilities=template.allowed_operations or template.provider_requirements,
+            resource_limits=template.resources,
+            workspace_binding=workspace_binding,
+            network_policy=template.network,
+            desktop_spec=template.desktop,
+            desktop_rules=rule_config,
+            desktop_access=access_policy,
+            desktop_provisioning=provisioning_plan,
+            assigned_agent_id=_optional_clean_string(assigned_agent_id),
+            generation=max(1, int(started.generation or 1)),
+            desktop_access_key_hash=access_key_hash,
+        )
+        try:
+            with self._lock:
+                self._instances[inst.sandbox_id] = inst
+                self._save_registry()
+        except Exception as exc:
+            with self._lock:
+                self._instances.pop(inst.sandbox_id, None)
+            self._destroy_provider_instance(provider, started)
             return {
-                "ok": True,
-                "created": True,
-                "sandbox_id": inst.sandbox_id,
-                "status": inst.state,
-                "state": inst.state,
-                "template_id": inst.template_id,
-                "provider_id": inst.provider_id,
-                "registry_path": str(self.registry_path),
-                "desktop_access": model_to_dict(inst.desktop_access),
+                "ok": False,
+                "error": f"Managed runtime provider sandbox was rolled back after registry save failed: {exc}",
+                "code": "SANDBOX_REGISTRY_SAVE_FAILED",
+                "status_code": 500,
             }
+        return {
+            "ok": True,
+            "created": True,
+            "sandbox_id": inst.sandbox_id,
+            "status": inst.state,
+            "state": inst.state,
+            "template_id": inst.template_id,
+            "provider_id": inst.provider_id,
+            "registry_path": str(self.registry_path),
+            "desktop_access": model_to_dict(inst.desktop_access),
+        }
 
     def destroy(self, sandbox_id: str) -> Dict[str, Any]:
         with self._lock:
@@ -532,6 +555,8 @@ class SandboxManager:
                 inst = self._instance_from_dict(raw, legacy=schema_version < REGISTRY_SCHEMA_VERSION)
                 instances[inst.sandbox_id] = inst
             self._instances = instances
+            if self._reconcile_loaded_instances():
+                self._save_registry()
 
     def _save_registry(self) -> None:
         self.registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -555,6 +580,56 @@ class SandboxManager:
         except OSError:
             pass
         tmp.replace(self.registry_path)
+
+    def _reconcile_loaded_instances(self) -> bool:
+        changed = False
+        now = time.time()
+        for inst in list(self._instances.values()):
+            if inst.state in TERMINAL_STATES or inst.provider_id == LEGACY_PLACEHOLDER_PROVIDER:
+                continue
+            try:
+                provider = self._provider_registry.get(inst.provider_id)
+                reconciled = provider.reconcile(self._provider_instance(inst)).instance
+            except SandboxContractError as exc:
+                if inst.state in RUNNING_STATES:
+                    inst.state = STOPPED
+                    inst.stopped_at = now
+                    inst.updated_at = now
+                    inst.last_activity_at = now
+                    inst.last_error = f"Managed runtime provider unavailable during startup reconcile: {exc.message}"
+                    changed = True
+                continue
+            except Exception as exc:
+                if inst.state in RUNNING_STATES:
+                    inst.state = STOPPED
+                    inst.stopped_at = now
+                    inst.updated_at = now
+                    inst.last_activity_at = now
+                    inst.last_error = f"Managed runtime startup reconcile failed: {exc}"
+                    changed = True
+                continue
+
+            reconciled_state = _canonical_state(reconciled.state)
+            if (
+                reconciled.provider_instance_id != inst.provider_instance_id
+                or reconciled.runtime_id != inst.runtime_id
+                or reconciled_state != inst.state
+                or int(reconciled.generation or 0) != int(inst.generation or 0)
+            ):
+                was_running = inst.state in RUNNING_STATES
+                inst.provider_instance_id = reconciled.provider_instance_id
+                inst.runtime_id = reconciled.runtime_id
+                inst.state = reconciled_state
+                inst.generation = max(1, int(reconciled.generation or inst.generation or 1))
+                inst.updated_at = now
+                inst.last_activity_at = now
+                if was_running and reconciled_state not in RUNNING_STATES:
+                    inst.stopped_at = now
+                    inst.last_error = "Managed runtime session was not found during startup reconcile."
+                elif reconciled_state in RUNNING_STATES:
+                    inst.last_error = None
+                changed = True
+        return changed
 
     def _ready_instance(
         self, sandbox_id: str
@@ -627,6 +702,13 @@ class SandboxManager:
         except Exception as exc:
             return f"Managed runtime provider destroy failed: {exc}"
         return None
+
+    @staticmethod
+    def _destroy_provider_instance(provider: Any, instance: ProviderInstance) -> None:
+        try:
+            provider.destroy(instance)
+        except Exception:
+            pass
 
     def _provider_instance(self, inst: SandboxInstance) -> ProviderInstance:
         return ProviderInstance(
@@ -873,7 +955,14 @@ class SandboxManager:
         width: int | None = None,
         height: int | None = None,
     ) -> ResolvedSandboxTemplate:
-        raw_template = _load_sandbox_template(template_id or ("desktop.ubuntu" if display else "tool.ephemeral"))
+        requested_template_id = str(template_id or ("desktop.ubuntu" if display else "tool.ephemeral")).strip()
+        raw_template = _load_sandbox_template(requested_template_id)
+        if not raw_template:
+            raise SandboxContractError(
+                "SANDBOX_TEMPLATE_NOT_FOUND",
+                f"Unknown sandbox template: {requested_template_id}",
+                status_code=400,
+            )
         runtime = raw_template.get("runtime") if isinstance(raw_template.get("runtime"), dict) else {}
         policy = raw_template.get("policy") if isinstance(raw_template.get("policy"), dict) else {}
         filesystem_policy = policy.get("filesystem") if isinstance(policy.get("filesystem"), dict) else {}
@@ -886,15 +975,25 @@ class SandboxManager:
         secrets_policy = policy.get("secrets") if isinstance(policy.get("secrets"), dict) else {}
         resources_policy = policy.get("resources") if isinstance(policy.get("resources"), dict) else {}
         lifecycle_policy = policy.get("lifecycle") if isinstance(policy.get("lifecycle"), dict) else {}
-        capabilities = {"sandbox.exec", "sandbox.files"}
-        allowed_operations = {"exec", "files.read", "files.write"}
+        provider_requirements = set(_clean_string_list(runtime.get("provider_requirements"), max_items=64, max_len=160))
+        runtime_capabilities = set(_clean_string_list(runtime.get("capabilities"), max_items=64, max_len=160))
+        if not provider_requirements:
+            provider_requirements = {"sandbox.exec", "sandbox.files"}
+        allowed_operations = set(_clean_string_list(raw_template.get("allowed_operations"), max_items=64, max_len=160))
+        if not allowed_operations:
+            allowed_operations = runtime_capabilities or provider_requirements
         desktop = None
-        resolved_template_id = str(template_id or "tool.ephemeral")
+        resolved_template_id = str(raw_template.get("id") or requested_template_id)
         packages = _packages_from_template_runtime(runtime)
-        if display:
-            capabilities = {"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"}
-            allowed_operations = {"desktop.input", "desktop.observe", "desktop.snapshot"}
-            desktop_policy = policy.get("desktop") if isinstance(policy.get("desktop"), dict) else {}
+        desktop_policy = policy.get("desktop") if isinstance(policy.get("desktop"), dict) else {}
+        desktop_enabled = bool(desktop_policy.get("enabled")) or display
+        if display and not desktop_enabled:
+            raise SandboxContractError(
+                "SANDBOX_TEMPLATE_NOT_DESKTOP",
+                f"Sandbox template does not declare a desktop: {resolved_template_id}",
+                status_code=400,
+            )
+        if desktop_enabled:
             desktop = DesktopSpec(
                 enabled=True,
                 width=int(width or desktop_policy.get("width") or 1440),
@@ -902,12 +1001,11 @@ class SandboxManager:
                 display_backend=str(desktop_policy.get("display_backend") or "xvfb_openbox"),
                 preset=str(desktop_policy.get("starter") or desktop_policy.get("preset") or "") or None,
             )
-            resolved_template_id = str(template_id or "desktop.ubuntu")
         return ResolvedSandboxTemplate(
             template_id=resolved_template_id,
             template_version=str(raw_template.get("version") or "1"),
             runtime_os=str(runtime.get("os") or "linux"),
-            provider_requirements=frozenset(capabilities),
+            provider_requirements=frozenset(provider_requirements),
             packages=packages,
             desktop=desktop,
             filesystem=FilesystemPolicy(
@@ -927,6 +1025,7 @@ class SandboxManager:
             resources=ResourceLimits(
                 cpu_count=_optional_float(resources_policy.get("cpu")) or 1,
                 memory_mb=int(_float_or_zero(resources_policy.get("memory_mb")) or 2048),
+                pids=int(_float_or_zero(resources_policy.get("pids")) or 0) or None,
                 output_bytes=int(_float_or_zero(resources_policy.get("max_output_bytes")) or 0) or None,
                 timeout_ms=int((_float_or_zero(resources_policy.get("timeout_seconds")) or 600) * 1000),
             ),
@@ -985,13 +1084,14 @@ class SandboxManager:
             last_activity_at=_optional_float(data.get("last_activity_at")),
             last_error=last_error,
             capabilities=frozenset(_string_tuple(data.get("capabilities"))),
-            resource_limits=ResourceLimits(),
+            resource_limits=_resource_limits_from_dict(data.get("resource_limits")),
             workspace_binding=_workspace_binding_from_dict(data.get("workspace_binding")),
-            network_policy=NetworkPolicy(),
-            desktop_spec=DesktopSpec(enabled=True) if display else None,
+            network_policy=_network_policy_from_dict(data.get("network_policy")),
+            desktop_spec=_desktop_spec_from_dict(data.get("desktop_spec"), display=display),
             desktop_rules=_desktop_rules_from_dict(data.get("desktop_rules")),
             desktop_access=_desktop_access_from_dict(data.get("desktop_access")),
             desktop_provisioning=_desktop_provisioning_from_dict(data.get("desktop_provisioning")),
+            assigned_agent_id=_optional_clean_string(data.get("assigned_agent_id")),
             generation=max(1, int(_float_or_zero(data.get("generation") or 1))),
             recovery_token_hash=str(data.get("recovery_token_hash")) if data.get("recovery_token_hash") is not None else None,
             desktop_access_key_hash=str(data.get("desktop_access_key_hash")) if data.get("desktop_access_key_hash") is not None else None,
@@ -1060,6 +1160,42 @@ def _clean_string_list(value: Any, *, max_items: int = 24, max_len: int = 512) -
         if len(result) >= max_items:
             break
     return tuple(result)
+
+
+def _resource_limits_from_dict(value: Any) -> ResourceLimits:
+    if not isinstance(value, dict):
+        return ResourceLimits()
+    return ResourceLimits(
+        cpu_count=_optional_float(value.get("cpu_count")),
+        memory_mb=int(_float_or_zero(value.get("memory_mb")) or 0) or None,
+        pids=int(_float_or_zero(value.get("pids")) or 0) or None,
+        output_bytes=int(_float_or_zero(value.get("output_bytes")) or 0) or None,
+        timeout_ms=int(_float_or_zero(value.get("timeout_ms")) or 0) or None,
+    )
+
+
+def _network_policy_from_dict(value: Any) -> NetworkPolicy:
+    if not isinstance(value, dict):
+        return NetworkPolicy()
+    return NetworkPolicy(
+        mode=str(value.get("mode") or "off")[:80],
+        allowlist=_clean_string_list(value.get("allowlist"), max_items=128, max_len=256),
+        approval_required=bool(value.get("approval_required")),
+    )
+
+
+def _desktop_spec_from_dict(value: Any, *, display: bool) -> DesktopSpec | None:
+    if not display:
+        return None
+    if not isinstance(value, dict):
+        return DesktopSpec(enabled=True)
+    return DesktopSpec(
+        enabled=bool(value.get("enabled", True)),
+        width=int(_float_or_zero(value.get("width")) or 1440),
+        height=int(_float_or_zero(value.get("height")) or 900),
+        display_backend=str(value.get("display_backend") or "x11")[:80],
+        preset=_optional_clean_string(value.get("preset"), max_len=160),
+    )
 
 
 def _desktop_rules_from_create(
@@ -1201,6 +1337,10 @@ def _template_workspace_access(value: Any) -> str:
     mode = str(value or "none").strip().lower()
     if mode in {"read", "readonly"}:
         return "read_only"
+    if mode == "read_only_when_selected":
+        return "read_only"
+    if mode in {"none_unless_explicit", "explicit"}:
+        return "none"
     if mode in {"overlay", "read_only", "none"}:
         return mode
     return "none"

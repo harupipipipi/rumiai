@@ -21,6 +21,8 @@ from ecosystem.defaultspack.backend.sandbox.models import (
     OperationResult,
     RuntimeProviderStatus,
     RuntimeRequirements,
+    UninstallRuntimeRequest,
+    UpdateRuntimeRequest,
 )
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.providers import LinuxNativeProvider
@@ -58,9 +60,9 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
         if handler == "runtime_ensure":
             return ok(_runtime_ensure(service, payload))
         if handler == "runtime_update":
-            return ok(_runtime_operation("completed", provider_id=payload.get("provider_id"), operation_id="managed-runtime-update"))
+            return ok(_runtime_update(service, payload))
         if handler == "runtime_uninstall":
-            return ok(_runtime_operation("completed", provider_id=payload.get("provider_id"), operation_id="managed-runtime-uninstall"))
+            return ok(_runtime_uninstall(service, payload))
         if handler == "runtime_operations":
             return ok({"operations": []})
         if handler in {"runtime_operation", "runtime_operation_get"}:
@@ -165,6 +167,34 @@ def _runtime_ensure(service: _SandboxApiService, payload: dict[str, Any]) -> dic
         return _runtime_operation("failed", provider_id=provider_id)
     sink = NullProgressSink()
     result = provider.ensure(EnsureRuntimeRequest(provider_id=provider_id, requirements=requirements), sink)
+    return _operation_payload(result)
+
+
+def _runtime_update(service: _SandboxApiService, payload: dict[str, Any]) -> dict[str, Any]:
+    provider_id = str(payload.get("provider_id") or _default_provider_id())
+    try:
+        provider = service.provider_registry.get(provider_id)
+    except SandboxContractError:
+        return _runtime_operation("failed", provider_id=provider_id, operation_id="managed-runtime-update")
+    sink = NullProgressSink()
+    result = provider.update(UpdateRuntimeRequest(provider_id=provider_id), sink)
+    return _operation_payload(result)
+
+
+def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> dict[str, Any]:
+    provider_id = str(payload.get("provider_id") or _default_provider_id())
+    try:
+        provider = service.provider_registry.get(provider_id)
+    except SandboxContractError:
+        return _runtime_operation("failed", provider_id=provider_id, operation_id="managed-runtime-uninstall")
+    sink = NullProgressSink()
+    result = provider.uninstall(
+        UninstallRuntimeRequest(
+            provider_id=provider_id,
+            remove_state=bool(payload.get("remove_state")),
+        ),
+        sink,
+    )
     return _operation_payload(result)
 
 

@@ -290,6 +290,9 @@ def test_linux_native_provider_desktop_session_capture_and_input(monkeypatch) ->
     assert frame["data"] == b"png"
     assert frame["width"] == 800
     assert frame["height"] == 600
+    assert frame["metadata"]["path_deleted"] is True
+    assert session.last_screenshot_path is not None
+    assert not session.last_screenshot_path.exists()
     assert action["ok"] is True
     assert session.calls == [("start",), ("screenshot",), ("click", 10, 20, "left")]
 
@@ -306,7 +309,15 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
     registry.register(
         FakeRuntimeProvider(
             provider_id="fake-runtime",
-            capabilities={"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"},
+            capabilities={
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+                "sandbox.desktop",
+                "sandbox.desktop_input",
+                "sandbox.snapshot",
+            },
             guest_agent=agent,
             sandbox_id_factory=lambda: "seat-1",
         )
@@ -368,7 +379,15 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
     registry.register(
         FakeRuntimeProvider(
             provider_id="fake-runtime",
-            capabilities={"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"},
+            capabilities={
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+                "sandbox.desktop",
+                "sandbox.desktop_input",
+                "sandbox.snapshot",
+            },
             guest_agent=agent,
             sandbox_id_factory=lambda: "seat-locked",
         )
@@ -514,6 +533,8 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     providers = api.run({"_handler": "runtime_providers"}, {})
     doctor = api.run({"_handler": "runtime_doctor"}, {})
     ensure = api.run({"_handler": "runtime_ensure"}, {})
+    update = api.run({"_handler": "runtime_update", "provider_id": "missing-provider"}, {})
+    uninstall = api.run({"_handler": "runtime_uninstall", "provider_id": "missing-provider"}, {})
     templates = api.run({"_handler": "sandbox_templates"}, {})
     desktops = api.run({"_handler": "desktops_list"}, {})
 
@@ -522,6 +543,10 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert doctor["data"]["status"] == "needs_setup"
     assert ensure["data"]["status"] == "failed"
     assert ensure["data"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
+    assert update["data"]["status"] == "failed"
+    assert update["data"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
+    assert uninstall["data"]["status"] == "failed"
+    assert uninstall["data"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
     assert {template["template_id"] for template in templates["data"]["templates"]} >= {"desktop.ubuntu", "tool.ephemeral"}
     coding_template = next(template for template in templates["data"]["templates"] if template["template_id"] == "desktop.coding")
     assert coding_template["trust_level"] == "builtin"
@@ -529,6 +554,31 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert "google-chrome-stable" in {app["name"] for app in coding_template["provisioning"]["packages"]}
     assert "playwright" in coding_template["provisioning"]["mcp_servers"]
     assert desktops["data"]["desktops"] == []
+
+
+def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    registry = ProviderRegistry()
+    provider = FakeRuntimeProvider(provider_id="fake-runtime")
+    registry.register(provider)
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        update = api.run({"_handler": "runtime_update", "provider_id": "fake-runtime"}, {})
+        uninstall = api.run({"_handler": "runtime_uninstall", "provider_id": "fake-runtime"}, {})
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert update["data"]["operation_id"] == "fake-update"
+    assert update["data"]["status"] == "completed"
+    assert uninstall["data"]["operation_id"] == "fake-uninstall"
+    assert uninstall["data"]["status"] == "completed"
 
 
 def test_runtime_mutation_routes_are_local_guard_sensitive() -> None:
@@ -588,6 +638,7 @@ class FakeX11Session:
     def __init__(self, *, width: int, height: int) -> None:
         self.config = SimpleNamespace(width=width, height=height)
         self.calls: list[tuple[object, ...]] = []
+        self.last_screenshot_path = None
 
     def missing_commands(self) -> list[str]:
         return []
@@ -602,9 +653,23 @@ class FakeX11Session:
 
     def screenshot(self) -> dict[str, object]:
         import base64
+        import tempfile
+        from pathlib import Path
 
         self.calls.append(("screenshot",))
-        return {"data_url": "data:image/png;base64," + base64.b64encode(b"png").decode("ascii")}
+        fd, path = tempfile.mkstemp(prefix="rumi-fake-x11-", suffix=".png")
+        try:
+            import os
+
+            os.close(fd)
+        except OSError:
+            pass
+        self.last_screenshot_path = Path(path)
+        self.last_screenshot_path.write_bytes(b"png")
+        return {
+            "path": path,
+            "data_url": "data:image/png;base64," + base64.b64encode(b"png").decode("ascii"),
+        }
 
     def click(self, x: int, y: int, *, button: str = "left") -> dict[str, object]:
         self.calls.append(("click", x, y, button))
