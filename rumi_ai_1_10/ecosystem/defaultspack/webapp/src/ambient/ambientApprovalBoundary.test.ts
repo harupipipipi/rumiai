@@ -4,9 +4,27 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 const SRC_ROOT = resolve(import.meta.dirname, "..");
+const REPOSITORY_ROOT = resolve(import.meta.dirname, "../../../../../../");
+const sourceCache = new Map<string, string>();
+
+function readCachedSource(filePath: string): string {
+  const cached = sourceCache.get(filePath);
+  if (cached !== undefined) return cached;
+  const source = readFileSync(filePath, "utf8");
+  sourceCache.set(filePath, source);
+  return source;
+}
+
+function readSource(...parts: string[]): string {
+  return readCachedSource(resolve(SRC_ROOT, ...parts));
+}
+
+function readRepositorySource(...parts: string[]): string {
+  return readCachedSource(resolve(REPOSITORY_ROOT, ...parts));
+}
 
 test("ambient panel cannot render or persist its own Rumi approval", () => {
-  const source = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const source = readSource("ambient", "AmbientTriggerPanel.tsx");
 
   assert.doesNotMatch(source, /RumiPermissionApprovalDialog/);
   assert.doesNotMatch(source, /ambientTriggerClient\.grantPermission/);
@@ -14,7 +32,7 @@ test("ambient panel cannot render or persist its own Rumi approval", () => {
 });
 
 test("ambient mini authority settlement never sends its own resume", () => {
-  const source = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const source = readSource("ambient", "AmbientTriggerPanel.tsx");
 
   assert.doesNotMatch(source, /sendAuthorityResume/);
   assert.doesNotMatch(source, /authorityApprovalRuntimeContent/);
@@ -23,7 +41,7 @@ test("ambient mini authority settlement never sends its own resume", () => {
 });
 
 test("ambient mini authority CTA resolves stale request metadata before opening", () => {
-  const source = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const source = readSource("ambient", "AmbientTriggerPanel.tsx");
 
   assert.match(source, /resolveMiniAuthorityApprovalTarget/);
   assert.match(source, /api\.listAuthorityRequests\(\{ status: "pending" \}\)/);
@@ -36,8 +54,8 @@ test("ambient mini authority CTA resolves stale request metadata before opening"
 });
 
 test("ambient mini authority browser fallback is debug QA only and opens tokenized approval URLs", () => {
-  const source = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
-  const helperSource = readFileSync(resolve(SRC_ROOT, "lib", "authorityApprovalBrowserToken.ts"), "utf8");
+  const source = readSource("ambient", "AmbientTriggerPanel.tsx");
+  const helperSource = readSource("lib", "authorityApprovalBrowserToken.ts");
 
   assert.match(source, /const browserApprovalQaEnabled = standalone && debugMode/);
   assert.match(source, /browserApprovalQaEnabled && miniAuthorityApproval && !hasNativeAuthorityApprovalWindow\(\) && browserApprovalToken\.trim\(\)/);
@@ -50,14 +68,14 @@ test("ambient mini authority browser fallback is debug QA only and opens tokeniz
 });
 
 test("authority approval route does not render ambient gesture overlay", () => {
-  const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
+  const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.doesNotMatch(source, /<AmbientTriggerPanel/);
   assert.doesNotMatch(source, /onApprovalGesture/);
 });
 
 test("ambient authority approval cancel and close settle the opener", () => {
-  const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
+  const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.match(source, /broadcastAmbientApprovalCancelled/);
   assert.match(source, /requestId:\s*AMBIENT_AUTHORITY_REQUEST_ID,\s*status:\s*"denied"/s);
@@ -67,7 +85,7 @@ test("ambient authority approval cancel and close settle the opener", () => {
 });
 
 test("generic authority approval settlements schedule window close", () => {
-  const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
+  const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.match(source, /function scheduleAuthorityApprovalWindowClose\(\)/);
   assert.match(source, /if \(await closeCurrentWindow\(\)\) return/);
@@ -78,7 +96,7 @@ test("generic authority approval settlements schedule window close", () => {
 });
 
 test("generic authority approval load settles already completed backend requests", () => {
-  const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
+  const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.match(source, /const singleSettledStatus = authorityRequestSettledStatus\(single\.status\)[\s\S]*settleAuthorityRequest\(single, singleSettledStatus\)/);
   assert.match(source, /resolvePendingAuthorityApproval\(requestToApproval\(single\), list\.pending \?\? \[\]\)/);
@@ -89,20 +107,20 @@ test("generic authority approval load settles already completed backend requests
 });
 
 test("generic authority approval success refetches before settling", () => {
-  const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
+  const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.match(source, /const finalizeApprovedDecision = useCallback[\s\S]*readAuthoritySettlementOrNull\(settledRequest\.request_id\)[\s\S]*settleAuthorityRequest\(finalRequest, finalStatus/);
   assert.match(source, /const finalizeDeniedRequest = useCallback[\s\S]*readAuthoritySettlementOrNull\(settledRequest\.request_id\)[\s\S]*settleAuthorityRequest\(finalRequest, finalStatus\)/);
 });
 
 test("generic authority approval stale post failure refetches and settles before error", () => {
-  const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
+  const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.equal((source.match(/if \(await settleFromServer\(request\.request_id\)\) return;/g) ?? []).length, 4);
 });
 
 test("generic authority approval retries stale native context once without browser bypass", () => {
-  const source = readFileSync(resolve(SRC_ROOT, "components", "AuthorityApprovalWindow.tsx"), "utf8");
+  const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.equal((source.match(/authorityApprovalShouldRetryWithFreshContext\(postError\)/g) ?? []).length, 2);
   assert.match(source, /const submitApproveOnce = async[\s\S]*getApprovalContext\(request\.request_id\)/);
@@ -114,8 +132,8 @@ test("generic authority approval retries stale native context once without brows
 });
 
 test("ambient browser approval QA remains route-scoped without visible send controls", () => {
-  const appSource = readFileSync(resolve(SRC_ROOT, "App.tsx"), "utf8");
-  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const appSource = readSource("App.tsx");
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
 
   assert.match(appSource, /pathname === "\/ambient-debug"/);
   assert.match(appSource, /pathname === "\/ambient-debug" \|\| pathname === "\/finger-recording"/);
@@ -133,8 +151,8 @@ test("ambient browser approval QA remains route-scoped without visible send cont
 });
 
 test("ambient mini window removed browser QA simulated OK payload", () => {
-  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
-  const miniChatSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientMiniChat.tsx"), "utf8");
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
+  const miniChatSource = readSource("ambient", "AmbientMiniChat.tsx");
 
   assert.doesNotMatch(panelSource, /Local Browser QA only/);
   assert.doesNotMatch(panelSource, /debug_qa/);
@@ -146,9 +164,9 @@ test("ambient mini window removed browser QA simulated OK payload", () => {
 });
 
 test("ambient mini chat open button opens the linked chat in the Defaultspack main window", () => {
-  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
-  const miniChatSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientMiniChat.tsx"), "utf8");
-  const desktopSource = readFileSync(resolve(SRC_ROOT, "lib", "desktopApproval.ts"), "utf8");
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
+  const miniChatSource = readSource("ambient", "AmbientMiniChat.tsx");
+  const desktopSource = readSource("lib", "desktopApproval.ts");
 
   assert.match(miniChatSource, /data-testid="ambient-mini-chat-open"/);
   assert.match(panelSource, /function openMiniChatConversation\(\)/);
@@ -160,7 +178,7 @@ test("ambient mini chat open button opens the linked chat in the Defaultspack ma
 });
 
 test("ambient event submit forwards browser QA token header", () => {
-  const clientSource = readFileSync(resolve(SRC_ROOT, "ambient", "ambientTriggerClient.ts"), "utf8");
+  const clientSource = readSource("ambient", "ambientTriggerClient.ts");
 
   assert.match(clientSource, /readBrowserApprovalToken/);
   assert.match(clientSource, /function browserApprovalHeaders\(\)/);
@@ -171,13 +189,13 @@ test("ambient event submit forwards browser QA token header", () => {
 });
 
 test("ambient action failures expand details so auth errors are visible", () => {
-  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
 
   assert.match(panelSource, /catch \(error\) \{\s*setExpanded\(true\);\s*setMessage\(error instanceof Error \? error\.message : "操作を完了できませんでした。"\)/);
 });
 
 test("real OK-mark recording routes audio through transcription before dispatch", () => {
-  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
 
   assert.match(panelSource, /setPinchDetectorStatus\("transcribing"\)/);
   assert.match(panelSource, /ambientOperationLabels\.transcribing/);
@@ -197,7 +215,7 @@ test("real OK-mark recording routes audio through transcription before dispatch"
 });
 
 test("ambient readout toggle uses stable on off copy", () => {
-  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
 
   assert.match(panelSource, /aria-pressed=\{readoutEnabled\}/);
   assert.match(panelSource, /readoutEnabled \? "オン" : "オフ"/);
@@ -205,7 +223,7 @@ test("ambient readout toggle uses stable on off copy", () => {
 });
 
 test("ambient mini chat keeps a submitted conversation active over stale routing", () => {
-  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
 
   assert.match(panelSource, /const miniConversationId = miniConversationIdOverride \|\| linkedAmbientConversationId/);
   assert.match(panelSource, /function ambientSubmittedConversationIdFromResult/);
@@ -218,14 +236,14 @@ test("ambient mini chat keeps a submitted conversation active over stale routing
 });
 
 test("ambient mini chat fallback conversation does not override backend routing", () => {
-  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
 
   assert.match(panelSource, /api\.listConversations\(\{[\s\S]*tag: "ambient"[\s\S]*group_id: "gesture"[\s\S]*limit: 1/);
   assert.doesNotMatch(panelSource, /if \(conversation\?\.id\) setMiniConversationIdOverride\(conversation\.id\)/);
 });
 
 test("ambient submission waits for the stored model reply before completing", () => {
-  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
 
   assert.match(panelSource, /waitForAmbientAssistantResponse/);
   assert.match(panelSource, /setPinchDetectorStatus\("waiting_response"\)/);
@@ -235,7 +253,7 @@ test("ambient submission waits for the stored model reply before completing", ()
 });
 
 test("ambient browser-owned monitor does not leave backend enabled without camera capture", () => {
-  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
 
   assert.match(panelSource, /const monitorEnabledRef = useRef\(false\)/);
   assert.match(panelSource, /cameraStreamRef\.current\?\.getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\)/);
@@ -247,9 +265,8 @@ test("ambient browser-owned monitor does not leave backend enabled without camer
 });
 
 test("Viewer authenticates every dedicated Defaultspack window and rejects unsafe stale listeners", () => {
-  const repositoryRoot = resolve(import.meta.dirname, "../../../../../../");
-  const viewerSource = readFileSync(resolve(repositoryRoot, "rumi_viewer", "src-tauri", "src", "lib.rs"), "utf8");
-  const dockSource = readFileSync(resolve(repositoryRoot, "rumi_viewer", "src-tauri", "src", "dock_registration.rs"), "utf8");
+  const viewerSource = readRepositorySource("rumi_viewer", "src-tauri", "src", "lib.rs");
+  const dockSource = readRepositorySource("rumi_viewer", "src-tauri", "src", "dock_registration.rs");
 
   assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, authority_approval_url/);
   assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, ambient_trigger_url/);
@@ -262,8 +279,8 @@ test("Viewer authenticates every dedicated Defaultspack window and rejects unsaf
 });
 
 test("ambient model selection persists to the canonical selected conversation", () => {
-  const routingSource = readFileSync(resolve(SRC_ROOT, "ambient", "useAmbientRouting.ts"), "utf8");
-  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const routingSource = readSource("ambient", "useAmbientRouting.ts");
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
 
   assert.match(routingSource, /async function saveRoutingModel\(model: string\)/);
   assert.match(routingSource, /api\.updateConversation\(targetConversationId, \{ model: normalizedModel \}\)/);

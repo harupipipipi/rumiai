@@ -1107,6 +1107,73 @@ def test_local_whisper_command_placeholder_can_receive_prompt(monkeypatch, tmp_p
     assert command_log
 
 
+def test_local_whisper_binary_env_is_single_argv_even_with_windows_spaces(monkeypatch, tmp_path):
+    _clear_local_whisper_env(monkeypatch)
+
+    from domain.ambient import local_transcription
+
+    command_path = r"C:\Program Files\Rumi AI\whisper-cli.exe"
+    model_path = tmp_path / "ggml-base.bin"
+    model_path.write_bytes(b"model")
+    monkeypatch.setenv("WHISPER_CPP_BIN", command_path)
+    monkeypatch.setenv("WHISPER_CPP_MODEL", str(model_path))
+
+    command_log = []
+
+    def fake_run_subprocess(argv, *, timeout_seconds):
+        del timeout_seconds
+        command_log.append(argv)
+        assert argv[0] == command_path
+        assert argv[argv.index("-m") + 1] == str(model_path)
+        output_prefix = Path(argv[argv.index("-of") + 1])
+        output_prefix.with_suffix(".txt").write_text("windows path ok\n", encoding="utf-8")
+        return local_transcription.CommandResult(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(local_transcription, "_run_subprocess", fake_run_subprocess)
+
+    result = local_transcription.transcribe_local_audio(
+        "data:audio/wav;base64,AAA=",
+        mime_type="audio/wav",
+    )
+
+    assert result["status"] == "ok"
+    assert result["text"] == "windows path ok"
+    assert command_log
+
+
+def test_local_whisper_binary_env_is_single_argv_even_with_posix_spaces(monkeypatch, tmp_path):
+    _clear_local_whisper_env(monkeypatch)
+
+    from domain.ambient import local_transcription
+
+    command_path = "/Applications/Rumi AI.app/Contents/Resources/bundled/whisper/bin/whisper-cli"
+    model_path = tmp_path / "ggml-base.bin"
+    model_path.write_bytes(b"model")
+    monkeypatch.setenv("WHISPER_CPP_BIN", command_path)
+    monkeypatch.setenv("WHISPER_CPP_MODEL", str(model_path))
+
+    command_log = []
+
+    def fake_run_subprocess(argv, *, timeout_seconds):
+        del timeout_seconds
+        command_log.append(argv)
+        assert argv[0] == command_path
+        output_prefix = Path(argv[argv.index("-of") + 1])
+        output_prefix.with_suffix(".txt").write_text("posix path ok\n", encoding="utf-8")
+        return local_transcription.CommandResult(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(local_transcription, "_run_subprocess", fake_run_subprocess)
+
+    result = local_transcription.transcribe_local_audio(
+        "data:audio/wav;base64,AAA=",
+        mime_type="audio/wav",
+    )
+
+    assert result["status"] == "ok"
+    assert result["text"] == "posix path ok"
+    assert command_log
+
+
 def test_local_whisper_faster_whisper_model_is_cached(monkeypatch):
     _clear_local_whisper_env(monkeypatch)
 

@@ -63,7 +63,9 @@ from domain.tool.schema_adapter import (
 MAX_ATTACHMENT_TEXT_CHARS = 240_000
 MAX_ATTACHMENT_TEXT_CHARS_PER_FILE = 120_000
 MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
+MAX_ATTACHMENT_AUDIO_BYTES = 25 * 1024 * 1024
 _DATA_IMAGE_PREFIX = "data:image/"
+_DATA_AUDIO_PREFIX = "data:audio/"
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _VECTOR_TOOL_ASSIST_PROFILE_IDS = {"defaultspack.mimo_coding_company"}
 _COMPUTER_USE_REQUEST_RE = re.compile(
@@ -919,10 +921,13 @@ def _prepared_user_content(
                 )
             )
             audio_blocks = _attachment_audio_blocks(attachments)
+            audio_placeholders = _attachment_audio_placeholders(attachments)
             if audio_blocks:
                 runtime_content = list(content)
                 runtime_content.extend(audio_blocks)
-                content.extend(_attachment_audio_placeholders(attachments))
+                content.extend(audio_placeholders)
+            elif audio_placeholders:
+                content.extend(audio_placeholders)
     return content if isinstance(content, list) else [{"type": "text", "text": str(content)}], metadata or None, runtime_content
 
 
@@ -1581,6 +1586,12 @@ def _attachment_audio_blocks(attachments: list[dict[str, Any]]) -> list[dict[str
         data_url = attachment.get("dataUrl") or attachment.get("data_url")
         if not mime.startswith("audio/") or not isinstance(data_url, str) or not data_url.startswith("data:"):
             continue
+        size = attachment.get("size")
+        if isinstance(size, int) and size > MAX_ATTACHMENT_AUDIO_BYTES:
+            continue
+        byte_length = _audio_data_url_byte_length(data_url)
+        if byte_length is None or byte_length > MAX_ATTACHMENT_AUDIO_BYTES:
+            continue
         header, encoded = data_url.split(",", 1) if "," in data_url else ("", "")
         if not encoded:
             continue
@@ -1726,6 +1737,18 @@ def _sanitize_attachment_metadata(attachments: list[dict[str, Any]]) -> list[dic
 
 def _image_data_url_byte_length(data_url: Any) -> int | None:
     if not isinstance(data_url, str) or not data_url.startswith(_DATA_IMAGE_PREFIX):
+        return None
+    header, separator, encoded = data_url.partition(",")
+    if not separator or ";base64" not in header.lower():
+        return None
+    try:
+        return len(base64.b64decode(encoded, validate=True))
+    except Exception:
+        return None
+
+
+def _audio_data_url_byte_length(data_url: Any) -> int | None:
+    if not isinstance(data_url, str) or not data_url.startswith(_DATA_AUDIO_PREFIX):
         return None
     header, separator, encoded = data_url.partition(",")
     if not separator or ";base64" not in header.lower():

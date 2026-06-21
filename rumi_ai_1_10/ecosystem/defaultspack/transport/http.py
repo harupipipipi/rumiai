@@ -1179,15 +1179,25 @@ class DefaultsHttpServer:
 
     def _handle_static_file(self, request_data, path_params):
         rel_path = path_params.get("path", "")
-        safe_path = os.path.normpath(rel_path)
-        if safe_path.startswith("..") or os.path.isabs(safe_path):
+        safe_path = os.path.normpath(str(rel_path or "").replace("\\", os.sep))
+        if (
+            safe_path in ("", ".")
+            or safe_path == ".."
+            or safe_path.startswith(".." + os.sep)
+            or os.path.isabs(safe_path)
+        ):
             return error("invalid path")
         pack_root = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
-        file_path = os.path.join(pack_root, "ui", safe_path)
-        if not os.path.isfile(file_path) and (
+        candidate_paths = [os.path.join(pack_root, "ui", safe_path)]
+        if (
             safe_path == "assets" or safe_path.startswith("assets" + os.sep)
         ):
-            file_path = os.path.join(pack_root, safe_path)
+            candidate_paths.append(os.path.join(pack_root, safe_path))
+        candidate_paths.append(os.path.join(pack_root, "webapp", "public", safe_path))
+        file_path = next(
+            (candidate for candidate in candidate_paths if os.path.isfile(candidate)),
+            "",
+        )
         if not os.path.isfile(file_path):
             return error("file not found: " + rel_path)
         ext = os.path.splitext(file_path)[1].lower()

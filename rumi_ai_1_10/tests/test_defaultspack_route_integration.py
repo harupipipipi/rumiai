@@ -198,16 +198,41 @@ def test_routes_json_transport_direct_entries_match_canonical_registry():
     assert committed_direct_routes <= canonical_routes
 
 
-def test_mediapipe_wasm_mirror_matches_webapp_public_canonical():
+def test_static_mediapipe_assets_fall_back_to_webapp_public_canonical(monkeypatch):
+    from ecosystem.defaultspack.transport import http as http_transport
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
     canonical_dir = DEFAULTSPACK_ROOT / "webapp" / "public" / "mediapipe" / "wasm"
-    mirror_dir = DEFAULTSPACK_ROOT / "ui" / "mediapipe" / "wasm"
-
     canonical_files = sorted(path.name for path in canonical_dir.iterdir() if path.is_file())
-    mirror_files = sorted(path.name for path in mirror_dir.iterdir() if path.is_file())
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    real_isfile = http_transport.os.path.isfile
 
-    assert mirror_files == canonical_files
+    def isfile_without_generated_ui(path):
+        if f"{http_transport.os.sep}ui{http_transport.os.sep}" in str(path):
+            return False
+        return real_isfile(path)
+
+    monkeypatch.setattr(http_transport.os.path, "isfile", isfile_without_generated_ui)
+
     for name in canonical_files:
-        assert (mirror_dir / name).read_bytes() == (canonical_dir / name).read_bytes(), name
+        result = server._handle_static_file(
+            {},
+            {"path": f"mediapipe/wasm/{name}"},
+        )
+        assert result["_static"] is True, name
+        expected_body = (
+            (canonical_dir / name).read_bytes()
+            if name.endswith(".wasm")
+            else (canonical_dir / name).read_text(encoding="utf-8")
+        )
+        assert result["body"] == expected_body
+
+    model_result = server._handle_static_file({}, {"path": "models/hand_landmarker.task"})
+    assert model_result["_static"] is True
+    assert model_result["content_type"] == "application/octet-stream"
+    assert model_result["body"] == (
+        DEFAULTSPACK_ROOT / "webapp" / "public" / "models" / "hand_landmarker.task"
+    ).read_bytes()
 
 
 def test_static_mediapipe_wasm_uses_browser_wasm_mime():

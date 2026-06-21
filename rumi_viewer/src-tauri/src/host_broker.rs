@@ -66,7 +66,7 @@ struct HostBrokerShared {
     status: Mutex<HostBrokerStatus>,
     active_requests: Mutex<usize>,
     active_host_streams: Mutex<HashMap<String, HostStreamSession>>,
-    used_approval_tokens: Mutex<HashSet<String>>,
+    used_approval_tokens: Mutex<HashMap<String, u64>>,
 }
 
 #[derive(Debug, Clone)]
@@ -123,7 +123,7 @@ impl HostBrokerRuntime {
                     status: Mutex::new(HostBrokerStatus::disabled(HOST_BROKER_DISABLED_REASON)),
                     active_requests: Mutex::new(0),
                     active_host_streams: Mutex::new(HashMap::new()),
-                    used_approval_tokens: Mutex::new(HashSet::new()),
+                    used_approval_tokens: Mutex::new(HashMap::new()),
                 }),
             });
         }
@@ -175,7 +175,7 @@ impl HostBrokerRuntime {
                     }),
                     active_requests: Mutex::new(0),
                     active_host_streams: Mutex::new(HashMap::new()),
-                    used_approval_tokens: Mutex::new(HashSet::new()),
+                    used_approval_tokens: Mutex::new(HashMap::new()),
                 }),
             };
 
@@ -842,7 +842,8 @@ fn execute_host_stream_start(shared: &HostBrokerShared, request: HostBrokerInten
     if normalized.approval_token.is_none() {
         return host_intent_missing_approval_response(shared, &normalized, audit_id);
     }
-    if let Err(error) = validate_host_intent_approval_token_with_consume(shared, &normalized, false) {
+    if let Err(error) = validate_host_intent_approval_token_with_consume(shared, &normalized, false)
+    {
         return host_intent_approval_error_response(shared, &normalized, audit_id, error);
     }
     if !host_stream_backend_available(shared, &normalized) {
@@ -1643,7 +1644,8 @@ fn validate_approval_token(
             "invalid_token",
         ));
     }
-    if payload.expires_at < now_epoch_seconds() {
+    let now = now_epoch_seconds();
+    if payload.expires_at < now {
         return Err(approval_error(
             "APPROVAL_EXPIRED",
             "approval token expired",
@@ -1698,7 +1700,8 @@ fn validate_approval_token(
             "token_state_error",
         )
     })?;
-    if used.contains(&payload.jti) {
+    used.retain(|_, expires_at| *expires_at >= now);
+    if used.contains_key(&payload.jti) {
         return Err(approval_error(
             "APPROVAL_TOKEN_USED",
             "approval token has already been used",
@@ -1706,7 +1709,7 @@ fn validate_approval_token(
         ));
     }
     if consume {
-        used.insert(payload.jti);
+        used.insert(payload.jti, payload.expires_at);
     }
     Ok(())
 }
@@ -2360,6 +2363,46 @@ mod tests {
     }
 
     #[test]
+    fn broker_prunes_expired_used_approval_tokens() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config);
+        let args = json!({"x": 10, "y": 10});
+        shared.used_approval_tokens.lock().unwrap().insert(
+            "tok-reused-after-expiry".to_string(),
+            now_epoch_seconds().saturating_sub(5),
+        );
+        let token = signed_test_approval_token(
+            "secret",
+            json!({
+                "version": APPROVAL_TOKEN_VERSION,
+                "jti": "tok-reused-after-expiry",
+                "operation": "computer.click",
+                "function_id": "computer.click",
+                "args_hash": hash_arguments_value(&args),
+                "pack_id": "defaultspack",
+                "conversation_id": "conv-1",
+                "expires_at": now_epoch_seconds() + 60,
+            }),
+        );
+
+        let result = validate_approval_token(
+            &shared,
+            &token,
+            "computer.click",
+            "computer.click",
+            &args,
+            &args,
+            "defaultspack",
+            "conv-1",
+            true,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(shared.used_approval_tokens.lock().unwrap().len(), 1);
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
     fn broker_normalizes_backspace_alias_before_whitelist() {
         let (function_id, args) =
             normalize_computer_request("computer.backspace", &json!({"count": 2}));
@@ -2673,7 +2716,7 @@ mod tests {
             status: Mutex::new(HostBrokerStatus::disabled("test")),
             active_requests: Mutex::new(0),
             active_host_streams: Mutex::new(HashMap::new()),
-            used_approval_tokens: Mutex::new(HashSet::new()),
+            used_approval_tokens: Mutex::new(HashMap::new()),
         }
     }
 }

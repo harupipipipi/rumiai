@@ -245,10 +245,13 @@ export function mergeRegisteredSlashCommands(
     const existingIndex = tokens.map((token) => tokenOwners.get(token)).find((index) => index !== undefined);
     if (existingIndex !== undefined) {
       const existing = merged[existingIndex];
+      const incomingAliases = [command.name, ...(command.aliases ?? [])].filter(
+        (alias) => alias && alias !== existing.name && alias !== existing.id,
+      );
       merged[existingIndex] = {
         ...existing,
         visibility: "default",
-        aliases: [...new Set([...(existing.aliases ?? []), ...(command.aliases ?? [])])],
+        aliases: [...new Set([...(existing.aliases ?? []), ...incomingAliases])],
       };
       registerCommandIdentityTokens(tokenOwners, merged[existingIndex], existingIndex, tokens);
       continue;

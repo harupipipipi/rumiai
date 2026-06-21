@@ -208,6 +208,27 @@ test("registered slash command aliases are claimed after built-in merges", () =>
   assert.equal(parseSlashCommandInput("/go", merged)?.command.id, "yolo");
 });
 
+test("registered slash command primary name survives when an alias collides", () => {
+  const builtInYolo: ComposerCommandItem = {
+    id: "yolo",
+    name: "yolo",
+    label: "Yolo Approvals",
+    category: "mode",
+    visibility: "hidden",
+    risk: "medium",
+    execution: { type: "frontend", action: "toggle_yolo" },
+  };
+  const registered = registeredSlashCommandsFromSettings([
+    { name: "camera", action: "open_settings", aliases: ["yolo"] },
+  ]);
+
+  const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
+
+  assert.equal(merged.length, 1);
+  assert.deepEqual(merged[0].aliases, ["camera"]);
+  assert.equal(parseSlashCommandInput("/camera", merged)?.command.id, "yolo");
+});
+
 test("composer command feedback surfaces pack block result messages and paths", () => {
   const command: ComposerCommandItem = {
     id: "context_txt",

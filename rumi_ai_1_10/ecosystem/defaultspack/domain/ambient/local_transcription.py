@@ -228,14 +228,15 @@ def default_local_whisper_model_path(model_size: str = DEFAULT_MODEL_SIZE) -> Pa
 def _configured_command(env: os._Environ[str]) -> dict[str, str] | None:
     custom = str(env.get(COMMAND_ENV_KEY) or "").strip()
     if custom:
-        return {"kind": "custom", "command": custom, "label": "command"}
+        return {"kind": "custom", "command": custom, "label": "command", "argv_mode": "shell"}
     for key in BINARY_ENV_KEYS:
         value = str(env.get(key) or "").strip()
         if value:
             return {
                 "kind": _command_kind(value),
                 "command": value,
-                "label": Path(value).name or value,
+                "label": _command_label(value),
+                "argv_mode": "binary",
             }
     for path in _bundled_command_candidates(env):
         if _is_executable_file(path):
@@ -243,17 +244,19 @@ def _configured_command(env: os._Environ[str]) -> dict[str, str] | None:
                 "kind": _command_kind(path.name),
                 "command": str(path),
                 "label": path.name,
+                "argv_mode": "binary",
             }
     for name in COMMON_COMMANDS:
         path = shutil.which(name)
         if path:
-            return {"kind": _command_kind(name), "command": path, "label": name}
+            return {"kind": _command_kind(name), "command": path, "label": name, "argv_mode": "binary"}
     for path in _well_known_command_candidates():
         if _is_executable_file(path):
             return {
                 "kind": _command_kind(path.name),
                 "command": str(path),
                 "label": path.name,
+                "argv_mode": "binary",
             }
     return None
 
@@ -579,11 +582,14 @@ def _build_command_argv(
     prompt: str,
 ) -> list[str]:
     raw = command["command"]
-    try:
-        tokens = shlex.split(raw)
-    except ValueError as exc:
-        message = "ローカルWhisperコマンドの形式を確認してください。"
-        raise ValueError(message) from exc
+    if command.get("argv_mode") == "binary":
+        tokens = [raw]
+    else:
+        try:
+            tokens = shlex.split(raw, posix=os.name != "nt")
+        except ValueError as exc:
+            message = "ローカルWhisperコマンドの形式を確認してください。"
+            raise ValueError(message) from exc
     if not tokens:
         raise ValueError("ローカルWhisperコマンドが空です。")
 
@@ -835,12 +841,21 @@ def _audio_suffix(mime_type: str) -> str:
 
 
 def _command_kind(command_name: str) -> str:
-    name = Path(str(command_name or "")).name.lower()
+    name = _command_label(command_name).lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
     if name == "whisper":
         return "whisper"
     if name in {"whisper-cli", "whisper.cpp", "whisper-cpp", "main"}:
         return "whisper_cpp"
     return "custom"
+
+
+def _command_label(command_name: str) -> str:
+    value = str(command_name or "").strip()
+    if not value:
+        return value
+    return re.split(r"[\\/]", value.rstrip("\\/"))[-1] or value
 
 
 def _library_model_allowed(model: str) -> bool:
