@@ -126,3 +126,34 @@ test("startWakeListening reports capture errors after startup", async () => {
   assert.ok(reported instanceof Error);
   assert.equal((reported as Error).message, "mic disconnected");
 });
+
+test("startWakeListening reports embedding dispatch errors after startup", async () => {
+  let captures = 0;
+  const embeddings: number[] = [];
+  let reported: unknown = null;
+
+  const stop = await startWakeListening(
+    async (embedding) => {
+      embeddings.push(embedding[0] ?? 0);
+      if (embedding[0] === 2) throw new Error("ambient event dispatch failed");
+    },
+    undefined,
+    {
+      captureEmbedding: async () => {
+        captures += 1;
+        return [captures];
+      },
+      onError: (error) => {
+        reported = error;
+      },
+      retryDelayMs: 20,
+    },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  stop();
+  assert.deepEqual(embeddings, [1, 2]);
+  assert.equal(captures, 2);
+  assert.ok(reported instanceof Error);
+  assert.equal((reported as Error).message, "ambient event dispatch failed");
+});

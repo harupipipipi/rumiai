@@ -292,7 +292,7 @@ export async function startWakeListening(
   const captureAndDispatch = async () => {
     const embedding = await captureEmbedding(700, deviceId);
     if (stopped) return;
-    await onEmbedding(embedding).catch(() => undefined);
+    await onEmbedding(embedding);
   };
 
   await captureAndDispatch();

@@ -19,6 +19,7 @@ import { openDefaultsConsoleWindow, openFingerRecordingWindow, openAuthorityAppr
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { ambientTriggerClient, type AmbientEventPayload, type AmbientStatus } from "./ambientTriggerClient";
 import { ambientConversationCompletionFromSnapshot, waitForAmbientAssistantResponse } from "./ambientConversationCompletion";
+import { safeLocalStorageGet, safeLocalStorageSet } from "./ambientStorage";
 import type { AmbientFinalAnswerPayload } from "./finalAnswerBridge";
 import { AmbientMiniChat } from "./AmbientMiniChat";
 import { buildAmbientDispatchTemplateContext, mergeAmbientDispatchMetadata } from "./ambientDispatchContext";
@@ -59,12 +60,13 @@ import {
   type AmbientRuntimeStatus,
   type AmbientUiState,
 } from "./ambientUiState";
-import { startHandLandmarkerLoop, type HandTrackingFrame } from "./mediaPipeHandLandmarker";
+import type { HandTrackingFrame } from "./mediaPipeHandLandmarker";
 import type { PinchState } from "./gesturePinchDetector";
 import { ChatPickerDialog, CompactRoutingControl, RoutingSettings } from "./AmbientRoutingSettings";
 import { PrimaryActionIcon, StateBadge, StatusGlyph, primaryButtonClass } from "./AmbientTriggerVisuals";
 import { gestureStatusLabel } from "./AmbientPermissionSections";
 import { useFinalAnswerBridge } from "./useFinalAnswerBridge";
+import { useAmbientHandTracker } from "./useAmbientHandTracker";
 import { useAmbientRouting } from "./useAmbientRouting";
 
 export type AmbientApprovalTarget = {
@@ -174,7 +176,6 @@ export function AmbientTriggerPanel({
   const cameraAcquireInFlightRef = useRef(false);
   const monitorEnabledRef = useRef(false);
   const audioStopRef = useRef<(() => void) | null>(null);
-  const gestureStopRef = useRef<(() => void) | null>(null);
   const pinchRecorderRef = useRef<ActiveAudioRecorder | null>(null);
   const pinchSpeechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const pinchTranscriptRef = useRef("");
@@ -666,8 +667,6 @@ export function AmbientTriggerPanel({
   }, [cameraStream, monitorEnabled, settingsOpen, standalone]);
 
   useEffect(() => () => {
-    gestureStopRef.current?.();
-    gestureStopRef.current = null;
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     cameraStreamRef.current = null;
     pinchRecorderRef.current?.cancel();
@@ -904,43 +903,17 @@ export function AmbientTriggerPanel({
     }
   }, [beginPinchRecording, finishPinchRecording, handleApprovalSwipe, submitFingerChoice]);
 
-  useEffect(() => {
-    let cancelled = false;
-    gestureStopRef.current?.();
-    gestureStopRef.current = null;
-    if (rumiApprovalPending || !monitorEnabled || !cameraStream || !videoRef.current) {
-      setPinchDetectorStatus(cameraStream ? "paused" : "idle");
-      setTrackingFrame(null);
-      return;
-    }
-    setPinchDetectorStatus("loading");
-    startHandLandmarkerLoop(videoRef.current, handlePinchState, {
-      choiceRequiresPinch: !approvalTargetRef.current,
-      pinchStartMs: 250,
-      pinchReleaseMs: 180,
-      onFrame: (frame) => setTrackingFrame(frame),
-    })
-      .then((stop) => {
-        if (cancelled) {
-          stop();
-          return;
-        }
-        gestureStopRef.current = stop;
-        setPinchDetectorStatus("tracking");
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setPinchDetectorStatus("unavailable");
-          setMessage(error instanceof Error ? error.message : "指の検出を開始できませんでした。");
-        }
-      });
-    return () => {
-      cancelled = true;
-      gestureStopRef.current?.();
-      gestureStopRef.current = null;
-      setTrackingFrame(null);
-    };
-  }, [Boolean(approvalTarget), cameraStream, handlePinchState, monitorEnabled, rumiApprovalPending, settingsOpen, standalone]);
+  useAmbientHandTracker({
+    approvalTargetActive: Boolean(approvalTarget),
+    cameraStream,
+    monitorEnabled,
+    onPinchState: handlePinchState,
+    rumiApprovalPending,
+    setMessage,
+    setPinchDetectorStatus,
+    setTrackingFrame,
+    videoRef,
+  });
 
   useEffect(() => {
     const previous = previousSelectedCameraIdRef.current;
@@ -2522,21 +2495,4 @@ function cleanString(value: unknown): string | null {
 
 function recordValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
-}
-
-function safeLocalStorageGet(key: string): string {
-  try {
-    return window.localStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function safeLocalStorageSet(key: string, value: string) {
-  try {
-    if (value) window.localStorage.setItem(key, value);
-    else window.localStorage.removeItem(key);
-  } catch {
-    // localStorage can be unavailable in restricted webviews.
-  }
 }

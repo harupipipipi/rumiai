@@ -7,6 +7,7 @@ import {
   parseAmbientFinalAnswerPayload,
   type AmbientFinalAnswerPayload,
 } from "./finalAnswerBridge";
+import { safeLocalStorageGet, safeLocalStorageSet } from "./ambientStorage";
 import { ambientOperationLabels } from "./ambientUiState";
 
 const FRONT_ON_FINAL_STORAGE_KEY = "rumi.ambient.frontOnFinal";
@@ -206,21 +207,4 @@ export function useFinalAnswerBridge({
     stopSpeechReadout,
     speakFinalAnswer,
   };
-}
-
-function safeLocalStorageGet(key: string): string {
-  try {
-    return window.localStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function safeLocalStorageSet(key: string, value: string) {
-  try {
-    if (value) window.localStorage.setItem(key, value);
-    else window.localStorage.removeItem(key);
-  } catch {
-    // localStorage can be unavailable in restricted webviews.
-  }
 }
