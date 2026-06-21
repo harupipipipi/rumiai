@@ -54,6 +54,8 @@ export function DesktopGrid({
   onStop,
   onDelete,
 }: DesktopGridProps) {
+  const singleDesktop = desktops.length === 1;
+
   if (loading) {
     return (
       <div className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2 min-[1400px]:grid-cols-3">
@@ -78,8 +80,9 @@ export function DesktopGrid({
 
   return (
     <div className={cn(
-      "grid grid-cols-1 gap-3 min-[900px]:grid-cols-2",
-      density === "dense" ? "min-[1400px]:grid-cols-4" : "min-[1400px]:grid-cols-3",
+      "grid grid-cols-1 items-start gap-3",
+      !singleDesktop && "min-[900px]:grid-cols-2",
+      !singleDesktop && (density === "dense" ? "min-[1400px]:grid-cols-4" : "min-[1400px]:grid-cols-3"),
     )}>
       {desktops.map((desktop) => (
         <DesktopTile

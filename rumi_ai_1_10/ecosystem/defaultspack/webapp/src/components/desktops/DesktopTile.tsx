@@ -62,6 +62,7 @@ export function DesktopTile({
   const resolution = frame
     ? { width: frame.width, height: frame.height }
     : desktop.resolution ?? { width: 1280, height: 800 };
+  const frameAspectRatio = `${Math.max(resolution.width, 1)} / ${Math.max(resolution.height, 1)}`;
   const provider = desktop.provider_label || desktop.provider_id || "provider pending";
   const controlLabel = hasLease
     ? "Human control"
@@ -116,10 +117,11 @@ export function DesktopTile({
         ref={frameRegionRef}
         onPointerDown={handlePointerDown}
         className={cn(
-          "relative m-3 flex min-h-[154px] flex-1 items-center justify-center overflow-hidden rounded-md border border-zinc-800 bg-black",
+          "relative m-3 flex min-h-[154px] items-center justify-center overflow-hidden rounded-md border border-zinc-800 bg-black",
           hasLease ? "cursor-crosshair" : "cursor-default",
           dense && "min-h-[128px]",
         )}
+        style={{ aspectRatio: frameAspectRatio }}
         role="img"
         aria-label={`${desktop.name} live snapshot`}
       >
