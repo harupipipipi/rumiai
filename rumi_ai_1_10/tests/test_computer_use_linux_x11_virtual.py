@@ -72,7 +72,11 @@ def test_x11_virtual_start_passes_owned_display_env_and_cleanup(monkeypatch, tmp
         env = call["env"]
         assert env["DISPLAY"] == ":88"
         assert env["RUMI_X11_VIRTUAL"] == "1"
-        assert env["KEEP"] == "1"
+        assert env["HOME"] == str(session_path)
+        assert env["TMPDIR"] == str(session_path)
+        assert env["XDG_RUNTIME_DIR"] == str(session_path / "runtime")
+        assert "KEEP" not in env
+        assert "OPENCODE_GO_API_KEY" not in env
         assert "WAYLAND_DISPLAY" not in env
         assert "XAUTHORITY" not in env
 

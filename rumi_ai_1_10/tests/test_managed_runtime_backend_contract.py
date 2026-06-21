@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,6 +27,7 @@ from ecosystem.defaultspack.backend.sandbox.models import (
     SecretsPolicy,
 )
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
+from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.testing.fake_guest_agent import FakeGuestAgent
 from ecosystem.defaultspack.backend.sandbox.testing.fake_provider import FakeRuntimeProvider
 
@@ -257,6 +259,101 @@ def test_fake_provider_create_lifecycle_is_local_only_contract_state() -> None:
     assert started.provider_instance_id not in provider.instances
 
 
+def test_linux_native_provider_desktop_session_capture_and_input(monkeypatch) -> None:
+    from ecosystem.defaultspack.backend.sandbox.providers.linux_native import LinuxNativeProvider
+
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.linux_native.sys.platform", "linux")
+    session = FakeX11Session(width=800, height=600)
+    provider = LinuxNativeProvider(session_factory=lambda **kwargs: session)
+    template = _desktop_only_template()
+
+    assert provider.doctor(RuntimeRequirements(required_capabilities=template.provider_requirements)).ready is True
+
+    instance = provider.create(_create_spec(template))
+    started = provider.start(instance)
+    agent = provider.connect_agent(started)
+
+    frame = agent.capture_frame(started.sandbox_id, started.sandbox_id)
+    action = agent.desktop_input(
+        started.sandbox_id,
+        started.sandbox_id,
+        {"action": "click", "client_action_id": "act-1", "x": 10, "y": 20, "button": "left"},
+    )
+
+    assert started.state == "ready"
+    assert frame["ok"] is True
+    assert frame["data"] == b"png"
+    assert frame["width"] == 800
+    assert frame["height"] == 600
+    assert action["ok"] is True
+    assert session.calls == [("start",), ("screenshot",), ("click", 10, 20, "left")]
+
+    provider.destroy(started)
+    assert session.calls[-1] == ("stop",)
+
+
+def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    lease_manager = ControlLeaseManager(ttl_seconds=30, token_factory=lambda: "lease-token")
+    agent = CaptureGuestAgent(lease_manager=lease_manager, width=800, height=600)
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities={"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"},
+            guest_agent=agent,
+            sandbox_id_factory=lambda: "seat-1",
+        )
+    )
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=lease_manager,
+    )
+    api._reset_service_for_tests(service)
+    try:
+        created = api.run(
+            {
+                "_handler": "desktops_create",
+                "name": "CI Ubuntu",
+                "template_id": "desktop.ubuntu",
+                "provider_id": "fake-runtime",
+                "resolution": {"width": 800, "height": 600},
+            },
+            {},
+        )
+        frame = api.run({"_handler": "desktop_frame", "seat_id": "seat-1"}, {})
+        lease = api.run({"_handler": "desktop_control_acquire", "seat_id": "seat-1"}, {})
+        click = api.run(
+            {
+                "_handler": "desktop_input",
+                "seat_id": "seat-1",
+                "action": "click",
+                "client_action_id": "act-1",
+                "lease_token": "lease-token",
+                "x": 10,
+                "y": 20,
+                "button": "left",
+            },
+            {},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert created["status"] == "ok"
+    assert created["data"]["seat_id"] == "seat-1"
+    assert created["data"]["status"] == "running"
+    assert frame["_binary"] is True
+    assert frame["body"] == b"fake-png"
+    assert frame["headers"]["X-Rumi-Frame-Width"] == "800"
+    assert lease["data"]["lease_token"] == "lease-token"
+    assert click["status"] == "ok"
+    assert click["data"]["accepted"] is True
+    assert agent.desktop_inputs[0].action == "click"
+
+
 def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
     from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
@@ -309,7 +406,68 @@ def _template() -> ResolvedSandboxTemplate:
     )
 
 
+def _desktop_only_template() -> ResolvedSandboxTemplate:
+    return ResolvedSandboxTemplate(
+        template_id="desktop.ubuntu",
+        template_version="1",
+        runtime_os="linux",
+        provider_requirements=frozenset({"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"}),
+        packages=(),
+        desktop=DesktopSpec(enabled=True, width=800, height=600),
+        filesystem=FilesystemPolicy(),
+        network=NetworkPolicy(mode="off"),
+        secrets=SecretsPolicy(mode="denied"),
+        resources=ResourceLimits(cpu_count=1, memory_mb=1024),
+        lifecycle=LifecyclePolicy(ttl_seconds=900),
+        allowed_operations=frozenset({"desktop.input", "desktop.snapshot"}),
+        source_template_ids=("desktop.ubuntu",),
+    )
+
+
 def _create_spec(template: ResolvedSandboxTemplate):
     from ecosystem.defaultspack.backend.sandbox.models import SandboxCreateSpec
 
     return SandboxCreateSpec(name="fake desktop", template=template, provider_id="fake-runtime")
+
+
+class FakeX11Session:
+    display = ":99"
+
+    def __init__(self, *, width: int, height: int) -> None:
+        self.config = SimpleNamespace(width=width, height=height)
+        self.calls: list[tuple[object, ...]] = []
+
+    def missing_commands(self) -> list[str]:
+        return []
+
+    def start(self) -> dict[str, object]:
+        self.calls.append(("start",))
+        return {"available": True, "running": True}
+
+    def stop(self) -> dict[str, object]:
+        self.calls.append(("stop",))
+        return {"available": True, "running": False}
+
+    def screenshot(self) -> dict[str, object]:
+        import base64
+
+        self.calls.append(("screenshot",))
+        return {"data_url": "data:image/png;base64," + base64.b64encode(b"png").decode("ascii")}
+
+    def click(self, x: int, y: int, *, button: str = "left") -> dict[str, object]:
+        self.calls.append(("click", x, y, button))
+        return {"executed": True}
+
+
+class CaptureGuestAgent(FakeGuestAgent):
+    def capture_frame(self, sandbox_id: str, seat_id: str) -> dict[str, object]:
+        return {
+            "ok": True,
+            "sandbox_id": sandbox_id,
+            "seat_id": seat_id,
+            "content_type": "image/png",
+            "data": b"fake-png",
+            "width": self.width,
+            "height": self.height,
+            "source": "capture_guest_agent",
+        }

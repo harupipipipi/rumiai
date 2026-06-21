@@ -24,6 +24,7 @@ class ProgressSink(Protocol):
 
 class GuestAgentClient(Protocol):
     def exec(self, sandbox_id: str, payload: dict[str, object]) -> dict[str, object]: ...
+    def capture_frame(self, sandbox_id: str, seat_id: str) -> dict[str, object]: ...
     def desktop_input(
         self,
         sandbox_id: str,

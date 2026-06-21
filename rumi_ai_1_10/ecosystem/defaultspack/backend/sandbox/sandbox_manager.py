@@ -86,10 +86,21 @@ class SandboxManager:
         display: bool = True,
         *,
         provider_id: str | None = None,
+        name: str | None = None,
+        template_id: str | None = None,
+        width: int | None = None,
+        height: int | None = None,
     ) -> Dict[str, Any]:
         image = str(image or "").strip() or "ubuntu:22.04"
         display = bool(display)
-        template = self._template_for_create(image=image, display=display)
+        template = self._template_for_create(
+            image=image,
+            display=display,
+            template_id=template_id,
+            width=width,
+            height=height,
+        )
+        instance_name = str(name or f"Sandbox {image}").strip() or f"Sandbox {image}"
         requirements = RuntimeRequirements(
             template_id=template.template_id,
             required_capabilities=template.provider_requirements,
@@ -99,7 +110,7 @@ class SandboxManager:
             provider = self._provider_registry.resolve(provider_id or "auto", requirements)
             provider_instance = provider.create(
                 SandboxCreateSpec(
-                    name=f"Sandbox {image}",
+                    name=instance_name,
                     template=template,
                     provider_id=provider.provider_id,
                     metadata={"image": image, "display": display},
@@ -120,7 +131,7 @@ class SandboxManager:
             now = time.time()
             inst = SandboxInstance(
                 sandbox_id=started.sandbox_id,
-                name=f"Sandbox {image}",
+                name=instance_name,
                 image=image,
                 display=display,
                 template_id=template.template_id,
@@ -208,6 +219,10 @@ class SandboxManager:
         if backend_result is not None:
             return backend_result
 
+        provider_result = self._provider_screenshot(inst)
+        if provider_result is not None:
+            return provider_result
+
         return self._backend_unavailable(inst, "screenshot")
 
     def click(self, sandbox_id: str, x: int, y: int) -> Dict[str, Any]:
@@ -254,6 +269,45 @@ class SandboxManager:
             "scrolled",
             {"direction": direction, "amount": amount},
         )
+        if result.get("ok") is True:
+            self._touch_ready_instance(inst.sandbox_id)
+        return result
+
+    def desktop_input(
+        self,
+        seat_id: str,
+        payload: Dict[str, Any],
+        *,
+        actor: str = "human",
+    ) -> Dict[str, Any]:
+        with self._lock:
+            inst, error = self._ready_instance(seat_id)
+            if error is not None:
+                return error
+            assert inst is not None
+        try:
+            agent = self._provider_agent(inst)
+            result = agent.desktop_input(inst.sandbox_id, inst.sandbox_id, payload, actor=actor)
+        except SandboxContractError as exc:
+            result = exc.to_dict()
+        except Exception as exc:
+            result = {
+                "ok": False,
+                "error": f"Desktop input failed: {exc}",
+                "code": "SANDBOX_BACKEND_ACTION_FAILED",
+                "status_code": 502,
+            }
+        if not isinstance(result, dict):
+            result = {
+                "ok": False,
+                "error": "Desktop input returned an invalid payload",
+                "code": "SANDBOX_BACKEND_ACTION_FAILED",
+                "status_code": 502,
+            }
+        result.setdefault("sandbox_id", inst.sandbox_id)
+        result.setdefault("seat_id", inst.sandbox_id)
+        result.setdefault("status", inst.state)
+        result.setdefault("state", inst.state)
         if result.get("ok") is True:
             self._touch_ready_instance(inst.sandbox_id)
         return result
@@ -482,6 +536,35 @@ class SandboxManager:
         result.setdefault("gui_backend", True)
         return result
 
+    def _provider_screenshot(self, inst: SandboxInstance) -> Optional[Dict[str, Any]]:
+        try:
+            agent = self._provider_agent(inst)
+        except SandboxContractError as exc:
+            return exc.to_dict()
+        except Exception as exc:
+            return self._backend_action_failed(inst, "screenshot", f"Sandbox provider screenshot failed: {exc}")
+        capture = getattr(agent, "capture_frame", None)
+        if not callable(capture):
+            return None
+        try:
+            result = capture(inst.sandbox_id, inst.sandbox_id)
+        except SandboxContractError as exc:
+            return exc.to_dict()
+        except Exception as exc:
+            return self._backend_action_failed(inst, "screenshot", f"Sandbox provider screenshot failed: {exc}")
+        if not isinstance(result, dict):
+            return self._backend_action_failed(inst, "screenshot", "Sandbox provider screenshot returned an invalid payload")
+        normalized = dict(result)
+        normalized.setdefault("ok", True)
+        normalized.setdefault("sandbox_id", inst.sandbox_id)
+        normalized.setdefault("seat_id", inst.sandbox_id)
+        normalized.setdefault("status", inst.state)
+        normalized.setdefault("state", inst.state)
+        normalized.setdefault("gui_backend", False)
+        normalized.setdefault("provider_id", inst.provider_id)
+        normalized.setdefault("action", "screenshot")
+        return normalized
+
     def _backend_teardown(self, inst: SandboxInstance) -> Optional[str]:
         backend = self._gui_backend
         if backend is None:
@@ -646,18 +729,31 @@ class SandboxManager:
             inst.touch()
             self._save_registry()
 
-    def _template_for_create(self, *, image: str, display: bool) -> ResolvedSandboxTemplate:
+    def _template_for_create(
+        self,
+        *,
+        image: str,
+        display: bool,
+        template_id: str | None = None,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> ResolvedSandboxTemplate:
         capabilities = {"sandbox.exec", "sandbox.files"}
         allowed_operations = {"exec", "files.read", "files.write"}
         desktop = None
-        template_id = "tool.ephemeral"
+        resolved_template_id = str(template_id or "tool.ephemeral")
         if display:
-            capabilities.update({"sandbox.desktop", "sandbox.desktop_input"})
-            allowed_operations.add("desktop.input")
-            desktop = DesktopSpec(enabled=True, width=1440, height=900, display_backend="x11")
-            template_id = "desktop.ubuntu"
+            capabilities = {"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"}
+            allowed_operations = {"desktop.input", "desktop.observe", "desktop.snapshot"}
+            desktop = DesktopSpec(
+                enabled=True,
+                width=int(width or 1440),
+                height=int(height or 900),
+                display_backend="xvfb_openbox",
+            )
+            resolved_template_id = str(template_id or "desktop.ubuntu")
         return ResolvedSandboxTemplate(
-            template_id=template_id,
+            template_id=resolved_template_id,
             template_version="1",
             runtime_os="linux",
             provider_requirements=frozenset(capabilities),
@@ -669,7 +765,7 @@ class SandboxManager:
             resources=ResourceLimits(cpu_count=1, memory_mb=2048, timeout_ms=600_000),
             lifecycle=LifecyclePolicy(ttl_seconds=900, persistent=False, destroy_on_exit=True),
             allowed_operations=frozenset(allowed_operations),
-            source_template_ids=(template_id, image),
+            source_template_ids=(resolved_template_id, image),
         )
 
     def _instance_to_dict(self, inst: SandboxInstance) -> Dict[str, Any]:
@@ -717,6 +813,10 @@ class SandboxManager:
             generation=max(1, int(_float_or_zero(data.get("generation") or 1))),
             recovery_token_hash=str(data.get("recovery_token_hash")) if data.get("recovery_token_hash") is not None else None,
         )
+
+    def _provider_agent(self, inst: SandboxInstance):
+        provider = self._provider_registry.get(inst.provider_id)
+        return provider.connect_agent(self._provider_instance(inst))
 
 
 def _canonical_state(value: Any) -> str:

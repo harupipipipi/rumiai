@@ -18,7 +18,7 @@ export function DesktopMonitorWorkspace() {
   const runtime = useRuntimeDoctor({ autoRunDoctor: true });
   const runtimeReady = runtime.availability.status === "ready";
   const templates = useSandboxTemplates({ enabled: runtimeReady });
-  const desktopInstances = useDesktopInstances({ enabled: runtimeReady });
+  const desktopInstances = useDesktopInstances({ enabled: runtimeReady, pollIntervalMs: 2500 });
   const [filter, setFilter] = useState<DesktopFilter>("all");
   const [density, setDensity] = useState<DesktopDensity>("comfortable");
   const [selectedSeatId, setSelectedSeatId] = useState<string | null>(null);

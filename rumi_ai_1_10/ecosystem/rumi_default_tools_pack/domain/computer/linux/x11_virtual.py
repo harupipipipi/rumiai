@@ -320,11 +320,20 @@ class X11VirtualSession:
     def _session_env(self) -> dict[str, str]:
         if not self._display:
             raise RuntimeError("Cannot build X11 virtual env before DISPLAY allocation.")
-        env = dict(self._base_env)
+        env: dict[str, str] = {}
+        for key in ("PATH", "LANG", "LC_ALL", "LC_CTYPE"):
+            value = self._base_env.get(key)
+            if value:
+                env[key] = value
+        session_dir = self._session_dir or Path(tempfile.gettempdir())
+        runtime_dir = session_dir / "runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        env["HOME"] = str(session_dir)
+        env["TMPDIR"] = str(session_dir)
+        env["TEMP"] = str(session_dir)
+        env["TMP"] = str(session_dir)
+        env["XDG_RUNTIME_DIR"] = str(runtime_dir)
         env["DISPLAY"] = self._display
-        env.pop("WAYLAND_DISPLAY", None)
-        env.pop("MIR_SOCKET", None)
-        env.pop("XAUTHORITY", None)
         env["RUMI_X11_VIRTUAL"] = "1"
         return env
 

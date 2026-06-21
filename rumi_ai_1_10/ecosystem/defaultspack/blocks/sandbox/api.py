@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
 import platform
+from dataclasses import asdict, is_dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -10,147 +13,500 @@ try:
 except ModuleNotFoundError:
     from ecosystem.defaultspack.blocks._common import error, ok, timestamp
 
+from ecosystem.defaultspack.backend.sandbox.control_lease import ControlLeaseManager
+from ecosystem.defaultspack.backend.sandbox.errors import SandboxContractError
+from ecosystem.defaultspack.backend.sandbox.frame_cache import FrameCache
+from ecosystem.defaultspack.backend.sandbox.models import (
+    EnsureRuntimeRequest,
+    OperationResult,
+    RuntimeProviderStatus,
+    RuntimeRequirements,
+)
+from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
+from ecosystem.defaultspack.backend.sandbox.providers import LinuxNativeProvider
+from ecosystem.defaultspack.backend.sandbox.providers.base import NullProgressSink
+from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
+
 
 RUNTIME_NOT_READY = "MANAGED_RUNTIME_NOT_READY"
+RUNNING_STATES = {"ready", "busy", "running"}
+
+
+class _SandboxApiService:
+    def __init__(self) -> None:
+        self.provider_registry = ProviderRegistry()
+        self.provider_registry.register(LinuxNativeProvider())
+        self.manager = SandboxManager(provider_registry=self.provider_registry)
+        self.frame_cache = FrameCache()
+        self.lease_manager = ControlLeaseManager()
+
+
+_SERVICE: _SandboxApiService | None = None
 
 
 def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None):
     del context
     payload = input_data if isinstance(input_data, dict) else {}
     handler = str(payload.get("_handler") or "runtime_providers")
-    if handler == "runtime_providers":
-        return ok(_runtime_providers())
-    if handler == "runtime_doctor":
-        return ok(_runtime_doctor())
-    if handler == "runtime_ensure":
-        return ok(_runtime_operation("failed", provider_id=payload.get("provider_id")))
-    if handler == "runtime_update":
-        return ok(_runtime_operation("failed", provider_id=payload.get("provider_id"), operation_id="managed-runtime-update"))
-    if handler == "runtime_uninstall":
-        return ok(_runtime_operation("failed", provider_id=payload.get("provider_id"), operation_id="managed-runtime-uninstall"))
-    if handler == "runtime_operations":
-        return ok({"operations": []})
-    if handler in {"runtime_operation", "runtime_operation_get"}:
-        return ok(_runtime_operation("failed", operation_id=str(payload.get("operation_id") or "runtime-operation")))
-    if handler in {"runtime_cancel", "runtime_operation_cancel"}:
-        return ok(_runtime_operation("cancelled", operation_id=str(payload.get("operation_id") or "runtime-operation")))
-    if handler == "sandbox_templates":
-        return ok({"templates": _template_summaries()})
-    if handler == "sandboxes_list":
-        return ok({"sandboxes": []})
-    if handler == "sandboxes_create":
-        return error("Managed sandbox runtime is not ready.", RUNTIME_NOT_READY)
-    if handler == "desktops_list":
-        return ok({"desktops": []})
-    if handler == "desktops_create":
-        return error("Managed desktop runtime is not ready.", RUNTIME_NOT_READY)
-    if handler.startswith("desktop_") or handler.startswith("sandbox_"):
-        return error("Managed sandbox runtime is not ready.", RUNTIME_NOT_READY)
-    return error(f"Unknown sandbox API handler: {handler}", "UNKNOWN_SANDBOX_API_HANDLER")
+    service = _service()
+    try:
+        if handler == "runtime_providers":
+            return ok(_runtime_providers(service))
+        if handler == "runtime_doctor":
+            return ok(_runtime_doctor(service))
+        if handler == "runtime_ensure":
+            return ok(_runtime_ensure(service, payload))
+        if handler == "runtime_update":
+            return ok(_runtime_operation("completed", provider_id=payload.get("provider_id"), operation_id="managed-runtime-update"))
+        if handler == "runtime_uninstall":
+            return ok(_runtime_operation("completed", provider_id=payload.get("provider_id"), operation_id="managed-runtime-uninstall"))
+        if handler == "runtime_operations":
+            return ok({"operations": []})
+        if handler in {"runtime_operation", "runtime_operation_get"}:
+            return ok(_runtime_operation("failed", operation_id=str(payload.get("operation_id") or "runtime-operation")))
+        if handler in {"runtime_cancel", "runtime_operation_cancel"}:
+            return ok(_runtime_operation("cancelled", operation_id=str(payload.get("operation_id") or "runtime-operation")))
+        if handler == "sandbox_templates":
+            return ok({"templates": _template_summaries()})
+        if handler == "sandboxes_list":
+            return ok({"sandboxes": [_sandbox_payload(item) for item in service.manager.list_instances()]})
+        if handler == "sandboxes_create":
+            return _sandbox_create(service, payload, display=False)
+        if handler == "sandbox_get":
+            return _sandbox_get(service, payload)
+        if handler == "sandbox_delete":
+            return _sandbox_delete(service, payload)
+        if handler in {"sandbox_start", "sandbox_stop", "sandbox_restart"}:
+            return _api_error("Sandbox start/stop/restart is not implemented yet.", "SANDBOX_LIFECYCLE_NOT_READY", 501)
+        if handler == "desktops_list":
+            return ok({"desktops": _desktop_list(service)})
+        if handler == "desktops_create":
+            return _sandbox_create(service, payload, display=True)
+        if handler == "desktop_get":
+            return _desktop_get(service, payload)
+        if handler == "desktop_delete":
+            return _desktop_delete(service, payload)
+        if handler in {"desktop_start", "desktop_stop", "desktop_restart"}:
+            return _api_error("Desktop start/stop/restart is not implemented yet.", "DESKTOP_LIFECYCLE_NOT_READY", 501)
+        if handler == "desktop_frame":
+            return _desktop_frame(service, payload)
+        if handler == "desktop_input":
+            return _desktop_input(service, payload)
+        if handler == "desktop_control_acquire":
+            return _desktop_control_acquire(service, payload)
+        if handler == "desktop_control_renew":
+            return _desktop_control_renew(service, payload)
+        if handler == "desktop_control_release":
+            return _desktop_control_release(service, payload)
+    except SandboxContractError as exc:
+        return _api_error(exc.message, exc.code, exc.status_code, details=exc.details)
+    return _api_error(f"Unknown sandbox API handler: {handler}", "UNKNOWN_SANDBOX_API_HANDLER", 400)
 
 
-def _runtime_providers() -> dict[str, Any]:
-    provider = _selected_provider()
-    providers = [provider, _docker_provider()]
+def _service() -> _SandboxApiService:
+    global _SERVICE
+    if _SERVICE is None:
+        _SERVICE = _SandboxApiService()
+    return _SERVICE
+
+
+def _reset_service_for_tests(service: _SandboxApiService | None = None) -> None:
+    global _SERVICE
+    _SERVICE = service
+
+
+def _runtime_providers(service: _SandboxApiService) -> dict[str, Any]:
+    default_provider_id = _default_provider_id()
+    statuses = [_provider_payload(status, selected=status.provider_id == default_provider_id) for status in service.provider_registry.doctor_all()]
+    if not any(provider.get("provider_id") == default_provider_id for provider in statuses):
+        statuses.insert(0, _placeholder_provider(default_provider_id, selected=True))
+    statuses.append(_docker_provider())
     return {
-        "providers": providers,
-        "selected_provider_id": provider["provider_id"],
-        "default_provider_id": provider["provider_id"],
+        "providers": statuses,
+        "selected_provider_id": default_provider_id,
+        "default_provider_id": default_provider_id,
         "runtime_version": None,
         "guest_protocol": 1,
     }
 
 
-def _runtime_doctor() -> dict[str, Any]:
-    provider = _selected_provider()
+def _runtime_doctor(service: _SandboxApiService) -> dict[str, Any]:
+    providers = _runtime_providers(service)["providers"]
+    ready = any(provider.get("ready") is True for provider in providers)
+    selected = next((provider for provider in providers if provider.get("provider_id") == _default_provider_id()), providers[0] if providers else {})
     return {
-        "status": "needs_setup",
-        "providers": [provider, _docker_provider()],
-        "selected_provider_id": provider["provider_id"],
-        "missing": provider["missing"],
-        "message": "Rumi Managed Runtime needs bundled provider setup before desktops can start.",
+        "status": "ready" if ready else "needs_setup",
+        "providers": providers,
+        "selected_provider_id": selected.get("provider_id"),
+        "missing": selected.get("missing", []),
+        "message": "Rumi Managed Runtime is ready." if ready else "Rumi Managed Runtime needs provider setup before desktops can start.",
         "diagnostics": {
             "runtime_api": "available",
-            "execution_provider": "not_bundled",
+            "execution_provider": selected.get("status", "unknown"),
             "generated_at": timestamp(),
         },
         "generated_at": timestamp(),
     }
 
 
+def _runtime_ensure(service: _SandboxApiService, payload: dict[str, Any]) -> dict[str, Any]:
+    provider_id = str(payload.get("provider_id") or _default_provider_id())
+    requirements = RuntimeRequirements(provider_id=provider_id)
+    try:
+        provider = service.provider_registry.get(provider_id)
+    except SandboxContractError:
+        return _runtime_operation("failed", provider_id=provider_id)
+    sink = NullProgressSink()
+    result = provider.ensure(EnsureRuntimeRequest(provider_id=provider_id, requirements=requirements), sink)
+    return _operation_payload(result)
+
+
 def _runtime_operation(status: str, *, provider_id: Any = None, operation_id: str = "managed-runtime-setup") -> dict[str, Any]:
-    selected = _selected_provider()
+    failed = status == "failed"
     return {
         "operation_id": operation_id,
         "status": status,
-        "step": "provider_setup_unavailable",
-        "message": "This build exposes the managed runtime API, but the OS provider setup helper is not bundled yet.",
-        "progress": 0,
+        "step": "provider_setup",
+        "message": "Managed runtime provider setup is not available in this build." if failed else "Runtime operation completed.",
+        "progress": 0 if failed else 100,
         "reboot_required": False,
-        "provider_id": str(provider_id or selected["provider_id"]),
+        "provider_id": str(provider_id or _default_provider_id()),
         "updated_at": timestamp(),
         "error": {
             "code": RUNTIME_NOT_READY,
             "message": "Managed runtime provider setup is not available in this build.",
-        } if status == "failed" else None,
+        } if failed else None,
     }
 
 
-def _selected_provider() -> dict[str, Any]:
+def _sandbox_create(service: _SandboxApiService, payload: dict[str, Any], *, display: bool):
+    resolution = payload.get("resolution") if isinstance(payload.get("resolution"), dict) else {}
+    created = service.manager.create(
+        image="ubuntu:22.04",
+        display=display,
+        provider_id=str(payload.get("provider_id") or "auto"),
+        name=str(payload.get("name") or ("Ubuntu Desktop" if display else "Sandbox")),
+        template_id=str(payload.get("template_id") or ("desktop.ubuntu" if display else "tool.ephemeral")),
+        width=_positive_int(resolution.get("width"), 1440),
+        height=_positive_int(resolution.get("height"), 900),
+    )
+    if created.get("ok") is not True:
+        return _api_error(str(created.get("error") or "Sandbox create failed"), str(created.get("code") or RUNTIME_NOT_READY), int(created.get("status_code") or 503))
+    status = service.manager.status(str(created["sandbox_id"]))
+    data = _desktop_payload(service, status) if display else _sandbox_payload(status)
+    return ok(data)
+
+
+def _sandbox_get(service: _SandboxApiService, payload: dict[str, Any]):
+    status = service.manager.status(str(payload.get("sandbox_id") or ""))
+    if status.get("ok") is not True:
+        return _api_error(str(status.get("error") or "Sandbox not found"), str(status.get("code") or "SANDBOX_NOT_FOUND"), int(status.get("status_code") or 404))
+    return ok(_sandbox_payload(status))
+
+
+def _sandbox_delete(service: _SandboxApiService, payload: dict[str, Any]):
+    sandbox_id = str(payload.get("sandbox_id") or "")
+    result = service.manager.destroy(sandbox_id)
+    if result.get("ok") is not True:
+        return _api_error(str(result.get("error") or "Sandbox delete failed"), str(result.get("code") or "SANDBOX_DELETE_FAILED"), int(result.get("status_code") or 400))
+    service.frame_cache.discard(sandbox_id)
+    service.lease_manager.invalidate(sandbox_id)
+    return ok({"deleted": True, "sandbox_id": sandbox_id})
+
+
+def _desktop_list(service: _SandboxApiService) -> list[dict[str, Any]]:
+    return [
+        _desktop_payload(service, item)
+        for item in service.manager.list_instances()
+        if item.get("display") is True
+    ]
+
+
+def _desktop_get(service: _SandboxApiService, payload: dict[str, Any]):
+    seat_id = str(payload.get("seat_id") or "")
+    status = service.manager.status(seat_id)
+    if status.get("ok") is not True:
+        return _api_error(str(status.get("error") or "Desktop not found"), str(status.get("code") or "DESKTOP_NOT_FOUND"), int(status.get("status_code") or 404))
+    return ok(_desktop_payload(service, status))
+
+
+def _desktop_delete(service: _SandboxApiService, payload: dict[str, Any]):
+    seat_id = str(payload.get("seat_id") or "")
+    result = service.manager.destroy(seat_id)
+    if result.get("ok") is not True:
+        return _api_error(str(result.get("error") or "Desktop delete failed"), str(result.get("code") or "DESKTOP_DELETE_FAILED"), int(result.get("status_code") or 400))
+    service.frame_cache.discard(seat_id)
+    service.lease_manager.invalidate(seat_id)
+    return ok({"deleted": True, "seat_id": seat_id})
+
+
+def _desktop_frame(service: _SandboxApiService, payload: dict[str, Any]):
+    seat_id = str(payload.get("seat_id") or "")
+    after_seq = _optional_int(payload.get("after"))
+    reservation = service.frame_cache.reserve_capture(seat_id)
+    if reservation is not None:
+        screenshot = service.manager.screenshot(seat_id)
+        try:
+            if screenshot.get("ok") is True:
+                frame_data, content_type = _frame_bytes(screenshot)
+                service.frame_cache.put_frame(
+                    seat_id,
+                    frame_data,
+                    content_type=content_type,
+                    width=_positive_int(screenshot.get("width"), 0),
+                    height=_positive_int(screenshot.get("height"), 0),
+                    source=str(screenshot.get("source") or screenshot.get("provider_id") or "managed_runtime"),
+                )
+        finally:
+            service.frame_cache.release_capture(seat_id)
+
+    try:
+        fetched = service.frame_cache.get_frame(seat_id, after_seq=after_seq)
+    except SandboxContractError as exc:
+        return _api_error(exc.message, exc.code, exc.status_code)
+    if fetched.not_modified:
+        return {
+            "_empty": True,
+            "status_code": 204,
+            "headers": {"X-Rumi-Frame-Seq": str(fetched.frame_seq)},
+        }
+    assert fetched.frame is not None
+    frame = fetched.frame
+    return {
+        "_binary": True,
+        "status_code": 200,
+        "content_type": frame.content_type,
+        "body": frame.data,
+        "headers": {
+            "Cache-Control": "no-store",
+            "X-Rumi-Frame-Seq": str(frame.frame_seq),
+            "X-Rumi-Frame-Width": str(frame.width),
+            "X-Rumi-Frame-Height": str(frame.height),
+            "X-Rumi-Captured-At": str(frame.captured_at),
+        },
+    }
+
+
+def _desktop_input(service: _SandboxApiService, payload: dict[str, Any]):
+    seat_id = str(payload.get("seat_id") or "")
+    lease_token = payload.get("lease_token")
+    service.lease_manager.validate_human_input(seat_id, str(lease_token) if lease_token is not None else None)
+    result = service.manager.desktop_input(seat_id, payload, actor="human")
+    if result.get("ok") is not True:
+        return _api_error(str(result.get("error") or "Desktop input failed"), str(result.get("code") or "DESKTOP_INPUT_FAILED"), int(result.get("status_code") or 400))
+    return ok({"accepted": True, "seat_id": seat_id, "action": result.get("action")})
+
+
+def _desktop_control_acquire(service: _SandboxApiService, payload: dict[str, Any]):
+    seat_id = str(payload.get("seat_id") or "")
+    owner_id = str(payload.get("owner_id") or "human")
+    grant = service.lease_manager.acquire(seat_id, owner_id)
+    response = grant.to_response()
+    response["expires_at"] = _iso_timestamp(grant.expires_at)
+    return ok(response)
+
+
+def _desktop_control_renew(service: _SandboxApiService, payload: dict[str, Any]):
+    seat_id = str(payload.get("seat_id") or "")
+    owner_id = str(payload.get("owner_id") or "human")
+    lease_token = str(payload.get("lease_token") or "")
+    renewed = service.lease_manager.renew(seat_id, owner_id, lease_token)
+    response = renewed.to_dict()
+    response["acquired_at"] = _iso_timestamp(renewed.acquired_at)
+    response["expires_at"] = _iso_timestamp(renewed.expires_at)
+    return ok(response)
+
+
+def _desktop_control_release(service: _SandboxApiService, payload: dict[str, Any]):
+    seat_id = str(payload.get("seat_id") or "")
+    owner_id = str(payload.get("owner_id") or "human")
+    lease_token = str(payload.get("lease_token") or "")
+    released = service.lease_manager.release(seat_id, owner_id, lease_token)
+    return ok({"released": released, "seat_id": seat_id})
+
+
+def _provider_payload(status: RuntimeProviderStatus, *, selected: bool) -> dict[str, Any]:
+    state = "ready" if status.ready else "needs_setup" if status.available else "unavailable"
+    return {
+        "provider_id": status.provider_id,
+        "label": _provider_label(status.provider_id),
+        "status": state,
+        "available": status.available,
+        "installed": status.installed,
+        "ready": status.ready,
+        "selected": selected,
+        "managed": status.provider_id != "docker",
+        "platform": status.platform,
+        "version": status.version,
+        "guest_protocol": 1,
+        "capabilities": sorted(status.capabilities),
+        "missing": [
+            {
+                "code": diagnostic.code,
+                "severity": diagnostic.severity,
+                "message": diagnostic.message,
+                "detail": json.dumps(dict(diagnostic.details), ensure_ascii=False) if diagnostic.details else None,
+            }
+            for diagnostic in status.diagnostics
+        ] + [
+            {
+                "code": str(item),
+                "severity": "warning",
+                "message": f"Missing runtime requirement: {item}",
+            }
+            for item in status.missing_requirements
+        ],
+        "isolation": _provider_isolation(status.provider_id, status.ready),
+        "message": "Ready" if status.ready else (status.user_action or "Setup is required before managed desktops can start."),
+    }
+
+
+def _operation_payload(result: OperationResult) -> dict[str, Any]:
+    return {
+        "operation_id": result.operation_id,
+        "status": "completed" if result.ok else "failed",
+        "step": result.status,
+        "message": "Runtime provider is ready." if result.ok else (result.user_action or "Runtime provider is not ready."),
+        "progress": 100 if result.ok else 0,
+        "reboot_required": result.reboot_required,
+        "provider_id": result.provider_id,
+        "updated_at": timestamp(),
+        "error": None if result.ok else {
+            "code": RUNTIME_NOT_READY,
+            "message": result.user_action or "Managed runtime provider setup is not available.",
+        },
+    }
+
+
+def _sandbox_payload(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "sandbox_id": item.get("sandbox_id"),
+        "template_id": item.get("template_id"),
+        "name": item.get("name"),
+        "status": item.get("state") or item.get("status"),
+        "state": item.get("state") or item.get("status"),
+        "provider_id": item.get("provider_id"),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }
+
+
+def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[str, Any]:
+    seat_id = str(item.get("sandbox_id") or item.get("seat_id") or "")
+    desktop = item.get("desktop_spec") if isinstance(item.get("desktop_spec"), dict) else {}
+    state = str(item.get("state") or item.get("status") or "unknown")
+    frame = service.frame_cache.last_metadata(seat_id)
+    lease = service.lease_manager.active_lease(seat_id)
+    return {
+        "seat_id": seat_id,
+        "sandbox_id": seat_id,
+        "name": item.get("name") or "Ubuntu Desktop",
+        "status": "running" if state in RUNNING_STATES else state,
+        "provider_id": item.get("provider_id"),
+        "provider_label": _provider_label(str(item.get("provider_id") or "")),
+        "template_id": item.get("template_id") or "desktop.ubuntu",
+        "resolution": {
+            "width": _positive_int(desktop.get("width"), 1440),
+            "height": _positive_int(desktop.get("height"), 900),
+        },
+        "frame": None if frame is None else {
+            "frame_seq": frame.get("frame_seq"),
+            "width": frame.get("width"),
+            "height": frame.get("height"),
+            "mime_type": frame.get("content_type"),
+            "captured_at": frame.get("captured_at"),
+        },
+        "assigned_agent": item.get("assigned_agent_id"),
+        "control": {
+            "holder": "human" if lease is not None else "none",
+            "lease_expires_at": None if lease is None else _iso_timestamp(lease.expires_at),
+        },
+        "isolation": _provider_isolation(str(item.get("provider_id") or ""), state in RUNNING_STATES),
+        "network_policy": {"summary": "off", "default": "off"},
+        "workspace": {"workspace_id": None, "label": None, "access": "none"},
+        "last_error": item.get("last_error"),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }
+
+
+def _frame_bytes(screenshot: dict[str, Any]) -> tuple[bytes, str]:
+    data = screenshot.get("data")
+    if isinstance(data, bytes):
+        return data, str(screenshot.get("content_type") or "image/png")
+    data_url = str(screenshot.get("data_url") or "")
+    if data_url.startswith("data:") and "," in data_url:
+        header, payload = data_url.split(",", 1)
+        content_type = header[5:].split(";", 1)[0] or "image/png"
+        return base64.b64decode(payload), content_type
+    raise SandboxContractError("FRAME_NOT_FOUND", "Desktop screenshot did not include frame bytes", status_code=404)
+
+
+def _default_provider_id() -> str:
     system = platform.system().lower()
     if system == "darwin":
-        provider_id = "mac_lima"
-        label = "Rumi-managed Lima Ubuntu"
-        missing_code = "lima_provider_not_bundled"
-        isolation = {
-            "mode": "vm_pending",
-            "vm": True,
-            "container": False,
-            "summary": "macOS desktops require a Rumi-managed Lima Ubuntu VM after explicit setup consent.",
-        }
-    elif system == "windows":
-        provider_id = "windows_wsl"
-        label = "RumiUbuntu WSL2"
-        missing_code = "wsl_provider_not_bundled"
-        isolation = {
-            "mode": "wsl2_pending",
-            "vm": True,
-            "container": False,
-            "summary": "Windows desktops require a Rumi-owned RumiUbuntu WSL2 distribution after explicit setup consent.",
-        }
-    else:
-        provider_id = "linux_native"
-        label = "Linux native Xvfb/Openbox"
-        missing_code = "linux_native_provider_not_bundled"
-        isolation = {
-            "mode": "native_pending",
+        return "mac_lima"
+    if system == "windows":
+        return "windows_wsl"
+    return "linux_native"
+
+
+def _provider_label(provider_id: str) -> str:
+    return {
+        "linux_native": "Linux native Xvfb/Openbox",
+        "windows_wsl": "RumiUbuntu WSL2",
+        "mac_lima": "Rumi-managed Lima Ubuntu",
+        "docker": "Docker-compatible runtime",
+    }.get(provider_id, provider_id or "Unknown provider")
+
+
+def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
+    if provider_id == "linux_native":
+        return {
+            "mode": "native_x11" if ready else "native_pending",
             "vm": False,
             "container": False,
             "host_process_namespace": True,
             "host_filesystem_shared": True,
             "host_network_shared": True,
-            "summary": "Linux native provider is not active; native Xvfb alone is not VM isolation.",
-            "warnings": ["Linux native isolation depends on bubblewrap/systemd capabilities when implemented."],
+            "summary": "Linux native provider uses a Rumi-owned Xvfb/Openbox display. It is not VM isolation.",
+            "warnings": ["Use WSL/Lima/container providers for stronger process and filesystem isolation."],
         }
+    if provider_id == "docker":
+        return {
+            "mode": "container_optional",
+            "container": True,
+            "summary": "Optional provider only; Docker Desktop is never installed silently.",
+        }
+    return {"mode": "unavailable", "summary": "Runtime isolation is unavailable until a provider is ready."}
+
+
+def _placeholder_provider(provider_id: str, *, selected: bool) -> dict[str, Any]:
+    missing_code = {
+        "mac_lima": "lima_provider_not_bundled",
+        "windows_wsl": "wsl_provider_not_bundled",
+        "linux_native": "linux_native_provider_not_bundled",
+    }.get(provider_id, "runtime_provider_not_bundled")
     return {
         "provider_id": provider_id,
-        "label": label,
+        "label": _provider_label(provider_id),
         "status": "needs_setup",
         "available": False,
         "installed": False,
         "ready": False,
-        "selected": True,
+        "selected": selected,
         "managed": True,
         "platform": platform.system().lower() or "unknown",
         "version": None,
         "guest_protocol": 1,
+        "capabilities": [],
         "missing": [{
             "code": missing_code,
             "severity": "warning",
             "message": "Managed provider setup helper is not bundled in this build.",
             "remediation": "Use the managed runtime diagnostics bundle when continuing provider implementation.",
         }],
-        "isolation": isolation,
+        "isolation": _provider_isolation(provider_id, False),
         "message": "Setup is required before managed desktops can start.",
     }
 
@@ -168,16 +524,13 @@ def _docker_provider() -> dict[str, Any]:
         "platform": platform.system().lower() or "unknown",
         "version": None,
         "guest_protocol": 1,
+        "capabilities": [],
         "missing": [{
             "code": "docker_optional_not_selected",
             "severity": "info",
             "message": "Docker-compatible providers are optional and are not installed or selected by Rumi automatically.",
         }],
-        "isolation": {
-            "mode": "container_optional",
-            "container": True,
-            "summary": "Optional provider only; Docker Desktop is never installed silently.",
-        },
+        "isolation": _provider_isolation("docker", False),
         "message": "Optional provider only.",
     }
 
@@ -226,3 +579,42 @@ def _template_summaries() -> list[dict[str, Any]]:
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[5]
+
+
+def _api_error(message: str, code: str, status_code: int = 400, *, details: Any | None = None) -> dict[str, Any]:
+    response = error(message, code)
+    response["_http_status"] = status_code
+    if details is not None:
+        response["error"]["details"] = _jsonable(details)
+    return response
+
+
+def _jsonable(value: Any) -> Any:
+    if is_dataclass(value):
+        return _jsonable(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
+def _positive_int(value: Any, fallback: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed > 0 else fallback
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _iso_timestamp(value: float) -> str:
+    return datetime.fromtimestamp(float(value), tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")

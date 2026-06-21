@@ -19,7 +19,7 @@ def _registry(
     registry.register(
         FakeRuntimeProvider(
             provider_id="fake-runtime",
-            capabilities=capabilities or {"sandbox.exec", "sandbox.files", "sandbox.desktop", "sandbox.desktop_input"},
+            capabilities=capabilities or {"sandbox.exec", "sandbox.files", "sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"},
             ready=ready,
             sandbox_id_factory=sandbox_id_factory,
         )
