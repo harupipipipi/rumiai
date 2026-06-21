@@ -30,6 +30,9 @@ from ecosystem.defaultspack.backend.sandbox.testing.fake_guest_agent import Fake
 from ecosystem.defaultspack.backend.sandbox.testing.fake_provider import FakeRuntimeProvider
 
 
+pytestmark = pytest.mark.contract
+
+
 class Clock:
     def __init__(self, now: float = 1_000.0) -> None:
         self.now = now

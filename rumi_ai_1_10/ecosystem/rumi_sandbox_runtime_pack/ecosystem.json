@@ -11,6 +11,7 @@
       "profile",
       "prompt",
       "preset",
+      "template",
       "example",
       "spec",
       "checklist",
@@ -85,6 +86,16 @@
       "specs": [
         "specs/execution_boundary_matrix.yaml",
         "specs/runtime_receipt.schema.yaml"
+      ],
+      "templates": [
+        "templates/coding.node/template.json",
+        "templates/coding.python/template.json",
+        "templates/coding.rust/template.json",
+        "templates/desktop.browser/template.json",
+        "templates/desktop.ubuntu/template.json",
+        "templates/pack.networked/template.json",
+        "templates/pack.safe/template.json",
+        "templates/tool.ephemeral/template.json"
       ],
       "checklists": ["checklists/reproducibility_checklist.yaml"],
       "evidence": ["evidence/runtime_receipt_ledger.template.yaml"]
