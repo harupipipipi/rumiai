@@ -26,6 +26,7 @@ from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderReg
 from ecosystem.defaultspack.backend.sandbox.providers import LinuxNativeProvider
 from ecosystem.defaultspack.backend.sandbox.providers.base import NullProgressSink
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
+from ecosystem.defaultspack.backend.sandbox.template_catalog import sandbox_template_catalog
 
 
 RUNTIME_NOT_READY = "MANAGED_RUNTIME_NOT_READY"
@@ -205,6 +206,8 @@ def _sandbox_create(service: _SandboxApiService, payload: dict[str, Any], *, dis
         access_request_required=bool(access.get("request_required") or payload.get("access_request_required")),
         provisioning=provisioning,
         assigned_agent_id=str(payload.get("assigned_agent") or payload.get("assigned_agent_id") or ""),
+        workspace_id=str(payload.get("workspace_id") or ""),
+        workspace_access=str(payload.get("workspace_access") or ""),
     )
     if created.get("ok") is not True:
         return _api_error(str(created.get("error") or "Sandbox create failed"), str(created.get("code") or RUNTIME_NOT_READY), int(created.get("status_code") or 503))
@@ -270,8 +273,8 @@ def _desktop_frame(service: _SandboxApiService, payload: dict[str, Any]):
     after_seq = _optional_int(payload.get("after"))
     reservation = service.frame_cache.reserve_capture(seat_id)
     if reservation is not None:
-        screenshot = service.manager.screenshot(seat_id)
         try:
+            screenshot = service.manager.screenshot(seat_id)
             if screenshot.get("ok") is True:
                 frame_data, content_type = _frame_bytes(screenshot)
                 service.frame_cache.put_frame(
@@ -483,6 +486,7 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
     access = item.get("desktop_access") if isinstance(item.get("desktop_access"), dict) else {}
     rules = item.get("desktop_rules") if isinstance(item.get("desktop_rules"), dict) else {}
     provisioning = item.get("desktop_provisioning") if isinstance(item.get("desktop_provisioning"), dict) else {}
+    workspace = item.get("workspace_binding") if isinstance(item.get("workspace_binding"), dict) else {}
     return {
         "seat_id": seat_id,
         "sandbox_id": seat_id,
@@ -509,7 +513,11 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
         },
         "isolation": _provider_isolation(str(item.get("provider_id") or ""), state in RUNNING_STATES),
         "network_policy": {"summary": "off", "default": "off"},
-        "workspace": {"workspace_id": None, "label": None, "access": "none"},
+        "workspace": {
+            "workspace_id": workspace.get("workspace_id"),
+            "label": workspace.get("workspace_id"),
+            "access": workspace.get("mode") or "none",
+        },
         "role": rules.get("role"),
         "rules": {
             "role": rules.get("role"),
@@ -641,14 +649,11 @@ def _docker_provider() -> dict[str, Any]:
 
 
 def _template_summaries() -> list[dict[str, Any]]:
-    templates_dir = _repo_root() / "rumi_ai_1_10" / "ecosystem" / "rumi_sandbox_runtime_pack" / "templates"
     summaries: list[dict[str, Any]] = []
-    for path in sorted(templates_dir.glob("*/template.json")):
-        try:
-            template = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+    for template in sandbox_template_catalog(_defaultspack_root()):
+        template_id = str(template.get("id") or template.get("template_id") or "")
+        if not template_id:
             continue
-        template_id = str(template.get("id") or path.parent.name)
         policy = template.get("policy") if isinstance(template.get("policy"), dict) else {}
         runtime = template.get("runtime") if isinstance(template.get("runtime"), dict) else {}
         provisioning = template.get("provisioning") if isinstance(template.get("provisioning"), dict) else {}
@@ -661,6 +666,9 @@ def _template_summaries() -> list[dict[str, Any]]:
             "name": template.get("display_name") or template_id,
             "description": template.get("summary") or "",
             "kind": template_id.split(".", 1)[0],
+            "trust_level": template.get("trust_level") or "user",
+            "source_pack_id": template.get("source_pack_id") or "rumi_sandbox_runtime_pack",
+            "source_template_ids": template.get("source_template_ids") or [template_id],
             "default_provider_id": runtime.get("provider") or "auto",
             "provider_requirements": runtime.get("provider_requirements") or [],
             "capabilities": runtime.get("capabilities") or [],
@@ -689,8 +697,8 @@ def _template_summaries() -> list[dict[str, Any]]:
     return summaries
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[5]
+def _defaultspack_root() -> Path:
+    return Path(__file__).resolve().parents[2]
 
 
 def _api_error(message: str, code: str, status_code: int = 400, *, details: Any | None = None) -> dict[str, Any]:

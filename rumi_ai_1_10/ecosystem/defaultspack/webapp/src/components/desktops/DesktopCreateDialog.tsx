@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AlertTriangle, Monitor, X } from "lucide-react";
 
 import { cn } from "../../lib/cn";
@@ -55,7 +55,7 @@ export function DesktopCreateDialog({
   const [starter, setStarter] = useState<DesktopStarter>("empty");
   const [browserUrl, setBrowserUrl] = useState("");
   const [workspaceId, setWorkspaceId] = useState("");
-  const [workspaceAccess, setWorkspaceAccess] = useState("read_write");
+  const [workspaceAccess, setWorkspaceAccess] = useState<"none" | "read_only" | "overlay">("none");
   const [assignedAgent, setAssignedAgent] = useState("");
   const [role, setRole] = useState("");
   const [ruleText, setRuleText] = useState("");
@@ -76,6 +76,14 @@ export function DesktopCreateDialog({
     || selectedProvider?.isolation?.host_process_namespace
     || selectedProvider?.isolation?.host_filesystem_shared
     || selectedProvider?.isolation?.host_network_shared;
+
+  useEffect(() => {
+    if (!workspaceId.trim()) {
+      setWorkspaceAccess("none");
+      return;
+    }
+    setWorkspaceAccess((current) => current === "none" ? "read_only" : current);
+  }, [workspaceId]);
 
   if (!isOpen) return null;
 
@@ -234,12 +242,12 @@ export function DesktopCreateDialog({
                 <span>Workspace access</span>
                 <select
                   value={workspaceAccess}
-                  onChange={(event) => setWorkspaceAccess(event.target.value)}
+                  onChange={(event) => setWorkspaceAccess(event.target.value as typeof workspaceAccess)}
                   className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
                 >
                   <option value="none">None</option>
                   <option value="read_only">Read only</option>
-                  <option value="read_write">Read/write</option>
+                  <option value="overlay">Writable overlay</option>
                 </select>
               </label>
 

@@ -99,6 +99,9 @@ export type SandboxTemplate = {
   name?: string;
   description?: string;
   kind?: SandboxTemplateKind;
+  trust_level?: "builtin" | "user" | "unknown";
+  source_pack_id?: string;
+  source_template_ids?: string[];
   default_provider_id?: string | null;
   provider_requirements?: string[];
   capabilities?: string[];
@@ -235,7 +238,7 @@ export type CreateDesktopRequest = {
   starter: DesktopStarter;
   browser_url?: string;
   workspace_id?: string | null;
-  workspace_access?: string | null;
+  workspace_access?: "none" | "read_only" | "overlay" | null;
   assigned_agent?: string | null;
   role?: string | null;
   rules?: DesktopRules | string[] | null;

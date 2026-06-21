@@ -825,67 +825,67 @@
     {
       "method": "GET",
       "path": "/api/desktops",
-      "flow_id": "managed_runtime",
+      "function_id": "managed_runtime_desktops_list",
       "description": "List managed desktop seats"
     },
     {
       "method": "POST",
       "path": "/api/desktops",
-      "flow_id": "managed_runtime",
+      "function_id": "managed_runtime_desktops_create",
       "description": "Create a managed desktop seat"
     },
     {
       "method": "GET",
       "path": "/api/desktops/{seat_id}",
-      "flow_id": "managed_runtime",
+      "function_id": "managed_runtime_desktop_get",
       "description": "Get a managed desktop seat"
     },
     {
       "method": "DELETE",
       "path": "/api/desktops/{seat_id}",
-      "flow_id": "managed_runtime",
+      "function_id": "managed_runtime_desktop_delete",
       "description": "Delete a managed desktop seat"
     },
     {
       "method": "GET",
       "path": "/api/desktops/{seat_id}/frame",
-      "flow_id": "managed_runtime",
+      "function_id": "managed_runtime_desktop_frame",
       "description": "Fetch a managed desktop frame"
     },
     {
       "method": "POST",
       "path": "/api/desktops/{seat_id}/input",
-      "flow_id": "managed_runtime",
+      "function_id": "managed_runtime_desktop_input",
       "description": "Send human desktop input with a control lease"
     },
     {
       "method": "POST",
       "path": "/api/desktops/{seat_id}/rules",
-      "flow_id": "managed_runtime",
+      "function_id": "managed_runtime_desktop_rules_update",
       "description": "Update desktop role, rules, or access policy"
     },
     {
       "method": "POST",
       "path": "/api/desktops/{seat_id}/access-requests",
-      "flow_id": "managed_runtime",
+      "function_id": "managed_runtime_desktop_access_request",
       "description": "Request access to a protected desktop"
     },
     {
       "method": "POST",
       "path": "/api/desktops/{seat_id}/control/acquire",
-      "flow_id": "managed_runtime",
+      "function_id": "managed_runtime_desktop_control_acquire",
       "description": "Acquire a desktop human-control lease"
     },
     {
       "method": "POST",
       "path": "/api/desktops/{seat_id}/control/renew",
-      "flow_id": "managed_runtime",
+      "function_id": "managed_runtime_desktop_control_renew",
       "description": "Renew a desktop human-control lease"
     },
     {
       "method": "POST",
       "path": "/api/desktops/{seat_id}/control/release",
-      "flow_id": "managed_runtime",
+      "function_id": "managed_runtime_desktop_control_release",
       "description": "Release a desktop human-control lease"
     }
   ]

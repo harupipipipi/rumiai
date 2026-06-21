@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -155,8 +156,10 @@ def test_control_lease_conflict_expiry_and_token_hash_storage() -> None:
 
 def test_control_lease_acquire_is_atomic_for_parallel_requests() -> None:
     manager = ControlLeaseManager(ttl_seconds=30)
+    barrier = threading.Barrier(8)
 
     def acquire(index: int):
+        barrier.wait(timeout=5)
         try:
             return ("ok", manager.acquire("seat-1", f"human-{index}").owner_id)
         except SandboxContractError as exc:
@@ -227,8 +230,10 @@ def test_frame_cache_after_seq_returns_not_modified_without_advancing_frame() ->
 
 def test_frame_cache_reserve_capture_is_single_flight_per_seat() -> None:
     cache = FrameCache(min_capture_interval_seconds=0)
+    barrier = threading.Barrier(8)
 
     def reserve(_index: int) -> bool:
+        barrier.wait(timeout=5)
         return cache.reserve_capture("seat-1") is not None
 
     with ThreadPoolExecutor(max_workers=8) as executor:
@@ -393,6 +398,21 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
                 "role": "browser operator",
                 "rules": {"rule_ids": ["browser-only"]},
                 "access": {"mode": "key_required", "access_key": "correct-key"},
+                "workspace_id": "workspace-1",
+                "workspace_access": "read_write",
+            },
+            {},
+        )
+        safe_workspace = api.run(
+            {
+                "_handler": "desktops_create",
+                "template_id": "desktop.coding",
+                "provider_id": "fake-runtime",
+                "role": "browser operator",
+                "rules": {"rule_ids": ["browser-only"]},
+                "access": {"mode": "key_required", "access_key": "correct-key"},
+                "workspace_id": "workspace-1",
+                "workspace_access": "read_only",
             },
             {},
         )
@@ -448,10 +468,13 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
 
     assert missing_key["status"] == "error"
     assert missing_key["error"]["code"] == "DESKTOP_ACCESS_KEY_MISSING"
-    assert created["status"] == "ok"
-    assert created["data"]["access_policy"]["key_required"] is True
-    assert created["data"]["access_policy"]["key_hint"] == "ends:-key"
-    assert "correct-key" not in str(created)
+    assert created["status"] == "error"
+    assert created["error"]["code"] == "DESKTOP_WORKSPACE_WRITE_REQUIRES_APPROVAL"
+    assert safe_workspace["status"] == "ok"
+    assert safe_workspace["data"]["access_policy"]["key_required"] is True
+    assert safe_workspace["data"]["access_policy"]["key_hint"] == "ends:-key"
+    assert safe_workspace["data"]["workspace"]["access"] == "read_only"
+    assert "correct-key" not in str(safe_workspace)
     assert denied["status"] == "error"
     assert denied["error"]["code"] == "DESKTOP_ACCESS_KEY_REQUIRED"
     assert allowed["status"] == "ok"
@@ -470,6 +493,14 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
 
     routes = {(spec.method, spec.pattern, spec.block_module) for spec in canonical_http_route_specs()}
+    route_specs = {
+        (spec.method, spec.pattern): spec
+        for spec in canonical_http_route_specs()
+        if spec.pattern.startswith("/api/runtime")
+        or spec.pattern.startswith("/api/sandbox")
+        or spec.pattern.startswith("/api/sandboxes")
+        or spec.pattern.startswith("/api/desktops")
+    }
 
     assert ("GET", "/api/runtime/providers", "blocks.sandbox.api") in routes
     assert ("POST", "/api/runtime/ensure", "blocks.sandbox.api") in routes
@@ -477,6 +508,9 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert ("GET", "/api/desktops", "blocks.sandbox.api") in routes
     assert ("POST", "/api/desktops/{seat_id}/rules", "blocks.sandbox.api") in routes
     assert ("POST", "/api/desktops/{seat_id}/access-requests", "blocks.sandbox.api") in routes
+    assert route_specs[("GET", "/api/runtime/providers")].function_id == "managed_runtime_providers"
+    assert route_specs[("POST", "/api/desktops/{seat_id}/input")].legacy_block_module == ""
+    assert route_specs[("POST", "/api/desktops/{seat_id}/input")].path_inject == {"seat_id": "seat_id"}
     providers = api.run({"_handler": "runtime_providers"}, {})
     doctor = api.run({"_handler": "runtime_doctor"}, {})
     ensure = api.run({"_handler": "runtime_ensure"}, {})
@@ -490,6 +524,8 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert ensure["data"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
     assert {template["template_id"] for template in templates["data"]["templates"]} >= {"desktop.ubuntu", "tool.ephemeral"}
     coding_template = next(template for template in templates["data"]["templates"] if template["template_id"] == "desktop.coding")
+    assert coding_template["trust_level"] == "builtin"
+    assert "desktop.browser" in coding_template["source_template_ids"]
     assert "google-chrome-stable" in {app["name"] for app in coding_template["provisioning"]["packages"]}
     assert "playwright" in coding_template["provisioning"]["mcp_servers"]
     assert desktops["data"]["desktops"] == []

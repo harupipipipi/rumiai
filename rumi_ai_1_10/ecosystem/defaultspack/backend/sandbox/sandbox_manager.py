@@ -32,6 +32,7 @@ from .models import (
     model_to_dict,
 )
 from .provider_registry import ProviderRegistry
+from .template_catalog import sandbox_template_by_id
 
 
 REGISTRY_SCHEMA_VERSION = 3
@@ -63,6 +64,7 @@ TERMINAL_STATES = {DESTROYED, FAILED}
 SUPPORTED_MODEL_MODES = {"fast", "heavy"}
 STATE_DIR_ENV = "RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR"
 DESKTOP_ACCESS_MODES = {"owner_only", "shared_link", "key_required", "request_required"}
+WORKSPACE_ACCESS_MODES = {"none", "read_only", "overlay"}
 
 
 class SandboxManager:
@@ -104,6 +106,8 @@ class SandboxManager:
         access_request_required: bool | None = None,
         provisioning: Any | None = None,
         assigned_agent_id: str | None = None,
+        workspace_id: str | None = None,
+        workspace_access: str | None = None,
     ) -> Dict[str, Any]:
         image = str(image or "").strip() or "ubuntu:22.04"
         display = bool(display)
@@ -132,6 +136,12 @@ class SandboxManager:
                 "code": "DESKTOP_ACCESS_KEY_MISSING",
                 "status_code": 400,
             }
+        workspace_binding = _workspace_binding_from_create(
+            workspace_id=workspace_id,
+            workspace_access=workspace_access,
+        )
+        if isinstance(workspace_binding, dict):
+            return workspace_binding
         rule_config = _desktop_rules_from_create(role=role, rules=rules)
         template_provisioning = _desktop_provisioning_from_create(
             _load_sandbox_template(template.template_id).get("provisioning"),
@@ -181,7 +191,7 @@ class SandboxManager:
                 started_at=now if _canonical_state(started.state) in RUNNING_STATES else None,
                 capabilities=template.provider_requirements,
                 resource_limits=template.resources,
-                workspace_binding=WorkspaceBinding(),
+                workspace_binding=workspace_binding,
                 network_policy=template.network,
                 desktop_spec=template.desktop,
                 desktop_rules=rule_config,
@@ -866,6 +876,16 @@ class SandboxManager:
         raw_template = _load_sandbox_template(template_id or ("desktop.ubuntu" if display else "tool.ephemeral"))
         runtime = raw_template.get("runtime") if isinstance(raw_template.get("runtime"), dict) else {}
         policy = raw_template.get("policy") if isinstance(raw_template.get("policy"), dict) else {}
+        filesystem_policy = policy.get("filesystem") if isinstance(policy.get("filesystem"), dict) else {}
+        workspace_policy = (
+            filesystem_policy.get("workspace")
+            if isinstance(filesystem_policy.get("workspace"), dict)
+            else {}
+        )
+        network_policy = policy.get("network") if isinstance(policy.get("network"), dict) else {}
+        secrets_policy = policy.get("secrets") if isinstance(policy.get("secrets"), dict) else {}
+        resources_policy = policy.get("resources") if isinstance(policy.get("resources"), dict) else {}
+        lifecycle_policy = policy.get("lifecycle") if isinstance(policy.get("lifecycle"), dict) else {}
         capabilities = {"sandbox.exec", "sandbox.files"}
         allowed_operations = {"exec", "files.read", "files.write"}
         desktop = None
@@ -890,13 +910,41 @@ class SandboxManager:
             provider_requirements=frozenset(capabilities),
             packages=packages,
             desktop=desktop,
-            filesystem=FilesystemPolicy(mode="ephemeral_overlay", workspace_access="none"),
-            network=NetworkPolicy(mode="off"),
-            secrets=SecretsPolicy(mode="denied"),
-            resources=ResourceLimits(cpu_count=1, memory_mb=2048, timeout_ms=600_000),
-            lifecycle=LifecyclePolicy(ttl_seconds=900, persistent=False, destroy_on_exit=True),
+            filesystem=FilesystemPolicy(
+                mode=str(filesystem_policy.get("mode") or "ephemeral_overlay"),
+                workspace_access=_template_workspace_access(workspace_policy.get("access")),
+                host_writeback=bool(workspace_policy.get("writeback_requires_approval") is False),
+            ),
+            network=NetworkPolicy(
+                mode=str(network_policy.get("mode") or "off"),
+                allowlist=tuple(str(item) for item in (network_policy.get("allowlist") or []) if str(item)),
+                approval_required=bool(network_policy.get("requires_approval")),
+            ),
+            secrets=SecretsPolicy(
+                mode=str(secrets_policy.get("mode") or "denied"),
+                approval_required=bool(secrets_policy.get("requires_approval")),
+            ),
+            resources=ResourceLimits(
+                cpu_count=_optional_float(resources_policy.get("cpu")) or 1,
+                memory_mb=int(_float_or_zero(resources_policy.get("memory_mb")) or 2048),
+                output_bytes=int(_float_or_zero(resources_policy.get("max_output_bytes")) or 0) or None,
+                timeout_ms=int((_float_or_zero(resources_policy.get("timeout_seconds")) or 600) * 1000),
+            ),
+            lifecycle=LifecyclePolicy(
+                ttl_seconds=int(_float_or_zero(lifecycle_policy.get("ttl_seconds")) or 900),
+                persistent=str(lifecycle_policy.get("persistence") or "").lower() not in {"", "ephemeral"},
+                destroy_on_exit=bool(lifecycle_policy.get("destroy_on_idle", True)),
+            ),
             allowed_operations=frozenset(allowed_operations),
-            source_template_ids=tuple(str(item) for item in (raw_template.get("extends"), resolved_template_id, image) if item),
+            source_template_ids=tuple(
+                str(item)
+                for item in (
+                    raw_template.get("source_template_ids")
+                    if isinstance(raw_template.get("source_template_ids"), list)
+                    else [raw_template.get("extends"), resolved_template_id, image]
+                )
+                if item
+            ),
         )
 
     def _instance_to_dict(self, inst: SandboxInstance) -> Dict[str, Any]:
@@ -938,7 +986,7 @@ class SandboxManager:
             last_error=last_error,
             capabilities=frozenset(_string_tuple(data.get("capabilities"))),
             resource_limits=ResourceLimits(),
-            workspace_binding=WorkspaceBinding(),
+            workspace_binding=_workspace_binding_from_dict(data.get("workspace_binding")),
             network_policy=NetworkPolicy(),
             desktop_spec=DesktopSpec(enabled=True) if display else None,
             desktop_rules=_desktop_rules_from_dict(data.get("desktop_rules")),
@@ -1112,6 +1160,52 @@ def _desktop_provisioning_from_dict(value: Any) -> DesktopProvisioningPlan:
     )
 
 
+def _workspace_binding_from_create(
+    *,
+    workspace_id: str | None,
+    workspace_access: str | None,
+) -> WorkspaceBinding | dict[str, Any]:
+    clean_workspace_id = _optional_clean_string(workspace_id, max_len=160)
+    if not clean_workspace_id:
+        return WorkspaceBinding(mode="none")
+    mode = str(workspace_access or "read_only").strip().lower()
+    if mode in {"read", "readonly"}:
+        mode = "read_only"
+    if mode in {"write", "read_write", "rw"}:
+        return {
+            "ok": False,
+            "error": "Desktop workspace write access requires a backend policy and explicit approval.",
+            "code": "DESKTOP_WORKSPACE_WRITE_REQUIRES_APPROVAL",
+            "status_code": 403,
+        }
+    if mode not in WORKSPACE_ACCESS_MODES:
+        mode = "read_only"
+    return WorkspaceBinding(workspace_id=clean_workspace_id, mode=mode, root=".")
+
+
+def _workspace_binding_from_dict(value: Any) -> WorkspaceBinding:
+    if not isinstance(value, dict):
+        return WorkspaceBinding()
+    workspace_id = _optional_clean_string(value.get("workspace_id"), max_len=160)
+    mode = str(value.get("mode") or "none").strip().lower()
+    if mode not in WORKSPACE_ACCESS_MODES:
+        mode = "none"
+    return WorkspaceBinding(
+        workspace_id=workspace_id,
+        mode=mode if workspace_id else "none",
+        root=str(value.get("root") or ".")[:512],
+    )
+
+
+def _template_workspace_access(value: Any) -> str:
+    mode = str(value or "none").strip().lower()
+    if mode in {"read", "readonly"}:
+        return "read_only"
+    if mode in {"overlay", "read_only", "none"}:
+        return mode
+    return "none"
+
+
 def _hash_access_key(access_key: str) -> str:
     salt = secrets.token_hex(16)
     digest = hashlib.sha256(f"{salt}:{access_key}".encode("utf-8")).hexdigest()
@@ -1142,18 +1236,7 @@ def _load_sandbox_template(template_id: str | None) -> dict[str, Any]:
     clean_id = str(template_id or "").strip()
     if not clean_id or "/" in clean_id or "\\" in clean_id or ".." in clean_id:
         return {}
-    template_path = (
-        Path(__file__).resolve().parents[3]
-        / "rumi_sandbox_runtime_pack"
-        / "templates"
-        / clean_id
-        / "template.json"
-    )
-    try:
-        raw = json.loads(template_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return raw if isinstance(raw, dict) else {}
+    return sandbox_template_by_id(clean_id)
 
 
 def _packages_from_template_runtime(runtime: dict[str, Any]) -> tuple[PackageSpec, ...]:

@@ -70,14 +70,6 @@ class FrameCache:
         self._captures_in_flight: set[str] = set()
         self._lock = threading.RLock()
 
-    def should_capture(self, seat_id: str) -> bool:
-        seat_id = require_canonical_id(seat_id, field="seat_id")
-        with self._lock:
-            last = self._last_capture_at.get(seat_id)
-            return seat_id not in self._captures_in_flight and (
-                last is None or (self._time_fn() - last) >= self.min_capture_interval_seconds
-            )
-
     def reserve_capture(self, seat_id: str) -> CaptureReservation | None:
         seat_id = require_canonical_id(seat_id, field="seat_id")
         with self._lock:
@@ -90,9 +82,6 @@ class FrameCache:
             self._captures_in_flight.add(seat_id)
             self._last_capture_at[seat_id] = now
             return CaptureReservation(seat_id=seat_id, reserved_at=now)
-
-    def mark_capture_attempt(self, seat_id: str) -> None:
-        self.reserve_capture(seat_id)
 
     def release_capture(self, seat_id: str) -> None:
         with self._lock:
