@@ -48,6 +48,7 @@ import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
+import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
@@ -2565,6 +2566,12 @@ function ChatApp() {
   }, [messageToolPreviews, previews]);
   const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo) || liveBrowserState.state_revision >= 0;
   const effectiveShowPreview = showPreview && canShowCanvas;
+  const effectiveCommandCatalog = useMemo(() => (
+    mergeRegisteredSlashCommands(
+      commandCatalog,
+      registeredSlashCommandsFromSettings(settingsValues.commands?.registered_slash_commands),
+    )
+  ), [commandCatalog, settingsValues.commands?.registered_slash_commands]);
 
   useEffect(() => {
     const preview = canvasPreviews.find(isHumanOperatorCanvasPreview);
@@ -2584,7 +2591,7 @@ function ChatApp() {
     const fastCandidate = fastCandidateForProfile(activeProfile, selectableModelProfiles);
     const priceLowCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "low");
     const priceHighCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "high");
-    return commandCatalog
+    return effectiveCommandCatalog
       .filter((command) => command.visibility !== "hidden")
       .filter((command) => showAdvanced || command.visibility === "default")
       .filter((command) => !command.modes?.length || command.modes.includes(mode as ComposerCommandMode))
@@ -2596,7 +2603,7 @@ function ChatApp() {
         active: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
         enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
       }));
-  }, [activeProfile, commandCatalog, deepthinkEnabled, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, slashCommandsEnabled, ultraYoloMode, yoloMode]);
+  }, [activeProfile, deepthinkEnabled, effectiveCommandCatalog, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, slashCommandsEnabled, ultraYoloMode, yoloMode]);
   const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
@@ -3802,8 +3809,8 @@ function ChatApp() {
   };
 
   const executeComposerCommand = async (commandId: string, rawInput = `/${commandId}`): Promise<boolean | void> => {
-    const parsed = parseSlashCommandInput(rawInput, commandCatalog) ?? {
-      command: commandCatalog.find((command) => command.id === commandId || command.name === commandId),
+    const parsed = parseSlashCommandInput(rawInput, effectiveCommandCatalog) ?? {
+      command: effectiveCommandCatalog.find((command) => command.id === commandId || command.name === commandId),
       args: {},
       raw: rawInput,
     };
@@ -3813,6 +3820,11 @@ function ChatApp() {
     }
     try {
       setError(null);
+      if (isRegisteredSlashCommand(parsed.command)) {
+        const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
+        runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
+        return true;
+      }
       const commandArgs = { ...parsed.args };
       if (parsed.command.id === "think" && commandArgs.level && activeProfile) {
         commandArgs.scope = "profile";
@@ -4554,7 +4566,7 @@ function ChatApp() {
     event.preventDefault();
     if ((!input.trim() && attachedFiles.length === 0) || isGenerating) return;
 
-    const commandInput = parseSlashCommandInput(input, commandCatalog, { enabled: slashCommandsEnabled });
+    const commandInput = parseSlashCommandInput(input, effectiveCommandCatalog, { enabled: slashCommandsEnabled });
     if (commandInput) {
       const shouldClearInput = await executeComposerCommand(commandInput.command.id, commandInput.raw);
       if (shouldClearInput !== false) setInput("");

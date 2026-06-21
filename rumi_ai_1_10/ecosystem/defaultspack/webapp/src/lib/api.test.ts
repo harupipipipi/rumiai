@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, defaultspackUrlWithLocalAuth, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
+import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
@@ -133,6 +134,55 @@ test("composer command merge keeps backend command definitions authoritative", (
   assert.equal(merged[0].risk, "medium");
   assert.equal(parseSlashCommandInput("/goal frontend handoff", merged)?.command.id, "goal");
   assert.equal(parseSlashCommandInput("/context-txt frontend handoff", merged)?.command.id, "context_txt");
+});
+
+test("registered slash command settings create safe frontend shortcuts", () => {
+  const registered = registeredSlashCommandsFromSettings([
+    {
+      name: "/go",
+      action: "toggle_yolo",
+      aliases: ["ship it"],
+      description: "Enable YOLO from settings.",
+      enabled: true,
+    },
+    {
+      name: "/bad",
+      action: "run_arbitrary_code",
+    },
+  ]);
+
+  assert.equal(registered.length, 1);
+  assert.equal(registered[0].name, "go");
+  assert.equal(registered[0].execution.type, "frontend");
+  assert.equal(registered[0].execution.type === "frontend" ? registered[0].execution.action : "", "toggle_yolo");
+
+  const parsed = parseSlashCommandInput("/ship it on", registered);
+  assert.equal(parsed?.command.name, "go");
+  assert.deepEqual(parsed?.args, { enabled: "on" });
+});
+
+test("registered slash commands merge into composer catalog without replacing built-ins", () => {
+  const builtInYolo: ComposerCommandItem = {
+    id: "yolo",
+    name: "yolo",
+    label: "Yolo Approvals",
+    category: "mode",
+    visibility: "hidden",
+    risk: "medium",
+    execution: { type: "frontend", action: "toggle_yolo" },
+  };
+  const registered = registeredSlashCommandsFromSettings([
+    { name: "yolo", action: "toggle_yolo" },
+    { name: "doit", action: "toggle_yolo" },
+  ]);
+
+  const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
+
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].id, "yolo");
+  assert.equal(merged[0].visibility, "default");
+  assert.equal(parseSlashCommandInput("/yolo", merged)?.command.id, "yolo");
+  assert.equal(parseSlashCommandInput("/doit", merged)?.command.id, "registered:doit");
 });
 
 test("composer command feedback surfaces pack block result messages and paths", () => {

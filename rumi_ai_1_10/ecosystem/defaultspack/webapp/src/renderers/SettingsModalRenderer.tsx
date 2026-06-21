@@ -79,6 +79,7 @@ function settingsFieldTakesFullWidth(field: SettingsSection["fields"][number]): 
     || type === "public_url"
     || type === "model_api_routes"
     || type === "device_lock"
+    || type === "slash_commands"
     || field.id.endsWith("_setup_guide")
   );
 }

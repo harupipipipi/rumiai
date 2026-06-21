@@ -1171,6 +1171,9 @@ export type ComposerCommandItem = {
   active?: boolean;
   args?: ComposerCommandArg[];
   execution: ComposerCommandExecution;
+  source?: string;
+  template_id?: string;
+  piece_id?: string;
 };
 
 export type ComposerCommandExecuteResult = {

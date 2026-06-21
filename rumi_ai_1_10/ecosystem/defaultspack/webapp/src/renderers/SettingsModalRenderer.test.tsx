@@ -187,6 +187,52 @@ test("SettingsModalRenderer renders template model_select with searchable model 
   assert.doesNotMatch(html, /type="text"[^>]*google\/gemini-2\.5-flash/);
 });
 
+test("SettingsModalRenderer renders template slash command registration field", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "commands",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "commands",
+          label: "Commands",
+          fields: [
+            {
+              id: "registered_slash_commands",
+              label: "Slash Commands",
+              type: "slash_commands",
+              renderer: "slash_commands",
+              default: [],
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        commands: {
+          registered_slash_commands: [
+            { name: "yolo", action: "toggle_yolo", aliases: ["go"], enabled: true },
+          ],
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="slash_commands"/);
+  assert.match(html, /value="yolo"/);
+  assert.match(html, /value="go"/);
+  assert.match(html, /YOLO/);
+});
+
 test("SettingsModalRenderer hides ambient detail fields until finger recording is enabled", () => {
   const sections = [
     {
