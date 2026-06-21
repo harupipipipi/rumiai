@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1104,6 +1105,109 @@ def test_local_whisper_command_placeholder_can_receive_prompt(monkeypatch, tmp_p
     assert result["status"] == "ok"
     assert result["text"] == "BlackHoleのテストです。"
     assert command_log
+
+
+def test_local_whisper_faster_whisper_model_is_cached(monkeypatch):
+    _clear_local_whisper_env(monkeypatch)
+
+    from domain.ambient import local_transcription
+
+    local_transcription._FASTER_WHISPER_MODEL_CACHE.clear()
+    monkeypatch.setenv("RUMI_LOCAL_WHISPER_ALLOW_DOWNLOAD", "1")
+    monkeypatch.setenv("RUMI_LOCAL_WHISPER_MODEL", "fake-faster-model")
+    monkeypatch.setattr(local_transcription, "_configured_command", lambda _env: None)
+    monkeypatch.setattr(
+        local_transcription,
+        "_has_python_module",
+        lambda name: name == "faster_whisper",
+    )
+
+    load_count = 0
+    transcribe_count = 0
+
+    class FakeSegment:
+        text = "キャッシュテスト"
+
+    class FakeWhisperModel:
+        def __init__(self, model, **kwargs):
+            nonlocal load_count
+            load_count += 1
+            assert model == "fake-faster-model"
+            assert kwargs["device"] == "cpu"
+            assert kwargs["compute_type"] == "int8"
+            assert "local_files_only" not in kwargs
+
+        def transcribe(self, audio_path, **kwargs):
+            nonlocal transcribe_count
+            transcribe_count += 1
+            assert audio_path
+            assert kwargs["language"] == "ja"
+            return [FakeSegment()], object()
+
+    fake_module = types.ModuleType("faster_whisper")
+    fake_module.WhisperModel = FakeWhisperModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+
+    for _ in range(2):
+        result = local_transcription.transcribe_local_audio(
+            "data:audio/wav;base64,AAA=",
+            mime_type="audio/wav",
+            language="ja",
+        )
+        assert result["status"] == "ok"
+        assert result["text"] == "キャッシュテスト"
+
+    assert load_count == 1
+    assert transcribe_count == 2
+
+
+def test_local_whisper_openai_whisper_model_is_cached(monkeypatch):
+    _clear_local_whisper_env(monkeypatch)
+
+    from domain.ambient import local_transcription
+
+    local_transcription._OPENAI_WHISPER_MODEL_CACHE.clear()
+    monkeypatch.setenv("RUMI_LOCAL_WHISPER_ALLOW_DOWNLOAD", "1")
+    monkeypatch.setenv("RUMI_LOCAL_WHISPER_MODEL", "fake-openai-model")
+    monkeypatch.setattr(local_transcription, "_configured_command", lambda _env: None)
+    monkeypatch.setattr(
+        local_transcription,
+        "_has_python_module",
+        lambda name: name == "whisper",
+    )
+
+    load_count = 0
+    transcribe_count = 0
+
+    class FakeWhisperModel:
+        def transcribe(self, audio_path, **kwargs):
+            nonlocal transcribe_count
+            transcribe_count += 1
+            assert audio_path
+            assert kwargs["initial_prompt"] == "Rumi"
+            return {"text": "openai whisper cache"}
+
+    def fake_load_model(model):
+        nonlocal load_count
+        load_count += 1
+        assert model == "fake-openai-model"
+        return FakeWhisperModel()
+
+    fake_module = types.ModuleType("whisper")
+    fake_module.load_model = fake_load_model
+    monkeypatch.setitem(sys.modules, "whisper", fake_module)
+
+    for _ in range(2):
+        result = local_transcription.transcribe_local_audio(
+            "data:audio/wav;base64,AAA=",
+            mime_type="audio/wav",
+            prompt="Rumi",
+        )
+        assert result["status"] == "ok"
+        assert result["text"] == "openai whisper cache"
+
+    assert load_count == 1
+    assert transcribe_count == 2
 
 
 def test_ambient_transcription_without_explicit_model_rejects_stub_only_provider(monkeypatch):

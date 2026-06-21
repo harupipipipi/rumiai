@@ -37,6 +37,8 @@ DEFAULT_MODEL_FILENAME = f"ggml-{DEFAULT_MODEL_SIZE}.bin"
 APP_DATA_DIR_NAME = "dev.rumiai.app"
 DEFAULT_TIMEOUT_SECONDS = 45
 WHISPER_CPP_SUPPORTED_SUFFIXES = {".wav", ".mp3", ".ogg", ".flac"}
+_FASTER_WHISPER_MODEL_CACHE: dict[tuple[str, str, str, bool], Any] = {}
+_OPENAI_WHISPER_MODEL_CACHE: dict[tuple[str], Any] = {}
 
 
 @dataclass(frozen=True)
@@ -656,15 +658,19 @@ def _run_faster_whisper(
     prompt: str,
 ) -> dict[str, Any]:
     try:
-        from faster_whisper import WhisperModel  # type: ignore
-
         kwargs: dict[str, Any] = {
             "device": os.environ.get("RUMI_LOCAL_WHISPER_DEVICE", "cpu"),
             "compute_type": os.environ.get("RUMI_LOCAL_WHISPER_COMPUTE_TYPE", "int8"),
         }
-        if not _allow_downloads():
+        local_files_only = not _allow_downloads()
+        if local_files_only:
             kwargs["local_files_only"] = True
-        whisper_model = WhisperModel(model, **kwargs)
+        whisper_model = _cached_faster_whisper_model(
+            model,
+            device=str(kwargs["device"]),
+            compute_type=str(kwargs["compute_type"]),
+            local_files_only=local_files_only,
+        )
         segments, _info = whisper_model.transcribe(
             str(audio_path),
             language=language or None,
@@ -700,6 +706,30 @@ def _run_faster_whisper(
         )
 
 
+def _cached_faster_whisper_model(
+    model: str,
+    *,
+    device: str,
+    compute_type: str,
+    local_files_only: bool,
+) -> Any:
+    key = (str(model), str(device), str(compute_type), bool(local_files_only))
+    cached = _FASTER_WHISPER_MODEL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    from faster_whisper import WhisperModel  # type: ignore
+
+    kwargs: dict[str, Any] = {
+        "device": device,
+        "compute_type": compute_type,
+    }
+    if local_files_only:
+        kwargs["local_files_only"] = True
+    whisper_model = WhisperModel(model, **kwargs)
+    _FASTER_WHISPER_MODEL_CACHE[key] = whisper_model
+    return whisper_model
+
+
 def _run_openai_whisper_library(
     audio_path: Path,
     *,
@@ -708,9 +738,7 @@ def _run_openai_whisper_library(
     prompt: str,
 ) -> dict[str, Any]:
     try:
-        import whisper  # type: ignore
-
-        whisper_model = whisper.load_model(model)
+        whisper_model = _cached_openai_whisper_model(model)
         response = whisper_model.transcribe(
             str(audio_path),
             language=language or None,
@@ -734,6 +762,18 @@ def _run_openai_whisper_library(
             "whisperで文字起こしできませんでした。",
             engine="whisper",
         )
+
+
+def _cached_openai_whisper_model(model: str) -> Any:
+    key = (str(model),)
+    cached = _OPENAI_WHISPER_MODEL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    import whisper  # type: ignore
+
+    whisper_model = whisper.load_model(model)
+    _OPENAI_WHISPER_MODEL_CACHE[key] = whisper_model
+    return whisper_model
 
 
 def _read_transcript_output(output_dir: Path, stdout: str) -> str:

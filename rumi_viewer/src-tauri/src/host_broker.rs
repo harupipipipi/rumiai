@@ -601,6 +601,7 @@ fn host_operation_stream_allowed(operation: &str) -> bool {
             | "host.audio.capture"
             | "host.speech.transcribe"
             | "host.camera.capture"
+            | "host.process.exec_guarded"
     )
 }
 
