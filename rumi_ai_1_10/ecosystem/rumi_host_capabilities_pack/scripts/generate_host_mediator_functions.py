@@ -53,7 +53,8 @@ def expected_host_mediator_functions(registry: dict[str, dict] | None = None) ->
     source = registry if registry is not None else host_permission_registry()
     return {
         host_function_id_for_operation(operation): operation
-        for operation in source
+        for operation, definition in source.items()
+        if definition.get("broker_runner_implemented") is True
     }
 
 

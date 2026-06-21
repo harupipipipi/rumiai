@@ -252,16 +252,40 @@ test("ambient submission waits for the stored model reply before completing", ()
   assert.match(panelSource, /setLatestSubmittedInput\(null\)/);
 });
 
-test("ambient browser-owned monitor does not leave backend enabled without camera capture", () => {
+test("ambient browser-owned monitor keeps camera lifecycle local to the active window", () => {
   const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
+  const trackerSource = readSource("ambient", "useAmbientHandTracker.ts");
+  const landmarkerSource = readSource("ambient", "mediaPipeHandLandmarker.ts");
 
-  assert.match(panelSource, /const monitorEnabledRef = useRef\(false\)/);
-  assert.match(panelSource, /cameraStreamRef\.current\?\.getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\)/);
-  assert.match(panelSource, /if \(monitorEnabledRef\.current\) \{[\s\S]*ambientTriggerClient\.stopMonitor\(\)/);
+  assert.match(panelSource, /const \[videoElement, setVideoElement\] = useState<HTMLVideoElement \| null>\(null\)/);
+  assert.match(panelSource, /const cameraVideoRef = useCallback\(\(node: HTMLVideoElement \| null\) => \{\s*setVideoElement\(node\);/);
+  assert.match(trackerSource, /videoElement: HTMLVideoElement \| null/);
+  assert.doesNotMatch(trackerSource, /RefObject/);
+  assert.doesNotMatch(panelSource, /monitorEnabledRef/);
+  assert.match(panelSource, /function replaceCameraStream\(nextStream: MediaStream \| null\)/);
+  assert.match(panelSource, /track\.addEventListener\("ended", handleEnded, \{ once: true \}\)/);
+  assert.match(panelSource, /track\.addEventListener\("mute", handleEnded, \{ once: true \}\)/);
+  assert.match(panelSource, /setMessage\("カメラの接続が切れました。/);
+  assert.match(landmarkerSource, /onError\?: \(error: unknown\) => void/);
+  assert.match(landmarkerSource, /catch \(error\) \{\s*stopLoop\(error\);/);
   assert.match(panelSource, /async function acquireCameraForMonitoring\(\)/);
   assert.match(panelSource, /if \(!monitorEnabled \|\| cameraStream \|\| cameraAcquireInFlightRef\.current\) return/);
   assert.match(panelSource, /await acquireCameraForMonitoring\(\);[\s\S]*待機を再開しました/);
   assert.match(panelSource, /await ambientTriggerClient\.stopMonitor\(\)\.catch\(\(\) => undefined\);[\s\S]*await refresh\(\{ probeOs: true \}\)/);
+});
+
+test("ambient approval gesture requires audit event before executing approval", () => {
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
+  const start = panelSource.indexOf("async function submitApprovalGesture");
+  const end = panelSource.indexOf("async function approvePendingApproval", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const submitApprovalGestureSource = panelSource.slice(start, end);
+
+  assert.doesNotMatch(submitApprovalGestureSource, /\.catch\(\(\) => undefined\)/);
+  assert.match(submitApprovalGestureSource, /const auditResult = await ambientTriggerClient\.submitEvent\(\{[\s\S]*trigger: "approval_gesture"/);
+  assert.match(submitApprovalGestureSource, /if \(auditResult\.status !== "approval_intent"\) \{/);
+  assert.match(submitApprovalGestureSource, /await onApprovalGestureRef\.current\?\.\(decision\)/);
 });
 
 test("Viewer authenticates every dedicated Defaultspack window and rejects unsafe stale listeners", () => {

@@ -11,9 +11,14 @@ cd rumi_ai_1_10/ecosystem/defaultspack/webapp
 npm run check:vendored-assets
 ```
 
-The check is kept as an explicit release verification command instead of being
-wired into `npm test`, `npm run lint`, or `npm run build`, so routine frontend
-work does not fail on packaged asset drift unrelated to the current edit.
+CI runs the stricter packaged check after `npm run build`:
+
+```bash
+npm run check:vendored-assets -- --require-ui
+```
+
+That mode requires both `webapp/public/` and the generated packaged `ui/`
+copies to exist and match the recorded hashes.
 
 ## MediaPipe hand tracking
 

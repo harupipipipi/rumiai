@@ -751,6 +751,55 @@ def test_local_whisper_prefers_small_then_base_before_tiny(monkeypatch, tmp_path
     assert status["model_quality"] == "quality"
 
 
+def test_local_whisper_status_treats_custom_command_as_executable_without_model(monkeypatch, tmp_path):
+    from domain.ambient import local_transcription
+
+    _clear_local_whisper_env(monkeypatch)
+    monkeypatch.setenv("RUMI_LOCAL_WHISPER_COMMAND", "/mock/transcribe --input {audio}")
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    monkeypatch.setattr(local_transcription, "_configured_model", lambda _env: "")
+
+    status = local_transcription.local_whisper_status()
+
+    assert status["configured"] is True
+    assert status["status"] == "local_whisper_configured"
+    assert status["command"] == "/mock/transcribe --input {audio}"
+    assert status["engine"] == "command"
+    assert status["model"] == ""
+
+
+def test_local_whisper_status_detects_faster_whisper_library(monkeypatch):
+    from domain.ambient import local_transcription
+
+    _clear_local_whisper_env(monkeypatch)
+    monkeypatch.setenv("RUMI_LOCAL_WHISPER_ALLOW_DOWNLOAD", "1")
+    monkeypatch.setenv("RUMI_LOCAL_WHISPER_MODEL", "small")
+    monkeypatch.setattr(local_transcription, "_configured_command", lambda _env: None)
+    monkeypatch.setattr(local_transcription, "_has_python_module", lambda name: name == "faster_whisper")
+
+    status = local_transcription.local_whisper_status()
+
+    assert status["configured"] is True
+    assert status["status"] == "local_whisper_configured"
+    assert status["engine"] == "faster_whisper"
+
+
+def test_local_whisper_status_detects_openai_whisper_library(monkeypatch):
+    from domain.ambient import local_transcription
+
+    _clear_local_whisper_env(monkeypatch)
+    monkeypatch.setenv("RUMI_LOCAL_WHISPER_ALLOW_DOWNLOAD", "1")
+    monkeypatch.setenv("RUMI_LOCAL_WHISPER_MODEL", "base")
+    monkeypatch.setattr(local_transcription, "_configured_command", lambda _env: None)
+    monkeypatch.setattr(local_transcription, "_has_python_module", lambda name: name == "whisper")
+
+    status = local_transcription.local_whisper_status()
+
+    assert status["configured"] is True
+    assert status["status"] == "local_whisper_configured"
+    assert status["engine"] == "whisper"
+
+
 def test_text_model_audio_uses_local_whisper_fallback(monkeypatch, tmp_path):
     _clear_local_whisper_env(monkeypatch)
     monkeypatch.setenv("RUMI_AMBIENT_TRANSCRIPTION_LANGUAGE", "ja")
@@ -1453,6 +1502,37 @@ def test_ai_send_approval_pending_summary_does_not_expose_audio_data(monkeypatch
     assert blob_ids[0] not in router_module._PENDING_AI_SEND_AUDIO_BLOBS
 
 
+def test_ai_send_approval_pending_audio_respects_capacity_limit(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+
+    from domain.ambient import router as router_module
+    from domain.ambient.router import AmbientTriggerRouter
+
+    with router_module._AMBIENT_PENDING_LOCK:
+        router_module._PENDING_AI_SEND_APPROVALS.clear()
+        router_module._PENDING_AI_SEND_AUDIO_BLOBS.clear()
+    monkeypatch.setattr(router_module, "MAX_PENDING_AUDIO_BLOB_BYTES", 4)
+
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+    router.configure({"routing": {"ai_send_approval_required": True}})
+
+    payload = _pinch_audio_payload()
+    payload["attachments"][0]["dataUrl"] = "data:audio/webm;base64," + ("A" * 64)
+    pending = router.submit_event(payload)
+
+    stored = router_module._PENDING_AI_SEND_APPROVALS[pending["approval_request_id"]]
+    assert stored["audio_blob_ids"] == []
+    assert router_module._PENDING_AI_SEND_AUDIO_BLOBS == {}
+    metadata = stored["attachments"][0]["metadata"]
+    assert metadata["ambient_audio_blob_omitted"] == "blob_too_large"
+    assert "ambient_audio_blob_id" not in metadata
+
+
 def test_ambient_preset_hello_uses_submit_input_path_without_approval_mode(monkeypatch, tmp_path):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
@@ -1691,9 +1771,7 @@ def test_ambient_events_viewer_token_satisfies_local_ui_context(monkeypatch):
     )
 
 
-def test_ambient_monitor_start_function_returns_host_stream_intent(monkeypatch):
-    from core_runtime.host_intent import validate_host_intent
-
+def test_ambient_monitor_start_function_returns_browser_owned_contract(monkeypatch):
     monkeypatch.setattr(sys, "dont_write_bytecode", True)
     main_path = DEFAULTSPACK_ROOT / "functions" / "ambient_monitor_start" / "main.py"
     spec = importlib.util.spec_from_file_location("ambient_monitor_start_main", main_path)
@@ -1709,18 +1787,15 @@ def test_ambient_monitor_start_function_returns_host_stream_intent(monkeypatch):
         },
         {"max_duration_ms": 30_000, "sample_rate": 16_000, "channels": 1},
     )
-    validation = validate_host_intent(
-        result,
-        caller_pack_id="rumi_ambient_trigger_pack",
-        caller_function_id="ambient_monitor_start",
-    )
-
-    assert validation.ok is True
-    assert result["type"] == "host_stream_intent"
-    assert result["operation"] == MIC_PERMISSION
-    assert result["host_function_id"] == "host_microphone_capture"
-    assert result["stream"]["enabled"] is True
-    assert result["args"]["privacy_mode"] == "audio_embedding_or_ephemeral_recording"
+    assert result["success"] is True
+    assert result["type"] == "ambient_browser_monitor_contract"
+    assert result["status"] == "browser_owned_monitor"
+    assert result["capture_owner"] == "defaultspack_webapp"
+    assert result["contract"]["camera"] == "browser.getUserMedia"
+    assert result["contract"]["microphone"] == "browser.getUserMedia"
+    assert result["host_stream"]["requested"] is False
+    assert result["host_stream"]["available"] is False
+    assert result["capture_options"]["privacy_mode"] == "audio_embedding_or_ephemeral_recording"
     assert result["consumer"] == {
         "pack_id": "rumi_ambient_trigger_pack",
         "function_id": "ambient_audio_classifier",

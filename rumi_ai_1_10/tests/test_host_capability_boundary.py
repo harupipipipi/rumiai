@@ -124,7 +124,8 @@ def test_host_permission_registry_normalizes_ambient_aliases():
 
     assert normalize_host_permission_id("microphone.capture") == "host.microphone.capture"
     assert normalize_host_permission_id("camera.capture") == "host.camera.capture"
-    assert get_host_permission_definition("host.microphone.capture").stream_allowed is True
+    assert get_host_permission_definition("host.microphone.capture").stream_allowed is False
+    assert get_host_permission_definition("host.permission.status").broker_runner_implemented is True
     assert get_host_permission_definition("host.process.exec_guarded").typed_confirmation_required is True
 
 
@@ -154,6 +155,14 @@ def test_host_intent_validator_enforces_typed_operations_and_stream_rules():
     from core_runtime.host_intent import validate_host_intent
 
     ok = validate_host_intent(
+        {
+            "type": "host_intent",
+            "operation": "host.permission.status",
+        },
+        caller_pack_id="pack.permissions",
+        caller_function_id="status",
+    )
+    stream_rejected = validate_host_intent(
         {
             "type": "host_stream_intent",
             "operation": "microphone.capture",
@@ -196,7 +205,9 @@ def test_host_intent_validator_enforces_typed_operations_and_stream_rules():
     )
 
     assert ok.ok is True
-    assert ok.intent.operation == "host.microphone.capture"
+    assert ok.intent.operation == "host.permission.status"
+    assert stream_rejected.ok is False
+    assert any("does not allow streams" in error for error in stream_rejected.errors)
     assert rejected.ok is False
     assert any("does not allow streams" in error for error in rejected.errors)
     assert unknown.ok is False
@@ -221,8 +232,10 @@ def test_default_builtin_grants_allow_host_pack_but_not_exec_guarded(tmp_path):
     authority_window = grants.get_grant("system:authority-approval-window")
 
     assert host_pack is not None
-    assert "host.microphone.capture" in host_pack.permissions
-    assert "host.camera.capture" in host_pack.permissions
+    assert "host.permission.status" in host_pack.permissions
+    assert "host.permission.open_settings" in host_pack.permissions
+    assert "host.microphone.capture" not in host_pack.permissions
+    assert "host.camera.capture" not in host_pack.permissions
     assert "host.process.exec_guarded" not in host_pack.permissions
     assert authority_window is not None
     assert "authority.request.approve" in authority_window.permissions
@@ -235,7 +248,8 @@ def test_host_capabilities_pack_contract_names_boundary_and_privacy():
     assert ecosystem["pack_id"] == "rumi_host_capabilities_pack"
     assert ecosystem["security_boundary"]["defaultspack_role"] == "ui_orchestration_and_authority_only"
     assert ecosystem["security_boundary"]["ordinary_pack_contract"] == "return_host_intent_json"
-    assert "host.process.exec_guarded" in ecosystem["default_grants"]["exclude"]
+    assert ecosystem["default_grants"]["include"] == "implemented_host_permissions"
+    assert ecosystem["default_grants"]["exclude"] == []
     assert ecosystem["privacy"]["store_microphone_audio"] is False
     assert ecosystem["privacy"]["store_camera_frames"] is False
     assert setup["overlap_policy"]["defaultspack_host_execution"] == "forbidden"
@@ -247,15 +261,20 @@ def test_host_capabilities_pack_registry_grants_follow_canonical_host_registry()
     registry = _host_permission_registry()
     ecosystem = json.loads((ROOT / "ecosystem" / "rumi_host_capabilities_pack" / "ecosystem.json").read_text())
 
-    assert ecosystem["capabilities"] == list(registry)
-    assert ecosystem["default_grants"]["include"] == "standard_host_permissions"
-    assert ecosystem["default_grants"]["exclude"] == ["host.process.exec_guarded"]
+    implemented = [
+        permission_id
+        for permission_id, definition in registry.items()
+        if definition.get("broker_runner_implemented") is True
+    ]
+    assert ecosystem["capabilities"] == implemented
+    assert ecosystem["default_grants"]["include"] == "implemented_host_permissions"
+    assert ecosystem["default_grants"]["exclude"] == []
     assert default_builtin_grants.HOST_CAPABILITIES_PACK_PERMISSIONS == (
         "function.call",
         *(
             permission_id
-            for permission_id in registry
-            if permission_id not in default_builtin_grants.HOST_CAPABILITIES_PACK_DEFAULT_GRANT_EXCLUSIONS
+            for permission_id, definition in registry.items()
+            if definition.get("broker_runner_implemented") is True
         ),
     )
 
@@ -313,10 +332,10 @@ def test_host_mediator_function_returns_valid_host_intent(monkeypatch):
         / "ecosystem"
         / "rumi_host_capabilities_pack"
         / "functions"
-        / "host_microphone_capture"
+        / "host_permission_status"
         / "main.py"
     )
-    spec = importlib.util.spec_from_file_location("host_microphone_capture_main", main_path)
+    spec = importlib.util.spec_from_file_location("host_permission_status_main", main_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -324,27 +343,29 @@ def test_host_mediator_function_returns_valid_host_intent(monkeypatch):
     result = module.run(
         {
             "owner_pack": "rumi_ambient_trigger_pack",
-            "function_id": "ambient_monitor_start",
+            "function_id": "ambient_permission_check",
             "conversation_id": "conversation-1",
         },
         {
-            "duration_ms": 1000,
+            "permission_id": "host.camera.capture",
             "stream": {"enabled": True, "max_duration_ms": 1000},
             "approval_token": "not-forwarded",
-            "reason": "wake audio",
+            "reason": "permission status",
         },
     )
     validation = validate_host_intent(
         result,
         caller_pack_id="rumi_ambient_trigger_pack",
-        caller_function_id="ambient_monitor_start",
+        caller_function_id="ambient_permission_check",
     )
 
-    assert result["type"] == "host_stream_intent"
-    assert result["operation"] == "host.microphone.capture"
-    assert result["host_function_id"] == "host_microphone_capture"
+    assert result["type"] == "host_intent"
+    assert result["operation"] == "host.permission.status"
+    assert result["stream"]["enabled"] is False
+    assert result["stream"]["rejected_reason"] == "operation_does_not_allow_stream"
+    assert result["host_function_id"] == "host_permission_status"
     assert result["caller"]["pack_id"] == "rumi_ambient_trigger_pack"
-    assert result["caller"]["function_id"] == "ambient_monitor_start"
+    assert result["caller"]["function_id"] == "ambient_permission_check"
     assert result["conversation_id"] == "conversation-1"
     assert "approval_token" not in result["args"]
     assert validation.ok is True
@@ -360,7 +381,7 @@ def test_capability_executor_uses_trusted_host_intent_caller_context():
     )
     host_facade_entry = SimpleNamespace(
         pack_id="rumi_host_capabilities_pack",
-        function_id="host_microphone_capture",
+        function_id="host_permission_status",
     )
     ordinary_entry = SimpleNamespace(
         pack_id="ordinary_pack",
@@ -373,15 +394,15 @@ def test_capability_executor_uses_trusted_host_intent_caller_context():
     )
     assert executor._host_intent_caller_ids(
         host_facade_entry,
-        {"owner_pack": "rumi_ambient_trigger_pack", "function_id": "ambient_monitor_start"},
-    ) == ("rumi_ambient_trigger_pack", "ambient_monitor_start")
+        {"owner_pack": "rumi_ambient_trigger_pack", "function_id": "ambient_permission_check"},
+    ) == ("rumi_ambient_trigger_pack", "ambient_permission_check")
     assert executor._host_intent_caller_ids(ordinary_entry, {"owner_pack": "spoofed"}) == (
         "ordinary_pack",
         "ordinary_function",
     )
 
 
-def test_host_intent_executor_dispatches_approved_stream_to_viewer_broker(monkeypatch):
+def test_host_intent_executor_dispatches_approved_status_to_viewer_broker(monkeypatch):
     from core_runtime.authority.models import AuthorityDecision
     from core_runtime.host_intent import executor as host_intent_executor
     from core_runtime.host_intent.executor import HostIntentExecutor
@@ -408,9 +429,9 @@ def test_host_intent_executor_dispatches_approved_stream_to_viewer_broker(monkey
         def available(self):
             return True
 
-        def start_stream(self, payload):
+        def execute_intent(self, payload):
             captured["broker_payload"] = dict(payload)
-            return {"ok": True, "stream_id": "host-stream-1"}
+            return {"ok": True, "result": {"permission_id": "host.camera.capture", "status": "unknown"}}
 
     def fake_issue_execution_token(request_id, args_hash, **kwargs):
         captured["execution_token"] = {
@@ -426,23 +447,22 @@ def test_host_intent_executor_dispatches_approved_stream_to_viewer_broker(monkey
 
     result = HostIntentExecutor().handle(
         {
-            "type": "host_stream_intent",
-            "operation": "host.microphone.capture",
-            "args": {"duration_ms": 1000},
-            "stream": {"enabled": True, "max_duration_ms": 1000},
+            "type": "host_intent",
+            "operation": "host.permission.status",
+            "args": {"permission_id": "host.camera.capture"},
             "caller": {
                 "pack_id": "rumi_ambient_trigger_pack",
-                "function_id": "ambient_monitor_start",
+                "function_id": "ambient_permission_check",
             },
-            "host_function_id": "host_microphone_capture",
+            "host_function_id": "host_permission_status",
         },
         principal_id="rumi_ambient_trigger_pack",
         caller_pack_id="rumi_ambient_trigger_pack",
-        caller_function_id="ambient_monitor_start",
+        caller_function_id="ambient_permission_check",
         request_context={
             "conversation_id": "conv-1",
             "authority": {
-                "permission_id": "host.microphone.capture",
+                "permission_id": "host.permission.status",
                 "request_id": "auth-1",
                 "approval_token": "authority-token",
             },
@@ -451,12 +471,12 @@ def test_host_intent_executor_dispatches_approved_stream_to_viewer_broker(monkey
 
     assert result["success"] is True
     assert result["status"] == "executed"
-    assert result["host_broker"]["stream_id"] == "host-stream-1"
+    assert result["host_broker"]["result"]["permission_id"] == "host.camera.capture"
     assert captured["broker_payload"]["approval_token"] == "viewer-execution-token"
     assert result["host_intent"].get("approval_token") is None
     assert captured["execution_token"]["request_id"] == "auth-1"
-    assert captured["execution_token"]["operation"] == "host.microphone.capture"
-    assert captured["execution_token"]["function_id"] == "host_microphone_capture"
+    assert captured["execution_token"]["operation"] == "host.permission.status"
+    assert captured["execution_token"]["function_id"] == "host_permission_status"
     assert captured["execution_token"]["pack_id"] == "rumi_ambient_trigger_pack"
     assert captured["execution_token"]["conversation_id"] == "conv-1"
     assert [item.get("consume_approval_token") for item in authority_checks] == [False, True]

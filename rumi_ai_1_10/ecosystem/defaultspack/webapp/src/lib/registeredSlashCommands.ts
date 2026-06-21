@@ -191,6 +191,21 @@ function registerCommandIdentityTokens(
   }
 }
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function commandExecutionKey(command: ComposerCommandItem): string {
+  return stableJson(command.execution ?? null);
+}
+
 export function registeredSlashCommandsFromSettings(value: unknown): ComposerCommandItem[] {
   const records = Array.isArray(value) ? value : [];
   const commands: ComposerCommandItem[] = [];
@@ -245,6 +260,9 @@ export function mergeRegisteredSlashCommands(
     const existingIndex = tokens.map((token) => tokenOwners.get(token)).find((index) => index !== undefined);
     if (existingIndex !== undefined) {
       const existing = merged[existingIndex];
+      if (commandExecutionKey(existing) !== commandExecutionKey(command)) {
+        continue;
+      }
       const incomingAliases = [command.name, ...(command.aliases ?? [])].filter(
         (alias) => alias && alias !== existing.name && alias !== existing.id,
       );

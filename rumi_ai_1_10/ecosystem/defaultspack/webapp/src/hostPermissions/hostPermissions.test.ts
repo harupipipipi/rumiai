@@ -90,7 +90,7 @@ describe("host permissions", () => {
     assert.equal(screen?.streamAllowed, false);
 
     const audio = rows.find((row) => row.id === "host.audio.capture");
-    assert.equal(audio?.streamAllowed, true);
+    assert.equal(audio?.streamAllowed, false);
   });
 
   it("uses latest matching authority request for Rumi approval status", () => {

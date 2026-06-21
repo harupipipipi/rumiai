@@ -9,6 +9,8 @@
     "lint": "tsc --noEmit && npm run lint:layers && npm run lint:boundaries",
     "lint:layers": "node scripts/forbid-raw-z-index.mjs",
     "lint:boundaries": "node scripts/forbid-renderer-api-imports.mjs",
+    "sync:host-permissions": "node scripts/sync-host-permission-registry.mjs",
+    "check:host-permissions": "node scripts/sync-host-permission-registry.mjs --check",
     "check:vendored-assets": "node scripts/check-vendored-assets.mjs",
     "audit": "npm audit --audit-level=high",
     "test:e2e": "playwright test",

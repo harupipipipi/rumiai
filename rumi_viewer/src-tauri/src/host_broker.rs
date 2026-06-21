@@ -21,8 +21,8 @@ use crate::desktop_system_info;
 use crate::host_audit::{now_epoch_seconds, summarize_args, write_audit_log, HostAuditEntry};
 use crate::host_broker_types::{
     HostBrokerComputerRunRequest, HostBrokerComputerRunResponse, HostBrokerConnectionInfo,
-    HostBrokerError, HostBrokerIntentCaller, HostBrokerIntentRequest, HostBrokerIntentResponse,
-    HostBrokerStatus, HostBrokerStreamStopRequest,
+    HostBrokerError, HostBrokerIntentRequest, HostBrokerIntentResponse, HostBrokerStatus,
+    HostBrokerStreamStopRequest,
 };
 use crate::process_utils;
 
@@ -566,43 +566,13 @@ fn normalize_host_operation(operation: &str) -> String {
 fn host_operation_allowed(operation: &str) -> bool {
     matches!(
         operation,
-        "host.permission.status"
-            | "host.permission.open_settings"
-            | "host.intent.execute"
-            | "host.stream.start"
-            | "host.stream.stop"
-            | "host.screen.capture"
-            | "host.accessibility.read"
-            | "host.accessibility.mutate"
-            | "host.input.pointer"
-            | "host.input.keyboard"
-            | "host.clipboard.read"
-            | "host.clipboard.write"
-            | "host.microphone.capture"
-            | "host.audio.capture"
-            | "host.audio.output"
-            | "host.speech.transcribe"
-            | "host.speech.synthesize"
-            | "host.camera.capture"
-            | "host.file.open_dialog"
-            | "host.file.read_user_selected"
-            | "host.file.write_user_selected"
-            | "host.process.open_url"
-            | "host.process.launch_app"
-            | "host.process.exec_guarded"
+        "host.permission.status" | "host.permission.open_settings"
     )
 }
 
 fn host_operation_stream_allowed(operation: &str) -> bool {
-    matches!(
-        operation,
-        "host.stream.start"
-            | "host.microphone.capture"
-            | "host.audio.capture"
-            | "host.speech.transcribe"
-            | "host.camera.capture"
-            | "host.process.exec_guarded"
-    )
+    let _ = operation;
+    false
 }
 
 fn host_intent_stream_enabled(stream: &Value) -> bool {
@@ -2118,6 +2088,7 @@ fn write_json_response(stream: &mut TcpStream, status_code: u16, body: &Value) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host_broker_types::HostBrokerIntentCaller;
 
     #[test]
     fn parse_authorization_header_accepts_bearer_and_custom_token() {
@@ -2504,7 +2475,7 @@ mod tests {
     }
 
     #[test]
-    fn host_stream_start_requires_approval_token() {
+    fn host_stream_start_rejects_unadvertised_operation_before_approval() {
         let (config, temp_dir) = test_config_with_approval_secret("secret");
         let shared = test_shared(config);
         let response = execute_host_stream_start(
@@ -2515,19 +2486,13 @@ mod tests {
         assert_eq!(response.get("ok").and_then(Value::as_bool), Some(false));
         assert_eq!(
             response.pointer("/error/code").and_then(Value::as_str),
-            Some("APPROVAL_REQUIRED")
-        );
-        assert_eq!(
-            response
-                .pointer("/result/host_intent/operation")
-                .and_then(Value::as_str),
-            Some("host.microphone.capture")
+            Some("HOST_OPERATION_UNKNOWN")
         );
         let _ = fs::remove_dir_all(temp_dir);
     }
 
     #[test]
-    fn host_stream_start_rejects_token_when_stream_config_changes() {
+    fn host_stream_start_rejects_unadvertised_operation_with_token() {
         let (config, temp_dir) = test_config_with_approval_secret("secret");
         let shared = test_shared(config);
         let approved_stream = json!({"enabled": true, "max_duration_ms": 1000});
@@ -2543,13 +2508,13 @@ mod tests {
         assert_eq!(response.get("ok").and_then(Value::as_bool), Some(false));
         assert_eq!(
             response.pointer("/error/code").and_then(Value::as_str),
-            Some("APPROVAL_ARGUMENTS_CHANGED")
+            Some("HOST_OPERATION_UNKNOWN")
         );
         let _ = fs::remove_dir_all(temp_dir);
     }
 
     #[test]
-    fn host_intent_execute_fails_closed_for_unimplemented_runner() {
+    fn host_intent_execute_fails_closed_for_unadvertised_operation() {
         let (config, temp_dir) = test_config_with_approval_secret("secret");
         let shared = test_shared(config);
         let args = json!({"include_cursor": true});
@@ -2586,14 +2551,14 @@ mod tests {
         assert_eq!(response.get("ok").and_then(Value::as_bool), Some(false));
         assert_eq!(
             response.pointer("/error/code").and_then(Value::as_str),
-            Some("HOST_OPERATION_NOT_IMPLEMENTED")
+            Some("HOST_OPERATION_UNKNOWN")
         );
         assert!(response.get("result").is_none());
         let _ = fs::remove_dir_all(temp_dir);
     }
 
     #[test]
-    fn host_stream_start_rejects_without_capture_backend() {
+    fn host_stream_start_rejects_capture_backend_contract_as_unadvertised() {
         let (config, temp_dir) = test_config_with_approval_secret("secret");
         let shared = test_shared(config);
         let stream = json!({"enabled": true, "max_duration_ms": 1000});
@@ -2609,12 +2574,12 @@ mod tests {
         assert_eq!(started.get("ok").and_then(Value::as_bool), Some(false));
         assert_eq!(
             started.pointer("/error/code").and_then(Value::as_str),
-            Some("HOST_STREAM_BACKEND_UNAVAILABLE")
+            Some("HOST_OPERATION_UNKNOWN")
         );
         assert_eq!(retried.get("ok").and_then(Value::as_bool), Some(false));
         assert_eq!(
             retried.pointer("/error/code").and_then(Value::as_str),
-            Some("HOST_STREAM_BACKEND_UNAVAILABLE")
+            Some("HOST_OPERATION_UNKNOWN")
         );
         let _ = fs::remove_dir_all(temp_dir);
     }

@@ -29,10 +29,7 @@
   "supports_all_ok": false,
   "required_permissions": [
     "host.permission.status",
-    "host.permission.open_settings",
-    "host.intent.execute",
-    "host.stream.start",
-    "host.stream.stop"
+    "host.permission.open_settings"
   ],
   "install_prompt": {
     "title": "このpackは端末操作の仲介を要求しています",

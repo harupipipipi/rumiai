@@ -21,6 +21,7 @@ type TrackerOptions = PinchDetectorOptions & {
   modelAssetPath?: string;
   frameIntervalMs?: number;
   onFrame?: (frame: HandTrackingFrame | null) => void;
+  onError?: (error: unknown) => void;
 };
 
 const DEFAULT_FRAME_INTERVAL_MS = 80;
@@ -38,31 +39,50 @@ export async function startHandLandmarkerLoop(
   let raf = 0;
   let lastFrameAt = 0;
 
-  const loop = () => {
+  const stopLoop = (error?: unknown) => {
     if (stopped) return;
-    const now = performance.now();
-    if (
-      video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
-      && now - lastFrameAt >= (options.frameIntervalMs ?? DEFAULT_FRAME_INTERVAL_MS)
-    ) {
-      lastFrameAt = now;
-      const result = handLandmarker.detectForVideo(video, now);
-      const frame = frameFromResult(result, now);
-      options.onFrame?.(frame);
-      if (frame) {
-        onState(detector.updateFromLandmarks(frame));
-      }
-    }
-    raf = window.requestAnimationFrame(loop);
-  };
-
-  raf = window.requestAnimationFrame(loop);
-  return () => {
     stopped = true;
     window.cancelAnimationFrame(raf);
     detector.reset();
+    try {
+      options.onFrame?.(null);
+    } catch (frameError) {
+      if (error === undefined) error = frameError;
+    }
     void handLandmarker.close();
+    if (error !== undefined) {
+      try {
+        options.onError?.(error);
+      } catch {
+        // Error callbacks are observational; the detector is already stopped.
+      }
+    }
   };
+
+  const loop = () => {
+    if (stopped) return;
+    try {
+      const now = performance.now();
+      if (
+        video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+        && now - lastFrameAt >= (options.frameIntervalMs ?? DEFAULT_FRAME_INTERVAL_MS)
+      ) {
+        lastFrameAt = now;
+        const result = handLandmarker.detectForVideo(video, now);
+        const frame = frameFromResult(result, now);
+        options.onFrame?.(frame);
+        if (frame) {
+          onState(detector.updateFromLandmarks(frame));
+        }
+      }
+      raf = window.requestAnimationFrame(loop);
+    } catch (error) {
+      stopLoop(error);
+    }
+  };
+
+  raf = window.requestAnimationFrame(loop);
+  return () => stopLoop();
 }
 
 async function createHandLandmarker(options: TrackerOptions): Promise<HandLandmarker> {

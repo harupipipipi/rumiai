@@ -10,19 +10,26 @@ def run(context, args):
     sample_rate = int(payload.get("sample_rate") or 16_000)
     channels = int(payload.get("channels") or 1)
     return {
-        "type": "host_stream_intent",
+        "type": "ambient_browser_monitor_contract",
         "version": 1,
-        "operation": "host.microphone.capture",
-        "args": {
+        "success": True,
+        "status": "browser_owned_monitor",
+        "capture_owner": "defaultspack_webapp",
+        "contract": {
+            "camera": "browser.getUserMedia",
+            "microphone": "browser.getUserMedia",
+            "trigger": "ok_mark_release_submits_ephemeral_recording",
+        },
+        "capture_options": {
             "sample_rate": sample_rate,
             "channels": channels,
             "max_duration_ms": max_duration_ms,
             "privacy_mode": "audio_embedding_or_ephemeral_recording",
         },
-        "stream": {
-            "enabled": True,
-            "max_duration_ms": max_duration_ms,
-            "events": ["audio.start", "audio.chunk", "audio.end", "error"],
+        "host_stream": {
+            "requested": False,
+            "available": False,
+            "reason": "Viewer host stream capture backend is not advertised; ambient recording is owned by the pack window.",
         },
         "reason": str(payload.get("reason") or "Ambient wake monitoring needs microphone audio.").strip(),
         "caller": {
@@ -30,7 +37,6 @@ def run(context, args):
             "function_id": _context_value(runtime_context, "function_id") or "ambient_monitor_start",
         },
         "conversation_id": _context_value(runtime_context, "conversation_id", "conversation_turn_id"),
-        "host_function_id": "host_microphone_capture",
         "consumer": {
             "pack_id": "rumi_ambient_trigger_pack",
             "function_id": "ambient_audio_classifier",

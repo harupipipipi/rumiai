@@ -190,17 +190,58 @@ def local_whisper_status() -> dict[str, Any]:
     command = _configured_command(env)
     model = _configured_model(env)
     ffmpeg = _configured_ffmpeg(env)
-    configured = bool(command and model)
+    capability = _local_whisper_capability(command=command, model=model)
+    configured = bool(capability["configured"])
     return {
         "status": "local_whisper_configured" if configured else "local_whisper_not_configured",
         "configured": configured,
         "command": str((command or {}).get("command") or ""),
         "command_label": str((command or {}).get("label") or ""),
+        "engine": str(capability.get("engine") or ""),
         "model": str(model or ""),
         "model_quality": _model_quality(model),
         "ffmpeg": ffmpeg,
         "can_convert_audio": bool(ffmpeg),
-        "reason": "" if configured else _local_whisper_missing_reason(command=command, model=model),
+        "reason": "" if configured else str(capability.get("reason") or ""),
+    }
+
+
+def _local_whisper_capability(*, command: dict[str, str] | None, model: str) -> dict[str, Any]:
+    if command is not None:
+        kind = str(command.get("kind") or "")
+        label = str(command.get("label") or command.get("command") or "")
+        if kind == "custom":
+            return {"configured": True, "engine": label or "custom"}
+        if model:
+            return {"configured": True, "engine": label}
+        return {
+            "configured": False,
+            "engine": label,
+            "reason": "ローカルWhisperモデルが見つかりません。",
+        }
+
+    if _has_python_module("faster_whisper"):
+        if _library_model_allowed(model):
+            return {"configured": True, "engine": "faster_whisper"}
+        return {
+            "configured": False,
+            "engine": "faster_whisper",
+            "reason": "faster-whisper用のローカルモデルが見つかりません。",
+        }
+
+    if _has_python_module("whisper"):
+        if _library_model_allowed(model):
+            return {"configured": True, "engine": "whisper"}
+        return {
+            "configured": False,
+            "engine": "whisper",
+            "reason": "openai-whisper用のローカルモデルが見つかりません。",
+        }
+
+    return {
+        "configured": False,
+        "engine": "",
+        "reason": _local_whisper_missing_reason(command=command, model=model),
     }
 
 

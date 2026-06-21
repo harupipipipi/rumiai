@@ -73,6 +73,8 @@ class HostIntentExecutor:
             }
 
         brokered = _dispatch_prepared_viewer_broker(intent, prepared)
+        if not isinstance(brokered, dict):
+            brokered = _host_broker_initialization_failed("viewer_broker_dispatcher_returned_none")
         if brokered.get("success") is True:
             authority = check_host_intent_authority(
                 service,
@@ -180,11 +182,14 @@ def _dispatch_prepared_viewer_broker(intent: HostIntent, prepared: _PreparedView
     }
 
 
-def _dispatch_to_viewer_broker(intent: HostIntent, *, request_id: str | None = None) -> dict[str, Any] | None:
+def _dispatch_to_viewer_broker(intent: HostIntent, *, request_id: str | None = None) -> dict[str, Any]:
     prepared = _prepare_viewer_broker(intent, request_id=request_id)
     if not isinstance(prepared, _PreparedViewerBroker):
         return prepared
-    return _dispatch_prepared_viewer_broker(intent, prepared)
+    brokered = _dispatch_prepared_viewer_broker(intent, prepared)
+    if isinstance(brokered, dict):
+        return brokered
+    return _host_broker_initialization_failed("viewer_broker_dispatcher_returned_none")
 
 
 def maybe_handle_host_intent_output(

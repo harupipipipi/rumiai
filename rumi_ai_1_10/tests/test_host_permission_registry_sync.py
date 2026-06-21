@@ -39,15 +39,21 @@ def test_viewer_host_broker_operation_allowlists_match_canonical_registry():
         ROOT.parent / "rumi_viewer" / "src-tauri" / "src" / "host_broker.rs"
     ).read_text(encoding="utf-8")
 
-    assert _rust_match_string_set(host_broker_source, "host_operation_allowed") == set(canonical)
+    implemented = {
+        operation_id
+        for operation_id, definition in canonical.items()
+        if definition.get("broker_runner_implemented") is True
+    }
+    assert _rust_match_string_set(host_broker_source, "host_operation_allowed") == implemented
     assert _rust_match_string_set(
         host_broker_source,
         "host_operation_stream_allowed",
-    ) == {
+    ) == set()
+    assert {
         operation_id
         for operation_id, definition in canonical.items()
         if definition.get("stream_allowed") is True
-    }
+    } == set()
 
 
 def _rust_match_string_set(source: str, function_name: str) -> set[str]:
@@ -56,5 +62,7 @@ def _rust_match_string_set(source: str, function_name: str) -> set[str]:
         r"\{\s*matches!\(\s*operation,\s*(?P<body>.*?)\s*\)\s*\}"
     )
     match = re.search(pattern, source, flags=re.DOTALL)
+    if not match and re.search(rf"fn {re.escape(function_name)}\(operation: &str\) -> bool \{{\s*let _ = operation;\s*false\s*\}}", source):
+        return set()
     assert match, f"Could not find {function_name} matches! body"
     return set(re.findall(r'"([^"]+)"', match.group("body")))

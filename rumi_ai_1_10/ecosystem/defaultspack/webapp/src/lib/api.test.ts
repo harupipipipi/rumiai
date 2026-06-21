@@ -208,7 +208,7 @@ test("registered slash command aliases are claimed after built-in merges", () =>
   assert.equal(parseSlashCommandInput("/go", merged)?.command.id, "yolo");
 });
 
-test("registered slash command primary name survives when an alias collides", () => {
+test("registered slash commands reject collisions with different actions", () => {
   const builtInYolo: ComposerCommandItem = {
     id: "yolo",
     name: "yolo",
@@ -225,8 +225,32 @@ test("registered slash command primary name survives when an alias collides", ()
   const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
 
   assert.equal(merged.length, 1);
-  assert.deepEqual(merged[0].aliases, ["camera"]);
-  assert.equal(parseSlashCommandInput("/camera", merged)?.command.id, "yolo");
+  assert.equal(merged[0].id, "yolo");
+  assert.deepEqual(merged[0].aliases, undefined);
+  assert.equal(parseSlashCommandInput("/camera", merged), null);
+});
+
+test("registered slash command rejected collisions do not reserve hidden primary names", () => {
+  const builtInYolo: ComposerCommandItem = {
+    id: "yolo",
+    name: "yolo",
+    label: "Yolo Approvals",
+    category: "mode",
+    visibility: "hidden",
+    risk: "medium",
+    execution: { type: "frontend", action: "toggle_yolo" },
+  };
+  const registered = registeredSlashCommandsFromSettings([
+    { name: "camera", action: "open_settings", aliases: ["yolo"] },
+    { name: "go", action: "toggle_yolo", aliases: ["camera"] },
+  ]);
+
+  const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
+
+  assert.equal(merged.length, 2);
+  assert.equal(parseSlashCommandInput("/yolo", merged)?.command.id, "yolo");
+  assert.equal(parseSlashCommandInput("/camera", merged)?.command.id, "registered:go");
+  assert.equal(parseSlashCommandInput("/go", merged)?.command.id, "registered:go");
 });
 
 test("composer command feedback surfaces pack block result messages and paths", () => {

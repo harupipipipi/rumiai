@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import threading
 import time
 import uuid
 from dataclasses import replace
@@ -51,6 +52,11 @@ PINCH_RECORD_RELEASE_MODES = {"record_audio_release", "dispatch_audio", "submit_
 APPROVAL_GESTURE_MODES = {"approval_approve", "approval_reject", "swipe_approve", "swipe_reject"}
 ROUTING_MODES = {"selected_chat", "startup_new_chat", "always_new_chat"}
 AI_SEND_APPROVAL_TTL_SECONDS = 5 * 60
+MAX_SESSION_CONVERSATIONS = 64
+MAX_PENDING_AI_SEND_APPROVALS = 64
+MAX_PENDING_AUDIO_BLOBS = 64
+MAX_PENDING_AUDIO_BLOB_BYTES = 10 * 1024 * 1024
+MAX_PENDING_AUDIO_TOTAL_BYTES = 40 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
 ALLOWED_ACTIONS = {
@@ -65,6 +71,7 @@ ALLOWED_ACTIONS = {
 _SESSION_CONVERSATION_IDS: dict[str, str] = {}
 _PENDING_AI_SEND_APPROVALS: dict[str, dict[str, Any]] = {}
 _PENDING_AI_SEND_AUDIO_BLOBS: dict[str, dict[str, Any]] = {}
+_AMBIENT_PENDING_LOCK = threading.RLock()
 
 
 class AmbientTriggerRouter:
@@ -76,8 +83,11 @@ class AmbientTriggerRouter:
         state = self.store.read()
         routing = state.get("routing") if isinstance(state.get("routing"), dict) else {}
         session_key = self._session_route_key(routing)
-        if session_key and _SESSION_CONVERSATION_IDS.get(session_key):
-            routing["session_conversation_id"] = _SESSION_CONVERSATION_IDS[session_key]
+        if session_key:
+            with _AMBIENT_PENDING_LOCK:
+                session_conversation_id = _SESSION_CONVERSATION_IDS.get(session_key)
+            if session_conversation_id:
+                routing["session_conversation_id"] = session_conversation_id
         state["audit_tail"] = self.audit.tail(10)
         state["allowed_actions"] = sorted(ALLOWED_ACTIONS)
         state["input_aliases"] = dict(ACTION_ALIASES)
@@ -534,7 +544,9 @@ class AmbientTriggerRouter:
             "created_at": _epoch_iso(now),
         }
         self._prune_pending()
-        _PENDING_AI_SEND_APPROVALS[request_id] = pending
+        with _AMBIENT_PENDING_LOCK:
+            _PENDING_AI_SEND_APPROVALS[request_id] = pending
+            _trim_pending_approvals_locked()
         return self._record(
             event,
             "approval_required",
@@ -548,10 +560,11 @@ class AmbientTriggerRouter:
     def _latest_pending_summary(self) -> dict[str, Any] | None:
         self._prune_pending()
         store_path = self._store_path_key()
-        pending = [
-            item for item in _PENDING_AI_SEND_APPROVALS.values()
-            if item.get("store_path") == store_path
-        ]
+        with _AMBIENT_PENDING_LOCK:
+            pending = [
+                item for item in _PENDING_AI_SEND_APPROVALS.values()
+                if item.get("store_path") == store_path
+            ]
         if not pending:
             return None
         pending.sort(key=lambda item: float(item.get("created_at_epoch") or 0), reverse=True)
@@ -562,43 +575,50 @@ class AmbientTriggerRouter:
     def _pop_pending(self, request_id: str) -> dict[str, Any] | None:
         self._prune_pending()
         request_id = str(request_id or "").strip()
-        pending = _PENDING_AI_SEND_APPROVALS.get(request_id)
-        if pending is None or pending.get("store_path") != self._store_path_key():
-            return None
-        now = time.time()
-        if float(pending.get("expires_at_epoch") or 0) <= now:
-            _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
-            _delete_pending_audio_blobs(pending)
-            event = pending.get("event")
+        expired_pending: dict[str, Any] | None = None
+        with _AMBIENT_PENDING_LOCK:
+            pending = _PENDING_AI_SEND_APPROVALS.get(request_id)
+            if pending is None or pending.get("store_path") != self._store_path_key():
+                return None
+            now = time.time()
+            if float(pending.get("expires_at_epoch") or 0) <= now:
+                expired_pending = _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
+                if expired_pending is not None:
+                    _delete_pending_audio_blobs_locked(expired_pending)
+            else:
+                return _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
+        if expired_pending is not None:
+            event = expired_pending.get("event")
             if isinstance(event, AmbientTriggerEvent):
                 self._record(
                     event,
                     "ignored",
                     "ambient.ai_send_approval_expired",
-                    action_id=str(pending.get("action_id") or ""),
+                    action_id=str(expired_pending.get("action_id") or ""),
                     approval_request_id=request_id,
                 )
-            return None
-        return _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
+        return None
 
     def _prune_pending(self) -> None:
         now = time.time()
-        expired = [
-            request_id
-            for request_id, pending in _PENDING_AI_SEND_APPROVALS.items()
-            if float(pending.get("expires_at_epoch") or 0) <= now
-        ]
-        for request_id in expired:
-            pending = _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
-            if pending is not None:
-                _delete_pending_audio_blobs(pending)
-        expired_blobs = [
-            blob_id
-            for blob_id, blob in _PENDING_AI_SEND_AUDIO_BLOBS.items()
-            if float(blob.get("expires_at_epoch") or 0) <= now
-        ]
-        for blob_id in expired_blobs:
-            _PENDING_AI_SEND_AUDIO_BLOBS.pop(blob_id, None)
+        with _AMBIENT_PENDING_LOCK:
+            expired = [
+                request_id
+                for request_id, pending in _PENDING_AI_SEND_APPROVALS.items()
+                if float(pending.get("expires_at_epoch") or 0) <= now
+            ]
+            for request_id in expired:
+                pending = _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
+                if pending is not None:
+                    _delete_pending_audio_blobs_locked(pending)
+            expired_blobs = [
+                blob_id
+                for blob_id, blob in _PENDING_AI_SEND_AUDIO_BLOBS.items()
+                if float(blob.get("expires_at_epoch") or 0) <= now
+            ]
+            for blob_id in expired_blobs:
+                _PENDING_AI_SEND_AUDIO_BLOBS.pop(blob_id, None)
+            _trim_pending_audio_blobs_locked()
 
     def _pending_summary(self, pending: dict[str, Any]) -> dict[str, Any]:
         event = pending.get("event")
@@ -654,13 +674,17 @@ class AmbientTriggerRouter:
         session_key = self._session_route_key(routing)
         if not session_key:
             return self._create_routed_conversation(routing, params=params, context=context, event=event)["id"]
-        conversation_id = _SESSION_CONVERSATION_IDS.get(session_key)
+        with _AMBIENT_PENDING_LOCK:
+            conversation_id = _SESSION_CONVERSATION_IDS.get(session_key)
         if conversation_id:
             existing = ChatStore().get_conversation(conversation_id)
             if existing:
                 return conversation_id
         created = self._create_routed_conversation(routing, params=params, context=context, event=event)
-        _SESSION_CONVERSATION_IDS[session_key] = created["id"]
+        with _AMBIENT_PENDING_LOCK:
+            _SESSION_CONVERSATION_IDS[session_key] = created["id"]
+            while len(_SESSION_CONVERSATION_IDS) > MAX_SESSION_CONVERSATIONS:
+                _SESSION_CONVERSATION_IDS.pop(next(iter(_SESSION_CONVERSATION_IDS)), None)
         return created["id"]
 
     def _create_routed_conversation(
@@ -1034,16 +1058,34 @@ def _detach_pending_audio_media(
         media = _raw_audio_media_from_attachment(item)
         clean_item = strip_audio_media(item)
         if media:
-            blob_id = f"{request_id}:{index}:{uuid.uuid4().hex}"
-            _PENDING_AI_SEND_AUDIO_BLOBS[blob_id] = {
-                "store_path": store_path,
-                "expires_at_epoch": expires_at_epoch,
-                "media": media,
-            }
             metadata = dict(clean_item.get("metadata") if isinstance(clean_item.get("metadata"), dict) else {})
-            metadata["ambient_audio_blob_id"] = blob_id
+            media_size = _pending_audio_media_size(media)
+            if media_size > MAX_PENDING_AUDIO_BLOB_BYTES:
+                metadata["ambient_audio_blob_omitted"] = "blob_too_large"
+                metadata["ambient_audio_blob_size"] = media_size
+            else:
+                blob_id = f"{request_id}:{index}:{uuid.uuid4().hex}"
+                with _AMBIENT_PENDING_LOCK:
+                    _trim_pending_audio_blobs_locked()
+                    if (
+                        len(_PENDING_AI_SEND_AUDIO_BLOBS) >= MAX_PENDING_AUDIO_BLOBS
+                        or _pending_audio_total_bytes_locked() + media_size > MAX_PENDING_AUDIO_TOTAL_BYTES
+                    ):
+                        blob_id = ""
+                    else:
+                        _PENDING_AI_SEND_AUDIO_BLOBS[blob_id] = {
+                            "store_path": store_path,
+                            "expires_at_epoch": expires_at_epoch,
+                            "size_bytes": media_size,
+                            "media": media,
+                        }
+                if blob_id:
+                    metadata["ambient_audio_blob_id"] = blob_id
+                    blob_ids.append(blob_id)
+                else:
+                    metadata["ambient_audio_blob_omitted"] = "pending_audio_capacity_exceeded"
+                    metadata["ambient_audio_blob_size"] = media_size
             clean_item["metadata"] = metadata
-            blob_ids.append(blob_id)
         clean_attachments.append(clean_item)
     return clean_attachments, blob_ids
 
@@ -1060,7 +1102,8 @@ def _rehydrate_pending_audio_media(pending: dict[str, Any]) -> list[dict[str, An
         item = dict(attachment)
         metadata = dict(item.get("metadata") if isinstance(item.get("metadata"), dict) else {})
         blob_id = str(metadata.get("ambient_audio_blob_id") or "").strip()
-        blob = _PENDING_AI_SEND_AUDIO_BLOBS.get(blob_id) if blob_id else None
+        with _AMBIENT_PENDING_LOCK:
+            blob = copy.deepcopy(_PENDING_AI_SEND_AUDIO_BLOBS.get(blob_id)) if blob_id else None
         if (
             blob is not None
             and str(blob.get("store_path") or "") == store_path
@@ -1082,9 +1125,60 @@ def _rehydrate_pending_audio_media(pending: dict[str, Any]) -> list[dict[str, An
 
 
 def _delete_pending_audio_blobs(pending: dict[str, Any]) -> None:
+    with _AMBIENT_PENDING_LOCK:
+        _delete_pending_audio_blobs_locked(pending)
+
+
+def _delete_pending_audio_blobs_locked(pending: dict[str, Any]) -> None:
     blob_ids = pending.get("audio_blob_ids") if isinstance(pending.get("audio_blob_ids"), list) else []
     for blob_id in blob_ids:
         _PENDING_AI_SEND_AUDIO_BLOBS.pop(str(blob_id), None)
+
+
+def _pending_audio_media_size(media: dict[str, Any]) -> int:
+    total = 0
+    for section in ("attachment", "metadata"):
+        values = media.get(section) if isinstance(media.get(section), dict) else {}
+        for value in values.values():
+            total += _raw_media_value_size(value)
+    return total
+
+
+def _raw_media_value_size(value: Any) -> int:
+    if isinstance(value, bytes):
+        return len(value)
+    if isinstance(value, bytearray):
+        return len(value)
+    if not isinstance(value, str):
+        return 0
+    text = value.strip()
+    if text.startswith("data:") and "," in text:
+        payload = text.split(",", 1)[1]
+        return max(0, (len(payload) * 3) // 4)
+    return len(text.encode("utf-8"))
+
+
+def _pending_audio_total_bytes_locked() -> int:
+    return sum(int(blob.get("size_bytes") or 0) for blob in _PENDING_AI_SEND_AUDIO_BLOBS.values())
+
+
+def _trim_pending_audio_blobs_locked() -> None:
+    now = time.time()
+    for blob_id, blob in list(_PENDING_AI_SEND_AUDIO_BLOBS.items()):
+        if float(blob.get("expires_at_epoch") or 0) <= now:
+            _PENDING_AI_SEND_AUDIO_BLOBS.pop(blob_id, None)
+    while len(_PENDING_AI_SEND_AUDIO_BLOBS) > MAX_PENDING_AUDIO_BLOBS:
+        _PENDING_AI_SEND_AUDIO_BLOBS.pop(next(iter(_PENDING_AI_SEND_AUDIO_BLOBS)), None)
+    while _pending_audio_total_bytes_locked() > MAX_PENDING_AUDIO_TOTAL_BYTES and _PENDING_AI_SEND_AUDIO_BLOBS:
+        _PENDING_AI_SEND_AUDIO_BLOBS.pop(next(iter(_PENDING_AI_SEND_AUDIO_BLOBS)), None)
+
+
+def _trim_pending_approvals_locked() -> None:
+    while len(_PENDING_AI_SEND_APPROVALS) > MAX_PENDING_AI_SEND_APPROVALS:
+        request_id = next(iter(_PENDING_AI_SEND_APPROVALS))
+        pending = _PENDING_AI_SEND_APPROVALS.pop(request_id, None)
+        if pending is not None:
+            _delete_pending_audio_blobs_locked(pending)
 
 
 def _strip_raw_audio_from_payload(payload: dict[str, Any]) -> dict[str, Any]:

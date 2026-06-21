@@ -30,108 +30,14 @@
   },
   "capabilities": [
     "host.permission.status",
-    "host.permission.open_settings",
-    "host.intent.execute",
-    "host.stream.start",
-    "host.stream.stop",
-    "host.screen.capture",
-    "host.accessibility.read",
-    "host.accessibility.mutate",
-    "host.input.pointer",
-    "host.input.keyboard",
-    "host.clipboard.read",
-    "host.clipboard.write",
-    "host.microphone.capture",
-    "host.audio.capture",
-    "host.audio.output",
-    "host.speech.transcribe",
-    "host.speech.synthesize",
-    "host.camera.capture",
-    "host.file.open_dialog",
-    "host.file.read_user_selected",
-    "host.file.write_user_selected",
-    "host.process.open_url",
-    "host.process.launch_app",
-    "host.process.exec_guarded"
+    "host.permission.open_settings"
   ],
   "default_grants": {
     "principal_id": "rumi_host_capabilities_pack",
-    "include": "standard_host_permissions",
-    "exclude": [
-      "host.process.exec_guarded"
-    ]
+    "include": "implemented_host_permissions",
+    "exclude": []
   },
   "host_functions": {
-    "host_accessibility_action": {
-      "operation": "host.accessibility.mutate",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_accessibility_snapshot": {
-      "operation": "host.accessibility.read",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_audio_capture": {
-      "operation": "host.audio.capture",
-      "stream": true,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_audio_output": {
-      "operation": "host.audio.output",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_camera_capture": {
-      "operation": "host.camera.capture",
-      "stream": true,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_clipboard_read": {
-      "operation": "host.clipboard.read",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_clipboard_write": {
-      "operation": "host.clipboard.write",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_file_open_dialog": {
-      "operation": "host.file.open_dialog",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_file_read_selected": {
-      "operation": "host.file.read_user_selected",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_file_write_selected": {
-      "operation": "host.file.write_user_selected",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_input_keyboard": {
-      "operation": "host.input.keyboard",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_input_pointer": {
-      "operation": "host.input.pointer",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_intent_execute": {
-      "operation": "host.intent.execute",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_microphone_capture": {
-      "operation": "host.microphone.capture",
-      "stream": true,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
     "host_permission_open_settings": {
       "operation": "host.permission.open_settings",
       "stream": false,
@@ -139,46 +45,6 @@
     },
     "host_permission_status": {
       "operation": "host.permission.status",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_process_exec_guarded": {
-      "operation": "host.process.exec_guarded",
-      "stream": true,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_process_launch_app": {
-      "operation": "host.process.launch_app",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_process_open_url": {
-      "operation": "host.process.open_url",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_screen_capture": {
-      "operation": "host.screen.capture",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_speech_synthesize": {
-      "operation": "host.speech.synthesize",
-      "stream": false,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_speech_transcribe": {
-      "operation": "host.speech.transcribe",
-      "stream": true,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_stream_start": {
-      "operation": "host.stream.start",
-      "stream": true,
-      "executor_owner": "rumi_viewer_host_broker"
-    },
-    "host_stream_stop": {
-      "operation": "host.stream.stop",
       "stream": false,
       "executor_owner": "rumi_viewer_host_broker"
     }

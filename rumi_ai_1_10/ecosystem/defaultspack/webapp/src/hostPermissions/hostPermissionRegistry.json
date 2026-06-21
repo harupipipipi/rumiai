@@ -3,13 +3,15 @@
     "label": "Host permission status",
     "risk_level": "low",
     "approval_required": false,
-    "stream_allowed": false
+    "stream_allowed": false,
+    "broker_runner_implemented": true
   },
   "host.permission.open_settings": {
     "label": "Open host permission settings",
     "risk_level": "medium",
     "approval_required": false,
-    "stream_allowed": false
+    "stream_allowed": false,
+    "broker_runner_implemented": true
   },
   "host.intent.execute": {
     "label": "Execute host intent",
@@ -21,7 +23,7 @@
     "label": "Start host stream",
     "risk_level": "high",
     "approval_required": true,
-    "stream_allowed": true
+    "stream_allowed": false
   },
   "host.stream.stop": {
     "label": "Stop host stream",
@@ -98,7 +100,7 @@
     "label": "Microphone capture",
     "risk_level": "high",
     "approval_required": true,
-    "stream_allowed": true,
+    "stream_allowed": false,
     "max_duration_ms_default": 30000,
     "max_duration_ms_hard": 300000,
     "os_permissions": {
@@ -114,7 +116,7 @@
     "label": "System audio capture",
     "risk_level": "high",
     "approval_required": true,
-    "stream_allowed": true,
+    "stream_allowed": false,
     "max_duration_ms_default": 30000,
     "max_duration_ms_hard": 300000
   },
@@ -128,7 +130,7 @@
     "label": "Speech transcription",
     "risk_level": "high",
     "approval_required": true,
-    "stream_allowed": true,
+    "stream_allowed": false,
     "privacy": {
       "store_raw": false
     }
@@ -143,7 +145,7 @@
     "label": "Camera capture",
     "risk_level": "high",
     "approval_required": true,
-    "stream_allowed": true,
+    "stream_allowed": false,
     "max_duration_ms_default": 30000,
     "max_duration_ms_hard": 300000,
     "os_permissions": {
@@ -191,6 +193,6 @@
     "risk_level": "critical",
     "approval_required": true,
     "typed_confirmation_required": true,
-    "stream_allowed": true
+    "stream_allowed": false
   }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 
 import type { PinchState } from "./gesturePinchDetector";
 import { startHandLandmarkerLoop, type HandTrackingFrame } from "./mediaPipeHandLandmarker";
@@ -12,7 +12,7 @@ type UseAmbientHandTrackerOptions = {
   setMessage: Dispatch<SetStateAction<string | null>>;
   setPinchDetectorStatus: Dispatch<SetStateAction<string>>;
   setTrackingFrame: Dispatch<SetStateAction<HandTrackingFrame | null>>;
-  videoRef: RefObject<HTMLVideoElement | null>;
+  videoElement: HTMLVideoElement | null;
 };
 
 export function useAmbientHandTracker({
@@ -24,7 +24,7 @@ export function useAmbientHandTracker({
   setMessage,
   setPinchDetectorStatus,
   setTrackingFrame,
-  videoRef,
+  videoElement,
 }: UseAmbientHandTrackerOptions) {
   const gestureStopRef = useRef<(() => void) | null>(null);
 
@@ -32,17 +32,23 @@ export function useAmbientHandTracker({
     let cancelled = false;
     gestureStopRef.current?.();
     gestureStopRef.current = null;
-    if (rumiApprovalPending || !monitorEnabled || !cameraStream || !videoRef.current) {
+    if (rumiApprovalPending || !monitorEnabled || !cameraStream || !videoElement) {
       setPinchDetectorStatus(cameraStream ? "paused" : "idle");
       setTrackingFrame(null);
       return;
     }
     setPinchDetectorStatus("loading");
-    startHandLandmarkerLoop(videoRef.current, onPinchState, {
+    startHandLandmarkerLoop(videoElement, onPinchState, {
       choiceRequiresPinch: !approvalTargetActive,
       pinchStartMs: 250,
       pinchReleaseMs: 180,
       onFrame: (frame) => setTrackingFrame(frame),
+      onError: (error) => {
+        if (cancelled) return;
+        setPinchDetectorStatus("unavailable");
+        setTrackingFrame(null);
+        setMessage(error instanceof Error ? error.message : "手の認識が停止しました。");
+      },
     })
       .then((stop) => {
         if (cancelled) {
@@ -73,6 +79,6 @@ export function useAmbientHandTracker({
     setMessage,
     setPinchDetectorStatus,
     setTrackingFrame,
-    videoRef,
+    videoElement,
   ]);
 }

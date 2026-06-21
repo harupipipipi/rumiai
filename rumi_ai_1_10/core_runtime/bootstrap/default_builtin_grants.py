@@ -25,25 +25,16 @@ AUTHORITY_WINDOW_PERMISSIONS = (
 HOST_BROKER_PERMISSIONS = (
     "host.permission.status",
     "host.permission.open_settings",
-    "host.intent.execute",
-    "host.stream.start",
-    "host.stream.stop",
 )
 
-HOST_CAPABILITIES_PACK_DEFAULT_GRANT_EXCLUSIONS = frozenset(
-    {
-        "host.intent.execute",
-        "host.stream.start",
-        "host.stream.stop",
-        "host.process.exec_guarded",
-    }
-)
+HOST_CAPABILITIES_PACK_DEFAULT_GRANT_EXCLUSIONS = frozenset()
 
 HOST_CAPABILITIES_PACK_PERMISSIONS = (
     "function.call",
     *(
         permission_id
-        for permission_id in load_host_permission_registry()
+        for permission_id, definition in load_host_permission_registry().items()
+        if definition.broker_runner_implemented
         if permission_id not in HOST_CAPABILITIES_PACK_DEFAULT_GRANT_EXCLUSIONS
     ),
 )
@@ -63,7 +54,7 @@ DEFAULT_BUILTIN_GRANTS: tuple[dict[str, Any], ...] = (
     {
         "principal_id": HOST_CAPABILITIES_PACK_ID,
         "permission_ids": HOST_CAPABILITIES_PACK_PERMISSIONS,
-        "config": {"mode": "builtin", "allow_stream": True},
+        "config": {"mode": "builtin", "allow_stream": False},
     },
 )
 

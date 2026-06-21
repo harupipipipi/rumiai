@@ -50,6 +50,7 @@ class HostPermissionDefinition:
     risk_level: str = "medium"
     approval_required: bool = True
     stream_allowed: bool = False
+    broker_runner_implemented: bool = False
     typed_confirmation_required: bool = False
     max_duration_ms_default: int | None = None
     max_duration_ms_hard: int | None = None
@@ -73,6 +74,7 @@ class HostPermissionDefinition:
             risk_level=str(data.get("risk_level") or "medium"),
             approval_required=bool(data.get("approval_required", True)),
             stream_allowed=bool(data.get("stream_allowed", False)),
+            broker_runner_implemented=bool(data.get("broker_runner_implemented", False)),
             typed_confirmation_required=bool(data.get("typed_confirmation_required", False)),
             max_duration_ms_default=_optional_int(data.get("max_duration_ms_default")),
             max_duration_ms_hard=_optional_int(data.get("max_duration_ms_hard")),
@@ -87,6 +89,7 @@ class HostPermissionDefinition:
             "risk_level": self.risk_level,
             "approval_required": self.approval_required,
             "stream_allowed": self.stream_allowed,
+            "broker_runner_implemented": self.broker_runner_implemented,
             "typed_confirmation_required": self.typed_confirmation_required,
             "max_duration_ms_default": self.max_duration_ms_default,
             "max_duration_ms_hard": self.max_duration_ms_hard,

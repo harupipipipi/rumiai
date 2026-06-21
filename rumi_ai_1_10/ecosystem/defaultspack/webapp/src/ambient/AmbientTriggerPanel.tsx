@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, Mic, Radio, RefreshCcw, Settings, Shield, Video, Volume2, VolumeX, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
@@ -152,6 +152,7 @@ export function AmbientTriggerPanel({
   const [miniChatCreating, setMiniChatCreating] = useState(false);
   const [latestSubmittedInput, setLatestSubmittedInput] = useState<string | null>(null);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [devicesChecked, setDevicesChecked] = useState(false);
   const [selectedMicId, setSelectedMicId] = useState(() => safeLocalStorageGet(MIC_DEVICE_STORAGE_KEY));
@@ -171,10 +172,9 @@ export function AmbientTriggerPanel({
   const [transcriptionTestBusy, setTranscriptionTestBusy] = useState(false);
   const [transcriptionTestStatus, setTranscriptionTestStatus] = useState("未実行");
   const [transcriptionTestText, setTranscriptionTestText] = useState("");
-  const videoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraStreamCleanupRef = useRef<(() => void) | null>(null);
   const cameraAcquireInFlightRef = useRef(false);
-  const monitorEnabledRef = useRef(false);
   const audioStopRef = useRef<(() => void) | null>(null);
   const pinchRecorderRef = useRef<ActiveAudioRecorder | null>(null);
   const pinchSpeechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -197,6 +197,9 @@ export function AmbientTriggerPanel({
     submittedAt: number;
   } | null>(null);
   const previousSelectedCameraIdRef = useRef(selectedCameraId);
+  const cameraVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    setVideoElement(node);
+  }, []);
 
   const readoutBlocked = useCallback(() => pinchRecording || Boolean(pinchRecorderRef.current), [pinchRecording]);
   const miniFinalAnswer = useMemo(
@@ -271,12 +274,6 @@ export function AmbientTriggerPanel({
   } = routing;
 
   const monitorEnabled = Boolean(status?.ambient_monitor.enabled);
-  useEffect(() => {
-    monitorEnabledRef.current = monitorEnabled;
-  }, [monitorEnabled]);
-  useEffect(() => {
-    cameraStreamRef.current = cameraStream;
-  }, [cameraStream]);
   const cameraDevices = useMemo(() => devices.filter((device) => device.kind === "videoinput"), [devices]);
   const cameraUnavailable = devicesChecked && cameraDevices.length === 0;
   const runtimeStatus = useMemo<AmbientRuntimeStatus>(() => {
@@ -657,18 +654,59 @@ export function AmbientTriggerPanel({
     void openRumiPermissionApproval();
   }, [allRumiPermissionsGranted, status]);
 
+  function replaceCameraStream(nextStream: MediaStream | null) {
+    const current = cameraStreamRef.current;
+    cameraStreamCleanupRef.current?.();
+    cameraStreamCleanupRef.current = null;
+    if (current && current !== nextStream) {
+      current.getTracks().forEach((track) => track.stop());
+    }
+    cameraStreamRef.current = nextStream;
+    cameraStreamCleanupRef.current = nextStream ? watchCameraStreamLifecycle(nextStream) : null;
+    setCameraStream(nextStream);
+  }
+
+  function watchCameraStreamLifecycle(stream: MediaStream): () => void {
+    const handleEnded = () => {
+      if (cameraStreamRef.current !== stream) return;
+      replaceCameraStream(null);
+      setTrackingFrame(null);
+      setPinchDetectorStatus("unavailable");
+      setMessage("カメラの接続が切れました。接続を確認してから、合図待ちをもう一度開始してください。");
+      void ambientTriggerClient.stopMonitor()
+        .catch(() => undefined)
+        .finally(() => refresh({ probeOs: true }).catch(() => undefined));
+    };
+    const tracks = stream.getVideoTracks();
+    for (const track of tracks) {
+      track.addEventListener("ended", handleEnded, { once: true });
+      track.addEventListener("mute", handleEnded, { once: true });
+    }
+    return () => {
+      for (const track of tracks) {
+        track.removeEventListener("ended", handleEnded);
+        track.removeEventListener("mute", handleEnded);
+      }
+    };
+  }
+
   useEffect(() => {
-    if (videoRef.current && cameraStream) {
-      videoRef.current.srcObject = cameraStream;
-      void videoRef.current.play().catch((error) => {
+    if (!videoElement) return;
+    videoElement.srcObject = cameraStream;
+    if (cameraStream) {
+      void videoElement.play().catch((error) => {
         console.info("[ambient] camera video play was blocked", error);
       });
     }
-  }, [cameraStream, monitorEnabled, settingsOpen, standalone]);
+    return () => {
+      if (videoElement.srcObject === cameraStream) {
+        videoElement.srcObject = null;
+      }
+    };
+  }, [cameraStream, videoElement]);
 
   useEffect(() => () => {
-    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
-    cameraStreamRef.current = null;
+    replaceCameraStream(null);
     pinchRecorderRef.current?.cancel();
     pinchRecorderRef.current = null;
     try {
@@ -680,9 +718,6 @@ export function AmbientTriggerPanel({
     pinchTranscriptRef.current = "";
     audioStopRef.current?.();
     audioStopRef.current = null;
-    if (monitorEnabledRef.current) {
-      void ambientTriggerClient.stopMonitor().catch(() => undefined);
-    }
   }, []);
 
   function stopPinchSpeechRecognition(abort = false): string {
@@ -911,7 +946,7 @@ export function AmbientTriggerPanel({
     setMessage,
     setPinchDetectorStatus,
     setTrackingFrame,
-    videoRef,
+    videoElement,
   });
 
   useEffect(() => {
@@ -928,10 +963,7 @@ export function AmbientTriggerPanel({
           stream.getTracks().forEach((track) => track.stop());
           return;
         }
-        setCameraStream((current) => {
-          current?.getTracks().forEach((track) => track.stop());
-          return stream;
-        });
+        replaceCameraStream(stream);
         void refreshDevices();
       })
       .catch((error) => {
@@ -1026,11 +1058,7 @@ export function AmbientTriggerPanel({
     cameraAcquireInFlightRef.current = true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: videoCaptureConstraints(selectedCameraId || undefined) });
-      setCameraStream((current) => {
-        current?.getTracks().forEach((track) => track.stop());
-        cameraStreamRef.current = stream;
-        return stream;
-      });
+      replaceCameraStream(stream);
       await refreshDevices();
       return stream;
     } catch (error) {
@@ -1238,10 +1266,7 @@ export function AmbientTriggerPanel({
         if (isMediaDeviceNotFound(error)) throw new Error("カメラが見つかりません。接続してからデバイス更新を押してください。");
         throw error;
       }
-      setCameraStream((current) => {
-        current?.getTracks().forEach((track) => track.stop());
-        return stream;
-      });
+      replaceCameraStream(stream);
       await refreshDevices();
       return ambientTriggerClient.checkOsPermissions({
         [AMBIENT_MIC_PERMISSION]: "granted",
@@ -1272,10 +1297,7 @@ export function AmbientTriggerPanel({
       setPinchRecording(false);
       setRecordingStartedAt(null);
       setTrackingFrame(null);
-      setCameraStream((current) => {
-        current?.getTracks().forEach((track) => track.stop());
-        return null;
-      });
+      replaceCameraStream(null);
       return ambientTriggerClient.stopMonitor();
     }, "停止しました。マイク・カメラの監視は止まっています。");
   }
@@ -1554,7 +1576,7 @@ export function AmbientTriggerPanel({
     approvalGestureBusyRef.current = true;
     setMessage(decision === "approve" ? "承認ジェスチャーを受け取りました。" : "拒否ジェスチャーを受け取りました。");
     try {
-      await ambientTriggerClient.submitEvent({
+      const auditResult = await ambientTriggerClient.submitEvent({
         source: "camera",
         trigger: "approval_gesture",
         mode,
@@ -1568,7 +1590,10 @@ export function AmbientTriggerPanel({
           normalized_distance: state.normalizedDistance,
           finger_choice: state.fingerChoice,
         },
-      }).catch(() => undefined);
+      });
+      if (auditResult.status !== "approval_intent") {
+        throw new Error("承認ジェスチャーを監査に記録できませんでした。もう一度お試しください。");
+      }
       await onApprovalGestureRef.current?.(decision);
       await refresh();
     } catch (error) {
@@ -1929,7 +1954,7 @@ export function AmbientTriggerPanel({
 
         {monitorEnabled && !(standalone && settingsOpen) && (
           <RecognitionMonitor
-            videoRef={videoRef}
+            videoRef={cameraVideoRef}
             frame={trackingFrame}
             status={pinchDetectorStatus}
             recording={pinchRecording}
@@ -1938,7 +1963,7 @@ export function AmbientTriggerPanel({
           />
         )}
         {monitorEnabled && standalone && settingsOpen && (
-          <CameraStreamSink videoRef={videoRef} />
+          <CameraStreamSink videoRef={cameraVideoRef} />
         )}
 
         <div className="min-h-0 overflow-y-auto overscroll-contain">
@@ -2201,7 +2226,7 @@ function RecognitionMonitor({
   recordingSeconds,
   debug,
 }: {
-  videoRef: RefObject<HTMLVideoElement | null>;
+  videoRef: (node: HTMLVideoElement | null) => void;
   frame: HandTrackingFrame | null;
   status: string;
   recording: boolean;
@@ -2300,7 +2325,7 @@ function RecognitionMonitor({
   );
 }
 
-function CameraStreamSink({ videoRef }: { videoRef: RefObject<HTMLVideoElement | null> }) {
+function CameraStreamSink({ videoRef }: { videoRef: (node: HTMLVideoElement | null) => void }) {
   return (
     <video
       ref={videoRef}
