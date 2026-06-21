@@ -662,10 +662,11 @@ function SortableChatItem({ chat, activeChatId, selectedChatId = null, selection
       <div
         ref={setNodeRef}
         style={style}
-        {...attributes}
-        {...listeners}
-        draggable
+        {...(selectionMode ? { role: "button", "aria-selected": isSelected } : attributes)}
+        {...(selectionMode ? {} : listeners)}
+        draggable={!selectionMode}
         onDragStart={(event) => {
+          if (selectionMode) return;
           const payload = historyChatDragPayload({ ...chat, groupId: chatGroupId(chat) || undefined });
           event.dataTransfer.setData(HISTORY_CHAT_DROP_MIME, JSON.stringify(payload));
           event.dataTransfer.setData("text/plain", chat.title);
@@ -680,6 +681,13 @@ function SortableChatItem({ chat, activeChatId, selectedChatId = null, selection
           isDragging && "ring-1 ring-emerald-500/50 rumi-layer-modal"
         )}
         onClick={() => { if (!isEditing) onChatSelect(chat.id); }}
+        onKeyDown={(event) => {
+          if (!selectionMode || isEditing) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onChatSelect(chat.id);
+          }
+        }}
         onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
         tabIndex={0}
       >
@@ -1909,51 +1917,55 @@ export function HistoryBoard({
               <PanelLeftOpen size={14} />
             </button>
           )}
-          <button
-            onClick={handleCreateChat}
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-            title="New Chat"
-            aria-label="New Chat"
-          >
-            <WarmActionIcon kind="newChat" size="sm" iconClassName="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={openCreateGroup}
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-            title="New Group"
-            aria-label="New Group"
-          >
-            <WarmActionIcon kind="group" size="sm" iconClassName="h-3.5 w-3.5" />
-          </button>
-          {createGroupForm}
-          <button
-            type="button"
-            onClick={() => {
-              onCalendarOpen?.();
-            }}
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
-              isCalendarActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
-            )}
-            title="Calendar"
-            aria-label="Calendar"
-          >
-            <WarmActionIcon kind="calendar" size="sm" iconClassName="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onKanbanOpen?.();
-            }}
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
-              isKanbanActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
-            )}
-            title="Kanban"
-            aria-label="Kanban"
-          >
-            <KanbanSquare size={14} />
-          </button>
+          {!selectionMode && (
+            <>
+              <button
+                onClick={handleCreateChat}
+                className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                title="New Chat"
+                aria-label="New Chat"
+              >
+                <WarmActionIcon kind="newChat" size="sm" iconClassName="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={openCreateGroup}
+                className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                title="New Group"
+                aria-label="New Group"
+              >
+                <WarmActionIcon kind="group" size="sm" iconClassName="h-3.5 w-3.5" />
+              </button>
+              {createGroupForm}
+              <button
+                type="button"
+                onClick={() => {
+                  onCalendarOpen?.();
+                }}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+                  isCalendarActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
+                )}
+                title="Calendar"
+                aria-label="Calendar"
+              >
+                <WarmActionIcon kind="calendar" size="sm" iconClassName="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onKanbanOpen?.();
+                }}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+                  isKanbanActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
+                )}
+                title="Kanban"
+                aria-label="Kanban"
+              >
+                <KanbanSquare size={14} />
+              </button>
+            </>
+          )}
         </div>
 
         <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5 py-2">
@@ -2048,59 +2060,63 @@ export function HistoryBoard({
               </button>
             )}
           </div>
-          <div className="mt-2 flex flex-col gap-1.5">
-            <button
-              onClick={handleCreateChat}
-              className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
-              title="New Chat"
-            >
-              <WarmActionIcon kind="newChat" size="sm" />
-              <span className="truncate">New Chat</span>
-            </button>
-            <button
-              onClick={openCreateGroup}
-              className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
-              title="New Group"
-            >
-              <WarmActionIcon kind="group" size="sm" />
-              <span className="truncate">New Group</span>
-            </button>
-            {createGroupForm}
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              onCalendarOpen?.();
-            }}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
-              isCalendarActive
-                ? "bg-zinc-800/80 text-zinc-100"
-                : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
-            )}
-            title="Calendar"
-            aria-expanded={isCalendarActive}
-          >
-            <WarmActionIcon kind="calendar" size="sm" />
-            <span className="truncate">Calendar</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onKanbanOpen?.();
-            }}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
-              isKanbanActive
-                ? "bg-zinc-800/80 text-zinc-100"
-                : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
-            )}
-            title="Kanban"
-            aria-expanded={isKanbanActive}
-          >
-            <KanbanSquare size={15} className="shrink-0 text-zinc-500" />
-            <span className="truncate">Kanban</span>
-          </button>
+          {!selectionMode && (
+            <>
+              <div className="mt-2 flex flex-col gap-1.5">
+                <button
+                  onClick={handleCreateChat}
+                  className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
+                  title="New Chat"
+                >
+                  <WarmActionIcon kind="newChat" size="sm" />
+                  <span className="truncate">New Chat</span>
+                </button>
+                <button
+                  onClick={openCreateGroup}
+                  className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
+                  title="New Group"
+                >
+                  <WarmActionIcon kind="group" size="sm" />
+                  <span className="truncate">New Group</span>
+                </button>
+                {createGroupForm}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onCalendarOpen?.();
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
+                  isCalendarActive
+                    ? "bg-zinc-800/80 text-zinc-100"
+                    : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
+                )}
+                title="Calendar"
+                aria-expanded={isCalendarActive}
+              >
+                <WarmActionIcon kind="calendar" size="sm" />
+                <span className="truncate">Calendar</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onKanbanOpen?.();
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
+                  isKanbanActive
+                    ? "bg-zinc-800/80 text-zinc-100"
+                    : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
+                )}
+                title="Kanban"
+                aria-expanded={isKanbanActive}
+              >
+                <KanbanSquare size={15} className="shrink-0 text-zinc-500" />
+                <span className="truncate">Kanban</span>
+              </button>
+            </>
+          )}
           <ConversationSearchBar value={searchQuery} resultCount={visibleChatCount} onChange={setSearchQuery} />
           <ConversationTagFilter tags={allTags} activeTag={activeTag} onChange={setActiveTag} />
         </div>

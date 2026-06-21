@@ -113,7 +113,7 @@ test("generic authority approval retries stale native context once without brows
   assert.doesNotMatch(source, /window\.localStorage/);
 });
 
-test("ambient debug QA controls are limited to finger recording window routes", () => {
+test("ambient browser approval QA remains route-scoped without visible send controls", () => {
   const appSource = readFileSync(resolve(SRC_ROOT, "App.tsx"), "utf8");
   const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
 
@@ -124,28 +124,39 @@ test("ambient debug QA controls are limited to finger recording window routes", 
   assert.doesNotMatch(appSource, /pathname === "\/viewer"/);
   assert.match(panelSource, /const explicitDebugConversationId = debugMode \? cleanString\(conversationId\) : null/);
   assert.match(panelSource, /explicitDebugConversationId \?\? ambientLinkedConversationId\(status, conversationId\)/);
-  assert.match(panelSource, /const debugQaVisible = standalone && debugMode/);
-  assert.match(panelSource, /data-testid="ambient-debug-panel"/);
-  assert.match(panelSource, /data-testid="ambient-debug-transcript"/);
-  assert.match(panelSource, /data-testid="ambient-debug-simulate-ok"/);
-  assert.match(panelSource, /data-testid="ambient-debug-status"/);
+  assert.doesNotMatch(panelSource, /Browser QA/);
+  assert.doesNotMatch(panelSource, /OK送信/);
+  assert.doesNotMatch(panelSource, /data-testid="ambient-debug-panel"/);
+  assert.doesNotMatch(panelSource, /data-testid="ambient-debug-transcript"/);
+  assert.doesNotMatch(panelSource, /data-testid="ambient-debug-simulate-ok"/);
+  assert.doesNotMatch(panelSource, /data-testid="ambient-debug-status"/);
 });
 
-test("ambient debug QA simulated OK payload avoids persistent media bytes", () => {
+test("ambient mini window removed browser QA simulated OK payload", () => {
   const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
   const miniChatSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientMiniChat.tsx"), "utf8");
 
-  assert.match(panelSource, /Local Browser QA only: this simulates OK-mark release without persistent audio\/image bytes/);
-  assert.match(panelSource, /mode: "record_audio_start"[\s\S]*debug_qa: true/);
-  assert.match(panelSource, /mode: "dispatch_audio"[\s\S]*action_id: "chat\.message"/);
-  assert.match(panelSource, /input_text: inputText/);
-  assert.match(panelSource, /type: "audio\/webm"[\s\S]*size: 0[\s\S]*ephemeral: true[\s\S]*do_not_persist: true/);
-  assert.match(panelSource, /transcript_source: "debug_qa"/);
-  assert.doesNotMatch(panelSource, /dataUrl: debug/);
-  assert.doesNotMatch(panelSource, /blob: debug/);
+  assert.doesNotMatch(panelSource, /Local Browser QA only/);
+  assert.doesNotMatch(panelSource, /debug_qa/);
+  assert.doesNotMatch(panelSource, /debug-ok-mark\.webm/);
+  assert.doesNotMatch(panelSource, /ambient\.debug_qa/);
   assert.match(miniChatSource, /data-testid="ambient-mini-chat"/);
   assert.match(miniChatSource, /data-testid="ambient-mini-chat-output"/);
   assert.match(miniChatSource, /data-testid="ambient-mini-chat-input"/);
+});
+
+test("ambient mini chat open button opens the linked chat in the Defaultspack main window", () => {
+  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+  const miniChatSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientMiniChat.tsx"), "utf8");
+  const desktopSource = readFileSync(resolve(SRC_ROOT, "lib", "desktopApproval.ts"), "utf8");
+
+  assert.match(miniChatSource, /data-testid="ambient-mini-chat-open"/);
+  assert.match(panelSource, /function openMiniChatConversation\(\)/);
+  assert.match(panelSource, /openDefaultspackMainWindow\(path\)/);
+  assert.match(panelSource, /window\.open\(defaultspackUrlWithLocalAuth\(path\), "rumi-defaultspack"/);
+  assert.doesNotMatch(panelSource, /window\.location\.assign/);
+  assert.match(desktopSource, /open_defaultspack_main_window/);
+  assert.match(panelSource, /onOpenChat=\{openMiniChatConversation\}/);
 });
 
 test("ambient event submit forwards browser QA token header", () => {
@@ -200,14 +211,55 @@ test("ambient mini chat keeps a submitted conversation active over stale routing
   assert.match(panelSource, /onSelect=\{\(chatId\) => void selectMiniChatRoutingConversation\(chatId\)\}/);
 });
 
-test("ambient debug QA marks completed model replies and clears transient input preview", () => {
+test("ambient mini chat fallback conversation does not override backend routing", () => {
   const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
 
-  assert.match(panelSource, /function ambientResultHasAssistantReply\(result: Record<string, unknown>\): boolean/);
-  assert.match(panelSource, /cleanString\(record\.assistant_text\)/);
-  assert.match(panelSource, /cleanString\(record\.assistant_message_id\)/);
-  assert.match(panelSource, /cleanString\(dispatch\?\.assistant_text\)/);
-  assert.match(panelSource, /cleanString\(dispatch\?\.assistant_message_id\)/);
-  assert.match(panelSource, /if \(ambientResultHasAssistantReply\(result\)\) return `\$\{ambientOperationLabels\.done\}: AIの回答が届きました。`/);
-  assert.match(panelSource, /setDebugStatus\(nextMessage\);\s*setLatestSubmittedInput\(null\);/);
+  assert.match(panelSource, /api\.listConversations\(\{[\s\S]*tag: "ambient"[\s\S]*group_id: "gesture"[\s\S]*limit: 1/);
+  assert.doesNotMatch(panelSource, /if \(conversation\?\.id\) setMiniConversationIdOverride\(conversation\.id\)/);
+});
+
+test("ambient submission waits for the stored model reply before completing", () => {
+  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+
+  assert.match(panelSource, /waitForAmbientAssistantResponse/);
+  assert.match(panelSource, /setPinchDetectorStatus\("waiting_response"\)/);
+  assert.match(panelSource, /outcome\.status === "completed"/);
+  assert.match(panelSource, /setPinchDetectorStatus\("completed"\)/);
+  assert.match(panelSource, /setLatestSubmittedInput\(null\)/);
+});
+
+test("ambient browser-owned monitor does not leave backend enabled without camera capture", () => {
+  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+
+  assert.match(panelSource, /const monitorEnabledRef = useRef\(false\)/);
+  assert.match(panelSource, /cameraStreamRef\.current\?\.getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\)/);
+  assert.match(panelSource, /if \(monitorEnabledRef\.current\) \{[\s\S]*ambientTriggerClient\.stopMonitor\(\)/);
+  assert.match(panelSource, /async function acquireCameraForMonitoring\(\)/);
+  assert.match(panelSource, /if \(!monitorEnabled \|\| cameraStream \|\| cameraAcquireInFlightRef\.current\) return/);
+  assert.match(panelSource, /await acquireCameraForMonitoring\(\);[\s\S]*待機を再開しました/);
+  assert.match(panelSource, /await ambientTriggerClient\.stopMonitor\(\)\.catch\(\(\) => undefined\);[\s\S]*await refresh\(\{ probeOs: true \}\)/);
+});
+
+test("Viewer authenticates every dedicated Defaultspack window and rejects unsafe stale listeners", () => {
+  const repositoryRoot = resolve(import.meta.dirname, "../../../../../../");
+  const viewerSource = readFileSync(resolve(repositoryRoot, "rumi_viewer", "src-tauri", "src", "lib.rs"), "utf8");
+  const dockSource = readFileSync(resolve(repositoryRoot, "rumi_viewer", "src-tauri", "src", "dock_registration.rs"), "utf8");
+
+  assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, authority_approval_url/);
+  assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, ambient_trigger_url/);
+  assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, finger_recording_url/);
+  assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, defaults_console_url/);
+  assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, host_permissions_url/);
+  assert.match(dockSource, /active HMAC store is encrypted; using the Kernel-managed desktop token cache/);
+  assert.match(dockSource, /Viewer did not stop it\. Close that process or free port/);
+  assert.match(dockSource, /identify_defaultspack_listener\(&listener, metadata\)/);
+});
+
+test("ambient model selection persists to the canonical selected conversation", () => {
+  const routingSource = readFileSync(resolve(SRC_ROOT, "ambient", "useAmbientRouting.ts"), "utf8");
+  const panelSource = readFileSync(resolve(SRC_ROOT, "ambient", "AmbientTriggerPanel.tsx"), "utf8");
+
+  assert.match(routingSource, /async function saveRoutingModel\(model: string\)/);
+  assert.match(routingSource, /api\.updateConversation\(targetConversationId, \{ model: normalizedModel \}\)/);
+  assert.match(panelSource, /onModelCommit=\{\(model\) => void saveRoutingModel\(model\)\}/);
 });

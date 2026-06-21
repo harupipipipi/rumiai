@@ -4,6 +4,7 @@ import { Hand, Loader2 } from "lucide-react";
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
 import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
 import { DefaultsConsoleWindow } from "./ambient/DefaultsConsoleWindow";
+import { ambientTriggerClient, type AmbientRoutingConfig } from "./ambient/ambientTriggerClient";
 import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
@@ -65,6 +66,15 @@ type ComposerCandidateMenuState = {
 
 type WorkspacePanelMode = "composer" | "calendar";
 type BackendConnectionState = "online" | "degraded" | "offline";
+
+const AMBIENT_ROUTING_SETTING_KEYS: Record<string, keyof AmbientRoutingConfig> = {
+  "ambient.routing.mode": "mode",
+  "ambient.routing.model": "model",
+  "ambient.routing.group_enabled": "group_enabled",
+  "ambient.routing.group_id": "group_id",
+  "ambient.routing.group_title": "group_title",
+  "ambient.routing.ai_send_approval_required": "ai_send_approval_required",
+};
 
 type PendingNewTaskContext = {
   groupId?: string;
@@ -2436,7 +2446,7 @@ function ChatApp() {
     : null;
   const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
   const visibleBrowserApproval = !ultraYoloMode ? browserApproval : null;
-  const latestAssistantFinalText = useMemo(() => {
+  const latestAssistantFinal = useMemo(() => {
     if (isGenerating || isConversationPending) return null;
     for (const message of [...messages].reverse()) {
       if (message.role === "user") return null;
@@ -2445,15 +2455,24 @@ function ChatApp() {
       if (!rawText) continue;
       if (rawText === AUTHORITY_WAITING_TEXT && pendingAuthorityApproval([message])) return null;
       const text = sanitizeAssistantAuthorityBoilerplate(rawText).trim();
-      if (text) return text;
+      if (!text) continue;
+      return {
+        messageId: message.id,
+        createdAt: message.createdAt ?? 0,
+        text,
+      };
     }
     return null;
   }, [isConversationPending, isGenerating, messages]);
 
   useEffect(() => {
-    if (!latestAssistantFinalText) return;
-    publishAmbientFinalAnswer(latestAssistantFinalText, activeConversationId);
-  }, [activeConversationId, latestAssistantFinalText]);
+    if (!latestAssistantFinal) return;
+    publishAmbientFinalAnswer(latestAssistantFinal.text, activeConversationId, {
+      messageId: latestAssistantFinal.messageId,
+      messageCreatedAt: latestAssistantFinal.createdAt,
+      updatedAt: latestAssistantFinal.createdAt || Date.now(),
+    });
+  }, [activeConversationId, latestAssistantFinal]);
 
   useEffect(() => {
     if (!authorityApproval) {
@@ -3464,6 +3483,16 @@ function ChatApp() {
           .then(() => refreshCatalog())
           .catch(console.error);
       } else {
+        if (sectionId === "ambient" && fieldId === "ambient.monitor.enabled") {
+          void (Boolean(value)
+            ? ambientTriggerClient.startMonitor({ voice_wake: true, gesture_pinch: true })
+            : ambientTriggerClient.stopMonitor()
+          ).catch(console.error);
+        }
+        const ambientRoutingKey = sectionId === "ambient" ? AMBIENT_ROUTING_SETTING_KEYS[fieldId] : undefined;
+        if (ambientRoutingKey) {
+          void ambientTriggerClient.configure({ [ambientRoutingKey]: value } as AmbientRoutingConfig).catch(console.error);
+        }
         void api.updateUiSettings(next).then((result) => setSettingsValues(withCalendarSettingsValues(result.values))).catch(console.error);
       }
       return next;
@@ -5640,15 +5669,16 @@ function ChatApp() {
         />
       )}
 
-      <AmbientWindowLauncher />
+      <AmbientWindowLauncher enabled={Boolean(settingsValues.ambient?.["ambient.monitor.enabled"])} />
     </div>
     </RendererBoundary>
   );
 }
 
-function AmbientWindowLauncher() {
+function AmbientWindowLauncher({ enabled }: { enabled: boolean }) {
   const [opening, setOpening] = useState(false);
   const [fallbackVisible, setFallbackVisible] = useState(false);
+  if (!enabled) return null;
 
   const openWindow = async () => {
     if (opening) return;

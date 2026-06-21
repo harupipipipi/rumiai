@@ -642,3 +642,31 @@ def test_audit_redacts_secrets(tmp_path, monkeypatch):
     payload = json.loads(line)
     assert payload["arguments"]["api_key"] == "***"
     assert payload["arguments"]["path"] == "ok.txt"
+
+
+def test_viewer_local_auth_context_reaches_direct_registry_handlers():
+    from transport.http import DefaultsHttpServer, _LOCAL_UI_APPROVAL_CONTEXT_FLAG
+
+    captured = {}
+
+    def handler(args, context):
+        captured["args"] = dict(args)
+        captured["context"] = dict(context)
+        return {"status": "ok"}
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server.facade = object()
+    result = server._invoke_registry_handler(
+        handler,
+        {
+            _LOCAL_UI_APPROVAL_CONTEXT_FLAG: True,
+            "input_text": "hello",
+        },
+        {},
+    )
+
+    assert result == {"status": "ok"}
+    assert captured["args"] == {"input_text": "hello"}
+    assert captured["context"]["_tool_server_approved"] is True
+    assert captured["context"]["source"] == "defaultspack_local_ui"
+    assert captured["context"]["approval_id"] == "defaultspack_local_ui"

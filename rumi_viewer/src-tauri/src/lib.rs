@@ -213,6 +213,15 @@ fn host_permissions_url() -> Result<Url, String> {
     .map_err(|error| format!("failed to build host permissions window URL: {error}"))
 }
 
+fn authenticated_defaultspack_window_url(
+    config: &AppConfig,
+    url: Result<Url, String>,
+) -> Result<Url, String> {
+    let url = url?;
+    dock_registration::add_defaultspack_local_auth(config, url)
+        .map_err(|error| format!("failed to authenticate Defaultspack window URL: {error:#}"))
+}
+
 fn focus_authority_approval_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     window
         .unminimize()
@@ -228,9 +237,14 @@ fn focus_authority_approval_window(window: &tauri::WebviewWindow) -> Result<(), 
         .map_err(|error| format!("failed to focus approval window: {error}"))
 }
 
-fn open_authority_approval_window_for_app(app: &AppHandle, request_id: &str) -> Result<(), String> {
+fn open_authority_approval_window_for_app(
+    app: &AppHandle,
+    config: &AppConfig,
+    request_id: &str,
+) -> Result<(), String> {
     let request_id = request_id.trim().to_string();
-    let approval_url = authority_approval_url(&request_id)?;
+    let approval_url =
+        authenticated_defaultspack_window_url(config, authority_approval_url(&request_id))?;
     if let Some(window) = app.get_webview_window(AUTHORITY_APPROVAL_WINDOW_LABEL) {
         window
             .navigate(approval_url)
@@ -256,8 +270,12 @@ fn open_authority_approval_window_for_app(app: &AppHandle, request_id: &str) -> 
 }
 
 #[tauri::command]
-async fn open_authority_approval_window(app: AppHandle, request_id: String) -> Result<(), String> {
-    open_authority_approval_window_for_app(&app, &request_id)
+async fn open_authority_approval_window(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+    request_id: String,
+) -> Result<(), String> {
+    open_authority_approval_window_for_app(&app, config.inner(), &request_id)
 }
 
 fn focus_ambient_trigger_window(window: &tauri::WebviewWindow) -> Result<(), String> {
@@ -275,8 +293,8 @@ fn focus_ambient_trigger_window(window: &tauri::WebviewWindow) -> Result<(), Str
         .map_err(|error| format!("failed to focus ambient trigger window: {error}"))
 }
 
-fn open_ambient_trigger_window_for_app(app: &AppHandle) -> Result<(), String> {
-    let ambient_url = ambient_trigger_url()?;
+fn open_ambient_trigger_window_for_app(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    let ambient_url = authenticated_defaultspack_window_url(config, ambient_trigger_url())?;
     if let Some(window) = app.get_webview_window(AMBIENT_TRIGGER_WINDOW_LABEL) {
         window
             .navigate(ambient_url)
@@ -302,8 +320,11 @@ fn open_ambient_trigger_window_for_app(app: &AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn open_ambient_trigger_window(app: AppHandle) -> Result<(), String> {
-    open_ambient_trigger_window_for_app(&app)
+async fn open_ambient_trigger_window(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+) -> Result<(), String> {
+    open_ambient_trigger_window_for_app(&app, config.inner())
 }
 
 fn focus_floating_window(window: &tauri::WebviewWindow, label: &str) -> Result<(), String> {
@@ -349,36 +370,57 @@ fn open_small_defaultspack_window_for_app(
     focus_floating_window(&window, label)
 }
 
-fn open_finger_recording_window_for_app(app: &AppHandle) -> Result<(), String> {
+fn open_finger_recording_window_for_app(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
     open_small_defaultspack_window_for_app(
         app,
         FINGER_RECORDING_WINDOW_LABEL,
         FINGER_RECORDING_WINDOW_TITLE,
-        finger_recording_url()?,
+        authenticated_defaultspack_window_url(config, finger_recording_url())?,
         380.0,
         460.0,
     )
 }
 
 #[tauri::command]
-async fn open_finger_recording_window(app: AppHandle) -> Result<(), String> {
-    open_finger_recording_window_for_app(&app)
+async fn open_finger_recording_window(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+) -> Result<(), String> {
+    open_finger_recording_window_for_app(&app, config.inner())
 }
 
-fn open_defaults_console_window_for_app(app: &AppHandle) -> Result<(), String> {
+#[tauri::command]
+async fn open_defaultspack_main_window(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+    path: Option<String>,
+) -> Result<(), String> {
+    dock_registration::open_defaultspack_desktop_window_path_impl(
+        &app,
+        config.inner(),
+        path.as_deref().unwrap_or("/chat"),
+    )
+    .map(|_| ())
+    .map_err(|error| format!("{error:#}"))
+}
+
+fn open_defaults_console_window_for_app(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
     open_small_defaultspack_window_for_app(
         app,
         DEFAULTS_CONSOLE_WINDOW_LABEL,
         DEFAULTS_CONSOLE_WINDOW_TITLE,
-        defaults_console_url()?,
+        authenticated_defaultspack_window_url(config, defaults_console_url())?,
         760.0,
         520.0,
     )
 }
 
 #[tauri::command]
-async fn open_defaults_console_window(app: AppHandle) -> Result<(), String> {
-    open_defaults_console_window_for_app(&app)
+async fn open_defaults_console_window(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+) -> Result<(), String> {
+    open_defaults_console_window_for_app(&app, config.inner())
 }
 
 fn focus_host_permissions_window(window: &tauri::WebviewWindow) -> Result<(), String> {
@@ -393,8 +435,9 @@ fn focus_host_permissions_window(window: &tauri::WebviewWindow) -> Result<(), St
         .map_err(|error| format!("failed to focus host permissions window: {error}"))
 }
 
-fn open_host_permissions_window_for_app(app: &AppHandle) -> Result<(), String> {
-    let host_permissions_url = host_permissions_url()?;
+fn open_host_permissions_window_for_app(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    let host_permissions_url =
+        authenticated_defaultspack_window_url(config, host_permissions_url())?;
     if let Some(window) = app.get_webview_window(HOST_PERMISSIONS_WINDOW_LABEL) {
         window
             .navigate(host_permissions_url)
@@ -419,8 +462,11 @@ fn open_host_permissions_window_for_app(app: &AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn open_host_permissions_window(app: AppHandle) -> Result<(), String> {
-    open_host_permissions_window_for_app(&app)
+async fn open_host_permissions_window(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+) -> Result<(), String> {
+    open_host_permissions_window_for_app(&app, config.inner())
 }
 
 #[cfg(debug_assertions)]
@@ -536,9 +582,14 @@ fn maybe_spawn_authority_approval_smoke_window(app: AppHandle) {
 
         thread::sleep(Duration::from_secs(2));
         let app_for_open = app.clone();
+        let config_for_open = app.state::<AppConfig>().inner().clone();
         let request_id_for_open = request_id.clone();
         if let Err(error) = app.run_on_main_thread(move || {
-            match open_authority_approval_window_for_app(&app_for_open, &request_id_for_open) {
+            match open_authority_approval_window_for_app(
+                &app_for_open,
+                &config_for_open,
+                &request_id_for_open,
+            ) {
                 Ok(()) => info!(
                     "authority smoke approval window opened on main thread for request {request_id_for_open}"
                 ),
@@ -1647,6 +1698,7 @@ pub fn run() {
             open_authority_approval_window,
             open_ambient_trigger_window,
             open_finger_recording_window,
+            open_defaultspack_main_window,
             open_defaults_console_window,
             open_host_permissions_window,
             authority_approval_context,

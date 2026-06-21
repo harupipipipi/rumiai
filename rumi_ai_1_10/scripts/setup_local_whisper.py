@@ -3,8 +3,8 @@
 
 This script is intentionally opt-in. It never runs from app startup and it does
 not add Python package dependencies. On macOS it can install whisper.cpp through
-Homebrew when --install-brew is provided, and it can download the tiny GGML
-model when --download-model is provided.
+Homebrew when --install-brew is provided, and it can download an explicitly
+selected GGML model when --download-model is provided.
 
 License note: whisper.cpp, OpenAI Whisper code, and OpenAI Whisper model
 weights are MIT licensed. The default model URL points at the MIT-licensed
@@ -33,7 +33,7 @@ from domain.ambient.local_transcription import (  # noqa: E402
 )
 
 
-DEFAULT_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+DEFAULT_MODEL_URL_TEMPLATE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_size}.bin"
 DEFAULT_MODEL_LICENSE = "MIT"
 DEFAULT_MODEL_SOURCE = "https://huggingface.co/ggerganov/whisper.cpp"
 
@@ -48,12 +48,18 @@ def main() -> int:
     parser.add_argument(
         "--download-model",
         action="store_true",
-        help="Download the tiny GGML model.",
+        help="Download the selected GGML model (explicit opt-in).",
+    )
+    parser.add_argument(
+        "--model-size",
+        choices=("tiny", "base", "small"),
+        default="base",
+        help="Local model quality/speed tier. Default: base.",
     )
     parser.add_argument(
         "--model-url",
-        default=DEFAULT_MODEL_URL,
-        help="GGML model URL to download.",
+        default="",
+        help="Override the GGML model URL to download.",
     )
     parser.add_argument("--model-path", default="", help="Override destination model path.")
     parser.add_argument(
@@ -80,14 +86,15 @@ def main() -> int:
     model_path = (
         Path(args.model_path).expanduser()
         if args.model_path
-        else default_local_whisper_model_path()
+        else default_local_whisper_model_path(args.model_size)
     )
+    model_url = args.model_url or DEFAULT_MODEL_URL_TEMPLATE.format(model_size=args.model_size)
     if args.download_model:
         model_path.parent.mkdir(parents=True, exist_ok=True)
         if not model_path.exists():
-            print(f"Downloading {args.model_url} -> {model_path}")
+            print(f"Downloading {model_url} -> {model_path}")
             print(f"Model source: {DEFAULT_MODEL_SOURCE} ({DEFAULT_MODEL_LICENSE})")
-            urllib.request.urlretrieve(args.model_url, model_path)
+            urllib.request.urlretrieve(model_url, model_path)
         else:
             print(f"Model already exists: {model_path}")
 

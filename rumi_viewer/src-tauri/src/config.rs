@@ -343,8 +343,12 @@ fn is_cargo_debug_resource_dir(resource_dir: &Path) -> bool {
     let mut components = resource_dir.components().rev();
     matches!(
         (
-            components.next().and_then(|component| component.as_os_str().to_str()),
-            components.next().and_then(|component| component.as_os_str().to_str()),
+            components
+                .next()
+                .and_then(|component| component.as_os_str().to_str()),
+            components
+                .next()
+                .and_then(|component| component.as_os_str().to_str()),
         ),
         (Some("debug"), Some("target"))
     )

@@ -734,15 +734,13 @@ fn execute_approved_host_intent(
                     message,
                 })
         }
-        _ => Ok(json!({
-            "type": "host_intent_approved",
-            "operation": intent.operation.clone(),
-            "host_function_id": intent.host_function_id.clone(),
-            "intent_type": intent.intent_type.clone(),
-            "permission_subject": PERMISSION_SUBJECT,
-            "execution_state": "approved_no_runner",
-            "message": "Host intent was approved. No operation-specific one-shot runner is registered in this Viewer build.",
-        })),
+        _ => Err(HostBrokerError {
+            code: "HOST_OPERATION_NOT_IMPLEMENTED".to_string(),
+            message: format!(
+                "Host operation '{}' is approved but this Viewer build has no runner for it.",
+                intent.operation
+            ),
+        }),
     };
 
     match result {
@@ -771,7 +769,7 @@ fn execute_approved_host_intent(
                 &intent,
                 true,
                 false,
-                Some("approved_runner_error".to_string()),
+                Some("approved_no_runner".to_string()),
             ),
             HostBrokerIntentResponse {
                 ok: false,
@@ -838,73 +836,24 @@ fn execute_host_stream_start(shared: &HostBrokerShared, request: HostBrokerInten
         return host_intent_approval_error_response(shared, &normalized, audit_id, error);
     }
 
-    let stream_id = format!("host-stream-{}", generate_broker_token());
-    let stop_token = generate_broker_token();
-    let started_at = now_epoch_seconds();
-    let expires_at = started_at.saturating_add(stream_duration_seconds(&normalized));
-    let session = HostStreamSession {
-        operation: normalized.operation.clone(),
-        caller_pack_id: normalized.caller_pack_id.clone(),
-        caller_function_id: normalized.caller_function_id.clone(),
-        conversation_id: normalized.conversation_id.clone(),
-        started_at,
-        expires_at,
-        stop_token: stop_token.clone(),
-    };
-    let mut streams = match shared.active_host_streams.lock() {
-        Ok(streams) => streams,
-        Err(_) => {
-            return serialize_intent_response(
-                &shared.config,
-                host_intent_audit_entry(
-                    audit_id.clone(),
-                    &normalized,
-                    false,
-                    false,
-                    Some("state_unavailable".to_string()),
-                ),
-                HostBrokerIntentResponse {
-                    ok: false,
-                    operation: normalized.operation,
-                    stream_id: None,
-                    result: None,
-                    error: Some(HostBrokerError {
-                        code: "HOST_STREAM_STATE_UNAVAILABLE".to_string(),
-                        message: "Host stream state is unavailable.".to_string(),
-                    }),
-                    audit_id,
-                },
-            );
-        }
-    };
-    prune_expired_streams(&mut streams, started_at);
-    streams.insert(stream_id.clone(), session);
-
     serialize_intent_response(
         &shared.config,
         host_intent_audit_entry(
             audit_id.clone(),
             &normalized,
             true,
-            true,
-            Some("stream_started".to_string()),
+            false,
+            Some("stream_backend_unavailable".to_string()),
         ),
         HostBrokerIntentResponse {
-            ok: true,
-            operation: normalized.operation.clone(),
-            stream_id: Some(stream_id.clone()),
-            result: Some(json!({
-                "type": "host_stream_started",
-                "stream_id": stream_id,
-                "operation": normalized.operation,
-                "permission_subject": PERMISSION_SUBJECT,
-                "events_url": format!("{HOST_STREAM_EVENTS_PREFIX}{stream_id}"),
-                "stop_token": stop_token,
-                "started_at": started_at,
-                "expires_at": expires_at,
-                "media_storage": "not_stored_by_broker",
-            })),
-            error: None,
+            ok: false,
+            operation: normalized.operation,
+            stream_id: None,
+            result: None,
+            error: Some(HostBrokerError {
+                code: "HOST_STREAM_BACKEND_UNAVAILABLE".to_string(),
+                message: "This Viewer build cannot start host media streams because no capture backend is registered.".to_string(),
+            }),
             audit_id,
         },
     )
@@ -1191,17 +1140,6 @@ fn serialize_intent_response(
     serde_json::to_value(response).unwrap_or_else(|_| {
         json!({"ok": false, "error": {"code": "SERIALIZATION_FAILED", "message": "Could not serialize broker response"}})
     })
-}
-
-fn stream_duration_seconds(intent: &NormalizedHostIntent) -> u64 {
-    let millis = intent
-        .stream
-        .get("max_duration_ms")
-        .and_then(Value::as_u64)
-        .or_else(|| intent.args.get("duration_ms").and_then(Value::as_u64))
-        .unwrap_or(30_000);
-    let seconds = (millis.saturating_add(999) / 1000).max(1);
-    seconds.min(300)
 }
 
 fn prune_expired_streams(streams: &mut HashMap<String, HostStreamSession>, now: u64) {
@@ -2517,7 +2455,51 @@ mod tests {
     }
 
     #[test]
-    fn host_stream_start_stop_lifecycle_uses_bound_tokens() {
+    fn host_intent_execute_fails_closed_for_unimplemented_runner() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config);
+        let args = json!({"include_cursor": true});
+        let stream = json!({});
+        let token = signed_host_intent_operation_token(
+            "secret",
+            "tok-host-screen-unimplemented",
+            "host.screen.capture",
+            "host_screen_capture",
+            "defaultspack",
+            "conv-1",
+            &args,
+            &stream,
+        );
+
+        let response = execute_host_intent(
+            &shared,
+            HostBrokerIntentRequest {
+                intent_type: "host_intent".to_string(),
+                operation: "host.screen.capture".to_string(),
+                args,
+                stream,
+                reason: Some("screen read".to_string()),
+                caller: Some(HostBrokerIntentCaller {
+                    pack_id: Some("defaultspack".to_string()),
+                    function_id: Some("screen_read".to_string()),
+                }),
+                conversation_id: Some("conv-1".to_string()),
+                host_function_id: Some("host_screen_capture".to_string()),
+                approval_token: Some(token),
+            },
+        );
+
+        assert_eq!(response.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            response.pointer("/error/code").and_then(Value::as_str),
+            Some("HOST_OPERATION_NOT_IMPLEMENTED")
+        );
+        assert!(response.get("result").is_none());
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn host_stream_start_rejects_without_capture_backend() {
         let (config, temp_dir) = test_config_with_approval_secret("secret");
         let shared = test_shared(config);
         let stream = json!({"enabled": true, "max_duration_ms": 1000});
@@ -2528,53 +2510,11 @@ mod tests {
 
         let started = execute_host_stream_start(&shared, request);
 
-        assert_eq!(started.get("ok").and_then(Value::as_bool), Some(true));
-        let stream_id = started
-            .get("stream_id")
-            .and_then(Value::as_str)
-            .expect("stream id should be returned")
-            .to_string();
-        let stop_token = started
-            .pointer("/result/stop_token")
-            .and_then(Value::as_str)
-            .expect("stop token should be returned")
-            .to_string();
-
-        let wrong_stop = execute_host_stream_stop(
-            &shared,
-            HostBrokerStreamStopRequest {
-                stream_id: stream_id.clone(),
-                operation: None,
-                caller: None,
-                conversation_id: Some("conv-1".to_string()),
-                stop_token: Some("wrong".to_string()),
-            },
-        );
-        assert_eq!(wrong_stop.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(started.get("stream_id").and_then(Value::as_str), None,);
+        assert_eq!(started.get("ok").and_then(Value::as_bool), Some(false));
         assert_eq!(
-            wrong_stop.pointer("/error/code").and_then(Value::as_str),
-            Some("HOST_STREAM_STOP_TOKEN_INVALID")
-        );
-
-        let events = host_stream_events(&shared, &stream_id);
-        assert_eq!(events.get("ok").and_then(Value::as_bool), Some(true));
-
-        let stopped = execute_host_stream_stop(
-            &shared,
-            HostBrokerStreamStopRequest {
-                stream_id: stream_id.clone(),
-                operation: None,
-                caller: None,
-                conversation_id: Some("conv-1".to_string()),
-                stop_token: Some(stop_token),
-            },
-        );
-        assert_eq!(stopped.get("ok").and_then(Value::as_bool), Some(true));
-        assert_eq!(
-            host_stream_events(&shared, &stream_id)
-                .pointer("/error/code")
-                .and_then(Value::as_str),
-            Some("HOST_STREAM_NOT_FOUND")
+            started.pointer("/error/code").and_then(Value::as_str),
+            Some("HOST_STREAM_BACKEND_UNAVAILABLE")
         );
         let _ = fs::remove_dir_all(temp_dir);
     }
@@ -2600,16 +2540,38 @@ mod tests {
     }
 
     fn signed_host_intent_token(secret: &str, jti: &str, args: &Value, stream: &Value) -> String {
+        signed_host_intent_operation_token(
+            secret,
+            jti,
+            "host.microphone.capture",
+            "host_microphone_capture",
+            "rumi_ambient_trigger_pack",
+            "conv-1",
+            args,
+            stream,
+        )
+    }
+
+    fn signed_host_intent_operation_token(
+        secret: &str,
+        jti: &str,
+        operation: &str,
+        function_id: &str,
+        pack_id: &str,
+        conversation_id: &str,
+        args: &Value,
+        stream: &Value,
+    ) -> String {
         signed_test_approval_token(
             secret,
             json!({
                 "version": APPROVAL_TOKEN_VERSION,
                 "jti": jti,
-                "operation": "host.microphone.capture",
-                "function_id": "host_microphone_capture",
+                "operation": operation,
+                "function_id": function_id,
                 "args_hash": hash_arguments_value(&json!({"args": args, "stream": stream})),
-                "pack_id": "rumi_ambient_trigger_pack",
-                "conversation_id": "conv-1",
+                "pack_id": pack_id,
+                "conversation_id": conversation_id,
                 "expires_at": now_epoch_seconds() + 60,
             }),
         )

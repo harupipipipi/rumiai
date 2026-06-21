@@ -77,6 +77,14 @@ function closePinchWithoutOkPosture(): HandLandmark[] {
   return items;
 }
 
+function relaxedOkMarkLandmarks(): HandLandmark[] {
+  const items = okMarkLandmarks("Right").map((landmark) => ({ ...landmark }));
+  items[12] = { x: 0.54, y: 0.18, z: 0 };
+  items[16] = { x: 0.63, y: 0.25, z: 0 };
+  items[20] = { x: 0.7, y: 0.34, z: 0 };
+  return items;
+}
+
 function fistLandmarks(): HandLandmark[] {
   const items = closePinchWithoutOkPosture();
   items[6] = { x: 0.45, y: 0.58, z: 0 };
@@ -118,6 +126,24 @@ test("ok mark detector triggers after a held ok posture", () => {
   assert.equal(triggered.triggered, true);
   assert.equal(triggered.active, true);
   assert.equal(triggered.hand, "Right");
+});
+
+test("ok mark detector tolerates slightly relaxed supporting fingers", () => {
+  const detector = new GesturePinchDetector({ pinchStartMs: 0 });
+  const pose = relaxedOkMarkLandmarks();
+  assert.equal(isOkMarkPose(pose), true);
+  const triggered = detector.updateFromLandmarks({ landmarks: pose, now: 1000 });
+  assert.equal(triggered.triggered, true);
+  assert.equal(triggered.active, true);
+});
+
+test("ok mark candidate survives one brief noisy frame", () => {
+  const detector = new GesturePinchDetector({ pinchStartMs: 300, candidateDropGraceMs: 220 });
+  assert.equal(detector.updateFromLandmarks({ landmarks: okMarkLandmarks(), now: 1000 }).reason, "ok_mark_candidate");
+  assert.equal(detector.updateFromLandmarks({ landmarks: closePinchWithoutOkPosture(), now: 1120 }).reason, "ok_mark_candidate");
+  const triggered = detector.updateFromLandmarks({ landmarks: okMarkLandmarks(), now: 1320 });
+  assert.equal(triggered.triggered, true);
+  assert.equal(triggered.active, true);
 });
 
 test("close thumb-index pinch without ok posture is rejected", () => {

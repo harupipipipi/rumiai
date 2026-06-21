@@ -8,14 +8,18 @@ import type { Conversation } from "../lib/api";
 import { AUTHORITY_FOLLOWUP_TEXT, AUTHORITY_WAITING_TEXT } from "../lib/authorityApproval";
 import { buildAmbientDispatchTemplateContext, mergeAmbientDispatchMetadata } from "./ambientDispatchContext";
 import { AmbientMiniChat } from "./AmbientMiniChat";
+import { ChatPickerDialog } from "./AmbientRoutingSettings";
 import {
   ambientConversationIdFromResult,
+  ambientLatestAssistantFinal,
   ambientLatestAssistantFinalText,
   ambientLinkedConversationId,
   ambientMiniChatMessages,
   ambientPendingAuthorityApproval,
 } from "./ambientMiniChatState";
 import { ambientSelectedModelDisplay, ambientVisibleModelOptions } from "./ambientRouting";
+import { ambientConversationCompletionFromSnapshot, waitForAmbientAssistantResponse } from "./ambientConversationCompletion";
+import { ambientDeliveryModeLabel, ambientDispatchDebugInfo } from "./ambientDispatchDebug";
 import type { AmbientStatus } from "./ambientTriggerClient";
 
 test("ambient mini chat resolves the linked conversation from routing state", () => {
@@ -53,6 +57,31 @@ test("ambient mini chat keeps recent user and assistant text in order", () => {
     { id: "u1", role: "user", text: "hello こんにちは", createdAt: 2 },
     { id: "a1", role: "assistant", text: "こんにちは", createdAt: 3 },
   ]);
+});
+
+test("ambient mini chat exposes an open button for the linked conversation", () => {
+  const html = renderToStaticMarkup(createElement(AmbientMiniChat, {
+    conversation: null,
+    conversationId: "linked-chat-1",
+    routingSummary: "Mini",
+    loading: false,
+    error: null,
+    input: "",
+    sending: false,
+    disabled: false,
+    latestInputPreview: null,
+    showPicker: false,
+    onInputChange: () => {},
+    onSubmit: (event) => event.preventDefault(),
+    onOpenChat: () => {},
+    onRefresh: () => {},
+    onPickChat: () => {},
+  }));
+
+  assert.match(html, /data-testid="ambient-mini-chat-open"/);
+  assert.match(html, /aria-label="チャットを開く"/);
+  assert.match(html, /title="\/chat\?chat=linked-chat-1"/);
+  assert.match(html, />開く</);
 });
 
 test("ambient mini chat detects pending authority and hides the approval placeholder", () => {
@@ -216,10 +245,10 @@ test("ambient mini chat hides hidden authority resume and keeps only the final a
   assert.equal(ambientLatestAssistantFinalText(conversation), "また会いましょう。");
 });
 
-test("ambient mini chat hides routing picker controls for the standalone normal screen", () => {
+test("ambient mini chat exposes conversation switching controls for the standalone normal screen", () => {
   const html = renderToStaticMarkup(createElement(AmbientMiniChat, {
     conversation: null,
-    conversationId: null,
+    conversationId: "linked-chat-1",
     routingSummary: "次の送信で作成",
     loading: false,
     error: null,
@@ -227,18 +256,46 @@ test("ambient mini chat hides routing picker controls for the standalone normal 
     sending: false,
     disabled: false,
     latestInputPreview: null,
-    showPicker: false,
+    showPicker: true,
     onInputChange: () => {},
     onSubmit: (event) => event.preventDefault(),
     onRefresh: () => {},
     onPickChat: () => {},
   }));
 
-  assert.equal(html.includes("チャットを選ぶ"), false);
-  assert.equal(html.includes("選択"), false);
+  assert.match(html, /チャットを選ぶ/);
+  assert.match(html, />切替</);
   assert.equal(html.includes("Defaultspack"), false);
-  assert.match(html, /次の送信で作成/);
+  assert.match(html, /linked-chat-1/);
   assert.match(html, /メッセージ/);
+});
+
+test("ambient chat picker uses the history template and puts new chat at the top", () => {
+  const html = renderToStaticMarkup(createElement(ChatPickerDialog, {
+    activeChatId: null,
+    selectedChatId: null,
+    chatItems: [{
+      id: "ambient-chat-1",
+      title: "Ambient test chat",
+      date: "Today",
+      type: "chat",
+    }],
+    loading: false,
+    onRefresh: () => {},
+    onNewChat: () => {},
+    onSelect: () => {},
+    onClose: () => {},
+  }));
+
+  const createIndex = html.indexOf("新規チャットを作る");
+  const historyIndex = html.indexOf("data-testid=\"ambient-chat-picker-history-template\"");
+  assert.ok(createIndex >= 0);
+  assert.ok(historyIndex >= 0);
+  assert.ok(createIndex < historyIndex);
+  assert.equal(html.includes(">New Chat<"), false);
+  assert.equal(html.includes(">New Group<"), false);
+  assert.match(html, /history-chat-card-ambient-chat-1/);
+  assert.equal(html.includes("aria-disabled=\"true\""), false);
 });
 
 test("ambient compact routing model options use template modelSelect display shape", () => {
@@ -353,3 +410,78 @@ function message(patch: Partial<Conversation["messages"][number]>): Conversation
     ...patch,
   };
 }
+
+
+test("finger recording completion waits until the assistant response is stored", () => {
+  const submittedAt = 10_000;
+  const before = conversationWithMessages([
+    message({ id: "u1", role: "user", raw_text: "質問", created_at: 9_900, sequence_number: 1 }),
+  ]);
+  assert.equal(ambientConversationCompletionFromSnapshot({
+    conversation: before,
+    previousAssistantMessageId: null,
+    submittedAt,
+  }).status, "waiting");
+
+  const after = conversationWithMessages([
+    message({ id: "u1", role: "user", raw_text: "質問", created_at: 9_900, sequence_number: 1 }),
+    message({ id: "a1", role: "assistant", raw_text: "回答", created_at: 10_100, sequence_number: 2 }),
+  ]);
+  const completion = ambientConversationCompletionFromSnapshot({
+    conversation: after,
+    previousAssistantMessageId: null,
+    submittedAt,
+  });
+  assert.equal(completion.status, "completed");
+  assert.deepEqual(completion.assistant, { messageId: "a1", createdAt: 10_100, text: "回答" });
+});
+
+test("finger recording completion also resolves from later conversation polling", async () => {
+  let calls = 0;
+  const waiting = conversationWithMessages([
+    message({ id: "u1", role: "user", raw_text: "質問", created_at: 9_900, sequence_number: 1 }),
+  ]);
+  const completed = conversationWithMessages([
+    message({ id: "u1", role: "user", raw_text: "質問", created_at: 9_900, sequence_number: 1 }),
+    message({ id: "a2", role: "assistant", raw_text: "後から届いた回答", created_at: 10_200, sequence_number: 2 }),
+  ]);
+  const outcome = await waitForAmbientAssistantResponse({
+    conversationId: "c1",
+    previousAssistantMessageId: null,
+    submittedAt: 10_000,
+    timeoutMs: 100,
+    pollIntervalMs: 0,
+    sleep: async () => {},
+    fetchConversation: async () => (++calls === 1 ? waiting : completed),
+  });
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.assistant?.messageId, "a2");
+  assert.equal(calls, 2);
+});
+
+test("ambient dispatch debug reports the actual model and audio route", () => {
+  const debug = ambientDispatchDebugInfo({
+    resolved_model: "opencode-go/deepseek-v4-flash",
+    audio_delivery: {
+      mode: "transcript",
+      target_capability: "text",
+    },
+  });
+  assert.deepEqual(debug, {
+    model: "opencode-go/deepseek-v4-flash",
+    deliveryMode: "transcript",
+    targetCapability: "text",
+  });
+  assert.equal(ambientDeliveryModeLabel(debug.deliveryMode), "文字起こしを送信");
+});
+
+test("ambient latest assistant final preserves message identity for read-aloud dedupe", () => {
+  const conversation = conversationWithMessages([
+    message({ id: "a-identity", role: "assistant", raw_text: "同じ文章", created_at: 42, sequence_number: 1 }),
+  ]);
+  assert.deepEqual(ambientLatestAssistantFinal(conversation), {
+    messageId: "a-identity",
+    createdAt: 42,
+    text: "同じ文章",
+  });
+});

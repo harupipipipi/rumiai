@@ -303,6 +303,15 @@ class DefaultsHttpServer:
             "inputs": {},
         }
 
+    def _invoke_registry_handler(self, handler, request_data, path_params):
+        if getattr(handler, "_defaultspack_flow_route_handler", False):
+            return handler(request_data, path_params or {})
+        context = self._build_context()
+        context["_facade"] = self.facade
+        _apply_ambient_browser_qa_context(context, request_data)
+        _apply_defaultspack_local_ui_context(context, request_data)
+        return handler(request_data, context)
+
     def _invoke_fallback_block(self, module_name, request_data, path_params, inject=None):
         payload = dict(request_data or {})
         for source_key, dest_key in (inject or {}).items():
@@ -1551,13 +1560,11 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                         request_data[data_key] = path_params.get(url_param, "")
                 request_data["_method"] = method
                 request_data["_actual_method"] = method
-                if getattr(handler, "_defaultspack_flow_route_handler", False):
-                    result = handler(request_data, path_params or {})
-                else:
-                    context = self.server_ref._build_context()
-                    context["_facade"] = self.server_ref.facade
-                    _apply_ambient_browser_qa_context(context, request_data)
-                    result = handler(request_data, context)
+                result = self.server_ref._invoke_registry_handler(
+                    handler,
+                    request_data,
+                    path_params or {},
+                )
             else:
                 request_data["_method"] = method
                 request_data["_actual_method"] = method

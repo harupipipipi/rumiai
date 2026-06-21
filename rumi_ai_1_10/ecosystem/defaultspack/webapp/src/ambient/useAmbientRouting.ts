@@ -151,6 +151,42 @@ export function useAmbientRouting({
     }
   }
 
+
+  async function saveRoutingModel(model: string) {
+    const normalizedModel = model.trim();
+    const targetConversationId = routingMode === "selected_chat"
+      ? String(routingConversationId || conversationId || "").trim()
+      : "";
+    setRoutingModel(normalizedModel);
+    setBusy(true);
+    try {
+      if (targetConversationId && normalizedModel) {
+        const updated = await api.updateConversation(targetConversationId, { model: normalizedModel });
+        setDestinationConversationModel({ id: targetConversationId, model: updated.model || normalizedModel });
+        setConversations((current) => current.map((item) => (
+          item.id === targetConversationId ? { ...item, model: updated.model || normalizedModel } : item
+        )));
+      }
+      const next = normalizeRouting({
+        mode: routingMode,
+        conversation_id: routingConversationId,
+        group_enabled: routingGroupEnabled,
+        group_id: routingGroupId,
+        group_title: routingGroupTitle,
+        model: normalizedModel,
+        ai_send_approval_required: aiSendApprovalRequired,
+      }, conversationId || null);
+      const configured = await ambientTriggerClient.configure(next);
+      setStatus(configured);
+      setMessage(normalizedModel ? "送信モデルを保存しました。" : "モデル指定を外しました。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "送信モデルを保存できませんでした。");
+      await refresh().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function selectConversationForRouting(chatId: string) {
     setChatPickerOpen(false);
     const selected = conversations.find((conversation) => conversation.id === chatId);
@@ -197,6 +233,7 @@ export function useAmbientRouting({
     loadConversations,
     openChatPicker,
     saveRouting,
+    saveRoutingModel,
     selectConversationForRouting,
     searchRoutingModels,
   };

@@ -21,6 +21,7 @@ export type PinchDetectorOptions = {
   swipeDominanceRatio?: number;
   minHandConfidence?: number;
   minTrackingConfidence?: number;
+  candidateDropGraceMs?: number;
 };
 
 export type FingerChoice = 2 | 3 | 4;
@@ -51,7 +52,7 @@ export type PinchFrame = {
 };
 
 const DEFAULTS = {
-  pinchStartThreshold: 0.28,
+  pinchStartThreshold: 0.34,
   pinchReleaseThreshold: 0.46,
   pinchStartMs: 300,
   pinchReleaseMs: 650,
@@ -63,16 +64,17 @@ const DEFAULTS = {
   swipeCooldownMs: 1000,
   swipeMinDistance: 0.16,
   swipeDominanceRatio: 1.6,
-  minHandConfidence: 0.6,
-  minTrackingConfidence: 0.6,
+  minHandConfidence: 0.45,
+  minTrackingConfidence: 0.45,
+  candidateDropGraceMs: 220,
 };
 
 const OK_MARK_FINGERS = ["middle", "ring", "pinky"] as const;
 const OK_MARK_MIN_OPEN_FINGERS = 2;
-const OK_MARK_MIN_TIP_MCP_DISTANCE = 0.38;
-const OK_MARK_TIP_PIP_EXTENSION_MARGIN = 0.12;
-const OK_MARK_TIP_DIP_EXTENSION_MARGIN = 0.04;
-const OK_MARK_WRIST_EXTENSION_MARGIN = 0.06;
+const OK_MARK_MIN_TIP_MCP_DISTANCE = 0.32;
+const OK_MARK_TIP_PIP_EXTENSION_MARGIN = 0.07;
+const OK_MARK_TIP_DIP_EXTENSION_MARGIN = 0.02;
+const OK_MARK_WRIST_EXTENSION_MARGIN = 0.02;
 
 type FingerName = "index" | "middle" | "ring" | "pinky";
 type OkMarkFingerName = typeof OK_MARK_FINGERS[number];
@@ -80,6 +82,7 @@ type OkMarkFingerName = typeof OK_MARK_FINGERS[number];
 export class GesturePinchDetector {
   private active = false;
   private candidateStartedAt: number | null = null;
+  private candidateLastOkAt: number | null = null;
   private releaseStartedAt: number | null = null;
   private lastTriggeredAt = -Infinity;
   private choiceCandidate: FingerChoice | null = null;
@@ -99,7 +102,7 @@ export class GesturePinchDetector {
     );
     if (confidence < options.minHandConfidence || confidence < options.minTrackingConfidence) {
       if (!this.active) {
-        this.candidateStartedAt = null;
+        this.clearCandidateUnlessGrace(now, options);
         this.resetChoice();
         this.swipeSamples = [];
       }
@@ -109,7 +112,7 @@ export class GesturePinchDetector {
     const normalizedDistance = normalizedThumbIndexDistance(frame.landmarks);
     if (!Number.isFinite(normalizedDistance)) {
       if (!this.active) {
-        this.candidateStartedAt = null;
+        this.clearCandidateUnlessGrace(now, options);
         this.resetChoice();
         this.swipeSamples = [];
       }
@@ -139,6 +142,7 @@ export class GesturePinchDetector {
     if (!this.active) {
       if (startOkMark.ok) {
         this.candidateStartedAt ??= now;
+        this.candidateLastOkAt = now;
         const heldMs = now - this.candidateStartedAt;
         const cooldownReady = now - this.lastTriggeredAt >= options.cooldownMs;
         if (heldMs >= options.pinchStartMs && cooldownReady) {
@@ -154,11 +158,14 @@ export class GesturePinchDetector {
         }
         return this.state(frame, normalizedDistance, confidence, cooldownReady ? "ok_mark_candidate" : "cooldown");
       }
+      if (this.candidateStartedAt !== null && this.candidateWithinGrace(now, options)) {
+        return this.state(frame, normalizedDistance, confidence, "ok_mark_candidate");
+      }
       if (startOkMark.thumbIndexClose) {
-        this.candidateStartedAt = null;
+        this.clearCandidate();
         return this.state(frame, normalizedDistance, confidence, choiceState ? "choice_candidate" : "ok_mark_posture_missing");
       }
-      this.candidateStartedAt = null;
+      this.clearCandidate();
       return this.state(frame, normalizedDistance, confidence, choiceState ? "choice_candidate" : undefined);
     }
 
@@ -167,7 +174,7 @@ export class GesturePinchDetector {
       this.releaseStartedAt ??= now;
       if (now - this.releaseStartedAt >= options.pinchReleaseMs) {
         this.active = false;
-        this.candidateStartedAt = null;
+        this.clearCandidate();
         return {
           ...this.state(frame, normalizedDistance, confidence, "pinch_released"),
           active: false,
@@ -182,7 +189,7 @@ export class GesturePinchDetector {
 
   reset() {
     this.active = false;
-    this.candidateStartedAt = null;
+    this.clearCandidate();
     this.releaseStartedAt = null;
     this.lastTriggeredAt = -Infinity;
     this.resetChoice();
@@ -265,6 +272,19 @@ export class GesturePinchDetector {
   private resetChoice() {
     this.choiceCandidate = null;
     this.choiceStartedAt = null;
+  }
+
+  private candidateWithinGrace(now: number, options: Required<PinchDetectorOptions>): boolean {
+    return this.candidateLastOkAt !== null && now - this.candidateLastOkAt <= options.candidateDropGraceMs;
+  }
+
+  private clearCandidateUnlessGrace(now: number, options: Required<PinchDetectorOptions>) {
+    if (!this.candidateWithinGrace(now, options)) this.clearCandidate();
+  }
+
+  private clearCandidate() {
+    this.candidateStartedAt = null;
+    this.candidateLastOkAt = null;
   }
 }
 

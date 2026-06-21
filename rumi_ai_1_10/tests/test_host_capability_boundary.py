@@ -510,8 +510,55 @@ def test_host_intent_exec_guarded_has_confirmation_phrase_and_approves(tmp_path,
         },
     )
 
-    assert retry["success"] is True
-    assert retry["status"] in {"prepared", "executed"}
+    assert retry["success"] is False
+    assert retry["status"] == "host_broker_unavailable"
+    assert retry["error_type"] == "host_broker_unavailable"
+
+
+def test_host_intent_executor_fails_closed_without_viewer_broker(monkeypatch):
+    from core_runtime.authority.models import AuthorityDecision
+    from core_runtime.host_intent import executor as host_intent_executor
+    from core_runtime.host_intent.executor import HostIntentExecutor
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+
+    class Authority:
+        def check(self, **kwargs):
+            return AuthorityDecision(
+                allowed=True,
+                permission_id=kwargs["permission_id"],
+                principal_id=kwargs["principal_id"],
+                reason="approved",
+                risk_level="high",
+                resource=kwargs["resource"],
+            )
+
+    class MissingBroker:
+        def available(self):
+            return False
+
+    monkeypatch.setattr(host_intent_executor, "get_authority_service", lambda: Authority())
+    monkeypatch.setattr(ViewerBrokerClient, "from_environment", classmethod(lambda cls: MissingBroker()))
+
+    result = HostIntentExecutor().handle(
+        {
+            "type": "host_intent",
+            "operation": "host.permission.status",
+            "args": {},
+            "caller": {
+                "pack_id": "rumi_ambient_trigger_pack",
+                "function_id": "ambient_monitor_start",
+            },
+        },
+        principal_id="rumi_ambient_trigger_pack",
+        caller_pack_id="rumi_ambient_trigger_pack",
+        caller_function_id="ambient_monitor_start",
+        request_context={"conversation_id": "conv-1"},
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "host_broker_unavailable"
+    assert result["error_type"] == "host_broker_unavailable"
+    assert result["host_broker"] == {"available": False}
 
 
 def test_direct_host_function_from_non_host_pack_becomes_critical_authority_request(monkeypatch):

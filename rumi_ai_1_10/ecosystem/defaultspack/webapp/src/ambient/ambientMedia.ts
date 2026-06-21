@@ -24,6 +24,12 @@ export type AmbientAudioRecording = {
   durationMs: number;
 };
 
+export type WakeListeningOptions = {
+  onError?: (error: unknown) => void;
+  captureEmbedding?: typeof captureAudioEmbedding;
+  retryDelayMs?: number;
+};
+
 type SpeechRecognitionAlternativeLike = {
   transcript?: string;
 };
@@ -274,14 +280,35 @@ export async function testMicrophoneInput(durationMs = 1400, deviceId?: string):
   }
 }
 
-export async function startWakeListening(onEmbedding: (embedding: number[]) => Promise<void>, deviceId?: string): Promise<() => void> {
+export async function startWakeListening(
+  onEmbedding: (embedding: number[]) => Promise<void>,
+  deviceId?: string,
+  options?: WakeListeningOptions,
+): Promise<() => void> {
   let stopped = false;
+  const captureEmbedding = options?.captureEmbedding ?? captureAudioEmbedding;
+  const retryDelayMs = Math.max(10, Math.min(Number(options?.retryDelayMs ?? 900), 10_000));
+  const delay = () => new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+  const captureAndDispatch = async () => {
+    const embedding = await captureEmbedding(700, deviceId);
+    if (stopped) return;
+    await onEmbedding(embedding).catch(() => undefined);
+  };
+
+  await captureAndDispatch();
+
   async function loop() {
     while (!stopped) {
-      const embedding = await captureAudioEmbedding(700, deviceId);
+      await delay();
       if (stopped) return;
-      await onEmbedding(embedding).catch(() => undefined);
-      await new Promise((resolve) => window.setTimeout(resolve, 900));
+      try {
+        await captureAndDispatch();
+      } catch (error) {
+        if (stopped) return;
+        stopped = true;
+        options?.onError?.(error);
+        return;
+      }
     }
   }
   void loop();

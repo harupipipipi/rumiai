@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from domain.input.audio_runtime import create_transcription_client, model_input_capability
+
 
 TRANSCRIPT_KEYS = ("transcript", "transcription", "text_transcript")
 TRANSCRIPT_SOURCE_KEYS = ("transcript_source", "transcription_source", "transcriptSource")
@@ -26,6 +28,9 @@ RAW_AUDIO_ATTACHMENT_KEYS = (
     "audioDataUrl",
     "bytes",
     "blob",
+)
+DEFAULT_LOCAL_TRANSCRIPTION_PROMPT = (
+    "BlackHole Rumi OKマーク DeepSeek OpenCode"
 )
 
 
@@ -148,9 +153,7 @@ def transcribe_ambient_audio(
     if not missing:
         return {"status": "skipped", "code": "transcript_already_present", "text": ""}
 
-    from domain.ai_client.client import AIClient
-
-    client = AIClient()
+    client = create_transcription_client()
     candidates = _transcription_candidates(client, payload=payload, params=params, routing=routing)
     use_local_fallback = _should_try_local_fallback(
         payload=payload,
@@ -291,15 +294,8 @@ def _should_try_local_fallback(
     )
     if not model_ref:
         return False
-    try:
-        from domain.ai_client.audio_capability import metadata_supports_audio_input
-        from domain.ai_client.model_search import get_model_capabilities
-    except Exception:
-        return False
-    capabilities = get_model_capabilities(model_ref)
-    if not isinstance(capabilities, dict):
-        return False
-    return not metadata_supports_audio_input(capabilities)
+    capability = model_input_capability(model_ref)
+    return not bool(capability.get("supports_audio_input"))
 
 
 def _target_model_from_context(
@@ -339,9 +335,17 @@ def _transcribe_local_attachment(
     return transcribe_local_audio(
         audio,
         mime_type=str(attachment.get("type") or attachment.get("mime_type") or ""),
-        language=str(params.get("language") or ""),
-        prompt=str(params.get("prompt") or ""),
+        language=str(params.get("language") or _default_local_transcription_language()),
+        prompt=str(params.get("prompt") or DEFAULT_LOCAL_TRANSCRIPTION_PROMPT),
     )
+
+
+def _default_local_transcription_language() -> str:
+    for key in ("RUMI_AMBIENT_TRANSCRIPTION_LANGUAGE", "RUMI_TRANSCRIPTION_LANGUAGE"):
+        value = str(os.environ.get(key) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _explicit_transcription_models(

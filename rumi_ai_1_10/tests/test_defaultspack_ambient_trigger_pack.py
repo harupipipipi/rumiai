@@ -496,7 +496,19 @@ def test_ambient_template_catalog_projects_settings_policy_and_external_hook():
     assert "ambient_finger_recording_tools" in tool_policy_ids
     assert {"host.microphone.capture", "host.camera.capture", "ambient.trigger.dispatch"} <= permission_ids
     assert "ambient.input.webhook" in external_template_ids
+    assert ambient_fields["ambient.monitor.enabled"]["type"] == "toggle"
+    assert ambient_fields["ambient.camera.lock"]["type"] == "device_lock"
+    assert ambient_fields["ambient.camera.lock"]["visible_when"] == {
+        "field": "ambient.monitor.enabled",
+        "truthy": True,
+    }
+    assert ambient_fields["ambient.routing.mode"]["type"] == "select"
     assert ambient_fields["ambient.routing.model"]["type"] == "model_select"
+    assert ambient_fields["ambient.routing.model"]["visible_when"] == {
+        "field": "ambient.monitor.enabled",
+        "truthy": True,
+    }
+    assert ambient_fields["ambient.routing.group_enabled"]["type"] == "toggle"
     assert ambient_fields["ambient.provider_keys"]["type"] == "api_key_setup"
 
 
@@ -560,6 +572,44 @@ def test_always_new_chat_prefers_current_conversation_model_when_route_model_bla
     assert envelope.params["model"] == current_model
     serialized = json.dumps({"conversation": created, "chat": envelope.chat, "params": envelope.params}, ensure_ascii=False)
     assert "ollama/llama3.1:8b" not in serialized
+
+
+def test_selected_chat_uses_conversation_model_instead_of_stale_route_model(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH", str(tmp_path / "ambient-audit.jsonl"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "conversations.json"))
+
+    from domain.ambient.router import AmbientTriggerRouter
+    from domain.chat.store import ChatStore
+
+    selected_model = "opencode-go/deepseek-v4-flash"
+    selected = ChatStore().create_conversation(model=selected_model)
+    router = AmbientTriggerRouter()
+    router.start_monitor()
+    router.grant_permission(MIC_PERMISSION, os_status="granted")
+    router.grant_permission(CAMERA_PERMISSION, os_status="granted")
+    router.grant_permission("ambient.trigger.dispatch")
+    router.configure({
+        "routing": {
+            "mode": "selected_chat",
+            "conversation_id": selected["id"],
+            "model": "ollama/llama3.1:8b",
+        }
+    })
+
+    payload = _pinch_audio_payload()
+    payload["model"] = "ollama/llama3.1:8b"
+    payload["params"] = {"model": "ollama/llama3.1:8b"}
+
+    with patch("domain.ambient.router.submit_input", return_value={"status": "ok", "assistant_text": ""}) as submit:
+        dispatched = router.submit_event(payload, {"conversation_id": selected["id"]})
+
+    assert dispatched["status"] == "ok"
+    assert dispatched["resolved_model"] == selected_model
+    envelope = submit.call_args.args[0]
+    assert envelope.params["model"] == selected_model
+    assert envelope.chat["conversation_id"] == selected["id"]
+    assert "ollama/llama3.1:8b" not in json.dumps(envelope.as_dict(), ensure_ascii=False)
 
 
 def test_ambient_audio_release_without_transcript_transcribes_for_text_model(monkeypatch, tmp_path):
@@ -673,10 +723,36 @@ def test_local_whisper_status_detects_bundled_whisper_cpp(monkeypatch, tmp_path)
     assert status["status"] == "local_whisper_configured"
     assert status["command"] == str(whisper_cli)
     assert status["model"] == str(model_dir / "ggml-tiny.bin")
+    assert status["model_quality"] == "fast"
+
+
+def test_local_whisper_prefers_small_then_base_before_tiny(monkeypatch, tmp_path):
+    from domain.ambient.local_transcription import local_whisper_status
+
+    app_dir = tmp_path / "app"
+    bin_dir = app_dir / "bundled" / "whisper" / "bin"
+    model_dir = app_dir / "bundled" / "whisper" / "models"
+    bin_dir.mkdir(parents=True)
+    model_dir.mkdir(parents=True)
+    whisper_cli = bin_dir / "whisper-cli"
+    whisper_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    whisper_cli.chmod(0o755)
+    for name in ("ggml-tiny.bin", "ggml-base.bin", "ggml-small.bin"):
+        (model_dir / name).write_bytes(name.encode("utf-8"))
+
+    monkeypatch.setenv("RUMI_APP_DIR", str(app_dir))
+    _clear_local_whisper_env(monkeypatch)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+
+    status = local_whisper_status()
+
+    assert status["model"] == str(model_dir / "ggml-small.bin")
+    assert status["model_quality"] == "quality"
 
 
 def test_text_model_audio_uses_local_whisper_fallback(monkeypatch, tmp_path):
     _clear_local_whisper_env(monkeypatch)
+    monkeypatch.setenv("RUMI_AMBIENT_TRANSCRIPTION_LANGUAGE", "ja")
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AMBIENT_STORE_PATH", str(tmp_path / "ambient-state.json"))
     monkeypatch.setenv(
         "RUMI_DEFAULTSPACK_AMBIENT_AUDIT_PATH",
@@ -724,6 +800,9 @@ def test_text_model_audio_uses_local_whisper_fallback(monkeypatch, tmp_path):
 
     assert dispatched["status"] == "ok"
     local_transcribe.assert_called_once()
+    assert local_transcribe.call_args.kwargs["language"] == "ja"
+    assert "BlackHole" in local_transcribe.call_args.kwargs["prompt"]
+    assert "OKマーク" in local_transcribe.call_args.kwargs["prompt"]
     envelope = submit.call_args.args[0]
     assert envelope.input == transcript
     assert "pinch.webm" not in envelope.input
@@ -733,6 +812,11 @@ def test_text_model_audio_uses_local_whisper_fallback(monkeypatch, tmp_path):
     assert "dataUrl" not in envelope.attachments[0]
     assert "data:audio" not in json.dumps(envelope.attachments, ensure_ascii=False)
     assert envelope.params["model"] == route_model
+    assert dispatched["audio_delivery"] == {
+        "mode": "transcript",
+        "target_capability": "text",
+        "model": route_model,
+    }
 
 
 def test_audio_tagged_model_keeps_audio_passthrough(monkeypatch, tmp_path):
@@ -754,14 +838,13 @@ def test_audio_tagged_model_keeps_audio_passthrough(monkeypatch, tmp_path):
 
     with (
         patch(
-            "domain.ambient.router.get_model_capabilities",
+            "domain.ambient.router.model_input_capability",
             return_value={
-                "profile_id": route_model,
+                "kind": "audio",
+                "supports_audio_input": True,
+                "supports_image_input": False,
+                "configured": True,
                 "provider_id": "provider",
-                "supports_audio": False,
-                "supports_audio_input": False,
-                "capability_tags": ["audio"],
-                "input_modalities": ["text", "audio"],
             },
         ),
         patch(
@@ -786,6 +869,8 @@ def test_audio_tagged_model_keeps_audio_passthrough(monkeypatch, tmp_path):
     assert envelope.params["model"] == route_model
     assert envelope.attachments[0]["dataUrl"].startswith("data:audio/webm")
     assert envelope.attachments[0]["transcription_status"] == "unavailable"
+    assert dispatched["audio_delivery"]["mode"] == "audio_direct"
+    assert dispatched["audio_delivery"]["target_capability"] == "audio"
 
 
 def test_multimodal_vision_without_audio_requires_transcription(monkeypatch, tmp_path):
@@ -807,16 +892,13 @@ def test_multimodal_vision_without_audio_requires_transcription(monkeypatch, tmp
 
     with (
         patch(
-            "domain.ambient.router.get_model_capabilities",
+            "domain.ambient.router.model_input_capability",
             return_value={
-                "profile_id": route_model,
-                "provider_id": "provider",
-                "supports_vision": True,
-                "supports_image_input": True,
-                "supports_audio": False,
+                "kind": "multimodal_no_audio",
                 "supports_audio_input": False,
-                "capability_tags": ["multimodal", "vision"],
-                "input_modalities": ["text", "image"],
+                "supports_image_input": True,
+                "configured": True,
+                "provider_id": "provider",
             },
         ),
         patch(
@@ -835,6 +917,8 @@ def test_multimodal_vision_without_audio_requires_transcription(monkeypatch, tmp
     assert result["status"] == "transcription_required"
     assert result["reason"] == "ambient.audio_transcription_unavailable"
     assert result["transcription"]["code"] == "local_whisper_not_configured"
+    assert result["audio_delivery"]["mode"] == "transcription_required"
+    assert result["audio_delivery"]["target_capability"] == "multimodal_no_audio"
     transcribe.assert_called_once()
     submit.assert_not_called()
 
@@ -956,6 +1040,8 @@ def test_local_whisper_command_uses_secure_temp_audio_and_deletes_it(monkeypatch
             return local_transcription.CommandResult(returncode=0, stdout="", stderr="")
         audio_path = Path(argv[argv.index("-f") + 1])
         output_prefix = Path(argv[argv.index("-of") + 1])
+        assert argv[argv.index("-l") + 1] == "auto"
+        assert argv[argv.index("--prompt") + 1] == "BlackHole is a product name."
         assert audio_path.exists()
         assert audio_path.suffix == ".wav"
         assert audio_path.read_bytes() == b"RIFF converted wav"
@@ -971,6 +1057,7 @@ def test_local_whisper_command_uses_secure_temp_audio_and_deletes_it(monkeypatch
     result = local_transcription.transcribe_local_audio(
         "data:audio/webm;base64,AAA=",
         mime_type="audio/webm",
+        prompt="BlackHole is a product name.",
     )
 
     assert result["status"] == "ok"
@@ -982,6 +1069,41 @@ def test_local_whisper_command_uses_secure_temp_audio_and_deletes_it(monkeypatch
     assert whisper_audio_paths
     assert not conversion_source_paths[0].exists()
     assert not whisper_audio_paths[0].exists()
+
+
+def test_local_whisper_command_placeholder_can_receive_prompt(monkeypatch, tmp_path):
+    _clear_local_whisper_env(monkeypatch)
+
+    from domain.ambient import local_transcription
+
+    command_log = []
+    model_path = tmp_path / "ggml-small.bin"
+    model_path.write_bytes(b"model")
+    monkeypatch.setenv(
+        "RUMI_LOCAL_WHISPER_COMMAND",
+        "/mock/bin/whisper-cli -m {model} -f {audio} --prompt {prompt} -otxt -of {output_prefix}",
+    )
+    monkeypatch.setenv("WHISPER_CPP_MODEL", str(model_path))
+
+    def fake_run_subprocess(argv, *, timeout_seconds):
+        del timeout_seconds
+        command_log.append(argv)
+        assert argv[argv.index("--prompt") + 1] == "BlackHole is a product name."
+        output_txt = Path(argv[argv.index("-of") + 1]).with_suffix(".txt")
+        output_txt.write_text("BlackHoleのテストです。\n", encoding="utf-8")
+        return local_transcription.CommandResult(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(local_transcription, "_run_subprocess", fake_run_subprocess)
+
+    result = local_transcription.transcribe_local_audio(
+        "data:audio/wav;base64,AAA=",
+        mime_type="audio/wav",
+        prompt="BlackHole is a product name.",
+    )
+
+    assert result["status"] == "ok"
+    assert result["text"] == "BlackHoleのテストです。"
+    assert command_log
 
 
 def test_ambient_transcription_without_explicit_model_rejects_stub_only_provider(monkeypatch):
@@ -1050,6 +1172,36 @@ def test_ambient_transcription_allows_explicit_stub_model_from_params_or_env(mon
                 "params": {"format": "webm"},
             }
         ]
+
+
+def test_model_input_capability_uses_builtin_manifest_without_full_catalog(monkeypatch):
+    from domain.ai_client import model_search
+    from domain.input.audio_runtime import (
+        _built_in_model_metadata,
+        _cached_model_input_capability,
+        _static_provider_model_metadata,
+        model_input_capability,
+    )
+
+    def fail_catalog_lookup(*_args, **_kwargs):
+        raise AssertionError("ambient capability lookup must not rebuild the full model catalog")
+
+    monkeypatch.setattr(model_search, "get_model_capabilities", fail_catalog_lookup)
+    _cached_model_input_capability.cache_clear()
+    _built_in_model_metadata.cache_clear()
+    _static_provider_model_metadata.cache_clear()
+
+    text_only = model_input_capability("opencode-go/deepseek-v4-flash")
+    vision_only = model_input_capability("opencode-go/qwen3.7-plus")
+    unknown = model_input_capability("custom-provider/unknown-model")
+
+    assert text_only["kind"] == "text"
+    assert text_only["supports_audio_input"] is False
+    assert vision_only["kind"] == "multimodal_no_audio"
+    assert vision_only["supports_image_input"] is True
+    assert vision_only["supports_audio_input"] is False
+    assert unknown["kind"] == "text"
+    assert unknown["supports_audio_input"] is False
 
 
 def test_ai_send_approval_mode_holds_ambient_input_until_server_approval(monkeypatch, tmp_path):

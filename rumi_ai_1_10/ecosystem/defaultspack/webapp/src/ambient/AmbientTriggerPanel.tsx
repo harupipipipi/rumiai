@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, Mic, Radio, RefreshCcw, Settings, Shield, Video, Volume2, VolumeX, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
-import { api, type Conversation } from "../lib/api";
+import { api, defaultspackUrlWithLocalAuth, type Conversation } from "../lib/api";
 import {
   authorityRequestSettledStatus,
   resolvePendingAuthorityApproval,
@@ -15,14 +15,16 @@ import {
   readBrowserApprovalTokenFromLocation,
   rememberBrowserApprovalToken,
 } from "../lib/authorityApprovalBrowserToken";
-import { openDefaultsConsoleWindow, openFingerRecordingWindow, openAuthorityApprovalWindow, openHostPermissionsPageWindow } from "../lib/desktopApproval";
+import { openDefaultsConsoleWindow, openFingerRecordingWindow, openAuthorityApprovalWindow, openDefaultspackMainWindow, openHostPermissionsPageWindow } from "../lib/desktopApproval";
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { ambientTriggerClient, type AmbientEventPayload, type AmbientStatus } from "./ambientTriggerClient";
+import { ambientConversationCompletionFromSnapshot, waitForAmbientAssistantResponse } from "./ambientConversationCompletion";
+import type { AmbientFinalAnswerPayload } from "./finalAnswerBridge";
 import { AmbientMiniChat } from "./AmbientMiniChat";
 import { buildAmbientDispatchTemplateContext, mergeAmbientDispatchMetadata } from "./ambientDispatchContext";
 import {
   ambientConversationIdFromResult,
-  ambientLatestAssistantFinalText,
+  ambientLatestAssistantFinal,
   ambientLinkedConversationId,
   ambientPendingAuthorityApproval,
 } from "./ambientMiniChatState";
@@ -145,9 +147,11 @@ export function AmbientTriggerPanel({
   const [browserApprovalTokenInput, setBrowserApprovalTokenInput] = useState(() => readBrowserApprovalToken());
   const [miniInput, setMiniInput] = useState("");
   const [miniSending, setMiniSending] = useState(false);
+  const [miniChatCreating, setMiniChatCreating] = useState(false);
   const [latestSubmittedInput, setLatestSubmittedInput] = useState<string | null>(null);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [devicesChecked, setDevicesChecked] = useState(false);
   const [selectedMicId, setSelectedMicId] = useState(() => safeLocalStorageGet(MIC_DEVICE_STORAGE_KEY));
   const [selectedCameraId, setSelectedCameraId] = useState(() => safeLocalStorageGet(CAMERA_DEVICE_STORAGE_KEY));
   const [micListening, setMicListening] = useState(false);
@@ -159,8 +163,6 @@ export function AmbientTriggerPanel({
   const [trackingFrame, setTrackingFrame] = useState<HandTrackingFrame | null>(null);
   const [cameraDebugOpen, setCameraDebugOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
-  const [debugTranscript, setDebugTranscript] = useState("ブラウザQAのテストです。");
-  const [debugStatus, setDebugStatus] = useState("待機中です。");
   const [micTestBusy, setMicTestBusy] = useState(false);
   const [micTestStatus, setMicTestStatus] = useState("未実行");
   const [micTestLevel, setMicTestLevel] = useState<number | null>(null);
@@ -168,6 +170,9 @@ export function AmbientTriggerPanel({
   const [transcriptionTestStatus, setTranscriptionTestStatus] = useState("未実行");
   const [transcriptionTestText, setTranscriptionTestText] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraAcquireInFlightRef = useRef(false);
+  const monitorEnabledRef = useRef(false);
   const audioStopRef = useRef<(() => void) | null>(null);
   const gestureStopRef = useRef<(() => void) | null>(null);
   const pinchRecorderRef = useRef<ActiveAudioRecorder | null>(null);
@@ -185,13 +190,33 @@ export function AmbientTriggerPanel({
   const approvalTargetRef = useRef<Props["approvalTarget"]>(approvalTarget);
   const onApprovalGestureRef = useRef<Props["onApprovalGesture"]>(onApprovalGesture);
   const miniChatRequestSeqRef = useRef(0);
+  const pendingAmbientResponseRef = useRef<{
+    conversationId: string;
+    previousAssistantMessageId: string | null;
+    submittedAt: number;
+  } | null>(null);
   const previousSelectedCameraIdRef = useRef(selectedCameraId);
 
   const readoutBlocked = useCallback(() => pinchRecording || Boolean(pinchRecorderRef.current), [pinchRecording]);
-  const miniFinalAnswerText = useMemo(
-    () => standalone ? ambientLatestAssistantFinalText(miniConversation) : null,
+  const miniFinalAnswer = useMemo(
+    () => standalone ? ambientLatestAssistantFinal(miniConversation) : null,
     [miniConversation, standalone],
   );
+  const finalAnswerPayload = useMemo<AmbientFinalAnswerPayload | null>(() => {
+    if (miniFinalAnswer) {
+      return {
+        conversation_id: miniConversation?.id ?? null,
+        message_id: miniFinalAnswer.messageId,
+        message_created_at: miniFinalAnswer.createdAt,
+        text: miniFinalAnswer.text,
+        updated_at: miniFinalAnswer.createdAt || Date.now(),
+      };
+    }
+    const text = String(finalAnswerText ?? "").trim();
+    return text
+      ? { conversation_id: conversationId ?? null, message_id: null, message_created_at: null, text, updated_at: Date.now() }
+      : null;
+  }, [conversationId, finalAnswerText, miniConversation?.id, miniFinalAnswer]);
   const {
     frontOnFinal,
     setFrontOnFinal,
@@ -200,7 +225,7 @@ export function AmbientTriggerPanel({
     setReadoutEnabled,
     stopSpeechReadout,
   } = useFinalAnswerBridge({
-    finalAnswerText: finalAnswerText ?? miniFinalAnswerText,
+    finalAnswer: finalAnswerPayload,
     standalone,
     pinchRecording,
     readoutBlocked,
@@ -239,19 +264,29 @@ export function AmbientTriggerPanel({
     loadConversations,
     openChatPicker,
     saveRouting,
+    saveRoutingModel,
     selectConversationForRouting,
     searchRoutingModels,
   } = routing;
 
   const monitorEnabled = Boolean(status?.ambient_monitor.enabled);
+  useEffect(() => {
+    monitorEnabledRef.current = monitorEnabled;
+  }, [monitorEnabled]);
+  useEffect(() => {
+    cameraStreamRef.current = cameraStream;
+  }, [cameraStream]);
+  const cameraDevices = useMemo(() => devices.filter((device) => device.kind === "videoinput"), [devices]);
+  const cameraUnavailable = devicesChecked && cameraDevices.length === 0;
   const runtimeStatus = useMemo<AmbientRuntimeStatus>(() => {
-    if (pinchDetectorStatus === "unavailable") return "blocked";
+    if (pinchDetectorStatus === "error") return "error";
+    if (cameraUnavailable || pinchDetectorStatus === "unavailable") return "blocked";
     if (pinchDetectorStatus === "transcribing") return "transcribing";
     if (pinchDetectorStatus === "sending") return "sending";
     if (pinchRecording || pinchDetectorStatus === "recording") return "recording";
     if (monitorEnabled) return "monitoring";
     return "off";
-  }, [monitorEnabled, pinchDetectorStatus, pinchRecording]);
+  }, [cameraUnavailable, monitorEnabled, pinchDetectorStatus, pinchRecording]);
   const uiState = useMemo(() => deriveAmbientUiState(status, runtimeStatus), [runtimeStatus, status]);
   const stateCopy = ambientCopyJa.states[uiState];
   const manualFallbackIsOsPermission = uiState === "denied" || uiState === "blocked" || uiState === "osPermissionNeeded";
@@ -273,6 +308,7 @@ export function AmbientTriggerPanel({
   const micRumiPermissionGranted = Boolean(status?.permissions.rumi[AMBIENT_MIC_PERMISSION]?.granted);
   const localTranscription = status?.local_transcription ?? null;
   const localTranscriptionConfigured = Boolean(localTranscription?.configured);
+  const localTranscriptionQuality = localWhisperQualityLabel(localTranscription?.model_quality);
   const selectedDispatchToolIds = selectedToolIds ?? EMPTY_SELECTED_TOOL_IDS;
   const selectedDispatchToolIdsKey = selectedDispatchToolIds.join("\0");
   const explicitDebugConversationId = debugMode ? cleanString(conversationId) : null;
@@ -309,7 +345,6 @@ export function AmbientTriggerPanel({
     : null;
   const inlineSettingsControlsVisible = !standalone;
   const miniChatRoutingSummary = standalone ? "次の送信で作成" : routingSummary;
-  const debugQaVisible = standalone && debugMode;
   const dispatchTemplateContext = useMemo(() => buildAmbientDispatchTemplateContext({
     model: routingModel || selectedModel || "",
     selectedToolIds: selectedDispatchToolIds,
@@ -353,10 +388,9 @@ export function AmbientTriggerPanel({
           limit: 1,
         });
         conversation = result.conversations[0] ?? null;
-        if (conversation?.id) setMiniConversationIdOverride(conversation.id);
       }
       if (miniChatRequestSeqRef.current !== requestSeq) return;
-      setMiniConversation(conversation);
+      setMiniConversation((current) => fresherMiniConversation(current, conversation));
       const stuckRequestId = miniAuthorityContinuationErrorRequestRef.current;
       if (stuckRequestId && !miniAuthorityContinuationResolved(conversation, stuckRequestId)) {
         setMiniChatError(MINI_AUTHORITY_CONTINUATION_PENDING_ERROR);
@@ -374,6 +408,102 @@ export function AmbientTriggerPanel({
       }
     }
   }, [miniConversationId]);
+
+  const settleAmbientSubmission = useCallback(async ({
+    result,
+    targetConversationId,
+    previousAssistantMessageId,
+    submittedAt,
+  }: {
+    result: Record<string, unknown>;
+    targetConversationId: string | null;
+    previousAssistantMessageId: string | null;
+    submittedAt: number;
+  }) => {
+    const resultStatus = String(result.status ?? "");
+    if (resultStatus === "approval_required") {
+      if (targetConversationId) {
+        pendingAmbientResponseRef.current = {
+          conversationId: targetConversationId,
+          previousAssistantMessageId,
+          submittedAt,
+        };
+      }
+      const approvalMessage = `${ambientOperationLabels.approvalPending}: AIへ送る前に確認が必要です。`;
+      setPinchDetectorStatus("approval_pending");
+      setMessage(approvalMessage);
+      await loadMiniConversation({ conversationId: targetConversationId, quiet: true });
+      return;
+    }
+    if (resultStatus && resultStatus !== "ok") {
+      pendingAmbientResponseRef.current = null;
+      const errorMessage = ambientResultMessage(result, "AIに送信できませんでした。");
+      setPinchDetectorStatus("error");
+      setMessage(errorMessage);
+      setMiniChatError(errorMessage);
+      return;
+    }
+    if (!targetConversationId) {
+      const waitingMessage = `${ambientOperationLabels.waitingResponse}: AIの返答を待っています。`;
+      setPinchDetectorStatus("waiting_response");
+      setMessage(waitingMessage);
+      await loadMiniConversation({ quiet: true });
+      return;
+    }
+
+    pendingAmbientResponseRef.current = {
+      conversationId: targetConversationId,
+      previousAssistantMessageId,
+      submittedAt,
+    };
+    const waitingMessage = `${ambientOperationLabels.waitingResponse}: AIの返答を待っています。`;
+    setPinchDetectorStatus("waiting_response");
+    setMessage(waitingMessage);
+    const outcome = await waitForAmbientAssistantResponse({
+      conversationId: targetConversationId,
+      previousAssistantMessageId,
+      submittedAt,
+      fetchConversation: api.getConversation,
+    });
+    if (outcome.conversation) setMiniConversation((current) => fresherMiniConversation(current, outcome.conversation));
+    if (outcome.status === "completed") {
+      pendingAmbientResponseRef.current = null;
+      const completedMessage = `${ambientOperationLabels.done}: AIの回答が届きました。`;
+      setPinchDetectorStatus("completed");
+      setLatestSubmittedInput(null);
+      setMiniChatError(null);
+      setMessage(completedMessage);
+      return;
+    }
+    if (outcome.status === "approval_required") {
+      const approvalMessage = `${ambientOperationLabels.approvalPending}: AIへ送る前に確認が必要です。`;
+      setPinchDetectorStatus("approval_pending");
+      setMessage(approvalMessage);
+      return;
+    }
+    setPinchDetectorStatus("waiting_response");
+  }, [loadMiniConversation]);
+
+  useEffect(() => {
+    const pending = pendingAmbientResponseRef.current;
+    if (!pending || !miniConversation || miniConversation.id !== pending.conversationId) return;
+    const outcome = ambientConversationCompletionFromSnapshot({
+      conversation: miniConversation,
+      previousAssistantMessageId: pending.previousAssistantMessageId,
+      submittedAt: pending.submittedAt,
+    });
+    if (outcome.status === "approval_required") {
+      setPinchDetectorStatus("approval_pending");
+      return;
+    }
+    if (outcome.status !== "completed") return;
+    pendingAmbientResponseRef.current = null;
+    const completedMessage = `${ambientOperationLabels.done}: AIの回答が届きました。`;
+    setPinchDetectorStatus("completed");
+    setLatestSubmittedInput(null);
+    setMiniChatError(null);
+    setMessage(completedMessage);
+  }, [miniConversation]);
 
   useEffect(() => {
     void loadMiniConversation();
@@ -433,9 +563,11 @@ export function AmbientTriggerPanel({
       if (event.status === "denied") {
         setMiniChatError("AIの使用が許可されませんでした。");
         setMessage("AIの使用は許可されませんでした。");
+        if (targetConversationId) setMiniConversationIdOverride(targetConversationId);
         void loadMiniConversation({ conversationId: targetConversationId, quiet: true });
         return;
       }
+      if (targetConversationId) setMiniConversationIdOverride(targetConversationId);
       setMiniChatError(null);
       setMessage("AIが続きを作成しています。");
       void loadMiniConversation({ conversationId: targetConversationId, quiet: true });
@@ -536,7 +668,8 @@ export function AmbientTriggerPanel({
   useEffect(() => () => {
     gestureStopRef.current?.();
     gestureStopRef.current = null;
-    cameraStream?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
     pinchRecorderRef.current?.cancel();
     pinchRecorderRef.current = null;
     try {
@@ -547,7 +680,11 @@ export function AmbientTriggerPanel({
     pinchSpeechRecognitionRef.current = null;
     pinchTranscriptRef.current = "";
     audioStopRef.current?.();
-  }, [cameraStream]);
+    audioStopRef.current = null;
+    if (monitorEnabledRef.current) {
+      void ambientTriggerClient.stopMonitor().catch(() => undefined);
+    }
+  }, []);
 
   function stopPinchSpeechRecognition(abort = false): string {
     const recognition = pinchSpeechRecognitionRef.current;
@@ -592,6 +729,11 @@ export function AmbientTriggerPanel({
         setPinchDetectorStatus("sending");
         setMessage(`${ambientOperationLabels.sending}: 文字起こしをAIへ送っています。`);
       }
+      const submittedAt = Date.now();
+      const requestedConversationId = miniConversationId || conversationIdRef.current || null;
+      const previousAssistantMessageId = miniConversation?.id === requestedConversationId
+        ? ambientLatestAssistantFinal(miniConversation)?.messageId ?? null
+        : null;
       const result = await ambientTriggerClient.submitEvent({
         source: "camera",
         trigger: "pinch",
@@ -600,7 +742,7 @@ export function AmbientTriggerPanel({
         ...dispatchTemplateContext.eventPayload,
         params: ambientParamsWithTranscriptionLanguage(dispatchTemplateContext.eventPayload.params),
         ...(transcript ? { input_text: transcript } : {}),
-        conversation_id: conversationIdRef.current || undefined,
+        conversation_id: requestedConversationId || undefined,
         confidence: state.confidence,
         duration_ms: recording.durationMs,
         audio_data_url: recording.dataUrl,
@@ -630,27 +772,22 @@ export function AmbientTriggerPanel({
           },
         ],
       });
-      setLatestSubmittedInput(null);
-      setMessage(ambientResultMessage(result, "録音音声をAIに送信しました。"));
-      const resultConversationId = activateMiniConversationFromSubmitResult(result, conversationIdRef.current);
-      const resultStatus = String(result.status ?? "");
-      if (resultStatus && resultStatus !== "ok" && resultStatus !== "approval_required") {
-        setMiniChatError(ambientResultMessage(result, "録音音声をAIに送信しました。"));
-      } else {
-        setMiniChatError(null);
-      }
+      const resultConversationId = activateMiniConversationFromSubmitResult(result, requestedConversationId);
       onOpenInputRef.current?.("");
       focusComposer();
       await refresh();
-      await loadMiniConversation({ conversationId: resultConversationId || conversationIdRef.current || null, quiet: true });
+      await settleAmbientSubmission({
+        result,
+        targetConversationId: resultConversationId || requestedConversationId,
+        previousAssistantMessageId,
+        submittedAt,
+      });
     } catch (error) {
       const errorText = error instanceof Error ? error.message : "送信できませんでした。録音は保存されていません。";
       setMessage(`${ambientOperationLabels.failed}: ${errorText}`);
       setMiniChatError(errorText);
-    } finally {
-      setPinchDetectorStatus("tracking");
     }
-  }, [activateMiniConversationFromSubmitResult, dispatchTemplateContext, loadMiniConversation]);
+  }, [activateMiniConversationFromSubmitResult, dispatchTemplateContext, miniConversation, miniConversationId, settleAmbientSubmission]);
 
   useEffect(() => {
     if (!pinchRecording || !recordingStartedAt) return;
@@ -843,6 +980,39 @@ export function AmbientTriggerPanel({
     selectedCameraId,
   ]);
 
+  useEffect(() => {
+    if (!monitorEnabled || cameraStream || cameraAcquireInFlightRef.current) return;
+    if (!allRumiPermissionsGranted || !allOsPermissionsGranted || rumiApprovalPending || cameraUnavailable) return;
+    let cancelled = false;
+    setPinchDetectorStatus("loading");
+    (async () => {
+      try {
+        await acquireCameraForMonitoring();
+        if (!cancelled) {
+          setMessage("待機を再開しました。OKマークで録音開始、指を開くと送信します。");
+        }
+      } catch (error) {
+        if (cancelled) return;
+        const messageText = error instanceof Error ? error.message : "カメラ監視を再開できませんでした。";
+        setPinchDetectorStatus("unavailable");
+        setMessage(messageText);
+        await ambientTriggerClient.stopMonitor().catch(() => undefined);
+        await refresh({ probeOs: true }).catch(() => undefined);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    allOsPermissionsGranted,
+    allRumiPermissionsGranted,
+    cameraStream,
+    cameraUnavailable,
+    monitorEnabled,
+    rumiApprovalPending,
+    selectedCameraId,
+  ]);
+
   async function refresh(options?: { probeOs?: boolean }) {
     const next = await ambientTriggerClient.status();
     setStatus(next);
@@ -855,12 +1025,47 @@ export function AmbientTriggerPanel({
   }
 
   async function refreshDevices() {
-    if (!navigator.mediaDevices?.enumerateDevices) return;
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setDevices([]);
+      setDevicesChecked(true);
+      return;
+    }
     try {
       const nextDevices = await navigator.mediaDevices.enumerateDevices();
       setDevices(nextDevices.filter((device) => device.kind === "audioinput" || device.kind === "videoinput"));
     } catch (error) {
       console.info("[ambient] media device listing unavailable", error);
+      setDevices([]);
+    } finally {
+      setDevicesChecked(true);
+    }
+  }
+
+  async function acquireCameraForMonitoring(): Promise<MediaStream> {
+    if (cameraAcquireInFlightRef.current) {
+      throw new Error("カメラを起動中です。少し待ってからもう一度お試しください。");
+    }
+    if (cameraUnavailable) {
+      throw new Error("カメラが見つかりません。接続してからデバイス更新を押してください。");
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("このブラウザではカメラを使用できません。");
+    }
+    cameraAcquireInFlightRef.current = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: videoCaptureConstraints(selectedCameraId || undefined) });
+      setCameraStream((current) => {
+        current?.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = stream;
+        return stream;
+      });
+      await refreshDevices();
+      return stream;
+    } catch (error) {
+      if (isMediaDeviceNotFound(error)) throw new Error("カメラが見つかりません。接続してからデバイス更新を押してください。");
+      throw error;
+    } finally {
+      cameraAcquireInFlightRef.current = false;
     }
   }
 
@@ -1008,7 +1213,8 @@ export function AmbientTriggerPanel({
       for (const delayMs of MINI_AUTHORITY_CONTINUATION_POLL_DELAYS_MS) {
         await sleep(delayMs);
         const latestConversation = await api.getConversation(conversationId);
-        setMiniConversation(latestConversation);
+        setMiniConversationIdOverride(conversationId);
+        setMiniConversation((current) => fresherMiniConversation(current, latestConversation));
         if (miniAuthorityContinuationResolved(latestConversation, requestId)) {
           if (miniAuthorityContinuationErrorRequestRef.current === requestId) {
             miniAuthorityContinuationErrorRequestRef.current = null;
@@ -1053,7 +1259,13 @@ export function AmbientTriggerPanel({
       }
       const micStream = await navigator.mediaDevices.getUserMedia({ audio: audioCaptureConstraints(selectedMicId || undefined) });
       micStream.getTracks().forEach((track) => track.stop());
-      const stream = await navigator.mediaDevices.getUserMedia({ video: videoCaptureConstraints(selectedCameraId || undefined) });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: videoCaptureConstraints(selectedCameraId || undefined) });
+      } catch (error) {
+        if (isMediaDeviceNotFound(error)) throw new Error("カメラが見つかりません。接続してからデバイス更新を押してください。");
+        throw error;
+      }
       setCameraStream((current) => {
         current?.getTracks().forEach((track) => track.stop());
         return stream;
@@ -1073,17 +1285,10 @@ export function AmbientTriggerPanel({
       return;
     }
     await runAction(async () => {
-      if (!cameraStream) {
-        if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error("このブラウザではカメラを使用できません。");
-        }
-        const stream = await navigator.mediaDevices.getUserMedia({ video: videoCaptureConstraints(selectedCameraId || undefined) });
-        setCameraStream((current) => {
-          current?.getTracks().forEach((track) => track.stop());
-          return stream;
-        });
-        await refreshDevices();
+      if (cameraUnavailable) {
+        throw new Error("カメラが見つかりません。接続してからデバイス更新を押してください。");
       }
+      if (!cameraStream) await acquireCameraForMonitoring();
       return ambientTriggerClient.startMonitor({ voice_wake: true, gesture_pinch: true });
     }, "待機中です。OKマークで録音開始、指を開くと送信します。");
   }
@@ -1152,7 +1357,13 @@ export function AmbientTriggerPanel({
           onOpenInput?.("");
           focusComposer();
         }
-      }, selectedMicId || undefined);
+      }, selectedMicId || undefined, {
+        onError: (error) => {
+          audioStopRef.current = null;
+          setMicListening(false);
+          setMessage(error instanceof Error ? error.message : "音声待機が停止しました。マイク接続を確認してください。");
+        },
+      });
       audioStopRef.current = stop;
       setMicListening(true);
       await refresh();
@@ -1267,6 +1478,10 @@ export function AmbientTriggerPanel({
     }
 
     const targetConversationId = miniConversationId || conversationIdRef.current || null;
+    const submittedAt = Date.now();
+    const previousAssistantMessageId = miniConversation?.id === targetConversationId
+      ? ambientLatestAssistantFinal(miniConversation)?.messageId ?? null
+      : null;
     setMiniSending(true);
     miniAuthorityContinuationErrorRequestRef.current = null;
     setMiniChatError(null);
@@ -1287,14 +1502,13 @@ export function AmbientTriggerPanel({
         }, dispatchTemplateContext),
       });
       const resultConversationId = activateMiniConversationFromSubmitResult(result, targetConversationId);
-      const nextMessage = ambientResultMessage(result, "メッセージをAIに送信しました。");
-      setMessage(nextMessage);
-      const resultStatus = String(result.status ?? "");
-      if (resultStatus && resultStatus !== "ok" && resultStatus !== "approval_required") {
-        setMiniChatError(nextMessage);
-      }
       await refresh();
-      await loadMiniConversation({ conversationId: resultConversationId || targetConversationId, quiet: true });
+      await settleAmbientSubmission({
+        result,
+        targetConversationId: resultConversationId || targetConversationId,
+        previousAssistantMessageId,
+        submittedAt,
+      });
     } catch (error) {
       const errorText = error instanceof Error ? error.message : "送信できませんでした。";
       setMiniChatError(errorText);
@@ -1307,77 +1521,54 @@ export function AmbientTriggerPanel({
   async function selectMiniChatRoutingConversation(chatId: string) {
     setMiniConversationIdOverride(null);
     await selectConversationForRouting(chatId);
+    setChatPickerOpen(false);
   }
 
-  async function simulateDebugOkMarkRecording() {
-    const transcript = debugTranscript.trim() || "ブラウザQAのテストです。";
-    const inputText = `文字起こし:\n${transcript}`;
-    setDebugStatus("OKマーク録音のシミュレーションを送信しています。");
+  async function createMiniChatRoutingConversation() {
+    if (miniChatCreating) return;
+    setMiniChatCreating(true);
     setMiniChatError(null);
-    setLatestSubmittedInput(inputText);
     try {
-      await ambientTriggerClient.submitEvent({
-        source: "camera",
-        trigger: "pinch",
-        mode: "record_audio_start",
-        action_id: "chat.message",
-        confidence: 1,
+      const conversation = await api.createConversation({
+        model: routingModel || selectedModel || undefined,
+        tags: ["integration:ambient", "ambient"],
         metadata: {
-          panel: "ambient_mini_window",
-          debug_qa: true,
-          simulated_ok_mark: true,
+          source: "ambient_finger_recording",
+          group_id: routingGroupEnabled ? routingGroupId || "gesture" : undefined,
+          group_title: routingGroupEnabled ? routingGroupTitle || "Gesture" : undefined,
         },
-      }).catch(() => undefined);
-
-      const result = await ambientTriggerClient.submitEvent({
-        source: "camera",
-        trigger: "pinch",
-        mode: "dispatch_audio",
-        action_id: "chat.message",
-        ...dispatchTemplateContext.eventPayload,
-        input_text: inputText,
-        conversation_id: miniConversationId || conversationIdRef.current || undefined,
-        confidence: 1,
-        duration_ms: 0,
-        metadata: mergeAmbientDispatchMetadata({
-          panel: "ambient_mini_window",
-          debug_qa: true,
-          simulated_ok_mark: true,
-          transcript,
-          transcript_source: "debug_qa",
-        }, dispatchTemplateContext),
-        attachments: [
-          {
-            id: `ambient-debug-audio-${Date.now()}`,
-            name: "debug-ok-mark.webm",
-            type: "audio/webm",
-            size: 0,
-            source: "ambient.debug_qa",
-            ephemeral: true,
-            do_not_persist: true,
-            transcript,
-            transcription: transcript,
-            transcript_source: "debug_qa",
-          },
-        ],
       });
-      const resultConversationId = activateMiniConversationFromSubmitResult(result, miniConversationId || conversationIdRef.current || null);
-      const nextMessage = ambientResultMessage(result, "ブラウザQAのOKマーク録音をAIに送信しました。");
-      setMessage(nextMessage);
-      setDebugStatus(nextMessage);
-      setLatestSubmittedInput(null);
-      const resultStatus = String(result.status ?? "");
-      if (resultStatus && resultStatus !== "ok" && resultStatus !== "approval_required") {
-        setMiniChatError(nextMessage);
-      }
-      await refresh();
-      await loadMiniConversation({ conversationId: resultConversationId || miniConversationId || conversationIdRef.current || null, quiet: true });
+      setMiniConversationIdOverride(conversation.id);
+      setMiniConversation(conversation);
+      await selectConversationForRouting(conversation.id);
+      await loadConversations();
+      await loadMiniConversation({ conversationId: conversation.id, quiet: true });
+      setChatPickerOpen(false);
+      setMessage("新規チャットを作成しました。");
     } catch (error) {
-      const errorText = error instanceof Error ? error.message : "ブラウザQAのシミュレーションを送信できませんでした。";
-      setDebugStatus(errorText);
+      const errorText = error instanceof Error ? error.message : "新規チャットを作成できませんでした。";
       setMiniChatError(errorText);
-      setMessage(`${ambientOperationLabels.failed}: ${errorText}`);
+      setMessage(errorText);
+    } finally {
+      setMiniChatCreating(false);
     }
+  }
+
+  async function openMiniChatConversation() {
+    const targetConversationId = miniConversation?.id || miniConversationId || null;
+    if (!targetConversationId) return;
+    const path = `/chat?chat=${encodeURIComponent(targetConversationId)}`;
+    try {
+      if (await openDefaultspackMainWindow(path)) return;
+      const popup = window.open(defaultspackUrlWithLocalAuth(path), "rumi-defaultspack", "width=980,height=720");
+      if (popup) {
+        popup.focus();
+        return;
+      }
+    } catch (error) {
+      console.info("[ambient] defaultspack main window unavailable", error);
+    }
+    setMiniChatError("Defaultspack本体ウィンドウを開けませんでした。Rumi ViewerからDefaultspackを開いてください。");
   }
 
   async function submitApprovalGesture(decision: "approve" | "reject", state: PinchState, mode: string) {
@@ -1422,13 +1613,19 @@ export function AmbientTriggerPanel({
     setBusy(true);
     setMessage(null);
     try {
+      const pendingResponse = pendingAmbientResponseRef.current;
+      const fallbackConversationId = pendingApproval?.conversation_id || pendingResponse?.conversationId || null;
       const result = await ambientTriggerClient.approvePendingApproval(requestId);
-      setMessage(ambientResultMessage(result, "AIへ送信しました。"));
-      const resultConversationId = activateMiniConversationFromSubmitResult(result, pendingApproval?.conversation_id || null);
-      await loadMiniConversation({ conversationId: resultConversationId || pendingApproval?.conversation_id || null, quiet: true });
+      const resultConversationId = activateMiniConversationFromSubmitResult(result, fallbackConversationId);
       onOpenInputRef.current?.("");
       focusComposer();
       await refresh();
+      await settleAmbientSubmission({
+        result,
+        targetConversationId: resultConversationId || fallbackConversationId,
+        previousAssistantMessageId: pendingResponse?.previousAssistantMessageId ?? null,
+        submittedAt: pendingResponse?.submittedAt ?? Date.now(),
+      });
     } catch (error) {
       const errorText = error instanceof Error ? error.message : "送信を許可できませんでした。";
       setMessage(`${ambientOperationLabels.failed}: ${errorText}`);
@@ -1457,6 +1654,12 @@ export function AmbientTriggerPanel({
   }
 
   async function handlePrimaryAction() {
+    if (cameraUnavailable && (uiState === "readyOff" || uiState === "paused" || uiState === "blocked")) {
+      setExpanded(true);
+      setSettingsOpen(true);
+      setMessage("カメラが見つかりません。接続してからデバイス更新を押してください。");
+      return;
+    }
     switch (uiState) {
       case "setupNeeded":
         setExpanded(true);
@@ -1539,7 +1742,7 @@ export function AmbientTriggerPanel({
           onGroupTitleChange={setRoutingGroupTitle}
           onGroupCommit={() => void saveRouting({ group_id: routingGroupId, group_title: routingGroupTitle }, "新しいチャットのグループを保存しました。")}
           onModelChange={setRoutingModel}
-          onModelCommit={(model) => void saveRouting({ model }, model ? "送信モデルを保存しました。" : "モデル指定を外しました。")}
+          onModelCommit={(model) => void saveRoutingModel(model)}
           onModelQueryChange={setModelQuery}
           onModelSearch={() => void searchRoutingModels()}
           onAiSendApprovalRequiredChange={(enabled) => void saveRouting(
@@ -1568,16 +1771,22 @@ export function AmbientTriggerPanel({
         <select
           value={selectedCameraId}
           onChange={(event) => setSelectedCameraId(event.target.value)}
+          disabled={cameraUnavailable}
           className="mt-1 h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
         >
           <option value="">デフォルト</option>
-          {devices.filter((device) => device.kind === "videoinput").map((device, index) => (
+          {cameraDevices.map((device, index) => (
             <option key={device.deviceId || `camera-${index}`} value={device.deviceId}>
               {deviceLabel(device, index, "カメラ")}
             </option>
           ))}
         </select>
       </label>
+      {cameraUnavailable && (
+        <div className="rounded-md border border-red-400/30 bg-red-500/10 px-2 py-1.5 text-[11px] leading-5 text-red-100">
+          カメラが見つかりません。接続してからデバイス更新を押してください。
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <button type="button" onClick={() => void refreshDevices()} disabled={rumiApprovalPending} className="ambient-mini-button">
           <Settings size={14} />
@@ -1595,7 +1804,7 @@ export function AmbientTriggerPanel({
         </div>
         <p className={cn("rounded-md border px-2 py-1 text-[11px] leading-5", localTranscriptionConfigured ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100" : "border-amber-400/25 bg-amber-400/10 text-amber-100")}>
           文字起こし: {localTranscriptionConfigured
-            ? `ローカルWhisper OK${localTranscription?.command_label ? ` (${localTranscription.command_label})` : ""}`
+            ? `ローカルWhisper OK・${localTranscriptionQuality}${localTranscription?.command_label ? ` (${localTranscription.command_label})` : ""}`
             : localTranscription?.reason || "ローカルWhisperを確認中です。"}
         </p>
         <div className="grid grid-cols-2 gap-2">
@@ -1879,7 +2088,7 @@ export function AmbientTriggerPanel({
               onModeChange={(mode) => void saveRouting({ mode })}
               onPickChat={() => void openChatPicker()}
               onModelChange={setRoutingModel}
-              onModelCommit={(model) => void saveRouting({ model }, model ? "送信モデルを保存しました。" : "モデル指定を外しました。")}
+              onModelCommit={(model) => void saveRoutingModel(model)}
               onModelQueryChange={setModelQuery}
               onModelSearch={(query) => void searchRoutingModels(query)}
             />
@@ -1902,50 +2111,14 @@ export function AmbientTriggerPanel({
               onTokenChange: setBrowserApprovalTokenInput,
               onSave: saveMiniBrowserApprovalToken,
             } : null}
-            showPicker={inlineSettingsControlsVisible}
+            showPicker={standalone || inlineSettingsControlsVisible}
             onInputChange={setMiniInput}
             onSubmit={submitMiniChat}
+            onOpenChat={openMiniChatConversation}
             onRefresh={() => void loadMiniConversation()}
             onPickChat={() => void openChatPicker()}
             onOpenAuthorityApproval={() => void openMiniAuthorityApproval()}
           />
-          {debugQaVisible && (
-            <section
-              data-testid="ambient-debug-panel"
-              className="space-y-2 rounded-lg border border-amber-300/25 bg-amber-400/10 p-2.5"
-            >
-              {/* Local Browser QA only: this simulates OK-mark release without persistent audio/image bytes. */}
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold text-amber-100">Browser QA</p>
-                  <p className="mt-0.5 text-[10px] leading-4 text-amber-100/70">
-                    Rumi権限と監視状態はbackendで通常通り確認されます。
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  data-testid="ambient-debug-simulate-ok"
-                  onClick={() => void simulateDebugOkMarkRecording()}
-                  disabled={miniSending}
-                  className="ambient-mini-button h-8 shrink-0 border-amber-300/35 text-amber-100"
-                >
-                  <Check size={13} />
-                  OK送信
-                </button>
-              </div>
-              <textarea
-                data-testid="ambient-debug-transcript"
-                value={debugTranscript}
-                onChange={(event) => setDebugTranscript(event.target.value)}
-                rows={2}
-                className="min-h-14 w-full resize-none rounded-md border border-amber-300/20 bg-zinc-950/80 px-2 py-1.5 text-xs leading-5 text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-amber-200/45"
-                placeholder="QA用の文字起こし"
-              />
-              <div data-testid="ambient-debug-status" className="text-[11px] leading-5 text-amber-100/80">
-                {debugStatus}
-              </div>
-            </section>
-          )}
           {inlineSettingsControlsVisible && (
             <>
               <div className="flex items-center justify-end text-[11px] leading-4 text-zinc-500">
@@ -2035,7 +2208,9 @@ export function AmbientTriggerPanel({
           selectedChatId={routingConversationId}
           chatItems={routingChatItems}
           loading={conversationsLoading}
+          creating={miniChatCreating}
           onRefresh={() => void loadConversations()}
+          onNewChat={() => void createMiniChatRoutingConversation()}
           onSelect={(chatId) => void selectMiniChatRoutingConversation(chatId)}
           onClose={() => setChatPickerOpen(false)}
         />
@@ -2175,6 +2350,10 @@ function recognitionMonitorLabel(status: string, hasHand: boolean, recording: bo
   if (recording) return `録音中 ${formatRecordingTime(recordingSeconds)}・OKマークを崩すと送信`;
   if (status === "transcribing") return "文字起こし中";
   if (status === "sending") return "送信中";
+  if (status === "waiting_response") return "返答待ち";
+  if (status === "completed") return "回答受信";
+  if (status === "approval_pending") return "承認待ち";
+  if (status === "error") return "エラー";
   if (status === "loading") return "合図の認識を準備中";
   if (status === "unavailable") return "合図待ちを開始できません";
   if (hasHand) return "手を認識中・OKマークで録音開始";
@@ -2184,8 +2363,10 @@ function recognitionMonitorLabel(status: string, hasHand: boolean, recording: bo
 function recognitionMonitorToneClass(status: string, hasHand: boolean, recording: boolean): string {
   if (recording) return "border-red-300/45 bg-red-500/25 text-red-50";
   if (status === "transcribing") return "border-violet-300/45 bg-violet-500/25 text-violet-50";
-  if (status === "sending") return "border-violet-300/45 bg-violet-500/25 text-violet-50";
-  if (status === "unavailable") return "border-red-300/45 bg-red-500/25 text-red-50";
+  if (status === "sending" || status === "waiting_response") return "border-violet-300/45 bg-violet-500/25 text-violet-50";
+  if (status === "completed") return "border-emerald-300/45 bg-emerald-500/20 text-emerald-50";
+  if (status === "approval_pending") return "border-amber-300/45 bg-amber-500/20 text-amber-50";
+  if (status === "error" || status === "unavailable") return "border-red-300/45 bg-red-500/25 text-red-50";
   if (hasHand) return "border-emerald-300/45 bg-emerald-500/20 text-emerald-50";
   return "border-zinc-700/80 bg-black/55 text-zinc-200";
 }
@@ -2194,6 +2375,14 @@ function formatRecordingTime(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function localWhisperQualityLabel(quality: string | null | undefined): string {
+  if (quality === "quality") return "高精度";
+  if (quality === "balanced") return "標準";
+  if (quality === "fast") return "高速";
+  if (quality === "custom") return "カスタム";
+  return "品質未確認";
 }
 
 function formatMicLevel(level: number): string {
@@ -2275,7 +2464,25 @@ function miniAuthorityContinuationResolved(conversation: Conversation | null, re
   if (!conversation) return false;
   const pending = ambientPendingAuthorityApproval(conversation);
   if (pending) return pending.requestId !== requestId;
-  return Boolean(ambientLatestAssistantFinalText(conversation));
+  return Boolean(ambientLatestAssistantFinal(conversation));
+}
+
+function fresherMiniConversation(current: Conversation | null, next: Conversation | null): Conversation | null {
+  if (!current || !next) return next;
+  if (current.id !== next.id) return next;
+  return conversationMessageCount(current) > conversationMessageCount(next) ? current : next;
+}
+
+function conversationMessageCount(conversation: Conversation): number {
+  return Array.isArray(conversation.messages) ? conversation.messages.length : 0;
+}
+
+function isMediaDeviceNotFound(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as Record<string, unknown>;
+  const name = String(record.name ?? "").toLowerCase();
+  const message = String(record.message ?? "").toLowerCase();
+  return name.includes("notfound") || name.includes("notreadable") || message.includes("requested device not found");
 }
 
 function sleep(milliseconds: number): Promise<void> {
@@ -2291,19 +2498,7 @@ function focusComposer() {
 
 function ambientParamsWithTranscriptionLanguage(params: AmbientEventPayload["params"] | undefined): AmbientEventPayload["params"] | undefined {
   const next = recordValue(params) ? { ...params } : {};
-  const transcription = recordValue(next.transcription);
-  if (!cleanString(next.language) && !cleanString(transcription?.language)) {
-    const language = defaultAmbientTranscriptionLanguage();
-    if (language) next.language = language;
-  }
   return Object.keys(next).length ? next : undefined;
-}
-
-function defaultAmbientTranscriptionLanguage(): string {
-  if (typeof navigator === "undefined") return "";
-  const raw = String(navigator.languages?.[0] || navigator.language || "").trim();
-  const primary = raw.split(/[-_]/)[0]?.toLowerCase() ?? "";
-  return /^[a-z]{2,3}$/.test(primary) ? primary : "";
 }
 
 function approvalDecisionForChoice(choice: 2 | 3 | 4, target: AmbientApprovalTarget | null | undefined): "approve" | "reject" | null {

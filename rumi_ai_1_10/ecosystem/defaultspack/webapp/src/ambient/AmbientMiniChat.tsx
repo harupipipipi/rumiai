@@ -27,6 +27,7 @@ type Props = {
   showPicker?: boolean;
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onOpenChat?: () => void;
   onRefresh: () => void;
   onPickChat: () => void;
   onOpenAuthorityApproval?: () => void;
@@ -48,6 +49,7 @@ export function AmbientMiniChat({
   showPicker = true,
   onInputChange,
   onSubmit,
+  onOpenChat,
   onRefresh,
   onPickChat,
   onOpenAuthorityApproval,
@@ -75,7 +77,20 @@ export function AmbientMiniChat({
             title="チャットを選ぶ"
             aria-label="チャットを選ぶ"
           >
-            選択
+            {conversationId ? "切替" : "選ぶ"}
+          </button>
+        )}
+        {conversationId && onOpenChat && (
+          <button
+            type="button"
+            data-testid="ambient-mini-chat-open"
+            onClick={onOpenChat}
+            className="ambient-mini-button h-7 shrink-0 px-2"
+            title={`/chat?chat=${conversationId}`}
+            aria-label="チャットを開く"
+          >
+            <ExternalLink size={12} />
+            開く
           </button>
         )}
         <button

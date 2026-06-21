@@ -117,10 +117,11 @@ def _dispatch_to_viewer_broker(intent: HostIntent, *, request_id: str | None = N
     client = ViewerBrokerClient.from_environment()
     if not client.available():
         return {
-            "status": "prepared",
-            "success": True,
+            "status": "host_broker_unavailable",
+            "success": False,
+            "error_type": "host_broker_unavailable",
             "host_broker": {"available": False},
-            "message": "Host intent is approved and ready for host capability broker execution.",
+            "message": "Host intent is approved, but Rumi Viewer host broker is unavailable.",
         }
 
     execution_token = approval.issue_execution_token(

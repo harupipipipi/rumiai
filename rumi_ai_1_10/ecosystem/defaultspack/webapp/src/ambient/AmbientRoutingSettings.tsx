@@ -1,4 +1,4 @@
-import { ChevronUp, ExternalLink, Loader2, MessageSquare, RefreshCcw, ShieldCheck, X } from "lucide-react";
+import { ChevronUp, ExternalLink, Loader2, MessageSquare, Plus, RefreshCcw, ShieldCheck, X } from "lucide-react";
 
 import { HistoryBoard, type ChatItem } from "../components/HistoryBoard";
 import type { ModelSearchItem } from "../lib/api";
@@ -259,7 +259,9 @@ export function ChatPickerDialog({
   selectedChatId,
   chatItems,
   loading,
+  creating = false,
   onRefresh,
+  onNewChat,
   onSelect,
   onClose,
 }: {
@@ -267,13 +269,15 @@ export function ChatPickerDialog({
   selectedChatId: string | null;
   chatItems: ChatItem[];
   loading: boolean;
+  creating?: boolean;
   onRefresh: () => void;
+  onNewChat?: () => void;
   onSelect: (chatId: string) => void;
   onClose: () => void;
 }) {
   return (
     <div className="fixed inset-0 rumi-layer-modal flex items-end justify-center bg-black/60 px-3 py-4 backdrop-blur-sm sm:items-center">
-      <section className="flex h-[min(720px,calc(100vh-32px))] w-[min(390px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl shadow-black/50">
+      <section className="flex h-[min(720px,calc(100vh-32px))] w-[min(520px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl shadow-black/50">
         <header className="flex h-10 items-center gap-2 border-b border-zinc-800 px-3">
           <MessageSquare size={15} className="text-sky-200" />
           <span className="min-w-0 flex-1 truncate text-sm font-semibold">チャットを選ぶ</span>
@@ -284,7 +288,20 @@ export function ChatPickerDialog({
             <X size={13} />
           </button>
         </header>
-        <div className="min-h-0 flex-1">
+        {onNewChat && (
+          <div className="border-b border-zinc-800/75 p-2">
+            <button
+              type="button"
+              onClick={onNewChat}
+              disabled={creating}
+              className="flex h-10 w-full items-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-400/10 px-3 text-left text-sm font-semibold text-emerald-50 transition hover:border-emerald-200/40 hover:bg-emerald-400/15 disabled:cursor-wait disabled:opacity-60"
+            >
+              {creating ? <Loader2 size={15} className="shrink-0 animate-spin" /> : <Plus size={15} className="shrink-0" />}
+              <span className="min-w-0 flex-1 truncate">新規チャットを作る</span>
+            </button>
+          </div>
+        )}
+        <div data-testid="ambient-chat-picker-history-template" className="min-h-0 flex-1">
           <HistoryBoard
             activeChatId={activeChatId}
             selectedChatId={selectedChatId}
@@ -292,9 +309,8 @@ export function ChatPickerDialog({
             selectionLabel="送信先"
             chatItems={chatItems}
             onChatSelect={onSelect}
-            onNewTask={() => undefined}
+            onNewTask={() => onNewChat?.()}
             onSettingsClick={() => undefined}
-            isCompact
           />
         </div>
       </section>

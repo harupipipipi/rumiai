@@ -43,15 +43,53 @@
       "section_id": "ambient",
       "field_id": "ambient.monitor.enabled",
       "type": "toggle",
-      "label": "Ambient Monitor",
+      "label": "指で録音",
       "default": false,
-      "help": "Turns voice wake and OK-mark recording monitoring on or off."
+      "help": "ONにするとDefaultspack本体に起動ボタンを表示し、マイクとカメラの監視を開始できます。"
+    },
+    {
+      "id": "ambient_camera_device_lock",
+      "kind": "settings_field",
+      "slot": "ambient",
+      "order": 72,
+      "section_id": "ambient",
+      "field_id": "ambient.camera.lock",
+      "type": "device_lock",
+      "renderer": "device_lock",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "カメラ",
+      "default": "",
+      "device_kind": "videoinput",
+      "checking_message": "カメラを確認しています。",
+      "available_message": "カメラを検出しました。指で録音を開始できます。",
+      "lock_message": "カメラが見つかりません。接続してからRumi Viewerを再読み込みしてください。",
+      "visible_when": {"field": "ambient.monitor.enabled", "truthy": true},
+      "help": "カメラが見つからない場合、指で録音はロックされます。"
+    },
+    {
+      "id": "ambient_route_mode",
+      "kind": "settings_field",
+      "slot": "ambient",
+      "order": 73,
+      "section_id": "ambient",
+      "field_id": "ambient.routing.mode",
+      "type": "select",
+      "label": "送信先",
+      "default": "startup_new_chat",
+      "options": [
+        {"value": "always_new_chat", "label": "毎回新しいチャット"},
+        {"value": "startup_new_chat", "label": "起動ごと"},
+        {"value": "selected_chat", "label": "選んだチャット"}
+      ],
+      "visible_when": {"field": "ambient.monitor.enabled", "truthy": true},
+      "help": "OKマーク録音を送るチャットの作り方です。"
     },
     {
       "id": "ambient_route_model",
       "kind": "settings_field",
       "slot": "ambient",
-      "order": 72,
+      "order": 74,
       "section_id": "ambient",
       "field_id": "ambient.routing.model",
       "type": "model_select",
@@ -61,25 +99,66 @@
       "label": "Ambient Send Model",
       "default": "",
       "data_source": "selectable_model_profiles",
+      "visible_when": {"field": "ambient.monitor.enabled", "truthy": true},
       "help": "Model used when finger recording creates or overrides a chat route."
+    },
+    {
+      "id": "ambient_route_group_enabled",
+      "kind": "settings_field",
+      "slot": "ambient",
+      "order": 75,
+      "section_id": "ambient",
+      "field_id": "ambient.routing.group_enabled",
+      "type": "toggle",
+      "label": "グループ内に作成",
+      "default": true,
+      "visible_when": {"field": "ambient.monitor.enabled", "truthy": true},
+      "help": "新しいチャットを指で録音用のグループにまとめます。"
+    },
+    {
+      "id": "ambient_route_group_id",
+      "kind": "settings_field",
+      "slot": "ambient",
+      "order": 76,
+      "section_id": "ambient",
+      "field_id": "ambient.routing.group_id",
+      "type": "text",
+      "label": "グループID",
+      "default": "gesture",
+      "visible_when": {"field": "ambient.monitor.enabled", "truthy": true},
+      "help": "新規チャットをまとめるグループIDです。"
+    },
+    {
+      "id": "ambient_route_group_title",
+      "kind": "settings_field",
+      "slot": "ambient",
+      "order": 77,
+      "section_id": "ambient",
+      "field_id": "ambient.routing.group_title",
+      "type": "text",
+      "label": "表示名",
+      "default": "Gesture",
+      "visible_when": {"field": "ambient.monitor.enabled", "truthy": true},
+      "help": "グループとして表示する名前です。"
     },
     {
       "id": "ambient_ai_send_approval",
       "kind": "settings_field",
       "slot": "ambient",
-      "order": 73,
+      "order": 78,
       "section_id": "ambient",
       "field_id": "ambient.routing.ai_send_approval_required",
       "type": "toggle",
       "label": "Confirm Before AI Send",
       "default": false,
+      "visible_when": {"field": "ambient.monitor.enabled", "truthy": true},
       "help": "Requires an explicit confirmation before ambient recordings are sent to the model."
     },
     {
       "id": "ambient_provider_key_setup",
       "kind": "settings_field",
       "slot": "ambient",
-      "order": 74,
+      "order": 79,
       "section_id": "ambient",
       "field_id": "ambient.provider_keys",
       "type": "api_key_setup",
@@ -90,12 +169,24 @@
       "default": [],
       "data_source": "provider_key_status",
       "write_route": "/api/ui/settings",
+      "visible_when": {"field": "ambient.monitor.enabled", "truthy": true},
       "help": "Optional provider credentials used by the selected ambient send model."
+    },
+    {
+      "id": "ambient_settings_field_renderer",
+      "kind": "field_renderer",
+      "order": 80,
+      "renderer": "device_lock",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "field_types": [
+        "device_lock"
+      ]
     },
     {
       "id": "ambient_status_data_source",
       "kind": "function",
-      "order": 76,
+      "order": 81,
       "role": "data_source",
       "data_source": "ambient_status",
       "function_id": "ambient_status",
@@ -108,7 +199,7 @@
     {
       "id": "ambient_event_submit_action",
       "kind": "function",
-      "order": 77,
+      "order": 82,
       "role": "action",
       "action_id": "ambient_event_submit",
       "function_id": "ambient_event_submit",
@@ -122,7 +213,7 @@
     {
       "id": "ambient_monitor_service",
       "kind": "backend_service",
-      "order": 78,
+      "order": 83,
       "service_id": "ambient_trigger_router",
       "entrypoint": "domain.ambient.router",
       "lifecycle": "local_monitor"
@@ -130,7 +221,7 @@
     {
       "id": "ambient_audio_context_policy",
       "kind": "context_policy",
-      "order": 79,
+      "order": 84,
       "policy": {
         "id": "ambient_audio_transcript",
         "mode": "ambient_audio_transcript",
@@ -147,7 +238,7 @@
     {
       "id": "ambient_finger_recording_tools",
       "kind": "tool_policy",
-      "order": 80,
+      "order": 85,
       "policy": {
         "id": "ambient_finger_recording_tools",
         "toggleable": true,
@@ -160,7 +251,7 @@
     {
       "id": "ambient_finger_recording_ai_input",
       "kind": "ai_input",
-      "order": 81,
+      "order": 86,
       "input": {
         "id": "ambient_finger_recording",
         "label": "Finger Recording",
@@ -184,7 +275,7 @@
     {
       "id": "ambient_microphone_permission",
       "kind": "permission",
-      "order": 82,
+      "order": 87,
       "permission_id": "host.microphone.capture",
       "scope": "ambient",
       "risk": "high",
@@ -193,7 +284,7 @@
     {
       "id": "ambient_camera_permission",
       "kind": "permission",
-      "order": 83,
+      "order": 88,
       "permission_id": "host.camera.capture",
       "scope": "ambient",
       "risk": "high",
@@ -202,7 +293,7 @@
     {
       "id": "ambient_dispatch_permission",
       "kind": "permission",
-      "order": 84,
+      "order": 89,
       "permission_id": "ambient.trigger.dispatch",
       "scope": "ambient",
       "risk": "medium",
@@ -211,7 +302,7 @@
     {
       "id": "ambient_model_invoke_permission",
       "kind": "permission",
-      "order": 85,
+      "order": 90,
       "permission_id": "model.invoke",
       "scope": "ai_client",
       "risk": "high",
@@ -220,7 +311,7 @@
     {
       "id": "ambient_external_hook_template",
       "kind": "external_io_template",
-      "order": 86,
+      "order": 91,
       "template": {
         "id": "ambient.input.webhook",
         "direction": "input",
@@ -254,14 +345,18 @@
     {
       "id": "ambient_template_contract",
       "kind": "test_contract",
-      "order": 87,
+      "order": 92,
       "contract_id": "defaultspack.template.ambient_trigger.catalog",
       "assertions": [
         {"type": "template_projectable", "template_id": "rumi.ambient_trigger.default"},
         {"type": "catalog_contains", "bucket": "ai_inputs", "match": {"id": "ambient_finger_recording"}},
         {"type": "catalog_contains", "bucket": "context_policies", "match": {"id": "ambient_audio_transcript"}},
         {"type": "catalog_contains", "bucket": "external_io_templates", "match": {"id": "ambient.input.webhook"}},
+        {"type": "setting_field_exists", "section_id": "ambient", "field_id": "ambient.monitor.enabled", "field_type": "toggle"},
+        {"type": "setting_field_exists", "section_id": "ambient", "field_id": "ambient.routing.mode", "field_type": "select"},
         {"type": "setting_field_exists", "section_id": "ambient", "field_id": "ambient.routing.model", "field_type": "model_select"},
+        {"type": "setting_field_exists", "section_id": "ambient", "field_id": "ambient.routing.group_enabled", "field_type": "toggle"},
+        {"type": "setting_field_exists", "section_id": "ambient", "field_id": "ambient.camera.lock", "field_type": "device_lock"},
         {"type": "setting_field_exists", "section_id": "ambient", "field_id": "ambient.provider_keys", "field_type": "api_key_setup"},
         {"type": "permission_declared", "permission_id": "host.microphone.capture"},
         {"type": "permission_declared", "permission_id": "host.camera.capture"},

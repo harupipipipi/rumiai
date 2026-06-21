@@ -11,6 +11,12 @@ import { messageToText, orderConversationMessages } from "../lib/chat";
 import type { ChatUiMessage } from "../renderers/types";
 import type { AmbientStatus } from "./ambientTriggerClient";
 
+export type AmbientAssistantFinal = {
+  messageId: string;
+  createdAt: number;
+  text: string;
+};
+
 export type AmbientMiniChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -57,7 +63,7 @@ export function ambientPendingAuthorityApproval(conversation: Conversation | nul
   return pendingAuthorityApproval(chatUiMessagesFromConversation(conversation));
 }
 
-export function ambientLatestAssistantFinalText(conversation: Conversation | null | undefined): string | null {
+export function ambientLatestAssistantFinal(conversation: Conversation | null | undefined): AmbientAssistantFinal | null {
   if (!conversation) return null;
   for (const message of [...orderConversationMessages(conversation.messages ?? [])].reverse()) {
     const role = normalizedMessageRole(message);
@@ -68,9 +74,18 @@ export function ambientLatestAssistantFinalText(conversation: Conversation | nul
     if (!rawText) continue;
     if (isAuthorityWaitingChatMessage(message, rawText)) return null;
     const text = sanitizeAssistantAuthorityBoilerplate(rawText).trim();
-    if (text) return text;
+    if (!text) continue;
+    return {
+      messageId: String(message.id || `assistant-${Number(message.created_at) || 0}`),
+      createdAt: Number(message.created_at) || 0,
+      text,
+    };
   }
   return null;
+}
+
+export function ambientLatestAssistantFinalText(conversation: Conversation | null | undefined): string | null {
+  return ambientLatestAssistantFinal(conversation)?.text ?? null;
 }
 
 function miniChatMessageFromChatMessage(message: ChatMessage): AmbientMiniChatMessage | null {

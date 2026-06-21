@@ -73,6 +73,10 @@ export function gestureStatusLabel(status: string, monitorEnabled: boolean): str
   if (status === "recording") return "録音中";
   if (status === "transcribing") return "文字起こし中";
   if (status === "sending") return "送信中";
+  if (status === "waiting_response") return "返答待ち";
+  if (status === "completed") return "回答受信";
+  if (status === "approval_pending") return "承認待ち";
+  if (status === "error") return "エラー";
   if (status === "loading") return "準備中";
   if (status === "unavailable") return "利用不可";
   return "確認中";

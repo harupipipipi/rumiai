@@ -53,6 +53,7 @@ export type AmbientStatus = {
     command?: string;
     command_label?: string;
     model?: string;
+    model_quality?: string;
     ffmpeg?: string;
     can_convert_audio?: boolean;
     reason?: string;

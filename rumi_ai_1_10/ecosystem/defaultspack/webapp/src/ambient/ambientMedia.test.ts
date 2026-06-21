@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { settleSpeechRecognitionTranscript, type SpeechRecognitionLike } from "./ambientMedia";
+import { settleSpeechRecognitionTranscript, startWakeListening, type SpeechRecognitionLike } from "./ambientMedia";
 
 function fakeRecognition(overrides: Partial<SpeechRecognitionLike> = {}): SpeechRecognitionLike {
   return {
@@ -73,4 +73,56 @@ test("settleSpeechRecognitionTranscript aborts immediately for cancellation path
 
   assert.equal(aborted, true);
   assert.equal(settled, "録音キャンセル前の文字起こし");
+});
+
+test("startWakeListening completes only after the first capture succeeds", async () => {
+  let captures = 0;
+  const embeddings: number[] = [];
+
+  const stop = await startWakeListening(
+    async (embedding) => {
+      embeddings.push(embedding[0] ?? 0);
+    },
+    undefined,
+    {
+      captureEmbedding: async () => {
+        captures += 1;
+        return [captures];
+      },
+      retryDelayMs: 20,
+    },
+  );
+
+  assert.equal(captures, 1);
+  assert.deepEqual(embeddings, [1]);
+  stop();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(captures, 1);
+});
+
+test("startWakeListening reports capture errors after startup", async () => {
+  let captures = 0;
+  let reported: unknown = null;
+
+  const stop = await startWakeListening(
+    async () => undefined,
+    undefined,
+    {
+      captureEmbedding: async () => {
+        captures += 1;
+        if (captures > 1) throw new Error("mic disconnected");
+        return [1];
+      },
+      onError: (error) => {
+        reported = error;
+      },
+      retryDelayMs: 20,
+    },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  stop();
+  assert.equal(captures, 2);
+  assert.ok(reported instanceof Error);
+  assert.equal((reported as Error).message, "mic disconnected");
 });

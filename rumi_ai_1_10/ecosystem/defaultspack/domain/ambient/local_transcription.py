@@ -27,7 +27,13 @@ ALLOW_DOWNLOAD_ENV_KEYS = ("RUMI_LOCAL_WHISPER_ALLOW_DOWNLOAD", "RUMI_WHISPER_AL
 COMMON_COMMANDS = ("whisper-cli", "whisper.cpp", "whisper-cpp", "whisper")
 FFMPEG_ENV_KEYS = ("RUMI_FFMPEG_BIN", "FFMPEG_BIN")
 LOCAL_WHISPER_DIR_ENV = "RUMI_LOCAL_WHISPER_DIR"
-DEFAULT_MODEL_FILENAME = "ggml-tiny.bin"
+DEFAULT_MODEL_SIZE = "base"
+MODEL_FILENAMES = (
+    "ggml-small.bin",
+    "ggml-base.bin",
+    "ggml-tiny.bin",
+)
+DEFAULT_MODEL_FILENAME = f"ggml-{DEFAULT_MODEL_SIZE}.bin"
 APP_DATA_DIR_NAME = "dev.rumiai.app"
 DEFAULT_TIMEOUT_SECONDS = 45
 WHISPER_CPP_SUPPORTED_SUFFIXES = {".wav", ".mp3", ".ogg", ".flac"}
@@ -95,6 +101,7 @@ def _transcribe_audio_file(
                 output_dir=output_dir,
                 model=model,
                 language=language,
+                prompt=prompt,
                 timeout_seconds=timeout_seconds,
             )
             if result.get("status") == "ok":
@@ -188,6 +195,7 @@ def local_whisper_status() -> dict[str, Any]:
         "command": str((command or {}).get("command") or ""),
         "command_label": str((command or {}).get("label") or ""),
         "model": str(model or ""),
+        "model_quality": _model_quality(model),
         "ffmpeg": ffmpeg,
         "can_convert_audio": bool(ffmpeg),
         "reason": "" if configured else _local_whisper_missing_reason(command=command, model=model),
@@ -208,8 +216,11 @@ def default_local_whisper_model_dir() -> Path:
     return Path.home() / ".local" / "share" / APP_DATA_DIR_NAME / "models" / "whisper"
 
 
-def default_local_whisper_model_path() -> Path:
-    return default_local_whisper_model_dir() / DEFAULT_MODEL_FILENAME
+def default_local_whisper_model_path(model_size: str = DEFAULT_MODEL_SIZE) -> Path:
+    normalized = str(model_size or DEFAULT_MODEL_SIZE).strip().lower()
+    if normalized not in {"tiny", "base", "small"}:
+        normalized = DEFAULT_MODEL_SIZE
+    return default_local_whisper_model_dir() / f"ggml-{normalized}.bin"
 
 
 def _configured_command(env: os._Environ[str]) -> dict[str, str] | None:
@@ -282,13 +293,14 @@ def _bundled_ffmpeg_candidates(env: os._Environ[str]) -> list[Path]:
 def _bundled_model_candidates(env: os._Environ[str]) -> list[Path]:
     candidates: list[Path] = []
     for app_dir in _runtime_app_dirs(env):
-        candidates.extend(
-            [
-                app_dir / "bundled" / "whisper" / "models" / DEFAULT_MODEL_FILENAME,
-                app_dir / "bundled" / "models" / "whisper" / DEFAULT_MODEL_FILENAME,
-                app_dir / "models" / "whisper" / DEFAULT_MODEL_FILENAME,
-            ]
-        )
+        for filename in MODEL_FILENAMES:
+            candidates.extend(
+                [
+                    app_dir / "bundled" / "whisper" / "models" / filename,
+                    app_dir / "bundled" / "models" / "whisper" / filename,
+                    app_dir / "models" / "whisper" / filename,
+                ]
+            )
     return _dedupe_paths(candidates)
 
 
@@ -374,44 +386,45 @@ def _well_known_command_candidates() -> list[Path]:
 
 
 def _default_model_candidates(env: os._Environ[str]) -> list[Path]:
-    candidates: list[Path] = []
+    roots: list[Path] = []
     configured_dir = str(env.get(LOCAL_WHISPER_DIR_ENV) or "").strip()
     if configured_dir:
-        candidates.append(Path(configured_dir).expanduser() / DEFAULT_MODEL_FILENAME)
-    candidates.append(default_local_whisper_model_path())
+        roots.append(Path(configured_dir).expanduser())
+    roots.append(default_local_whisper_model_dir())
     xdg_data = str(env.get("XDG_DATA_HOME") or "").strip()
     if xdg_data:
-        candidates.append(
+        roots.append(
             Path(xdg_data).expanduser()
             / APP_DATA_DIR_NAME
             / "models"
             / "whisper"
-            / DEFAULT_MODEL_FILENAME
         )
-    candidates.extend(
+    roots.extend(
         [
             Path.home()
             / "Library"
             / "Application Support"
             / "Rumi AI"
             / "models"
-            / "whisper"
-            / DEFAULT_MODEL_FILENAME,
+            / "whisper",
             Path.home()
             / ".local"
             / "share"
             / APP_DATA_DIR_NAME
             / "models"
-            / "whisper"
-            / DEFAULT_MODEL_FILENAME,
+            / "whisper",
             Path.home()
             / ".cache"
             / "rumi"
             / "models"
-            / "whisper"
-            / DEFAULT_MODEL_FILENAME,
+            / "whisper",
         ]
     )
+    candidates = [
+        root / filename
+        for root in _dedupe_paths(roots)
+        for filename in MODEL_FILENAMES
+    ]
     return _dedupe_paths(candidates)
 
 
@@ -422,6 +435,7 @@ def _run_command_candidate(
     output_dir: Path,
     model: str,
     language: str,
+    prompt: str,
     timeout_seconds: int | float,
 ) -> dict[str, Any]:
     kind = command["kind"]
@@ -456,6 +470,7 @@ def _run_command_candidate(
             output_txt=output_txt,
             model=model,
             language=language,
+            prompt=prompt,
         )
     except ValueError as exc:
         return _unavailable("local_whisper_not_configured", str(exc), engine=label)
@@ -559,6 +574,7 @@ def _build_command_argv(
     output_txt: Path,
     model: str,
     language: str,
+    prompt: str,
 ) -> list[str]:
     raw = command["command"]
     try:
@@ -576,6 +592,7 @@ def _build_command_argv(
         "{output_prefix}": str(output_prefix),
         "{output_txt}": str(output_txt),
         "{language}": language,
+        "{prompt}": prompt,
     }
     if any(key in token for token in tokens for key in placeholders):
         argv = []
@@ -599,6 +616,8 @@ def _build_command_argv(
         ]
         if language:
             argv.extend(["--language", language])
+        if prompt:
+            argv.extend(["--initial_prompt", prompt])
         return argv
     if kind == "whisper_cpp":
         argv = [
@@ -611,8 +630,9 @@ def _build_command_argv(
             "-of",
             str(output_prefix),
         ]
-        if language:
-            argv.extend(["-l", language])
+        argv.extend(["-l", language or "auto"])
+        if prompt:
+            argv.extend(["--prompt", prompt])
         return argv
     return [*tokens, str(audio_path)]
 
@@ -649,6 +669,13 @@ def _run_faster_whisper(
             str(audio_path),
             language=language or None,
             initial_prompt=prompt or None,
+            beam_size=5,
+            best_of=5,
+            temperature=0.0,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 350},
+            condition_on_previous_text=False,
+            no_speech_threshold=0.6,
         )
         text = " ".join(
             str(getattr(segment, "text", "") or "").strip()
@@ -689,6 +716,9 @@ def _run_openai_whisper_library(
             language=language or None,
             initial_prompt=prompt or None,
             fp16=False,
+            temperature=0.0,
+            condition_on_previous_text=False,
+            no_speech_threshold=0.6,
         )
         text = str(response.get("text") if isinstance(response, dict) else "").strip()
         if text:
@@ -807,6 +837,17 @@ def _coerce_timeout(value: int | float | None) -> int | float:
     return min(max(parsed, 1.0), 300.0)
 
 
+def _model_quality(model: str) -> str:
+    filename = Path(str(model or "")).name.lower()
+    if "small" in filename:
+        return "quality"
+    if "base" in filename:
+        return "balanced"
+    if "tiny" in filename:
+        return "fast"
+    return "custom" if str(model or "").strip() else "unconfigured"
+
+
 def _model_label(model: str, *, fallback: str) -> str:
     value = str(model or "").strip()
     if not value:
@@ -875,7 +916,7 @@ def _local_whisper_missing_reason(*, command: dict[str, str] | None, model: str)
     if not command and not model:
         return (
             "ローカルWhisperが未設定です。"
-            "whisper.cpp と tinyモデルをセットアップしてください。"
+            "whisper.cpp と baseモデルをセットアップしてください。"
         )
     if not command:
         return "ローカルWhisperコマンドが見つかりません。"

@@ -187,6 +187,73 @@ test("SettingsModalRenderer renders template model_select with searchable model 
   assert.doesNotMatch(html, /type="text"[^>]*google\/gemini-2\.5-flash/);
 });
 
+test("SettingsModalRenderer hides ambient detail fields until finger recording is enabled", () => {
+  const sections = [
+    {
+      id: "ambient",
+      label: "Ambient",
+      fields: [
+        {
+          id: "ambient.monitor.enabled",
+          label: "指で録音",
+          type: "toggle",
+          default: false,
+        },
+        {
+          id: "ambient.camera.lock",
+          label: "カメラ",
+          type: "device_lock",
+          renderer: "device_lock",
+          visible_when: { field: "ambient.monitor.enabled", truthy: true },
+          lock_message: "カメラが見つかりません。",
+        },
+        {
+          id: "ambient.routing.model",
+          label: "Ambient Send Model",
+          type: "model_select",
+          renderer: "model_select",
+          visible_when: { field: "ambient.monitor.enabled", truthy: true },
+        },
+      ] as unknown as SettingsSection["fields"],
+    },
+  ];
+
+  const offHtml = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "ambient",
+      catalog: { sidebar: { filters: [], items: [] }, settings: { sections: [], values: {} }, chat_rendering: { renderers: [] }, extension_points: [] },
+      health: null,
+      previewsCount: 0,
+      settingsSections: sections,
+      settingsValues: { ambient: { "ambient.monitor.enabled": false } },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+  assert.match(offHtml, /指で録音/);
+  assert.doesNotMatch(offHtml, /Ambient Send Model/);
+  assert.doesNotMatch(offHtml, /data-settings-renderer="device_lock"/);
+
+  const onHtml = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "ambient",
+      catalog: { sidebar: { filters: [], items: [] }, settings: { sections: [], values: {} }, chat_rendering: { renderers: [] }, extension_points: [] },
+      health: null,
+      previewsCount: 0,
+      settingsSections: sections,
+      settingsValues: { ambient: { "ambient.monitor.enabled": true } },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+  assert.match(onHtml, /Ambient Send Model/);
+  assert.match(onHtml, /data-settings-renderer="device_lock"/);
+});
+
 test("SettingsModalRenderer renders template api_key_setup with setup control", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {
