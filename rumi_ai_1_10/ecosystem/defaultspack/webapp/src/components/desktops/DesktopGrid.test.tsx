@@ -41,8 +41,8 @@ test("single desktop tile uses prominent monitor sizing", () => {
   const html = renderGrid([desktop("seat-1")]);
 
   assert.match(html, /grid w-full grid-cols-1/);
-  assert.match(html, /min-h-\[calc\(100vh-180px\)\]/);
-  assert.match(html, /min-h-\[420px\]/);
+  assert.match(html, /min-h-\[calc\(100vh-150px\)\]/);
+  assert.match(html, /min-h-\[520px\]/);
   assert.doesNotMatch(html, /min-\[900px\]:grid-cols-2/);
 });
 

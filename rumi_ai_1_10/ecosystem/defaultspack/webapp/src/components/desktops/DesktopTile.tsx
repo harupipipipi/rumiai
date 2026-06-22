@@ -94,7 +94,7 @@ export function DesktopTile({
         "group flex min-h-[280px] flex-col rounded-lg border bg-[#0a0a0c] transition-colors",
         selected ? "border-zinc-500 text-zinc-100" : "border-zinc-800/70 text-zinc-300 hover:border-zinc-700",
         dense && "min-h-[238px]",
-        prominent && "min-h-[calc(100vh-180px)]",
+        prominent && "min-h-[calc(100vh-150px)]",
       )}
       data-testid={`desktop-tile-${desktop.seat_id}`}
     >
@@ -126,7 +126,7 @@ export function DesktopTile({
           "relative m-3 flex min-h-[154px] items-center justify-center overflow-hidden rounded-md border border-zinc-800 bg-black",
           hasLease ? "cursor-crosshair" : "cursor-default",
           dense && "min-h-[128px]",
-          prominent && "m-2 min-h-[420px] flex-1",
+          prominent && "m-2 min-h-[520px] flex-1",
         )}
         style={{ aspectRatio: frameAspectRatio }}
         role="img"

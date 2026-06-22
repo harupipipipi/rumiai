@@ -233,8 +233,8 @@ export function DesktopMonitorWorkspace() {
         onDoctor={() => void runtime.runDoctor()}
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        <div className="grid gap-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        <div className="grid gap-2">
           {providerNotice}
           {surfaceError && (
             <div className={cn(
@@ -246,7 +246,7 @@ export function DesktopMonitorWorkspace() {
           )}
 
           {runtimeReady && (
-            <div className="grid min-h-0 gap-3 min-[1100px]:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="grid min-h-0 gap-2 min-[1280px]:grid-cols-[minmax(0,1fr)_300px] min-[1536px]:grid-cols-[minmax(0,1fr)_340px]">
               <DesktopGrid
                 desktops={visibleDesktops}
                 loading={desktopInstances.loading}
