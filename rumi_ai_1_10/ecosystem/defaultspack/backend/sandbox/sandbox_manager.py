@@ -243,6 +243,7 @@ class SandboxManager:
             capabilities=template.allowed_operations or template.provider_requirements,
             resource_limits=template.resources,
             lifecycle_policy=template.lifecycle,
+            filesystem_policy=template.filesystem,
             workspace_binding=workspace_binding,
             network_policy=template.network,
             secrets_policy=template.secrets,
@@ -620,6 +621,9 @@ class SandboxManager:
             operation_error = self._require_operation(inst, "sandbox.files.apply_patch")
             if operation_error is not None:
                 return operation_error
+            filesystem_error = self._require_filesystem_patch_policy(inst)
+            if filesystem_error is not None:
+                return filesystem_error
         try:
             agent = self._provider_agent(inst)
             apply_patch = getattr(agent, "apply_file_patch", None)
@@ -1282,6 +1286,25 @@ class SandboxManager:
             }
         return None
 
+    @staticmethod
+    def _require_filesystem_patch_policy(inst: SandboxInstance) -> Dict[str, Any] | None:
+        filesystem_mode = str(inst.filesystem_policy.mode or "").strip().lower().replace("-", "_")
+        workspace_mode = str(inst.workspace_binding.mode or inst.filesystem_policy.workspace_access or "none").strip().lower()
+        if filesystem_mode in {"read_only", "readonly", "immutable"} or workspace_mode == "read_only":
+            return {
+                "ok": False,
+                "error": "Sandbox file patch is blocked by a read-only filesystem or workspace policy.",
+                "code": "SANDBOX_FILESYSTEM_READ_ONLY",
+                "status_code": 403,
+                "sandbox_id": inst.sandbox_id,
+                "status": inst.state,
+                "state": inst.state,
+                "template_id": inst.template_id,
+                "filesystem_policy": model_to_dict(inst.filesystem_policy),
+                "workspace_binding": model_to_dict(inst.workspace_binding),
+            }
+        return None
+
     def _mark_failed(self, sandbox_id: str, message: str, *, code: str) -> Dict[str, Any]:
         with self._lock:
             inst = self._instances.get(str(sandbox_id))
@@ -1327,6 +1350,7 @@ class SandboxManager:
         opaque_state = dict(inst.provider_opaque_state)
         opaque_state.setdefault("template_id", inst.template_id)
         opaque_state.setdefault("image", inst.image)
+        opaque_state.setdefault("filesystem_policy", model_to_dict(inst.filesystem_policy))
         opaque_state.setdefault("workspace_binding", model_to_dict(inst.workspace_binding))
         opaque_state.setdefault("network_policy", model_to_dict(inst.network_policy))
         opaque_state.setdefault("secrets_policy", model_to_dict(inst.secrets_policy))
@@ -1735,6 +1759,7 @@ class SandboxManager:
             capabilities=frozenset(_string_tuple(data.get("capabilities"))),
             resource_limits=_resource_limits_from_dict(data.get("resource_limits")),
             lifecycle_policy=_lifecycle_policy_from_dict(data.get("lifecycle_policy")),
+            filesystem_policy=_filesystem_policy_from_dict(data.get("filesystem_policy")),
             workspace_binding=_workspace_binding_from_dict(data.get("workspace_binding")),
             network_policy=_network_policy_from_dict(data.get("network_policy")),
             secrets_policy=_secrets_policy_from_dict(data.get("secrets_policy")),
@@ -1881,6 +1906,17 @@ def _lifecycle_policy_from_dict(value: Any) -> LifecyclePolicy:
         ttl_seconds=int(_float_or_zero(value.get("ttl_seconds")) or 0) or None,
         persistent=bool(value.get("persistent")),
         destroy_on_exit=bool(value.get("destroy_on_exit", True)),
+    )
+
+
+def _filesystem_policy_from_dict(value: Any) -> FilesystemPolicy:
+    if not isinstance(value, dict):
+        return FilesystemPolicy()
+    return FilesystemPolicy(
+        mode=str(value.get("mode") or "ephemeral_overlay")[:80],
+        workspace_access=str(value.get("workspace_access") or "none")[:80],
+        workspace_paths=_clean_string_list(value.get("workspace_paths"), max_items=128, max_len=256),
+        host_writeback=bool(value.get("host_writeback")),
     )
 
 

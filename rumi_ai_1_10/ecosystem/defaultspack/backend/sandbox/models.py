@@ -278,6 +278,7 @@ class SandboxInstance:
     capabilities: frozenset[str] = field(default_factory=frozenset)
     resource_limits: ResourceLimits = field(default_factory=ResourceLimits)
     lifecycle_policy: LifecyclePolicy = field(default_factory=LifecyclePolicy)
+    filesystem_policy: FilesystemPolicy = field(default_factory=FilesystemPolicy)
     workspace_binding: WorkspaceBinding = field(default_factory=WorkspaceBinding)
     network_policy: NetworkPolicy = field(default_factory=NetworkPolicy)
     secrets_policy: SecretsPolicy = field(default_factory=SecretsPolicy)

@@ -238,6 +238,8 @@ def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path, monk
     assert status["network_policy"]["mode"] == "project_policy_or_first_use_approval"
     assert status["secrets_policy"]["mode"] == "explicit_read_only"
     assert status["secrets_policy"]["approval_required"] is True
+    assert status["filesystem_policy"]["mode"] == "writable_overlay"
+    assert status["filesystem_policy"]["workspace_access"] == "overlay"
     assert status["resource_limits"]["memory_mb"] == 4096
     assert status["workspace_binding"]["mode"] == "read_only"
     assert status["workspace_binding"]["root"] == str(workspace_root)
@@ -250,6 +252,8 @@ def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path, monk
     assert reloaded_status["network_policy"]["mode"] == "project_policy_or_first_use_approval"
     assert reloaded_status["secrets_policy"]["mode"] == "explicit_read_only"
     assert reloaded_status["secrets_policy"]["approval_required"] is True
+    assert reloaded_status["filesystem_policy"]["mode"] == "writable_overlay"
+    assert reloaded_status["filesystem_policy"]["workspace_access"] == "overlay"
     assert reloaded_status["resource_limits"]["timeout_ms"] == 14_400_000
     assert reloaded_status["desktop_spec"]["width"] == 1440
     assert reloaded_status["assigned_agent_id"] == "agent-1"
@@ -568,6 +572,55 @@ def test_sandbox_file_patch_and_port_contracts_fail_closed_until_guest_services_
     assert port["ok"] is False
     assert port["code"] == "SANDBOX_PORTS_NOT_READY"
     assert port["status_code"] == 501
+
+
+def test_sandbox_file_patch_denies_read_only_workspace_before_guest_agent(tmp_path, monkeypatch):
+    _trusted_workspace(tmp_path, monkeypatch)
+
+    class PatchGuest(FakeGuestAgent):
+        def __init__(self):
+            super().__init__()
+            self.patch_requests = []
+
+        def apply_file_patch(self, sandbox_id, payload):
+            self.patch_requests.append((sandbox_id, dict(payload)))
+            return {"ok": True, "sandbox_id": sandbox_id, "files_written": 1}
+
+    guest = PatchGuest()
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+        },
+        guest_agent=guest,
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path / "state", provider_registry=registry)
+    created = manager.create(
+        display=False,
+        provider_id="fake-runtime",
+        template_id="coding.python",
+        workspace_id="workspace-1",
+        workspace_access="read_only",
+    )
+    assert created["ok"] is True
+
+    denied = manager.apply_file_patch(
+        created["sandbox_id"],
+        {"files": [{"path": "src/app.py", "content": "print('no write')\n"}]},
+    )
+
+    assert denied["ok"] is False
+    assert denied["code"] == "SANDBOX_FILESYSTEM_READ_ONLY"
+    assert denied["status_code"] == 403
+    assert denied["workspace_binding"]["mode"] == "read_only"
+    assert guest.patch_requests == []
 
 
 def test_sandbox_port_expose_requires_network_policy_approval_before_guest_agent(tmp_path):
