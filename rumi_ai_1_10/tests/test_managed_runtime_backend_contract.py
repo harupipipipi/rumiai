@@ -567,9 +567,28 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
             },
             {},
         )
-        stop = api.run({"_handler": "desktop_stop", "seat_id": "seat-1", "owner_id": "local-user"}, {})
+        stop_without_confirmation = api.run({"_handler": "desktop_stop", "seat_id": "seat-1", "owner_id": "local-user"}, {})
+        stop = api.run(
+            {
+                "_handler": "desktop_stop",
+                "seat_id": "seat-1",
+                "owner_id": "local-user",
+                "confirm_destructive": True,
+            },
+            {},
+        )
         start = api.run({"_handler": "desktop_start", "seat_id": "seat-1", "owner_id": "local-user"}, {})
         restart = api.run({"_handler": "desktop_restart", "seat_id": "seat-1", "owner_id": "local-user"}, {})
+        delete_without_confirmation = api.run({"_handler": "desktop_delete", "seat_id": "seat-1", "owner_id": "local-user"}, {})
+        delete = api.run(
+            {
+                "_handler": "desktop_delete",
+                "seat_id": "seat-1",
+                "owner_id": "local-user",
+                "confirm_destructive": True,
+            },
+            {},
+        )
     finally:
         api._reset_service_for_tests(None)
 
@@ -586,9 +605,15 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
     assert lease["data"]["lease_token"] == "lease-token"
     assert click["status"] == "ok"
     assert click["data"]["accepted"] is True
+    assert stop_without_confirmation["status"] == "error"
+    assert stop_without_confirmation["error"]["code"] == "DESTRUCTIVE_ACTION_CONFIRMATION_REQUIRED"
     assert stop["data"]["status"] == "stopped"
     assert start["data"]["status"] == "running"
     assert restart["data"]["status"] == "running"
+    assert delete_without_confirmation["status"] == "error"
+    assert delete_without_confirmation["error"]["code"] == "DESTRUCTIVE_ACTION_CONFIRMATION_REQUIRED"
+    assert delete["status"] == "ok"
+    assert delete["data"] == {"deleted": True, "seat_id": "seat-1"}
     assert service.frame_cache.last_metadata("seat-1") is None
     assert service.lease_manager.active_lease("seat-1") is None
     assert agent.desktop_inputs[0].action == "click"

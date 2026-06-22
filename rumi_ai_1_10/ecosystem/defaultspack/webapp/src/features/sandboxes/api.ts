@@ -204,7 +204,11 @@ export const sandboxesApi = {
   stopDesktop(seatId: string) {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/stop`, {
       method: "POST",
-      body: JSON.stringify({ owner_id: LOCAL_DESKTOP_OWNER_ID, request_id: requestId("desktop-stop") }),
+      body: JSON.stringify({
+        owner_id: LOCAL_DESKTOP_OWNER_ID,
+        request_id: requestId("desktop-stop"),
+        confirm_destructive: true,
+      }),
     }).then(normalizeDesktopInstance);
   },
 
@@ -222,7 +226,11 @@ export const sandboxesApi = {
         "X-Rumi-Desktop-Owner": LOCAL_DESKTOP_OWNER_ID,
         ...(accessKey ? { "X-Rumi-Desktop-Access-Key": accessKey } : {}),
       },
-      body: JSON.stringify({ owner_id: LOCAL_DESKTOP_OWNER_ID, request_id: requestId("desktop-delete") }),
+      body: JSON.stringify({
+        owner_id: LOCAL_DESKTOP_OWNER_ID,
+        request_id: requestId("desktop-delete"),
+        confirm_destructive: true,
+      }),
     });
   },
 

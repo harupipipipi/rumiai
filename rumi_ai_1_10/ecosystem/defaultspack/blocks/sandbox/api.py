@@ -536,6 +536,9 @@ def _desktop_delete(service: _SandboxApiService, payload: dict[str, Any]):
     access_error = _desktop_access_error(service, seat_id, payload)
     if access_error is not None:
         return access_error
+    confirmation_error = _destructive_confirmation_error(payload, action="delete", resource="desktop")
+    if confirmation_error is not None:
+        return confirmation_error
     result = service.manager.destroy(seat_id)
     if result.get("ok") is not True:
         return _api_error(str(result.get("error") or "Desktop delete failed"), str(result.get("code") or "DESKTOP_DELETE_FAILED"), int(result.get("status_code") or 400))
@@ -549,6 +552,10 @@ def _desktop_lifecycle(service: _SandboxApiService, payload: dict[str, Any], *, 
     access_error = _desktop_access_error(service, seat_id, payload)
     if access_error is not None:
         return access_error
+    if action == "stop":
+        confirmation_error = _destructive_confirmation_error(payload, action="stop", resource="desktop")
+        if confirmation_error is not None:
+            return confirmation_error
     if action == "start":
         result = service.manager.start(seat_id)
     elif action == "stop":
@@ -1076,6 +1083,28 @@ def _jsonable(value: Any) -> Any:
 
 def _context_has_server_approval(context: dict[str, Any]) -> bool:
     return internal_tool_decision_allows(context) or tool_server_approval_context_is_internal(context)
+
+
+def _destructive_confirmation_error(payload: dict[str, Any], *, action: str, resource: str) -> dict[str, Any] | None:
+    if _truthy(payload.get("confirm_destructive")) or _truthy(payload.get("confirmed")):
+        return None
+    confirmation = str(payload.get("confirmation") or "").strip().lower()
+    if confirmation in {action, f"{action}_{resource}", f"{resource}_{action}"}:
+        return None
+    return _api_error(
+        f"{resource.title()} {action} requires explicit confirmation.",
+        "DESTRUCTIVE_ACTION_CONFIRMATION_REQUIRED",
+        409,
+        details={"action": action, "resource": resource, "required": "confirm_destructive"},
+    )
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "confirmed"}
 
 
 def _desktop_access_error(service: _SandboxApiService, seat_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
