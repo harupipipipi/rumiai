@@ -36,7 +36,11 @@
           "approved": { "type": "boolean" },
           "owner_id": { "type": "string" }
         },
-        "required": ["request_id"]
+        "required": ["request_id"],
+        "anyOf": [
+          { "required": ["seat_id"] },
+          { "required": ["desktop_id"] }
+        ]
       }
     },
     "execution": {

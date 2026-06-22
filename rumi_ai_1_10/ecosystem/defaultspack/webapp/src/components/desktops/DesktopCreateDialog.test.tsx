@@ -62,6 +62,12 @@ test("desktop create dialog keeps workspace unmounted by default", () => {
   assert.doesNotMatch(html, /read_write/);
 });
 
+test("desktop create dialog exposes request-required access policy", () => {
+  const html = renderDialog();
+
+  assert.match(html, /<option value="request_required">Request required<\/option>/);
+});
+
 test("desktop create dialog hides app provisioning for desktop-only templates", () => {
   const html = renderDialog();
 

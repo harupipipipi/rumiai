@@ -71,7 +71,7 @@ function templateSupportsGuestProvisioning(
   );
 }
 
-type DesktopAccessMode = "owner_only" | "key_required";
+type DesktopAccessMode = "owner_only" | "key_required" | "request_required";
 
 export function DesktopCreateDialog({
   isOpen,
@@ -428,6 +428,7 @@ export function DesktopCreateDialog({
                   >
                     <option value="owner_only">Owner only</option>
                     <option value="key_required">Key required</option>
+                    <option value="request_required">Request required</option>
                   </select>
                 </label>
 

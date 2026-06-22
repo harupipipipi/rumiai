@@ -33,12 +33,38 @@
           "name": { "type": "string" },
           "template_id": { "type": "string", "default": "desktop.linux_native" },
           "provider_id": { "type": ["string", "null"] },
+          "starter": {
+            "type": "string",
+            "enum": ["empty", "terminal", "browser_url"],
+            "description": "Initial desktop startup action. Use browser_url only with an http(s) browser_url."
+          },
+          "browser_url": {
+            "type": "string",
+            "description": "HTTP(S) URL to open when starter is browser_url."
+          },
           "resolution": {
             "type": "object",
             "properties": {
               "width": { "type": "integer" },
               "height": { "type": "integer" }
             }
+          },
+          "workspace_id": {
+            "type": ["string", "null"],
+            "description": "Optional workspace binding id. Leave empty for no workspace mount."
+          },
+          "workspace_access": {
+            "type": ["string", "null"],
+            "enum": ["none", "read_only", "overlay", null],
+            "description": "Workspace access requested by the template policy."
+          },
+          "assigned_agent": {
+            "type": ["string", "null"],
+            "description": "Agent id allowed to operate this desktop with AI input."
+          },
+          "assigned_agent_id": {
+            "type": ["string", "null"],
+            "description": "Alias for assigned_agent."
           },
           "role": { "type": "string" },
           "rules": {
@@ -47,11 +73,13 @@
           "access": {
             "type": "object",
             "properties": {
-              "mode": { "type": "string", "enum": ["owner_only", "key_required"] },
+              "mode": { "type": "string", "enum": ["owner_only", "key_required", "request_required"] },
               "owner_id": { "type": "string" },
-              "access_key": { "type": "string" }
+              "access_key": { "type": "string" },
+              "request_required": { "type": "boolean" }
             }
           },
+          "access_request_required": { "type": "boolean" },
           "provisioning": {
             "type": "object",
             "properties": {

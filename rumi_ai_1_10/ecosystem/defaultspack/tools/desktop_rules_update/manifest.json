@@ -37,11 +37,13 @@
           "access": {
             "type": "object",
             "properties": {
-              "mode": { "type": "string", "enum": ["owner_only", "key_required"] },
+              "mode": { "type": "string", "enum": ["owner_only", "key_required", "request_required"] },
               "owner_id": { "type": "string" },
-              "access_key": { "type": "string" }
+              "access_key": { "type": "string" },
+              "request_required": { "type": "boolean" }
             }
-          }
+          },
+          "access_request_required": { "type": "boolean" }
         },
         "required": []
       }
