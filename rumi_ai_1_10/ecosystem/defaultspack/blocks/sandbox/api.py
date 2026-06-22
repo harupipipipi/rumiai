@@ -603,6 +603,9 @@ def _sandbox_port_expose(service: _SandboxApiService, payload: dict[str, Any], c
 
 def _sandbox_delete(service: _SandboxApiService, payload: dict[str, Any]):
     sandbox_id = str(payload.get("sandbox_id") or "")
+    confirmation_error = _destructive_confirmation_error(payload, action="delete", resource="sandbox")
+    if confirmation_error is not None:
+        return confirmation_error
     result = service.manager.destroy(sandbox_id)
     if result.get("ok") is not True:
         return _api_error(str(result.get("error") or "Sandbox delete failed"), str(result.get("code") or "SANDBOX_DELETE_FAILED"), int(result.get("status_code") or 400))
@@ -613,6 +616,10 @@ def _sandbox_delete(service: _SandboxApiService, payload: dict[str, Any]):
 
 def _sandbox_lifecycle(service: _SandboxApiService, payload: dict[str, Any], *, action: str):
     sandbox_id = str(payload.get("sandbox_id") or "")
+    if action == "stop":
+        confirmation_error = _destructive_confirmation_error(payload, action="stop", resource="sandbox")
+        if confirmation_error is not None:
+            return confirmation_error
     if action == "start":
         result = service.manager.start(sandbox_id)
     elif action == "stop":

@@ -54,7 +54,10 @@ def sandbox_exec(arguments: dict[str, Any], context: dict[str, Any] | None = Non
     try:
         return _sandbox_exec_call(sandbox_id, arguments, argv, timeout_ms, context)
     finally:
-        _sandbox_api().run({"_handler": "sandbox_delete", "sandbox_id": sandbox_id}, context or {})
+        _sandbox_api().run(
+            {"_handler": "sandbox_delete", "sandbox_id": sandbox_id, "confirm_destructive": True},
+            context or {},
+        )
 
 
 def sandbox_files_apply_patch(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -246,7 +249,10 @@ def _script_path_exec(
             context,
         )
     finally:
-        api.run({"_handler": "sandbox_delete", "sandbox_id": sandbox_id}, context or {})
+        api.run(
+            {"_handler": "sandbox_delete", "sandbox_id": sandbox_id, "confirm_destructive": True},
+            context or {},
+        )
 
 
 def _sandbox_exec_call(

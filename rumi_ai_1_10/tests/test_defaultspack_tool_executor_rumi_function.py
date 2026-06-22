@@ -831,6 +831,7 @@ def test_sandbox_exec_creates_ephemeral_sandbox_when_no_sandbox_id(tmp_path, mon
     assert fake_api.calls[0]["template_id"] == "tool.ephemeral"
     assert fake_api.calls[1]["argv"] == ["pwd"]
     assert fake_api.calls[1]["timeout_ms"] == 5000
+    assert fake_api.calls[2]["confirm_destructive"] is True
 
 
 def test_sandbox_exec_rejects_shell_strings_after_internal_tool_decision(tmp_path):
@@ -948,6 +949,8 @@ def test_python_and_node_exec_code_use_coding_templates(tmp_path, monkeypatch):
     assert [call["template_id"] for call in creates] == ["coding.python", "coding.node"]
     assert execs[0]["argv"] == ["python", "-c", "print('ok')"]
     assert execs[1]["argv"] == ["node", "-e", "console.log('ok')"]
+    deletes = [call for call in fake_api.calls if call["_handler"] == "sandbox_delete"]
+    assert [call["confirm_destructive"] for call in deletes] == [True, True]
 
 
 def test_python_and_node_exec_script_path_stages_file_in_sandbox(tmp_path, monkeypatch):
@@ -1001,6 +1004,7 @@ def test_python_and_node_exec_script_path_stages_file_in_sandbox(tmp_path, monke
     assert execs[1]["argv"] == ["node", "scripts/hello.js"]
     assert execs[1]["timeout_ms"] == 6000
     assert len(deletes) == 2
+    assert [call["confirm_destructive"] for call in deletes] == [True, True]
 
 
 def test_desktop_frame_tool_returns_base64_frame_payload(monkeypatch):

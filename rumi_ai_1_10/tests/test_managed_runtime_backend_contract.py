@@ -1187,6 +1187,62 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
     assert agent.desktop_inputs[0].action == "click"
 
 
+def test_sandbox_stop_and_delete_require_destructive_confirmation(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits", "sandbox.network_policy"},
+            sandbox_id_factory=lambda: "sandbox-1",
+        )
+    )
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        created = api.run(
+            {
+                "_handler": "sandboxes_create",
+                "template_id": "tool.ephemeral",
+                "provider_id": "fake-runtime",
+            },
+            {},
+        )
+        stop_without_confirmation = api.run({"_handler": "sandbox_stop", "sandbox_id": "sandbox-1"}, {})
+        stop = api.run(
+            {"_handler": "sandbox_stop", "sandbox_id": "sandbox-1", "confirm_destructive": True},
+            {},
+        )
+        start = api.run({"_handler": "sandbox_start", "sandbox_id": "sandbox-1"}, {})
+        delete_without_confirmation = api.run({"_handler": "sandbox_delete", "sandbox_id": "sandbox-1"}, {})
+        delete = api.run(
+            {"_handler": "sandbox_delete", "sandbox_id": "sandbox-1", "confirm_destructive": True},
+            {},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert created["status"] == "ok"
+    assert created["data"]["sandbox_id"] == "sandbox-1"
+    assert stop_without_confirmation["status"] == "error"
+    assert stop_without_confirmation["error"]["code"] == "DESTRUCTIVE_ACTION_CONFIRMATION_REQUIRED"
+    assert stop_without_confirmation["error"]["details"]["resource"] == "sandbox"
+    assert stop["status"] == "ok"
+    assert stop["data"]["status"] == "stopped"
+    assert start["status"] == "ok"
+    assert start["data"]["status"] == "ready"
+    assert delete_without_confirmation["status"] == "error"
+    assert delete_without_confirmation["error"]["code"] == "DESTRUCTIVE_ACTION_CONFIRMATION_REQUIRED"
+    assert delete["status"] == "ok"
+    assert delete["data"] == {"deleted": True, "sandbox_id": "sandbox-1"}
+
+
 def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -> None:
     _trusted_workspace(tmp_path, monkeypatch)
     from ecosystem.defaultspack.blocks.sandbox import api
