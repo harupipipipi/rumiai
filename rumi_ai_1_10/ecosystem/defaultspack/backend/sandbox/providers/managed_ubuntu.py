@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import base64
+import io
 import os
 import platform
 import shlex
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -53,6 +55,7 @@ DEFAULT_WSL_RUNTIME_NAME = "RumiUbuntu"
 WSL_ROOTFS_ENV = "RUMI_WSL_ROOTFS_TARBALL"
 WSL_INSTALL_DIR_ENV = "RUMI_WSL_INSTALL_DIR"
 MAX_FILE_PATCH_BYTES = 2 * 1024 * 1024
+MAX_WORKSPACE_SEED_BYTES = 64 * 1024 * 1024
 GUEST_APP_PACKAGE_MAP = {
     "ca-certificates": ("ca-certificates",),
     "chromium": ("chromium-browser",),
@@ -278,6 +281,7 @@ class ManagedUbuntuProvider:
 
     def start(self, instance: ProviderInstance) -> ProviderInstance:
         command_path = str(instance.opaque_state.get("command_path") or self._require_ready(MANAGED_UBUNTU_CAPABILITIES))
+        self._seed_workspace(command_path, instance)
         self._provision_instance(command_path, instance)
         if instance.opaque_state.get("desktop_enabled") is True:
             self._guest_shell(
@@ -417,8 +421,16 @@ class ManagedUbuntuProvider:
             )
         return result
 
-    def _guest_shell(self, command_path: str, script: str, *, timeout: float | None = None, check: bool = True) -> GuestCommandResult:
-        return self._guest_command(command_path, ("bash", "-lc", script), timeout=timeout, check=check)
+    def _guest_shell(
+        self,
+        command_path: str,
+        script: str,
+        *,
+        input_text: str | None = None,
+        timeout: float | None = None,
+        check: bool = True,
+    ) -> GuestCommandResult:
+        return self._guest_command(command_path, ("bash", "-lc", script), input_text=input_text, timeout=timeout, check=check)
 
     def _missing_guest_deps(self, command_path: str) -> tuple[str, ...]:
         script = "\n".join(f"command -v {name} >/dev/null 2>&1 || echo {name}" for name in GUEST_DEPS)
@@ -438,6 +450,22 @@ class ManagedUbuntuProvider:
         if update:
             script += f"sudo apt-get install --only-upgrade -y {packages} || true\n"
         self._guest_shell(command_path, script, timeout=600)
+
+    def _seed_workspace(self, command_path: str, instance: ProviderInstance) -> None:
+        workspace = _workspace_binding(instance.opaque_state)
+        mode = str(workspace.get("mode") or "none")
+        if mode not in {"read_only", "overlay"}:
+            return
+        root = str(workspace.get("root") or "")
+        if not _usable_host_workspace_root(root):
+            return
+        payload = _workspace_seed_payload(root)
+        self._guest_shell(
+            command_path,
+            _workspace_seed_script(mode),
+            input_text=payload,
+            timeout=300,
+        )
 
     def _provision_instance(self, command_path: str, instance: ProviderInstance) -> None:
         provisioning = _guest_provisioning_input(instance)
@@ -815,6 +843,93 @@ def _unlink(path: str) -> None:
         os.unlink(path)
     except OSError:
         pass
+
+
+def _workspace_binding(opaque_state: Mapping[str, object]) -> Mapping[str, object]:
+    workspace = opaque_state.get("workspace_binding")
+    return workspace if isinstance(workspace, Mapping) else {}
+
+
+def _usable_host_workspace_root(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    return os.path.isabs(value) and os.path.isdir(value)
+
+
+def _workspace_seed_payload(root: str) -> str:
+    root_path = os.path.abspath(root)
+    total_bytes = 0
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for dirpath, dirnames, filenames in os.walk(root_path, followlinks=False):
+            dirnames[:] = sorted(name for name in dirnames if not os.path.islink(os.path.join(dirpath, name)))
+            rel_dir = os.path.relpath(dirpath, root_path)
+            if rel_dir != ".":
+                info = archive.gettarinfo(dirpath, arcname=rel_dir)
+                info.uid = 0
+                info.gid = 0
+                info.uname = ""
+                info.gname = ""
+                archive.addfile(info)
+            for filename in sorted(filenames):
+                host_path = os.path.join(dirpath, filename)
+                if os.path.islink(host_path) or not os.path.isfile(host_path):
+                    continue
+                size = os.path.getsize(host_path)
+                total_bytes += size
+                if total_bytes > MAX_WORKSPACE_SEED_BYTES:
+                    raise SandboxContractError(
+                        "MANAGED_UBUNTU_WORKSPACE_TOO_LARGE",
+                        "Managed Ubuntu workspace seed is too large.",
+                        status_code=413,
+                        details={"max_bytes": MAX_WORKSPACE_SEED_BYTES},
+                    )
+                arcname = filename if rel_dir == "." else f"{rel_dir}/{filename}"
+                info = archive.gettarinfo(host_path, arcname=arcname)
+                info.uid = 0
+                info.gid = 0
+                info.uname = ""
+                info.gname = ""
+                with open(host_path, "rb") as handle:
+                    archive.addfile(info, handle)
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _workspace_seed_script(mode: str) -> str:
+    python_script = (
+        "import base64, io, os, pathlib, sys, tarfile\n"
+        "data = base64.b64decode(sys.stdin.read().encode('ascii'))\n"
+        "root = pathlib.Path('/workspace').resolve()\n"
+        "written = []\n"
+        "with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:\n"
+        "    for member in archive.getmembers():\n"
+        "        target = (root / member.name).resolve()\n"
+        "        if target != root and root not in target.parents:\n"
+        "            raise SystemExit('unsafe workspace archive member')\n"
+        "        if member.isdir():\n"
+        "            target.mkdir(parents=True, exist_ok=True)\n"
+        "            written.append(target)\n"
+        "        elif member.isfile():\n"
+        "            target.parent.mkdir(parents=True, exist_ok=True)\n"
+        "            source = archive.extractfile(member)\n"
+        "            if source is None:\n"
+        "                raise SystemExit('workspace archive file missing payload')\n"
+        "            target.write_bytes(source.read())\n"
+        "            written.append(target)\n"
+        "if os.environ.get('RUMI_WORKSPACE_SEED_MODE') == 'read_only':\n"
+        "    for target in sorted(written, key=lambda item: len(item.parts), reverse=True):\n"
+        "        try:\n"
+        "            target.chmod(target.stat().st_mode & ~0o222)\n"
+        "        except OSError:\n"
+        "            pass\n"
+    )
+    return (
+        "set -e\n"
+        "mkdir -p /workspace\n"
+        "chmod -R u+w /workspace >/dev/null 2>&1 || true\n"
+        "find /workspace -mindepth 1 -maxdepth 1 ! -name .rumi -exec rm -rf {} +\n"
+        f"RUMI_WORKSPACE_SEED_MODE={shlex.quote(mode)} python3 -c {shlex.quote(python_script)}\n"
+    )
 
 
 def _desktop_start_script(

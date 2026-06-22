@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import io
+import tarfile
 from collections.abc import Sequence
 
 import pytest
@@ -177,17 +179,34 @@ def _create_spec(
     *,
     startup: dict[str, object] | None = None,
     provisioning: dict[str, object] | None = None,
+    workspace_binding: WorkspaceBinding | None = None,
 ) -> SandboxCreateSpec:
     return SandboxCreateSpec(
         name="Managed Ubuntu",
         template=template,
         provider_id="auto",
-        workspace_binding=WorkspaceBinding(workspace_id="workspace-1", mode="read_only"),
+        workspace_binding=workspace_binding or WorkspaceBinding(workspace_id="workspace-1", mode="read_only"),
         metadata={
             "startup": startup or {"starter": "terminal"},
             "desktop_provisioning": provisioning or {},
         },
     )
+
+
+def _workspace_seed_call(fake: FakeManagedUbuntuCli, mode: str) -> tuple[str, str]:
+    marker = f"RUMI_WORKSPACE_SEED_MODE={mode}"
+    for command, input_text, _timeout in fake.calls:
+        if len(command) >= 2 and command[-2] == "-lc" and marker in command[-1]:
+            assert input_text
+            return command[-1], input_text
+    raise AssertionError(f"workspace seed call for {mode!r} was not made")
+
+
+def _workspace_seed_member(payload: str, member_name: str) -> bytes:
+    with tarfile.open(fileobj=io.BytesIO(base64.b64decode(payload)), mode="r:gz") as archive:
+        member = archive.extractfile(member_name)
+        assert member is not None
+        return member.read()
 
 
 def test_mac_lima_provider_ensure_and_guest_desktop_flow(monkeypatch) -> None:
@@ -424,6 +443,57 @@ def test_managed_ubuntu_template_packages_are_guest_provisioned(monkeypatch) -> 
     assert "python3" in provision_script
     assert "python3-pip" in provision_script
     assert "not-a-known-app" not in provision_script
+
+
+def test_managed_ubuntu_seeds_trusted_workspace_read_only(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    workspace_root = tmp_path / "workspace"
+    (workspace_root / "src").mkdir(parents=True)
+    (workspace_root / "src" / "app.py").write_text("print('seeded')\n", encoding="utf-8")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec", "sandbox.files"}))
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(
+        _create_spec(
+            _template(desktop=False),
+            workspace_binding=WorkspaceBinding(workspace_id="workspace-1", mode="read_only", root=str(workspace_root)),
+        )
+    )
+    started = provider.start(instance)
+    seed_script, payload = _workspace_seed_call(fake, "read_only")
+
+    assert ensured.ok is True
+    assert started.state == "ready"
+    assert "find /workspace -mindepth 1 -maxdepth 1 ! -name .rumi" in seed_script
+    assert "& ~0o222" in seed_script
+    assert _workspace_seed_member(payload, "src/app.py") == b"print('seeded')\n"
+
+
+def test_managed_ubuntu_seeds_trusted_workspace_overlay(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "package.json").write_text('{"scripts":{"test":"true"}}\n', encoding="utf-8")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec", "sandbox.files"}))
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(
+        _create_spec(
+            _template(desktop=False),
+            workspace_binding=WorkspaceBinding(workspace_id="workspace-1", mode="overlay", root=str(workspace_root)),
+        )
+    )
+    started = provider.start(instance)
+    seed_script, payload = _workspace_seed_call(fake, "overlay")
+
+    assert ensured.ok is True
+    assert started.state == "ready"
+    assert "RUMI_WORKSPACE_SEED_MODE=overlay" in seed_script
+    assert _workspace_seed_member(payload, "package.json") == b'{"scripts":{"test":"true"}}\n'
 
 
 def test_default_sandbox_api_registers_cross_platform_runtime_providers() -> None:
