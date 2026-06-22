@@ -70,6 +70,7 @@ export type RuntimeDoctorResult = {
 };
 
 export type RuntimeOperationStatus =
+  | "running"
   | "planned"
   | "downloading"
   | "verified"
@@ -91,6 +92,13 @@ export type RuntimeOperation = {
   error?: RuntimeDoctorIssue | string | null;
   provider_id?: string | null;
   updated_at?: string;
+  progress_events?: Array<{
+    operation_id: string;
+    stage: string;
+    message: string;
+    percent?: number | null;
+    recorded_at?: string;
+  }>;
 };
 
 export type SandboxTemplateKind = "pack" | "coding" | "desktop" | "tool" | "unknown";

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -57,6 +58,19 @@ def _trusted_workspace(tmp_path, monkeypatch, *, workspace_id: str = "workspace-
     root.mkdir(exist_ok=True)
     WorkspaceStore().create(root, workspace_id=workspace_id, trusted=True)
     return root
+
+
+def _wait_for_runtime_operation(api, operation_id: str, *, timeout_seconds: float = 3.0) -> dict[str, object]:
+    deadline = time.monotonic() + timeout_seconds
+    latest: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        latest = api.run({"_handler": "runtime_operation_get", "operation_id": operation_id}, {})
+        if latest.get("status") == "ok":
+            data = latest.get("data")
+            if isinstance(data, dict) and data.get("status") in {"completed", "failed", "cancelled"}:
+                return data
+        time.sleep(0.02)
+    raise AssertionError(f"Runtime operation did not finish: {operation_id}; latest={latest}")
 
 
 def test_exec_protocol_rejects_raw_command_strings_and_accepts_argv() -> None:
@@ -713,7 +727,7 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert route_specs[("POST", "/api/desktops/{seat_id}/input")].path_inject == {"seat_id": "seat_id"}
     providers = api.run({"_handler": "runtime_providers"}, {})
     doctor = api.run({"_handler": "runtime_doctor"}, {})
-    ensure = api.run({"_handler": "runtime_ensure"}, {})
+    ensure = api.run({"_handler": "runtime_ensure", "provider_id": "missing-provider"}, {})
     update = api.run({"_handler": "runtime_update", "provider_id": "missing-provider"}, {})
     uninstall = api.run({"_handler": "runtime_uninstall", "provider_id": "missing-provider"}, {})
     templates = api.run({"_handler": "sandbox_templates"}, {})
@@ -751,7 +765,11 @@ def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -
     )
     api._reset_service_for_tests(service)
     try:
-        update = api.run({"_handler": "runtime_update", "provider_id": "fake-runtime"}, {})
+        update = api.run(
+            {"_handler": "runtime_update", "provider_id": "fake-runtime", "request_id": "fake-update"},
+            {},
+        )
+        update_done = _wait_for_runtime_operation(api, "fake-update")
         operations = api.run({"_handler": "runtime_operations"}, {})
         operation_get = api.run(
             {"_handler": "runtime_operation_get", "operation_id": "fake-update"},
@@ -761,15 +779,21 @@ def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -
             {"_handler": "runtime_operation_cancel", "operation_id": "fake-update"},
             {},
         )
-        uninstall = api.run({"_handler": "runtime_uninstall", "provider_id": "fake-runtime"}, {})
+        uninstall = api.run(
+            {"_handler": "runtime_uninstall", "provider_id": "fake-runtime", "request_id": "fake-uninstall"},
+            {},
+        )
+        uninstall_done = _wait_for_runtime_operation(api, "fake-uninstall")
     finally:
         api._reset_service_for_tests(None)
 
     assert update["data"]["operation_id"] == "fake-update"
-    assert update["data"]["status"] == "completed"
-    assert update["data"]["step"] == "done"
-    assert update["data"]["message"] == "Fake provider updated"
-    assert update["data"]["progress_events"][0]["stage"] == "done"
+    assert update["data"]["status"] == "running"
+    assert update["data"]["step"] == "queued"
+    assert update_done["status"] == "completed"
+    assert update_done["step"] == "done"
+    assert update_done["message"] == "Fake provider updated"
+    assert update_done["progress_events"][0]["stage"] == "done"
     assert [operation["operation_id"] for operation in operations["data"]["operations"]] == ["fake-update"]
     assert operations["data"]["operations"][0]["progress_events"][0]["message"] == "Fake provider updated"
     assert operation_get["data"]["operation_id"] == "fake-update"
@@ -778,8 +802,9 @@ def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -
     assert operation_cancel["data"]["cancelled"] is False
     assert operation_cancel["data"]["status"] == "completed"
     assert uninstall["data"]["operation_id"] == "fake-uninstall"
-    assert uninstall["data"]["status"] == "completed"
-    assert uninstall["data"]["progress_events"][0]["stage"] == "done"
+    assert uninstall["data"]["status"] == "running"
+    assert uninstall_done["status"] == "completed"
+    assert uninstall_done["progress_events"][0]["stage"] == "done"
 
 
 def test_runtime_ensure_persists_running_progress_events(tmp_path) -> None:
@@ -824,11 +849,11 @@ def test_runtime_ensure_persists_running_progress_events(tmp_path) -> None:
     )
     api._reset_service_for_tests(service)
     try:
-        ensure = api.run({"_handler": "runtime_ensure", "provider_id": "fake-runtime"}, {})
-        operation_get = api.run(
-            {"_handler": "runtime_operation_get", "operation_id": "fake-ensure"},
+        ensure = api.run(
+            {"_handler": "runtime_ensure", "provider_id": "fake-runtime", "request_id": "fake-ensure"},
             {},
         )
+        operation_get = _wait_for_runtime_operation(api, "fake-ensure")
     finally:
         api._reset_service_for_tests(None)
     reloaded = RuntimeOperationStore(tmp_path / "runtime_operations.json")
@@ -837,11 +862,76 @@ def test_runtime_ensure_persists_running_progress_events(tmp_path) -> None:
     assert provider.running_snapshot["status"] == "running"
     assert provider.running_snapshot["step"] == "doctor"
     assert provider.running_snapshot["progress"] == 10
-    assert ensure["data"]["status"] == "completed"
-    assert ensure["data"]["progress"] == 100
-    assert [event["stage"] for event in ensure["data"]["progress_events"]] == ["doctor", "ready"]
-    assert operation_get["data"]["status"] == "completed"
+    assert ensure["data"]["status"] == "running"
+    assert ensure["data"]["progress"] == 0
+    assert operation_get["status"] == "completed"
+    assert operation_get["progress"] == 100
+    assert [event["stage"] for event in operation_get["progress_events"]] == ["doctor", "ready"]
     assert reloaded.get("fake-ensure")["progress_events"][1]["message"] == "Fake runtime ready"
+
+
+def test_runtime_operation_cancel_preserves_cancelled_status_after_worker_finishes(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    class BlockingRuntimeProvider(FakeRuntimeProvider):
+        def __init__(self) -> None:
+            super().__init__(provider_id="fake-runtime")
+
+        def ensure(self, request, progress):
+            progress.emit(
+                ProgressEvent(
+                    operation_id="provider-op",
+                    stage="packages",
+                    message="Installing fake runtime packages",
+                    percent=40,
+                )
+            )
+            started.set()
+            release.wait(timeout=3)
+            progress.emit(
+                ProgressEvent(
+                    operation_id="provider-op",
+                    stage="ready",
+                    message="Fake runtime ready",
+                    percent=100,
+                )
+            )
+            finished.set()
+            return OperationResult(ok=True, provider_id=self.provider_id, operation_id="provider-op", status="ready")
+
+    registry = ProviderRegistry()
+    registry.register(BlockingRuntimeProvider())
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        operation_store=RuntimeOperationStore(tmp_path / "runtime_operations.json"),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        ensure = api.run(
+            {"_handler": "runtime_ensure", "provider_id": "fake-runtime", "request_id": "cancel-op"},
+            {},
+        )
+        assert started.wait(timeout=3)
+        cancelled = api.run({"_handler": "runtime_operation_cancel", "operation_id": "cancel-op"}, {})
+        release.set()
+        assert finished.wait(timeout=3)
+        final = api.run({"_handler": "runtime_operation_get", "operation_id": "cancel-op"}, {})
+    finally:
+        release.set()
+        api._reset_service_for_tests(None)
+
+    assert ensure["data"]["status"] == "running"
+    assert cancelled["data"]["status"] == "cancelled"
+    assert cancelled["data"]["cancelled"] is True
+    assert final["data"]["status"] == "cancelled"
+    assert [event["stage"] for event in final["data"]["progress_events"]] == ["packages", "ready"]
 
 
 def test_runtime_operation_store_preserves_cancelled_running_operation(tmp_path) -> None:
@@ -924,12 +1014,17 @@ def test_runtime_uninstall_reconciles_manager_desktops_and_local_state(tmp_path)
     lease_manager.acquire(seat_id, "human")
     api._reset_service_for_tests(service)
     try:
-        uninstall = api.run({"_handler": "runtime_uninstall", "provider_id": "fake-runtime"}, {})
+        uninstall = api.run(
+            {"_handler": "runtime_uninstall", "provider_id": "fake-runtime", "request_id": "fake-uninstall-reconcile"},
+            {},
+        )
+        uninstall_done = _wait_for_runtime_operation(api, "fake-uninstall-reconcile")
     finally:
         api._reset_service_for_tests(None)
 
     status = service.manager.status(seat_id)
-    assert uninstall["data"]["status"] == "completed"
+    assert uninstall["data"]["status"] == "running"
+    assert uninstall_done["status"] == "completed"
     assert status["state"] == "stopped"
     assert "uninstalled" in status["last_error"]
     assert service.frame_cache.last_metadata(seat_id) is None
@@ -946,13 +1041,20 @@ def test_runtime_uninstall_reconciles_manager_desktops_and_local_state(tmp_path)
     api._reset_service_for_tests(service)
     try:
         remove_state = api.run(
-            {"_handler": "runtime_uninstall", "provider_id": "fake-runtime", "remove_state": True},
+            {
+                "_handler": "runtime_uninstall",
+                "provider_id": "fake-runtime",
+                "remove_state": True,
+                "request_id": "fake-uninstall-remove-state",
+            },
             {},
         )
+        remove_state_done = _wait_for_runtime_operation(api, "fake-uninstall-remove-state")
     finally:
         api._reset_service_for_tests(None)
 
-    assert remove_state["data"]["status"] == "completed"
+    assert remove_state["data"]["status"] == "running"
+    assert remove_state_done["status"] == "completed"
     assert service.manager.list_instances() == []
 
 

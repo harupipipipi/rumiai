@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import json
 import platform
+import threading
+import uuid
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -145,15 +147,23 @@ def _operation_store(service: _SandboxApiService) -> RuntimeOperationStore:
 
 
 class _RecordingProgressSink:
-    def __init__(self, service: _SandboxApiService, *, provider_id: str) -> None:
+    def __init__(self, service: _SandboxApiService, *, provider_id: str, operation_id: str) -> None:
         self._service = service
         self._provider_id = provider_id
+        self._operation_id = operation_id
         self.events: list[ProgressEvent] = []
 
     def emit(self, event: ProgressEvent) -> None:
-        self.events.append(event)
+        normalized = ProgressEvent(
+            operation_id=self._operation_id,
+            stage=event.stage,
+            message=event.message,
+            percent=event.percent,
+            details=event.details,
+        )
+        self.events.append(normalized)
         _operation_store(self._service).append_progress(
-            _progress_event_payload(event),
+            _progress_event_payload(normalized),
             provider_id=self._provider_id,
             updated_at=timestamp(),
         )
@@ -200,9 +210,18 @@ def _runtime_ensure(service: _SandboxApiService, payload: dict[str, Any]) -> dic
         provider = service.provider_registry.get(provider_id)
     except SandboxContractError:
         return _record_operation(service, _runtime_operation("failed", provider_id=provider_id))
-    sink = _RecordingProgressSink(service, provider_id=provider_id)
-    result = provider.ensure(EnsureRuntimeRequest(provider_id=provider_id, requirements=requirements), sink)
-    return _record_operation(service, _operation_payload(result, progress_events=sink.events))
+    operation_id = _runtime_operation_id(payload, provider_id=provider_id, action="ensure")
+    operation = _start_runtime_operation(
+        service,
+        operation_id=operation_id,
+        provider_id=provider_id,
+        action="ensure",
+        worker=lambda sink: provider.ensure(
+            EnsureRuntimeRequest(provider_id=provider_id, requirements=requirements),
+            sink,
+        ),
+    )
+    return operation
 
 
 def _runtime_update(service: _SandboxApiService, payload: dict[str, Any]) -> dict[str, Any]:
@@ -211,9 +230,15 @@ def _runtime_update(service: _SandboxApiService, payload: dict[str, Any]) -> dic
         provider = service.provider_registry.get(provider_id)
     except SandboxContractError:
         return _record_operation(service, _runtime_operation("failed", provider_id=provider_id, operation_id="managed-runtime-update"))
-    sink = _RecordingProgressSink(service, provider_id=provider_id)
-    result = provider.update(UpdateRuntimeRequest(provider_id=provider_id), sink)
-    return _record_operation(service, _operation_payload(result, progress_events=sink.events))
+    operation_id = _runtime_operation_id(payload, provider_id=provider_id, action="update")
+    operation = _start_runtime_operation(
+        service,
+        operation_id=operation_id,
+        provider_id=provider_id,
+        action="update",
+        worker=lambda sink: provider.update(UpdateRuntimeRequest(provider_id=provider_id), sink),
+    )
+    return operation
 
 
 def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> dict[str, Any]:
@@ -223,19 +248,29 @@ def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> 
         provider = service.provider_registry.get(provider_id)
     except SandboxContractError:
         return _record_operation(service, _runtime_operation("failed", provider_id=provider_id, operation_id="managed-runtime-uninstall"))
-    sink = _RecordingProgressSink(service, provider_id=provider_id)
-    result = provider.uninstall(
-        UninstallRuntimeRequest(
-            provider_id=provider_id,
-            remove_state=remove_state,
-        ),
-        sink,
+    operation_id = _runtime_operation_id(payload, provider_id=provider_id, action="uninstall")
+
+    def worker(sink: _RecordingProgressSink) -> OperationResult:
+        result = provider.uninstall(
+            UninstallRuntimeRequest(
+                provider_id=provider_id,
+                remove_state=remove_state,
+            ),
+            sink,
+        )
+        if result.ok:
+            for seat_id in service.manager.mark_provider_uninstalled(provider_id, remove_state=remove_state):
+                service.frame_cache.discard(seat_id)
+                service.lease_manager.invalidate(seat_id)
+        return result
+
+    return _start_runtime_operation(
+        service,
+        operation_id=operation_id,
+        provider_id=provider_id,
+        action="uninstall",
+        worker=worker,
     )
-    if result.ok:
-        for seat_id in service.manager.mark_provider_uninstalled(provider_id, remove_state=remove_state):
-            service.frame_cache.discard(seat_id)
-            service.lease_manager.invalidate(seat_id)
-    return _record_operation(service, _operation_payload(result, progress_events=sink.events))
 
 
 def _runtime_operation_get(service: _SandboxApiService, payload: dict[str, Any]):
@@ -256,6 +291,91 @@ def _runtime_operation_cancel(service: _SandboxApiService, payload: dict[str, An
 
 def _record_operation(service: _SandboxApiService, operation: dict[str, Any]) -> dict[str, Any]:
     return _operation_store(service).put(operation)
+
+
+def _start_runtime_operation(
+    service: _SandboxApiService,
+    *,
+    operation_id: str,
+    provider_id: str,
+    action: str,
+    worker: Any,
+) -> dict[str, Any]:
+    operation = _record_operation(
+        service,
+        {
+            "operation_id": operation_id,
+            "status": "running",
+            "step": "queued",
+            "message": f"Runtime {action} operation queued.",
+            "progress": 0,
+            "progress_events": [],
+            "reboot_required": False,
+            "provider_id": provider_id,
+            "updated_at": timestamp(),
+            "error": None,
+        },
+    )
+
+    def run_worker() -> None:
+        sink = _RecordingProgressSink(service, provider_id=provider_id, operation_id=operation_id)
+        try:
+            result = worker(sink)
+            _record_operation(
+                service,
+                _operation_payload(result, progress_events=sink.events, operation_id=operation_id),
+            )
+        except SandboxContractError as exc:
+            _record_operation(
+                service,
+                {
+                    "operation_id": operation_id,
+                    "status": "failed",
+                    "step": "failed",
+                    "message": exc.message,
+                    "progress": 0,
+                    "progress_events": [_progress_event_payload(event) for event in sink.events],
+                    "reboot_required": False,
+                    "provider_id": provider_id,
+                    "updated_at": timestamp(),
+                    "error": {"code": exc.code, "message": exc.message, "details": _jsonable(exc.details)},
+                },
+            )
+        except Exception as exc:
+            _record_operation(
+                service,
+                {
+                    "operation_id": operation_id,
+                    "status": "failed",
+                    "step": "failed",
+                    "message": f"Runtime {action} operation failed: {exc}",
+                    "progress": 0,
+                    "progress_events": [_progress_event_payload(event) for event in sink.events],
+                    "reboot_required": False,
+                    "provider_id": provider_id,
+                    "updated_at": timestamp(),
+                    "error": {"code": RUNTIME_NOT_READY, "message": str(exc)},
+                },
+            )
+
+    thread = threading.Thread(
+        target=run_worker,
+        name=f"rumi-runtime-{provider_id}-{action}",
+        daemon=True,
+    )
+    thread.start()
+    return operation
+
+
+def _runtime_operation_id(payload: dict[str, Any], *, provider_id: str, action: str) -> str:
+    raw_request_id = str(payload.get("request_id") or "").strip()
+    if raw_request_id:
+        safe = "".join(char if char.isalnum() or char in "._:-" else "-" for char in raw_request_id)
+        safe = safe.strip(".:-_")
+        if safe:
+            return safe[:120]
+    clean_provider = "".join(char if char.isalnum() or char in "._:-" else "-" for char in provider_id).strip(".:-_")
+    return f"{clean_provider or 'runtime'}-{action}-{uuid.uuid4().hex[:12]}"
 
 
 def _runtime_operation(status: str, *, provider_id: Any = None, operation_id: str = "managed-runtime-setup") -> dict[str, Any]:
@@ -602,14 +722,19 @@ def _provider_payload(status: RuntimeProviderStatus, *, selected: bool) -> dict[
     }
 
 
-def _operation_payload(result: OperationResult, *, progress_events: list[ProgressEvent] | None = None) -> dict[str, Any]:
+def _operation_payload(
+    result: OperationResult,
+    *,
+    progress_events: list[ProgressEvent] | None = None,
+    operation_id: str | None = None,
+) -> dict[str, Any]:
     events = [_progress_event_payload(event) for event in progress_events or []]
     last_event = events[-1] if events else {}
     event_progress = last_event.get("percent")
     progress = int(float(event_progress)) if isinstance(event_progress, (int, float)) else (100 if result.ok else 0)
     message = str(last_event.get("message") or ("Runtime provider is ready." if result.ok else (result.user_action or "Runtime provider is not ready.")))
     return {
-        "operation_id": result.operation_id,
+        "operation_id": operation_id or result.operation_id,
         "status": "completed" if result.ok else "failed",
         "step": str(last_event.get("stage") or result.status),
         "message": message,
