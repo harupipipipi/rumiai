@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
+import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import uuid
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from ..errors import INVALID_EXEC_REQUEST, RUNTIME_PROVIDER_UNAVAILABLE, SandboxContractError
 from ..guest.protocol import DesktopInputRequest
@@ -26,6 +30,23 @@ from .base import ProgressSink
 
 
 DESKTOP_CAPABILITIES = frozenset({"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"})
+LINUX_NATIVE_COMMAND_PACKAGES = {
+    "Xvfb": "xvfb",
+    "openbox": "openbox",
+    "xdotool": "xdotool",
+    "import": "imagemagick",
+}
+LINUX_NATIVE_APT_PACKAGES = ("xvfb", "openbox", "xdotool", "imagemagick", "x11-utils", "ca-certificates")
+
+
+@dataclass(frozen=True)
+class LinuxCommandResult:
+    returncode: int
+    stdout: str = ""
+    stderr: str = ""
+
+
+LinuxRunner = Callable[[Sequence[str], str | None, float | None], LinuxCommandResult]
 
 
 class LinuxNativeProvider:
@@ -38,8 +59,18 @@ class LinuxNativeProvider:
 
     provider_id = "linux_native"
 
-    def __init__(self, *, session_factory: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        session_factory: Any | None = None,
+        runner: LinuxRunner | None = None,
+        apt_get_path: str | None = None,
+        sudo_path: str | None = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._runner = runner or _subprocess_runner
+        self._configured_apt_get_path = str(apt_get_path).strip() if apt_get_path else None
+        self._configured_sudo_path = str(sudo_path).strip() if sudo_path else None
         self._instances: dict[str, ProviderInstance] = {}
         self._sessions: dict[str, Any] = {}
 
@@ -76,6 +107,15 @@ class LinuxNativeProvider:
 
         missing_capabilities = sorted(request.required_capabilities - capabilities)
         missing.extend(missing_capabilities)
+        if missing_capabilities:
+            diagnostics.append(
+                Diagnostic(
+                    code="LINUX_NATIVE_CAPABILITIES_UNSUPPORTED",
+                    message="Linux native desktop runtime does not provide every requested sandbox capability.",
+                    severity="warning",
+                    details={"missing_capabilities": missing_capabilities},
+                )
+            )
         ready = available and installed and not missing_capabilities
         return RuntimeProviderStatus(
             provider_id=self.provider_id,
@@ -87,21 +127,34 @@ class LinuxNativeProvider:
             capabilities=capabilities,
             missing_requirements=tuple(missing),
             requires_user_action=bool(missing),
-            user_action=None if ready else "Open the managed runtime setup flow to install the Linux desktop helper.",
+            user_action=None if ready else _linux_native_user_action(available=available, missing_capabilities=missing_capabilities),
             reboot_required=False,
             diagnostics=tuple(diagnostics),
         )
 
     def ensure(self, request: EnsureRuntimeRequest, progress: ProgressSink) -> OperationResult:
-        progress.emit(ProgressEvent(operation_id="linux-native-ensure", stage="doctor", message="Checking Linux native desktop runtime"))
+        operation_id = "linux-native-ensure"
+        progress.emit(ProgressEvent(operation_id=operation_id, stage="doctor", message="Checking Linux native desktop runtime"))
         status = self.doctor(request.requirements)
         if status.ready:
-            progress.emit(ProgressEvent(operation_id="linux-native-ensure", stage="ready", message="Linux native desktop runtime is ready", percent=100))
-            return OperationResult(ok=True, provider_id=self.provider_id, operation_id="linux-native-ensure", status="completed")
+            progress.emit(ProgressEvent(operation_id=operation_id, stage="ready", message="Linux native desktop runtime is ready", percent=100))
+            return OperationResult(ok=True, provider_id=self.provider_id, operation_id=operation_id, status="completed")
+        unsupported_capabilities = sorted(request.requirements.required_capabilities - DESKTOP_CAPABILITIES)
+        if unsupported_capabilities or not sys.platform.startswith("linux"):
+            return _failed_from_status(self.provider_id, operation_id, status)
+
+        install_result = self._install_desktop_packages(progress, operation_id=operation_id, update=False)
+        if install_result is not None:
+            return install_result
+
+        status = self.doctor(request.requirements)
+        if status.ready:
+            progress.emit(ProgressEvent(operation_id=operation_id, stage="ready", message="Linux native desktop runtime is ready", percent=100))
+            return OperationResult(ok=True, provider_id=self.provider_id, operation_id=operation_id, status="completed")
         return OperationResult(
             ok=False,
             provider_id=self.provider_id,
-            operation_id="linux-native-ensure",
+            operation_id=operation_id,
             status="failed",
             diagnostics=status.diagnostics,
             requires_user_action=status.requires_user_action,
@@ -111,15 +164,19 @@ class LinuxNativeProvider:
 
     def update(self, request: UpdateRuntimeRequest, progress: ProgressSink) -> OperationResult:
         del request
-        progress.emit(ProgressEvent(operation_id="linux-native-update", stage="not_ready", message="Linux native desktop runtime has no bundled updater yet", percent=0))
-        return OperationResult(
-            ok=False,
-            provider_id=self.provider_id,
-            operation_id="linux-native-update",
-            status="failed",
-            requires_user_action=True,
-            user_action="Linux native runtime update is not implemented in this build.",
-        )
+        operation_id = "linux-native-update"
+        status = self.doctor(RuntimeRequirements(provider_id=self.provider_id))
+        if not sys.platform.startswith("linux"):
+            return _failed_from_status(self.provider_id, operation_id, status)
+        progress.emit(ProgressEvent(operation_id=operation_id, stage="packages", message="Updating Linux native desktop helper packages", percent=20))
+        install_result = self._install_desktop_packages(progress, operation_id=operation_id, update=True)
+        if install_result is not None:
+            return install_result
+        status = self.doctor(RuntimeRequirements(provider_id=self.provider_id))
+        if status.installed:
+            progress.emit(ProgressEvent(operation_id=operation_id, stage="ready", message="Linux native desktop helper packages are ready", percent=100))
+            return OperationResult(ok=True, provider_id=self.provider_id, operation_id=operation_id, status="completed")
+        return _failed_from_status(self.provider_id, operation_id, status)
 
     def uninstall(self, request: UninstallRuntimeRequest, progress: ProgressSink) -> OperationResult:
         del request
@@ -247,6 +304,93 @@ class LinuxNativeProvider:
         config = X11VirtualSessionConfig(width=width or 1440, height=height or 900)
         return X11VirtualSession(config)
 
+    def _install_desktop_packages(self, progress: ProgressSink, *, operation_id: str, update: bool) -> OperationResult | None:
+        apt_get = self._apt_get_path()
+        if apt_get is None:
+            return _failed_operation(
+                self.provider_id,
+                operation_id,
+                Diagnostic(
+                    code="LINUX_NATIVE_PACKAGE_MANAGER_MISSING",
+                    message="apt-get was not found; Linux native desktop dependencies cannot be installed automatically.",
+                    severity="error",
+                ),
+                user_action="Install xvfb, openbox, xdotool, and ImageMagick manually or use a managed Ubuntu provider.",
+            )
+
+        prefix_result = self._apt_prefix(apt_get, operation_id=operation_id)
+        if isinstance(prefix_result, OperationResult):
+            return prefix_result
+        update_command, install_command = prefix_result
+
+        progress.emit(
+            ProgressEvent(
+                operation_id=operation_id,
+                stage="apt_update",
+                message="Refreshing Linux package indexes",
+                percent=35 if not update else 30,
+            )
+        )
+        updated = self._run(update_command, timeout=300)
+        if updated.returncode != 0:
+            return _command_failed(self.provider_id, operation_id, "LINUX_NATIVE_APT_UPDATE_FAILED", "Linux native package index refresh failed.", updated, update_command)
+
+        package_details = {
+            "packages": list(LINUX_NATIVE_APT_PACKAGES),
+            "command_packages": dict(LINUX_NATIVE_COMMAND_PACKAGES),
+        }
+        progress.emit(
+            ProgressEvent(
+                operation_id=operation_id,
+                stage="apt_install",
+                message="Installing Linux native desktop helper packages",
+                percent=70,
+                details=package_details,
+            )
+        )
+        installed = self._run(install_command, timeout=600)
+        if installed.returncode != 0:
+            return _command_failed(
+                self.provider_id,
+                operation_id,
+                "LINUX_NATIVE_PACKAGE_INSTALL_FAILED",
+                "Linux native desktop helper package installation failed.",
+                installed,
+                install_command,
+            )
+        return None
+
+    def _apt_prefix(self, apt_get: str, *, operation_id: str) -> tuple[list[str], list[str]] | OperationResult:
+        if _is_root():
+            return [apt_get, "update"], ["env", "DEBIAN_FRONTEND=noninteractive", apt_get, "install", "-y", *LINUX_NATIVE_APT_PACKAGES]
+        sudo = self._sudo_path()
+        if sudo is None:
+            return _failed_operation(
+                self.provider_id,
+                operation_id,
+                Diagnostic(
+                    code="LINUX_NATIVE_SUDO_MISSING",
+                    message="sudo was not found; package installation requires root privileges.",
+                    severity="error",
+                ),
+                user_action="Run the setup from a root-capable Linux environment or install the desktop helper packages manually.",
+            )
+        return [sudo, "-n", apt_get, "update"], [sudo, "-n", "env", "DEBIAN_FRONTEND=noninteractive", apt_get, "install", "-y", *LINUX_NATIVE_APT_PACKAGES]
+
+    def _apt_get_path(self) -> str | None:
+        return self._configured_apt_get_path or shutil.which("apt-get")
+
+    def _sudo_path(self) -> str | None:
+        return self._configured_sudo_path or shutil.which("sudo")
+
+    def _run(self, command: Sequence[str], *, input_text: str | None = None, timeout: float | None = None) -> LinuxCommandResult:
+        try:
+            return self._runner(tuple(str(part) for part in command), input_text, timeout)
+        except TimeoutError as exc:
+            return LinuxCommandResult(returncode=124, stderr=str(exc))
+        except OSError as exc:
+            return LinuxCommandResult(returncode=127, stderr=str(exc))
+
 
 class LinuxNativeGuestAgent:
     def __init__(self, session: Any) -> None:
@@ -350,6 +494,92 @@ def _unlink_capture_file(path: str) -> bool:
         return existed and not capture_path.exists()
     except OSError:
         return False
+
+
+def _failed_from_status(provider_id: str, operation_id: str, status: RuntimeProviderStatus) -> OperationResult:
+    return OperationResult(
+        ok=False,
+        provider_id=provider_id,
+        operation_id=operation_id,
+        status="failed",
+        diagnostics=status.diagnostics,
+        requires_user_action=status.requires_user_action,
+        user_action=status.user_action,
+        reboot_required=status.reboot_required,
+    )
+
+
+def _failed_operation(provider_id: str, operation_id: str, diagnostic: Diagnostic, *, user_action: str | None = None) -> OperationResult:
+    return OperationResult(
+        ok=False,
+        provider_id=provider_id,
+        operation_id=operation_id,
+        status="failed",
+        diagnostics=(diagnostic,),
+        requires_user_action=True,
+        user_action=user_action or diagnostic.message,
+    )
+
+
+def _command_failed(
+    provider_id: str,
+    operation_id: str,
+    code: str,
+    message: str,
+    result: LinuxCommandResult,
+    command: Sequence[str],
+) -> OperationResult:
+    return _failed_operation(
+        provider_id,
+        operation_id,
+        Diagnostic(
+            code=code,
+            message=message,
+            severity="error",
+            details={
+                "argv": list(command[:4]),
+                "exit_code": result.returncode,
+                "stdout": result.stdout.strip()[:1000],
+                "stderr": result.stderr.strip()[:1000],
+            },
+        ),
+    )
+
+
+def _linux_native_user_action(*, available: bool, missing_capabilities: Sequence[str]) -> str:
+    if not available:
+        return "Run Linux native desktops on a Linux host or select a managed Ubuntu provider."
+    if missing_capabilities:
+        return "Select the desktop.linux_native template for the linux_native provider, or use Lima/WSL/Docker for sandbox exec/files."
+    return "Open the managed runtime setup flow to install the Linux desktop helper packages."
+
+
+def _is_root() -> bool:
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is None:
+        return False
+    try:
+        return int(geteuid()) == 0
+    except OSError:
+        return False
+
+
+def _subprocess_runner(command: Sequence[str], input_text: str | None, timeout: float | None) -> LinuxCommandResult:
+    try:
+        completed = subprocess.run(
+            [str(part) for part in command],
+            input=input_text,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else str(exc.stdout or "")
+        stderr = exc.stderr.decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or "")
+        return LinuxCommandResult(returncode=124, stdout=stdout, stderr=stderr or str(exc))
+    return LinuxCommandResult(returncode=int(completed.returncode), stdout=completed.stdout or "", stderr=completed.stderr or "")
 
 
 def _positive_int(value: object, fallback: int) -> int:
