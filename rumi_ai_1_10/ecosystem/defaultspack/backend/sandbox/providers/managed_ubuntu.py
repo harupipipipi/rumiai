@@ -348,6 +348,8 @@ class ManagedUbuntuProvider:
             display=str(instance.opaque_state.get("display") or DEFAULT_DISPLAY),
             width=_positive_int(instance.opaque_state.get("width"), 1440),
             height=_positive_int(instance.opaque_state.get("height"), 900),
+            memory_mb=_optional_positive_int(resources.get("memory_mb")),
+            pids=_optional_positive_int(resources.get("pids")),
             output_bytes=_optional_positive_int(resources.get("output_bytes")),
             timeout_ms=_optional_positive_int(resources.get("timeout_ms")),
             network_disabled=_instance_network_disabled(instance),
@@ -562,6 +564,8 @@ class ManagedUbuntuGuestAgent:
         display: str,
         width: int,
         height: int,
+        memory_mb: int | None = None,
+        pids: int | None = None,
         output_bytes: int | None = None,
         timeout_ms: int | None = None,
         network_disabled: bool = False,
@@ -573,6 +577,8 @@ class ManagedUbuntuGuestAgent:
         self._display = display
         self._width = width
         self._height = height
+        self._memory_mb = memory_mb
+        self._pids = pids
         self._output_bytes = output_bytes
         self._timeout_ms = timeout_ms
         self._network_disabled = network_disabled
@@ -581,6 +587,7 @@ class ManagedUbuntuGuestAgent:
         request = GuestExecRequest.from_payload(payload)
         timeout_ms = min(request.timeout_ms, self._timeout_ms) if self._timeout_ms else request.timeout_ms
         argv = _exec_argv(request.cwd, request.argv)
+        argv = _resource_limited_argv(argv, memory_mb=self._memory_mb, pids=self._pids)
         if self._network_disabled:
             argv = _network_disabled_argv(argv)
         result = self._run(argv, input_text=request.stdin, timeout=max(1, timeout_ms / 1000))
@@ -958,6 +965,21 @@ def _exec_argv(cwd: str, argv: Sequence[str]) -> tuple[str, ...]:
 
 def _network_disabled_argv(argv: Sequence[str]) -> tuple[str, ...]:
     return ("unshare", "--user", "--map-root-user", "--net", "--", *argv)
+
+
+def _resource_limited_argv(argv: Sequence[str], *, memory_mb: int | None, pids: int | None) -> tuple[str, ...]:
+    memory_kb = int(memory_mb * 1024) if memory_mb and memory_mb > 0 else 0
+    pids_limit = int(pids) if pids and pids > 0 else 0
+    if memory_kb <= 0 and pids_limit <= 0:
+        return tuple(argv)
+    script = (
+        "set -e\n"
+        "if [ \"$1\" != '0' ]; then ulimit -v \"$1\"; fi\n"
+        "if [ \"$2\" != '0' ]; then ulimit -u \"$2\"; fi\n"
+        "shift 2\n"
+        "exec \"$@\"\n"
+    )
+    return ("bash", "-lc", script, "rumi-resource-limit", str(memory_kb), str(pids_limit), *argv)
 
 
 def _instance_network_disabled(instance: ProviderInstance) -> bool:
