@@ -27,6 +27,8 @@ class FakeDockerCli:
         if cmd[1:3] == ["info", "--format"]:
             return DockerCommandResult(returncode=0, stdout="25.0.0\n")
         if cmd[1:3] == ["inspect", "--format"]:
+            if "IPAddress" in cmd[3]:
+                return DockerCommandResult(returncode=0, stdout="172.17.0.2\n")
             name = cmd[-1]
             state = self.states.get(name)
             if state is None:
@@ -45,7 +47,11 @@ class FakeDockerCli:
         if cmd[1:3] == ["rm", "-f"]:
             self.states.pop(cmd[3], None)
             return DockerCommandResult(returncode=0)
+        if cmd[1] == "cp":
+            return DockerCommandResult(returncode=0)
         if cmd[1] == "exec":
+            if cmd[-3:] == ["mkdir", "-p", "/workspace/src"]:
+                return DockerCommandResult(returncode=0)
             return DockerCommandResult(returncode=0, stdout=self.exec_stdout)
         return DockerCommandResult(returncode=1, stderr=f"unexpected docker command: {cmd}")
 
@@ -115,6 +121,7 @@ def test_docker_provider_uses_python_image_for_python_template(tmp_path) -> None
     assert created["ok"] is True
     docker_run = fake.command_with("run")
     assert "python:3.11-slim" in docker_run
+    assert docker_run[docker_run.index("--network") + 1] == "bridge"
     assert "--memory" in docker_run
     assert "4096m" in docker_run
 
@@ -128,3 +135,47 @@ def test_docker_provider_uses_node_image_for_node_template(tmp_path) -> None:
     assert created["ok"] is True
     docker_run = fake.command_with("run")
     assert "node:20-bookworm-slim" in docker_run
+
+
+def test_docker_provider_applies_file_patch_inside_container(tmp_path) -> None:
+    fake = FakeDockerCli()
+    manager = _manager(tmp_path, fake)
+    created = manager.create(display=False, provider_id="docker", template_id="coding.python")
+
+    result = manager.apply_file_patch(
+        created["sandbox_id"],
+        {"files": [{"path": "src/app.py", "content": "print('hello')\n"}]},
+    )
+
+    assert result["ok"] is True
+    assert result["files_written"] == 1
+    mkdir = fake.command_with("exec")
+    copy = fake.command_with("cp")
+    assert mkdir[-3:] == ["mkdir", "-p", "/workspace/src"]
+    assert copy[-1].endswith(":/workspace/src/app.py")
+
+
+def test_docker_provider_rejects_file_patch_path_traversal(tmp_path) -> None:
+    fake = FakeDockerCli()
+    manager = _manager(tmp_path, fake)
+    created = manager.create(display=False, provider_id="docker", template_id="coding.python")
+
+    result = manager.apply_file_patch(
+        created["sandbox_id"],
+        {"path": "../outside.py", "content": "print('outside')"},
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "INVALID_EXEC_REQUEST"
+
+
+def test_docker_provider_exposes_container_port_metadata(tmp_path) -> None:
+    fake = FakeDockerCli()
+    manager = _manager(tmp_path, fake)
+    created = manager.create(display=False, provider_id="docker", template_id="coding.python")
+
+    result = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"})
+
+    assert result["ok"] is True
+    assert result["port"] == 3000
+    assert result["target_url"] == "http://172.17.0.2:3000"

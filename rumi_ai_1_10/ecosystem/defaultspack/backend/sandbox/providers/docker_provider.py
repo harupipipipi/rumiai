@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
+import os
 import platform
 import shutil
 import subprocess
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -23,6 +26,7 @@ from ..models import (
     UninstallRuntimeRequest,
     UpdateRuntimeRequest,
 )
+from ..policy import validate_workspace_relative_path
 from .base import ProgressSink
 
 
@@ -41,6 +45,7 @@ DEFAULT_DOCKER_IMAGE = "ubuntu:22.04"
 CODING_PYTHON_IMAGE = "python:3.11-slim"
 CODING_NODE_IMAGE = "node:20-bookworm-slim"
 CONTAINER_WORKDIR = "/workspace"
+MAX_FILE_PATCH_BYTES = 2 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -345,6 +350,79 @@ class DockerGuestAgent:
             "provider_runtime": "docker",
         }
 
+    def apply_file_patch(self, sandbox_id: str, payload: Mapping[str, object]) -> dict[str, object]:
+        operations = _file_patch_operations(payload)
+        applied: list[dict[str, object]] = []
+        for operation in operations:
+            path = str(operation["path"])
+            content = operation["content"]
+            parent = _container_parent(path)
+            if parent:
+                mkdir = self._runner(
+                    (self._docker_path, "exec", self._container_name, "mkdir", "-p", parent),
+                    None,
+                    30,
+                )
+                if mkdir.returncode != 0:
+                    return _guest_operation_error(sandbox_id, "SANDBOX_FILES_FAILED", "Sandbox file patch could not create parent directory.", mkdir)
+            tmp_path = _write_temp_patch_file(content)
+            try:
+                copy = self._runner(
+                    (self._docker_path, "cp", tmp_path, f"{self._container_name}:{_container_path(path)}"),
+                    None,
+                    60,
+                )
+            finally:
+                _unlink_tmp(tmp_path)
+            if copy.returncode != 0:
+                return _guest_operation_error(sandbox_id, "SANDBOX_FILES_FAILED", "Sandbox file patch could not copy content into the sandbox.", copy)
+            applied.append({"path": path, "bytes": len(content)})
+        return {
+            "ok": True,
+            "sandbox_id": sandbox_id,
+            "applied": applied,
+            "files_written": len(applied),
+            "provider_runtime": "docker",
+        }
+
+    def expose_port(self, sandbox_id: str, payload: Mapping[str, object]) -> dict[str, object]:
+        port = _port_number(payload.get("port"))
+        protocol = str(payload.get("protocol") or "http").strip().lower()
+        if protocol not in {"http", "https", "tcp"}:
+            raise SandboxContractError("INVALID_SANDBOX_PORT", "Sandbox port protocol must be http, https, or tcp.", status_code=400)
+        inspect = self._runner(
+            (
+                self._docker_path,
+                "inspect",
+                "--format",
+                "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                self._container_name,
+            ),
+            None,
+            10,
+        )
+        if inspect.returncode != 0:
+            return _guest_operation_error(sandbox_id, "SANDBOX_PORTS_FAILED", "Sandbox port exposure could not inspect container networking.", inspect)
+        container_ip = inspect.stdout.strip()
+        if not container_ip:
+            raise SandboxContractError(
+                "SANDBOX_PORTS_NOT_READY",
+                "Sandbox container does not have an inspectable network address.",
+                status_code=501,
+            )
+        scheme = "http" if protocol == "tcp" else protocol
+        url = f"{scheme}://{container_ip}:{port}"
+        return {
+            "ok": True,
+            "sandbox_id": sandbox_id,
+            "port": port,
+            "protocol": protocol,
+            "url": url,
+            "target_url": url,
+            "host_reachable": platform.system().lower() == "linux",
+            "provider_runtime": "docker",
+        }
+
     def capture_frame(self, sandbox_id: str, seat_id: str) -> dict[str, object]:
         return {
             "ok": False,
@@ -431,6 +509,8 @@ def _image_for_spec(spec: SandboxCreateSpec) -> str:
 
 
 def _docker_network_mode(spec: SandboxCreateSpec) -> str:
+    if "sandbox.port.expose" in spec.template.allowed_operations or "sandbox.port_forward" in spec.template.provider_requirements:
+        return "bridge"
     if spec.template.network.mode in {"off", "deny", "none"}:
         return "none"
     if spec.template.network.approval_required:
@@ -446,6 +526,102 @@ def _container_cwd(cwd: str) -> str:
     if cwd == ".":
         return CONTAINER_WORKDIR
     return (PurePosixPath(CONTAINER_WORKDIR) / cwd).as_posix()
+
+
+def _container_path(path: str) -> str:
+    return (PurePosixPath(CONTAINER_WORKDIR) / path).as_posix()
+
+
+def _container_parent(path: str) -> str | None:
+    parent = PurePosixPath(_container_path(path)).parent
+    return None if parent.as_posix() == CONTAINER_WORKDIR else parent.as_posix()
+
+
+def _file_patch_operations(payload: Mapping[str, object]) -> list[dict[str, object]]:
+    raw_items = payload.get("files")
+    if raw_items is None:
+        raw_items = payload.get("patch")
+    if raw_items is None:
+        raw_items = [payload]
+    if not isinstance(raw_items, list) or not raw_items:
+        raise SandboxContractError("INVALID_SANDBOX_FILE_PATCH", "Sandbox file patch requires at least one file operation.", status_code=400)
+
+    operations: list[dict[str, object]] = []
+    total_bytes = 0
+    for raw in raw_items:
+        if not isinstance(raw, Mapping):
+            raise SandboxContractError("INVALID_SANDBOX_FILE_PATCH", "Sandbox file patch operations must be objects.", status_code=400)
+        path = validate_workspace_relative_path(raw.get("path"), field="path")
+        op = str(raw.get("op") or raw.get("operation") or "write").strip().lower()
+        if op not in {"write", "replace", "create", "upsert"}:
+            raise SandboxContractError("INVALID_SANDBOX_FILE_PATCH", "Sandbox file patch only supports write-style operations.", status_code=400)
+        content = _patch_content(raw)
+        total_bytes += len(content)
+        if total_bytes > MAX_FILE_PATCH_BYTES:
+            raise SandboxContractError("SANDBOX_FILE_PATCH_TOO_LARGE", "Sandbox file patch payload is too large.", status_code=413)
+        operations.append({"path": path, "content": content})
+    return operations
+
+
+def _patch_content(raw: Mapping[str, object]) -> bytes:
+    if "content_base64" in raw:
+        value = raw.get("content_base64")
+        if not isinstance(value, str):
+            raise SandboxContractError("INVALID_SANDBOX_FILE_PATCH", "content_base64 must be a string.", status_code=400)
+        try:
+            return base64.b64decode(value, validate=True)
+        except Exception as exc:
+            raise SandboxContractError("INVALID_SANDBOX_FILE_PATCH", "content_base64 is invalid.", status_code=400) from exc
+    value = raw.get("content")
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode("utf-8")
+    raise SandboxContractError("INVALID_SANDBOX_FILE_PATCH", "Sandbox file patch requires content or content_base64.", status_code=400)
+
+
+def _write_temp_patch_file(content: bytes) -> str:
+    handle = tempfile.NamedTemporaryFile(prefix="rumi-sandbox-patch-", delete=False)
+    try:
+        handle.write(content)
+        return handle.name
+    finally:
+        handle.close()
+
+
+def _unlink_tmp(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _port_number(value: object) -> int:
+    if isinstance(value, bool):
+        raise SandboxContractError("INVALID_SANDBOX_PORT", "Sandbox port must be an integer.", status_code=400)
+    try:
+        port = int(value or 0)
+    except (TypeError, ValueError) as exc:
+        raise SandboxContractError("INVALID_SANDBOX_PORT", "Sandbox port must be an integer.", status_code=400) from exc
+    if port < 1 or port > 65535:
+        raise SandboxContractError("INVALID_SANDBOX_PORT", "Sandbox port must be between 1 and 65535.", status_code=400)
+    return port
+
+
+def _guest_operation_error(
+    sandbox_id: str,
+    code: str,
+    message: str,
+    result: DockerCommandResult,
+) -> dict[str, object]:
+    return {
+        "ok": False,
+        "sandbox_id": sandbox_id,
+        "code": code,
+        "error": message,
+        "status_code": 502,
+        "details": {"exit_code": result.returncode, "stderr": result.stderr.strip()[:1000]},
+    }
 
 
 def _docker_error(code: str, message: str, result: DockerCommandResult, *, status_code: int) -> SandboxContractError:

@@ -307,12 +307,16 @@ def _sandbox_exec(service: _SandboxApiService, payload: dict[str, Any]):
 def _sandbox_files_apply_patch(service: _SandboxApiService, payload: dict[str, Any]):
     sandbox_id = str(payload.get("sandbox_id") or "")
     result = service.manager.apply_file_patch(sandbox_id, payload)
+    if result.get("ok") is True:
+        return ok(result)
     return _api_error(str(result.get("error") or "Sandbox file patch failed"), str(result.get("code") or "SANDBOX_FILES_NOT_READY"), int(result.get("status_code") or 501), details=result.get("details"))
 
 
 def _sandbox_port_expose(service: _SandboxApiService, payload: dict[str, Any]):
     sandbox_id = str(payload.get("sandbox_id") or "")
     result = service.manager.expose_port(sandbox_id, payload)
+    if result.get("ok") is True:
+        return ok(result)
     return _api_error(str(result.get("error") or "Sandbox port exposure failed"), str(result.get("code") or "SANDBOX_PORTS_NOT_READY"), int(result.get("status_code") or 501), details=result.get("details"))
 
 

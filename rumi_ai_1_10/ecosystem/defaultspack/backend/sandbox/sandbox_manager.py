@@ -584,7 +584,6 @@ class SandboxManager:
         return result
 
     def apply_file_patch(self, sandbox_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        del payload
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
             if error is not None:
@@ -593,19 +592,47 @@ class SandboxManager:
             operation_error = self._require_operation(inst, "sandbox.files.apply_patch")
             if operation_error is not None:
                 return operation_error
+        try:
+            agent = self._provider_agent(inst)
+            apply_patch = getattr(agent, "apply_file_patch", None)
+            if callable(apply_patch):
+                result = apply_patch(inst.sandbox_id, payload)
+            else:
+                result = {
+                    "ok": False,
+                    "error": "Sandbox file patch is not available until a guest file service is implemented.",
+                    "code": "SANDBOX_FILES_NOT_READY",
+                    "status_code": 501,
+                }
+        except SandboxContractError as exc:
+            result = exc.to_dict()
+        except Exception as exc:
             return {
                 "ok": False,
-                "error": "Sandbox file patch is not available until a guest file service is implemented.",
-                "code": "SANDBOX_FILES_NOT_READY",
-                "status_code": 501,
+                "error": f"Sandbox file patch failed: {exc}",
+                "code": "SANDBOX_FILES_FAILED",
+                "status_code": 502,
                 "sandbox_id": inst.sandbox_id,
                 "status": inst.state,
                 "state": inst.state,
                 "provider_id": inst.provider_id,
             }
+        if not isinstance(result, dict):
+            result = {
+                "ok": False,
+                "error": "Sandbox file patch returned an invalid payload",
+                "code": "SANDBOX_FILES_FAILED",
+                "status_code": 502,
+            }
+        result.setdefault("sandbox_id", inst.sandbox_id)
+        result.setdefault("status", inst.state)
+        result.setdefault("state", inst.state)
+        result.setdefault("provider_id", inst.provider_id)
+        if result.get("ok") is True:
+            self._touch_ready_instance(inst.sandbox_id)
+        return result
 
     def expose_port(self, sandbox_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        del payload
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
             if error is not None:
@@ -614,16 +641,45 @@ class SandboxManager:
             operation_error = self._require_operation(inst, "sandbox.port.expose", "sandbox.port_forward")
             if operation_error is not None:
                 return operation_error
+        try:
+            agent = self._provider_agent(inst)
+            expose_port = getattr(agent, "expose_port", None)
+            if callable(expose_port):
+                result = expose_port(inst.sandbox_id, payload)
+            else:
+                result = {
+                    "ok": False,
+                    "error": "Sandbox port exposure is not available until a guest port service is implemented.",
+                    "code": "SANDBOX_PORTS_NOT_READY",
+                    "status_code": 501,
+                }
+        except SandboxContractError as exc:
+            result = exc.to_dict()
+        except Exception as exc:
             return {
                 "ok": False,
-                "error": "Sandbox port exposure is not available until a guest port service is implemented.",
-                "code": "SANDBOX_PORTS_NOT_READY",
-                "status_code": 501,
+                "error": f"Sandbox port exposure failed: {exc}",
+                "code": "SANDBOX_PORTS_FAILED",
+                "status_code": 502,
                 "sandbox_id": inst.sandbox_id,
                 "status": inst.state,
                 "state": inst.state,
                 "provider_id": inst.provider_id,
             }
+        if not isinstance(result, dict):
+            result = {
+                "ok": False,
+                "error": "Sandbox port exposure returned an invalid payload",
+                "code": "SANDBOX_PORTS_FAILED",
+                "status_code": 502,
+            }
+        result.setdefault("sandbox_id", inst.sandbox_id)
+        result.setdefault("status", inst.state)
+        result.setdefault("state", inst.state)
+        result.setdefault("provider_id", inst.provider_id)
+        if result.get("ok") is True:
+            self._touch_ready_instance(inst.sandbox_id)
+        return result
 
     def set_model_mode(self, mode: str) -> Dict[str, Any]:
         if mode not in SUPPORTED_MODEL_MODES:
