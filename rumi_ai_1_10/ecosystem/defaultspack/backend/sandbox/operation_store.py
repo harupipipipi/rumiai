@@ -133,6 +133,35 @@ class RuntimeOperationStore:
             self._save()
             return dict(current)
 
+    def interrupt_nonterminal(
+        self,
+        *,
+        updated_at: str,
+        message: str = "Runtime operation was interrupted before completion.",
+    ) -> list[dict[str, Any]]:
+        interrupted: list[dict[str, Any]] = []
+        with self._lock:
+            for operation_id, current in list(self._operations.items()):
+                status = str(current.get("status") or "")
+                if not status or status in TERMINAL_OPERATION_STATES:
+                    continue
+                updated = {
+                    **current,
+                    "status": "failed",
+                    "step": str(current.get("step") or "interrupted"),
+                    "message": message,
+                    "updated_at": updated_at,
+                    "error": {
+                        "code": "RUNTIME_OPERATION_INTERRUPTED",
+                        "message": message,
+                    },
+                }
+                self._operations[operation_id] = updated
+                interrupted.append(dict(updated))
+            if interrupted:
+                self._save()
+        return interrupted
+
     def _load(self) -> None:
         if self.path is None or not self.path.is_file():
             return

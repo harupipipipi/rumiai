@@ -47,6 +47,10 @@ class _SandboxApiService:
         self.provider_registry.register(DockerProvider())
         self.manager = SandboxManager(provider_registry=self.provider_registry)
         self.operation_store = RuntimeOperationStore(self.manager.state_dir / "runtime_operations.json")
+        self.operation_store.interrupt_nonterminal(
+            updated_at=timestamp(),
+            message="Runtime operation was interrupted by a Rumi service restart. Start the operation again to continue.",
+        )
         self.frame_cache = FrameCache()
         self.lease_manager = ControlLeaseManager()
 

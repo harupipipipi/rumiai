@@ -978,6 +978,46 @@ def test_runtime_operation_store_preserves_cancelled_running_operation(tmp_path)
     assert [event["stage"] for event in final["progress_events"]] == ["packages", "ready"]
 
 
+def test_runtime_operation_store_marks_nonterminal_operations_interrupted_on_restart(tmp_path) -> None:
+    store = RuntimeOperationStore(tmp_path / "runtime_operations.json")
+    store.put(
+        {
+            "operation_id": "running-op",
+            "status": "running",
+            "step": "packages",
+            "message": "Installing runtime packages",
+            "progress": 40,
+            "provider_id": "fake-runtime",
+            "updated_at": "2026-06-22T00:00:00Z",
+            "error": None,
+        }
+    )
+    store.put(
+        {
+            "operation_id": "completed-op",
+            "status": "completed",
+            "step": "ready",
+            "message": "Runtime ready",
+            "progress": 100,
+            "provider_id": "fake-runtime",
+            "updated_at": "2026-06-22T00:00:01Z",
+            "error": None,
+        }
+    )
+
+    interrupted = store.interrupt_nonterminal(
+        updated_at="2026-06-22T00:00:02Z",
+        message="Runtime operation was interrupted by a restart.",
+    )
+    reloaded = RuntimeOperationStore(tmp_path / "runtime_operations.json")
+
+    assert [operation["operation_id"] for operation in interrupted] == ["running-op"]
+    assert reloaded.get("running-op")["status"] == "failed"
+    assert reloaded.get("running-op")["error"]["code"] == "RUNTIME_OPERATION_INTERRUPTED"
+    assert reloaded.get("running-op")["progress"] == 40
+    assert reloaded.get("completed-op")["status"] == "completed"
+
+
 def test_runtime_uninstall_reconciles_manager_desktops_and_local_state(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 
