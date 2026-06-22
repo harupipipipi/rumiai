@@ -895,6 +895,7 @@ class SandboxManager:
                     instructions=inst.desktop_rules.instructions,
                 )
             if access_mode is not None or access_key is not None or access_request_required is not None:
+                previous_access = inst.desktop_access
                 wants_key_required = str(access_mode or inst.desktop_access.mode or "").strip().lower() == "key_required"
                 if wants_key_required and access_key is None and not inst.desktop_access_key_hash:
                     return {
@@ -921,6 +922,12 @@ class SandboxManager:
                     inst.desktop_access_key_hash = access_key_hash
                 elif access_policy.mode != "key_required":
                     inst.desktop_access_key_hash = None
+                if (
+                    access_policy.mode != "request_required"
+                    or not access_policy.request_required
+                    or access_policy.owner_id != previous_access.owner_id
+                ):
+                    self._drop_desktop_access_requests(inst.sandbox_id)
             inst.touch()
             self._save_registry()
             return {"ok": True, **self._instance_to_dict(inst)}

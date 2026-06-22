@@ -1455,6 +1455,28 @@ def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, 
             {"_handler": "desktop_get", "seat_id": "seat-request", "access_key": granted_key},
             {},
         )
+        owner_reverted = api.run(
+            {
+                "_handler": "desktop_rules_update",
+                "seat_id": "seat-request",
+                "owner_id": "owner-1",
+                "access": {"mode": "owner_only"},
+            },
+            {},
+        )
+        requester_after_revert = api.run(
+            {"_handler": "desktop_get", "seat_id": "seat-request", "access_key": granted_key},
+            {},
+        )
+        request_after_revert = api.run(
+            {
+                "_handler": "desktop_access_request",
+                "seat_id": "seat-request",
+                "owner_id": "requester-2",
+            },
+            {},
+        )
+        registry_after_revert = service.manager.registry_path.read_text(encoding="utf-8")
         registry_text = service.manager.registry_path.read_text(encoding="utf-8")
         destroyed = service.manager.destroy("seat-request")
         registry_after_destroy = service.manager.registry_path.read_text(encoding="utf-8")
@@ -1476,6 +1498,14 @@ def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, 
     assert granted["data"]["status"] == "approved"
     assert granted["data"]["access_key_hint"].startswith("ends:")
     assert requester_allowed["status"] == "ok"
+    assert owner_reverted["status"] == "ok"
+    assert owner_reverted["data"]["access_policy"]["mode"] == "owner_only"
+    assert owner_reverted["data"]["access_policy"]["request_required"] is False
+    assert requester_after_revert["status"] == "error"
+    assert requester_after_revert["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
+    assert request_after_revert["status"] == "error"
+    assert request_after_revert["error"]["code"] == "DESKTOP_ACCESS_REQUEST_NOT_REQUIRED"
+    assert access_request["data"]["request_id"] not in registry_after_revert
     assert granted_key not in registry_text
     assert destroyed["ok"] is True
     assert access_request["data"]["request_id"] not in registry_after_destroy
