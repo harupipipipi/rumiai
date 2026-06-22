@@ -122,6 +122,13 @@ class X11VirtualSession:
     def stop(self) -> dict[str, Any]:
         """Stop managed processes and remove session artifacts."""
 
+        for name in list(self._processes):
+            if name in {"openbox", "xvfb"}:
+                continue
+            proc = self._processes.pop(name, None)
+            if proc is not None:
+                self._terminate_process(proc)
+
         for name in ("openbox", "xvfb"):
             proc = self._processes.pop(name, None)
             if proc is not None:
@@ -246,6 +253,48 @@ class X11VirtualSession:
         duration = max(0.0, float(seconds or 0))
         time.sleep(duration)
         return self._command_result(True, ["wait", str(duration)], data={"seconds": duration})
+
+    def launch(self, name: str, args: list[str], *, stdout_name: str | None = None) -> dict[str, Any]:
+        reason = self._ensure_started()
+        if reason:
+            return self._command_result(False, args, reason=reason)
+
+        process_key = f"launch-{_safe_process_name(name)}"
+        existing = self._processes.pop(process_key, None)
+        if existing is not None:
+            self._terminate_process(existing)
+
+        log_path: Path | None = None
+        log_handle = None
+        stdout_target: Any = subprocess.DEVNULL
+        if stdout_name and self._session_dir is not None:
+            log_path = self._session_dir / _safe_process_name(stdout_name)
+            try:
+                log_handle = log_path.open("a", encoding="utf-8")
+                stdout_target = log_handle
+            except OSError:
+                log_path = None
+                log_handle = None
+
+        command = [str(part) for part in args]
+        try:
+            proc = subprocess.Popen(
+                command,
+                env=self._session_env(),
+                stdout=stdout_target,
+                stderr=subprocess.STDOUT,
+            )
+        except OSError as exc:
+            return self._command_result(False, command, reason=str(exc))
+        finally:
+            if log_handle is not None:
+                log_handle.close()
+
+        self._processes[process_key] = proc
+        data: dict[str, Any] = {"pid": proc.pid, "process": process_key}
+        if log_path is not None:
+            data["log_path"] = str(log_path)
+        return self._command_result(True, command, data=data)
 
     def _run_xdotool(self, args: list[str], *, timeout: float = 5.0) -> dict[str, Any]:
         reason = self._ensure_started()
@@ -482,6 +531,12 @@ def _safe_mtime(path: Path) -> float:
         return path.stat().st_mtime
     except OSError:
         return 0.0
+
+
+def _safe_process_name(value: str) -> str:
+    text = str(value or "").strip().lower()
+    safe = "".join(char if char.isalnum() or char in {"-", "_", "."} else "-" for char in text)
+    return safe.strip(".-_")[:80] or "process"
 
 
 def _process_alive(pid: int) -> bool:

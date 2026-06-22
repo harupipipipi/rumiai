@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 import json
 from pathlib import Path
 import threading
@@ -329,6 +330,66 @@ def test_linux_native_provider_desktop_session_capture_and_input(monkeypatch) ->
 
     provider.destroy(started)
     assert session.calls[-1] == ("stop",)
+
+
+def test_linux_native_provider_applies_browser_url_starter_when_network_allows(monkeypatch, tmp_path) -> None:
+    import ecosystem.defaultspack.backend.sandbox.providers.linux_native as linux_native
+    from ecosystem.defaultspack.backend.sandbox.providers.linux_native import LinuxNativeProvider
+
+    monkeypatch.setattr(linux_native.sys, "platform", "linux")
+    monkeypatch.setattr(
+        linux_native.shutil,
+        "which",
+        lambda name: "/usr/bin/google-chrome-stable" if name == "google-chrome-stable" else None,
+    )
+    session = FakeX11Session(width=800, height=600, session_dir=tmp_path)
+    provider = LinuxNativeProvider(session_factory=lambda **kwargs: session)
+    template = replace(_desktop_only_template(), network=NetworkPolicy(mode="host_shared"))
+
+    instance = provider.create(
+        _create_spec(
+            template,
+            metadata={"startup": {"starter": "browser_url", "browser_url": "https://example.com/task"}},
+        )
+    )
+    started = provider.start(instance)
+
+    launch_call = next(call for call in session.calls if call[0] == "launch")
+    argv = list(launch_call[2])
+    assert launch_call[1] == "browser_url"
+    assert launch_call[3] == "starter-browser.log"
+    assert argv[0] == "/usr/bin/google-chrome-stable"
+    assert "--new-window" in argv
+    assert any(str(part).startswith("--user-data-dir=") for part in argv)
+    assert argv[-1] == "https://example.com/task"
+    assert started.opaque_state["startup_status"]["starter"] == "browser_url"
+    assert started.opaque_state["startup_status"]["executed"] is True
+
+
+def test_linux_native_provider_skips_browser_url_starter_when_network_is_off(monkeypatch) -> None:
+    import ecosystem.defaultspack.backend.sandbox.providers.linux_native as linux_native
+    from ecosystem.defaultspack.backend.sandbox.providers.linux_native import LinuxNativeProvider
+
+    monkeypatch.setattr(linux_native.sys, "platform", "linux")
+    monkeypatch.setattr(
+        linux_native.shutil,
+        "which",
+        lambda name: "/usr/bin/google-chrome-stable" if name == "google-chrome-stable" else None,
+    )
+    session = FakeX11Session(width=800, height=600)
+    provider = LinuxNativeProvider(session_factory=lambda **kwargs: session)
+
+    instance = provider.create(
+        _create_spec(
+            _desktop_only_template(),
+            metadata={"startup": {"starter": "browser_url", "browser_url": "https://example.com/task"}},
+        )
+    )
+    started = provider.start(instance)
+
+    assert session.calls == [("start",)]
+    assert started.opaque_state["startup_status"]["skipped"] is True
+    assert "Network policy" in started.opaque_state["startup_status"]["reason"]
 
 
 def test_linux_native_api_default_desktop_template_is_compatible(monkeypatch, tmp_path) -> None:
@@ -1475,17 +1536,18 @@ def _desktop_only_template() -> ResolvedSandboxTemplate:
     )
 
 
-def _create_spec(template: ResolvedSandboxTemplate):
+def _create_spec(template: ResolvedSandboxTemplate, *, metadata: dict[str, object] | None = None):
     from ecosystem.defaultspack.backend.sandbox.models import SandboxCreateSpec
 
-    return SandboxCreateSpec(name="fake desktop", template=template, provider_id="fake-runtime")
+    return SandboxCreateSpec(name="fake desktop", template=template, provider_id="fake-runtime", metadata=metadata or {})
 
 
 class FakeX11Session:
     display = ":99"
 
-    def __init__(self, *, width: int, height: int) -> None:
+    def __init__(self, *, width: int, height: int, session_dir: Path | None = None) -> None:
         self.config = SimpleNamespace(width=width, height=height)
+        self.session_dir = session_dir
         self.calls: list[tuple[object, ...]] = []
         self.last_screenshot_path = None
 
@@ -1523,6 +1585,16 @@ class FakeX11Session:
     def click(self, x: int, y: int, *, button: str = "left") -> dict[str, object]:
         self.calls.append(("click", x, y, button))
         return {"executed": True}
+
+    def launch(self, name: str, args: list[str], *, stdout_name: str | None = None) -> dict[str, object]:
+        self.calls.append(("launch", name, tuple(args), stdout_name))
+        return {
+            "executed": True,
+            "command": list(args),
+            "pid": 1234,
+            "process": f"launch-{name}",
+            "log_path": str(self.session_dir / stdout_name) if self.session_dir is not None and stdout_name else None,
+        }
 
 
 class CaptureGuestAgent(FakeGuestAgent):

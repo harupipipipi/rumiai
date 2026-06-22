@@ -36,7 +36,8 @@ LINUX_NATIVE_COMMAND_PACKAGES = {
     "xdotool": "xdotool",
     "import": "imagemagick",
 }
-LINUX_NATIVE_APT_PACKAGES = ("xvfb", "openbox", "xdotool", "imagemagick", "x11-utils", "ca-certificates")
+LINUX_NATIVE_APT_PACKAGES = ("xvfb", "openbox", "xdotool", "imagemagick", "x11-utils", "ca-certificates", "xterm")
+LINUX_NATIVE_BROWSER_CANDIDATES = ("google-chrome-stable", "google-chrome", "chromium", "chromium-browser", "firefox", "xdg-open")
 
 
 @dataclass(frozen=True)
@@ -233,13 +234,19 @@ class LinuxNativeProvider:
                 status_code=503,
                 details={"status": status},
             )
+        startup_status = self._apply_startup(session, instance)
+        opaque_state = {**dict(instance.opaque_state), "display": session.display}
+        if startup_status:
+            opaque_state["startup_status"] = startup_status
+        else:
+            opaque_state.pop("startup_status", None)
         started = ProviderInstance(
             provider_id=instance.provider_id,
             provider_instance_id=instance.provider_instance_id,
             sandbox_id=instance.sandbox_id,
             runtime_id=instance.runtime_id,
             state="ready",
-            opaque_state={**dict(instance.opaque_state), "display": session.display},
+            opaque_state=opaque_state,
             generation=instance.generation + 1,
         )
         self._instances[started.provider_instance_id] = started
@@ -303,6 +310,57 @@ class LinuxNativeProvider:
 
         config = X11VirtualSessionConfig(width=width or 1440, height=height or 900)
         return X11VirtualSession(config)
+
+    def _apply_startup(self, session: Any, instance: ProviderInstance) -> dict[str, Any]:
+        startup = instance.opaque_state.get("startup") if isinstance(instance.opaque_state, Mapping) else {}
+        if not isinstance(startup, Mapping):
+            return {}
+        starter = str(startup.get("starter") or "empty").strip().lower()
+        if starter in {"", "empty"}:
+            return {"starter": "empty", "skipped": True, "reason": "No desktop starter was requested."}
+        if starter == "terminal":
+            terminal = shutil.which("xterm")
+            if not terminal:
+                return {"starter": starter, "skipped": True, "reason": "xterm is not installed in the Linux native runtime."}
+            return self._launch_session(session, "terminal", [terminal, "-title", "Rumi Desktop"], stdout_name="starter-terminal.log")
+        if starter == "browser_url":
+            browser_url = str(startup.get("browser_url") or "").strip()
+            if not browser_url:
+                return {"starter": starter, "skipped": True, "reason": "No browser_url was provided."}
+            if not _linux_native_network_allows_startup(instance.opaque_state):
+                return {"starter": starter, "skipped": True, "reason": "Network policy requires approval or is disabled for browser startup."}
+            browser = _first_available_command(LINUX_NATIVE_BROWSER_CANDIDATES)
+            if browser is None:
+                return {"starter": starter, "skipped": True, "reason": "No supported browser command was found."}
+            command_name, browser_path = browser
+            return self._launch_session(
+                session,
+                "browser_url",
+                _browser_launch_args(command_name, browser_path, browser_url, session),
+                stdout_name="starter-browser.log",
+            )
+        return {"starter": starter, "skipped": True, "reason": f"Unsupported Linux native desktop starter: {starter}"}
+
+    @staticmethod
+    def _launch_session(session: Any, name: str, args: list[str], *, stdout_name: str) -> dict[str, Any]:
+        launch = getattr(session, "launch", None)
+        if not callable(launch):
+            return {
+                "starter": name,
+                "skipped": True,
+                "reason": "Linux native session does not support background starter launch.",
+            }
+        result = launch(name, args, stdout_name=stdout_name)
+        return {
+            "starter": name,
+            "executed": bool(result.get("executed")),
+            "skipped": not bool(result.get("executed")),
+            "reason": result.get("reason") or result.get("stderr") or "",
+            "command": result.get("command") or args,
+            "pid": result.get("pid"),
+            "process": result.get("process"),
+            "log_path": result.get("log_path"),
+        }
 
     def _install_desktop_packages(self, progress: ProgressSink, *, operation_id: str, update: bool) -> OperationResult | None:
         apt_get = self._apt_get_path()
@@ -552,6 +610,53 @@ def _linux_native_user_action(*, available: bool, missing_capabilities: Sequence
     if missing_capabilities:
         return "Select the desktop.linux_native template for the linux_native provider, or use Lima/WSL/Docker for sandbox exec/files."
     return "Open the managed runtime setup flow to install the Linux desktop helper packages."
+
+
+def _first_available_command(candidates: Sequence[str]) -> tuple[str, str] | None:
+    for command_name in candidates:
+        command_path = shutil.which(command_name)
+        if command_path:
+            return command_name, command_path
+    return None
+
+
+def _browser_launch_args(command_name: str, browser_path: str, browser_url: str, session: Any) -> list[str]:
+    profile_dir = _browser_profile_dir(session)
+    if command_name == "xdg-open":
+        return [browser_path, browser_url]
+    if command_name == "firefox":
+        args = [browser_path, "--no-remote", "--new-instance"]
+        if profile_dir is not None:
+            args.extend(["--profile", str(profile_dir)])
+        args.append(browser_url)
+        return args
+    args = [browser_path, "--no-first-run", "--disable-dev-shm-usage", "--new-window"]
+    if profile_dir is not None:
+        args.append(f"--user-data-dir={profile_dir}")
+    args.append(browser_url)
+    return args
+
+
+def _browser_profile_dir(session: Any) -> Path | None:
+    session_dir = getattr(session, "session_dir", None)
+    if not session_dir:
+        return None
+    profile_dir = Path(session_dir) / "browser-profile"
+    try:
+        profile_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    return profile_dir
+
+
+def _linux_native_network_allows_startup(opaque_state: Mapping[str, Any]) -> bool:
+    policy = opaque_state.get("network_policy") if isinstance(opaque_state, Mapping) else {}
+    if not isinstance(policy, Mapping):
+        return False
+    mode = str(policy.get("mode") or "off").strip().lower()
+    if mode in {"", "off", "none", "deny", "denied", "disabled"}:
+        return False
+    return not bool(policy.get("approval_required"))
 
 
 def _is_root() -> bool:
