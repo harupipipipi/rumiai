@@ -17,7 +17,11 @@
   "applies_to_tools": [
     "desktop_list",
     "desktop_create",
+    "desktop_frame",
     "desktop_input",
+    "desktop_control_acquire",
+    "desktop_control_renew",
+    "desktop_control_release",
     "desktop_rules_update",
     "desktop_access_request",
     "desktop_access_grant"

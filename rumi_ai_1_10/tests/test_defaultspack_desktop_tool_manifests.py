@@ -13,6 +13,19 @@ def _tool_parameters(tool_id: str) -> dict:
     return manifest["config"]["schema"]["parameters"]
 
 
+def test_desktop_operator_skill_applies_to_every_desktop_tool() -> None:
+    manifest_path = DEFAULTSPACK_ROOT / "extensions" / "skills" / "desktop_operator" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    desktop_tool_ids = {
+        path.name
+        for path in (DEFAULTSPACK_ROOT / "tools").iterdir()
+        if path.is_dir() and path.name.startswith("desktop_")
+    }
+
+    assert desktop_tool_ids
+    assert desktop_tool_ids <= set(manifest["applies_to_tools"])
+
+
 def test_desktop_create_manifest_exposes_runtime_context_fields() -> None:
     parameters = _tool_parameters("desktop_create")
     properties = parameters["properties"]
