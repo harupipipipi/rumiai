@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -68,6 +70,10 @@ def test_x11_virtual_start_passes_owned_display_env_and_cleanup(monkeypatch, tmp
         ["openbox"],
     ]
     assert run_calls[0]["args"] == ["xdotool", "getdisplaygeometry"]
+    lock_metadata_path = tmp_path / "rumi-x11-virtual-displays" / "display-88.lock" / "owner.json"
+    lock_metadata = json.loads(lock_metadata_path.read_text(encoding="utf-8"))
+    assert lock_metadata["pid"] == os.getpid()
+    assert lock_metadata["display_number"] == 88
     for call in [*popen_calls, *run_calls]:
         env = call["env"]
         assert env["DISPLAY"] == ":88"
@@ -86,6 +92,32 @@ def test_x11_virtual_start_passes_owned_display_env_and_cleanup(monkeypatch, tmp
     assert all(proc.terminated for proc in processes)
     assert not session_path.exists()
     assert not (tmp_path / "rumi-x11-virtual-displays" / "display-88.lock").exists()
+
+
+def test_x11_virtual_reclaims_stale_display_lock(monkeypatch, tmp_path: Path) -> None:
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.linux import x11_virtual
+
+    lock_dir = tmp_path / "rumi-x11-virtual-displays" / "display-88.lock"
+    lock_dir.mkdir(parents=True)
+    (lock_dir / "owner.json").write_text(
+        json.dumps({"pid": 999_999, "boot_id": "boot-1", "display_number": 88, "created_at": 1}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(x11_virtual.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(x11_virtual.X11VirtualSession, "_display_socket_exists", staticmethod(lambda number: False))
+    monkeypatch.setattr(x11_virtual.X11VirtualSession, "_boot_id", staticmethod(lambda: "boot-1"))
+    monkeypatch.setattr(x11_virtual, "_process_alive", lambda pid: False)
+
+    session = x11_virtual.X11VirtualSession(x11_virtual.X11VirtualSessionConfig(display_min=88, display_max=88))
+    number = session._allocate_display_number()
+
+    assert number == 88
+    metadata = json.loads((lock_dir / "owner.json").read_text(encoding="utf-8"))
+    assert metadata["pid"] == os.getpid()
+    assert metadata["display_number"] == 88
+    session.stop()
+    assert not lock_dir.exists()
 
 
 def test_x11_virtual_actions_and_screenshot_use_virtual_display(monkeypatch, tmp_path: Path) -> None:

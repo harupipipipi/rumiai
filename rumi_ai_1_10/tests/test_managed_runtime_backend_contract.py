@@ -323,6 +323,7 @@ def test_linux_native_api_default_desktop_template_is_compatible(monkeypatch, tm
             {
                 "_handler": "desktops_create",
                 "provider_id": "linux_native",
+                "owner_id": "local-user",
                 "resolution": {"width": 800, "height": 600},
             },
             {},
@@ -372,16 +373,20 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
                 "name": "CI Ubuntu",
                 "template_id": "desktop.ubuntu",
                 "provider_id": "fake-runtime",
+                "owner_id": "local-user",
                 "resolution": {"width": 800, "height": 600},
             },
             {},
         )
-        frame = api.run({"_handler": "desktop_frame", "seat_id": "seat-1"}, {})
-        lease = api.run({"_handler": "desktop_control_acquire", "seat_id": "seat-1"}, {})
+        anonymous_get = api.run({"_handler": "desktop_get", "seat_id": "seat-1"}, {})
+        owner_get = api.run({"_handler": "desktop_get", "seat_id": "seat-1", "owner_id": "local-user"}, {})
+        frame = api.run({"_handler": "desktop_frame", "seat_id": "seat-1", "owner_id": "local-user"}, {})
+        lease = api.run({"_handler": "desktop_control_acquire", "seat_id": "seat-1", "owner_id": "local-user"}, {})
         click = api.run(
             {
                 "_handler": "desktop_input",
                 "seat_id": "seat-1",
+                "owner_id": "local-user",
                 "action": "click",
                 "client_action_id": "act-1",
                 "lease_token": "lease-token",
@@ -391,6 +396,9 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
             },
             {},
         )
+        stop = api.run({"_handler": "desktop_stop", "seat_id": "seat-1", "owner_id": "local-user"}, {})
+        start = api.run({"_handler": "desktop_start", "seat_id": "seat-1", "owner_id": "local-user"}, {})
+        restart = api.run({"_handler": "desktop_restart", "seat_id": "seat-1", "owner_id": "local-user"}, {})
     finally:
         api._reset_service_for_tests(None)
 
@@ -398,12 +406,20 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
     assert created["data"]["seat_id"] == "seat-1"
     assert created["data"]["status"] == "running"
     assert created["data"]["network_policy"]["default"] == "limited_or_approval_gated"
+    assert anonymous_get["status"] == "error"
+    assert anonymous_get["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
+    assert owner_get["status"] == "ok"
     assert frame["_binary"] is True
     assert frame["body"] == b"fake-png"
     assert frame["headers"]["X-Rumi-Frame-Width"] == "800"
     assert lease["data"]["lease_token"] == "lease-token"
     assert click["status"] == "ok"
     assert click["data"]["accepted"] is True
+    assert stop["data"]["status"] == "stopped"
+    assert start["data"]["status"] == "running"
+    assert restart["data"]["status"] == "running"
+    assert service.frame_cache.last_metadata("seat-1") is None
+    assert service.lease_manager.active_lease("seat-1") is None
     assert agent.desktop_inputs[0].action == "click"
 
 
@@ -591,6 +607,9 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert ("POST", "/api/runtime/ensure", "blocks.sandbox.api") in routes
     assert ("GET", "/api/sandbox/templates", "blocks.sandbox.api") in routes
     assert ("GET", "/api/desktops", "blocks.sandbox.api") in routes
+    assert ("POST", "/api/sandboxes/{sandbox_id}/exec", "blocks.sandbox.api") in routes
+    assert ("POST", "/api/sandboxes/{sandbox_id}/files/apply-patch", "blocks.sandbox.api") in routes
+    assert ("POST", "/api/sandboxes/{sandbox_id}/ports", "blocks.sandbox.api") in routes
     assert ("POST", "/api/desktops/{seat_id}/rules", "blocks.sandbox.api") in routes
     assert ("POST", "/api/desktops/{seat_id}/access-requests", "blocks.sandbox.api") in routes
     assert route_specs[("GET", "/api/runtime/providers")].function_id == "managed_runtime_providers"
@@ -637,12 +656,26 @@ def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -
     api._reset_service_for_tests(service)
     try:
         update = api.run({"_handler": "runtime_update", "provider_id": "fake-runtime"}, {})
+        operations = api.run({"_handler": "runtime_operations"}, {})
+        operation_get = api.run(
+            {"_handler": "runtime_operation_get", "operation_id": "fake-update"},
+            {},
+        )
+        operation_cancel = api.run(
+            {"_handler": "runtime_operation_cancel", "operation_id": "fake-update"},
+            {},
+        )
         uninstall = api.run({"_handler": "runtime_uninstall", "provider_id": "fake-runtime"}, {})
     finally:
         api._reset_service_for_tests(None)
 
     assert update["data"]["operation_id"] == "fake-update"
     assert update["data"]["status"] == "completed"
+    assert [operation["operation_id"] for operation in operations["data"]["operations"]] == ["fake-update"]
+    assert operation_get["data"]["operation_id"] == "fake-update"
+    assert operation_cancel["data"]["operation_id"] == "fake-update"
+    assert operation_cancel["data"]["cancelled"] is False
+    assert operation_cancel["data"]["status"] == "completed"
     assert uninstall["data"]["operation_id"] == "fake-uninstall"
     assert uninstall["data"]["status"] == "completed"
 
@@ -672,7 +705,12 @@ def test_runtime_uninstall_reconciles_manager_desktops_and_local_state(tmp_path)
         frame_cache=FrameCache(min_capture_interval_seconds=0),
         lease_manager=lease_manager,
     )
-    created = service.manager.create(display=True, provider_id="fake-runtime", template_id="desktop.ubuntu")
+    created = service.manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.ubuntu",
+        access_owner_id="local-user",
+    )
     seat_id = str(created["sandbox_id"])
     service.frame_cache.put_frame(seat_id, b"frame", content_type="image/png", width=2, height=2)
     lease_manager.acquire(seat_id, "human")
@@ -690,7 +728,12 @@ def test_runtime_uninstall_reconciles_manager_desktops_and_local_state(tmp_path)
     assert service.lease_manager.active_lease(seat_id) is None
 
     provider._sandbox_id_factory = lambda: "seat-remove-state"
-    recreated = service.manager.create(display=True, provider_id="fake-runtime", template_id="desktop.ubuntu")
+    recreated = service.manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.ubuntu",
+        access_owner_id="local-user",
+    )
     assert recreated["ok"] is True
     api._reset_service_for_tests(service)
     try:

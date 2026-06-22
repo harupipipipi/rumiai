@@ -8,6 +8,7 @@ explicit DISPLAY environment for the virtual session.
 from __future__ import annotations
 
 import base64
+import json
 import os
 from pathlib import Path
 import shutil
@@ -20,6 +21,9 @@ from typing import Any
 
 
 REQUIRED_COMMANDS = ("Xvfb", "openbox", "xdotool", "import")
+DISPLAY_LOCK_ROOT = "rumi-x11-virtual-displays"
+DISPLAY_LOCK_METADATA = "owner.json"
+STALE_LOCK_GRACE_SECONDS = 60.0
 
 
 @dataclass(frozen=True)
@@ -126,10 +130,7 @@ class X11VirtualSession:
         if self._session_dir is not None:
             shutil.rmtree(self._session_dir, ignore_errors=True)
         if self._display_lock_dir is not None:
-            try:
-                self._display_lock_dir.rmdir()
-            except OSError:
-                pass
+            shutil.rmtree(self._display_lock_dir, ignore_errors=True)
 
         self._session_dir = None
         self._display_lock_dir = None
@@ -299,7 +300,7 @@ class X11VirtualSession:
         return False
 
     def _allocate_display_number(self) -> int | None:
-        lock_root = Path(tempfile.gettempdir()) / "rumi-x11-virtual-displays"
+        lock_root = Path(tempfile.gettempdir()) / DISPLAY_LOCK_ROOT
         lock_root.mkdir(parents=True, exist_ok=True)
         for number in range(int(self.config.display_min), int(self.config.display_max) + 1):
             if self._display_socket_exists(number):
@@ -308,14 +309,63 @@ class X11VirtualSession:
             try:
                 lock_dir.mkdir()
             except FileExistsError:
+                if not self._release_stale_display_lock(lock_dir, number):
+                    continue
+                try:
+                    lock_dir.mkdir()
+                except FileExistsError:
+                    continue
+            try:
+                self._write_display_lock_metadata(lock_dir, number)
+            except OSError:
+                shutil.rmtree(lock_dir, ignore_errors=True)
                 continue
             self._display_lock_dir = lock_dir
             return number
         return None
 
+    def _write_display_lock_metadata(self, lock_dir: Path, number: int) -> None:
+        metadata = {
+            "pid": os.getpid(),
+            "boot_id": self._boot_id(),
+            "display_number": number,
+            "created_at": time.time(),
+        }
+        (lock_dir / DISPLAY_LOCK_METADATA).write_text(json.dumps(metadata, sort_keys=True) + "\n", encoding="utf-8")
+
+    def _release_stale_display_lock(self, lock_dir: Path, number: int) -> bool:
+        if self._display_socket_exists(number):
+            return False
+        metadata_path = lock_dir / DISPLAY_LOCK_METADATA
+        metadata: dict[str, Any] = {}
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            age = time.time() - _safe_mtime(lock_dir)
+            if age < STALE_LOCK_GRACE_SECONDS:
+                return False
+            shutil.rmtree(lock_dir, ignore_errors=True)
+            return not lock_dir.exists()
+
+        pid = _optional_int(metadata.get("pid"))
+        boot_id = str(metadata.get("boot_id") or "")
+        current_boot_id = self._boot_id()
+        if pid is not None and boot_id == current_boot_id and _process_alive(pid):
+            return False
+        shutil.rmtree(lock_dir, ignore_errors=True)
+        return not lock_dir.exists()
+
     @staticmethod
     def _display_socket_exists(number: int) -> bool:
         return (Path("/tmp/.X11-unix") / f"X{number}").exists()
+
+    @staticmethod
+    def _boot_id() -> str:
+        path = Path("/proc/sys/kernel/random/boot_id")
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return "unknown"
 
     def _session_env(self) -> dict[str, str]:
         if not self._display:
@@ -418,3 +468,31 @@ class X11VirtualSession:
                 proc.wait(timeout=2.0)
             except Exception:
                 pass
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True

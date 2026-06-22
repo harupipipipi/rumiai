@@ -45,7 +45,7 @@ function templateMatchesProvider(template: SandboxTemplate, provider: RuntimePro
   return requirements.every((requirement) => capabilities.has(requirement));
 }
 
-type DesktopAccessMode = "owner_only" | "shared_link" | "key_required";
+type DesktopAccessMode = "owner_only" | "key_required";
 
 export function DesktopCreateDialog({
   isOpen,
@@ -130,6 +130,7 @@ export function DesktopCreateDialog({
       rules: ruleText.trim() ? { role: role.trim() || null, rule_ids: splitList(ruleText) } : null,
       access: {
         mode: accessMode,
+        owner_id: "local-user",
         ...(accessMode === "key_required" && accessKey ? { access_key: accessKey } : {}),
       },
       provisioning: provisioningApps.trim() || provisioningMcp.trim()
@@ -303,7 +304,6 @@ export function DesktopCreateDialog({
                   className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
                 >
                   <option value="owner_only">Owner only</option>
-                  <option value="shared_link">Shared link</option>
                   <option value="key_required">Key required</option>
                 </select>
               </label>

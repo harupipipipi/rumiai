@@ -153,7 +153,13 @@ class LinuxNativeProvider:
         return instance
 
     def start(self, instance: ProviderInstance) -> ProviderInstance:
-        session = self._require_session(instance)
+        session = self._sessions.get(instance.provider_instance_id)
+        if session is None:
+            session = self._new_session(
+                width=_positive_int(instance.opaque_state.get("width"), 1440),
+                height=_positive_int(instance.opaque_state.get("height"), 900),
+            )
+            self._sessions[instance.provider_instance_id] = session
         status = session.start()
         if not status.get("running"):
             raise SandboxContractError(
@@ -336,3 +342,11 @@ def _unlink_capture_file(path: str) -> bool:
         return existed and not capture_path.exists()
     except OSError:
         return False
+
+
+def _positive_int(value: object, fallback: int) -> int:
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed > 0 else fallback

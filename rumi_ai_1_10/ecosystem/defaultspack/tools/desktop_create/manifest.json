@@ -47,7 +47,8 @@
           "access": {
             "type": "object",
             "properties": {
-              "mode": { "type": "string", "enum": ["owner_only", "shared_link", "key_required"] },
+              "mode": { "type": "string", "enum": ["owner_only", "key_required"] },
+              "owner_id": { "type": "string" },
               "access_key": { "type": "string" }
             }
           },

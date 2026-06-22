@@ -56,7 +56,7 @@ def _manager(
 def test_sandbox_create_fails_closed_without_registered_provider(tmp_path):
     manager = SandboxManager(state_dir=tmp_path)
 
-    created = manager.create()
+    created = manager.create(display=False)
 
     assert created["ok"] is False
     assert created["status_code"] == 503
@@ -214,6 +214,7 @@ def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path):
         display=True,
         provider_id="fake-runtime",
         template_id="desktop.coding",
+        access_owner_id="local-user",
         assigned_agent_id="agent-1",
         workspace_id="workspace-1",
         workspace_access="read_only",
@@ -238,9 +239,106 @@ def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path):
     assert reloaded_status["assigned_agent_id"] == "agent-1"
 
 
+def test_sandbox_lifecycle_start_stop_restart_uses_provider_state(tmp_path):
+    manager = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"})
+    sandbox_id = manager.create(image="ubuntu:24.04", display=False)["sandbox_id"]
+
+    stopped = manager.stop(sandbox_id)
+    stopped_status = manager.status(sandbox_id)
+    start = manager.start(sandbox_id)
+    restart = manager.restart(sandbox_id)
+
+    assert stopped["ok"] is True
+    assert stopped["state"] == "stopped"
+    assert stopped_status["state"] == "stopped"
+    assert start["ok"] is True
+    assert start["state"] == "ready"
+    assert restart["ok"] is True
+    assert restart["state"] == "ready"
+    assert restart["generation"] > stopped["generation"]
+
+
+def test_sandbox_exec_is_guest_agent_only_and_template_gated(tmp_path):
+    manager = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"})
+    sandbox_id = manager.create(image="ubuntu:24.04", display=False)["sandbox_id"]
+
+    executed = manager.exec(
+        sandbox_id,
+        {"argv": ["python", "--version"], "cwd": ".", "client_request_id": "exec-1"},
+    )
+    raw_command = manager.exec(
+        sandbox_id,
+        {"command": "python --version", "client_request_id": "exec-2"},
+    )
+
+    desktop_only = _manager(
+        tmp_path / "desktop-only",
+        capabilities={"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"},
+    )
+    desktop = desktop_only.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.linux_native",
+        access_owner_id="local-user",
+    )
+    denied = desktop_only.exec(
+        desktop["sandbox_id"],
+        {"argv": ["python", "--version"], "cwd": ".", "client_request_id": "exec-3"},
+    )
+
+    assert executed["ok"] is True
+    assert executed["argv"] == ["python", "--version"]
+    assert raw_command["ok"] is False
+    assert raw_command["code"] == "RAW_COMMAND_REJECTED"
+    assert denied["ok"] is False
+    assert denied["code"] == "SANDBOX_OPERATION_NOT_ALLOWED"
+
+
+def test_sandbox_file_patch_and_port_contracts_fail_closed_until_guest_services_exist(tmp_path):
+    manager = _manager(
+        tmp_path,
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+        },
+    )
+    sandbox_id = manager.create(display=False, provider_id="fake-runtime", template_id="coding.python")["sandbox_id"]
+
+    file_patch = manager.apply_file_patch(sandbox_id, {"patch": []})
+    port = manager.expose_port(sandbox_id, {"port": 3000})
+
+    assert file_patch["ok"] is False
+    assert file_patch["code"] == "SANDBOX_FILES_NOT_READY"
+    assert file_patch["status_code"] == 501
+    assert port["ok"] is False
+    assert port["code"] == "SANDBOX_PORTS_NOT_READY"
+    assert port["status_code"] == 501
+
+
+def test_desktop_resolution_is_bounded_before_provider_start(tmp_path):
+    manager = _manager(tmp_path)
+
+    created = manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.ubuntu",
+        width=20_000,
+        height=20_000,
+        access_owner_id="local-user",
+    )
+
+    assert created["ok"] is False
+    assert created["code"] == "DESKTOP_RESOLUTION_LIMIT_EXCEEDED"
+    assert created["status_code"] == 400
+
+
 def test_sandbox_screenshot_fails_closed_without_backend(tmp_path):
     manager = _manager(tmp_path)
-    sandbox_id = manager.create()["sandbox_id"]
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     result = manager.screenshot(sandbox_id)
 
@@ -264,7 +362,7 @@ def test_sandbox_not_found_and_destroyed_errors_are_clear(tmp_path):
     assert missing["sandbox_id"] == "missing-sandbox"
     assert "Sandbox not found" in missing["error"]
 
-    sandbox_id = manager.create()["sandbox_id"]
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
     manager.destroy(sandbox_id)
 
     screenshot = manager.screenshot(sandbox_id)
@@ -291,7 +389,7 @@ def test_sandbox_destroy_marks_failed_when_backend_teardown_fails(tmp_path):
 
     backend = Backend()
     manager = _manager(tmp_path, gui_backend=backend)
-    sandbox_id = manager.create()["sandbox_id"]
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     result = manager.destroy(sandbox_id)
 
@@ -310,7 +408,7 @@ def test_sandbox_destroy_marks_failed_when_backend_teardown_fails(tmp_path):
 
 def test_sandbox_input_actions_fail_closed_without_backend(tmp_path):
     manager = _manager(tmp_path)
-    sandbox_id = manager.create()["sandbox_id"]
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     click = manager.click(sandbox_id, 10, 20)
     typed = manager.type_text(sandbox_id, "hello")
@@ -357,7 +455,7 @@ def test_sandbox_input_actions_route_to_backend_before_reporting_success(tmp_pat
 
     backend = Backend()
     manager = _manager(tmp_path, gui_backend=backend)
-    sandbox_id = manager.create()["sandbox_id"]
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     click = manager.click(sandbox_id, 10, 20)
     typed = manager.type_text(sandbox_id, "hello")
@@ -387,7 +485,7 @@ def test_sandbox_manager_uses_explicit_test_gui_backend_for_input_actions(tmp_pa
     backend = GUISandbox()
     session = backend.create_session("test desktop")
     manager = _manager(tmp_path, gui_backend=backend, sandbox_id_factory=lambda: session.session_id)
-    sandbox_id = manager.create()["sandbox_id"]
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     result = manager.click(sandbox_id, 1, 2)
 
@@ -407,7 +505,7 @@ def test_sandbox_input_backend_failures_do_not_gain_success_flags(tmp_path):
             return {"ok": False, "error": "window missing", "clicked": True, "recorded": True}
 
     manager = _manager(tmp_path, gui_backend=Backend())
-    sandbox_id = manager.create()["sandbox_id"]
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     result = manager.click(sandbox_id, 10, 20)
 
@@ -428,7 +526,7 @@ def test_sandbox_state_dir_env_override_is_used(monkeypatch, tmp_path):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR", str(override))
 
     manager = SandboxManager(provider_registry=_registry())
-    sandbox_id = manager.create()["sandbox_id"]
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     registry_path = override / "sandboxes.json"
     assert manager.registry_path == registry_path

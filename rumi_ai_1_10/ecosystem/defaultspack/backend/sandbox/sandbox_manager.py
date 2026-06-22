@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from .errors import RUNTIME_PROVIDER_UNAVAILABLE, SandboxContractError
+from .guest.protocol import GuestExecRequest
 from .models import (
     DesktopAccessPolicy,
     DesktopProvisioningPlan,
@@ -63,8 +64,13 @@ RUNNING_STATES = {READY, BUSY}
 TERMINAL_STATES = {DESTROYED, FAILED}
 SUPPORTED_MODEL_MODES = {"fast", "heavy"}
 STATE_DIR_ENV = "RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR"
-DESKTOP_ACCESS_MODES = {"owner_only", "shared_link", "key_required"}
+DESKTOP_ACCESS_MODES = {"owner_only", "key_required"}
 WORKSPACE_ACCESS_MODES = {"none", "read_only", "overlay"}
+DESKTOP_MIN_WIDTH = 640
+DESKTOP_MIN_HEIGHT = 480
+DESKTOP_MAX_WIDTH = 3840
+DESKTOP_MAX_HEIGHT = 2160
+DESKTOP_MAX_PIXELS = 3840 * 2160
 
 
 class SandboxManager:
@@ -103,6 +109,7 @@ class SandboxManager:
         rules: Any | None = None,
         access_mode: str | None = None,
         access_key: str | None = None,
+        access_owner_id: str | None = None,
         access_request_required: bool | None = None,
         provisioning: Any | None = None,
         assigned_agent_id: str | None = None,
@@ -132,7 +139,9 @@ class SandboxManager:
             access_policy, access_key_hash = _desktop_access_from_create(
                 mode=access_mode,
                 access_key=access_key,
+                owner_id=access_owner_id,
                 request_required=access_request_required,
+                require_owner=display,
             )
         except SandboxContractError as exc:
             return exc.to_dict()
@@ -285,12 +294,97 @@ class SandboxManager:
                 "state": inst.state,
             }
 
+    def start(self, sandbox_id: str) -> Dict[str, Any]:
+        with self._lock:
+            inst = self._instances.get(str(sandbox_id))
+            if inst is None:
+                return self._not_found(sandbox_id)
+            if inst.state == DESTROYED:
+                return self._not_running(inst, "destroyed")
+            if inst.state in RUNNING_STATES:
+                return {"ok": True, "started": False, **self._instance_to_dict(inst)}
+            provider_instance = self._provider_instance(inst)
+
+        try:
+            provider = self._provider_registry.get(inst.provider_id)
+            started = provider.start(provider_instance)
+        except SandboxContractError as exc:
+            return self._mark_failed(inst.sandbox_id, exc.message, code=exc.code)
+        except Exception as exc:
+            return self._mark_failed(
+                inst.sandbox_id,
+                f"Managed runtime provider start failed: {exc}",
+                code="SANDBOX_PROVIDER_START_FAILED",
+            )
+
+        with self._lock:
+            inst = self._instances.get(str(sandbox_id))
+            if inst is None:
+                return self._not_found(sandbox_id)
+            self._apply_provider_instance(inst, started)
+            now = time.time()
+            inst.state = _canonical_state(started.state)
+            inst.started_at = now if inst.state in RUNNING_STATES else inst.started_at
+            inst.stopped_at = None if inst.state in RUNNING_STATES else inst.stopped_at
+            inst.updated_at = now
+            inst.last_activity_at = now
+            inst.last_error = None
+            self._save_registry()
+            return {"ok": True, "started": inst.state in RUNNING_STATES, **self._instance_to_dict(inst)}
+
+    def stop(self, sandbox_id: str, *, force: bool = False) -> Dict[str, Any]:
+        with self._lock:
+            inst = self._instances.get(str(sandbox_id))
+            if inst is None:
+                return self._not_found(sandbox_id)
+            if inst.state == DESTROYED:
+                return self._not_running(inst, "destroyed")
+            if inst.state == STOPPED:
+                return {"ok": True, "stopped": False, **self._instance_to_dict(inst)}
+            provider_instance = self._provider_instance(inst)
+
+        try:
+            provider = self._provider_registry.get(inst.provider_id)
+            provider.stop(provider_instance, force=force)
+            reconciled = provider.reconcile(provider_instance).instance
+        except SandboxContractError as exc:
+            return self._mark_failed(inst.sandbox_id, exc.message, code=exc.code)
+        except Exception as exc:
+            return self._mark_failed(
+                inst.sandbox_id,
+                f"Managed runtime provider stop failed: {exc}",
+                code="SANDBOX_PROVIDER_STOP_FAILED",
+            )
+
+        with self._lock:
+            inst = self._instances.get(str(sandbox_id))
+            if inst is None:
+                return self._not_found(sandbox_id)
+            self._apply_provider_instance(inst, reconciled)
+            now = time.time()
+            inst.state = STOPPED
+            inst.stopped_at = now
+            inst.updated_at = now
+            inst.last_activity_at = now
+            inst.last_error = None
+            self._save_registry()
+            return {"ok": True, "stopped": True, **self._instance_to_dict(inst)}
+
+    def restart(self, sandbox_id: str) -> Dict[str, Any]:
+        stopped = self.stop(sandbox_id, force=True)
+        if stopped.get("ok") is not True:
+            return stopped
+        return self.start(sandbox_id)
+
     def screenshot(self, sandbox_id: str) -> Dict[str, Any]:
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
             if error is not None:
                 return error
             assert inst is not None
+            operation_error = self._require_operation(inst, "desktop.snapshot", "sandbox.snapshot")
+            if operation_error is not None:
+                return operation_error
             inst.touch()
             self._save_registry()
 
@@ -310,6 +404,9 @@ class SandboxManager:
             if error is not None:
                 return error
             assert inst is not None
+            operation_error = self._require_operation(inst, "desktop.input.with_lease", "sandbox.desktop_input")
+            if operation_error is not None:
+                return operation_error
         result = self._backend_input_action(
             inst,
             "click",
@@ -326,6 +423,9 @@ class SandboxManager:
             if error is not None:
                 return error
             assert inst is not None
+            operation_error = self._require_operation(inst, "desktop.input.with_lease", "sandbox.desktop_input")
+            if operation_error is not None:
+                return operation_error
         result = self._backend_input_action(
             inst,
             "type_text",
@@ -342,6 +442,9 @@ class SandboxManager:
             if error is not None:
                 return error
             assert inst is not None
+            operation_error = self._require_operation(inst, "desktop.input.with_lease", "sandbox.desktop_input")
+            if operation_error is not None:
+                return operation_error
         result = self._backend_input_action(
             inst,
             "scroll",
@@ -364,6 +467,9 @@ class SandboxManager:
             if error is not None:
                 return error
             assert inst is not None
+            operation_error = self._require_operation(inst, "desktop.input.with_lease", "sandbox.desktop_input")
+            if operation_error is not None:
+                return operation_error
         try:
             agent = self._provider_agent(inst)
             result = agent.desktop_input(inst.sandbox_id, inst.sandbox_id, payload, actor=actor)
@@ -390,6 +496,85 @@ class SandboxManager:
         if result.get("ok") is True:
             self._touch_ready_instance(inst.sandbox_id)
         return result
+
+    def exec(self, sandbox_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            inst, error = self._ready_instance(sandbox_id)
+            if error is not None:
+                return error
+            assert inst is not None
+            operation_error = self._require_operation(inst, "sandbox.exec.argv", "sandbox.exec")
+            if operation_error is not None:
+                return operation_error
+        try:
+            request = GuestExecRequest.from_payload(payload)
+            agent = self._provider_agent(inst)
+            result = agent.exec(inst.sandbox_id, request.to_agent_payload())
+        except SandboxContractError as exc:
+            result = exc.to_dict()
+        except Exception as exc:
+            result = {
+                "ok": False,
+                "error": f"Sandbox exec failed: {exc}",
+                "code": "SANDBOX_EXEC_FAILED",
+                "status_code": 502,
+            }
+        if not isinstance(result, dict):
+            result = {
+                "ok": False,
+                "error": "Sandbox exec returned an invalid payload",
+                "code": "SANDBOX_EXEC_FAILED",
+                "status_code": 502,
+            }
+        result.setdefault("sandbox_id", inst.sandbox_id)
+        result.setdefault("status", inst.state)
+        result.setdefault("state", inst.state)
+        result.setdefault("provider_id", inst.provider_id)
+        if result.get("ok") is True:
+            self._touch_ready_instance(inst.sandbox_id)
+        return result
+
+    def apply_file_patch(self, sandbox_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        del payload
+        with self._lock:
+            inst, error = self._ready_instance(sandbox_id)
+            if error is not None:
+                return error
+            assert inst is not None
+            operation_error = self._require_operation(inst, "sandbox.files.apply_patch")
+            if operation_error is not None:
+                return operation_error
+            return {
+                "ok": False,
+                "error": "Sandbox file patch is not available until a guest file service is implemented.",
+                "code": "SANDBOX_FILES_NOT_READY",
+                "status_code": 501,
+                "sandbox_id": inst.sandbox_id,
+                "status": inst.state,
+                "state": inst.state,
+                "provider_id": inst.provider_id,
+            }
+
+    def expose_port(self, sandbox_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        del payload
+        with self._lock:
+            inst, error = self._ready_instance(sandbox_id)
+            if error is not None:
+                return error
+            assert inst is not None
+            operation_error = self._require_operation(inst, "sandbox.port.expose", "sandbox.port_forward")
+            if operation_error is not None:
+                return operation_error
+            return {
+                "ok": False,
+                "error": "Sandbox port exposure is not available until a guest port service is implemented.",
+                "code": "SANDBOX_PORTS_NOT_READY",
+                "status_code": 501,
+                "sandbox_id": inst.sandbox_id,
+                "status": inst.state,
+                "state": inst.state,
+                "provider_id": inst.provider_id,
+            }
 
     def set_model_mode(self, mode: str) -> Dict[str, Any]:
         if mode not in SUPPORTED_MODEL_MODES:
@@ -448,6 +633,7 @@ class SandboxManager:
         rules: Any | None = None,
         access_mode: str | None = None,
         access_key: str | None = None,
+        access_owner_id: str | None = None,
         access_request_required: bool | None = None,
     ) -> Dict[str, Any]:
         with self._lock:
@@ -482,9 +668,11 @@ class SandboxManager:
                     access_policy, access_key_hash = _desktop_access_from_create(
                         mode=access_mode or inst.desktop_access.mode,
                         access_key=access_key,
+                        owner_id=access_owner_id or inst.desktop_access.owner_id,
                         request_required=access_request_required,
                         previous_key_hint=inst.desktop_access.key_hint,
                         previous_key_required=inst.desktop_access.key_required,
+                        previous_owner_id=inst.desktop_access.owner_id,
                     )
                 except SandboxContractError as exc:
                     return exc.to_dict()
@@ -497,7 +685,13 @@ class SandboxManager:
             self._save_registry()
             return {"ok": True, **self._instance_to_dict(inst)}
 
-    def validate_desktop_access(self, seat_id: str, access_key: str | None = None) -> Dict[str, Any]:
+    def validate_desktop_access(
+        self,
+        seat_id: str,
+        access_key: str | None = None,
+        *,
+        owner_id: str | None = None,
+    ) -> Dict[str, Any]:
         with self._lock:
             inst = self._instances.get(str(seat_id))
             if inst is None:
@@ -508,6 +702,16 @@ class SandboxManager:
                     "ok": False,
                     "error": "Desktop access requires an approved access request.",
                     "code": "DESKTOP_ACCESS_REQUEST_REQUIRED",
+                    "status_code": 403,
+                    "sandbox_id": inst.sandbox_id,
+                }
+            if policy.mode == "owner_only" and not policy.key_required:
+                if owner_id and policy.owner_id and secrets.compare_digest(owner_id, policy.owner_id):
+                    return {"ok": True, "sandbox_id": inst.sandbox_id}
+                return {
+                    "ok": False,
+                    "error": "Desktop owner identity is required.",
+                    "code": "DESKTOP_OWNER_REQUIRED",
                     "status_code": 403,
                     "sandbox_id": inst.sandbox_id,
                 }
@@ -697,6 +901,42 @@ class SandboxManager:
             "code": "SANDBOX_NOT_FOUND",
             "status_code": 404,
             "sandbox_id": str(sandbox_id),
+        }
+
+    @staticmethod
+    def _not_running(inst: SandboxInstance, reason: str) -> Dict[str, Any]:
+        return {
+            "ok": False,
+            "error": f"Sandbox is not runnable ({reason}): {inst.sandbox_id}",
+            "code": "SANDBOX_NOT_RUNNING",
+            "status_code": 409,
+            "sandbox_id": inst.sandbox_id,
+            "status": inst.state,
+            "state": inst.state,
+        }
+
+    @staticmethod
+    def _apply_provider_instance(inst: SandboxInstance, provider_instance: ProviderInstance) -> None:
+        inst.provider_id = provider_instance.provider_id
+        inst.provider_instance_id = provider_instance.provider_instance_id
+        inst.runtime_id = provider_instance.runtime_id
+        inst.generation = max(1, int(provider_instance.generation or inst.generation or 1))
+
+    @staticmethod
+    def _require_operation(inst: SandboxInstance, *operations: str) -> Dict[str, Any] | None:
+        allowed = set(inst.capabilities)
+        if any(operation in allowed for operation in operations):
+            return None
+        return {
+            "ok": False,
+            "error": f"Sandbox template does not allow operation: {operations[0]}",
+            "code": "SANDBOX_OPERATION_NOT_ALLOWED",
+            "status_code": 403,
+            "sandbox_id": inst.sandbox_id,
+            "status": inst.state,
+            "state": inst.state,
+            "template_id": inst.template_id,
+            "allowed_operations": sorted(allowed),
         }
 
     def _mark_failed(self, sandbox_id: str, message: str, *, code: str) -> Dict[str, Any]:
@@ -1031,10 +1271,16 @@ class SandboxManager:
                 status_code=400,
             )
         if template_declares_desktop:
+            resolved_width, resolved_height = _validated_desktop_resolution(
+                width=width,
+                height=height,
+                default_width=int(_float_or_zero(desktop_policy.get("width")) or 1440),
+                default_height=int(_float_or_zero(desktop_policy.get("height")) or 900),
+            )
             desktop = DesktopSpec(
                 enabled=True,
-                width=int(width or desktop_policy.get("width") or 1440),
-                height=int(height or desktop_policy.get("height") or 900),
+                width=resolved_width,
+                height=resolved_height,
                 display_backend=str(desktop_policy.get("display_backend") or "xvfb_openbox"),
                 preset=str(desktop_policy.get("starter") or desktop_policy.get("preset") or "") or None,
             )
@@ -1210,6 +1456,44 @@ def _default_template_id(*, display: bool, provider_id: str | None) -> str:
     return "desktop.ubuntu"
 
 
+def _validated_desktop_resolution(
+    *,
+    width: int | None,
+    height: int | None,
+    default_width: int,
+    default_height: int,
+) -> tuple[int, int]:
+    resolved_width = int(width or default_width or 1440)
+    resolved_height = int(height or default_height or 900)
+    if (
+        resolved_width < DESKTOP_MIN_WIDTH
+        or resolved_height < DESKTOP_MIN_HEIGHT
+        or resolved_width > DESKTOP_MAX_WIDTH
+        or resolved_height > DESKTOP_MAX_HEIGHT
+        or resolved_width * resolved_height > DESKTOP_MAX_PIXELS
+    ):
+        raise SandboxContractError(
+            "DESKTOP_RESOLUTION_LIMIT_EXCEEDED",
+            (
+                "Desktop resolution must be between "
+                f"{DESKTOP_MIN_WIDTH}x{DESKTOP_MIN_HEIGHT} and "
+                f"{DESKTOP_MAX_WIDTH}x{DESKTOP_MAX_HEIGHT}, with at most "
+                f"{DESKTOP_MAX_PIXELS} pixels."
+            ),
+            status_code=400,
+            details={
+                "width": resolved_width,
+                "height": resolved_height,
+                "min_width": DESKTOP_MIN_WIDTH,
+                "min_height": DESKTOP_MIN_HEIGHT,
+                "max_width": DESKTOP_MAX_WIDTH,
+                "max_height": DESKTOP_MAX_HEIGHT,
+                "max_pixels": DESKTOP_MAX_PIXELS,
+            },
+        )
+    return resolved_width, resolved_height
+
+
 def _resource_limits_from_dict(value: Any) -> ResourceLimits:
     if not isinstance(value, dict):
         return ResourceLimits()
@@ -1278,9 +1562,12 @@ def _desktop_access_from_create(
     *,
     mode: str | None = None,
     access_key: str | None = None,
+    owner_id: str | None = None,
     request_required: bool | None = None,
+    require_owner: bool = True,
     previous_key_hint: str | None = None,
     previous_key_required: bool = False,
+    previous_owner_id: str | None = None,
 ) -> tuple[DesktopAccessPolicy, str | None]:
     normalized_mode = str(mode or "owner_only").strip().lower()
     if normalized_mode == "request_required" or bool(request_required):
@@ -1289,15 +1576,29 @@ def _desktop_access_from_create(
             "Desktop request-required access is not available until request grant state is implemented.",
             status_code=501,
         )
+    if normalized_mode == "shared_link":
+        raise SandboxContractError(
+            "DESKTOP_SHARED_LINK_NOT_READY",
+            "Desktop shared-link access is not available until link-token verification is implemented.",
+            status_code=501,
+        )
     if normalized_mode not in DESKTOP_ACCESS_MODES:
         normalized_mode = "owner_only"
     key_text = str(access_key or "")
     key_required = normalized_mode == "key_required" or (previous_key_required and normalized_mode == "key_required")
     key_hint = _access_key_hint(key_text) if key_text else (previous_key_hint if key_required else None)
     key_hash = _hash_access_key(key_text) if key_text else None
+    clean_owner_id = _optional_clean_string(owner_id, max_len=160) or previous_owner_id
+    if require_owner and normalized_mode == "owner_only" and not clean_owner_id:
+        raise SandboxContractError(
+            "DESKTOP_OWNER_REQUIRED",
+            "Desktop owner_only access requires an owner_id.",
+            status_code=400,
+        )
     return (
         DesktopAccessPolicy(
             mode=normalized_mode,
+            owner_id=clean_owner_id if normalized_mode == "owner_only" else None,
             key_required=key_required,
             request_required=False,
             key_hint=key_hint,
@@ -1315,10 +1616,11 @@ def _desktop_access_from_dict(value: Any) -> DesktopAccessPolicy:
         mode = "owner_only"
     return DesktopAccessPolicy(
         mode=mode,
+        owner_id=_optional_clean_string(value.get("owner_id"), max_len=160),
         key_required=bool(value.get("key_required")),
         request_required=False,
         key_hint=str(value.get("key_hint")) if value.get("key_hint") is not None else None,
-        link_enabled=bool(value.get("link_enabled")),
+        link_enabled=False,
     )
 
 

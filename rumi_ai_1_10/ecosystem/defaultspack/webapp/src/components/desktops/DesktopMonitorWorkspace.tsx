@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Trash2, X } from "lucide-react";
 
 import { sandboxesApi } from "../../features/sandboxes/api";
 import { diagnosticsText } from "../../features/sandboxes/runtimeStatus";
@@ -30,6 +31,7 @@ export function DesktopMonitorWorkspace() {
   const [accessKeys, setAccessKeys] = useState<Record<string, string>>({});
   const [accessMessage, setAccessMessage] = useState<string | null>(null);
   const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
+  const [deleteTargetSeatId, setDeleteTargetSeatId] = useState<string | null>(null);
   const selectedAccessKey = selectedSeatId ? accessKeys[selectedSeatId] || "" : "";
   const control = useDesktopControlLease(selectedSeatId, sandboxesApi, selectedAccessKey);
 
@@ -46,6 +48,7 @@ export function DesktopMonitorWorkspace() {
   const selectedDesktop = desktopInstances.desktops.find((desktop) => desktop.seat_id === selectedSeatId)
     ?? desktopInstances.desktops[0]
     ?? null;
+  const deleteTarget = desktopInstances.desktops.find((desktop) => desktop.seat_id === deleteTargetSeatId) ?? null;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -123,6 +126,7 @@ export function DesktopMonitorWorkspace() {
       if (action === "delete") await sandboxesApi.deleteDesktop(seatId, accessKeys[seatId] || undefined);
       if (action === "delete" && seatId === selectedSeatId) {
         setSelectedSeatId(null);
+        setDeleteTargetSeatId(null);
       }
       await desktopInstances.refresh();
     } catch (error) {
@@ -236,7 +240,7 @@ export function DesktopMonitorWorkspace() {
                 onStart={(seatId) => void runDesktopAction(seatId, "start")}
                 onRestart={(seatId) => void runDesktopAction(seatId, "restart")}
                 onStop={(seatId) => void runDesktopAction(seatId, "stop")}
-                onDelete={(seatId) => void runDesktopAction(seatId, "delete")}
+                onDelete={setDeleteTargetSeatId}
               />
               <DesktopInspector
                 desktop={selectedDesktop}
@@ -266,6 +270,52 @@ export function DesktopMonitorWorkspace() {
         }}
         onCreate={handleCreateDesktop}
       />
+
+      {deleteTarget && (
+        <div className="absolute inset-0 rumi-layer-modal flex items-center justify-center bg-black/60 p-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="desktop-delete-title" className="w-[min(420px,100%)] rounded-lg border border-red-500/25 bg-[#0b0b0d] shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-red-500/20 px-4 py-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-red-500/25 bg-red-500/10 text-red-200">
+                  <AlertTriangle size={15} />
+                </span>
+                <div className="min-w-0">
+                  <p id="desktop-delete-title" className="truncate text-sm font-semibold text-zinc-100">Delete Desktop</p>
+                  <p className="truncate text-xs text-zinc-500">{deleteTarget.name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteTargetSeatId(null)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                aria-label="Close delete confirmation"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <div className="px-4 py-4 text-sm leading-6 text-zinc-300">
+              This removes the desktop session and clears its cached frame and control lease.
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-zinc-800/70 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setDeleteTargetSeatId(null)}
+                className="h-8 rounded-md border border-zinc-800 px-3 text-xs font-medium text-zinc-300 hover:bg-zinc-900"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void runDesktopAction(deleteTarget.seat_id, "delete")}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-red-500 px-3 text-xs font-semibold text-white hover:bg-red-400"
+              >
+                <Trash2 size={13} />
+                <span>Delete</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

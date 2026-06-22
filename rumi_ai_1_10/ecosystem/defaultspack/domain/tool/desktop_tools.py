@@ -16,6 +16,7 @@ def desktop_create(arguments: dict[str, Any], context: dict[str, Any] | None = N
     if approval_error is not None:
         return approval_error
     payload = dict(arguments or {})
+    _default_owner(payload, context)
     payload["_handler"] = "desktops_create"
     return _sandbox_api().run(payload, context or {})
 
@@ -29,6 +30,7 @@ def desktop_input(arguments: dict[str, Any], context: dict[str, Any] | None = No
     if not seat_id:
         return err("'seat_id' is required", "INVALID_INPUT")
     payload["seat_id"] = seat_id
+    _default_owner(payload, context)
     payload["_handler"] = "desktop_ai_input"
     return _sandbox_api().run(payload, context or {})
 
@@ -42,6 +44,7 @@ def desktop_rules_update(arguments: dict[str, Any], context: dict[str, Any] | No
     if not seat_id:
         return err("'seat_id' is required", "INVALID_INPUT")
     payload["seat_id"] = seat_id
+    _default_owner(payload, context)
     payload["_handler"] = "desktop_rules_update"
     return _sandbox_api().run(payload, context or {})
 
@@ -52,8 +55,27 @@ def desktop_access_request(arguments: dict[str, Any], context: dict[str, Any] | 
     if not seat_id:
         return err("'seat_id' is required", "INVALID_INPUT")
     payload["seat_id"] = seat_id
+    _default_owner(payload, context)
     payload["_handler"] = "desktop_access_request"
     return _sandbox_api().run(payload, context or {})
+
+
+def _default_owner(payload: dict[str, Any], context: dict[str, Any] | None) -> None:
+    if payload.get("owner_id") or payload.get("access_owner_id"):
+        return
+    access = payload.get("access") if isinstance(payload.get("access"), dict) else None
+    if access and access.get("owner_id"):
+        return
+    context = context if isinstance(context, dict) else {}
+    owner_id = str(
+        context.get("agent_id")
+        or context.get("actor_id")
+        or context.get("user_id")
+        or "local-agent"
+    ).strip()
+    payload["owner_id"] = owner_id[:160] or "local-agent"
+    if access is not None:
+        access.setdefault("owner_id", payload["owner_id"])
 
 
 def _sandbox_api():

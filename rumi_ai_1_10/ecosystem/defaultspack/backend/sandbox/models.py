@@ -205,6 +205,7 @@ class DesktopRuleConfig:
 @dataclass(frozen=True)
 class DesktopAccessPolicy:
     mode: str = "owner_only"
+    owner_id: str | None = None
     key_required: bool = False
     request_required: bool = False
     key_hint: str | None = None

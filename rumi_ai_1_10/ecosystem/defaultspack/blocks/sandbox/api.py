@@ -24,6 +24,7 @@ from ecosystem.defaultspack.backend.sandbox.models import (
     UninstallRuntimeRequest,
     UpdateRuntimeRequest,
 )
+from ecosystem.defaultspack.backend.sandbox.operation_store import RuntimeOperationStore
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.providers import LinuxNativeProvider
 from ecosystem.defaultspack.backend.sandbox.providers.base import NullProgressSink
@@ -40,6 +41,7 @@ class _SandboxApiService:
         self.provider_registry = ProviderRegistry()
         self.provider_registry.register(LinuxNativeProvider())
         self.manager = SandboxManager(provider_registry=self.provider_registry)
+        self.operation_store = RuntimeOperationStore(self.manager.state_dir / "runtime_operations.json")
         self.frame_cache = FrameCache()
         self.lease_manager = ControlLeaseManager()
 
@@ -64,11 +66,11 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
         if handler == "runtime_uninstall":
             return ok(_runtime_uninstall(service, payload))
         if handler == "runtime_operations":
-            return ok({"operations": []})
+            return ok({"operations": _operation_store(service).list()})
         if handler in {"runtime_operation", "runtime_operation_get"}:
-            return ok(_runtime_operation("failed", operation_id=str(payload.get("operation_id") or "runtime-operation")))
+            return _runtime_operation_get(service, payload)
         if handler in {"runtime_cancel", "runtime_operation_cancel"}:
-            return ok(_runtime_operation("cancelled", operation_id=str(payload.get("operation_id") or "runtime-operation")))
+            return _runtime_operation_cancel(service, payload)
         if handler == "sandbox_templates":
             return ok({"templates": _template_summaries()})
         if handler == "sandboxes_list":
@@ -77,10 +79,16 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
             return _sandbox_create(service, payload, display=False)
         if handler == "sandbox_get":
             return _sandbox_get(service, payload)
+        if handler == "sandbox_exec":
+            return _sandbox_exec(service, payload)
+        if handler == "sandbox_files_apply_patch":
+            return _sandbox_files_apply_patch(service, payload)
+        if handler == "sandbox_port_expose":
+            return _sandbox_port_expose(service, payload)
         if handler == "sandbox_delete":
             return _sandbox_delete(service, payload)
         if handler in {"sandbox_start", "sandbox_stop", "sandbox_restart"}:
-            return _api_error("Sandbox start/stop/restart is not implemented yet.", "SANDBOX_LIFECYCLE_NOT_READY", 501)
+            return _sandbox_lifecycle(service, payload, action=handler.removeprefix("sandbox_"))
         if handler == "desktops_list":
             return ok({"desktops": _desktop_list(service)})
         if handler == "desktops_create":
@@ -90,7 +98,7 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
         if handler == "desktop_delete":
             return _desktop_delete(service, payload)
         if handler in {"desktop_start", "desktop_stop", "desktop_restart"}:
-            return _api_error("Desktop start/stop/restart is not implemented yet.", "DESKTOP_LIFECYCLE_NOT_READY", 501)
+            return _desktop_lifecycle(service, payload, action=handler.removeprefix("desktop_"))
         if handler == "desktop_frame":
             return _desktop_frame(service, payload)
         if handler == "desktop_input":
@@ -122,6 +130,15 @@ def _service() -> _SandboxApiService:
 def _reset_service_for_tests(service: _SandboxApiService | None = None) -> None:
     global _SERVICE
     _SERVICE = service
+
+
+def _operation_store(service: _SandboxApiService) -> RuntimeOperationStore:
+    store = getattr(service, "operation_store", None)
+    if isinstance(store, RuntimeOperationStore):
+        return store
+    store = RuntimeOperationStore()
+    setattr(service, "operation_store", store)
+    return store
 
 
 def _runtime_providers(service: _SandboxApiService) -> dict[str, Any]:
@@ -164,10 +181,10 @@ def _runtime_ensure(service: _SandboxApiService, payload: dict[str, Any]) -> dic
     try:
         provider = service.provider_registry.get(provider_id)
     except SandboxContractError:
-        return _runtime_operation("failed", provider_id=provider_id)
+        return _record_operation(service, _runtime_operation("failed", provider_id=provider_id))
     sink = NullProgressSink()
     result = provider.ensure(EnsureRuntimeRequest(provider_id=provider_id, requirements=requirements), sink)
-    return _operation_payload(result)
+    return _record_operation(service, _operation_payload(result))
 
 
 def _runtime_update(service: _SandboxApiService, payload: dict[str, Any]) -> dict[str, Any]:
@@ -175,10 +192,10 @@ def _runtime_update(service: _SandboxApiService, payload: dict[str, Any]) -> dic
     try:
         provider = service.provider_registry.get(provider_id)
     except SandboxContractError:
-        return _runtime_operation("failed", provider_id=provider_id, operation_id="managed-runtime-update")
+        return _record_operation(service, _runtime_operation("failed", provider_id=provider_id, operation_id="managed-runtime-update"))
     sink = NullProgressSink()
     result = provider.update(UpdateRuntimeRequest(provider_id=provider_id), sink)
-    return _operation_payload(result)
+    return _record_operation(service, _operation_payload(result))
 
 
 def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> dict[str, Any]:
@@ -187,7 +204,7 @@ def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> 
     try:
         provider = service.provider_registry.get(provider_id)
     except SandboxContractError:
-        return _runtime_operation("failed", provider_id=provider_id, operation_id="managed-runtime-uninstall")
+        return _record_operation(service, _runtime_operation("failed", provider_id=provider_id, operation_id="managed-runtime-uninstall"))
     sink = NullProgressSink()
     result = provider.uninstall(
         UninstallRuntimeRequest(
@@ -200,7 +217,27 @@ def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> 
         for seat_id in service.manager.mark_provider_uninstalled(provider_id, remove_state=remove_state):
             service.frame_cache.discard(seat_id)
             service.lease_manager.invalidate(seat_id)
-    return _operation_payload(result)
+    return _record_operation(service, _operation_payload(result))
+
+
+def _runtime_operation_get(service: _SandboxApiService, payload: dict[str, Any]):
+    operation_id = str(payload.get("operation_id") or "").strip()
+    operation = _operation_store(service).get(operation_id)
+    if operation is None:
+        return _api_error(f"Runtime operation not found: {operation_id}", "RUNTIME_OPERATION_NOT_FOUND", 404)
+    return ok(operation)
+
+
+def _runtime_operation_cancel(service: _SandboxApiService, payload: dict[str, Any]):
+    operation_id = str(payload.get("operation_id") or "").strip()
+    operation = _operation_store(service).cancel(operation_id, updated_at=timestamp())
+    if operation is None:
+        return _api_error(f"Runtime operation not found: {operation_id}", "RUNTIME_OPERATION_NOT_FOUND", 404)
+    return ok(operation)
+
+
+def _record_operation(service: _SandboxApiService, operation: dict[str, Any]) -> dict[str, Any]:
+    return _operation_store(service).put(operation)
 
 
 def _runtime_operation(status: str, *, provider_id: Any = None, operation_id: str = "managed-runtime-setup") -> dict[str, Any]:
@@ -238,6 +275,7 @@ def _sandbox_create(service: _SandboxApiService, payload: dict[str, Any], *, dis
         rules=rules,
         access_mode=str(access.get("mode") or payload.get("access_mode") or "owner_only"),
         access_key=str(access.get("access_key") or payload.get("access_key") or ""),
+        access_owner_id=_access_owner_id(payload),
         access_request_required=bool(access.get("request_required") or payload.get("access_request_required")),
         provisioning=provisioning,
         assigned_agent_id=str(payload.get("assigned_agent") or payload.get("assigned_agent_id") or ""),
@@ -258,6 +296,26 @@ def _sandbox_get(service: _SandboxApiService, payload: dict[str, Any]):
     return ok(_sandbox_payload(status))
 
 
+def _sandbox_exec(service: _SandboxApiService, payload: dict[str, Any]):
+    sandbox_id = str(payload.get("sandbox_id") or "")
+    result = service.manager.exec(sandbox_id, payload)
+    if result.get("ok") is not True:
+        return _api_error(str(result.get("error") or "Sandbox exec failed"), str(result.get("code") or "SANDBOX_EXEC_FAILED"), int(result.get("status_code") or 400), details=result.get("details"))
+    return ok(result)
+
+
+def _sandbox_files_apply_patch(service: _SandboxApiService, payload: dict[str, Any]):
+    sandbox_id = str(payload.get("sandbox_id") or "")
+    result = service.manager.apply_file_patch(sandbox_id, payload)
+    return _api_error(str(result.get("error") or "Sandbox file patch failed"), str(result.get("code") or "SANDBOX_FILES_NOT_READY"), int(result.get("status_code") or 501), details=result.get("details"))
+
+
+def _sandbox_port_expose(service: _SandboxApiService, payload: dict[str, Any]):
+    sandbox_id = str(payload.get("sandbox_id") or "")
+    result = service.manager.expose_port(sandbox_id, payload)
+    return _api_error(str(result.get("error") or "Sandbox port exposure failed"), str(result.get("code") or "SANDBOX_PORTS_NOT_READY"), int(result.get("status_code") or 501), details=result.get("details"))
+
+
 def _sandbox_delete(service: _SandboxApiService, payload: dict[str, Any]):
     sandbox_id = str(payload.get("sandbox_id") or "")
     result = service.manager.destroy(sandbox_id)
@@ -266,6 +324,24 @@ def _sandbox_delete(service: _SandboxApiService, payload: dict[str, Any]):
     service.frame_cache.discard(sandbox_id)
     service.lease_manager.invalidate(sandbox_id)
     return ok({"deleted": True, "sandbox_id": sandbox_id})
+
+
+def _sandbox_lifecycle(service: _SandboxApiService, payload: dict[str, Any], *, action: str):
+    sandbox_id = str(payload.get("sandbox_id") or "")
+    if action == "start":
+        result = service.manager.start(sandbox_id)
+    elif action == "stop":
+        result = service.manager.stop(sandbox_id)
+    elif action == "restart":
+        result = service.manager.restart(sandbox_id)
+    else:
+        return _api_error(f"Unknown sandbox lifecycle action: {action}", "SANDBOX_LIFECYCLE_UNKNOWN", 400)
+    if result.get("ok") is not True:
+        return _api_error(str(result.get("error") or "Sandbox lifecycle failed"), str(result.get("code") or "SANDBOX_LIFECYCLE_FAILED"), int(result.get("status_code") or 400))
+    if action in {"stop", "restart"}:
+        service.frame_cache.discard(sandbox_id)
+        service.lease_manager.invalidate(sandbox_id)
+    return ok(_sandbox_payload(result))
 
 
 def _desktop_list(service: _SandboxApiService) -> list[dict[str, Any]]:
@@ -298,6 +374,27 @@ def _desktop_delete(service: _SandboxApiService, payload: dict[str, Any]):
     service.frame_cache.discard(seat_id)
     service.lease_manager.invalidate(seat_id)
     return ok({"deleted": True, "seat_id": seat_id})
+
+
+def _desktop_lifecycle(service: _SandboxApiService, payload: dict[str, Any], *, action: str):
+    seat_id = str(payload.get("seat_id") or "")
+    access_error = _desktop_access_error(service, seat_id, payload)
+    if access_error is not None:
+        return access_error
+    if action == "start":
+        result = service.manager.start(seat_id)
+    elif action == "stop":
+        result = service.manager.stop(seat_id)
+    elif action == "restart":
+        result = service.manager.restart(seat_id)
+    else:
+        return _api_error(f"Unknown desktop lifecycle action: {action}", "DESKTOP_LIFECYCLE_UNKNOWN", 400)
+    if result.get("ok") is not True:
+        return _api_error(str(result.get("error") or "Desktop lifecycle failed"), str(result.get("code") or "DESKTOP_LIFECYCLE_FAILED"), int(result.get("status_code") or 400))
+    if action in {"stop", "restart"}:
+        service.frame_cache.discard(seat_id)
+        service.lease_manager.invalidate(seat_id)
+    return ok(_desktop_payload(service, result))
 
 
 def _desktop_frame(service: _SandboxApiService, payload: dict[str, Any]):
@@ -387,6 +484,7 @@ def _desktop_rules_update(service: _SandboxApiService, payload: dict[str, Any]):
         rules=payload.get("rules"),
         access_mode=str(access.get("mode") or payload.get("access_mode") or "") or None,
         access_key=str(access.get("access_key") or payload.get("access_key") or "") or None,
+        access_owner_id=_access_owner_id(payload),
         access_request_required=access.get("request_required")
         if "request_required" in access
         else payload.get("access_request_required"),
@@ -564,6 +662,7 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
         },
         "access_policy": {
             "mode": access.get("mode") or "owner_only",
+            "owner_id": access.get("owner_id"),
             "key_required": bool(access.get("key_required")),
             "request_required": bool(access.get("request_required")),
             "key_hint": access.get("key_hint"),
@@ -769,7 +868,11 @@ def _jsonable(value: Any) -> Any:
 
 
 def _desktop_access_error(service: _SandboxApiService, seat_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
-    result = service.manager.validate_desktop_access(seat_id, _access_key(payload))
+    result = service.manager.validate_desktop_access(
+        seat_id,
+        _access_key(payload),
+        owner_id=_access_owner_id(payload),
+    )
     if result.get("ok") is True:
         return None
     return _api_error(
@@ -793,6 +896,22 @@ def _access_key(payload: dict[str, Any]) -> str | None:
         text = str(value or "")
         if text:
             return text
+    return None
+
+
+def _access_owner_id(payload: dict[str, Any]) -> str | None:
+    access = payload.get("access") if isinstance(payload.get("access"), dict) else {}
+    headers = payload.get("_headers") if isinstance(payload.get("_headers"), dict) else {}
+    for value in (
+        payload.get("owner_id"),
+        payload.get("access_owner_id"),
+        access.get("owner_id"),
+        headers.get("x-rumi-desktop-owner"),
+        headers.get("X-Rumi-Desktop-Owner"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text[:160]
     return None
 
 

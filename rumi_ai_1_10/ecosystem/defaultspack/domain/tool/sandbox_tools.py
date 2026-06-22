@@ -23,6 +23,28 @@ def sandbox_exec(arguments: dict[str, Any], context: dict[str, Any] | None = Non
     argv = plan["argv"]
     if not argv:
         return err("'command' is required", "INVALID_INPUT")
+    sandbox_id = str(arguments.get("sandbox_id") or "").strip()
+    if sandbox_id:
+        try:
+            if arguments.get("timeout_ms") is not None:
+                timeout_ms = int(arguments.get("timeout_ms"))
+            else:
+                timeout_ms = int(arguments.get("timeout") or 60) * 1000
+        except (TypeError, ValueError):
+            timeout_ms = 60_000
+        return _sandbox_api().run(
+            {
+                "_handler": "sandbox_exec",
+                "sandbox_id": sandbox_id,
+                "argv": argv,
+                "cwd": arguments.get("cwd") or ".",
+                "env": arguments.get("env") or {},
+                "stdin": arguments.get("stdin"),
+                "timeout_ms": timeout_ms,
+                "client_request_id": str(arguments.get("client_request_id") or f"sandbox-exec-{now_slug()}"),
+            },
+            context or {},
+        )
     return err(
         "Managed sandbox runtime is not ready; sandbox_exec will not fall back to host execution.",
         MANAGED_RUNTIME_NOT_READY,
@@ -99,6 +121,14 @@ def _require_server_side_approval(context: dict[str, Any] | None) -> dict[str, A
     if isinstance(policy, dict) and str(policy.get("yolo_mode")).lower() == "true":
         return None
     return err("sandbox execution requires a server-side approval decision", "SANDBOX_APPROVAL_REQUIRED")
+
+
+def _sandbox_api():
+    try:
+        from ecosystem.defaultspack.blocks.sandbox import api
+    except ModuleNotFoundError:
+        from blocks.sandbox import api  # type: ignore
+    return api
 
 
 def _command_plan(arguments: dict[str, Any]) -> dict[str, Any]:
