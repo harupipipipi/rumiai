@@ -87,6 +87,28 @@ function normalizeDesktopInstance(instance: DesktopInstance): DesktopInstance {
   };
 }
 
+function normalizeLeaseExpiresAt(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const milliseconds = value > 10_000_000_000 ? value : value * 1000;
+    return new Date(milliseconds).toISOString();
+  }
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeDesktopLeaseGrant(lease: DesktopControlLeaseGrant & { expires_at?: unknown }): DesktopControlLeaseGrant {
+  return {
+    ...lease,
+    expires_at: normalizeLeaseExpiresAt(lease.expires_at),
+  };
+}
+
+function normalizeDesktopLeaseRenewal(lease: DesktopControlLeaseRenewal & { expires_at?: unknown }): DesktopControlLeaseRenewal {
+  return {
+    ...lease,
+    expires_at: normalizeLeaseExpiresAt(lease.expires_at),
+  };
+}
+
 export async function fetchDesktopFrame(
   seatId: string,
   options: {
@@ -289,7 +311,7 @@ export const sandboxesApi = {
         access_key: accessKey || undefined,
         request_id: requestId("desktop-control-acquire"),
       }),
-    });
+    }).then(normalizeDesktopLeaseGrant);
   },
 
   renewDesktopControl(seatId: string, leaseToken: string, accessKey?: string | null) {
@@ -301,7 +323,7 @@ export const sandboxesApi = {
         lease_token: leaseToken,
         request_id: requestId("desktop-control-renew"),
       }),
-    });
+    }).then(normalizeDesktopLeaseRenewal);
   },
 
   releaseDesktopControl(seatId: string, leaseToken: string, accessKey?: string | null) {

@@ -105,3 +105,52 @@ test("grantDesktopAccess sends owner approval to the request grant endpoint", as
   assert.equal(body.approved, true);
   assert.match(body.request_id, /^desktop-access-grant-/);
 });
+
+test("desktop control acquire normalizes epoch lease expiry to an ISO string", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    status: "ok",
+    data: {
+      seat_id: "seat-1",
+      lease_id: "lease-1",
+      lease_token: "secret-token",
+      expires_at: 1767225600,
+    },
+  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.acquireDesktopControl("seat-1");
+    assert.equal(result.expires_at, "2026-01-01T00:00:00.000Z");
+    assert.equal(result.lease_token, "secret-token");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("desktop control renew normalizes expiry without requiring a lease token in the response", async () => {
+  let requestInit: RequestInit | undefined;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestInit = init;
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        seat_id: "seat-1",
+        lease_id: "lease-1",
+        expires_at: 1767225610,
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.renewDesktopControl("seat-1", "secret-token");
+    assert.equal(result.expires_at, "2026-01-01T00:00:10.000Z");
+    assert.equal("lease_token" in result, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const body = JSON.parse(String(requestInit?.body));
+  assert.equal(body.lease_token, "secret-token");
+  assert.match(body.request_id, /^desktop-control-renew-/);
+});
