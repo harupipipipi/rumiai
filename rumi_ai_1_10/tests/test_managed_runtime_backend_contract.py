@@ -407,6 +407,71 @@ def test_expired_lifecycle_blocks_desktop_control_lease(tmp_path) -> None:
     assert lease_manager.active_lease("ttl-control") is None
 
 
+def test_lifecycle_sweeper_enforces_expired_desktop_without_api_polling(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+    from ecosystem.defaultspack.backend.sandbox.lifecycle_sweeper import LifecycleSweeper
+
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+            "sandbox.desktop",
+            "sandbox.desktop_input",
+            "sandbox.snapshot",
+        },
+        sandbox_id_factory=lambda: "ttl-sweep",
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    lease_manager = ControlLeaseManager(token_factory=lambda: "lease-token")
+    frame_cache = FrameCache(min_capture_interval_seconds=0)
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=frame_cache,
+        lease_manager=lease_manager,
+    )
+    created = service.manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.ubuntu",
+        access_owner_id="local-user",
+    )
+    assert created["ok"] is True
+    frame_cache.put_frame("ttl-sweep", b"frame", content_type="image/png", width=2, height=2)
+    lease_manager.acquire("ttl-sweep", "local-user")
+    with service.manager._lock:
+        inst = service.manager._instances["ttl-sweep"]
+        inst.lifecycle_policy = LifecyclePolicy(ttl_seconds=1, destroy_on_exit=True)
+        inst.last_activity_at = time.time() - 5
+        service.manager._save_registry()
+
+    sweeper = LifecycleSweeper(lambda: api._sweep_lifecycle(service), interval_seconds=0.05)
+    sweeper.start()
+    try:
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            with service.manager._lock:
+                state = service.manager._instances["ttl-sweep"].state
+            if state == "destroyed":
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("Lifecycle sweeper did not destroy the expired desktop")
+    finally:
+        sweeper.stop()
+
+    with service.manager._lock:
+        final_state = service.manager._instances["ttl-sweep"].state
+    assert final_state == "destroyed"
+    assert provider.instances == {}
+    assert frame_cache.last_metadata("ttl-sweep") is None
+    assert lease_manager.active_lease("ttl-sweep") is None
+
+
 def test_exec_timeout_cannot_exceed_template_resource_limit(tmp_path) -> None:
     agent = FakeGuestAgent()
     registry = ProviderRegistry()

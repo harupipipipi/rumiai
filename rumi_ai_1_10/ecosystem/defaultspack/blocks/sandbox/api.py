@@ -41,6 +41,7 @@ from ecosystem.defaultspack.backend.sandbox.models import (
     UninstallRuntimeRequest,
     UpdateRuntimeRequest,
 )
+from ecosystem.defaultspack.backend.sandbox.lifecycle_sweeper import LifecycleSweeper
 from ecosystem.defaultspack.backend.sandbox.operation_store import RuntimeOperationStore
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.providers import DockerProvider, LinuxNativeProvider, MacLimaProvider, WindowsWslProvider
@@ -54,7 +55,7 @@ DESKTOP_RUNTIME_CAPABILITIES = frozenset({"sandbox.desktop", "sandbox.desktop_in
 
 
 class _SandboxApiService:
-    def __init__(self) -> None:
+    def __init__(self, *, start_lifecycle_sweeper: bool = False, lifecycle_sweep_interval_seconds: float = 30.0) -> None:
         self.provider_registry = ProviderRegistry()
         self.provider_registry.register(LinuxNativeProvider())
         self.provider_registry.register(MacLimaProvider())
@@ -69,6 +70,15 @@ class _SandboxApiService:
         )
         self.frame_cache = FrameCache()
         self.lease_manager = ControlLeaseManager()
+        self.lifecycle_sweeper = LifecycleSweeper(
+            lambda: _sweep_lifecycle(self),
+            interval_seconds=lifecycle_sweep_interval_seconds,
+        )
+        if start_lifecycle_sweeper:
+            self.lifecycle_sweeper.start()
+
+    def close(self) -> None:
+        self.lifecycle_sweeper.stop()
 
 
 _SERVICE: _SandboxApiService | None = None
@@ -150,12 +160,14 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
 def _service() -> _SandboxApiService:
     global _SERVICE
     if _SERVICE is None:
-        _SERVICE = _SandboxApiService()
+        _SERVICE = _SandboxApiService(start_lifecycle_sweeper=True)
     return _SERVICE
 
 
 def _reset_service_for_tests(service: _SandboxApiService | None = None) -> None:
     global _SERVICE
+    if _SERVICE is not None and _SERVICE is not service and hasattr(_SERVICE, "close"):
+        _SERVICE.close()
     _SERVICE = service
 
 
@@ -175,6 +187,24 @@ def _operation_cancellations(service: _SandboxApiService) -> CancellationRegistr
     registry = CancellationRegistry()
     setattr(service, "operation_cancellations", registry)
     return registry
+
+
+def _sweep_lifecycle(service: _SandboxApiService) -> list[dict[str, Any]]:
+    results = service.manager.enforce_lifecycle()
+    _cleanup_lifecycle_results(service, results)
+    return results
+
+
+def _cleanup_lifecycle_results(service: _SandboxApiService, results: list[dict[str, Any]]) -> None:
+    for result in results:
+        if result.get("ok") is not True:
+            continue
+        sandbox_id = str(result.get("sandbox_id") or result.get("seat_id") or "").strip()
+        if not sandbox_id:
+            continue
+        if str(result.get("lifecycle_action") or "") in {"stop", "destroy"}:
+            service.frame_cache.discard(sandbox_id)
+            service.lease_manager.invalidate(sandbox_id)
 
 
 class _RecordingProgressSink:
