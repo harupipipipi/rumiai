@@ -690,13 +690,19 @@ def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -
 
     assert update["data"]["operation_id"] == "fake-update"
     assert update["data"]["status"] == "completed"
+    assert update["data"]["step"] == "done"
+    assert update["data"]["message"] == "Fake provider updated"
+    assert update["data"]["progress_events"][0]["stage"] == "done"
     assert [operation["operation_id"] for operation in operations["data"]["operations"]] == ["fake-update"]
+    assert operations["data"]["operations"][0]["progress_events"][0]["message"] == "Fake provider updated"
     assert operation_get["data"]["operation_id"] == "fake-update"
+    assert operation_get["data"]["progress_events"][0]["operation_id"] == "fake-update"
     assert operation_cancel["data"]["operation_id"] == "fake-update"
     assert operation_cancel["data"]["cancelled"] is False
     assert operation_cancel["data"]["status"] == "completed"
     assert uninstall["data"]["operation_id"] == "fake-uninstall"
     assert uninstall["data"]["status"] == "completed"
+    assert uninstall["data"]["progress_events"][0]["stage"] == "done"
 
 
 def test_runtime_uninstall_reconciles_manager_desktops_and_local_state(tmp_path) -> None:

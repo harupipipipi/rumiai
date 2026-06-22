@@ -19,6 +19,7 @@ from ecosystem.defaultspack.backend.sandbox.frame_cache import FrameCache
 from ecosystem.defaultspack.backend.sandbox.models import (
     EnsureRuntimeRequest,
     OperationResult,
+    ProgressEvent,
     RuntimeProviderStatus,
     RuntimeRequirements,
     UninstallRuntimeRequest,
@@ -187,7 +188,7 @@ def _runtime_ensure(service: _SandboxApiService, payload: dict[str, Any]) -> dic
         return _record_operation(service, _runtime_operation("failed", provider_id=provider_id))
     sink = NullProgressSink()
     result = provider.ensure(EnsureRuntimeRequest(provider_id=provider_id, requirements=requirements), sink)
-    return _record_operation(service, _operation_payload(result))
+    return _record_operation(service, _operation_payload(result, progress_events=sink.events))
 
 
 def _runtime_update(service: _SandboxApiService, payload: dict[str, Any]) -> dict[str, Any]:
@@ -198,7 +199,7 @@ def _runtime_update(service: _SandboxApiService, payload: dict[str, Any]) -> dic
         return _record_operation(service, _runtime_operation("failed", provider_id=provider_id, operation_id="managed-runtime-update"))
     sink = NullProgressSink()
     result = provider.update(UpdateRuntimeRequest(provider_id=provider_id), sink)
-    return _record_operation(service, _operation_payload(result))
+    return _record_operation(service, _operation_payload(result, progress_events=sink.events))
 
 
 def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> dict[str, Any]:
@@ -220,7 +221,7 @@ def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> 
         for seat_id in service.manager.mark_provider_uninstalled(provider_id, remove_state=remove_state):
             service.frame_cache.discard(seat_id)
             service.lease_manager.invalidate(seat_id)
-    return _record_operation(service, _operation_payload(result))
+    return _record_operation(service, _operation_payload(result, progress_events=sink.events))
 
 
 def _runtime_operation_get(service: _SandboxApiService, payload: dict[str, Any]):
@@ -587,13 +588,19 @@ def _provider_payload(status: RuntimeProviderStatus, *, selected: bool) -> dict[
     }
 
 
-def _operation_payload(result: OperationResult) -> dict[str, Any]:
+def _operation_payload(result: OperationResult, *, progress_events: list[ProgressEvent] | None = None) -> dict[str, Any]:
+    events = [_progress_event_payload(event) for event in progress_events or []]
+    last_event = events[-1] if events else {}
+    event_progress = last_event.get("percent")
+    progress = int(float(event_progress)) if isinstance(event_progress, (int, float)) else (100 if result.ok else 0)
+    message = str(last_event.get("message") or ("Runtime provider is ready." if result.ok else (result.user_action or "Runtime provider is not ready.")))
     return {
         "operation_id": result.operation_id,
         "status": "completed" if result.ok else "failed",
-        "step": result.status,
-        "message": "Runtime provider is ready." if result.ok else (result.user_action or "Runtime provider is not ready."),
-        "progress": 100 if result.ok else 0,
+        "step": str(last_event.get("stage") or result.status),
+        "message": message,
+        "progress": max(0, min(100, progress)),
+        "progress_events": events,
         "reboot_required": result.reboot_required,
         "provider_id": result.provider_id,
         "updated_at": timestamp(),
@@ -601,6 +608,18 @@ def _operation_payload(result: OperationResult) -> dict[str, Any]:
             "code": RUNTIME_NOT_READY,
             "message": result.user_action or "Managed runtime provider setup is not available.",
         },
+    }
+
+
+def _progress_event_payload(event: ProgressEvent) -> dict[str, Any]:
+    details = dict(event.details) if isinstance(event.details, dict) else {}
+    return {
+        "operation_id": event.operation_id,
+        "stage": event.stage,
+        "message": event.message,
+        "percent": event.percent,
+        "details": _jsonable(details),
+        "recorded_at": timestamp(),
     }
 
 
