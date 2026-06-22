@@ -104,7 +104,8 @@ class FakeManagedUbuntuCli:
             script = argv[2]
             self.guest_scripts.append(script)
             if "rumi-resource-limit" in argv and "ulimit -v" in script and "ulimit -u" in script:
-                return self._guest(argv[6:], input_text)
+                marker_index = argv.index("rumi-resource-limit")
+                return self._guest(argv[marker_index + 4 :], input_text)
             if "PROVISION_MARKER" in script:
                 return GuestCommandResult(returncode=0)
             if "command -v" in script:
@@ -142,6 +143,7 @@ def _template(
     output_bytes: int = 4096,
     timeout_ms: int | None = None,
     memory_mb: int = 2048,
+    cpu_count: float | None = 1,
     pids: int | None = None,
     network_mode: str = "limited_or_approval_gated",
     network_approval_required: bool = True,
@@ -157,7 +159,7 @@ def _template(
         filesystem=FilesystemPolicy(),
         network=NetworkPolicy(mode=network_mode, approval_required=network_approval_required),
         secrets=SecretsPolicy(),
-        resources=ResourceLimits(memory_mb=memory_mb, cpu_count=1, pids=pids, output_bytes=output_bytes, timeout_ms=timeout_ms),
+        resources=ResourceLimits(memory_mb=memory_mb, cpu_count=cpu_count, pids=pids, output_bytes=output_bytes, timeout_ms=timeout_ms),
         lifecycle=LifecyclePolicy(),
         allowed_operations=MANAGED_UBUNTU_CAPABILITIES,
         source_template_ids=("test",),
@@ -242,7 +244,7 @@ def test_managed_ubuntu_exec_enforces_template_output_and_timeout_limits(monkeyp
     requirements = RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec", "sandbox.files"}))
 
     ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
-    instance = provider.create(_create_spec(_template(desktop=False, output_bytes=5, timeout_ms=2_000, memory_mb=64, pids=32)))
+    instance = provider.create(_create_spec(_template(desktop=False, output_bytes=5, timeout_ms=2_000, memory_mb=64, cpu_count=2, pids=32)))
     started = provider.start(instance)
     agent = provider.connect_agent(started)
     executed = agent.exec(started.sandbox_id, {"argv": ["emit-long"], "cwd": ".", "client_request_id": "exec-long", "timeout_ms": 600_000})
@@ -257,7 +259,9 @@ def test_managed_ubuntu_exec_enforces_template_output_and_timeout_limits(monkeyp
     assert "unshare" in exec_call[0]
     assert any("ulimit -v" in part for part in exec_call[0])
     assert any("ulimit -u" in part for part in exec_call[0])
+    assert any("taskset -c" in part for part in exec_call[0])
     assert "65536" in exec_call[0]
+    assert "0-1" in exec_call[0]
     assert "32" in exec_call[0]
     assert exec_call[0][-1] == "emit-long"
 

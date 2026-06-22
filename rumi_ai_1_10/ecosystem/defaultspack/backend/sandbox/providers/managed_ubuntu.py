@@ -350,6 +350,7 @@ class ManagedUbuntuProvider:
             width=_positive_int(instance.opaque_state.get("width"), 1440),
             height=_positive_int(instance.opaque_state.get("height"), 900),
             memory_mb=_optional_positive_int(resources.get("memory_mb")),
+            cpu_count=_optional_positive_float(resources.get("cpu_count")),
             pids=_optional_positive_int(resources.get("pids")),
             output_bytes=_optional_positive_int(resources.get("output_bytes")),
             timeout_ms=_optional_positive_int(resources.get("timeout_ms")),
@@ -566,6 +567,7 @@ class ManagedUbuntuGuestAgent:
         width: int,
         height: int,
         memory_mb: int | None = None,
+        cpu_count: float | None = None,
         pids: int | None = None,
         output_bytes: int | None = None,
         timeout_ms: int | None = None,
@@ -579,6 +581,7 @@ class ManagedUbuntuGuestAgent:
         self._width = width
         self._height = height
         self._memory_mb = memory_mb
+        self._cpu_count = cpu_count
         self._pids = pids
         self._output_bytes = output_bytes
         self._timeout_ms = timeout_ms
@@ -588,7 +591,7 @@ class ManagedUbuntuGuestAgent:
         request = GuestExecRequest.from_payload(payload)
         timeout_ms = min(request.timeout_ms, self._timeout_ms) if self._timeout_ms else request.timeout_ms
         argv = _exec_argv(request.cwd, request.argv)
-        argv = _resource_limited_argv(argv, memory_mb=self._memory_mb, pids=self._pids)
+        argv = _resource_limited_argv(argv, memory_mb=self._memory_mb, cpu_count=self._cpu_count, pids=self._pids)
         if self._network_disabled:
             argv = _network_disabled_argv(argv)
         result = self._run(argv, input_text=request.stdin, timeout=max(1, timeout_ms / 1000))
@@ -983,19 +986,38 @@ def _network_disabled_argv(argv: Sequence[str]) -> tuple[str, ...]:
     return ("unshare", "--user", "--map-root-user", "--net", "--", *argv)
 
 
-def _resource_limited_argv(argv: Sequence[str], *, memory_mb: int | None, pids: int | None) -> tuple[str, ...]:
+def _resource_limited_argv(
+    argv: Sequence[str],
+    *,
+    memory_mb: int | None,
+    cpu_count: float | None,
+    pids: int | None,
+) -> tuple[str, ...]:
     memory_kb = int(memory_mb * 1024) if memory_mb and memory_mb > 0 else 0
     pids_limit = int(pids) if pids and pids > 0 else 0
-    if memory_kb <= 0 and pids_limit <= 0:
+    cpu_affinity = _cpu_affinity_list(cpu_count)
+    if memory_kb <= 0 and pids_limit <= 0 and not cpu_affinity:
         return tuple(argv)
     script = (
         "set -e\n"
         "if [ \"$1\" != '0' ]; then ulimit -v \"$1\"; fi\n"
         "if [ \"$2\" != '0' ]; then ulimit -u \"$2\"; fi\n"
-        "shift 2\n"
+        "RUMI_CPUSET=\"$3\"\n"
+        "shift 3\n"
+        "if [ -n \"$RUMI_CPUSET\" ]; then\n"
+        "  command -v taskset >/dev/null 2>&1 || { echo 'taskset is required for sandbox CPU limits' >&2; exit 126; }\n"
+        "  exec taskset -c \"$RUMI_CPUSET\" \"$@\"\n"
+        "fi\n"
         "exec \"$@\"\n"
     )
-    return ("bash", "-lc", script, "rumi-resource-limit", str(memory_kb), str(pids_limit), *argv)
+    return ("bash", "-lc", script, "rumi-resource-limit", str(memory_kb), str(pids_limit), cpu_affinity, *argv)
+
+
+def _cpu_affinity_list(cpu_count: float | None) -> str:
+    if cpu_count is None or cpu_count <= 0:
+        return ""
+    cores = max(1, int(cpu_count))
+    return "0" if cores == 1 else f"0-{cores - 1}"
 
 
 def _instance_network_disabled(instance: ProviderInstance) -> bool:
@@ -1096,6 +1118,14 @@ def _positive_int(value: object, fallback: int) -> int:
 def _optional_positive_int(value: object) -> int | None:
     try:
         parsed = int(value or 0)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _optional_positive_float(value: object) -> float | None:
+    try:
+        parsed = float(value or 0)
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
