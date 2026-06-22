@@ -26,7 +26,7 @@ from ecosystem.defaultspack.backend.sandbox.models import (
 )
 from ecosystem.defaultspack.backend.sandbox.operation_store import RuntimeOperationStore
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
-from ecosystem.defaultspack.backend.sandbox.providers import DockerProvider, LinuxNativeProvider
+from ecosystem.defaultspack.backend.sandbox.providers import DockerProvider, LinuxNativeProvider, MacLimaProvider, WindowsWslProvider
 from ecosystem.defaultspack.backend.sandbox.providers.base import NullProgressSink
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.template_catalog import sandbox_template_catalog
@@ -40,6 +40,8 @@ class _SandboxApiService:
     def __init__(self) -> None:
         self.provider_registry = ProviderRegistry()
         self.provider_registry.register(LinuxNativeProvider())
+        self.provider_registry.register(MacLimaProvider())
+        self.provider_registry.register(WindowsWslProvider())
         self.provider_registry.register(DockerProvider())
         self.manager = SandboxManager(provider_registry=self.provider_registry)
         self.operation_store = RuntimeOperationStore(self.manager.state_dir / "runtime_operations.json")
@@ -147,6 +149,7 @@ def _runtime_providers(service: _SandboxApiService) -> dict[str, Any]:
     statuses = [_provider_payload(status, selected=status.provider_id == default_provider_id) for status in service.provider_registry.doctor_all()]
     if not any(provider.get("provider_id") == default_provider_id for provider in statuses):
         statuses.insert(0, _placeholder_provider(default_provider_id, selected=True))
+    statuses.sort(key=lambda provider: (provider.get("provider_id") != default_provider_id, str(provider.get("provider_id") or "")))
     return {
         "providers": statuses,
         "selected_provider_id": default_provider_id,
