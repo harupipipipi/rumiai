@@ -3,6 +3,7 @@ import { normalizeDesktopStatus, normalizeSandboxState } from "./types";
 import type {
   CreateDesktopRequest,
   DesktopAccessPolicy,
+  DesktopAccessRequest,
   DesktopControlLeaseGrant,
   DesktopControlLeaseRenewal,
   DesktopFrameQuality,
@@ -254,17 +255,14 @@ export const sandboxesApi = {
   },
 
   requestDesktopAccess(seatId: string, reason?: string) {
-    return request<{ seat_id: string; request_id: string; status: "pending"; message?: string }>(
-      `/api/desktops/${encodeId(seatId)}/access-requests`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          owner_id: LOCAL_DESKTOP_OWNER_ID,
-          reason,
-          request_id: requestId("desktop-access"),
-        }),
-      },
-    );
+    return request<DesktopAccessRequest>(`/api/desktops/${encodeId(seatId)}/access-requests`, {
+      method: "POST",
+      body: JSON.stringify({
+        owner_id: LOCAL_DESKTOP_OWNER_ID,
+        reason,
+        request_id: requestId("desktop-access"),
+      }),
+    });
   },
 
   fetchDesktopFrame,

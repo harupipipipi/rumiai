@@ -19,7 +19,8 @@
     "desktop_create",
     "desktop_input",
     "desktop_rules_update",
-    "desktop_access_request"
+    "desktop_access_request",
+    "desktop_access_grant"
   ],
   "prompt_file": "instructions.md",
   "metadata": {

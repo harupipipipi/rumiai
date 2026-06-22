@@ -126,6 +126,8 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
             return _desktop_rules_update(service, payload)
         if handler == "desktop_access_request":
             return _desktop_access_request(service, payload)
+        if handler == "desktop_access_grant":
+            return _desktop_access_grant(service, payload)
         if handler == "desktop_control_acquire":
             return _desktop_control_acquire(service, payload)
         if handler == "desktop_control_renew":
@@ -672,12 +674,28 @@ def _desktop_rules_update(service: _SandboxApiService, payload: dict[str, Any]):
 
 
 def _desktop_access_request(service: _SandboxApiService, payload: dict[str, Any]):
-    del service, payload
-    return _api_error(
-        "Desktop access requests are not available until request grant state is implemented.",
-        "DESKTOP_ACCESS_REQUEST_MODE_NOT_READY",
-        501,
+    seat_id = str(payload.get("seat_id") or "")
+    result = service.manager.create_desktop_access_request(
+        seat_id,
+        requester_id=str(payload.get("requester_id") or payload.get("owner_id") or ""),
+        reason=str(payload.get("reason") or ""),
     )
+    if result.get("ok") is not True:
+        return _api_error(str(result.get("error") or "Desktop access request failed"), str(result.get("code") or "DESKTOP_ACCESS_REQUEST_FAILED"), int(result.get("status_code") or 400))
+    return ok({key: value for key, value in result.items() if key != "ok"})
+
+
+def _desktop_access_grant(service: _SandboxApiService, payload: dict[str, Any]):
+    seat_id = str(payload.get("seat_id") or "")
+    result = service.manager.grant_desktop_access_request(
+        seat_id,
+        str(payload.get("request_id") or ""),
+        owner_id=_access_owner_id(payload),
+        approved=_truthy(payload.get("approved", True)),
+    )
+    if result.get("ok") is not True:
+        return _api_error(str(result.get("error") or "Desktop access grant failed"), str(result.get("code") or "DESKTOP_ACCESS_GRANT_FAILED"), int(result.get("status_code") or 400))
+    return ok({key: value for key, value in result.items() if key != "ok"})
 
 
 def _desktop_control_acquire(service: _SandboxApiService, payload: dict[str, Any]):

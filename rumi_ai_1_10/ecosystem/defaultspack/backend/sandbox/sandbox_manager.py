@@ -38,7 +38,7 @@ from .provider_registry import ProviderRegistry
 from .template_catalog import sandbox_template_by_id
 
 
-REGISTRY_SCHEMA_VERSION = 4
+REGISTRY_SCHEMA_VERSION = 5
 CREATING = "creating"
 PROVISIONING = "provisioning"
 STARTING = "starting"
@@ -66,7 +66,7 @@ RUNNING_STATES = {READY, BUSY}
 TERMINAL_STATES = {DESTROYED, FAILED}
 SUPPORTED_MODEL_MODES = {"fast", "heavy"}
 STATE_DIR_ENV = "RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR"
-DESKTOP_ACCESS_MODES = {"owner_only", "key_required"}
+DESKTOP_ACCESS_MODES = {"owner_only", "key_required", "request_required"}
 DESKTOP_STARTERS = {"empty", "browser_url", "terminal"}
 WORKSPACE_ACCESS_MODES = {"none", "read_only", "overlay"}
 DESKTOP_MIN_WIDTH = 640
@@ -102,6 +102,7 @@ class SandboxManager:
         self._provider_registry = provider_registry or ProviderRegistry()
         self._lock = threading.RLock()
         self._instances: Dict[str, SandboxInstance] = {}
+        self._desktop_access_requests: dict[str, dict[str, Any]] = {}
         self.audit_path = self.state_dir / DESKTOP_CONTROL_AUDIT_FILENAME
         self._desktop_input_events: dict[tuple[str, str, str], list[float]] = {}
         self._model_mode: str = "fast"
@@ -307,6 +308,7 @@ class SandboxManager:
             inst = self._instances.get(str(sandbox_id))
             if inst is None:
                 return self._not_found(sandbox_id)
+            requests_changed = self._drop_desktop_access_requests(inst.sandbox_id)
             if inst.state != DESTROYED:
                 now = time.time()
                 inst.state = DESTROYED
@@ -315,6 +317,8 @@ class SandboxManager:
                 inst.updated_at = now
                 inst.last_activity_at = now
                 inst.last_error = None
+                requests_changed = True
+            if requests_changed:
                 self._save_registry()
             return {
                 "ok": True,
@@ -775,6 +779,7 @@ class SandboxManager:
                 affected.append(inst.sandbox_id)
                 if remove_state:
                     self._instances.pop(sandbox_id, None)
+                    self._drop_desktop_access_requests(inst.sandbox_id)
                     continue
                 if inst.state == DESTROYED:
                     continue
@@ -860,6 +865,10 @@ class SandboxManager:
                 return self._not_found(seat_id)
             policy = inst.desktop_access
             if policy.mode == "request_required" or policy.request_required:
+                if owner_id and policy.owner_id and secrets.compare_digest(owner_id, policy.owner_id):
+                    return {"ok": True, "sandbox_id": inst.sandbox_id}
+                if self._approved_access_request_matches(inst.sandbox_id, access_key):
+                    return {"ok": True, "sandbox_id": inst.sandbox_id}
                 return {
                     "ok": False,
                     "error": "Desktop access requires an approved access request.",
@@ -889,6 +898,110 @@ class SandboxManager:
                 "sandbox_id": inst.sandbox_id,
                 "key_hint": policy.key_hint,
             }
+
+    def create_desktop_access_request(
+        self,
+        seat_id: str,
+        *,
+        requester_id: str | None = None,
+        reason: str | None = None,
+    ) -> Dict[str, Any]:
+        with self._lock:
+            inst = self._instances.get(str(seat_id))
+            if inst is None:
+                return self._not_found(seat_id)
+            if not inst.display:
+                return {
+                    "ok": False,
+                    "error": f"Sandbox is not a desktop seat: {seat_id}",
+                    "code": "DESKTOP_ACCESS_REQUEST_NOT_SUPPORTED",
+                    "status_code": 409,
+                    "sandbox_id": str(seat_id),
+                }
+            policy = inst.desktop_access
+            clean_requester = _optional_clean_string(requester_id, max_len=160)
+            if clean_requester and policy.owner_id and secrets.compare_digest(clean_requester, policy.owner_id):
+                return {
+                    "ok": True,
+                    "seat_id": inst.sandbox_id,
+                    "request_id": "",
+                    "status": "owner",
+                    "approved": True,
+                    "message": "Requester is already the desktop owner.",
+                }
+            if policy.mode != "request_required" and not policy.request_required:
+                return {
+                    "ok": False,
+                    "error": "Desktop is not configured for request-required access.",
+                    "code": "DESKTOP_ACCESS_REQUEST_NOT_REQUIRED",
+                    "status_code": 409,
+                    "sandbox_id": inst.sandbox_id,
+                }
+            now = time.time()
+            request_id = f"dreq-{secrets.token_urlsafe(12)}"
+            record = {
+                "request_id": request_id,
+                "seat_id": inst.sandbox_id,
+                "requester_id": clean_requester,
+                "reason": str(reason or "").strip()[:1000],
+                "status": "pending",
+                "requested_at": now,
+                "updated_at": now,
+                "owner_id": policy.owner_id,
+                "access_key_hash": None,
+                "access_key_hint": None,
+            }
+            self._desktop_access_requests[request_id] = record
+            self._save_registry()
+            return {"ok": True, **_public_access_request(record)}
+
+    def grant_desktop_access_request(
+        self,
+        seat_id: str,
+        request_id: str,
+        *,
+        owner_id: str | None = None,
+        approved: bool = True,
+    ) -> Dict[str, Any]:
+        with self._lock:
+            inst = self._instances.get(str(seat_id))
+            if inst is None:
+                return self._not_found(seat_id)
+            policy = inst.desktop_access
+            if not owner_id or not policy.owner_id or not secrets.compare_digest(owner_id, policy.owner_id):
+                return {
+                    "ok": False,
+                    "error": "Only the desktop owner can grant access requests.",
+                    "code": "DESKTOP_OWNER_REQUIRED",
+                    "status_code": 403,
+                    "sandbox_id": inst.sandbox_id,
+                }
+            record = self._desktop_access_requests.get(str(request_id))
+            if not record or record.get("seat_id") != inst.sandbox_id:
+                return {
+                    "ok": False,
+                    "error": f"Desktop access request not found: {request_id}",
+                    "code": "DESKTOP_ACCESS_REQUEST_NOT_FOUND",
+                    "status_code": 404,
+                    "sandbox_id": inst.sandbox_id,
+                    "request_id": str(request_id),
+                }
+            now = time.time()
+            record["updated_at"] = now
+            record["decided_at"] = now
+            record["decided_by"] = owner_id
+            if not approved:
+                record["status"] = "denied"
+                record["access_key_hash"] = None
+                record["access_key_hint"] = None
+                self._save_registry()
+                return {"ok": True, **_public_access_request(record)}
+            access_key = secrets.token_urlsafe(24)
+            record["status"] = "approved"
+            record["access_key_hash"] = _hash_access_key(access_key)
+            record["access_key_hint"] = _access_key_hint(access_key)
+            self._save_registry()
+            return {"ok": True, **_public_access_request(record), "access_key": access_key}
 
     @staticmethod
     def _default_state_dir() -> Path:
@@ -931,11 +1044,13 @@ class SandboxManager:
 
             if isinstance(data, dict):
                 raw_instances = data.get("instances", {})
+                raw_access_requests = data.get("desktop_access_requests", {})
                 mode = str(data.get("model_mode") or "fast")
                 schema_version = int(_float_or_zero(data.get("schema_version") or 0))
                 self._model_mode = mode if mode in SUPPORTED_MODEL_MODES else "fast"
             else:
                 raw_instances = data
+                raw_access_requests = {}
                 schema_version = 0
 
             instances: Dict[str, SandboxInstance] = {}
@@ -951,6 +1066,7 @@ class SandboxManager:
                 inst = self._instance_from_dict(raw, legacy=schema_version < REGISTRY_SCHEMA_VERSION)
                 instances[inst.sandbox_id] = inst
             self._instances = instances
+            self._desktop_access_requests = _access_requests_from_registry(raw_access_requests)
             if self._reconcile_loaded_instances():
                 self._save_registry()
 
@@ -964,6 +1080,10 @@ class SandboxManager:
             "schema_version": REGISTRY_SCHEMA_VERSION,
             "model_mode": self._model_mode,
             "updated_at": time.time(),
+            "desktop_access_requests": {
+                request_id: _persisted_access_request(record)
+                for request_id, record in sorted(self._desktop_access_requests.items())
+            },
             "instances": {
                 sandbox_id: self._instance_to_dict(inst)
                 for sandbox_id, inst in sorted(self._instances.items())
@@ -1777,6 +1897,25 @@ class SandboxManager:
         provider = self._provider_registry.get(inst.provider_id)
         return provider.connect_agent(self._provider_instance(inst))
 
+    def _approved_access_request_matches(self, seat_id: str, access_key: str | None) -> bool:
+        if not access_key:
+            return False
+        for record in self._desktop_access_requests.values():
+            if record.get("seat_id") != seat_id or record.get("status") != "approved":
+                continue
+            if _verify_access_key(str(record.get("access_key_hash") or ""), access_key):
+                return True
+        return False
+
+    def _drop_desktop_access_requests(self, seat_id: str) -> bool:
+        original_count = len(self._desktop_access_requests)
+        self._desktop_access_requests = {
+            request_id: record
+            for request_id, record in self._desktop_access_requests.items()
+            if record.get("seat_id") != seat_id
+        }
+        return len(self._desktop_access_requests) != original_count
+
 
 def _canonical_state(value: Any) -> str:
     state = str(value or READY).strip().lower()
@@ -2031,11 +2170,7 @@ def _desktop_access_from_create(
 ) -> tuple[DesktopAccessPolicy, str | None]:
     normalized_mode = str(mode or "owner_only").strip().lower()
     if normalized_mode == "request_required" or bool(request_required):
-        raise SandboxContractError(
-            "DESKTOP_ACCESS_REQUEST_MODE_NOT_READY",
-            "Desktop request-required access is not available until request grant state is implemented.",
-            status_code=501,
-        )
+        normalized_mode = "request_required"
     if normalized_mode == "shared_link":
         raise SandboxContractError(
             "DESKTOP_SHARED_LINK_NOT_READY",
@@ -2047,22 +2182,22 @@ def _desktop_access_from_create(
     key_text = str(access_key or "")
     key_required = normalized_mode == "key_required" or (previous_key_required and normalized_mode == "key_required")
     key_hint = _access_key_hint(key_text) if key_text else (previous_key_hint if key_required else None)
-    key_hash = _hash_access_key(key_text) if key_text else None
+    key_hash = _hash_access_key(key_text) if key_text and key_required else None
     clean_owner_id = _optional_clean_string(owner_id, max_len=160) or previous_owner_id
-    if require_owner and normalized_mode == "owner_only" and not clean_owner_id:
+    if require_owner and normalized_mode in {"owner_only", "request_required"} and not clean_owner_id:
         raise SandboxContractError(
             "DESKTOP_OWNER_REQUIRED",
-            "Desktop owner_only access requires an owner_id.",
+            "Desktop owner-bound access requires an owner_id.",
             status_code=400,
         )
     return (
         DesktopAccessPolicy(
             mode=normalized_mode,
-            owner_id=clean_owner_id if normalized_mode == "owner_only" else None,
+            owner_id=clean_owner_id if normalized_mode in {"owner_only", "request_required"} else None,
             key_required=key_required,
-            request_required=False,
+            request_required=normalized_mode == "request_required",
             key_hint=key_hint,
-            link_enabled=normalized_mode == "shared_link",
+            link_enabled=False,
         ),
         key_hash,
     )
@@ -2077,11 +2212,64 @@ def _desktop_access_from_dict(value: Any) -> DesktopAccessPolicy:
     return DesktopAccessPolicy(
         mode=mode,
         owner_id=_optional_clean_string(value.get("owner_id"), max_len=160),
-        key_required=bool(value.get("key_required")),
-        request_required=False,
+        key_required=bool(value.get("key_required")) and mode == "key_required",
+        request_required=mode == "request_required" or bool(value.get("request_required")),
         key_hint=str(value.get("key_hint")) if value.get("key_hint") is not None else None,
         link_enabled=False,
     )
+
+
+def _access_requests_from_registry(value: Any) -> dict[str, dict[str, Any]]:
+    if isinstance(value, dict):
+        iterable = value.values()
+    elif isinstance(value, list):
+        iterable = value
+    else:
+        iterable = []
+    requests: dict[str, dict[str, Any]] = {}
+    for raw in iterable:
+        if not isinstance(raw, dict):
+            continue
+        record = _persisted_access_request(raw)
+        request_id = str(record.get("request_id") or "")
+        if request_id:
+            requests[request_id] = record
+    return requests
+
+
+def _persisted_access_request(record: dict[str, Any]) -> dict[str, Any]:
+    status = str(record.get("status") or "pending").strip().lower()
+    if status not in {"pending", "approved", "denied"}:
+        status = "pending"
+    return {
+        "request_id": str(record.get("request_id") or "")[:160],
+        "seat_id": str(record.get("seat_id") or "")[:160],
+        "requester_id": _optional_clean_string(record.get("requester_id"), max_len=160),
+        "reason": str(record.get("reason") or "")[:1000],
+        "status": status,
+        "requested_at": _float_or_zero(record.get("requested_at")) or time.time(),
+        "updated_at": _float_or_zero(record.get("updated_at")) or time.time(),
+        "owner_id": _optional_clean_string(record.get("owner_id"), max_len=160),
+        "decided_at": _optional_float(record.get("decided_at")),
+        "decided_by": _optional_clean_string(record.get("decided_by"), max_len=160),
+        "access_key_hash": str(record.get("access_key_hash") or "") or None,
+        "access_key_hint": str(record.get("access_key_hint") or "") or None,
+    }
+
+
+def _public_access_request(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "seat_id": record.get("seat_id"),
+        "request_id": record.get("request_id"),
+        "requester_id": record.get("requester_id"),
+        "reason": record.get("reason") or "",
+        "status": record.get("status") or "pending",
+        "requested_at": record.get("requested_at"),
+        "updated_at": record.get("updated_at"),
+        "decided_at": record.get("decided_at"),
+        "decided_by": record.get("decided_by"),
+        "access_key_hint": record.get("access_key_hint"),
+    }
 
 
 def _desktop_provisioning_from_create(

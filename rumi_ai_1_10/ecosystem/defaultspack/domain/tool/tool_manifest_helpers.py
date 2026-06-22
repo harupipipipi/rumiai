@@ -53,6 +53,7 @@ REQUESTED_AGENT_OS_TOOL_IDS = [
     "desktop_control_release",
     "desktop_rules_update",
     "desktop_access_request",
+    "desktop_access_grant",
     "project_scaffold",
     "webapp_build",
     "webapp_preview",

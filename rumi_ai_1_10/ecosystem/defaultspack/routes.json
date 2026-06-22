@@ -872,6 +872,12 @@
     },
     {
       "method": "POST",
+      "path": "/api/desktops/{seat_id}/access-requests/{request_id}/grant",
+      "function_id": "managed_runtime_desktop_access_grant",
+      "description": "Grant or deny a protected desktop access request"
+    },
+    {
+      "method": "POST",
       "path": "/api/desktops/{seat_id}/control/acquire",
       "function_id": "managed_runtime_desktop_control_acquire",
       "description": "Acquire a desktop human-control lease"

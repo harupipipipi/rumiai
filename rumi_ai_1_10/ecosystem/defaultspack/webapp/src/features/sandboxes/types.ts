@@ -181,12 +181,27 @@ export type DesktopRules = {
 };
 
 export type DesktopAccessPolicy = {
-  mode?: "owner_only" | "key_required";
+  mode?: "owner_only" | "key_required" | "request_required";
   owner_id?: string | null;
   key_required?: boolean;
   request_required?: boolean;
   key_hint?: string | null;
   link_enabled?: boolean;
+};
+
+export type DesktopAccessRequest = {
+  seat_id: string;
+  request_id: string;
+  requester_id?: string | null;
+  reason?: string;
+  status: "pending" | "owner" | "approved" | "denied";
+  message?: string;
+  requested_at?: number | string | null;
+  updated_at?: number | string | null;
+  decided_at?: number | string | null;
+  decided_by?: string | null;
+  access_key?: string;
+  access_key_hint?: string | null;
 };
 
 export type DesktopProvisioning = {
@@ -255,7 +270,7 @@ export type CreateDesktopRequest = {
   role?: string | null;
   rules?: DesktopRules | string[] | null;
   access?: {
-    mode?: "owner_only" | "key_required";
+    mode?: "owner_only" | "key_required" | "request_required";
     owner_id?: string | null;
     access_key?: string;
   };

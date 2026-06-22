@@ -103,6 +103,24 @@ def desktop_access_request(arguments: dict[str, Any], context: dict[str, Any] | 
     return _sandbox_api().run(payload, context or {})
 
 
+def desktop_access_grant(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    approval_error = _require_server_side_approval(context)
+    if approval_error is not None:
+        return approval_error
+    payload = dict(arguments or {})
+    seat_id = str(payload.get("seat_id") or payload.get("desktop_id") or "").strip()
+    request_id = str(payload.get("request_id") or "").strip()
+    if not seat_id:
+        return err("'seat_id' is required", "INVALID_INPUT")
+    if not request_id:
+        return err("'request_id' is required", "INVALID_INPUT")
+    payload["seat_id"] = seat_id
+    payload["request_id"] = request_id
+    _default_owner(payload, context)
+    payload["_handler"] = "desktop_access_grant"
+    return _sandbox_api().run(payload, context or {})
+
+
 def _desktop_control(
     arguments: dict[str, Any],
     context: dict[str, Any] | None,

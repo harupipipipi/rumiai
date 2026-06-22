@@ -1,0 +1,47 @@
+{
+  "id": "desktop_access_grant",
+  "description": "Grant or deny a pending request for access to an owner-protected managed desktop.",
+  "metadata": {
+    "aliases": ["desktop.access.grant", "grant desktop access"],
+    "keywords": ["desktop", "access", "approval", "grant"]
+  },
+  "config": {
+    "tool_id": "desktop_access_grant",
+    "name": "Desktop Access Grant",
+    "summary": "Approve or deny a protected desktop access request.",
+    "tool_category": "desktop",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": ["desktop", "access", "approval"],
+    "ui": {
+      "group_id": "desktop",
+      "group_label": "Desktop",
+      "group_icon": "monitor",
+      "item_icon": "key-round",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Grant Desktop Access",
+      "composer_description": "Approve or deny a pending desktop access request.",
+      "composer_icon": "key-round"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "seat_id": { "type": "string" },
+          "desktop_id": { "type": "string" },
+          "request_id": { "type": "string" },
+          "approved": { "type": "boolean" },
+          "owner_id": { "type": "string" }
+        },
+        "required": ["request_id"]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.desktop_tools:desktop_access_grant"
+    }
+  }
+}

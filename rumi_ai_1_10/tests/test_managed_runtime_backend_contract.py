@@ -781,7 +781,7 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
     assert safe_workspace["data"]["workspace"]["access"] == "read_only"
     assert "correct-key" not in str(safe_workspace)
     assert request_required_create["status"] == "error"
-    assert request_required_create["error"]["code"] == "DESKTOP_ACCESS_REQUEST_MODE_NOT_READY"
+    assert request_required_create["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
     assert denied["status"] == "error"
     assert denied["error"]["code"] == "DESKTOP_ACCESS_KEY_REQUIRED"
     assert allowed["status"] == "ok"
@@ -790,9 +790,9 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
     assert updated["data"]["rules"]["role"] == "coding desktop"
     assert updated["data"]["rules"]["rule_ids"] == ["playwright-ok"]
     assert request_required_update["status"] == "error"
-    assert request_required_update["error"]["code"] == "DESKTOP_ACCESS_REQUEST_MODE_NOT_READY"
+    assert request_required_update["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
     assert access_request["status"] == "error"
-    assert access_request["error"]["code"] == "DESKTOP_ACCESS_REQUEST_MODE_NOT_READY"
+    assert access_request["error"]["code"] == "DESKTOP_ACCESS_REQUEST_NOT_REQUIRED"
     assert wrong_agent_click["status"] == "error"
     assert wrong_agent_click["error"]["code"] == "DESKTOP_AGENT_NOT_ASSIGNED"
     assert ai_click["status"] == "ok"
@@ -807,6 +807,110 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
     audit_events = service.manager.read_desktop_audit_events()
     assert {event["code"] for event in audit_events if event["code"]} >= {"DESKTOP_AGENT_NOT_ASSIGNED"}
     assert all("correct-key" not in str(event) and "lease-token" not in str(event) for event in audit_events)
+
+
+def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, monkeypatch) -> None:
+    _trusted_workspace(tmp_path, monkeypatch)
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities={
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+                "sandbox.desktop",
+                "sandbox.desktop_input",
+                "sandbox.snapshot",
+            },
+            sandbox_id_factory=lambda: "seat-request",
+        )
+    )
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(ttl_seconds=30),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        created = api.run(
+            {
+                "_handler": "desktops_create",
+                "template_id": "desktop.ubuntu",
+                "provider_id": "fake-runtime",
+                "owner_id": "owner-1",
+                "access": {"mode": "request_required"},
+            },
+            {},
+        )
+        requester_denied = api.run(
+            {"_handler": "desktop_get", "seat_id": "seat-request", "owner_id": "requester-1"},
+            {},
+        )
+        owner_allowed = api.run(
+            {"_handler": "desktop_get", "seat_id": "seat-request", "owner_id": "owner-1"},
+            {},
+        )
+        access_request = api.run(
+            {
+                "_handler": "desktop_access_request",
+                "seat_id": "seat-request",
+                "owner_id": "requester-1",
+                "reason": "Need to inspect the browser session.",
+            },
+            {},
+        )
+        wrong_owner_grant = api.run(
+            {
+                "_handler": "desktop_access_grant",
+                "seat_id": "seat-request",
+                "request_id": access_request["data"]["request_id"],
+                "owner_id": "requester-1",
+            },
+            {},
+        )
+        granted = api.run(
+            {
+                "_handler": "desktop_access_grant",
+                "seat_id": "seat-request",
+                "request_id": access_request["data"]["request_id"],
+                "owner_id": "owner-1",
+            },
+            {},
+        )
+        granted_key = granted["data"]["access_key"]
+        requester_allowed = api.run(
+            {"_handler": "desktop_get", "seat_id": "seat-request", "access_key": granted_key},
+            {},
+        )
+        registry_text = service.manager.registry_path.read_text(encoding="utf-8")
+        destroyed = service.manager.destroy("seat-request")
+        registry_after_destroy = service.manager.registry_path.read_text(encoding="utf-8")
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert created["status"] == "ok"
+    assert created["data"]["access_policy"]["mode"] == "request_required"
+    assert created["data"]["access_policy"]["request_required"] is True
+    assert requester_denied["status"] == "error"
+    assert requester_denied["error"]["code"] == "DESKTOP_ACCESS_REQUEST_REQUIRED"
+    assert owner_allowed["status"] == "ok"
+    assert access_request["status"] == "ok"
+    assert access_request["data"]["status"] == "pending"
+    assert "access_key" not in access_request["data"]
+    assert wrong_owner_grant["status"] == "error"
+    assert wrong_owner_grant["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
+    assert granted["status"] == "ok"
+    assert granted["data"]["status"] == "approved"
+    assert granted["data"]["access_key_hint"].startswith("ends:")
+    assert requester_allowed["status"] == "ok"
+    assert granted_key not in registry_text
+    assert destroyed["ok"] is True
+    assert access_request["data"]["request_id"] not in registry_after_destroy
 
 
 def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
@@ -832,6 +936,7 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert ("POST", "/api/sandboxes/{sandbox_id}/ports", "blocks.sandbox.api") in routes
     assert ("POST", "/api/desktops/{seat_id}/rules", "blocks.sandbox.api") in routes
     assert ("POST", "/api/desktops/{seat_id}/access-requests", "blocks.sandbox.api") in routes
+    assert ("POST", "/api/desktops/{seat_id}/access-requests/{request_id}/grant", "blocks.sandbox.api") in routes
     assert route_specs[("GET", "/api/runtime/providers")].function_id == "managed_runtime_providers"
     assert route_specs[("POST", "/api/desktops/{seat_id}/input")].legacy_block_module == ""
     assert route_specs[("POST", "/api/desktops/{seat_id}/input")].path_inject == {"seat_id": "seat_id"}
