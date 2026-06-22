@@ -653,21 +653,23 @@ class WindowsWslProvider(ManagedUbuntuProvider):
         os.makedirs(cache_dir, exist_ok=True)
         filename = os.path.basename(urllib.parse.urlparse(url).path) or "rumi-ubuntu-wsl.rootfs.tar.gz"
         destination = os.path.join(cache_dir, filename)
+        expected_sha256 = self._rootfs_expected_sha256(url, filename)
         if os.path.isfile(destination) and os.path.getsize(destination) > 0:
-            return destination
+            actual_sha256 = _sha256_file(destination)
+            if actual_sha256.casefold() == expected_sha256.casefold():
+                return destination
+            _unlink(destination)
         tmp_path = f"{destination}.tmp-{uuid.uuid4().hex}"
         try:
             self._rootfs_downloader(url, tmp_path)
-            expected_sha256 = self._rootfs_expected_sha256(url, filename)
-            if expected_sha256:
-                actual_sha256 = _sha256_file(tmp_path)
-                if actual_sha256.casefold() != expected_sha256.casefold():
-                    raise SandboxContractError(
-                        RUNTIME_PROVIDER_UNAVAILABLE,
-                        "Downloaded RumiUbuntu WSL rootfs checksum did not match Ubuntu SHA256SUMS.",
-                        status_code=503,
-                        details={"url": url, "expected": expected_sha256, "actual": actual_sha256},
-                    )
+            actual_sha256 = _sha256_file(tmp_path)
+            if actual_sha256.casefold() != expected_sha256.casefold():
+                raise SandboxContractError(
+                    RUNTIME_PROVIDER_UNAVAILABLE,
+                    "Downloaded RumiUbuntu WSL rootfs checksum did not match Ubuntu SHA256SUMS.",
+                    status_code=503,
+                    details={"url": url, "expected": expected_sha256, "actual": actual_sha256},
+                )
             if not os.path.isfile(tmp_path) or os.path.getsize(tmp_path) <= 0:
                 raise SandboxContractError(
                     RUNTIME_PROVIDER_UNAVAILABLE,

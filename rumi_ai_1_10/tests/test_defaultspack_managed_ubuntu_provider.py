@@ -335,6 +335,50 @@ def test_windows_wsl_provider_downloads_rumi_rootfs_when_not_configured(monkeypa
     assert fake.imported_install_dir == str(install_dir)
 
 
+def test_windows_wsl_provider_replaces_corrupt_cached_rootfs(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
+    monkeypatch.delenv(WSL_ROOTFS_ENV, raising=False)
+    monkeypatch.setenv("PROCESSOR_ARCHITECTURE", "AMD64")
+    cache_dir = tmp_path / "rootfs-cache"
+    cache_dir.mkdir()
+    cached_rootfs = cache_dir / "ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz"
+    cached_rootfs.write_bytes(b"corrupt")
+    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name=DEFAULT_WSL_RUNTIME_NAME)
+    downloaded: list[str] = []
+
+    def downloader(url: str, destination: str) -> None:
+        downloaded.append(url)
+        with open(destination, "wb") as handle:
+            handle.write(b"rootfs")
+
+    def checksum_fetcher(url: str) -> str:
+        digest = hashlib.sha256(b"rootfs").hexdigest()
+        return f"{digest}  {cached_rootfs.name}\n"
+
+    provider = WindowsWslProvider(
+        command_path="C:/Windows/System32/wsl.exe",
+        runner=fake,
+        rootfs_cache_dir=str(cache_dir),
+        rootfs_downloader=downloader,
+        checksum_fetcher=checksum_fetcher,
+    )
+
+    ensured = provider.ensure(
+        EnsureRuntimeRequest(
+            provider_id="windows_wsl",
+            requirements=RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec"})),
+        ),
+        NullProgressSink(),
+    )
+
+    assert ensured.ok is True
+    assert downloaded == [
+        "https://cloud-images.ubuntu.com/wsl/releases/22.04/current/ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz"
+    ]
+    assert cached_rootfs.read_bytes() == b"rootfs"
+    assert fake.imported_rootfs_path == str(cached_rootfs)
+
+
 def test_managed_ubuntu_exec_enforces_template_output_and_timeout_limits(monkeypatch) -> None:
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
     fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
