@@ -26,7 +26,7 @@ from ecosystem.defaultspack.backend.sandbox.models import (
 )
 from ecosystem.defaultspack.backend.sandbox.operation_store import RuntimeOperationStore
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
-from ecosystem.defaultspack.backend.sandbox.providers import LinuxNativeProvider
+from ecosystem.defaultspack.backend.sandbox.providers import DockerProvider, LinuxNativeProvider
 from ecosystem.defaultspack.backend.sandbox.providers.base import NullProgressSink
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.template_catalog import sandbox_template_catalog
@@ -40,6 +40,7 @@ class _SandboxApiService:
     def __init__(self) -> None:
         self.provider_registry = ProviderRegistry()
         self.provider_registry.register(LinuxNativeProvider())
+        self.provider_registry.register(DockerProvider())
         self.manager = SandboxManager(provider_registry=self.provider_registry)
         self.operation_store = RuntimeOperationStore(self.manager.state_dir / "runtime_operations.json")
         self.frame_cache = FrameCache()
@@ -146,7 +147,6 @@ def _runtime_providers(service: _SandboxApiService) -> dict[str, Any]:
     statuses = [_provider_payload(status, selected=status.provider_id == default_provider_id) for status in service.provider_registry.doctor_all()]
     if not any(provider.get("provider_id") == default_provider_id for provider in statuses):
         statuses.insert(0, _placeholder_provider(default_provider_id, selected=True))
-    statuses.append(_docker_provider())
     return {
         "providers": statuses,
         "selected_provider_id": default_provider_id,
@@ -158,8 +158,8 @@ def _runtime_providers(service: _SandboxApiService) -> dict[str, Any]:
 
 def _runtime_doctor(service: _SandboxApiService) -> dict[str, Any]:
     providers = _runtime_providers(service)["providers"]
-    ready = any(provider.get("ready") is True for provider in providers)
     selected = next((provider for provider in providers if provider.get("provider_id") == _default_provider_id()), providers[0] if providers else {})
+    ready = selected.get("ready") is True
     return {
         "status": "ready" if ready else "needs_setup",
         "providers": providers,
@@ -771,30 +771,6 @@ def _placeholder_provider(provider_id: str, *, selected: bool) -> dict[str, Any]
         }],
         "isolation": _provider_isolation(provider_id, False),
         "message": "Setup is required before managed desktops can start.",
-    }
-
-
-def _docker_provider() -> dict[str, Any]:
-    return {
-        "provider_id": "docker",
-        "label": "Docker-compatible runtime",
-        "status": "unavailable",
-        "available": False,
-        "installed": False,
-        "ready": False,
-        "selected": False,
-        "managed": False,
-        "platform": platform.system().lower() or "unknown",
-        "version": None,
-        "guest_protocol": 1,
-        "capabilities": [],
-        "missing": [{
-            "code": "docker_optional_not_selected",
-            "severity": "info",
-            "message": "Docker-compatible providers are optional and are not installed or selected by Rumi automatically.",
-        }],
-        "isolation": _provider_isolation("docker", False),
-        "message": "Optional provider only.",
     }
 
 
