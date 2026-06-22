@@ -360,6 +360,30 @@ def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkey
     assert "starter-browser.log" in start_script
 
 
+def test_managed_ubuntu_stop_cleans_desktop_starter_processes(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(
+        _create_spec(
+            _template(network_mode="host_shared", network_approval_required=False),
+            startup={"starter": "browser_url", "browser_url": "https://example.com"},
+        )
+    )
+    started = provider.start(instance)
+    provider.stop(started)
+    stop_script = fake.guest_scripts[-1]
+
+    assert ensured.ok is True
+    assert "starter-browser.pid" in stop_script
+    assert "starter-terminal.pid" in stop_script
+    assert stop_script.index("starter-browser.pid") < stop_script.index("openbox.pid")
+    assert stop_script.index("starter-terminal.pid") < stop_script.index("xvfb.pid")
+
+
 def test_managed_ubuntu_browser_url_starter_respects_network_policy(monkeypatch) -> None:
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
     fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")

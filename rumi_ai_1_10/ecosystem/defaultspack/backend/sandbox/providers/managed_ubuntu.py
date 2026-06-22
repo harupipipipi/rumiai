@@ -1120,7 +1120,7 @@ def _desktop_stop_script(provider_instance_id: str) -> str:
     runtime_dir = _runtime_dir(provider_instance_id)
     return (
         "set +e\n"
-        f"for pidfile in {runtime_dir}/openbox.pid {runtime_dir}/xvfb.pid; do\n"
+        f"for pidfile in {runtime_dir}/starter-browser.pid {runtime_dir}/starter-terminal.pid {runtime_dir}/openbox.pid {runtime_dir}/xvfb.pid; do\n"
         "  if [ -f \"$pidfile\" ]; then kill $(cat \"$pidfile\") >/dev/null 2>&1 || true; rm -f \"$pidfile\"; fi\n"
         "done\n"
     )
