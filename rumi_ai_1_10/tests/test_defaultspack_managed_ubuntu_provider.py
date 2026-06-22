@@ -97,6 +97,8 @@ class FakeManagedUbuntuCli:
         if argv[:2] == ["bash", "-lc"]:
             script = argv[2]
             self.guest_scripts.append(script)
+            if "PROVISION_MARKER" in script:
+                return GuestCommandResult(returncode=0)
             if "command -v" in script:
                 if self.deps_installed:
                     return GuestCommandResult(returncode=0)
@@ -144,13 +146,21 @@ def _template(*, desktop: bool = True, output_bytes: int = 4096, timeout_ms: int
     )
 
 
-def _create_spec(template: ResolvedSandboxTemplate, *, startup: dict[str, object] | None = None) -> SandboxCreateSpec:
+def _create_spec(
+    template: ResolvedSandboxTemplate,
+    *,
+    startup: dict[str, object] | None = None,
+    provisioning: dict[str, object] | None = None,
+) -> SandboxCreateSpec:
     return SandboxCreateSpec(
         name="Managed Ubuntu",
         template=template,
         provider_id="auto",
         workspace_binding=WorkspaceBinding(workspace_id="workspace-1", mode="read_only"),
-        metadata={"startup": startup or {"starter": "terminal"}},
+        metadata={
+            "startup": startup or {"starter": "terminal"},
+            "desktop_provisioning": provisioning or {},
+        },
     )
 
 
@@ -244,6 +254,33 @@ def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkey
     assert "BROWSER_URL=https://example.com" in start_script
     assert "google-chrome-stable google-chrome chromium chromium-browser firefox xdg-open" in start_script
     assert "starter-browser.log" in start_script
+
+
+def test_managed_ubuntu_desktop_provisioning_installs_declared_apps_and_mcp(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+    provisioning = {
+        "packages": [{"name": "google-chrome-stable"}, {"name": "python"}],
+        "apps": ["xterm", "code-editor"],
+        "mcp_servers": ["playwright"],
+    }
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(_create_spec(_template(), provisioning=provisioning))
+    started = provider.start(instance)
+    provision_script = next(script for script in fake.guest_scripts if "PROVISION_MARKER" in script)
+
+    assert ensured.ok is True
+    assert started.state == "ready"
+    assert "google-chrome-stable" in provision_script
+    assert "python3" in provision_script
+    assert "python3-pip" in provision_script
+    assert "xterm" in provision_script
+    assert "code-editor" not in provision_script
+    assert "/workspace/.rumi/mcp_servers.txt" in provision_script
+    assert "@playwright/mcp" in provision_script
 
 
 def test_default_sandbox_api_registers_cross_platform_runtime_providers() -> None:

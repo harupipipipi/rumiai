@@ -50,6 +50,26 @@ GUEST_DEPS = ("Xvfb", "openbox", "xdotool", "import", "python3", "xterm")
 APT_PACKAGES = ("xvfb", "openbox", "xdotool", "imagemagick", "python3", "xterm", "x11-utils", "ca-certificates")
 DEFAULT_DISPLAY = ":98"
 MAX_FILE_PATCH_BYTES = 2 * 1024 * 1024
+GUEST_APP_PACKAGE_MAP = {
+    "ca-certificates": ("ca-certificates",),
+    "chromium": ("chromium-browser",),
+    "chromium-browser": ("chromium-browser",),
+    "firefox": ("firefox",),
+    "google-chrome": ("google-chrome-stable",),
+    "google-chrome-stable": ("google-chrome-stable",),
+    "imagemagick": ("imagemagick",),
+    "node": ("nodejs", "npm"),
+    "nodejs": ("nodejs",),
+    "npm": ("npm",),
+    "openbox": ("openbox",),
+    "python": ("python3", "python3-pip"),
+    "python3": ("python3",),
+    "python3-pip": ("python3-pip",),
+    "x11-utils": ("x11-utils",),
+    "xdotool": ("xdotool",),
+    "xterm": ("xterm",),
+    "xvfb": ("xvfb",),
+}
 
 
 @dataclass(frozen=True)
@@ -253,6 +273,7 @@ class ManagedUbuntuProvider:
 
     def start(self, instance: ProviderInstance) -> ProviderInstance:
         command_path = str(instance.opaque_state.get("command_path") or self._require_ready(MANAGED_UBUNTU_CAPABILITIES))
+        self._provision_instance(command_path, instance)
         if instance.opaque_state.get("desktop_enabled") is True:
             self._guest_shell(
                 command_path,
@@ -407,6 +428,17 @@ class ManagedUbuntuProvider:
         if update:
             script += f"sudo apt-get install --only-upgrade -y {packages} || true\n"
         self._guest_shell(command_path, script, timeout=600)
+
+    def _provision_instance(self, command_path: str, instance: ProviderInstance) -> None:
+        provisioning = instance.opaque_state.get("desktop_provisioning")
+        if not isinstance(provisioning, Mapping):
+            return
+        apt_packages = _guest_provisioning_apt_packages(provisioning)
+        mcp_servers = _guest_provisioning_mcp_servers(provisioning)
+        if not apt_packages and not mcp_servers:
+            return
+        script = _guest_provisioning_script(instance.provider_instance_id, apt_packages, mcp_servers)
+        self._guest_shell(command_path, script, timeout=900)
 
     def _desktop_running(self, command_path: str, provider_instance_id: str) -> bool:
         result = self._guest_shell(command_path, _desktop_running_script(provider_instance_id), timeout=10, check=False)
@@ -772,6 +804,95 @@ def _desktop_start_script(provider_instance_id: str, width: int, height: int, di
             "fi\n"
         )
     return script
+
+
+def _guest_provisioning_script(provider_instance_id: str, apt_packages: Sequence[str], mcp_servers: Sequence[str]) -> str:
+    runtime_dir = _runtime_dir(provider_instance_id)
+    package_list = " ".join(shlex.quote(package) for package in apt_packages)
+    mcp_lines = "\n".join(str(server) for server in mcp_servers)
+    mcp_payload = shlex.quote(mcp_lines)
+    marker_key = shlex.quote("|".join((*apt_packages, "--", *mcp_servers)))
+    script = (
+        "set -e\n"
+        "export DEBIAN_FRONTEND=noninteractive\n"
+        f"mkdir -p /workspace/.rumi {runtime_dir}\n"
+        f"PROVISION_MARKER={runtime_dir}/provisioning.key\n"
+        f"PROVISION_KEY={marker_key}\n"
+        "if [ \"$(cat \"$PROVISION_MARKER\" 2>/dev/null || true)\" != \"$PROVISION_KEY\" ]; then\n"
+    )
+    if apt_packages:
+        script += (
+            f"  RUMI_APT_PACKAGES={shlex.quote(package_list)}\n"
+            "  if printf '%s\n' \"$RUMI_APT_PACKAGES\" | grep -qw google-chrome-stable; then\n"
+            "    if [ \"$(dpkg --print-architecture 2>/dev/null || true)\" = amd64 ]; then\n"
+            "      sudo apt-get update\n"
+            "      sudo apt-get install -y ca-certificates wget gnupg\n"
+            "      wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor | sudo tee /usr/share/keyrings/google-linux-signing-keyring.gpg >/dev/null\n"
+            "      echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main' | sudo tee /etc/apt/sources.list.d/google-chrome.list >/dev/null\n"
+            "    else\n"
+            "      RUMI_APT_PACKAGES=\"$(printf '%s\n' \"$RUMI_APT_PACKAGES\" | sed 's/google-chrome-stable/chromium-browser/g')\"\n"
+            "    fi\n"
+            "  fi\n"
+            "  sudo apt-get update\n"
+            "  sudo apt-get install -y $RUMI_APT_PACKAGES\n"
+        )
+    if mcp_servers:
+        script += (
+            f"  printf '%s\n' {mcp_payload} > /workspace/.rumi/mcp_servers.txt\n"
+            "  if grep -qx playwright /workspace/.rumi/mcp_servers.txt && command -v npm >/dev/null 2>&1; then\n"
+            "    sudo npm install -g @playwright/mcp || echo 'playwright mcp install failed' >>" + runtime_dir + "/provisioning.log\n"
+            "  fi\n"
+        )
+    script += (
+        "  printf '%s\n' \"$PROVISION_KEY\" > \"$PROVISION_MARKER\"\n"
+        "fi\n"
+    )
+    return script
+
+
+def _guest_provisioning_apt_packages(provisioning: Mapping[str, object]) -> tuple[str, ...]:
+    requested: list[str] = []
+    raw_packages = provisioning.get("packages")
+    if isinstance(raw_packages, Sequence) and not isinstance(raw_packages, (str, bytes)):
+        for item in raw_packages:
+            if isinstance(item, Mapping):
+                requested.append(str(item.get("name") or ""))
+            else:
+                requested.append(str(item or ""))
+    raw_apps = provisioning.get("apps")
+    if isinstance(raw_apps, Sequence) and not isinstance(raw_apps, (str, bytes)):
+        requested.extend(str(item or "") for item in raw_apps)
+
+    packages: list[str] = []
+    for name in requested:
+        normalized = _normalize_guest_package_name(name)
+        if not normalized:
+            continue
+        for package in GUEST_APP_PACKAGE_MAP.get(normalized, ()):
+            if package not in packages:
+                packages.append(package)
+    return tuple(packages)
+
+
+def _guest_provisioning_mcp_servers(provisioning: Mapping[str, object]) -> tuple[str, ...]:
+    raw_servers = provisioning.get("mcp_servers")
+    if not isinstance(raw_servers, Sequence) or isinstance(raw_servers, (str, bytes)):
+        return ()
+    servers: list[str] = []
+    for item in raw_servers:
+        normalized = _normalize_guest_package_name(str(item or ""))
+        if normalized and normalized not in servers:
+            servers.append(normalized)
+    return tuple(servers)
+
+
+def _normalize_guest_package_name(value: str) -> str:
+    normalized = value.strip().lower().replace("_", "-")
+    if not normalized:
+        return ""
+    if not all(ch.isalnum() or ch in {"-", "."} for ch in normalized):
+        return ""
+    return normalized
 
 
 def _desktop_stop_script(provider_instance_id: str) -> str:
