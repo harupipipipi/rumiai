@@ -702,7 +702,7 @@ class ManagedUbuntuGuestAgent:
         }
 
     def expose_port(self, sandbox_id: str, payload: Mapping[str, object]) -> dict[str, object]:
-        if self._network_disabled:
+        if self._network_disabled and payload.get("_network_policy_approved") is not True:
             raise SandboxContractError(
                 "SANDBOX_NETWORK_DENIED",
                 "Sandbox port exposure is disabled by the template network policy.",

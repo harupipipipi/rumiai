@@ -658,7 +658,7 @@ class SandboxManager:
             self._touch_ready_instance(inst.sandbox_id)
         return result
 
-    def expose_port(self, sandbox_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def expose_port(self, sandbox_id: str, payload: Dict[str, Any], *, approved: bool = False) -> Dict[str, Any]:
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
             if error is not None:
@@ -667,11 +667,15 @@ class SandboxManager:
             operation_error = self._require_operation(inst, "sandbox.port.expose", "sandbox.port_forward")
             if operation_error is not None:
                 return operation_error
+            network_error = self._require_network_policy(inst, approved=approved)
+            if network_error is not None:
+                return network_error
         try:
             agent = self._provider_agent(inst)
             expose_port = getattr(agent, "expose_port", None)
             if callable(expose_port):
-                result = expose_port(inst.sandbox_id, payload)
+                provider_payload = {**payload, "_network_policy_approved": True} if approved else payload
+                result = expose_port(inst.sandbox_id, provider_payload)
             else:
                 result = {
                     "ok": False,
@@ -1247,6 +1251,34 @@ class SandboxManager:
             "code": "SANDBOX_SECRET_POLICY_UNSUPPORTED",
             "status_code": 403,
         }
+
+    @staticmethod
+    def _require_network_policy(inst: SandboxInstance, *, approved: bool) -> Dict[str, Any] | None:
+        policy = inst.network_policy
+        mode = str(policy.mode or "off").strip().lower().replace("-", "_")
+        base = {
+            "ok": False,
+            "sandbox_id": inst.sandbox_id,
+            "status": inst.state,
+            "state": inst.state,
+            "template_id": inst.template_id,
+            "network_policy": model_to_dict(policy),
+        }
+        if mode in {"off", "deny", "denied", "none"}:
+            return {
+                **base,
+                "error": "Sandbox template denies network port exposure.",
+                "code": "SANDBOX_NETWORK_DENIED",
+                "status_code": 403,
+            }
+        if (policy.approval_required or policy.allowlist) and not approved:
+            return {
+                **base,
+                "error": "Sandbox template requires an approved network grant before exposing ports.",
+                "code": "SANDBOX_NETWORK_REQUIRES_APPROVAL",
+                "status_code": 409,
+            }
+        return None
 
     def _mark_failed(self, sandbox_id: str, message: str, *, code: str) -> Dict[str, Any]:
         with self._lock:

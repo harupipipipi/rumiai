@@ -388,7 +388,13 @@ def test_managed_ubuntu_port_exposure_respects_network_policy(monkeypatch) -> No
     assert ensured.ok is True
     with pytest.raises(SandboxContractError) as excinfo:
         agent.expose_port(started.sandbox_id, {"port": 3000, "protocol": "http"})
+    approved = agent.expose_port(
+        started.sandbox_id,
+        {"port": 3000, "protocol": "http", "_network_policy_approved": True},
+    )
     assert getattr(excinfo.value, "code", "") == "SANDBOX_NETWORK_DENIED"
+    assert approved["ok"] is True
+    assert approved["target_url"] == "http://127.0.0.1:3000"
 
 
 def test_managed_ubuntu_desktop_provisioning_installs_declared_apps_and_mcp(monkeypatch) -> None:

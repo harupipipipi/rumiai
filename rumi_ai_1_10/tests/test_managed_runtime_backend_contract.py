@@ -35,6 +35,7 @@ from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderReg
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.testing.fake_guest_agent import FakeGuestAgent
 from ecosystem.defaultspack.backend.sandbox.testing.fake_provider import FakeRuntimeProvider
+from ecosystem.defaultspack.domain.tool_policy.internal_context import mark_tool_server_approval_context
 from ecosystem.defaultspack.domain.coding.workspace_store import WorkspaceStore
 
 
@@ -425,6 +426,86 @@ def test_api_rejects_template_kind_mismatches(tmp_path) -> None:
     assert sandbox_created["status"] == "ok"
     assert sandbox_created["data"]["template_id"] == "tool.ephemeral"
     assert desktops["data"]["desktops"] == []
+
+
+def test_sandbox_port_api_uses_context_approval_not_payload_flags(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    class PortGuest(FakeGuestAgent):
+        def __init__(self) -> None:
+            super().__init__()
+            self.port_requests = []
+
+        def expose_port(self, sandbox_id, payload):
+            self.port_requests.append((sandbox_id, dict(payload)))
+            return {"ok": True, "sandbox_id": sandbox_id, "port": int(payload["port"]), "url": "http://127.0.0.1:3000"}
+
+    guest = PortGuest()
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities={
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.overlay_workspace",
+                "sandbox.port_forward",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+            },
+            guest_agent=guest,
+        )
+    )
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        created = api.run(
+            {
+                "_handler": "sandboxes_create",
+                "template_id": "coding.python",
+                "provider_id": "fake-runtime",
+            },
+            {},
+        )
+        forged = api.run(
+            {
+                "_handler": "sandbox_port_expose",
+                "sandbox_id": created["data"]["sandbox_id"],
+                "port": 3000,
+                "_network_policy_approved": True,
+            },
+            {},
+        )
+        approved = api.run(
+            {
+                "_handler": "sandbox_port_expose",
+                "sandbox_id": created["data"]["sandbox_id"],
+                "port": 3000,
+            },
+            mark_tool_server_approval_context({}),
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert forged["status"] == "error"
+    assert forged["error"]["code"] == "SANDBOX_NETWORK_REQUIRES_APPROVAL"
+    assert approved["status"] == "ok"
+    assert guest.port_requests == [
+        (
+            created["data"]["sandbox_id"],
+            {
+                "_handler": "sandbox_port_expose",
+                "sandbox_id": created["data"]["sandbox_id"],
+                "port": 3000,
+                "_network_policy_approved": True,
+            },
+        )
+    ]
 
 
 def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_path) -> None:

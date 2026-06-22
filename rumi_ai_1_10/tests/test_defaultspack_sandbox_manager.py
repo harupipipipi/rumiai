@@ -560,7 +560,7 @@ def test_sandbox_file_patch_and_port_contracts_fail_closed_until_guest_services_
     sandbox_id = manager.create(display=False, provider_id="fake-runtime", template_id="coding.python")["sandbox_id"]
 
     file_patch = manager.apply_file_patch(sandbox_id, {"patch": []})
-    port = manager.expose_port(sandbox_id, {"port": 3000})
+    port = manager.expose_port(sandbox_id, {"port": 3000}, approved=True)
 
     assert file_patch["ok"] is False
     assert file_patch["code"] == "SANDBOX_FILES_NOT_READY"
@@ -568,6 +568,54 @@ def test_sandbox_file_patch_and_port_contracts_fail_closed_until_guest_services_
     assert port["ok"] is False
     assert port["code"] == "SANDBOX_PORTS_NOT_READY"
     assert port["status_code"] == 501
+
+
+def test_sandbox_port_expose_requires_network_policy_approval_before_guest_agent(tmp_path):
+    class PortGuest(FakeGuestAgent):
+        def __init__(self):
+            super().__init__()
+            self.port_requests = []
+
+        def expose_port(self, sandbox_id, payload):
+            self.port_requests.append((sandbox_id, dict(payload)))
+            return {"ok": True, "sandbox_id": sandbox_id, "port": int(payload["port"]), "url": "http://127.0.0.1:3000"}
+
+    guest = PortGuest()
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+        },
+        guest_agent=guest,
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    created = manager.create(display=False, provider_id="fake-runtime", template_id="coding.python")
+    assert created["ok"] is True
+
+    denied = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"})
+    approved = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"}, approved=True)
+
+    assert denied["ok"] is False
+    assert denied["code"] == "SANDBOX_NETWORK_REQUIRES_APPROVAL"
+    assert denied["status_code"] == 409
+    assert approved["ok"] is True
+    assert guest.port_requests == [
+        (
+            created["sandbox_id"],
+            {
+                "port": 3000,
+                "protocol": "http",
+                "_network_policy_approved": True,
+            },
+        )
+    ]
 
 
 def test_desktop_resolution_is_bounded_before_provider_start(tmp_path):

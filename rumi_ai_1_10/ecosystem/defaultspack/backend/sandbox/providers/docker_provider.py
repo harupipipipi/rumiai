@@ -437,20 +437,18 @@ class DockerGuestAgent:
         protocol = str(payload.get("protocol") or "http").strip().lower()
         if protocol not in {"http", "https", "tcp"}:
             raise SandboxContractError("INVALID_SANDBOX_PORT", "Sandbox port protocol must be http, https, or tcp.", status_code=400)
-        inspect = self._runner(
-            (
-                self._docker_path,
-                "inspect",
-                "--format",
-                "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
-                self._container_name,
-            ),
-            None,
-            10,
-        )
+        inspect = self._inspect_network_address()
         if inspect.returncode != 0:
             return _guest_operation_error(sandbox_id, "SANDBOX_PORTS_FAILED", "Sandbox port exposure could not inspect container networking.", inspect)
         container_ip = inspect.stdout.strip()
+        if not container_ip and payload.get("_network_policy_approved") is True:
+            connected = self._runner((self._docker_path, "network", "connect", "bridge", self._container_name), None, 30)
+            if connected.returncode != 0:
+                return _guest_operation_error(sandbox_id, "SANDBOX_PORTS_FAILED", "Sandbox port exposure could not attach approved container networking.", connected)
+            inspect = self._inspect_network_address()
+            if inspect.returncode != 0:
+                return _guest_operation_error(sandbox_id, "SANDBOX_PORTS_FAILED", "Sandbox port exposure could not inspect approved container networking.", inspect)
+            container_ip = inspect.stdout.strip()
         if not container_ip:
             raise SandboxContractError(
                 "SANDBOX_PORTS_NOT_READY",
@@ -478,6 +476,19 @@ class DockerGuestAgent:
             "host_reachable": True,
             "provider_runtime": "docker",
         }
+
+    def _inspect_network_address(self) -> DockerCommandResult:
+        return self._runner(
+            (
+                self._docker_path,
+                "inspect",
+                "--format",
+                "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                self._container_name,
+            ),
+            None,
+            10,
+        )
 
     def capture_frame(self, sandbox_id: str, seat_id: str) -> dict[str, object]:
         return {
@@ -645,12 +656,14 @@ def _image_for_spec(spec: SandboxCreateSpec) -> str:
 
 
 def _docker_network_mode(spec: SandboxCreateSpec) -> str:
-    if "sandbox.port.expose" in spec.template.allowed_operations or "sandbox.port_forward" in spec.template.provider_requirements:
-        return "bridge"
     if spec.template.network.mode in {"off", "deny", "none"}:
         return "none"
     if spec.template.network.approval_required:
         return "none"
+    if spec.template.network.allowlist:
+        return "none"
+    if "sandbox.port.expose" in spec.template.allowed_operations or "sandbox.port_forward" in spec.template.provider_requirements:
+        return "bridge"
     return "bridge"
 
 

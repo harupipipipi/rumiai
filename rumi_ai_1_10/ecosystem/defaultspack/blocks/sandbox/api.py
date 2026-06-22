@@ -15,6 +15,14 @@ try:
 except ModuleNotFoundError:
     from ecosystem.defaultspack.blocks._common import error, ok, timestamp
 
+try:
+    from ecosystem.defaultspack.domain.tool_policy.internal_context import (
+        internal_tool_decision_allows,
+        tool_server_approval_context_is_internal,
+    )
+except ModuleNotFoundError:
+    from domain.tool_policy.internal_context import internal_tool_decision_allows, tool_server_approval_context_is_internal  # type: ignore
+
 from ecosystem.defaultspack.backend.sandbox.control_lease import ControlLeaseManager
 from ecosystem.defaultspack.backend.sandbox.errors import SandboxContractError
 from ecosystem.defaultspack.backend.sandbox.frame_cache import FrameCache
@@ -93,7 +101,7 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
         if handler == "sandbox_files_apply_patch":
             return _sandbox_files_apply_patch(service, payload)
         if handler == "sandbox_port_expose":
-            return _sandbox_port_expose(service, payload)
+            return _sandbox_port_expose(service, payload, context_payload)
         if handler == "sandbox_delete":
             return _sandbox_delete(service, payload)
         if handler in {"sandbox_start", "sandbox_stop", "sandbox_restart"}:
@@ -468,9 +476,9 @@ def _sandbox_files_apply_patch(service: _SandboxApiService, payload: dict[str, A
     return _api_error(str(result.get("error") or "Sandbox file patch failed"), str(result.get("code") or "SANDBOX_FILES_NOT_READY"), int(result.get("status_code") or 501), details=result.get("details"))
 
 
-def _sandbox_port_expose(service: _SandboxApiService, payload: dict[str, Any]):
+def _sandbox_port_expose(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     sandbox_id = str(payload.get("sandbox_id") or "")
-    result = service.manager.expose_port(sandbox_id, payload)
+    result = service.manager.expose_port(sandbox_id, payload, approved=_context_has_server_approval(context))
     if result.get("ok") is True:
         return ok(result)
     return _api_error(str(result.get("error") or "Sandbox port exposure failed"), str(result.get("code") or "SANDBOX_PORTS_NOT_READY"), int(result.get("status_code") or 501), details=result.get("details"))
@@ -1026,6 +1034,10 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, (list, tuple, set, frozenset)):
         return [_jsonable(item) for item in value]
     return value
+
+
+def _context_has_server_approval(context: dict[str, Any]) -> bool:
+    return internal_tool_decision_allows(context) or tool_server_approval_context_is_internal(context)
 
 
 def _desktop_access_error(service: _SandboxApiService, seat_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:

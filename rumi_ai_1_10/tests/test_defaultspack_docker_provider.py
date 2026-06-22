@@ -15,6 +15,7 @@ class FakeDockerCli:
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], str | None, float | None]] = []
         self.states: dict[str, str] = {}
+        self.networks: dict[str, str] = {}
         self.exec_stdout = "hello\n"
         self.forwarders: list[FakeDockerPortForwarder] = []
 
@@ -30,7 +31,8 @@ class FakeDockerCli:
             return DockerCommandResult(returncode=0, stdout="25.0.0\n")
         if cmd[1:3] == ["inspect", "--format"]:
             if "IPAddress" in cmd[3]:
-                return DockerCommandResult(returncode=0, stdout="172.17.0.2\n")
+                name = cmd[-1]
+                return DockerCommandResult(returncode=0, stdout="172.17.0.2\n" if self.networks.get(name) == "bridge" else "\n")
             name = cmd[-1]
             state = self.states.get(name)
             if state is None:
@@ -39,7 +41,11 @@ class FakeDockerCli:
         if len(cmd) > 4 and cmd[1] == "run":
             name = cmd[cmd.index("--name") + 1]
             self.states[name] = "running"
+            self.networks[name] = cmd[cmd.index("--network") + 1] if "--network" in cmd else "bridge"
             return DockerCommandResult(returncode=0, stdout=f"{name}\n")
+        if cmd[1:3] == ["network", "connect"]:
+            self.networks[cmd[4]] = cmd[3]
+            return DockerCommandResult(returncode=0)
         if cmd[1] == "start":
             self.states[cmd[2]] = "running"
             return DockerCommandResult(returncode=0, stdout=cmd[2])
@@ -150,7 +156,7 @@ def test_docker_provider_uses_python_image_for_python_template(tmp_path) -> None
     assert created["ok"] is True
     docker_run = fake.command_with("run")
     assert "python:3.11-slim" in docker_run
-    assert docker_run[docker_run.index("--network") + 1] == "bridge"
+    assert docker_run[docker_run.index("--network") + 1] == "none"
     assert "--memory" in docker_run
     assert "4096m" in docker_run
 
@@ -261,10 +267,13 @@ def test_docker_provider_exposes_container_port_metadata(tmp_path) -> None:
     manager = _manager(tmp_path, fake)
     created = manager.create(display=False, provider_id="docker", template_id="coding.python")
 
-    result = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"})
-    repeated = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"})
+    denied = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"})
+    result = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"}, approved=True)
+    repeated = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"}, approved=True)
     destroyed = manager.destroy(created["sandbox_id"])
 
+    assert denied["ok"] is False
+    assert denied["code"] == "SANDBOX_NETWORK_REQUIRES_APPROVAL"
     assert result["ok"] is True
     assert result["port"] == 3000
     assert result["url"] == "http://127.0.0.1:49152"
@@ -272,6 +281,8 @@ def test_docker_provider_exposes_container_port_metadata(tmp_path) -> None:
     assert result["container_url"] == "http://172.17.0.2:3000"
     assert result["host_reachable"] is True
     assert repeated["url"] == result["url"]
+    network_connect = [call for call, _input, _timeout in fake.calls if call[1:4] == ["network", "connect", "bridge"]]
+    assert len(network_connect) == 1
     assert len(fake.forwarders) == 1
     assert fake.forwarders[0].target_host == "172.17.0.2"
     assert fake.forwarders[0].target_port == 3000
