@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -45,8 +46,8 @@ MANAGED_UBUNTU_CAPABILITIES = frozenset(
     }
 )
 GUEST_WORKDIR = "/workspace"
-GUEST_DEPS = ("Xvfb", "openbox", "xdotool", "import", "python3")
-APT_PACKAGES = ("xvfb", "openbox", "xdotool", "imagemagick", "python3", "x11-utils", "ca-certificates")
+GUEST_DEPS = ("Xvfb", "openbox", "xdotool", "import", "python3", "xterm")
+APT_PACKAGES = ("xvfb", "openbox", "xdotool", "imagemagick", "python3", "xterm", "x11-utils", "ca-certificates")
 DEFAULT_DISPLAY = ":98"
 MAX_FILE_PATCH_BYTES = 2 * 1024 * 1024
 
@@ -260,6 +261,7 @@ class ManagedUbuntuProvider:
                     _positive_int(instance.opaque_state.get("width"), 1440),
                     _positive_int(instance.opaque_state.get("height"), 900),
                     str(instance.opaque_state.get("display") or DEFAULT_DISPLAY),
+                    instance.opaque_state.get("startup") if isinstance(instance.opaque_state.get("startup"), Mapping) else {},
                 ),
                 timeout=30,
             )
@@ -708,7 +710,7 @@ provision:
     set -e
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y xvfb openbox xdotool imagemagick python3 x11-utils ca-certificates
+    apt-get install -y xvfb openbox xdotool imagemagick python3 xterm x11-utils ca-certificates
 """
     handle = tempfile.NamedTemporaryFile(prefix="rumi-lima-", suffix=".yaml", delete=False)
     try:
@@ -725,9 +727,12 @@ def _unlink(path: str) -> None:
         pass
 
 
-def _desktop_start_script(provider_instance_id: str, width: int, height: int, display: str) -> str:
+def _desktop_start_script(provider_instance_id: str, width: int, height: int, display: str, startup: Mapping[str, object] | None = None) -> str:
     runtime_dir = _runtime_dir(provider_instance_id)
-    return (
+    startup = startup or {}
+    starter = str(startup.get("starter") or "empty").strip().lower()
+    browser_url = str(startup.get("browser_url") or "").strip()
+    script = (
         "set -e\n"
         "mkdir -p /workspace " + runtime_dir + "\n"
         f"DISPLAY_ID={display!r}\n"
@@ -739,6 +744,34 @@ def _desktop_start_script(provider_instance_id: str, width: int, height: int, di
         f"  DISPLAY={display} openbox >{runtime_dir}/openbox.log 2>&1 & echo $! > {runtime_dir}/openbox.pid\n"
         "fi\n"
     )
+    if starter == "terminal":
+        script += (
+            f"if command -v xterm >/dev/null 2>&1; then\n"
+            f"  DISPLAY={display} xterm -title 'Rumi Desktop' -e bash -lc 'cd /workspace; exec bash' >{runtime_dir}/starter-terminal.log 2>&1 & echo $! > {runtime_dir}/starter-terminal.pid\n"
+            "else\n"
+            f"  echo 'xterm is not installed; terminal starter skipped' >{runtime_dir}/starter-terminal.log\n"
+            "fi\n"
+        )
+    elif starter == "browser_url" and browser_url:
+        quoted_url = shlex.quote(browser_url)
+        script += (
+            f"BROWSER_URL={quoted_url}\n"
+            "BROWSER_BIN=''\n"
+            "for candidate in google-chrome-stable google-chrome chromium chromium-browser firefox xdg-open; do\n"
+            "  if command -v \"$candidate\" >/dev/null 2>&1; then BROWSER_BIN=\"$candidate\"; break; fi\n"
+            "done\n"
+            "if [ -n \"$BROWSER_BIN\" ]; then\n"
+            "  mkdir -p " + runtime_dir + "/browser-profile\n"
+            "  if [ \"$BROWSER_BIN\" = 'xdg-open' ]; then\n"
+            f"    DISPLAY={display} \"$BROWSER_BIN\" \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
+            "  else\n"
+            f"    DISPLAY={display} \"$BROWSER_BIN\" --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
+            "  fi\n"
+            "else\n"
+            f"  echo 'No browser executable found; browser_url starter skipped' >{runtime_dir}/starter-browser.log\n"
+            "fi\n"
+        )
+    return script
 
 
 def _desktop_stop_script(provider_instance_id: str) -> str:

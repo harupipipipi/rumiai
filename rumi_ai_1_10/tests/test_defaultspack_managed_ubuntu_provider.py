@@ -31,6 +31,7 @@ class FakeManagedUbuntuCli:
         self.mode = mode
         self.runtime_name = runtime_name
         self.calls: list[tuple[list[str], str | None, float | None]] = []
+        self.guest_scripts: list[str] = []
         self.guest_exists = False
         self.deps_installed = False
         self.desktop_running = False
@@ -95,6 +96,7 @@ class FakeManagedUbuntuCli:
     def _guest(self, argv: list[str], input_text: str | None) -> GuestCommandResult:
         if argv[:2] == ["bash", "-lc"]:
             script = argv[2]
+            self.guest_scripts.append(script)
             if "command -v" in script:
                 if self.deps_installed:
                     return GuestCommandResult(returncode=0)
@@ -142,13 +144,13 @@ def _template(*, desktop: bool = True, output_bytes: int = 4096, timeout_ms: int
     )
 
 
-def _create_spec(template: ResolvedSandboxTemplate) -> SandboxCreateSpec:
+def _create_spec(template: ResolvedSandboxTemplate, *, startup: dict[str, object] | None = None) -> SandboxCreateSpec:
     return SandboxCreateSpec(
         name="Managed Ubuntu",
         template=template,
         provider_id="auto",
         workspace_binding=WorkspaceBinding(workspace_id="workspace-1", mode="read_only"),
-        metadata={"startup": {"starter": "terminal"}},
+        metadata={"startup": startup or {"starter": "terminal"}},
     )
 
 
@@ -180,6 +182,7 @@ def test_mac_lima_provider_ensure_and_guest_desktop_flow(monkeypatch) -> None:
     assert exposed["target_url"] == "http://127.0.0.1:3000"
     assert frame["data"] == b"png"
     assert click["ok"] is True
+    assert any("xterm -title 'Rumi Desktop'" in script for script in fake.guest_scripts)
     assert fake.command_containing("shell", "rumi-managed-runtime", "--", "echo", "hello")[-2:] == ["echo", "hello"]
 
 
@@ -223,6 +226,24 @@ def test_managed_ubuntu_exec_enforces_template_output_and_timeout_limits(monkeyp
     assert executed["stdout_truncated"] is True
     assert executed["stderr_truncated"] is True
     assert exec_call[2] == 2
+
+
+def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(_create_spec(_template(), startup={"starter": "browser_url", "browser_url": "https://example.com"}))
+    started = provider.start(instance)
+    start_script = next(script for script in fake.guest_scripts if "BROWSER_URL=" in script)
+
+    assert ensured.ok is True
+    assert started.state == "ready"
+    assert "BROWSER_URL=https://example.com" in start_script
+    assert "google-chrome-stable google-chrome chromium chromium-browser firefox xdg-open" in start_script
+    assert "starter-browser.log" in start_script
 
 
 def test_default_sandbox_api_registers_cross_platform_runtime_providers() -> None:
