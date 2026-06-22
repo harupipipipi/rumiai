@@ -324,6 +324,9 @@ def _runtime_update(service: _SandboxApiService, payload: dict[str, Any]) -> dic
 
 
 def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> dict[str, Any]:
+    confirmation_error = _destructive_confirmation_error(payload, action="uninstall", resource="runtime")
+    if confirmation_error is not None:
+        return confirmation_error
     provider_id = str(payload.get("provider_id") or _default_provider_id())
     remove_state = bool(payload.get("remove_state"))
     try:

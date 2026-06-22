@@ -1599,14 +1599,34 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
         for route in json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))["routes"]
         if str(route.get("path", "")).startswith(("/api/runtime", "/api/sandbox", "/api/desktops"))
     }
+    sandbox_runtime_template = json.loads(
+        (DEFAULTSPACK_ROOT / "templates" / "sandbox_runtime" / "default" / "template.json").read_text(encoding="utf-8")
+    )
+    route_pieces = {
+        piece["function_id"]: piece
+        for piece in sandbox_runtime_template["pieces"]
+        if piece.get("kind") == "function"
+    }
     for key, spec in route_specs.items():
         assert static_routes.get(key) == spec.function_id
+    for function_id in {
+        "managed_runtime_uninstall",
+        "managed_runtime_sandbox_stop",
+        "managed_runtime_sandbox_delete",
+        "managed_runtime_desktop_stop",
+        "managed_runtime_desktop_delete",
+    }:
+        assert route_pieces[function_id]["requires_confirmation"] is True
+        assert route_pieces[function_id]["confirmation_field"] == "confirm_destructive"
 
     providers = api.run({"_handler": "runtime_providers"}, {})
     doctor = api.run({"_handler": "runtime_doctor"}, {})
     ensure = api.run({"_handler": "runtime_ensure", "provider_id": "missing-provider"}, {})
     update = api.run({"_handler": "runtime_update", "provider_id": "missing-provider"}, {})
-    uninstall = api.run({"_handler": "runtime_uninstall", "provider_id": "missing-provider"}, {})
+    uninstall = api.run(
+        {"_handler": "runtime_uninstall", "provider_id": "missing-provider", "confirm_destructive": True},
+        {},
+    )
     templates = api.run({"_handler": "sandbox_templates"}, {})
     desktops = api.run({"_handler": "desktops_list"}, {})
 
@@ -1745,8 +1765,17 @@ def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -
             {"_handler": "runtime_operation_cancel", "operation_id": "fake-update"},
             {},
         )
+        uninstall_without_confirmation = api.run(
+            {"_handler": "runtime_uninstall", "provider_id": "fake-runtime", "request_id": "fake-uninstall-denied"},
+            {},
+        )
         uninstall = api.run(
-            {"_handler": "runtime_uninstall", "provider_id": "fake-runtime", "request_id": "fake-uninstall"},
+            {
+                "_handler": "runtime_uninstall",
+                "provider_id": "fake-runtime",
+                "request_id": "fake-uninstall",
+                "confirm_destructive": True,
+            },
             {},
         )
         uninstall_done = _wait_for_runtime_operation(api, "fake-uninstall")
@@ -1767,6 +1796,9 @@ def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -
     assert operation_cancel["data"]["operation_id"] == "fake-update"
     assert operation_cancel["data"]["cancelled"] is False
     assert operation_cancel["data"]["status"] == "completed"
+    assert uninstall_without_confirmation["status"] == "ok"
+    assert uninstall_without_confirmation["data"]["status"] == "error"
+    assert uninstall_without_confirmation["data"]["error"]["code"] == "DESTRUCTIVE_ACTION_CONFIRMATION_REQUIRED"
     assert uninstall["data"]["operation_id"] == "fake-uninstall"
     assert uninstall["data"]["status"] == "running"
     assert uninstall_done["status"] == "completed"
@@ -2181,7 +2213,12 @@ def test_runtime_uninstall_reconciles_manager_desktops_and_local_state(tmp_path)
     api._reset_service_for_tests(service)
     try:
         uninstall = api.run(
-            {"_handler": "runtime_uninstall", "provider_id": "fake-runtime", "request_id": "fake-uninstall-reconcile"},
+            {
+                "_handler": "runtime_uninstall",
+                "provider_id": "fake-runtime",
+                "request_id": "fake-uninstall-reconcile",
+                "confirm_destructive": True,
+            },
             {},
         )
         uninstall_done = _wait_for_runtime_operation(api, "fake-uninstall-reconcile")
@@ -2212,6 +2249,7 @@ def test_runtime_uninstall_reconciles_manager_desktops_and_local_state(tmp_path)
                 "provider_id": "fake-runtime",
                 "remove_state": True,
                 "request_id": "fake-uninstall-remove-state",
+                "confirm_destructive": True,
             },
             {},
         )
