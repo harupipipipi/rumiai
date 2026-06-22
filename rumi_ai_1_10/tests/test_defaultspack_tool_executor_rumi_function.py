@@ -770,6 +770,7 @@ def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
 def test_sandbox_exec_fails_closed_after_internal_tool_decision_until_managed_runtime_exists(tmp_path, monkeypatch):
     from domain.tool.executor import ToolExecutor
     from domain.tool import sandbox_tools
+    from domain.coding.terminal import Terminal
     from domain.tool_policy.internal_context import seal_tool_context
 
     class MissingRuntimeApi:
@@ -781,6 +782,10 @@ def test_sandbox_exec_fails_closed_after_internal_tool_decision_until_managed_ru
                 }
             raise AssertionError(f"unexpected sandbox api call: {payload}")
 
+    def forbidden_host_terminal(*args, **kwargs):
+        raise AssertionError("sandbox_exec must not fall back to host Terminal.execute")
+
+    monkeypatch.setattr(Terminal, "execute", forbidden_host_terminal)
     monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: MissingRuntimeApi())
     context = seal_tool_context(
         {"workspace_root": str(tmp_path)},
@@ -1144,6 +1149,77 @@ def test_node_exec_script_path_must_stay_inside_workspace_even_when_code_is_pres
     assert result["is_error"] is True
     assert result["widget"]["error"]["code"] == "NODE_EXEC_FAILED"
     assert "escapes artifact root" in result["widget"]["error"]["message"]
+
+
+def test_python_exec_script_path_must_stay_inside_workspace_even_when_code_is_present(
+    tmp_path,
+    monkeypatch,
+):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-code.py"
+    outside.write_text("print('outside')", encoding="utf-8")
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    def forbidden_sandbox_api():
+        raise AssertionError(
+            "python_exec must reject an escaped script_path before sandbox API calls"
+        )
+
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", forbidden_sandbox_api)
+
+    result = sandbox_tools.python_exec(
+        {"code": "print('inside')", "script_path": f"../{outside.name}"},
+        context,
+    )
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "PYTHON_EXEC_FAILED"
+    assert "escapes artifact root" in result["widget"]["error"]["message"]
+
+
+def test_python_and_node_exec_reject_absolute_script_paths_outside_workspace_before_runtime_api(
+    tmp_path,
+    monkeypatch,
+):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    outside_python = tmp_path.parent / f"{tmp_path.name}-absolute.py"
+    outside_node = tmp_path.parent / f"{tmp_path.name}-absolute.js"
+    outside_python.write_text("print('outside')", encoding="utf-8")
+    outside_node.write_text("console.log('outside')", encoding="utf-8")
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    def forbidden_sandbox_api():
+        raise AssertionError(
+            "script_path jail must reject escaped absolute paths before sandbox API calls"
+        )
+
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", forbidden_sandbox_api)
+
+    python_result = sandbox_tools.python_exec({"script_path": str(outside_python)}, context)
+    node_result = sandbox_tools.node_exec({"script_path": str(outside_node)}, context)
+
+    assert python_result["is_error"] is True
+    assert python_result["widget"]["error"]["code"] == "PYTHON_EXEC_FAILED"
+    assert (
+        "outside" in python_result["widget"]["error"]["message"]
+        or "artifact path" in python_result["widget"]["error"]["message"]
+    )
+    assert node_result["is_error"] is True
+    assert node_result["widget"]["error"]["code"] == "NODE_EXEC_FAILED"
+    assert (
+        "outside" in node_result["widget"]["error"]["message"]
+        or "artifact path" in node_result["widget"]["error"]["message"]
+    )
 
 
 def test_package_install_plan_never_executes_packages(tmp_path):
