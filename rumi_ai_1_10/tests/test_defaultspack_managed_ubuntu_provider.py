@@ -117,12 +117,14 @@ class FakeManagedUbuntuCli:
             return GuestCommandResult(returncode=0, stdout=base64.b64encode(b"png").decode("ascii"))
         if argv[:3] == ["env", "DISPLAY=:98", "xdotool"]:
             return GuestCommandResult(returncode=0)
+        if argv[:1] == ["emit-long"]:
+            return GuestCommandResult(returncode=0, stdout="0123456789", stderr="abcdefghij")
         if argv[:2] == ["echo", "hello"]:
             return GuestCommandResult(returncode=0, stdout="hello\n")
         return GuestCommandResult(returncode=0)
 
 
-def _template(*, desktop: bool = True) -> ResolvedSandboxTemplate:
+def _template(*, desktop: bool = True, output_bytes: int = 4096, timeout_ms: int | None = None) -> ResolvedSandboxTemplate:
     return ResolvedSandboxTemplate(
         template_id="desktop.ubuntu" if desktop else "coding.python",
         template_version="1",
@@ -133,7 +135,7 @@ def _template(*, desktop: bool = True) -> ResolvedSandboxTemplate:
         filesystem=FilesystemPolicy(),
         network=NetworkPolicy(mode="limited_or_approval_gated"),
         secrets=SecretsPolicy(),
-        resources=ResourceLimits(memory_mb=2048, cpu_count=1, output_bytes=4096),
+        resources=ResourceLimits(memory_mb=2048, cpu_count=1, output_bytes=output_bytes, timeout_ms=timeout_ms),
         lifecycle=LifecyclePolicy(),
         allowed_operations=MANAGED_UBUNTU_CAPABILITIES,
         source_template_ids=("test",),
@@ -200,6 +202,27 @@ def test_windows_wsl_provider_ensure_installs_distribution(monkeypatch) -> None:
     assert fake.deps_installed is True
     assert executed["stdout"] == "hello\n"
     assert fake.command_containing("-d", "Ubuntu", "--", "echo", "hello")[-2:] == ["echo", "hello"]
+
+
+def test_managed_ubuntu_exec_enforces_template_output_and_timeout_limits(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec", "sandbox.files"}))
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(_create_spec(_template(desktop=False, output_bytes=5, timeout_ms=2_000)))
+    started = provider.start(instance)
+    agent = provider.connect_agent(started)
+    executed = agent.exec(started.sandbox_id, {"argv": ["emit-long"], "cwd": ".", "client_request_id": "exec-long", "timeout_ms": 600_000})
+    exec_call = next(call for call in fake.calls if "emit-long" in call[0])
+
+    assert ensured.ok is True
+    assert executed["stdout"] == "01234"
+    assert executed["stderr"] == "abcde"
+    assert executed["stdout_truncated"] is True
+    assert executed["stderr_truncated"] is True
+    assert exec_call[2] == 2
 
 
 def test_default_sandbox_api_registers_cross_platform_runtime_providers() -> None:

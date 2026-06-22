@@ -314,6 +314,7 @@ class ManagedUbuntuProvider:
 
     def connect_agent(self, instance: ProviderInstance) -> "ManagedUbuntuGuestAgent":
         command_path = str(instance.opaque_state.get("command_path") or self._require_ready(MANAGED_UBUNTU_CAPABILITIES))
+        resources = instance.opaque_state.get("resource_limits") if isinstance(instance.opaque_state.get("resource_limits"), Mapping) else {}
         return ManagedUbuntuGuestAgent(
             provider_id=self.provider_id,
             command_path=command_path,
@@ -322,6 +323,8 @@ class ManagedUbuntuProvider:
             display=str(instance.opaque_state.get("display") or DEFAULT_DISPLAY),
             width=_positive_int(instance.opaque_state.get("width"), 1440),
             height=_positive_int(instance.opaque_state.get("height"), 900),
+            output_bytes=_optional_positive_int(resources.get("output_bytes")),
+            timeout_ms=_optional_positive_int(resources.get("timeout_ms")),
         )
 
     def _command_path(self) -> str | None:
@@ -522,6 +525,8 @@ class ManagedUbuntuGuestAgent:
         display: str,
         width: int,
         height: int,
+        output_bytes: int | None = None,
+        timeout_ms: int | None = None,
     ) -> None:
         self._provider_id = provider_id
         self._command_path = command_path
@@ -530,20 +535,25 @@ class ManagedUbuntuGuestAgent:
         self._display = display
         self._width = width
         self._height = height
+        self._output_bytes = output_bytes
+        self._timeout_ms = timeout_ms
 
     def exec(self, sandbox_id: str, payload: Mapping[str, object]) -> dict[str, object]:
         request = GuestExecRequest.from_payload(payload)
-        result = self._run(_exec_argv(request.cwd, request.argv), input_text=request.stdin, timeout=max(1, request.timeout_ms / 1000))
+        timeout_ms = min(request.timeout_ms, self._timeout_ms) if self._timeout_ms else request.timeout_ms
+        result = self._run(_exec_argv(request.cwd, request.argv), input_text=request.stdin, timeout=max(1, timeout_ms / 1000))
+        stdout, stdout_truncated = _bounded_output(result.stdout, self._output_bytes)
+        stderr, stderr_truncated = _bounded_output(result.stderr, self._output_bytes)
         return {
             "ok": True,
             "sandbox_id": sandbox_id,
             "argv": list(request.argv),
             "cwd": request.cwd,
             "exit_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "stdout_truncated": False,
-            "stderr_truncated": False,
+            "stdout": stdout,
+            "stderr": stderr,
+            "stdout_truncated": stdout_truncated,
+            "stderr_truncated": stderr_truncated,
             "client_request_id": request.client_request_id,
             "provider_runtime": self._provider_id,
         }
@@ -827,6 +837,23 @@ def _positive_int(value: object, fallback: int) -> int:
     except (TypeError, ValueError):
         return fallback
     return parsed if parsed > 0 else fallback
+
+
+def _optional_positive_int(value: object) -> int | None:
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _bounded_output(value: str, max_bytes: int | None) -> tuple[str, bool]:
+    if not max_bytes or max_bytes <= 0:
+        return value, False
+    encoded = value.encode("utf-8", errors="replace")
+    if len(encoded) <= max_bytes:
+        return value, False
+    return encoded[:max_bytes].decode("utf-8", errors="replace"), True
 
 
 def _button(value: object) -> str:
