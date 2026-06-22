@@ -3,9 +3,12 @@ from __future__ import annotations
 import base64
 import os
 import platform
+import select
 import shutil
+import socket
 import subprocess
 import tempfile
+import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -57,6 +60,7 @@ class DockerCommandResult:
 
 
 DockerRunner = Callable[[Sequence[str], str | None, float | None], DockerCommandResult]
+PortForwarderFactory = Callable[[str, int], "DockerPortForwarder"]
 
 
 class DockerProvider:
@@ -69,10 +73,13 @@ class DockerProvider:
         *,
         docker_path: str | None = None,
         runner: DockerRunner | None = None,
+        port_forwarder_factory: PortForwarderFactory | None = None,
     ) -> None:
         self._configured_docker_path = docker_path
         self._runner = runner or _subprocess_runner
         self._instances: dict[str, ProviderInstance] = {}
+        self._port_forwarder_factory = port_forwarder_factory or DockerPortForwarder
+        self._port_forwarders: dict[tuple[str, int], DockerPortForwarder] = {}
 
     def doctor(self, request: RuntimeRequirements) -> RuntimeProviderStatus:
         docker_path = self._docker_path()
@@ -210,6 +217,7 @@ class DockerProvider:
     def stop(self, instance: ProviderInstance, *, force: bool = False) -> None:
         docker_path = str(instance.opaque_state.get("docker_path") or self._docker_path() or "docker")
         name = str(instance.opaque_state.get("container_name") or instance.provider_instance_id)
+        self._stop_port_forwarders(name)
         command = [docker_path, "kill", name] if force else [docker_path, "stop", name]
         self._run(command, timeout=30)
         self._instances[instance.provider_instance_id] = ProviderInstance(
@@ -225,6 +233,7 @@ class DockerProvider:
     def destroy(self, instance: ProviderInstance) -> None:
         docker_path = str(instance.opaque_state.get("docker_path") or self._docker_path() or "docker")
         name = str(instance.opaque_state.get("container_name") or instance.provider_instance_id)
+        self._stop_port_forwarders(name)
         self._run([docker_path, "rm", "-f", name], timeout=30)
         self._instances.pop(instance.provider_instance_id, None)
 
@@ -253,7 +262,16 @@ class DockerProvider:
             container_name=name,
             runner=self._runner,
             output_bytes=_positive_int(instance.opaque_state.get("output_bytes")),
+            port_forwarders=self._port_forwarders,
+            port_forwarder_factory=self._port_forwarder_factory,
         )
+
+    def _stop_port_forwarders(self, container_name: str) -> None:
+        for key, forwarder in list(self._port_forwarders.items()):
+            if key[0] != container_name:
+                continue
+            forwarder.stop()
+            self._port_forwarders.pop(key, None)
 
     def _started(self, instance: ProviderInstance) -> ProviderInstance:
         started = ProviderInstance(
@@ -317,11 +335,15 @@ class DockerGuestAgent:
         container_name: str,
         runner: DockerRunner,
         output_bytes: int | None,
+        port_forwarders: dict[tuple[str, int], "DockerPortForwarder"],
+        port_forwarder_factory: PortForwarderFactory,
     ) -> None:
         self._docker_path = docker_path
         self._container_name = container_name
         self._runner = runner
         self._output_bytes = output_bytes
+        self._port_forwarders = port_forwarders
+        self._port_forwarder_factory = port_forwarder_factory
 
     def exec(self, sandbox_id: str, payload: Mapping[str, object]) -> dict[str, object]:
         request = GuestExecRequest.from_payload(payload)
@@ -418,16 +440,25 @@ class DockerGuestAgent:
                 "Sandbox container does not have an inspectable network address.",
                 status_code=501,
             )
+        key = (self._container_name, port)
+        forwarder = self._port_forwarders.get(key)
+        if forwarder is None:
+            forwarder = self._port_forwarder_factory(container_ip, port)
+            self._port_forwarders[key] = forwarder
         scheme = "http" if protocol == "tcp" else protocol
-        url = f"{scheme}://{container_ip}:{port}"
+        url = f"{scheme}://{forwarder.host}:{forwarder.host_port}"
+        container_url = f"{scheme}://{container_ip}:{port}"
         return {
             "ok": True,
             "sandbox_id": sandbox_id,
             "port": port,
+            "host": forwarder.host,
+            "host_port": forwarder.host_port,
             "protocol": protocol,
             "url": url,
-            "target_url": url,
-            "host_reachable": platform.system().lower() == "linux",
+            "target_url": container_url,
+            "container_url": container_url,
+            "host_reachable": True,
             "provider_runtime": "docker",
         }
 
@@ -478,6 +509,69 @@ def _subprocess_runner(command: Sequence[str], input_text: str | None, timeout: 
         stdout=str(completed.stdout or ""),
         stderr=str(completed.stderr or ""),
     )
+
+
+class DockerPortForwarder:
+    host = "127.0.0.1"
+
+    def __init__(self, target_host: str, target_port: int) -> None:
+        self._target_host = target_host
+        self._target_port = int(target_port)
+        self._closed = threading.Event()
+        self._listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._listener.bind((self.host, 0))
+        self._listener.listen(64)
+        self.host_port = int(self._listener.getsockname()[1])
+        self._thread = threading.Thread(target=self._serve, name=f"rumi-docker-port-{self.host_port}", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._closed.set()
+        try:
+            self._listener.close()
+        except OSError:
+            pass
+
+    def _serve(self) -> None:
+        while not self._closed.is_set():
+            try:
+                client, _addr = self._listener.accept()
+            except OSError:
+                return
+            thread = threading.Thread(target=self._handle_client, args=(client,), daemon=True)
+            thread.start()
+
+    def _handle_client(self, client: socket.socket) -> None:
+        with client:
+            try:
+                upstream = socket.create_connection((self._target_host, self._target_port), timeout=10)
+            except OSError:
+                return
+            with upstream:
+                _relay_sockets(client, upstream)
+
+
+def _relay_sockets(left: socket.socket, right: socket.socket) -> None:
+    sockets = {left: right, right: left}
+    try:
+        while True:
+            readable, _writable, _errored = select.select(tuple(sockets), (), tuple(sockets), 30)
+            if not readable:
+                continue
+            for source in readable:
+                chunk = source.recv(65536)
+                if not chunk:
+                    return
+                sockets[source].sendall(chunk)
+    except OSError:
+        return
+    finally:
+        for sock in sockets:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
 
 def _docker_run_command(docker_path: str, name: str, opaque_state: Mapping[str, object]) -> list[str]:

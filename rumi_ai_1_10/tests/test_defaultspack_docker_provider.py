@@ -15,6 +15,7 @@ class FakeDockerCli:
         self.calls: list[tuple[list[str], str | None, float | None]] = []
         self.states: dict[str, str] = {}
         self.exec_stdout = "hello\n"
+        self.forwarders: list[FakeDockerPortForwarder] = []
 
     def __call__(
         self,
@@ -62,9 +63,27 @@ class FakeDockerCli:
         raise AssertionError(f"docker {docker_subcommand} was not called")
 
 
+class FakeDockerPortForwarder:
+    host = "127.0.0.1"
+
+    def __init__(self, target_host: str, target_port: int, *, host_port: int) -> None:
+        self.target_host = target_host
+        self.target_port = target_port
+        self.host_port = host_port
+        self.stopped = False
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
 def _manager(tmp_path, fake: FakeDockerCli) -> SandboxManager:
+    def forwarder_factory(target_host: str, target_port: int) -> FakeDockerPortForwarder:
+        forwarder = FakeDockerPortForwarder(target_host, target_port, host_port=49152 + len(fake.forwarders))
+        fake.forwarders.append(forwarder)
+        return forwarder
+
     registry = ProviderRegistry()
-    registry.register(DockerProvider(docker_path="/usr/bin/docker", runner=fake))
+    registry.register(DockerProvider(docker_path="/usr/bin/docker", runner=fake, port_forwarder_factory=forwarder_factory))
     return SandboxManager(state_dir=tmp_path, provider_registry=registry)
 
 
@@ -175,7 +194,18 @@ def test_docker_provider_exposes_container_port_metadata(tmp_path) -> None:
     created = manager.create(display=False, provider_id="docker", template_id="coding.python")
 
     result = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"})
+    repeated = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"})
+    destroyed = manager.destroy(created["sandbox_id"])
 
     assert result["ok"] is True
     assert result["port"] == 3000
+    assert result["url"] == "http://127.0.0.1:49152"
     assert result["target_url"] == "http://172.17.0.2:3000"
+    assert result["container_url"] == "http://172.17.0.2:3000"
+    assert result["host_reachable"] is True
+    assert repeated["url"] == result["url"]
+    assert len(fake.forwarders) == 1
+    assert fake.forwarders[0].target_host == "172.17.0.2"
+    assert fake.forwarders[0].target_port == 3000
+    assert destroyed["ok"] is True
+    assert fake.forwarders[0].stopped is True
