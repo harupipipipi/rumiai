@@ -256,6 +256,7 @@ class ManagedUbuntuProvider:
             "network_policy": model_to_dict(spec.template.network),
             "network_disabled": _guest_network_disabled(spec.template.network),
             "resource_limits": model_to_dict(spec.template.resources),
+            "template_packages": [model_to_dict(package) for package in spec.template.packages],
             "desktop_provisioning": spec.metadata.get("desktop_provisioning") or {},
             "desktop_rules": spec.metadata.get("desktop_rules") or {},
             "assigned_agent_id": spec.metadata.get("assigned_agent_id"),
@@ -435,8 +436,8 @@ class ManagedUbuntuProvider:
         self._guest_shell(command_path, script, timeout=600)
 
     def _provision_instance(self, command_path: str, instance: ProviderInstance) -> None:
-        provisioning = instance.opaque_state.get("desktop_provisioning")
-        if not isinstance(provisioning, Mapping):
+        provisioning = _guest_provisioning_input(instance)
+        if not provisioning:
             return
         apt_packages = _guest_provisioning_apt_packages(provisioning)
         mcp_servers = _guest_provisioning_mcp_servers(provisioning)
@@ -890,6 +891,21 @@ def _guest_provisioning_script(provider_instance_id: str, apt_packages: Sequence
         "fi\n"
     )
     return script
+
+
+def _guest_provisioning_input(instance: ProviderInstance) -> dict[str, object]:
+    provisioning = instance.opaque_state.get("desktop_provisioning")
+    merged: dict[str, object] = dict(provisioning) if isinstance(provisioning, Mapping) else {}
+    packages: list[object] = []
+    template_packages = instance.opaque_state.get("template_packages")
+    if isinstance(template_packages, Sequence) and not isinstance(template_packages, (str, bytes)):
+        packages.extend(template_packages)
+    declared_packages = merged.get("packages")
+    if isinstance(declared_packages, Sequence) and not isinstance(declared_packages, (str, bytes)):
+        packages.extend(declared_packages)
+    if packages:
+        merged["packages"] = packages
+    return merged
 
 
 def _guest_provisioning_apt_packages(provisioning: Mapping[str, object]) -> tuple[str, ...]:

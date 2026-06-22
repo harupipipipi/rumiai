@@ -11,6 +11,7 @@ from ecosystem.defaultspack.backend.sandbox.models import (
     FilesystemPolicy,
     LifecyclePolicy,
     NetworkPolicy,
+    PackageSpec,
     ResolvedSandboxTemplate,
     ResourceLimits,
     RuntimeRequirements,
@@ -144,13 +145,14 @@ def _template(
     pids: int | None = None,
     network_mode: str = "limited_or_approval_gated",
     network_approval_required: bool = True,
+    packages: tuple[PackageSpec, ...] = (),
 ) -> ResolvedSandboxTemplate:
     return ResolvedSandboxTemplate(
         template_id="desktop.ubuntu" if desktop else "coding.python",
         template_version="1",
         runtime_os="linux",
         provider_requirements=MANAGED_UBUNTU_CAPABILITIES if desktop else frozenset({"sandbox.exec", "sandbox.files", "sandbox.port_forward"}),
-        packages=(),
+        packages=packages,
         desktop=DesktopSpec(enabled=True, width=800, height=600) if desktop else None,
         filesystem=FilesystemPolicy(),
         network=NetworkPolicy(mode=network_mode, approval_required=network_approval_required),
@@ -343,6 +345,33 @@ def test_managed_ubuntu_desktop_provisioning_installs_declared_apps_and_mcp(monk
     assert "code-editor" not in provision_script
     assert "/workspace/.rumi/mcp_servers.txt" in provision_script
     assert "@playwright/mcp" in provision_script
+
+
+def test_managed_ubuntu_template_packages_are_guest_provisioned(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+    template = _template(
+        packages=(
+            PackageSpec(name="node", version="20+", source="guest"),
+            PackageSpec(name="python", version="3.11+", source="guest"),
+            PackageSpec(name="not-a-known-app", source="guest"),
+        )
+    )
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(_create_spec(template))
+    started = provider.start(instance)
+    provision_script = next(script for script in fake.guest_scripts if "PROVISION_MARKER" in script)
+
+    assert ensured.ok is True
+    assert started.state == "ready"
+    assert "nodejs" in provision_script
+    assert "npm" in provision_script
+    assert "python3" in provision_script
+    assert "python3-pip" in provision_script
+    assert "not-a-known-app" not in provision_script
 
 
 def test_default_sandbox_api_registers_cross_platform_runtime_providers() -> None:
