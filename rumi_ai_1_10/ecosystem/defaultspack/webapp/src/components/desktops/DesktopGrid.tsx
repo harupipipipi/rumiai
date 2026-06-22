@@ -82,7 +82,7 @@ export function DesktopGrid({
 
   return (
     <div className={cn(
-      "grid grid-cols-1 items-start gap-3",
+      "grid w-full grid-cols-1 items-start gap-3",
       !singleDesktop && "min-[900px]:grid-cols-2",
       !singleDesktop && (density === "dense" ? "min-[1400px]:grid-cols-4" : "min-[1400px]:grid-cols-3"),
     )}>
@@ -92,6 +92,7 @@ export function DesktopGrid({
           desktop={desktop}
           selected={desktop.seat_id === selectedSeatId}
           dense={density === "dense"}
+          prominent={singleDesktop}
           hasLease={desktop.seat_id === leaseSeatId}
           accessKey={accessKeys[desktop.seat_id] || null}
           controlBusy={controlBusy && desktop.seat_id === selectedSeatId}
