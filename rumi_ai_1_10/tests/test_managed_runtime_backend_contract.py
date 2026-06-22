@@ -346,6 +346,70 @@ def test_linux_native_api_default_desktop_template_is_compatible(monkeypatch, tm
     assert created["data"]["status"] == "running"
 
 
+def test_api_rejects_template_kind_mismatches(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities={
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+                "sandbox.desktop",
+                "sandbox.desktop_input",
+                "sandbox.snapshot",
+            },
+        )
+    )
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        desktop_via_sandbox = api.run(
+            {
+                "_handler": "sandboxes_create",
+                "template_id": "desktop.ubuntu",
+                "provider_id": "fake-runtime",
+            },
+            {},
+        )
+        sandbox_via_desktop = api.run(
+            {
+                "_handler": "desktops_create",
+                "template_id": "tool.ephemeral",
+                "provider_id": "fake-runtime",
+                "owner_id": "local-user",
+            },
+            {},
+        )
+        sandbox_created = api.run(
+            {
+                "_handler": "sandboxes_create",
+                "template_id": "tool.ephemeral",
+                "provider_id": "fake-runtime",
+            },
+            {},
+        )
+        desktops = api.run({"_handler": "desktops_list"}, {})
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert desktop_via_sandbox["status"] == "error"
+    assert desktop_via_sandbox["error"]["code"] == "SANDBOX_TEMPLATE_KIND_MISMATCH"
+    assert sandbox_via_desktop["status"] == "error"
+    assert sandbox_via_desktop["error"]["code"] == "SANDBOX_TEMPLATE_NOT_DESKTOP"
+    assert sandbox_created["status"] == "ok"
+    assert sandbox_created["data"]["template_id"] == "tool.ephemeral"
+    assert desktops["data"]["desktops"] == []
+
+
 def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 
