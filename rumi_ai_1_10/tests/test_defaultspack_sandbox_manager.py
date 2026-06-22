@@ -688,6 +688,58 @@ def test_desktop_resolution_is_bounded_before_provider_start(tmp_path):
     assert created["status_code"] == 400
 
 
+def test_persisted_desktop_resolution_is_sanitized_before_provider_reconcile(tmp_path):
+    registry_path = tmp_path / "sandboxes.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "instances": {
+                    "seat-huge": {
+                        "sandbox_id": "seat-huge",
+                        "name": "Huge Desktop",
+                        "image": "ubuntu:22.04",
+                        "display": True,
+                        "template_id": "desktop.ubuntu",
+                        "provider_id": "fake-runtime",
+                        "provider_instance_id": "fake-seat-huge",
+                        "runtime_id": "fake-runtime",
+                        "state": "ready",
+                        "created_at": 10,
+                        "updated_at": 11,
+                        "desktop_spec": {"enabled": True, "width": 20_000, "height": 20_000},
+                        "provider_opaque_state": {"width": 20_000, "height": 20_000},
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class CaptureReconcileProvider(FakeRuntimeProvider):
+        def __init__(self) -> None:
+            super().__init__(provider_id="fake-runtime")
+            self.reconciled: list[ProviderInstance] = []
+
+        def reconcile(self, persisted: ProviderInstance) -> ReconcileResult:
+            self.reconciled.append(persisted)
+            return ReconcileResult(instance=persisted, changed=False)
+
+    provider = CaptureReconcileProvider()
+    registry = ProviderRegistry()
+    registry.register(provider)
+
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    status = manager.status("seat-huge")
+
+    assert status["ok"] is True
+    assert status["desktop_spec"]["width"] == 1440
+    assert status["desktop_spec"]["height"] == 900
+    assert provider.reconciled[0].opaque_state["width"] == 1440
+    assert provider.reconciled[0].opaque_state["height"] == 900
+    assert provider.reconciled[0].opaque_state["desktop_spec"]["width"] == 1440
+
+
 def test_sandbox_screenshot_fails_closed_without_backend(tmp_path):
     manager = _manager(tmp_path)
     sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]

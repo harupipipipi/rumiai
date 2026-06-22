@@ -1564,7 +1564,9 @@ class SandboxManager:
         opaque_state.setdefault("desktop_provisioning", model_to_dict(inst.desktop_provisioning))
         opaque_state.setdefault("desktop_rules", model_to_dict(inst.desktop_rules))
         if inst.desktop_spec is not None:
-            opaque_state.setdefault("desktop_spec", model_to_dict(inst.desktop_spec))
+            opaque_state["desktop_spec"] = model_to_dict(inst.desktop_spec)
+            opaque_state["width"] = inst.desktop_spec.width
+            opaque_state["height"] = inst.desktop_spec.height
         if inst.assigned_agent_id:
             opaque_state.setdefault("assigned_agent_id", inst.assigned_agent_id)
         return ProviderInstance(
@@ -2177,10 +2179,21 @@ def _desktop_spec_from_dict(value: Any, *, display: bool) -> DesktopSpec | None:
         return None
     if not isinstance(value, dict):
         return DesktopSpec(enabled=True)
+    default_width = 1440
+    default_height = 900
+    try:
+        width, height = _validated_desktop_resolution(
+            width=int(_float_or_zero(value.get("width")) or default_width),
+            height=int(_float_or_zero(value.get("height")) or default_height),
+            default_width=default_width,
+            default_height=default_height,
+        )
+    except SandboxContractError:
+        width, height = default_width, default_height
     return DesktopSpec(
         enabled=bool(value.get("enabled", True)),
-        width=int(_float_or_zero(value.get("width")) or 1440),
-        height=int(_float_or_zero(value.get("height")) or 900),
+        width=width,
+        height=height,
         display_backend=str(value.get("display_backend") or "x11")[:80],
         preset=_optional_clean_string(value.get("preset"), max_len=160),
     )
