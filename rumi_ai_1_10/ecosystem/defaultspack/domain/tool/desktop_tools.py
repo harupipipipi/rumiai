@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from ._agent_os_common import err
@@ -19,6 +20,35 @@ def desktop_create(arguments: dict[str, Any], context: dict[str, Any] | None = N
     _default_owner(payload, context)
     payload["_handler"] = "desktops_create"
     return _sandbox_api().run(payload, context or {})
+
+
+def desktop_frame(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = dict(arguments or {})
+    seat_id = str(payload.get("seat_id") or payload.get("desktop_id") or "").strip()
+    if not seat_id:
+        return err("'seat_id' is required", "INVALID_INPUT")
+    payload["seat_id"] = seat_id
+    _default_owner(payload, context)
+    payload["_handler"] = "desktop_frame"
+    result = _sandbox_api().run(payload, context or {})
+    if not isinstance(result, dict) or result.get("_binary") is not True:
+        return result
+    body = result.get("body") or b""
+    if not isinstance(body, (bytes, bytearray)):
+        return err("desktop frame returned an invalid binary payload", "DESKTOP_FRAME_INVALID")
+    headers = result.get("headers") if isinstance(result.get("headers"), dict) else {}
+    return {
+        "status": "ok",
+        "data": {
+            "seat_id": seat_id,
+            "content_type": result.get("content_type") or "image/png",
+            "data_base64": base64.b64encode(bytes(body)).decode("ascii"),
+            "frame_seq": _header_int(headers.get("X-Rumi-Frame-Seq")),
+            "width": _header_int(headers.get("X-Rumi-Frame-Width")),
+            "height": _header_int(headers.get("X-Rumi-Frame-Height")),
+            "captured_at": headers.get("X-Rumi-Captured-At"),
+        },
+    }
 
 
 def desktop_input(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -91,6 +121,14 @@ def _default_agent(payload: dict[str, Any], context: dict[str, Any] | None) -> N
     ).strip()
     if agent_id:
         payload["agent_id"] = agent_id[:160]
+
+
+def _header_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed
 
 
 def _sandbox_api():

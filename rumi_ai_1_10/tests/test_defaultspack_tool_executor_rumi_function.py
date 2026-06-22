@@ -879,6 +879,43 @@ def test_python_and_node_exec_code_use_coding_templates(tmp_path, monkeypatch):
     assert execs[1]["argv"] == ["node", "-e", "console.log('ok')"]
 
 
+def test_desktop_frame_tool_returns_base64_frame_payload(monkeypatch):
+    from domain.tool import desktop_tools
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append((payload, context))
+            assert payload["_handler"] == "desktop_frame"
+            return {
+                "_binary": True,
+                "status_code": 200,
+                "content_type": "image/png",
+                "body": b"fake-png",
+                "headers": {
+                    "X-Rumi-Frame-Seq": "7",
+                    "X-Rumi-Frame-Width": "800",
+                    "X-Rumi-Frame-Height": "600",
+                    "X-Rumi-Captured-At": "2026-01-01T00:00:00Z",
+                },
+            }
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: fake_api)
+
+    result = desktop_tools.desktop_frame({"desktop_id": "seat-1"}, {"agent_id": "agent-1"})
+
+    assert result["status"] == "ok"
+    assert result["data"]["seat_id"] == "seat-1"
+    assert result["data"]["data_base64"] == "ZmFrZS1wbmc="
+    assert result["data"]["frame_seq"] == 7
+    assert result["data"]["width"] == 800
+    assert result["data"]["height"] == 600
+    assert fake_api.calls[0][0]["owner_id"] == "agent-1"
+
+
 def test_sandbox_exec_direct_call_requires_server_side_approval(tmp_path):
     from domain.tool.sandbox_tools import sandbox_exec
 
