@@ -46,8 +46,8 @@ MANAGED_UBUNTU_CAPABILITIES = frozenset(
     }
 )
 GUEST_WORKDIR = "/workspace"
-GUEST_DEPS = ("Xvfb", "openbox", "xdotool", "import", "python3", "xterm")
-APT_PACKAGES = ("xvfb", "openbox", "xdotool", "imagemagick", "python3", "xterm", "x11-utils", "ca-certificates")
+GUEST_DEPS = ("Xvfb", "openbox", "xdotool", "import", "python3", "xterm", "unshare")
+APT_PACKAGES = ("xvfb", "openbox", "xdotool", "imagemagick", "python3", "xterm", "x11-utils", "ca-certificates", "util-linux")
 DEFAULT_DISPLAY = ":98"
 MAX_FILE_PATCH_BYTES = 2 * 1024 * 1024
 GUEST_APP_PACKAGE_MAP = {
@@ -254,6 +254,7 @@ class ManagedUbuntuProvider:
             "display": DEFAULT_DISPLAY,
             "workspace_binding": model_to_dict(spec.workspace_binding),
             "network_policy": model_to_dict(spec.template.network),
+            "network_disabled": _guest_network_disabled(spec.template.network),
             "resource_limits": model_to_dict(spec.template.resources),
             "desktop_provisioning": spec.metadata.get("desktop_provisioning") or {},
             "desktop_rules": spec.metadata.get("desktop_rules") or {},
@@ -282,6 +283,7 @@ class ManagedUbuntuProvider:
                     _positive_int(instance.opaque_state.get("width"), 1440),
                     _positive_int(instance.opaque_state.get("height"), 900),
                     str(instance.opaque_state.get("display") or DEFAULT_DISPLAY),
+                    _instance_network_disabled(instance),
                     instance.opaque_state.get("startup") if isinstance(instance.opaque_state.get("startup"), Mapping) else {},
                 ),
                 timeout=30,
@@ -348,6 +350,7 @@ class ManagedUbuntuProvider:
             height=_positive_int(instance.opaque_state.get("height"), 900),
             output_bytes=_optional_positive_int(resources.get("output_bytes")),
             timeout_ms=_optional_positive_int(resources.get("timeout_ms")),
+            network_disabled=_instance_network_disabled(instance),
         )
 
     def _command_path(self) -> str | None:
@@ -561,6 +564,7 @@ class ManagedUbuntuGuestAgent:
         height: int,
         output_bytes: int | None = None,
         timeout_ms: int | None = None,
+        network_disabled: bool = False,
     ) -> None:
         self._provider_id = provider_id
         self._command_path = command_path
@@ -571,11 +575,15 @@ class ManagedUbuntuGuestAgent:
         self._height = height
         self._output_bytes = output_bytes
         self._timeout_ms = timeout_ms
+        self._network_disabled = network_disabled
 
     def exec(self, sandbox_id: str, payload: Mapping[str, object]) -> dict[str, object]:
         request = GuestExecRequest.from_payload(payload)
         timeout_ms = min(request.timeout_ms, self._timeout_ms) if self._timeout_ms else request.timeout_ms
-        result = self._run(_exec_argv(request.cwd, request.argv), input_text=request.stdin, timeout=max(1, timeout_ms / 1000))
+        argv = _exec_argv(request.cwd, request.argv)
+        if self._network_disabled:
+            argv = _network_disabled_argv(argv)
+        result = self._run(argv, input_text=request.stdin, timeout=max(1, timeout_ms / 1000))
         stdout, stdout_truncated = _bounded_output(result.stdout, self._output_bytes)
         stderr, stderr_truncated = _bounded_output(result.stderr, self._output_bytes)
         return {
@@ -622,6 +630,12 @@ class ManagedUbuntuGuestAgent:
         }
 
     def expose_port(self, sandbox_id: str, payload: Mapping[str, object]) -> dict[str, object]:
+        if self._network_disabled:
+            raise SandboxContractError(
+                "SANDBOX_NETWORK_DENIED",
+                "Sandbox port exposure is disabled by the template network policy.",
+                status_code=403,
+            )
         port = _port_number(payload.get("port"))
         protocol = str(payload.get("protocol") or "http").strip().lower()
         if protocol not in {"http", "https", "tcp"}:
@@ -759,50 +773,71 @@ def _unlink(path: str) -> None:
         pass
 
 
-def _desktop_start_script(provider_instance_id: str, width: int, height: int, display: str, startup: Mapping[str, object] | None = None) -> str:
+def _desktop_start_script(
+    provider_instance_id: str,
+    width: int,
+    height: int,
+    display: str,
+    network_disabled: bool,
+    startup: Mapping[str, object] | None = None,
+) -> str:
     runtime_dir = _runtime_dir(provider_instance_id)
     startup = startup or {}
     starter = str(startup.get("starter") or "empty").strip().lower()
     browser_url = str(startup.get("browser_url") or "").strip()
+    network_flag = "1" if network_disabled else "0"
     script = (
         "set -e\n"
         "mkdir -p /workspace " + runtime_dir + "\n"
         f"DISPLAY_ID={display!r}\n"
+        f"RUMI_NETWORK_DISABLED={network_flag!r}\n"
+        "rumi_run() {\n"
+        "  if [ \"$RUMI_NETWORK_DISABLED\" = '1' ]; then\n"
+        "    command -v unshare >/dev/null 2>&1 || { echo 'unshare is required for sandbox network policy' >&2; return 126; }\n"
+        "    unshare --user --map-root-user --net -- \"$@\"\n"
+        "  else\n"
+        "    \"$@\"\n"
+        "  fi\n"
+        "}\n"
+        "if [ \"$RUMI_NETWORK_DISABLED\" = '1' ]; then rumi_run true; fi\n"
         f"if [ ! -f {runtime_dir}/xvfb.pid ] || ! kill -0 $(cat {runtime_dir}/xvfb.pid) >/dev/null 2>&1; then\n"
-        f"  Xvfb {display} -screen 0 {width}x{height}x24 -nolisten tcp >{runtime_dir}/xvfb.log 2>&1 & echo $! > {runtime_dir}/xvfb.pid\n"
+        f"  rumi_run Xvfb {display} -screen 0 {width}x{height}x24 -nolisten tcp >{runtime_dir}/xvfb.log 2>&1 & echo $! > {runtime_dir}/xvfb.pid\n"
         "  sleep 0.5\n"
         "fi\n"
         f"if [ ! -f {runtime_dir}/openbox.pid ] || ! kill -0 $(cat {runtime_dir}/openbox.pid) >/dev/null 2>&1; then\n"
-        f"  DISPLAY={display} openbox >{runtime_dir}/openbox.log 2>&1 & echo $! > {runtime_dir}/openbox.pid\n"
+        f"  rumi_run env DISPLAY={display} openbox >{runtime_dir}/openbox.log 2>&1 & echo $! > {runtime_dir}/openbox.pid\n"
         "fi\n"
     )
     if starter == "terminal":
         script += (
             f"if command -v xterm >/dev/null 2>&1; then\n"
-            f"  DISPLAY={display} xterm -title 'Rumi Desktop' -e bash -lc 'cd /workspace; exec bash' >{runtime_dir}/starter-terminal.log 2>&1 & echo $! > {runtime_dir}/starter-terminal.pid\n"
+            f"  rumi_run env DISPLAY={display} xterm -title 'Rumi Desktop' -e bash -lc 'cd /workspace; exec bash' >{runtime_dir}/starter-terminal.log 2>&1 & echo $! > {runtime_dir}/starter-terminal.pid\n"
             "else\n"
             f"  echo 'xterm is not installed; terminal starter skipped' >{runtime_dir}/starter-terminal.log\n"
             "fi\n"
         )
     elif starter == "browser_url" and browser_url:
         quoted_url = shlex.quote(browser_url)
-        script += (
-            f"BROWSER_URL={quoted_url}\n"
-            "BROWSER_BIN=''\n"
-            "for candidate in google-chrome-stable google-chrome chromium chromium-browser firefox xdg-open; do\n"
-            "  if command -v \"$candidate\" >/dev/null 2>&1; then BROWSER_BIN=\"$candidate\"; break; fi\n"
-            "done\n"
-            "if [ -n \"$BROWSER_BIN\" ]; then\n"
-            "  mkdir -p " + runtime_dir + "/browser-profile\n"
-            "  if [ \"$BROWSER_BIN\" = 'xdg-open' ]; then\n"
-            f"    DISPLAY={display} \"$BROWSER_BIN\" \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
-            "  else\n"
-            f"    DISPLAY={display} \"$BROWSER_BIN\" --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
-            "  fi\n"
-            "else\n"
-            f"  echo 'No browser executable found; browser_url starter skipped' >{runtime_dir}/starter-browser.log\n"
-            "fi\n"
-        )
+        if network_disabled:
+            script += f"echo 'browser_url starter skipped by sandbox network policy' >{runtime_dir}/starter-browser.log\n"
+        else:
+            script += (
+                f"BROWSER_URL={quoted_url}\n"
+                "BROWSER_BIN=''\n"
+                "for candidate in google-chrome-stable google-chrome chromium chromium-browser firefox xdg-open; do\n"
+                "  if command -v \"$candidate\" >/dev/null 2>&1; then BROWSER_BIN=\"$candidate\"; break; fi\n"
+                "done\n"
+                "if [ -n \"$BROWSER_BIN\" ]; then\n"
+                "  mkdir -p " + runtime_dir + "/browser-profile\n"
+                "  if [ \"$BROWSER_BIN\" = 'xdg-open' ]; then\n"
+                f"    rumi_run env DISPLAY={display} \"$BROWSER_BIN\" \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
+                "  else\n"
+                f"    rumi_run env DISPLAY={display} \"$BROWSER_BIN\" --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
+                "  fi\n"
+                "else\n"
+                f"  echo 'No browser executable found; browser_url starter skipped' >{runtime_dir}/starter-browser.log\n"
+                "fi\n"
+            )
     return script
 
 
@@ -919,6 +954,33 @@ def _exec_argv(cwd: str, argv: Sequence[str]) -> tuple[str, ...]:
     if cwd == ".":
         return tuple(argv)
     return ("bash", "-lc", 'cd "$1" && shift && exec "$@"', "rumi-cd", _container_path(cwd), *argv)
+
+
+def _network_disabled_argv(argv: Sequence[str]) -> tuple[str, ...]:
+    return ("unshare", "--user", "--map-root-user", "--net", "--", *argv)
+
+
+def _instance_network_disabled(instance: ProviderInstance) -> bool:
+    value = instance.opaque_state.get("network_disabled")
+    if isinstance(value, bool):
+        return value
+    policy = instance.opaque_state.get("network_policy")
+    return _guest_network_disabled(policy if isinstance(policy, Mapping) else {})
+
+
+def _guest_network_disabled(policy: object) -> bool:
+    open_modes = {"open", "on", "allow", "allowed", "bridge", "host_shared", "shared", "internet", "full"}
+    if isinstance(policy, Mapping):
+        mode = str(policy.get("mode") or "off").strip().lower()
+        approval_required = bool(policy.get("approval_required") or policy.get("requires_approval"))
+        allowlist = policy.get("allowlist") or ()
+    else:
+        mode = str(getattr(policy, "mode", "off") or "off").strip().lower()
+        approval_required = bool(getattr(policy, "approval_required", False))
+        allowlist = getattr(policy, "allowlist", ()) or ()
+    if approval_required or tuple(allowlist):
+        return True
+    return mode not in open_modes
 
 
 def _container_path(path: str) -> str:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 from collections.abc import Sequence
 
+import pytest
+
 from ecosystem.defaultspack.backend.sandbox.models import (
     DesktopSpec,
     EnsureRuntimeRequest,
@@ -16,6 +18,7 @@ from ecosystem.defaultspack.backend.sandbox.models import (
     SecretsPolicy,
     WorkspaceBinding,
 )
+from ecosystem.defaultspack.backend.sandbox.errors import SandboxContractError
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.providers.base import NullProgressSink
 from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import (
@@ -94,6 +97,8 @@ class FakeManagedUbuntuCli:
         return GuestCommandResult(returncode=1, stderr=f"unexpected wsl command: {cmd}")
 
     def _guest(self, argv: list[str], input_text: str | None) -> GuestCommandResult:
+        if argv[:5] == ["unshare", "--user", "--map-root-user", "--net", "--"]:
+            return self._guest(argv[5:], input_text)
         if argv[:2] == ["bash", "-lc"]:
             script = argv[2]
             self.guest_scripts.append(script)
@@ -128,7 +133,14 @@ class FakeManagedUbuntuCli:
         return GuestCommandResult(returncode=0)
 
 
-def _template(*, desktop: bool = True, output_bytes: int = 4096, timeout_ms: int | None = None) -> ResolvedSandboxTemplate:
+def _template(
+    *,
+    desktop: bool = True,
+    output_bytes: int = 4096,
+    timeout_ms: int | None = None,
+    network_mode: str = "limited_or_approval_gated",
+    network_approval_required: bool = True,
+) -> ResolvedSandboxTemplate:
     return ResolvedSandboxTemplate(
         template_id="desktop.ubuntu" if desktop else "coding.python",
         template_version="1",
@@ -137,7 +149,7 @@ def _template(*, desktop: bool = True, output_bytes: int = 4096, timeout_ms: int
         packages=(),
         desktop=DesktopSpec(enabled=True, width=800, height=600) if desktop else None,
         filesystem=FilesystemPolicy(),
-        network=NetworkPolicy(mode="limited_or_approval_gated"),
+        network=NetworkPolicy(mode=network_mode, approval_required=network_approval_required),
         secrets=SecretsPolicy(),
         resources=ResourceLimits(memory_mb=2048, cpu_count=1, output_bytes=output_bytes, timeout_ms=timeout_ms),
         lifecycle=LifecyclePolicy(),
@@ -173,7 +185,7 @@ def test_mac_lima_provider_ensure_and_guest_desktop_flow(monkeypatch) -> None:
     before = provider.doctor(requirements)
     ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
     after = provider.doctor(requirements)
-    instance = provider.create(_create_spec(_template()))
+    instance = provider.create(_create_spec(_template(network_mode="host_shared", network_approval_required=False)))
     started = provider.start(instance)
     agent = provider.connect_agent(started)
     executed = agent.exec(started.sandbox_id, {"argv": ["echo", "hello"], "cwd": ".", "client_request_id": "exec-1"})
@@ -236,6 +248,8 @@ def test_managed_ubuntu_exec_enforces_template_output_and_timeout_limits(monkeyp
     assert executed["stdout_truncated"] is True
     assert executed["stderr_truncated"] is True
     assert exec_call[2] == 2
+    assert "unshare" in exec_call[0]
+    assert exec_call[0][-1] == "emit-long"
 
 
 def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkeypatch) -> None:
@@ -245,7 +259,12 @@ def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkey
     requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
 
     ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
-    instance = provider.create(_create_spec(_template(), startup={"starter": "browser_url", "browser_url": "https://example.com"}))
+    instance = provider.create(
+        _create_spec(
+            _template(network_mode="host_shared", network_approval_required=False),
+            startup={"starter": "browser_url", "browser_url": "https://example.com"},
+        )
+    )
     started = provider.start(instance)
     start_script = next(script for script in fake.guest_scripts if "BROWSER_URL=" in script)
 
@@ -254,6 +273,41 @@ def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkey
     assert "BROWSER_URL=https://example.com" in start_script
     assert "google-chrome-stable google-chrome chromium chromium-browser firefox xdg-open" in start_script
     assert "starter-browser.log" in start_script
+
+
+def test_managed_ubuntu_browser_url_starter_respects_network_policy(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(_create_spec(_template(), startup={"starter": "browser_url", "browser_url": "https://example.com"}))
+    started = provider.start(instance)
+    start_script = next(script for script in fake.guest_scripts if "starter-browser.log" in script)
+
+    assert ensured.ok is True
+    assert started.state == "ready"
+    assert "RUMI_NETWORK_DISABLED='1'" in start_script
+    assert "browser_url starter skipped by sandbox network policy" in start_script
+    assert "google-chrome-stable google-chrome chromium chromium-browser firefox xdg-open" not in start_script
+
+
+def test_managed_ubuntu_port_exposure_respects_network_policy(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(_create_spec(_template()))
+    started = provider.start(instance)
+    agent = provider.connect_agent(started)
+
+    assert ensured.ok is True
+    with pytest.raises(SandboxContractError) as excinfo:
+        agent.expose_port(started.sandbox_id, {"port": 3000, "protocol": "http"})
+    assert getattr(excinfo.value, "code", "") == "SANDBOX_NETWORK_DENIED"
 
 
 def test_managed_ubuntu_desktop_provisioning_installs_declared_apps_and_mcp(monkeypatch) -> None:
