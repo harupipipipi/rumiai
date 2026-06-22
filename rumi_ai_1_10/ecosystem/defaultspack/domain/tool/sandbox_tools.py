@@ -57,6 +57,34 @@ def sandbox_exec(arguments: dict[str, Any], context: dict[str, Any] | None = Non
         _sandbox_api().run({"_handler": "sandbox_delete", "sandbox_id": sandbox_id}, context or {})
 
 
+def sandbox_files_apply_patch(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    approval_error = _require_server_side_approval(context)
+    if approval_error is not None:
+        return approval_error
+    payload = dict(arguments or {})
+    sandbox_id = str(payload.get("sandbox_id") or "").strip()
+    if not sandbox_id:
+        return err("'sandbox_id' is required", "INVALID_INPUT")
+    payload["sandbox_id"] = sandbox_id
+    payload["_handler"] = "sandbox_files_apply_patch"
+    return _sandbox_api().run(payload, context or {})
+
+
+def sandbox_port_expose(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    approval_error = _require_server_side_approval(context)
+    if approval_error is not None:
+        return approval_error
+    payload = dict(arguments or {})
+    sandbox_id = str(payload.get("sandbox_id") or "").strip()
+    if not sandbox_id:
+        return err("'sandbox_id' is required", "INVALID_INPUT")
+    if payload.get("port") is None:
+        return err("'port' is required", "INVALID_INPUT")
+    payload["sandbox_id"] = sandbox_id
+    payload["_handler"] = "sandbox_port_expose"
+    return _sandbox_api().run(payload, context or {})
+
+
 def python_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
     approval_error = _require_server_side_approval(context)
     if approval_error is not None:

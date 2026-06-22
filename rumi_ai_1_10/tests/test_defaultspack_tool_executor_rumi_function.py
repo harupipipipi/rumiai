@@ -843,6 +843,71 @@ def test_sandbox_exec_rejects_shell_strings_after_internal_tool_decision(tmp_pat
     assert result["widget"]["error"]["code"] == "SANDBOX_SHELL_STRING_REJECTED"
 
 
+def test_sandbox_file_patch_and_port_tools_forward_to_runtime_api(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            if payload["_handler"] == "sandbox_files_apply_patch":
+                return {"status": "ok", "data": {"files_written": 1}}
+            if payload["_handler"] == "sandbox_port_expose":
+                return {"status": "ok", "data": {"target_url": "http://127.0.0.1:3000"}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    patched = sandbox_tools.sandbox_files_apply_patch(
+        {"sandbox_id": "sandbox-1", "path": "app.py", "content": "print('ok')\n"},
+        context,
+    )
+    exposed = sandbox_tools.sandbox_port_expose(
+        {"sandbox_id": "sandbox-1", "port": 3000, "protocol": "http"},
+        context,
+    )
+
+    assert patched["status"] == "ok"
+    assert exposed["status"] == "ok"
+    assert [call["_handler"] for call in fake_api.calls] == ["sandbox_files_apply_patch", "sandbox_port_expose"]
+    assert fake_api.calls[0]["sandbox_id"] == "sandbox-1"
+    assert fake_api.calls[0]["path"] == "app.py"
+    assert fake_api.calls[1]["port"] == 3000
+    assert fake_api.calls[1]["protocol"] == "http"
+
+
+def test_sandbox_file_patch_and_port_tools_require_approval(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+
+    class UnexpectedSandboxApi:
+        def run(self, payload, context):
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: UnexpectedSandboxApi())
+
+    patch = sandbox_tools.sandbox_files_apply_patch(
+        {"sandbox_id": "sandbox-1", "path": "app.py", "content": "print('ok')"},
+        {"workspace_root": str(tmp_path)},
+    )
+    port = sandbox_tools.sandbox_port_expose(
+        {"sandbox_id": "sandbox-1", "port": 3000},
+        {"workspace_root": str(tmp_path)},
+    )
+
+    assert patch["is_error"] is True
+    assert patch["widget"]["error"]["code"] == "SANDBOX_APPROVAL_REQUIRED"
+    assert port["is_error"] is True
+    assert port["widget"]["error"]["code"] == "SANDBOX_APPROVAL_REQUIRED"
+
+
 def test_python_and_node_exec_code_use_coding_templates(tmp_path, monkeypatch):
     from domain.tool import sandbox_tools
     from domain.tool_policy.internal_context import seal_tool_context
