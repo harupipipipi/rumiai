@@ -1589,11 +1589,14 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert ("POST", "/api/sandboxes/{sandbox_id}/files/apply-patch", "blocks.sandbox.api") in routes
     assert ("POST", "/api/sandboxes/{sandbox_id}/ports", "blocks.sandbox.api") in routes
     assert ("POST", "/api/desktops/{seat_id}/rules", "blocks.sandbox.api") in routes
+    assert ("POST", "/api/desktops/{seat_id}/ai-input", "blocks.sandbox.api") in routes
     assert ("POST", "/api/desktops/{seat_id}/access-requests", "blocks.sandbox.api") in routes
     assert ("POST", "/api/desktops/{seat_id}/access-requests/{request_id}/grant", "blocks.sandbox.api") in routes
     assert route_specs[("GET", "/api/runtime/providers")].function_id == "managed_runtime_providers"
     assert route_specs[("POST", "/api/desktops/{seat_id}/input")].legacy_block_module == ""
     assert route_specs[("POST", "/api/desktops/{seat_id}/input")].path_inject == {"seat_id": "seat_id"}
+    assert route_specs[("POST", "/api/desktops/{seat_id}/ai-input")].function_id == "managed_runtime_desktop_ai_input"
+    assert route_specs[("POST", "/api/desktops/{seat_id}/ai-input")].defaults == {"_handler": "desktop_ai_input"}
     static_routes = {
         (route["method"], route["path"]): route.get("function_id")
         for route in json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))["routes"]

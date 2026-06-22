@@ -998,6 +998,12 @@
     },
     {
       "method": "POST",
+      "path": "/api/desktops/{seat_id}/ai-input",
+      "function_id": "managed_runtime_desktop_ai_input",
+      "description": "Send approved AI desktop input without taking the human lease"
+    },
+    {
+      "method": "POST",
       "path": "/api/desktops/{seat_id}/rules",
       "function_id": "managed_runtime_desktop_rules_update",
       "description": "Update desktop role, rules, or access policy"
