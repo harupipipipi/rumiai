@@ -970,6 +970,72 @@ def test_desktop_frame_tool_returns_base64_frame_payload(monkeypatch):
     assert fake_api.calls[0][0]["owner_id"] == "agent-1"
 
 
+def test_desktop_control_tools_forward_owner_and_lease_token(tmp_path, monkeypatch):
+    from domain.tool import desktop_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            if payload["_handler"] == "desktop_control_acquire":
+                return {"status": "ok", "data": {"lease_id": "lease-1", "lease_token": "token-1"}}
+            if payload["_handler"] == "desktop_control_renew":
+                return {"status": "ok", "data": {"lease_id": "lease-1"}}
+            if payload["_handler"] == "desktop_control_release":
+                return {"status": "ok", "data": {"released": True}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path), "agent_id": "agent-1"},
+        {"action": "allow", "allowed": True},
+    )
+
+    acquire = desktop_tools.desktop_control_acquire({"desktop_id": "seat-1"}, context)
+    renew = desktop_tools.desktop_control_renew({"seat_id": "seat-1", "lease_token": "token-1"}, context)
+    release = desktop_tools.desktop_control_release({"seat_id": "seat-1", "lease_token": "token-1"}, context)
+
+    assert acquire["status"] == "ok"
+    assert renew["status"] == "ok"
+    assert release["status"] == "ok"
+    assert [call["_handler"] for call in fake_api.calls] == [
+        "desktop_control_acquire",
+        "desktop_control_renew",
+        "desktop_control_release",
+    ]
+    assert all(call["seat_id"] == "seat-1" for call in fake_api.calls)
+    assert all(call["owner_id"] == "agent-1" for call in fake_api.calls)
+    assert fake_api.calls[1]["lease_token"] == "token-1"
+    assert fake_api.calls[2]["lease_token"] == "token-1"
+
+
+def test_desktop_control_tools_require_approval_and_token(tmp_path, monkeypatch):
+    from domain.tool import desktop_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class UnexpectedSandboxApi:
+        def run(self, payload, context):
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: UnexpectedSandboxApi())
+
+    without_approval = desktop_tools.desktop_control_acquire({"seat_id": "seat-1"}, {"workspace_root": str(tmp_path)})
+    approved_context = seal_tool_context(
+        {"workspace_root": str(tmp_path), "agent_id": "agent-1"},
+        {"action": "allow", "allowed": True},
+    )
+    missing_token = desktop_tools.desktop_control_renew({"seat_id": "seat-1"}, approved_context)
+
+    assert without_approval["is_error"] is True
+    assert without_approval["widget"]["error"]["code"] == "SANDBOX_APPROVAL_REQUIRED"
+    assert missing_token["is_error"] is True
+    assert missing_token["widget"]["error"]["code"] == "INVALID_INPUT"
+
+
 def test_sandbox_exec_direct_call_requires_server_side_approval(tmp_path):
     from domain.tool.sandbox_tools import sandbox_exec
 

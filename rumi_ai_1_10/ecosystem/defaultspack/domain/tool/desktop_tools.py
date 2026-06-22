@@ -66,6 +66,18 @@ def desktop_input(arguments: dict[str, Any], context: dict[str, Any] | None = No
     return _sandbox_api().run(payload, context or {})
 
 
+def desktop_control_acquire(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    return _desktop_control(arguments, context, handler="desktop_control_acquire", require_token=False)
+
+
+def desktop_control_renew(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    return _desktop_control(arguments, context, handler="desktop_control_renew", require_token=True)
+
+
+def desktop_control_release(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    return _desktop_control(arguments, context, handler="desktop_control_release", require_token=True)
+
+
 def desktop_rules_update(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
     approval_error = _require_server_side_approval(context)
     if approval_error is not None:
@@ -88,6 +100,28 @@ def desktop_access_request(arguments: dict[str, Any], context: dict[str, Any] | 
     payload["seat_id"] = seat_id
     _default_owner(payload, context)
     payload["_handler"] = "desktop_access_request"
+    return _sandbox_api().run(payload, context or {})
+
+
+def _desktop_control(
+    arguments: dict[str, Any],
+    context: dict[str, Any] | None,
+    *,
+    handler: str,
+    require_token: bool,
+) -> dict[str, Any]:
+    approval_error = _require_server_side_approval(context)
+    if approval_error is not None:
+        return approval_error
+    payload = dict(arguments or {})
+    seat_id = str(payload.get("seat_id") or payload.get("desktop_id") or "").strip()
+    if not seat_id:
+        return err("'seat_id' is required", "INVALID_INPUT")
+    if require_token and not str(payload.get("lease_token") or "").strip():
+        return err("'lease_token' is required", "INVALID_INPUT")
+    payload["seat_id"] = seat_id
+    _default_owner(payload, context)
+    payload["_handler"] = handler
     return _sandbox_api().run(payload, context or {})
 
 
