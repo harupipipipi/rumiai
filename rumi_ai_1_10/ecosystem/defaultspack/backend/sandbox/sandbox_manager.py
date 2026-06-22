@@ -83,6 +83,7 @@ SANDBOX_MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000
 DESKTOP_INPUT_RATE_WINDOW_SECONDS = 5.0
 DESKTOP_INPUT_RATE_MAX_EVENTS = 30
 DESKTOP_CONTROL_AUDIT_FILENAME = "desktop_control_audit.jsonl"
+GUEST_PROVISIONING_CAPABILITIES = frozenset({"sandbox.exec", "sandbox.files"})
 SECRET_ENV_KEY_RE = re.compile(
     r"(^|_)(API_KEY|AUTH|COOKIE|CREDENTIAL|KEY|OAUTH|PASS|PASSWD|PASSWORD|PRIVATE_KEY|SECRET|SESSION|TOKEN)($|_)",
     re.IGNORECASE,
@@ -191,6 +192,9 @@ class SandboxManager:
             if provisioning is not None
             else template_provisioning
         )
+        provisioning_error = _desktop_provisioning_support_error(template, provisioning)
+        if provisioning_error is not None:
+            return provisioning_error
         startup = _desktop_startup_from_create(starter=starter, browser_url=browser_url, desktop=template.desktop)
         assigned_agent = _optional_clean_string(assigned_agent_id)
         provider = None
@@ -2444,6 +2448,45 @@ def _desktop_provisioning_from_create(
         mcp_servers=_clean_string_list(value.get("mcp_servers") or value.get("tools"), max_items=32, max_len=160),
         status=str(value.get("status") or "declared")[:80],
     )
+
+
+def _desktop_provisioning_support_error(
+    template: ResolvedSandboxTemplate,
+    provisioning: Any,
+) -> dict[str, Any] | None:
+    if not _provisioning_requests_guest_install(provisioning):
+        return None
+    if GUEST_PROVISIONING_CAPABILITIES.issubset(template.provider_requirements):
+        return None
+    return {
+        "ok": False,
+        "error": "Desktop app and MCP provisioning requires a guest runtime template with sandbox exec and file capabilities.",
+        "code": "DESKTOP_PROVISIONING_UNSUPPORTED",
+        "status_code": 400,
+        "template_id": template.template_id,
+        "required_capabilities": sorted(GUEST_PROVISIONING_CAPABILITIES),
+        "provider_requirements": sorted(template.provider_requirements),
+    }
+
+
+def _provisioning_requests_guest_install(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    for key in ("apps", "mcp_servers", "tools", "packages"):
+        raw = value.get(key)
+        if isinstance(raw, (str, bytes)):
+            if str(raw).strip():
+                return True
+            continue
+        if not isinstance(raw, (list, tuple, set)):
+            continue
+        for item in raw:
+            if isinstance(item, dict):
+                if str(item.get("name") or item.get("id") or "").strip():
+                    return True
+            elif str(item or "").strip():
+                return True
+    return False
 
 
 def _desktop_provisioning_from_dict(value: Any) -> DesktopProvisioningPlan:

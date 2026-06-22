@@ -30,6 +30,7 @@ const RESOLUTIONS: DesktopResolution[] = [
   { width: 1440, height: 900 },
   { width: 1920, height: 1080 },
 ];
+const GUEST_PROVISIONING_CAPABILITIES = ["sandbox.exec", "sandbox.files"];
 
 function splitList(value: string): string[] {
   return value
@@ -55,6 +56,19 @@ function templateMatchesProvider(
   if (requirements.length === 0) return true;
   const capabilities = new Set(provider.capabilities ?? []);
   return requirements.every((requirement) => capabilities.has(requirement));
+}
+
+function templateSupportsGuestProvisioning(
+  template: SandboxTemplate | null,
+): boolean {
+  if (!template) return false;
+  const capabilities = new Set([
+    ...(template.provider_requirements ?? []),
+    ...(template.capabilities ?? []),
+  ]);
+  return GUEST_PROVISIONING_CAPABILITIES.every((capability) =>
+    capabilities.has(capability),
+  );
 }
 
 type DesktopAccessMode = "owner_only" | "key_required";
@@ -133,6 +147,8 @@ export function DesktopCreateDialog({
     ? selectedProviderReady &&
       templateMatchesProvider(selectedTemplate, selectedProvider)
     : false;
+  const selectedTemplateSupportsProvisioning =
+    templateSupportsGuestProvisioning(selectedTemplate);
   const showLinuxNativeWarning =
     selectedProvider?.provider_id === "linux_native" ||
     selectedProvider?.isolation?.host_process_namespace ||
@@ -170,6 +186,12 @@ export function DesktopCreateDialog({
     visibleTemplates,
   ]);
 
+  useEffect(() => {
+    if (selectedTemplateSupportsProvisioning) return;
+    if (provisioningApps) setProvisioningApps("");
+    if (provisioningMcp) setProvisioningMcp("");
+  }, [provisioningApps, provisioningMcp, selectedTemplateSupportsProvisioning]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (event: FormEvent) => {
@@ -198,7 +220,8 @@ export function DesktopCreateDialog({
           : {}),
       },
       provisioning:
-        provisioningApps.trim() || provisioningMcp.trim()
+        selectedTemplateSupportsProvisioning &&
+        (provisioningApps.trim() || provisioningMcp.trim())
           ? {
               apps: splitList(provisioningApps),
               mcp_servers: splitList(provisioningMcp),
@@ -430,33 +453,40 @@ export function DesktopCreateDialog({
                   />
                 </label>
 
-                <label className="grid gap-1.5 text-xs text-zinc-400">
-                  <span>Apps</span>
-                  <input
-                    value={provisioningApps}
-                    onChange={(event) =>
-                      setProvisioningApps(event.target.value)
-                    }
-                    placeholder={
-                      selectedTemplate?.provisioning?.apps?.join(", ") ||
-                      "Template default"
-                    }
-                    className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
-                  />
-                </label>
+                {selectedTemplateSupportsProvisioning && (
+                  <>
+                    <label className="grid gap-1.5 text-xs text-zinc-400">
+                      <span>Apps</span>
+                      <input
+                        value={provisioningApps}
+                        onChange={(event) =>
+                          setProvisioningApps(event.target.value)
+                        }
+                        placeholder={
+                          selectedTemplate?.provisioning?.apps?.join(", ") ||
+                          "Template default"
+                        }
+                        className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                      />
+                    </label>
 
-                <label className="grid gap-1.5 text-xs text-zinc-400">
-                  <span>MCP servers</span>
-                  <input
-                    value={provisioningMcp}
-                    onChange={(event) => setProvisioningMcp(event.target.value)}
-                    placeholder={
-                      selectedTemplate?.provisioning?.mcp_servers?.join(", ") ||
-                      "playwright"
-                    }
-                    className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
-                  />
-                </label>
+                    <label className="grid gap-1.5 text-xs text-zinc-400">
+                      <span>MCP servers</span>
+                      <input
+                        value={provisioningMcp}
+                        onChange={(event) =>
+                          setProvisioningMcp(event.target.value)
+                        }
+                        placeholder={
+                          selectedTemplate?.provisioning?.mcp_servers?.join(
+                            ", ",
+                          ) || "playwright"
+                        }
+                        className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                      />
+                    </label>
+                  </>
+                )}
               </div>
             </>
           )}

@@ -797,6 +797,46 @@ def test_api_rejects_template_kind_mismatches(tmp_path) -> None:
     assert desktops["data"]["desktops"] == []
 
 
+def test_desktop_create_rejects_guest_provisioning_for_desktop_only_provider(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="linux_native",
+            capabilities={"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"},
+            sandbox_id_factory=lambda: "native-seat",
+        )
+    )
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        created = api.run(
+            {
+                "_handler": "desktops_create",
+                "template_id": "desktop.linux_native",
+                "provider_id": "linux_native",
+                "owner_id": "local-user",
+                "provisioning": {
+                    "apps": ["google-chrome-stable"],
+                    "mcp_servers": ["playwright"],
+                },
+            },
+            {},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert created["status"] == "error"
+    assert created["error"]["code"] == "DESKTOP_PROVISIONING_UNSUPPORTED"
+    assert service.manager.list_instances() == []
+
+
 def test_sandbox_port_api_uses_context_approval_not_payload_flags(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 
