@@ -265,6 +265,20 @@ export const sandboxesApi = {
     });
   },
 
+  grantDesktopAccess(seatId: string, accessRequestId: string, approved = true) {
+    return request<DesktopAccessRequest>(
+      `/api/desktops/${encodeId(seatId)}/access-requests/${encodeId(accessRequestId)}/grant`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          owner_id: LOCAL_DESKTOP_OWNER_ID,
+          approved,
+          request_id: requestId("desktop-access-grant"),
+        }),
+      },
+    );
+  },
+
   fetchDesktopFrame,
 
   acquireDesktopControl(seatId: string, accessKey?: string | null) {

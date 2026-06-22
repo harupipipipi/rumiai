@@ -13,6 +13,7 @@ type DesktopInspectorProps = {
   accessMessage?: string | null;
   onAccessKeyChange?: (seatId: string, accessKey: string) => void;
   onRequestAccess?: (seatId: string) => void;
+  onGrantAccess?: (seatId: string, requestId: string) => void;
 };
 
 function factRow(label: string, value: string, tone: "default" | "warning" = "default") {
@@ -62,8 +63,10 @@ export function DesktopInspector({
   accessMessage,
   onAccessKeyChange,
   onRequestAccess,
+  onGrantAccess,
 }: DesktopInspectorProps) {
   const [copiedAction, setCopiedAction] = useState<string | null>(null);
+  const [grantRequestId, setGrantRequestId] = useState("");
   const shareLink = useMemo(() => {
     if (!desktop?.seat_id || typeof window === "undefined") return "";
     const url = new URL(window.location.href);
@@ -194,13 +197,37 @@ export function DesktopInspector({
           </label>
         )}
         {desktop.access_policy?.request_required && (
-          <button
-            type="button"
-            onClick={() => onRequestAccess?.(desktop.seat_id)}
-            className="mt-2 h-8 rounded-md border border-zinc-800 px-3 text-xs font-medium text-zinc-300 hover:bg-zinc-900"
-          >
-            Request access
-          </button>
+          <div className="mt-2 grid gap-2">
+            <button
+              type="button"
+              onClick={() => onRequestAccess?.(desktop.seat_id)}
+              className="h-8 rounded-md border border-zinc-800 px-3 text-xs font-medium text-zinc-300 hover:bg-zinc-900"
+            >
+              Request access
+            </button>
+            <div className="flex gap-2">
+              <label className="min-w-0 flex-1">
+                <span className="sr-only">Request id</span>
+                <input
+                  value={grantRequestId}
+                  onChange={(event) => setGrantRequestId(event.target.value)}
+                  placeholder="Request id"
+                  className="h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-100 outline-none focus:border-zinc-600"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  const requestId = grantRequestId.trim();
+                  if (requestId) onGrantAccess?.(desktop.seat_id, requestId);
+                }}
+                disabled={!grantRequestId.trim()}
+                className="h-8 rounded-md border border-zinc-800 px-3 text-xs font-medium text-zinc-300 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Grant
+              </button>
+            </div>
+          </div>
         )}
         {accessMessage && <p className="mt-2 text-[11px] text-emerald-300">{accessMessage}</p>}
       </section>

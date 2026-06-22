@@ -176,10 +176,27 @@ export function DesktopMonitorWorkspace() {
     setAccessMessage(null);
     void sandboxesApi.requestDesktopAccess(seatId, "Requested from the Desktops workspace.")
       .then((result) => {
-        setAccessMessage(result.message || "Access request recorded.");
+        setAccessMessage(result.request_id ? `Access request ${result.request_id} recorded.` : result.message || "Access request recorded.");
       })
       .catch((error) => {
         setActionError(error instanceof Error ? error.message : "Desktop access request failed.");
+      });
+  }, []);
+
+  const handleGrantAccess = useCallback((seatId: string, requestId: string) => {
+    setAccessMessage(null);
+    void sandboxesApi.grantDesktopAccess(seatId, requestId)
+      .then((result) => {
+        if (result.access_key) {
+          setAccessKeys((current) => ({
+            ...current,
+            [seatId]: result.access_key || "",
+          }));
+        }
+        setAccessMessage(result.access_key_hint ? `Access granted (${result.access_key_hint}).` : "Access request granted.");
+      })
+      .catch((error) => {
+        setActionError(error instanceof Error ? error.message : "Desktop access grant failed.");
       });
   }, []);
 
@@ -256,6 +273,7 @@ export function DesktopMonitorWorkspace() {
                 accessMessage={accessMessage}
                 onAccessKeyChange={handleAccessKeyChange}
                 onRequestAccess={handleRequestAccess}
+                onGrantAccess={handleGrantAccess}
               />
             </div>
           )}

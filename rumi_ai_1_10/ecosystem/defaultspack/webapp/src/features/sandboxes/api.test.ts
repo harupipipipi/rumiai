@@ -71,3 +71,37 @@ test("deleteDesktop confirms the destructive action after the UI confirmation fl
   assert.equal(body.confirm_destructive, true);
   assert.match(body.request_id, /^desktop-delete-/);
 });
+
+test("grantDesktopAccess sends owner approval to the request grant endpoint", async () => {
+  let requestUrl = "";
+  let requestInit: RequestInit | undefined;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestInit = init;
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        seat_id: "seat-1",
+        request_id: "dreq-1",
+        status: "approved",
+        access_key: "secret-key",
+        access_key_hint: "ends:-key",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.grantDesktopAccess("seat-1", "dreq-1");
+    assert.equal(result.access_key, "secret-key");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/desktops/seat-1/access-requests/dreq-1/grant");
+  assert.equal(requestInit?.method, "POST");
+  const body = JSON.parse(String(requestInit?.body));
+  assert.equal(body.owner_id, "local-user");
+  assert.equal(body.approved, true);
+  assert.match(body.request_id, /^desktop-access-grant-/);
+});
