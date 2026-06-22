@@ -158,6 +158,13 @@ class _RecordingProgressSink:
         self.events: list[ProgressEvent] = []
 
     def emit(self, event: ProgressEvent) -> None:
+        current = _operation_store(self._service).get(self._operation_id)
+        if isinstance(current, dict) and current.get("status") == "cancelled":
+            raise SandboxContractError(
+                "RUNTIME_OPERATION_CANCELLED",
+                "Runtime operation was cancelled.",
+                status_code=409,
+            )
         normalized = ProgressEvent(
             operation_id=self._operation_id,
             stage=event.stage,
@@ -165,12 +172,18 @@ class _RecordingProgressSink:
             percent=event.percent,
             details=event.details,
         )
-        self.events.append(normalized)
-        _operation_store(self._service).append_progress(
+        updated = _operation_store(self._service).append_progress(
             _progress_event_payload(normalized),
             provider_id=self._provider_id,
             updated_at=timestamp(),
         )
+        if updated.get("status") == "cancelled":
+            raise SandboxContractError(
+                "RUNTIME_OPERATION_CANCELLED",
+                "Runtime operation was cancelled.",
+                status_code=409,
+            )
+        self.events.append(normalized)
 
 
 def _runtime_providers(service: _SandboxApiService) -> dict[str, Any]:

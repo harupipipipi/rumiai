@@ -921,7 +921,7 @@ def test_runtime_operation_cancel_preserves_cancelled_status_after_worker_finish
         assert started.wait(timeout=3)
         cancelled = api.run({"_handler": "runtime_operation_cancel", "operation_id": "cancel-op"}, {})
         release.set()
-        assert finished.wait(timeout=3)
+        assert not finished.wait(timeout=0.2)
         final = api.run({"_handler": "runtime_operation_get", "operation_id": "cancel-op"}, {})
     finally:
         release.set()
@@ -931,7 +931,7 @@ def test_runtime_operation_cancel_preserves_cancelled_status_after_worker_finish
     assert cancelled["data"]["status"] == "cancelled"
     assert cancelled["data"]["cancelled"] is True
     assert final["data"]["status"] == "cancelled"
-    assert [event["stage"] for event in final["data"]["progress_events"]] == ["packages", "ready"]
+    assert [event["stage"] for event in final["data"]["progress_events"]] == ["packages"]
 
 
 def test_runtime_operations_are_single_flight_per_provider(tmp_path) -> None:
