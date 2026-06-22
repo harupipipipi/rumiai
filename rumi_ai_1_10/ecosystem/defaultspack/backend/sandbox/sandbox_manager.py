@@ -36,7 +36,7 @@ from .provider_registry import ProviderRegistry
 from .template_catalog import sandbox_template_by_id
 
 
-REGISTRY_SCHEMA_VERSION = 3
+REGISTRY_SCHEMA_VERSION = 4
 CREATING = "creating"
 PROVISIONING = "provisioning"
 STARTING = "starting"
@@ -71,6 +71,9 @@ DESKTOP_MIN_HEIGHT = 480
 DESKTOP_MAX_WIDTH = 3840
 DESKTOP_MAX_HEIGHT = 2160
 DESKTOP_MAX_PIXELS = 3840 * 2160
+DESKTOP_INPUT_RATE_WINDOW_SECONDS = 5.0
+DESKTOP_INPUT_RATE_MAX_EVENTS = 30
+DESKTOP_CONTROL_AUDIT_FILENAME = "desktop_control_audit.jsonl"
 
 
 class SandboxManager:
@@ -92,6 +95,8 @@ class SandboxManager:
         self._provider_registry = provider_registry or ProviderRegistry()
         self._lock = threading.RLock()
         self._instances: Dict[str, SandboxInstance] = {}
+        self.audit_path = self.state_dir / DESKTOP_CONTROL_AUDIT_FILENAME
+        self._desktop_input_events: dict[tuple[str, str, str], list[float]] = {}
         self._model_mode: str = "fast"
         self._load_registry()
 
@@ -215,6 +220,7 @@ class SandboxManager:
             started_at=now if _canonical_state(started.state) in RUNNING_STATES else None,
             capabilities=template.allowed_operations or template.provider_requirements,
             resource_limits=template.resources,
+            lifecycle_policy=template.lifecycle,
             workspace_binding=workspace_binding,
             network_policy=template.network,
             desktop_spec=template.desktop,
@@ -462,6 +468,13 @@ class SandboxManager:
         *,
         actor: str = "human",
     ) -> Dict[str, Any]:
+        normalized_actor = "ai" if actor == "ai" else "human"
+        agent_id = _optional_clean_string(
+            payload.get("agent_id") or payload.get("actor_agent_id") or payload.get("assigned_agent_id"),
+            max_len=160,
+        )
+        action = str(payload.get("action") or "")
+        client_action_id = _optional_clean_string(payload.get("client_action_id"), max_len=160)
         with self._lock:
             inst, error = self._ready_instance(seat_id)
             if error is not None:
@@ -470,9 +483,33 @@ class SandboxManager:
             operation_error = self._require_operation(inst, "desktop.input.with_lease", "sandbox.desktop_input")
             if operation_error is not None:
                 return operation_error
+            auth_error = self._authorize_desktop_actor(inst, normalized_actor, agent_id)
+            if auth_error is not None:
+                self._append_desktop_audit_event(
+                    inst,
+                    actor=normalized_actor,
+                    agent_id=agent_id,
+                    action=action,
+                    client_action_id=client_action_id,
+                    ok=False,
+                    code=str(auth_error.get("code") or "DESKTOP_INPUT_DENIED"),
+                )
+                return auth_error
+            rate_error = self._reserve_desktop_input_slot(inst, normalized_actor, agent_id)
+            if rate_error is not None:
+                self._append_desktop_audit_event(
+                    inst,
+                    actor=normalized_actor,
+                    agent_id=agent_id,
+                    action=action,
+                    client_action_id=client_action_id,
+                    ok=False,
+                    code=str(rate_error.get("code") or "DESKTOP_INPUT_RATE_LIMITED"),
+                )
+                return rate_error
         try:
             agent = self._provider_agent(inst)
-            result = agent.desktop_input(inst.sandbox_id, inst.sandbox_id, payload, actor=actor)
+            result = agent.desktop_input(inst.sandbox_id, inst.sandbox_id, payload, actor=normalized_actor)
         except SandboxContractError as exc:
             result = exc.to_dict()
         except Exception as exc:
@@ -493,6 +530,18 @@ class SandboxManager:
         result.setdefault("seat_id", inst.sandbox_id)
         result.setdefault("status", inst.state)
         result.setdefault("state", inst.state)
+        result.setdefault("actor", normalized_actor)
+        if agent_id:
+            result.setdefault("agent_id", agent_id)
+        self._append_desktop_audit_event(
+            inst,
+            actor=normalized_actor,
+            agent_id=agent_id,
+            action=action,
+            client_action_id=client_action_id,
+            ok=result.get("ok") is True,
+            code=None if result.get("ok") is True else str(result.get("code") or "DESKTOP_INPUT_FAILED"),
+        )
         if result.get("ok") is True:
             self._touch_ready_instance(inst.sandbox_id)
         return result
@@ -590,6 +639,7 @@ class SandboxManager:
         return {"ok": True, "mode": mode}
 
     def status(self, sandbox_id: str) -> Dict[str, Any]:
+        self.enforce_lifecycle()
         with self._lock:
             inst = self._instances.get(str(sandbox_id))
             if inst is None:
@@ -597,8 +647,28 @@ class SandboxManager:
             return {"ok": True, **self._instance_to_dict(inst)}
 
     def list_instances(self) -> List[Dict[str, Any]]:
+        self.enforce_lifecycle()
         with self._lock:
             return [self._instance_to_dict(instance) for instance in self._instances.values()]
+
+    def enforce_lifecycle(self, *, now: float | None = None) -> list[dict[str, Any]]:
+        current_time = time.time() if now is None else float(now)
+        actions: list[tuple[str, str]] = []
+        with self._lock:
+            for inst in self._instances.values():
+                action = self._lifecycle_action(inst, current_time)
+                if action is not None:
+                    actions.append((inst.sandbox_id, action))
+
+        results: list[dict[str, Any]] = []
+        for sandbox_id, action in actions:
+            if action == "destroy":
+                result = self.destroy(sandbox_id)
+            else:
+                result = self.stop(sandbox_id)
+            result["lifecycle_action"] = action
+            results.append(result)
+        return results
 
     def mark_provider_uninstalled(self, provider_id: str, *, remove_state: bool = False) -> list[str]:
         clean_provider_id = str(provider_id or "").strip()
@@ -864,6 +934,117 @@ class SandboxManager:
                     inst.last_error = None
                 changed = True
         return changed
+
+    @staticmethod
+    def _lifecycle_action(inst: SandboxInstance, now: float) -> str | None:
+        if inst.state not in RUNNING_STATES:
+            return None
+        ttl = inst.lifecycle_policy.ttl_seconds
+        if ttl is None or ttl <= 0:
+            return None
+        idle_base = inst.last_activity_at or inst.started_at or inst.created_at
+        if now - idle_base < ttl:
+            return None
+        return "destroy" if inst.lifecycle_policy.destroy_on_exit else "stop"
+
+    @staticmethod
+    def _authorize_desktop_actor(
+        inst: SandboxInstance,
+        actor: str,
+        agent_id: str | None,
+    ) -> Dict[str, Any] | None:
+        if actor != "ai" or not inst.assigned_agent_id:
+            return None
+        if agent_id and secrets.compare_digest(agent_id, inst.assigned_agent_id):
+            return None
+        return {
+            "ok": False,
+            "error": "AI desktop input is limited to the assigned agent.",
+            "code": "DESKTOP_AGENT_NOT_ASSIGNED",
+            "status_code": 403,
+            "sandbox_id": inst.sandbox_id,
+            "seat_id": inst.sandbox_id,
+            "assigned_agent_id": inst.assigned_agent_id,
+            "agent_id": agent_id,
+        }
+
+    def _reserve_desktop_input_slot(
+        self,
+        inst: SandboxInstance,
+        actor: str,
+        agent_id: str | None,
+    ) -> Dict[str, Any] | None:
+        now = time.time()
+        key = (inst.sandbox_id, actor, agent_id or actor)
+        window_start = now - DESKTOP_INPUT_RATE_WINDOW_SECONDS
+        recent = [stamp for stamp in self._desktop_input_events.get(key, []) if stamp >= window_start]
+        if len(recent) >= DESKTOP_INPUT_RATE_MAX_EVENTS:
+            self._desktop_input_events[key] = recent
+            return {
+                "ok": False,
+                "error": "Desktop input rate limit exceeded.",
+                "code": "DESKTOP_INPUT_RATE_LIMITED",
+                "status_code": 429,
+                "sandbox_id": inst.sandbox_id,
+                "seat_id": inst.sandbox_id,
+                "actor": actor,
+                "agent_id": agent_id,
+                "retry_after_seconds": DESKTOP_INPUT_RATE_WINDOW_SECONDS,
+            }
+        recent.append(now)
+        self._desktop_input_events[key] = recent
+        return None
+
+    def _append_desktop_audit_event(
+        self,
+        inst: SandboxInstance,
+        *,
+        actor: str,
+        agent_id: str | None,
+        action: str,
+        client_action_id: str | None,
+        ok: bool,
+        code: str | None,
+    ) -> None:
+        event = {
+            "ts": time.time(),
+            "sandbox_id": inst.sandbox_id,
+            "seat_id": inst.sandbox_id,
+            "provider_id": inst.provider_id,
+            "template_id": inst.template_id,
+            "actor": actor,
+            "agent_id": agent_id,
+            "assigned_agent_id": inst.assigned_agent_id,
+            "action": action,
+            "client_action_id": client_action_id,
+            "ok": ok,
+            "code": code,
+        }
+        try:
+            self.audit_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.audit_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+            try:
+                self.audit_path.chmod(0o600)
+            except OSError:
+                pass
+        except OSError:
+            pass
+
+    def read_desktop_audit_events(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        try:
+            lines = self.audit_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        events: list[dict[str, Any]] = []
+        for line in lines[-max(1, int(limit)):]:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        return events
 
     def _ready_instance(
         self, sandbox_id: str
@@ -1368,6 +1549,7 @@ class SandboxManager:
             last_error=last_error,
             capabilities=frozenset(_string_tuple(data.get("capabilities"))),
             resource_limits=_resource_limits_from_dict(data.get("resource_limits")),
+            lifecycle_policy=_lifecycle_policy_from_dict(data.get("lifecycle_policy")),
             workspace_binding=_workspace_binding_from_dict(data.get("workspace_binding")),
             network_policy=_network_policy_from_dict(data.get("network_policy")),
             desktop_spec=_desktop_spec_from_dict(data.get("desktop_spec"), display=display),
@@ -1503,6 +1685,16 @@ def _resource_limits_from_dict(value: Any) -> ResourceLimits:
         pids=int(_float_or_zero(value.get("pids")) or 0) or None,
         output_bytes=int(_float_or_zero(value.get("output_bytes")) or 0) or None,
         timeout_ms=int(_float_or_zero(value.get("timeout_ms")) or 0) or None,
+    )
+
+
+def _lifecycle_policy_from_dict(value: Any) -> LifecyclePolicy:
+    if not isinstance(value, dict):
+        return LifecyclePolicy()
+    return LifecyclePolicy(
+        ttl_seconds=int(_float_or_zero(value.get("ttl_seconds")) or 0) or None,
+        persistent=bool(value.get("persistent")),
+        destroy_on_exit=bool(value.get("destroy_on_exit", True)),
     )
 
 

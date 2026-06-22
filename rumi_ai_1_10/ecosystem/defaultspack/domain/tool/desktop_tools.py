@@ -31,6 +31,7 @@ def desktop_input(arguments: dict[str, Any], context: dict[str, Any] | None = No
         return err("'seat_id' is required", "INVALID_INPUT")
     payload["seat_id"] = seat_id
     _default_owner(payload, context)
+    _default_agent(payload, context)
     payload["_handler"] = "desktop_ai_input"
     return _sandbox_api().run(payload, context or {})
 
@@ -76,6 +77,20 @@ def _default_owner(payload: dict[str, Any], context: dict[str, Any] | None) -> N
     payload["owner_id"] = owner_id[:160] or "local-agent"
     if access is not None:
         access.setdefault("owner_id", payload["owner_id"])
+
+
+def _default_agent(payload: dict[str, Any], context: dict[str, Any] | None) -> None:
+    if payload.get("agent_id") or payload.get("actor_agent_id"):
+        return
+    context = context if isinstance(context, dict) else {}
+    agent_id = str(
+        context.get("agent_id")
+        or context.get("actor_id")
+        or context.get("user_id")
+        or ""
+    ).strip()
+    if agent_id:
+        payload["agent_id"] = agent_id[:160]
 
 
 def _sandbox_api():

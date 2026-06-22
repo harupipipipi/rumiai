@@ -276,6 +276,7 @@ class SandboxInstance:
     last_error: str | None = None
     capabilities: frozenset[str] = field(default_factory=frozenset)
     resource_limits: ResourceLimits = field(default_factory=ResourceLimits)
+    lifecycle_policy: LifecyclePolicy = field(default_factory=LifecyclePolicy)
     workspace_binding: WorkspaceBinding = field(default_factory=WorkspaceBinding)
     network_policy: NetworkPolicy = field(default_factory=NetworkPolicy)
     desktop_spec: DesktopSpec | None = None

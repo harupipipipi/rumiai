@@ -483,6 +483,7 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
                 "role": "browser operator",
                 "rules": {"rule_ids": ["browser-only"]},
                 "access": {"mode": "key_required", "access_key": "correct-key"},
+                "assigned_agent": "agent-1",
                 "workspace_id": "workspace-1",
                 "workspace_access": "read_only",
             },
@@ -525,6 +526,18 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
             {"_handler": "desktop_access_request", "seat_id": "seat-locked"},
             {},
         )
+        wrong_agent_click = api.run(
+            {
+                "_handler": "desktop_ai_input",
+                "seat_id": "seat-locked",
+                "access_key": "correct-key",
+                "action": "click",
+                "client_action_id": "ai-wrong",
+                "x": 10,
+                "y": 10,
+            },
+            {"agent_id": "agent-2"},
+        )
         ai_click = api.run(
             {
                 "_handler": "desktop_ai_input",
@@ -535,7 +548,7 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
                 "x": 10,
                 "y": 10,
             },
-            {},
+            {"agent_id": "agent-1"},
         )
         lease = api.run(
             {
@@ -555,7 +568,7 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
                 "x": 10,
                 "y": 10,
             },
-            {},
+            {"agent_id": "agent-1"},
         )
     finally:
         api._reset_service_for_tests(None)
@@ -583,10 +596,16 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
     assert request_required_update["error"]["code"] == "DESKTOP_ACCESS_REQUEST_MODE_NOT_READY"
     assert access_request["status"] == "error"
     assert access_request["error"]["code"] == "DESKTOP_ACCESS_REQUEST_MODE_NOT_READY"
+    assert wrong_agent_click["status"] == "error"
+    assert wrong_agent_click["error"]["code"] == "DESKTOP_AGENT_NOT_ASSIGNED"
     assert ai_click["status"] == "ok"
+    assert ai_click["data"]["agent_id"] == "agent-1"
     assert lease["data"]["lease_token"] == "lease-token"
     assert ai_conflict["status"] == "error"
     assert ai_conflict["error"]["code"] == DESKTOP_CONTROL_CONFLICT
+    audit_events = service.manager.read_desktop_audit_events()
+    assert {event["code"] for event in audit_events if event["code"]} >= {"DESKTOP_AGENT_NOT_ASSIGNED"}
+    assert all("correct-key" not in str(event) and "lease-token" not in str(event) for event in audit_events)
 
 
 def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:

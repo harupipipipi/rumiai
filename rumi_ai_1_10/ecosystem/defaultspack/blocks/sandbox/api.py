@@ -50,8 +50,8 @@ _SERVICE: _SandboxApiService | None = None
 
 
 def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None):
-    del context
     payload = input_data if isinstance(input_data, dict) else {}
+    context_payload = context if isinstance(context, dict) else {}
     handler = str(payload.get("_handler") or "runtime_providers")
     service = _service()
     try:
@@ -104,7 +104,7 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
         if handler == "desktop_input":
             return _desktop_input(service, payload)
         if handler == "desktop_ai_input":
-            return _desktop_ai_input(service, payload)
+            return _desktop_ai_input(service, payload, context_payload)
         if handler == "desktop_rules_update":
             return _desktop_rules_update(service, payload)
         if handler == "desktop_access_request":
@@ -460,16 +460,18 @@ def _desktop_input(service: _SandboxApiService, payload: dict[str, Any]):
     return ok({"accepted": True, "seat_id": seat_id, "action": result.get("action")})
 
 
-def _desktop_ai_input(service: _SandboxApiService, payload: dict[str, Any]):
+def _desktop_ai_input(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     seat_id = str(payload.get("seat_id") or "")
     access_error = _desktop_access_error(service, seat_id, payload)
     if access_error is not None:
         return access_error
     service.lease_manager.validate_ai_input(seat_id)
-    result = service.manager.desktop_input(seat_id, payload, actor="ai")
+    agent_id = _agent_id(payload, context)
+    manager_payload = payload if agent_id is None or payload.get("agent_id") else {**payload, "agent_id": agent_id}
+    result = service.manager.desktop_input(seat_id, manager_payload, actor="ai")
     if result.get("ok") is not True:
         return _api_error(str(result.get("error") or "Desktop input failed"), str(result.get("code") or "DESKTOP_INPUT_FAILED"), int(result.get("status_code") or 400))
-    return ok({"accepted": True, "seat_id": seat_id, "action": result.get("action"), "actor": "ai"})
+    return ok({"accepted": True, "seat_id": seat_id, "action": result.get("action"), "actor": "ai", "agent_id": result.get("agent_id")})
 
 
 def _desktop_rules_update(service: _SandboxApiService, payload: dict[str, Any]):
@@ -908,6 +910,21 @@ def _access_owner_id(payload: dict[str, Any]) -> str | None:
         access.get("owner_id"),
         headers.get("x-rumi-desktop-owner"),
         headers.get("X-Rumi-Desktop-Owner"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text[:160]
+    return None
+
+
+def _agent_id(payload: dict[str, Any], context: dict[str, Any]) -> str | None:
+    for value in (
+        payload.get("agent_id"),
+        payload.get("actor_agent_id"),
+        payload.get("assigned_agent_id"),
+        context.get("agent_id"),
+        context.get("actor_id"),
+        context.get("user_id"),
     ):
         text = str(value or "").strip()
         if text:

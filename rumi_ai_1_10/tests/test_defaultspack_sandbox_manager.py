@@ -237,6 +237,48 @@ def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path):
     assert reloaded_status["resource_limits"]["timeout_ms"] == 14_400_000
     assert reloaded_status["desktop_spec"]["width"] == 1440
     assert reloaded_status["assigned_agent_id"] == "agent-1"
+    assert reloaded_status["lifecycle_policy"]["ttl_seconds"] == 14_400
+    assert reloaded_status["lifecycle_policy"]["destroy_on_exit"] is False
+
+
+def test_sandbox_lifecycle_policy_enforces_idle_stop_or_destroy(tmp_path):
+    manager = _manager(
+        tmp_path,
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+        },
+    )
+    coding = manager.create(display=False, provider_id="fake-runtime", template_id="coding.python")
+    assert coding["ok"] is True
+    coding_status = manager.status(coding["sandbox_id"])
+
+    stop_results = manager.enforce_lifecycle(now=float(coding_status["started_at"]) + 14_401)
+
+    assert stop_results[0]["lifecycle_action"] == "stop"
+    assert manager.status(coding["sandbox_id"])["state"] == "stopped"
+
+    desktop_manager = _manager(
+        tmp_path / "desktop",
+        capabilities={"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"},
+    )
+    desktop = desktop_manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.linux_native",
+        access_owner_id="local-user",
+    )
+    assert desktop["ok"] is True
+    desktop_status = desktop_manager.status(desktop["sandbox_id"])
+
+    destroy_results = desktop_manager.enforce_lifecycle(now=float(desktop_status["started_at"]) + 14_401)
+
+    assert destroy_results[0]["lifecycle_action"] == "destroy"
+    assert desktop_manager.status(desktop["sandbox_id"])["state"] == "destroyed"
 
 
 def test_sandbox_lifecycle_start_stop_restart_uses_provider_state(tmp_path):
@@ -292,6 +334,46 @@ def test_sandbox_exec_is_guest_agent_only_and_template_gated(tmp_path):
     assert raw_command["code"] == "RAW_COMMAND_REJECTED"
     assert denied["ok"] is False
     assert denied["code"] == "SANDBOX_OPERATION_NOT_ALLOWED"
+
+
+def test_ai_desktop_input_rate_limit_is_actor_scoped(tmp_path):
+    manager = _manager(tmp_path)
+    created = manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.ubuntu",
+        assigned_agent_id="agent-1",
+        access_owner_id="local-user",
+    )
+    assert created["ok"] is True
+    seat_id = created["sandbox_id"]
+
+    last_ok = None
+    for index in range(30):
+        last_ok = manager.desktop_input(
+            seat_id,
+            {"action": "click", "client_action_id": f"ai-{index}", "x": 1, "y": 1, "agent_id": "agent-1"},
+            actor="ai",
+        )
+    limited = manager.desktop_input(
+        seat_id,
+        {"action": "click", "client_action_id": "ai-limited", "x": 1, "y": 1, "agent_id": "agent-1"},
+        actor="ai",
+    )
+    other_agent = manager.desktop_input(
+        seat_id,
+        {"action": "click", "client_action_id": "ai-other", "x": 1, "y": 1, "agent_id": "agent-2"},
+        actor="ai",
+    )
+
+    assert last_ok is not None and last_ok["ok"] is True
+    assert limited["ok"] is False
+    assert limited["code"] == "DESKTOP_INPUT_RATE_LIMITED"
+    assert other_agent["ok"] is False
+    assert other_agent["code"] == "DESKTOP_AGENT_NOT_ASSIGNED"
+    audit_codes = [event["code"] for event in manager.read_desktop_audit_events(limit=4)]
+    assert "DESKTOP_INPUT_RATE_LIMITED" in audit_codes
+    assert "DESKTOP_AGENT_NOT_ASSIGNED" in audit_codes
 
 
 def test_sandbox_file_patch_and_port_contracts_fail_closed_until_guest_services_exist(tmp_path):

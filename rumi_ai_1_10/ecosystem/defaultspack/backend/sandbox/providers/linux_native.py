@@ -296,7 +296,6 @@ class LinuxNativeGuestAgent:
         *,
         actor: str = "human",
     ) -> dict[str, object]:
-        del actor
         request = DesktopInputRequest.from_payload(
             payload,
             width=int(getattr(self._session.config, "width", 0) or 0),
@@ -309,6 +308,7 @@ class LinuxNativeGuestAgent:
             "sandbox_id": sandbox_id,
             "seat_id": seat_id,
             "action": request.action,
+            "actor": actor,
             "error": result.get("reason") or result.get("error") or result.get("stderr"),
         }
 
