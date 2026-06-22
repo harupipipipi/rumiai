@@ -116,13 +116,13 @@ class FakeManagedUbuntuCli:
                 return self._guest(argv[marker_index + 4 :], input_text)
             if "PROVISION_MARKER" in script:
                 return GuestCommandResult(returncode=0)
+            if "apt-get install" in script:
+                self.deps_installed = True
+                return GuestCommandResult(returncode=0)
             if "command -v" in script:
                 if self.deps_installed:
                     return GuestCommandResult(returncode=0)
                 return GuestCommandResult(returncode=0, stdout="Xvfb\nopenbox\nxdotool\nimport\npython3\n")
-            if "apt-get install" in script:
-                self.deps_installed = True
-                return GuestCommandResult(returncode=0)
             if "Xvfb" in script and "openbox" in script:
                 self.desktop_running = True
                 return GuestCommandResult(returncode=0)
@@ -237,6 +237,10 @@ def test_mac_lima_provider_ensure_and_guest_desktop_flow(monkeypatch) -> None:
     assert exposed["target_url"] == "http://127.0.0.1:3000"
     assert frame["data"] == b"png"
     assert click["ok"] is True
+    install_script = next(script for script in fake.guest_scripts if "$RUMI_SUDO apt-get install -y xvfb" in script)
+    assert "id -u" in install_script
+    assert "RUMI_SUDO='sudo'" in install_script
+    assert "sudo apt-get" not in install_script
     assert any("xterm -title 'Rumi Desktop'" in script for script in fake.guest_scripts)
     assert fake.command_containing("shell", "rumi-managed-runtime", "--", "echo", "hello")[-2:] == ["echo", "hello"]
 
@@ -422,6 +426,10 @@ def test_managed_ubuntu_desktop_provisioning_installs_declared_apps_and_mcp(monk
     assert "code-editor" not in provision_script
     assert "/workspace/.rumi/mcp_servers.txt" in provision_script
     assert "@playwright/mcp" in provision_script
+    assert "$RUMI_SUDO apt-get install -y" in provision_script
+    assert "$RUMI_SUDO npm install -g @playwright/mcp" in provision_script
+    assert "sudo apt-get" not in provision_script
+    assert "sudo npm" not in provision_script
 
 
 def test_managed_ubuntu_template_packages_are_guest_provisioned(monkeypatch) -> None:

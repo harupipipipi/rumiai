@@ -76,6 +76,16 @@ GUEST_APP_PACKAGE_MAP = {
     "xterm": ("xterm",),
     "xvfb": ("xvfb",),
 }
+SUDO_BOOTSTRAP_SCRIPT = (
+    "if [ \"$(id -u)\" = '0' ]; then\n"
+    "  RUMI_SUDO=''\n"
+    "elif command -v sudo >/dev/null 2>&1; then\n"
+    "  RUMI_SUDO='sudo'\n"
+    "else\n"
+    "  echo 'sudo is required for managed runtime package installation when not running as root' >&2\n"
+    "  exit 126\n"
+    "fi\n"
+)
 
 
 @dataclass(frozen=True)
@@ -444,11 +454,12 @@ class ManagedUbuntuProvider:
         script = (
             "set -e\n"
             "export DEBIAN_FRONTEND=noninteractive\n"
-            "sudo apt-get update\n"
-            f"sudo apt-get install -y {packages}\n"
+            f"{SUDO_BOOTSTRAP_SCRIPT}"
+            "$RUMI_SUDO apt-get update\n"
+            f"$RUMI_SUDO apt-get install -y {packages}\n"
         )
         if update:
-            script += f"sudo apt-get install --only-upgrade -y {packages} || true\n"
+            script += f"$RUMI_SUDO apt-get install --only-upgrade -y {packages} || true\n"
         self._guest_shell(command_path, script, timeout=600)
 
     def _seed_workspace(self, command_path: str, instance: ProviderInstance) -> None:
@@ -1009,6 +1020,7 @@ def _guest_provisioning_script(provider_instance_id: str, apt_packages: Sequence
     script = (
         "set -e\n"
         "export DEBIAN_FRONTEND=noninteractive\n"
+        f"{SUDO_BOOTSTRAP_SCRIPT}"
         f"mkdir -p /workspace/.rumi {runtime_dir}\n"
         f"PROVISION_MARKER={runtime_dir}/provisioning.key\n"
         f"PROVISION_KEY={marker_key}\n"
@@ -1019,22 +1031,22 @@ def _guest_provisioning_script(provider_instance_id: str, apt_packages: Sequence
             f"  RUMI_APT_PACKAGES={shlex.quote(package_list)}\n"
             "  if printf '%s\n' \"$RUMI_APT_PACKAGES\" | grep -qw google-chrome-stable; then\n"
             "    if [ \"$(dpkg --print-architecture 2>/dev/null || true)\" = amd64 ]; then\n"
-            "      sudo apt-get update\n"
-            "      sudo apt-get install -y ca-certificates wget gnupg\n"
-            "      wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor | sudo tee /usr/share/keyrings/google-linux-signing-keyring.gpg >/dev/null\n"
-            "      echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main' | sudo tee /etc/apt/sources.list.d/google-chrome.list >/dev/null\n"
+            "      $RUMI_SUDO apt-get update\n"
+            "      $RUMI_SUDO apt-get install -y ca-certificates wget gnupg\n"
+            "      wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor | $RUMI_SUDO tee /usr/share/keyrings/google-linux-signing-keyring.gpg >/dev/null\n"
+            "      echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main' | $RUMI_SUDO tee /etc/apt/sources.list.d/google-chrome.list >/dev/null\n"
             "    else\n"
             "      RUMI_APT_PACKAGES=\"$(printf '%s\n' \"$RUMI_APT_PACKAGES\" | sed 's/google-chrome-stable/chromium-browser/g')\"\n"
             "    fi\n"
             "  fi\n"
-            "  sudo apt-get update\n"
-            "  sudo apt-get install -y $RUMI_APT_PACKAGES\n"
+            "  $RUMI_SUDO apt-get update\n"
+            "  $RUMI_SUDO apt-get install -y $RUMI_APT_PACKAGES\n"
         )
     if mcp_servers:
         script += (
             f"  printf '%s\n' {mcp_payload} > /workspace/.rumi/mcp_servers.txt\n"
             "  if grep -qx playwright /workspace/.rumi/mcp_servers.txt && command -v npm >/dev/null 2>&1; then\n"
-            "    sudo npm install -g @playwright/mcp || echo 'playwright mcp install failed' >>" + runtime_dir + "/provisioning.log\n"
+            "    $RUMI_SUDO npm install -g @playwright/mcp || echo 'playwright mcp install failed' >>" + runtime_dir + "/provisioning.log\n"
             "  fi\n"
         )
     script += (
