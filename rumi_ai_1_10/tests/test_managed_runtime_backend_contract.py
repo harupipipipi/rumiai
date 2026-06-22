@@ -934,6 +934,91 @@ def test_runtime_operation_cancel_preserves_cancelled_status_after_worker_finish
     assert [event["stage"] for event in final["data"]["progress_events"]] == ["packages", "ready"]
 
 
+def test_runtime_operations_are_single_flight_per_provider(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class SingleFlightRuntimeProvider(FakeRuntimeProvider):
+        def __init__(self) -> None:
+            super().__init__(provider_id="fake-runtime")
+            self.update_calls = 0
+
+        def ensure(self, request, progress):
+            progress.emit(
+                ProgressEvent(
+                    operation_id="provider-ensure",
+                    stage="packages",
+                    message="Installing fake runtime packages",
+                    percent=20,
+                )
+            )
+            started.set()
+            release.wait(timeout=3)
+            progress.emit(
+                ProgressEvent(
+                    operation_id="provider-ensure",
+                    stage="ready",
+                    message="Fake runtime ready",
+                    percent=100,
+                )
+            )
+            return OperationResult(ok=True, provider_id=self.provider_id, operation_id="provider-ensure", status="ready")
+
+        def update(self, request, progress):
+            self.update_calls += 1
+            progress.emit(
+                ProgressEvent(
+                    operation_id="provider-update",
+                    stage="done",
+                    message="Fake runtime updated",
+                    percent=100,
+                )
+            )
+            return OperationResult(ok=True, provider_id=self.provider_id, operation_id="provider-update", status="updated")
+
+    provider = SingleFlightRuntimeProvider()
+    registry = ProviderRegistry()
+    registry.register(provider)
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        operation_store=RuntimeOperationStore(tmp_path / "runtime_operations.json"),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        ensure = api.run(
+            {"_handler": "runtime_ensure", "provider_id": "fake-runtime", "request_id": "ensure-op"},
+            {},
+        )
+        assert started.wait(timeout=3)
+        concurrent_update = api.run(
+            {"_handler": "runtime_update", "provider_id": "fake-runtime", "request_id": "update-op"},
+            {},
+        )
+        release.set()
+        ensure_done = _wait_for_runtime_operation(api, "ensure-op")
+        update = api.run(
+            {"_handler": "runtime_update", "provider_id": "fake-runtime", "request_id": "update-op"},
+            {},
+        )
+        update_done = _wait_for_runtime_operation(api, "update-op")
+    finally:
+        release.set()
+        api._reset_service_for_tests(None)
+
+    assert ensure["data"]["operation_id"] == "ensure-op"
+    assert concurrent_update["data"]["operation_id"] == "ensure-op"
+    assert provider.update_calls == 1
+    assert ensure_done["status"] == "completed"
+    assert update["data"]["operation_id"] == "update-op"
+    assert update_done["status"] == "completed"
+    assert update_done["progress_events"][0]["stage"] == "done"
+
+
 def test_runtime_operation_store_preserves_cancelled_running_operation(tmp_path) -> None:
     store = RuntimeOperationStore(tmp_path / "runtime_operations.json")
     store.append_progress(

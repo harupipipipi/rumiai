@@ -305,21 +305,20 @@ def _start_runtime_operation(
     action: str,
     worker: Any,
 ) -> dict[str, Any]:
-    operation = _record_operation(
-        service,
-        {
-            "operation_id": operation_id,
-            "status": "running",
-            "step": "queued",
-            "message": f"Runtime {action} operation queued.",
-            "progress": 0,
-            "progress_events": [],
-            "reboot_required": False,
-            "provider_id": provider_id,
-            "updated_at": timestamp(),
-            "error": None,
-        },
-    )
+    operation, reserved = _operation_store(service).reserve_provider_operation({
+        "operation_id": operation_id,
+        "status": "running",
+        "step": "queued",
+        "message": f"Runtime {action} operation queued.",
+        "progress": 0,
+        "progress_events": [],
+        "reboot_required": False,
+        "provider_id": provider_id,
+        "updated_at": timestamp(),
+        "error": None,
+    })
+    if not reserved:
+        return operation
 
     def run_worker() -> None:
         sink = _RecordingProgressSink(service, provider_id=provider_id, operation_id=operation_id)

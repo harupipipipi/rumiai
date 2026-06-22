@@ -68,6 +68,25 @@ class RuntimeOperationStore:
             self._save()
             return dict(stored)
 
+    def reserve_provider_operation(self, operation: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        operation_id = str(operation.get("operation_id") or "").strip()
+        provider_id = str(operation.get("provider_id") or "").strip()
+        if not operation_id:
+            raise ValueError("operation_id is required")
+        if not provider_id:
+            raise ValueError("provider_id is required")
+        with self._lock:
+            for current in self._operations.values():
+                if str(current.get("provider_id") or "") != provider_id:
+                    continue
+                if str(current.get("status") or "") in TERMINAL_OPERATION_STATES:
+                    continue
+                return dict(current), False
+            stored = dict(operation)
+            self._operations[operation_id] = stored
+            self._save()
+            return dict(stored), True
+
     def append_progress(
         self,
         event: dict[str, Any],
