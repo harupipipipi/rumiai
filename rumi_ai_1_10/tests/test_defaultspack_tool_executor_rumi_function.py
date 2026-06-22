@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -877,6 +878,59 @@ def test_python_and_node_exec_code_use_coding_templates(tmp_path, monkeypatch):
     assert [call["template_id"] for call in creates] == ["coding.python", "coding.node"]
     assert execs[0]["argv"] == ["python", "-c", "print('ok')"]
     assert execs[1]["argv"] == ["node", "-e", "console.log('ok')"]
+
+
+def test_python_and_node_exec_script_path_stages_file_in_sandbox(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    (tmp_path / "scripts").mkdir()
+    python_script = tmp_path / "scripts" / "hello.py"
+    node_script = tmp_path / "scripts" / "hello.js"
+    python_script.write_text("print('ok')\n", encoding="utf-8")
+    node_script.write_text("console.log('ok')\n", encoding="utf-8")
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            if payload.get("_handler") == "sandboxes_create":
+                return {"status": "ok", "data": {"sandbox_id": f"{payload['template_id']}-seat"}}
+            if payload.get("_handler") == "sandbox_files_apply_patch":
+                return {"status": "ok", "data": {"files_written": 1, "sandbox_id": payload["sandbox_id"]}}
+            if payload.get("_handler") == "sandbox_exec":
+                return {"status": "ok", "data": {"sandbox_id": payload["sandbox_id"], "argv": payload["argv"]}}
+            if payload.get("_handler") == "sandbox_delete":
+                return {"status": "ok", "data": {"deleted": True, "sandbox_id": payload["sandbox_id"]}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"artifact_root": str(tmp_path), "workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    python_result = sandbox_tools.python_exec({"script_path": "scripts/hello.py", "timeout": 5}, context)
+    node_result = sandbox_tools.node_exec({"script_path": "scripts/hello.js", "timeout": 6}, context)
+
+    assert python_result["status"] == "ok"
+    assert node_result["status"] == "ok"
+    creates = [call for call in fake_api.calls if call["_handler"] == "sandboxes_create"]
+    patches = [call for call in fake_api.calls if call["_handler"] == "sandbox_files_apply_patch"]
+    execs = [call for call in fake_api.calls if call["_handler"] == "sandbox_exec"]
+    deletes = [call for call in fake_api.calls if call["_handler"] == "sandbox_delete"]
+    assert [call["template_id"] for call in creates] == ["coding.python", "coding.node"]
+    assert patches[0]["files"][0]["path"] == "scripts/hello.py"
+    assert base64.b64decode(patches[0]["files"][0]["content_base64"]).decode("utf-8") == "print('ok')\n"
+    assert patches[1]["files"][0]["path"] == "scripts/hello.js"
+    assert execs[0]["argv"] == ["python", "scripts/hello.py"]
+    assert execs[0]["timeout_ms"] == 5000
+    assert execs[1]["argv"] == ["node", "scripts/hello.js"]
+    assert execs[1]["timeout_ms"] == 6000
+    assert len(deletes) == 2
 
 
 def test_desktop_frame_tool_returns_base64_frame_payload(monkeypatch):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import shlex
 import sys
 from typing import Any
@@ -10,6 +11,7 @@ from domain.tool_policy.internal_context import internal_tool_decision_allows
 from ._agent_os_common import err, now_slug, ok, workspace
 
 MANAGED_RUNTIME_NOT_READY = "MANAGED_RUNTIME_NOT_READY"
+MAX_SCRIPT_PATH_BYTES = 2 * 1024 * 1024
 
 
 def sandbox_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -78,7 +80,7 @@ def python_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None
                 },
                 context,
             )
-        return sandbox_exec({"argv": [sys.executable, str(script_path)], "timeout": arguments.get("timeout") or 30}, context)
+        return _script_path_exec(arguments, context, runtime_argv=["python"], script_path=str(script_path), template_id="coding.python")
     except Exception as exc:
         return err(str(exc), "PYTHON_EXEC_FAILED")
 
@@ -106,7 +108,7 @@ def node_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) 
                 },
                 context,
             )
-        return sandbox_exec({"argv": ["node", str(script_path)], "timeout": arguments.get("timeout") or 30}, context)
+        return _script_path_exec(arguments, context, runtime_argv=["node"], script_path=str(script_path), template_id="coding.node")
     except Exception as exc:
         return err(str(exc), "NODE_EXEC_FAILED")
 
@@ -143,6 +145,80 @@ def _sandbox_api():
     except ModuleNotFoundError:
         from blocks.sandbox import api  # type: ignore
     return api
+
+
+def _script_path_exec(
+    arguments: dict[str, Any],
+    context: dict[str, Any] | None,
+    *,
+    runtime_argv: list[str],
+    script_path: str,
+    template_id: str,
+) -> dict[str, Any]:
+    ws = workspace(context)
+    resolved = ws.resolve(script_path, must_exist=True)
+    relative_path = ws.relative(resolved)
+    if resolved.stat().st_size > MAX_SCRIPT_PATH_BYTES:
+        return err("script_path is too large for sandbox staging", "SCRIPT_PATH_TOO_LARGE", script_path=relative_path)
+
+    api = _sandbox_api()
+    create = api.run(
+        {
+            "_handler": "sandboxes_create",
+            "template_id": str(arguments.get("template_id") or template_id),
+            "provider_id": str(arguments.get("provider_id") or "auto"),
+            "name": str(arguments.get("name") or f"Script Sandbox {now_slug()}"),
+        },
+        context or {},
+    )
+    if create.get("status") != "ok":
+        return err(
+            "Managed sandbox runtime is not ready; script_path will not fall back to host execution.",
+            MANAGED_RUNTIME_NOT_READY,
+            script_path=relative_path,
+            template_id=str(arguments.get("template_id") or template_id),
+            provider_id=str(arguments.get("provider_id") or "auto"),
+            runtime_error=create.get("error"),
+        )
+    sandbox_id = str((create.get("data") or {}).get("sandbox_id") or "")
+    if not sandbox_id:
+        return err("Managed sandbox runtime did not return a sandbox id.", MANAGED_RUNTIME_NOT_READY, script_path=relative_path)
+
+    try:
+        patch = api.run(
+            {
+                "_handler": "sandbox_files_apply_patch",
+                "sandbox_id": sandbox_id,
+                "files": [
+                    {
+                        "path": relative_path,
+                        "content_base64": base64.b64encode(resolved.read_bytes()).decode("ascii"),
+                    }
+                ],
+            },
+            context or {},
+        )
+        if patch.get("status") != "ok":
+            patch_error = patch.get("error") if isinstance(patch.get("error"), dict) else {}
+            return err(
+                "Managed sandbox runtime could not stage script_path.",
+                str(patch_error.get("code") or "SANDBOX_SCRIPT_STAGE_FAILED"),
+                script_path=relative_path,
+                runtime_error=patch.get("error"),
+            )
+        return _sandbox_exec_call(
+            sandbox_id,
+            {
+                **arguments,
+                "argv": [*runtime_argv, relative_path],
+                "cwd": arguments.get("cwd") or ".",
+            },
+            [*runtime_argv, relative_path],
+            _timeout_ms(arguments),
+            context,
+        )
+    finally:
+        api.run({"_handler": "sandbox_delete", "sandbox_id": sandbox_id}, context or {})
 
 
 def _sandbox_exec_call(
