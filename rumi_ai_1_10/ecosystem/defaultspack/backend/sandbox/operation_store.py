@@ -34,7 +34,75 @@ class RuntimeOperationStore:
         if not operation_id:
             raise ValueError("operation_id is required")
         with self._lock:
+            current = self._operations.get(operation_id)
+            if str(current.get("status") if isinstance(current, dict) else "") == "cancelled":
+                preserved = dict(current)
+                incoming_events = operation.get("progress_events")
+                if isinstance(incoming_events, list):
+                    existing_events = preserved.get("progress_events")
+                    progress_events: list[Any] = []
+                    seen: set[tuple[str, str, str, str]] = set()
+                    for event in [
+                        *(existing_events if isinstance(existing_events, list) else []),
+                        *incoming_events,
+                    ]:
+                        if not isinstance(event, dict):
+                            continue
+                        key = (
+                            str(event.get("operation_id") or ""),
+                            str(event.get("stage") or ""),
+                            str(event.get("message") or ""),
+                            str(event.get("percent") or ""),
+                        )
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        progress_events.append(event)
+                    preserved["progress_events"] = progress_events
+                preserved["updated_at"] = operation.get("updated_at") or preserved.get("updated_at")
+                self._operations[operation_id] = preserved
+                self._save()
+                return dict(preserved)
             stored = dict(operation)
+            self._operations[operation_id] = stored
+            self._save()
+            return dict(stored)
+
+    def append_progress(
+        self,
+        event: dict[str, Any],
+        *,
+        provider_id: str,
+        updated_at: str,
+    ) -> dict[str, Any]:
+        operation_id = str(event.get("operation_id") or "").strip()
+        if not operation_id:
+            raise ValueError("operation_id is required")
+        with self._lock:
+            current = dict(self._operations.get(operation_id) or {})
+            if str(current.get("status") or "") in TERMINAL_OPERATION_STATES:
+                return dict(current)
+            events = current.get("progress_events")
+            progress_events = list(events) if isinstance(events, list) else []
+            progress_events.append(dict(event))
+            raw_percent = event.get("percent")
+            try:
+                progress = int(float(raw_percent))
+            except (TypeError, ValueError):
+                progress = int(current.get("progress") or 0)
+            stored = {
+                **current,
+                "operation_id": operation_id,
+                "status": "running",
+                "step": str(event.get("stage") or current.get("step") or "provider_setup"),
+                "message": str(event.get("message") or current.get("message") or "Runtime operation is running."),
+                "progress": max(0, min(100, progress)),
+                "progress_events": progress_events,
+                "reboot_required": bool(current.get("reboot_required", False)),
+                "provider_id": str(current.get("provider_id") or provider_id),
+                "updated_at": updated_at,
+                "error": None,
+            }
             self._operations[operation_id] = stored
             self._save()
             return dict(stored)

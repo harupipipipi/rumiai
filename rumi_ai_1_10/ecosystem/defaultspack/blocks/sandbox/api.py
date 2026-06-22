@@ -28,7 +28,6 @@ from ecosystem.defaultspack.backend.sandbox.models import (
 from ecosystem.defaultspack.backend.sandbox.operation_store import RuntimeOperationStore
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.providers import DockerProvider, LinuxNativeProvider, MacLimaProvider, WindowsWslProvider
-from ecosystem.defaultspack.backend.sandbox.providers.base import NullProgressSink
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.template_catalog import sandbox_template_catalog
 
@@ -145,6 +144,21 @@ def _operation_store(service: _SandboxApiService) -> RuntimeOperationStore:
     return store
 
 
+class _RecordingProgressSink:
+    def __init__(self, service: _SandboxApiService, *, provider_id: str) -> None:
+        self._service = service
+        self._provider_id = provider_id
+        self.events: list[ProgressEvent] = []
+
+    def emit(self, event: ProgressEvent) -> None:
+        self.events.append(event)
+        _operation_store(self._service).append_progress(
+            _progress_event_payload(event),
+            provider_id=self._provider_id,
+            updated_at=timestamp(),
+        )
+
+
 def _runtime_providers(service: _SandboxApiService) -> dict[str, Any]:
     default_provider_id = _default_provider_id()
     statuses = [_provider_payload(status, selected=status.provider_id == default_provider_id) for status in service.provider_registry.doctor_all()]
@@ -186,7 +200,7 @@ def _runtime_ensure(service: _SandboxApiService, payload: dict[str, Any]) -> dic
         provider = service.provider_registry.get(provider_id)
     except SandboxContractError:
         return _record_operation(service, _runtime_operation("failed", provider_id=provider_id))
-    sink = NullProgressSink()
+    sink = _RecordingProgressSink(service, provider_id=provider_id)
     result = provider.ensure(EnsureRuntimeRequest(provider_id=provider_id, requirements=requirements), sink)
     return _record_operation(service, _operation_payload(result, progress_events=sink.events))
 
@@ -197,7 +211,7 @@ def _runtime_update(service: _SandboxApiService, payload: dict[str, Any]) -> dic
         provider = service.provider_registry.get(provider_id)
     except SandboxContractError:
         return _record_operation(service, _runtime_operation("failed", provider_id=provider_id, operation_id="managed-runtime-update"))
-    sink = NullProgressSink()
+    sink = _RecordingProgressSink(service, provider_id=provider_id)
     result = provider.update(UpdateRuntimeRequest(provider_id=provider_id), sink)
     return _record_operation(service, _operation_payload(result, progress_events=sink.events))
 
@@ -209,7 +223,7 @@ def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> 
         provider = service.provider_registry.get(provider_id)
     except SandboxContractError:
         return _record_operation(service, _runtime_operation("failed", provider_id=provider_id, operation_id="managed-runtime-uninstall"))
-    sink = NullProgressSink()
+    sink = _RecordingProgressSink(service, provider_id=provider_id)
     result = provider.uninstall(
         UninstallRuntimeRequest(
             provider_id=provider_id,

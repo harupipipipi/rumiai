@@ -22,11 +22,14 @@ from ecosystem.defaultspack.backend.sandbox.models import (
     FilesystemPolicy,
     LifecyclePolicy,
     NetworkPolicy,
+    OperationResult,
+    ProgressEvent,
     ResolvedSandboxTemplate,
     ResourceLimits,
     RuntimeRequirements,
     SecretsPolicy,
 )
+from ecosystem.defaultspack.backend.sandbox.operation_store import RuntimeOperationStore
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.testing.fake_guest_agent import FakeGuestAgent
@@ -777,6 +780,112 @@ def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -
     assert uninstall["data"]["operation_id"] == "fake-uninstall"
     assert uninstall["data"]["status"] == "completed"
     assert uninstall["data"]["progress_events"][0]["stage"] == "done"
+
+
+def test_runtime_ensure_persists_running_progress_events(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    operation_store = RuntimeOperationStore(tmp_path / "runtime_operations.json")
+
+    class ProgressRuntimeProvider(FakeRuntimeProvider):
+        def __init__(self) -> None:
+            super().__init__(provider_id="fake-runtime")
+            self.running_snapshot: dict[str, object] | None = None
+
+        def ensure(self, request, progress):
+            progress.emit(
+                ProgressEvent(
+                    operation_id="fake-ensure",
+                    stage="doctor",
+                    message="Checking fake runtime",
+                    percent=10,
+                )
+            )
+            self.running_snapshot = operation_store.get("fake-ensure")
+            progress.emit(
+                ProgressEvent(
+                    operation_id="fake-ensure",
+                    stage="ready",
+                    message="Fake runtime ready",
+                    percent=100,
+                )
+            )
+            return OperationResult(ok=True, provider_id=self.provider_id, operation_id="fake-ensure", status="ready")
+
+    registry = ProviderRegistry()
+    provider = ProgressRuntimeProvider()
+    registry.register(provider)
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        operation_store=operation_store,
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        ensure = api.run({"_handler": "runtime_ensure", "provider_id": "fake-runtime"}, {})
+        operation_get = api.run(
+            {"_handler": "runtime_operation_get", "operation_id": "fake-ensure"},
+            {},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+    reloaded = RuntimeOperationStore(tmp_path / "runtime_operations.json")
+
+    assert provider.running_snapshot is not None
+    assert provider.running_snapshot["status"] == "running"
+    assert provider.running_snapshot["step"] == "doctor"
+    assert provider.running_snapshot["progress"] == 10
+    assert ensure["data"]["status"] == "completed"
+    assert ensure["data"]["progress"] == 100
+    assert [event["stage"] for event in ensure["data"]["progress_events"]] == ["doctor", "ready"]
+    assert operation_get["data"]["status"] == "completed"
+    assert reloaded.get("fake-ensure")["progress_events"][1]["message"] == "Fake runtime ready"
+
+
+def test_runtime_operation_store_preserves_cancelled_running_operation(tmp_path) -> None:
+    store = RuntimeOperationStore(tmp_path / "runtime_operations.json")
+    store.append_progress(
+        {
+            "operation_id": "op-1",
+            "stage": "packages",
+            "message": "Installing runtime packages",
+            "percent": 40,
+            "details": {},
+            "recorded_at": "2026-06-22T00:00:00Z",
+        },
+        provider_id="fake-runtime",
+        updated_at="2026-06-22T00:00:00Z",
+    )
+    cancelled = store.cancel("op-1", updated_at="2026-06-22T00:00:01Z")
+    final = store.put(
+        {
+            "operation_id": "op-1",
+            "status": "completed",
+            "step": "ready",
+            "message": "Runtime ready",
+            "progress": 100,
+            "progress_events": [
+                {
+                    "operation_id": "op-1",
+                    "stage": "ready",
+                    "message": "Runtime ready",
+                    "percent": 100,
+                    "details": {},
+                    "recorded_at": "2026-06-22T00:00:02Z",
+                }
+            ],
+            "provider_id": "fake-runtime",
+            "updated_at": "2026-06-22T00:00:02Z",
+            "error": None,
+        }
+    )
+
+    assert cancelled["cancelled"] is True
+    assert final["status"] == "cancelled"
+    assert final["cancelled"] is True
+    assert [event["stage"] for event in final["progress_events"]] == ["packages", "ready"]
 
 
 def test_runtime_uninstall_reconciles_manager_desktops_and_local_state(tmp_path) -> None:
