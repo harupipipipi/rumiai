@@ -300,6 +300,42 @@ def test_linux_native_provider_desktop_session_capture_and_input(monkeypatch) ->
     assert session.calls[-1] == ("stop",)
 
 
+def test_linux_native_api_default_desktop_template_is_compatible(monkeypatch, tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+    from ecosystem.defaultspack.backend.sandbox.providers.linux_native import LinuxNativeProvider
+
+    monkeypatch.setattr("ecosystem.defaultspack.blocks.sandbox.api.platform.system", lambda: "Linux")
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.sandbox_manager.platform.system", lambda: "Linux")
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.linux_native.sys.platform", "linux")
+    session = FakeX11Session(width=800, height=600)
+    registry = ProviderRegistry()
+    registry.register(LinuxNativeProvider(session_factory=lambda **kwargs: session))
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        providers = api.run({"_handler": "runtime_providers"}, {})
+        created = api.run(
+            {
+                "_handler": "desktops_create",
+                "provider_id": "linux_native",
+                "resolution": {"width": 800, "height": 600},
+            },
+            {},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert providers["data"]["providers"][0]["ready"] is True
+    assert created["status"] == "ok"
+    assert created["data"]["template_id"] == "desktop.linux_native"
+    assert created["data"]["status"] == "running"
+
+
 def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 
@@ -361,6 +397,7 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
     assert created["status"] == "ok"
     assert created["data"]["seat_id"] == "seat-1"
     assert created["data"]["status"] == "running"
+    assert created["data"]["network_policy"]["default"] == "limited_or_approval_gated"
     assert frame["_binary"] is True
     assert frame["body"] == b"fake-png"
     assert frame["headers"]["X-Rumi-Frame-Width"] == "800"
@@ -435,6 +472,15 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
             },
             {},
         )
+        request_required_create = api.run(
+            {
+                "_handler": "desktops_create",
+                "template_id": "desktop.ubuntu",
+                "provider_id": "fake-runtime",
+                "access": {"mode": "request_required"},
+            },
+            {},
+        )
         denied = api.run({"_handler": "desktop_get", "seat_id": "seat-locked"}, {})
         allowed = api.run(
             {"_handler": "desktop_get", "seat_id": "seat-locked", "access_key": "correct-key"},
@@ -448,6 +494,19 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
                 "role": "coding desktop",
                 "rules": ["playwright-ok"],
             },
+            {},
+        )
+        request_required_update = api.run(
+            {
+                "_handler": "desktop_rules_update",
+                "seat_id": "seat-locked",
+                "access_key": "correct-key",
+                "access": {"mode": "request_required"},
+            },
+            {},
+        )
+        access_request = api.run(
+            {"_handler": "desktop_access_request", "seat_id": "seat-locked"},
             {},
         )
         ai_click = api.run(
@@ -492,8 +551,11 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
     assert safe_workspace["status"] == "ok"
     assert safe_workspace["data"]["access_policy"]["key_required"] is True
     assert safe_workspace["data"]["access_policy"]["key_hint"] == "ends:-key"
+    assert safe_workspace["data"]["network_policy"]["default"] == "project_policy_or_first_use_approval"
     assert safe_workspace["data"]["workspace"]["access"] == "read_only"
     assert "correct-key" not in str(safe_workspace)
+    assert request_required_create["status"] == "error"
+    assert request_required_create["error"]["code"] == "DESKTOP_ACCESS_REQUEST_MODE_NOT_READY"
     assert denied["status"] == "error"
     assert denied["error"]["code"] == "DESKTOP_ACCESS_KEY_REQUIRED"
     assert allowed["status"] == "ok"
@@ -501,6 +563,10 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
     assert updated["status"] == "ok"
     assert updated["data"]["rules"]["role"] == "coding desktop"
     assert updated["data"]["rules"]["rule_ids"] == ["playwright-ok"]
+    assert request_required_update["status"] == "error"
+    assert request_required_update["error"]["code"] == "DESKTOP_ACCESS_REQUEST_MODE_NOT_READY"
+    assert access_request["status"] == "error"
+    assert access_request["error"]["code"] == "DESKTOP_ACCESS_REQUEST_MODE_NOT_READY"
     assert ai_click["status"] == "ok"
     assert lease["data"]["lease_token"] == "lease-token"
     assert ai_conflict["status"] == "error"
@@ -547,7 +613,7 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert update["data"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
     assert uninstall["data"]["status"] == "failed"
     assert uninstall["data"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
-    assert {template["template_id"] for template in templates["data"]["templates"]} >= {"desktop.ubuntu", "tool.ephemeral"}
+    assert {template["template_id"] for template in templates["data"]["templates"]} >= {"desktop.linux_native", "desktop.ubuntu", "tool.ephemeral"}
     coding_template = next(template for template in templates["data"]["templates"] if template["template_id"] == "desktop.coding")
     assert coding_template["trust_level"] == "builtin"
     assert "desktop.browser" in coding_template["source_template_ids"]
@@ -579,6 +645,64 @@ def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -
     assert update["data"]["status"] == "completed"
     assert uninstall["data"]["operation_id"] == "fake-uninstall"
     assert uninstall["data"]["status"] == "completed"
+
+
+def test_runtime_uninstall_reconciles_manager_desktops_and_local_state(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    registry = ProviderRegistry()
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+            "sandbox.desktop",
+            "sandbox.desktop_input",
+            "sandbox.snapshot",
+        },
+        sandbox_id_factory=lambda: "seat-uninstall",
+    )
+    registry.register(provider)
+    lease_manager = ControlLeaseManager(token_factory=lambda: "lease-token")
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=lease_manager,
+    )
+    created = service.manager.create(display=True, provider_id="fake-runtime", template_id="desktop.ubuntu")
+    seat_id = str(created["sandbox_id"])
+    service.frame_cache.put_frame(seat_id, b"frame", content_type="image/png", width=2, height=2)
+    lease_manager.acquire(seat_id, "human")
+    api._reset_service_for_tests(service)
+    try:
+        uninstall = api.run({"_handler": "runtime_uninstall", "provider_id": "fake-runtime"}, {})
+    finally:
+        api._reset_service_for_tests(None)
+
+    status = service.manager.status(seat_id)
+    assert uninstall["data"]["status"] == "completed"
+    assert status["state"] == "stopped"
+    assert "uninstalled" in status["last_error"]
+    assert service.frame_cache.last_metadata(seat_id) is None
+    assert service.lease_manager.active_lease(seat_id) is None
+
+    provider._sandbox_id_factory = lambda: "seat-remove-state"
+    recreated = service.manager.create(display=True, provider_id="fake-runtime", template_id="desktop.ubuntu")
+    assert recreated["ok"] is True
+    api._reset_service_for_tests(service)
+    try:
+        remove_state = api.run(
+            {"_handler": "runtime_uninstall", "provider_id": "fake-runtime", "remove_state": True},
+            {},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert remove_state["data"]["status"] == "completed"
+    assert service.manager.list_instances() == []
 
 
 def test_runtime_mutation_routes_are_local_guard_sensitive() -> None:

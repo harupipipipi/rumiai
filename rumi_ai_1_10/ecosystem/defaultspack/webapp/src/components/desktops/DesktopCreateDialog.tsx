@@ -37,6 +37,16 @@ function templateLabel(template: SandboxTemplate): string {
   return template.name || template.template_id;
 }
 
+function templateMatchesProvider(template: SandboxTemplate, provider: RuntimeProviderStatus | null): boolean {
+  if (!provider || provider.provider_id === "auto") return true;
+  const requirements = template.provider_requirements ?? [];
+  if (requirements.length === 0) return true;
+  const capabilities = new Set(provider.capabilities ?? []);
+  return requirements.every((requirement) => capabilities.has(requirement));
+}
+
+type DesktopAccessMode = "owner_only" | "shared_link" | "key_required";
+
 export function DesktopCreateDialog({
   isOpen,
   templates,
@@ -47,9 +57,8 @@ export function DesktopCreateDialog({
   onClose,
   onCreate,
 }: DesktopCreateDialogProps) {
-  const firstTemplate = templates[0]?.template_id ?? "";
   const [name, setName] = useState("Ubuntu Desktop");
-  const [templateId, setTemplateId] = useState(firstTemplate);
+  const [templateId, setTemplateId] = useState("");
   const [providerId, setProviderId] = useState("auto");
   const [resolution, setResolution] = useState<DesktopResolution>(RESOLUTIONS[0]);
   const [starter, setStarter] = useState<DesktopStarter>("empty");
@@ -59,19 +68,25 @@ export function DesktopCreateDialog({
   const [assignedAgent, setAssignedAgent] = useState("");
   const [role, setRole] = useState("");
   const [ruleText, setRuleText] = useState("");
-  const [accessMode, setAccessMode] = useState<"owner_only" | "shared_link" | "key_required" | "request_required">("owner_only");
+  const [accessMode, setAccessMode] = useState<DesktopAccessMode>("owner_only");
   const [accessKey, setAccessKey] = useState("");
   const [provisioningApps, setProvisioningApps] = useState("");
   const [provisioningMcp, setProvisioningMcp] = useState("");
 
-  const effectiveTemplateId = templateId || firstTemplate;
-  const selectedTemplate = templates.find((template) => template.template_id === effectiveTemplateId) ?? templates[0] ?? null;
   const selectedProvider = useMemo(() => {
     if (providerId !== "auto") return providers.find((provider) => provider.provider_id === providerId) ?? null;
     return providers.find((provider) => provider.provider_id === selectedProviderId)
       ?? providers.find((provider) => provider.selected)
       ?? null;
   }, [providerId, providers, selectedProviderId]);
+  const visibleTemplates = useMemo(() => {
+    const compatible = templates.filter((template) => templateMatchesProvider(template, selectedProvider));
+    return compatible.length > 0 ? compatible : templates;
+  }, [selectedProvider, templates]);
+  const firstTemplate = visibleTemplates[0]?.template_id ?? "";
+  const effectiveTemplateId = templateId || firstTemplate;
+  const selectedTemplate = visibleTemplates.find((template) => template.template_id === effectiveTemplateId) ?? visibleTemplates[0] ?? null;
+  const selectedTemplateCompatible = selectedTemplate ? templateMatchesProvider(selectedTemplate, selectedProvider) : false;
   const showLinuxNativeWarning = selectedProvider?.provider_id === "linux_native"
     || selectedProvider?.isolation?.host_process_namespace
     || selectedProvider?.isolation?.host_filesystem_shared
@@ -85,11 +100,22 @@ export function DesktopCreateDialog({
     setWorkspaceAccess((current) => current === "none" ? "read_only" : current);
   }, [workspaceId]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!firstTemplate) {
+      if (templateId) setTemplateId("");
+      return;
+    }
+    if (!visibleTemplates.some((template) => template.template_id === effectiveTemplateId)) {
+      setTemplateId(firstTemplate);
+    }
+  }, [effectiveTemplateId, firstTemplate, isOpen, templateId, visibleTemplates]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (!effectiveTemplateId) return;
+    if (!effectiveTemplateId || !selectedTemplateCompatible) return;
     void onCreate({
       name: name.trim() || "Desktop",
       template_id: effectiveTemplateId,
@@ -104,7 +130,6 @@ export function DesktopCreateDialog({
       rules: ruleText.trim() ? { role: role.trim() || null, rule_ids: splitList(ruleText) } : null,
       access: {
         mode: accessMode,
-        request_required: accessMode === "request_required",
         ...(accessMode === "key_required" && accessKey ? { access_key: accessKey } : {}),
       },
       provisioning: provisioningApps.trim() || provisioningMcp.trim()
@@ -162,7 +187,7 @@ export function DesktopCreateDialog({
                   onChange={(event) => setTemplateId(event.target.value)}
                   className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
                 >
-                  {templates.map((template) => (
+                  {visibleTemplates.map((template) => (
                     <option key={template.template_id} value={template.template_id}>
                       {templateLabel(template)}
                     </option>
@@ -280,7 +305,6 @@ export function DesktopCreateDialog({
                   <option value="owner_only">Owner only</option>
                   <option value="shared_link">Shared link</option>
                   <option value="key_required">Key required</option>
-                  <option value="request_required">Request required</option>
                 </select>
               </label>
 
@@ -344,7 +368,7 @@ export function DesktopCreateDialog({
           </button>
           <button
             type="submit"
-            disabled={loading || templates.length === 0}
+            disabled={loading || visibleTemplates.length === 0 || !selectedTemplateCompatible}
             className="h-8 rounded-md bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? "Creating..." : "Create Desktop"}

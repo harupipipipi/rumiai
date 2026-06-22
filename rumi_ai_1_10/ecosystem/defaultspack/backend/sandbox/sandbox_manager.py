@@ -63,7 +63,7 @@ RUNNING_STATES = {READY, BUSY}
 TERMINAL_STATES = {DESTROYED, FAILED}
 SUPPORTED_MODEL_MODES = {"fast", "heavy"}
 STATE_DIR_ENV = "RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR"
-DESKTOP_ACCESS_MODES = {"owner_only", "shared_link", "key_required", "request_required"}
+DESKTOP_ACCESS_MODES = {"owner_only", "shared_link", "key_required"}
 WORKSPACE_ACCESS_MODES = {"none", "read_only", "overlay"}
 
 
@@ -116,6 +116,7 @@ class SandboxManager:
                 image=image,
                 display=display,
                 template_id=template_id,
+                provider_id=provider_id,
                 width=width,
                 height=height,
             )
@@ -127,11 +128,14 @@ class SandboxManager:
             required_capabilities=template.provider_requirements,
             provider_id=provider_id,
         )
-        access_policy, access_key_hash = _desktop_access_from_create(
-            mode=access_mode,
-            access_key=access_key,
-            request_required=access_request_required,
-        )
+        try:
+            access_policy, access_key_hash = _desktop_access_from_create(
+                mode=access_mode,
+                access_key=access_key,
+                request_required=access_request_required,
+            )
+        except SandboxContractError as exc:
+            return exc.to_dict()
         if access_policy.key_required and not access_key_hash:
             return {
                 "ok": False,
@@ -411,6 +415,31 @@ class SandboxManager:
         with self._lock:
             return [self._instance_to_dict(instance) for instance in self._instances.values()]
 
+    def mark_provider_uninstalled(self, provider_id: str, *, remove_state: bool = False) -> list[str]:
+        clean_provider_id = str(provider_id or "").strip()
+        affected: list[str] = []
+        if not clean_provider_id:
+            return affected
+        with self._lock:
+            now = time.time()
+            for sandbox_id, inst in list(self._instances.items()):
+                if inst.provider_id != clean_provider_id:
+                    continue
+                affected.append(inst.sandbox_id)
+                if remove_state:
+                    self._instances.pop(sandbox_id, None)
+                    continue
+                if inst.state == DESTROYED:
+                    continue
+                inst.state = STOPPED
+                inst.stopped_at = now
+                inst.updated_at = now
+                inst.last_activity_at = now
+                inst.last_error = "Runtime provider was uninstalled; managed session is no longer running."
+            if affected:
+                self._save_registry()
+        return affected
+
     def update_desktop_rules(
         self,
         seat_id: str,
@@ -449,15 +478,16 @@ class SandboxManager:
                         "status_code": 400,
                         "sandbox_id": str(seat_id),
                     }
-                access_policy, access_key_hash = _desktop_access_from_create(
-                    mode=access_mode or inst.desktop_access.mode,
-                    access_key=access_key,
-                    request_required=access_request_required
-                    if access_request_required is not None
-                    else inst.desktop_access.request_required,
-                    previous_key_hint=inst.desktop_access.key_hint,
-                    previous_key_required=inst.desktop_access.key_required,
-                )
+                try:
+                    access_policy, access_key_hash = _desktop_access_from_create(
+                        mode=access_mode or inst.desktop_access.mode,
+                        access_key=access_key,
+                        request_required=access_request_required,
+                        previous_key_hint=inst.desktop_access.key_hint,
+                        previous_key_required=inst.desktop_access.key_required,
+                    )
+                except SandboxContractError as exc:
+                    return exc.to_dict()
                 inst.desktop_access = access_policy
                 if access_key is not None:
                     inst.desktop_access_key_hash = access_key_hash
@@ -952,10 +982,11 @@ class SandboxManager:
         image: str,
         display: bool,
         template_id: str | None = None,
+        provider_id: str | None = None,
         width: int | None = None,
         height: int | None = None,
     ) -> ResolvedSandboxTemplate:
-        requested_template_id = str(template_id or ("desktop.ubuntu" if display else "tool.ephemeral")).strip()
+        requested_template_id = str(template_id or _default_template_id(display=display, provider_id=provider_id)).strip()
         raw_template = _load_sandbox_template(requested_template_id)
         if not raw_template:
             raise SandboxContractError(
@@ -986,14 +1017,20 @@ class SandboxManager:
         resolved_template_id = str(raw_template.get("id") or requested_template_id)
         packages = _packages_from_template_runtime(runtime)
         desktop_policy = policy.get("desktop") if isinstance(policy.get("desktop"), dict) else {}
-        desktop_enabled = bool(desktop_policy.get("enabled")) or display
-        if display and not desktop_enabled:
+        template_declares_desktop = bool(desktop_policy.get("enabled"))
+        if display and not template_declares_desktop:
             raise SandboxContractError(
                 "SANDBOX_TEMPLATE_NOT_DESKTOP",
                 f"Sandbox template does not declare a desktop: {resolved_template_id}",
                 status_code=400,
             )
-        if desktop_enabled:
+        if not display and template_declares_desktop:
+            raise SandboxContractError(
+                "SANDBOX_TEMPLATE_KIND_MISMATCH",
+                f"Desktop template cannot be created via sandbox endpoint: {resolved_template_id}",
+                status_code=400,
+            )
+        if template_declares_desktop:
             desktop = DesktopSpec(
                 enabled=True,
                 width=int(width or desktop_policy.get("width") or 1440),
@@ -1162,6 +1199,17 @@ def _clean_string_list(value: Any, *, max_items: int = 24, max_len: int = 512) -
     return tuple(result)
 
 
+def _default_template_id(*, display: bool, provider_id: str | None) -> str:
+    if not display:
+        return "tool.ephemeral"
+    clean_provider_id = str(provider_id or "auto").strip().lower()
+    if clean_provider_id == "linux_native" or (
+        clean_provider_id in {"", "auto"} and platform.system().lower() == "linux"
+    ):
+        return "desktop.linux_native"
+    return "desktop.ubuntu"
+
+
 def _resource_limits_from_dict(value: Any) -> ResourceLimits:
     if not isinstance(value, dict):
         return ResourceLimits()
@@ -1235,18 +1283,23 @@ def _desktop_access_from_create(
     previous_key_required: bool = False,
 ) -> tuple[DesktopAccessPolicy, str | None]:
     normalized_mode = str(mode or "owner_only").strip().lower()
+    if normalized_mode == "request_required" or bool(request_required):
+        raise SandboxContractError(
+            "DESKTOP_ACCESS_REQUEST_MODE_NOT_READY",
+            "Desktop request-required access is not available until request grant state is implemented.",
+            status_code=501,
+        )
     if normalized_mode not in DESKTOP_ACCESS_MODES:
         normalized_mode = "owner_only"
     key_text = str(access_key or "")
     key_required = normalized_mode == "key_required" or (previous_key_required and normalized_mode == "key_required")
     key_hint = _access_key_hint(key_text) if key_text else (previous_key_hint if key_required else None)
     key_hash = _hash_access_key(key_text) if key_text else None
-    request_flag = bool(request_required) or normalized_mode == "request_required"
     return (
         DesktopAccessPolicy(
             mode=normalized_mode,
             key_required=key_required,
-            request_required=request_flag,
+            request_required=False,
             key_hint=key_hint,
             link_enabled=normalized_mode == "shared_link",
         ),
@@ -1263,7 +1316,7 @@ def _desktop_access_from_dict(value: Any) -> DesktopAccessPolicy:
     return DesktopAccessPolicy(
         mode=mode,
         key_required=bool(value.get("key_required")),
-        request_required=bool(value.get("request_required")),
+        request_required=False,
         key_hint=str(value.get("key_hint")) if value.get("key_hint") is not None else None,
         link_enabled=bool(value.get("link_enabled")),
     )

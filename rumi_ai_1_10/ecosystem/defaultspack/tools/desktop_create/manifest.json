@@ -31,7 +31,7 @@
         "additionalProperties": true,
         "properties": {
           "name": { "type": "string" },
-          "template_id": { "type": "string", "default": "desktop.ubuntu" },
+          "template_id": { "type": "string", "default": "desktop.linux_native" },
           "provider_id": { "type": ["string", "null"] },
           "resolution": {
             "type": "object",
@@ -47,9 +47,8 @@
           "access": {
             "type": "object",
             "properties": {
-              "mode": { "type": "string", "enum": ["owner_only", "shared_link", "key_required", "request_required"] },
-              "access_key": { "type": "string" },
-              "request_required": { "type": "boolean" }
+              "mode": { "type": "string", "enum": ["owner_only", "shared_link", "key_required"] },
+              "access_key": { "type": "string" }
             }
           },
           "provisioning": {

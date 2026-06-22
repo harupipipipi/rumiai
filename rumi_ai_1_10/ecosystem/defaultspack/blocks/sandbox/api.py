@@ -183,6 +183,7 @@ def _runtime_update(service: _SandboxApiService, payload: dict[str, Any]) -> dic
 
 def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> dict[str, Any]:
     provider_id = str(payload.get("provider_id") or _default_provider_id())
+    remove_state = bool(payload.get("remove_state"))
     try:
         provider = service.provider_registry.get(provider_id)
     except SandboxContractError:
@@ -191,10 +192,14 @@ def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> 
     result = provider.uninstall(
         UninstallRuntimeRequest(
             provider_id=provider_id,
-            remove_state=bool(payload.get("remove_state")),
+            remove_state=remove_state,
         ),
         sink,
     )
+    if result.ok:
+        for seat_id in service.manager.mark_provider_uninstalled(provider_id, remove_state=remove_state):
+            service.frame_cache.discard(seat_id)
+            service.lease_manager.invalidate(seat_id)
     return _operation_payload(result)
 
 
@@ -226,7 +231,7 @@ def _sandbox_create(service: _SandboxApiService, payload: dict[str, Any], *, dis
         display=display,
         provider_id=str(payload.get("provider_id") or "auto"),
         name=str(payload.get("name") or ("Ubuntu Desktop" if display else "Sandbox")),
-        template_id=str(payload.get("template_id") or ("desktop.ubuntu" if display else "tool.ephemeral")),
+        template_id=str(payload.get("template_id") or _default_create_template_id(display=display, provider_id=payload.get("provider_id"))),
         width=_positive_int(resolution.get("width"), 1440),
         height=_positive_int(resolution.get("height"), 900),
         role=str(payload.get("role") or ""),
@@ -392,16 +397,12 @@ def _desktop_rules_update(service: _SandboxApiService, payload: dict[str, Any]):
 
 
 def _desktop_access_request(service: _SandboxApiService, payload: dict[str, Any]):
-    seat_id = str(payload.get("seat_id") or "")
-    status = service.manager.status(seat_id)
-    if status.get("ok") is not True:
-        return _api_error(str(status.get("error") or "Desktop not found"), str(status.get("code") or "DESKTOP_NOT_FOUND"), int(status.get("status_code") or 404))
-    return ok({
-        "seat_id": seat_id,
-        "request_id": str(payload.get("request_id") or f"desktop-access-{seat_id}"),
-        "status": "pending",
-        "message": "Desktop access request recorded; approval workflow is required before access is granted.",
-    })
+    del service, payload
+    return _api_error(
+        "Desktop access requests are not available until request grant state is implemented.",
+        "DESKTOP_ACCESS_REQUEST_MODE_NOT_READY",
+        501,
+    )
 
 
 def _desktop_control_acquire(service: _SandboxApiService, payload: dict[str, Any]):
@@ -517,6 +518,8 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
     rules = item.get("desktop_rules") if isinstance(item.get("desktop_rules"), dict) else {}
     provisioning = item.get("desktop_provisioning") if isinstance(item.get("desktop_provisioning"), dict) else {}
     workspace = item.get("workspace_binding") if isinstance(item.get("workspace_binding"), dict) else {}
+    network = item.get("network_policy") if isinstance(item.get("network_policy"), dict) else {}
+    network_mode = str(network.get("mode") or "off")
     return {
         "seat_id": seat_id,
         "sandbox_id": seat_id,
@@ -542,7 +545,12 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
             "lease_expires_at": None if lease is None else _iso_timestamp(lease.expires_at),
         },
         "isolation": _provider_isolation(str(item.get("provider_id") or ""), state in RUNNING_STATES),
-        "network_policy": {"summary": "off", "default": "off"},
+        "network_policy": {
+            "summary": network_mode,
+            "default": network_mode,
+            "allowed": network.get("allowlist") or [],
+            "approval_required": bool(network.get("approval_required")),
+        },
         "workspace": {
             "workspace_id": workspace.get("workspace_id"),
             "label": workspace.get("workspace_id"),
@@ -592,6 +600,17 @@ def _default_provider_id() -> str:
     if system == "windows":
         return "windows_wsl"
     return "linux_native"
+
+
+def _default_create_template_id(*, display: bool, provider_id: Any = None) -> str:
+    if not display:
+        return "tool.ephemeral"
+    clean_provider_id = str(provider_id or "auto").strip().lower()
+    if clean_provider_id == "linux_native" or (
+        clean_provider_id in {"", "auto"} and _default_provider_id() == "linux_native"
+    ):
+        return "desktop.linux_native"
+    return "desktop.ubuntu"
 
 
 def _provider_label(provider_id: str) -> str:

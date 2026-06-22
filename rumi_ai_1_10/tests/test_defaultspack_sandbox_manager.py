@@ -187,6 +187,26 @@ def test_sandbox_unknown_template_is_rejected(tmp_path):
     assert created["code"] == "SANDBOX_TEMPLATE_NOT_FOUND"
 
 
+def test_sandbox_create_rejects_endpoint_template_kind_mismatch(tmp_path):
+    manager = _manager(tmp_path)
+
+    desktop_template_on_sandbox_endpoint = manager.create(
+        display=False,
+        provider_id="fake-runtime",
+        template_id="desktop.coding",
+    )
+    tool_template_on_desktop_endpoint = manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="tool.ephemeral",
+    )
+
+    assert desktop_template_on_sandbox_endpoint["ok"] is False
+    assert desktop_template_on_sandbox_endpoint["code"] == "SANDBOX_TEMPLATE_KIND_MISMATCH"
+    assert tool_template_on_desktop_endpoint["ok"] is False
+    assert tool_template_on_desktop_endpoint["code"] == "SANDBOX_TEMPLATE_NOT_DESKTOP"
+
+
 def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path):
     manager = _manager(tmp_path)
 

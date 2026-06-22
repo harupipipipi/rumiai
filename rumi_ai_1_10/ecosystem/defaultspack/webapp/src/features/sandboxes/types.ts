@@ -44,6 +44,7 @@ export type RuntimeProviderStatus = {
   platform?: string;
   version?: string | null;
   guest_protocol?: string | number | null;
+  capabilities?: string[];
   missing?: RuntimeDoctorIssue[];
   isolation?: RuntimeIsolationFacts;
   diagnostics?: Record<string, unknown>;
@@ -172,7 +173,7 @@ export type DesktopRules = {
 };
 
 export type DesktopAccessPolicy = {
-  mode?: "owner_only" | "shared_link" | "key_required" | "request_required";
+  mode?: "owner_only" | "shared_link" | "key_required";
   key_required?: boolean;
   request_required?: boolean;
   key_hint?: string | null;
@@ -217,6 +218,8 @@ export type DesktopInstance = {
   network_policy?: {
     summary?: string;
     default?: string;
+    allowed?: string[];
+    approval_required?: boolean;
   } | null;
   workspace?: {
     workspace_id?: string | null;
@@ -243,9 +246,8 @@ export type CreateDesktopRequest = {
   role?: string | null;
   rules?: DesktopRules | string[] | null;
   access?: {
-    mode?: "owner_only" | "shared_link" | "key_required" | "request_required";
+    mode?: "owner_only" | "shared_link" | "key_required";
     access_key?: string;
-    request_required?: boolean;
   };
   provisioning?: DesktopProvisioning | null;
   request_id?: string;
