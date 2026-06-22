@@ -55,6 +55,8 @@ GUEST_WORKDIR = "/workspace"
 GUEST_DEPS = ("Xvfb", "openbox", "xdotool", "import", "python3", "xterm", "unshare")
 APT_PACKAGES = ("xvfb", "openbox", "xdotool", "imagemagick", "python3", "xterm", "x11-utils", "ca-certificates", "util-linux")
 DEFAULT_DISPLAY = ":98"
+GUEST_DISPLAY_MIN = 98
+GUEST_DISPLAY_MAX = 199
 DEFAULT_WSL_RUNTIME_NAME = "RumiUbuntu"
 WSL_ROOTFS_ENV = "RUMI_WSL_ROOTFS_TARBALL"
 WSL_INSTALL_DIR_ENV = "RUMI_WSL_INSTALL_DIR"
@@ -279,7 +281,7 @@ class ManagedUbuntuProvider:
             "width": width,
             "height": height,
             "desktop_enabled": desktop is not None and desktop.enabled,
-            "display": DEFAULT_DISPLAY,
+            "display": self._allocate_guest_display() if desktop is not None and desktop.enabled else "",
             "workspace_binding": model_to_dict(spec.workspace_binding),
             "network_policy": model_to_dict(spec.template.network),
             "network_disabled": _guest_network_disabled(spec.template.network),
@@ -504,6 +506,24 @@ class ManagedUbuntuProvider:
     def _desktop_running(self, command_path: str, provider_instance_id: str) -> bool:
         result = self._guest_shell(command_path, _desktop_running_script(provider_instance_id), timeout=10, check=False)
         return result.returncode == 0
+
+    def _allocate_guest_display(self) -> str:
+        used = {
+            display
+            for instance in self._instances.values()
+            for display in [_normalized_guest_display(instance.opaque_state.get("display"))]
+            if display
+        }
+        for number in range(GUEST_DISPLAY_MIN, GUEST_DISPLAY_MAX + 1):
+            display = f":{number}"
+            if display not in used:
+                return display
+        raise SandboxContractError(
+            RUNTIME_PROVIDER_UNAVAILABLE,
+            "No free managed Ubuntu X11 DISPLAY number was available.",
+            status_code=503,
+            details={"display_min": GUEST_DISPLAY_MIN, "display_max": GUEST_DISPLAY_MAX},
+        )
 
     def _setup_message(self) -> str:
         return "Open the managed runtime setup flow to create and provision the Ubuntu guest."
@@ -1037,6 +1057,17 @@ def _host_arch() -> str:
 def _workspace_binding(opaque_state: Mapping[str, object]) -> Mapping[str, object]:
     workspace = opaque_state.get("workspace_binding")
     return workspace if isinstance(workspace, Mapping) else {}
+
+
+def _normalized_guest_display(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith(":") and text[1:].isdigit():
+        return text
+    if text.isdigit():
+        return f":{text}"
+    return ""
 
 
 def _usable_host_workspace_root(value: object) -> bool:

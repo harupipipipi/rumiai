@@ -26,6 +26,7 @@ from ecosystem.defaultspack.backend.sandbox.errors import SandboxContractError
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.providers.base import NullProgressSink
 from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import (
+    DEFAULT_DISPLAY,
     DEFAULT_WSL_RUNTIME_NAME,
     GuestCommandResult,
     MANAGED_UBUNTU_CAPABILITIES,
@@ -244,6 +245,27 @@ def test_mac_lima_provider_ensure_and_guest_desktop_flow(monkeypatch) -> None:
     assert "sudo apt-get" not in install_script
     assert any("xterm -title 'Rumi Desktop'" in script for script in fake.guest_scripts)
     assert fake.command_containing("shell", "rumi-managed-runtime", "--", "echo", "hello")[-2:] == ["echo", "hello"]
+
+
+def test_managed_ubuntu_desktops_get_distinct_guest_displays(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    first = provider.start(provider.create(_create_spec(_template(network_mode="host_shared", network_approval_required=False))))
+    second = provider.start(provider.create(_create_spec(_template(network_mode="host_shared", network_approval_required=False))))
+    desktop_scripts = [script for script in fake.guest_scripts if "DISPLAY_ID=" in script and "Xvfb" in script and "openbox" in script]
+
+    assert ensured.ok is True
+    assert first.opaque_state["display"] == DEFAULT_DISPLAY
+    assert second.opaque_state["display"] == ":99"
+    assert len({first.opaque_state["display"], second.opaque_state["display"]}) == 2
+    assert "DISPLAY_ID=':98'" in desktop_scripts[-2]
+    assert "Xvfb :98" in desktop_scripts[-2]
+    assert "DISPLAY_ID=':99'" in desktop_scripts[-1]
+    assert "Xvfb :99" in desktop_scripts[-1]
 
 
 def test_windows_wsl_provider_ensure_imports_rumi_owned_distribution(monkeypatch, tmp_path) -> None:
