@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Callable, Mapping, Sequence
 
+from ..cancellation import run_cancellable_subprocess
 from ..errors import RUNTIME_PROVIDER_UNAVAILABLE, SandboxContractError
 from ..guest.protocol import DesktopInputRequest, GuestExecRequest
 from ..models import (
@@ -930,14 +931,10 @@ class ManagedUbuntuGuestAgent:
 
 def _subprocess_runner(command: Sequence[str], input_text: str | None, timeout: float | None) -> GuestCommandResult:
     try:
-        completed = subprocess.run(
-            list(command),
-            input=input_text,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        completed = run_cancellable_subprocess(
+            command,
+            input_text=input_text,
             timeout=timeout,
-            check=False,
         )
     except subprocess.TimeoutExpired as exc:
         raise TimeoutError(str(exc)) from exc

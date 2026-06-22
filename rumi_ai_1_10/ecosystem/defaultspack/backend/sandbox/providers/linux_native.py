@@ -10,6 +10,7 @@ import sys
 import uuid
 from typing import Any, Callable, Mapping, Sequence
 
+from ..cancellation import run_cancellable_subprocess
 from ..errors import INVALID_EXEC_REQUEST, RUNTIME_PROVIDER_UNAVAILABLE, SandboxContractError
 from ..guest.protocol import DesktopInputRequest
 from ..models import (
@@ -671,14 +672,10 @@ def _is_root() -> bool:
 
 def _subprocess_runner(command: Sequence[str], input_text: str | None, timeout: float | None) -> LinuxCommandResult:
     try:
-        completed = subprocess.run(
+        completed = run_cancellable_subprocess(
             [str(part) for part in command],
-            input=input_text,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            input_text=input_text,
             timeout=timeout,
-            check=False,
         )
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else str(exc.stdout or "")

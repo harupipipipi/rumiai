@@ -24,6 +24,12 @@ except ModuleNotFoundError:
     from domain.tool_policy.internal_context import internal_tool_decision_allows, tool_server_approval_context_is_internal  # type: ignore
 
 from ecosystem.defaultspack.backend.sandbox.control_lease import ControlLeaseManager
+from ecosystem.defaultspack.backend.sandbox.cancellation import (
+    CancellationRegistry,
+    CancellationToken,
+    RuntimeOperationCancelled,
+    cancellation_context,
+)
 from ecosystem.defaultspack.backend.sandbox.errors import SandboxContractError
 from ecosystem.defaultspack.backend.sandbox.frame_cache import FrameCache
 from ecosystem.defaultspack.backend.sandbox.models import (
@@ -56,6 +62,7 @@ class _SandboxApiService:
         self.provider_registry.register(DockerProvider())
         self.manager = SandboxManager(provider_registry=self.provider_registry)
         self.operation_store = RuntimeOperationStore(self.manager.state_dir / "runtime_operations.json")
+        self.operation_cancellations = CancellationRegistry()
         self.operation_store.interrupt_nonterminal(
             updated_at=timestamp(),
             message="Runtime operation was interrupted by a Rumi service restart. Start the operation again to continue.",
@@ -159,6 +166,15 @@ def _operation_store(service: _SandboxApiService) -> RuntimeOperationStore:
     store = RuntimeOperationStore()
     setattr(service, "operation_store", store)
     return store
+
+
+def _operation_cancellations(service: _SandboxApiService) -> CancellationRegistry:
+    registry = getattr(service, "operation_cancellations", None)
+    if isinstance(registry, CancellationRegistry):
+        return registry
+    registry = CancellationRegistry()
+    setattr(service, "operation_cancellations", registry)
+    return registry
 
 
 class _RecordingProgressSink:
@@ -321,6 +337,8 @@ def _runtime_operation_cancel(service: _SandboxApiService, payload: dict[str, An
     operation = _operation_store(service).cancel(operation_id, updated_at=timestamp())
     if operation is None:
         return _api_error(f"Runtime operation not found: {operation_id}", "RUNTIME_OPERATION_NOT_FOUND", 404)
+    if operation.get("cancelled") is True:
+        _operation_cancellations(service).cancel(operation_id)
     return ok(operation)
 
 
@@ -350,14 +368,34 @@ def _start_runtime_operation(
     })
     if not reserved:
         return operation
+    cancel_token = CancellationToken()
+    _operation_cancellations(service).register(operation_id, cancel_token)
 
     def run_worker() -> None:
         sink = _RecordingProgressSink(service, provider_id=provider_id, operation_id=operation_id)
         try:
-            result = worker(sink)
+            with cancellation_context(cancel_token):
+                result = worker(sink)
             _record_operation(
                 service,
                 _operation_payload(result, progress_events=sink.events, operation_id=operation_id),
+            )
+        except RuntimeOperationCancelled as exc:
+            _record_operation(
+                service,
+                {
+                    "operation_id": operation_id,
+                    "status": "cancelled",
+                    "cancelled": True,
+                    "step": "cancelled",
+                    "message": str(exc) or "Runtime operation was cancelled.",
+                    "progress": 0,
+                    "progress_events": [_progress_event_payload(event) for event in sink.events],
+                    "reboot_required": False,
+                    "provider_id": provider_id,
+                    "updated_at": timestamp(),
+                    "error": None,
+                },
             )
         except SandboxContractError as exc:
             _record_operation(
@@ -391,6 +429,8 @@ def _start_runtime_operation(
                     "error": {"code": RUNTIME_NOT_READY, "message": str(exc)},
                 },
             )
+        finally:
+            _operation_cancellations(service).unregister(operation_id, cancel_token)
 
     thread = threading.Thread(
         target=run_worker,

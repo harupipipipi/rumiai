@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import json
 from pathlib import Path
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -1652,6 +1653,81 @@ def test_runtime_operation_cancel_preserves_cancelled_status_after_worker_finish
     assert cancelled["data"]["status"] == "cancelled"
     assert cancelled["data"]["cancelled"] is True
     assert final["data"]["status"] == "cancelled"
+    assert [event["stage"] for event in final["data"]["progress_events"]] == ["packages"]
+
+
+def test_runtime_operation_cancel_terminates_active_subprocess(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+    from ecosystem.defaultspack.backend.sandbox.cancellation import (
+        RuntimeOperationCancelled,
+        run_cancellable_subprocess,
+    )
+
+    started_file = tmp_path / "subprocess-started"
+    finished_file = tmp_path / "subprocess-finished"
+    worker_cancelled = threading.Event()
+    script = (
+        "from pathlib import Path\n"
+        "import sys\n"
+        "import time\n"
+        "Path(sys.argv[1]).write_text('started', encoding='utf-8')\n"
+        "time.sleep(30)\n"
+        "Path(sys.argv[2]).write_text('finished', encoding='utf-8')\n"
+    )
+
+    class CancellableSubprocessProvider(FakeRuntimeProvider):
+        def __init__(self) -> None:
+            super().__init__(provider_id="fake-runtime")
+
+        def ensure(self, request, progress):
+            progress.emit(
+                ProgressEvent(
+                    operation_id="provider-op",
+                    stage="packages",
+                    message="Spawning cancellable fake runtime subprocess",
+                    percent=40,
+                )
+            )
+            try:
+                run_cancellable_subprocess(
+                    (sys.executable, "-c", script, str(started_file), str(finished_file)),
+                    timeout=30,
+                )
+            except RuntimeOperationCancelled:
+                worker_cancelled.set()
+                raise
+            return OperationResult(ok=True, provider_id=self.provider_id, operation_id="provider-op", status="ready")
+
+    registry = ProviderRegistry()
+    registry.register(CancellableSubprocessProvider())
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        operation_store=RuntimeOperationStore(tmp_path / "runtime_operations.json"),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        ensure = api.run(
+            {"_handler": "runtime_ensure", "provider_id": "fake-runtime", "request_id": "subprocess-cancel"},
+            {},
+        )
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not started_file.exists():
+            time.sleep(0.02)
+        assert started_file.exists()
+        cancelled = api.run({"_handler": "runtime_operation_cancel", "operation_id": "subprocess-cancel"}, {})
+        assert worker_cancelled.wait(timeout=3)
+        final = api.run({"_handler": "runtime_operation_get", "operation_id": "subprocess-cancel"}, {})
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert ensure["data"]["status"] == "running"
+    assert cancelled["data"]["status"] == "cancelled"
+    assert cancelled["data"]["cancelled"] is True
+    assert final["data"]["status"] == "cancelled"
+    assert not finished_file.exists()
     assert [event["stage"] for event in final["data"]["progress_events"]] == ["packages"]
 
 
