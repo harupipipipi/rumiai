@@ -7,13 +7,15 @@ import { normalizeDesktopStatus } from "./types";
 test("runtimeAvailability does not treat available provider as ready without ready flag", () => {
   const availability = runtimeAvailability(
     {
-      providers: [{
-        provider_id: "linux_native",
-        status: "available",
-        available: true,
-        installed: true,
-        ready: false,
-      }],
+      providers: [
+        {
+          provider_id: "linux_native",
+          status: "available",
+          available: true,
+          installed: true,
+          ready: false,
+        },
+      ],
       selected_provider_id: "linux_native",
     },
     null,
@@ -35,12 +37,17 @@ test("runtimeAvailability selects a ready provider when the preferred provider s
           ready: false,
         },
         {
-          provider_id: "docker",
-          label: "Docker",
+          provider_id: "mac_lima",
+          label: "Mac Lima",
           status: "ready",
           available: true,
           installed: true,
           ready: true,
+          capabilities: [
+            "sandbox.desktop",
+            "sandbox.desktop_input",
+            "sandbox.snapshot",
+          ],
         },
       ],
       selected_provider_id: "linux_native",
@@ -50,8 +57,44 @@ test("runtimeAvailability selects a ready provider when the preferred provider s
   );
 
   assert.equal(availability.status, "ready");
-  assert.equal(availability.selectedProvider?.provider_id, "docker");
-  assert.equal(availability.message, "Docker is ready.");
+  assert.equal(availability.selectedProvider?.provider_id, "mac_lima");
+  assert.equal(availability.message, "Mac Lima is ready.");
+});
+
+test("runtimeAvailability does not treat exec-only ready provider as desktop ready", () => {
+  const availability = runtimeAvailability(
+    {
+      providers: [
+        {
+          provider_id: "linux_native",
+          status: "needs_setup",
+          available: true,
+          installed: false,
+          ready: false,
+          capabilities: [
+            "sandbox.desktop",
+            "sandbox.desktop_input",
+            "sandbox.snapshot",
+          ],
+        },
+        {
+          provider_id: "docker",
+          label: "Docker",
+          status: "ready",
+          available: true,
+          installed: true,
+          ready: true,
+          capabilities: ["sandbox.exec", "sandbox.files"],
+        },
+      ],
+      selected_provider_id: "linux_native",
+    },
+    null,
+    null,
+  );
+
+  assert.equal(availability.status, "needs_setup");
+  assert.equal(availability.selectedProvider?.provider_id, "linux_native");
 });
 
 test("normalizeDesktopStatus maps sandbox ready and busy states to running", () => {

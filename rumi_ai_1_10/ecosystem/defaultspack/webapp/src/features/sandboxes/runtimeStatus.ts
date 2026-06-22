@@ -1,5 +1,16 @@
 import { normalizeRuntimeStatus } from "./types";
-import type { RuntimeDoctorIssue, RuntimeDoctorResult, RuntimeProviderStatus, RuntimeProvidersResponse } from "./types";
+import type {
+  RuntimeDoctorIssue,
+  RuntimeDoctorResult,
+  RuntimeProviderStatus,
+  RuntimeProvidersResponse,
+} from "./types";
+
+const DESKTOP_RUNTIME_CAPABILITIES = [
+  "sandbox.desktop",
+  "sandbox.desktop_input",
+  "sandbox.snapshot",
+] as const;
 
 export type RuntimeAvailability =
   | {
@@ -21,21 +32,48 @@ function providerIsReady(provider: RuntimeProviderStatus): boolean {
   return provider.ready === true;
 }
 
-function providerNeedsSetup(provider: RuntimeProviderStatus): boolean {
-  const status = normalizeRuntimeStatus(provider.status);
-  return status === "needs_setup" || status === "installing" || status === "updating";
+export function providerSupportsDesktop(
+  provider: RuntimeProviderStatus | null | undefined,
+): boolean {
+  if (!provider) return false;
+  const capabilities = new Set(provider.capabilities ?? []);
+  return DESKTOP_RUNTIME_CAPABILITIES.every((capability) =>
+    capabilities.has(capability),
+  );
 }
 
-export function providerLabel(provider: RuntimeProviderStatus | null | undefined): string {
+export function providerIsDesktopReady(
+  provider: RuntimeProviderStatus | null | undefined,
+): boolean {
+  return Boolean(
+    provider && providerIsReady(provider) && providerSupportsDesktop(provider),
+  );
+}
+
+function providerNeedsSetup(provider: RuntimeProviderStatus): boolean {
+  const status = normalizeRuntimeStatus(provider.status);
+  return (
+    status === "needs_setup" || status === "installing" || status === "updating"
+  );
+}
+
+export function providerLabel(
+  provider: RuntimeProviderStatus | null | undefined,
+): string {
   if (!provider) return "Auto";
   return provider.label || provider.provider_id.replace(/_/g, " ");
 }
 
-export function providerStatusTone(provider: RuntimeProviderStatus): "success" | "warning" | "danger" | "idle" {
+export function providerStatusTone(
+  provider: RuntimeProviderStatus,
+): "success" | "warning" | "danger" | "idle" {
   const status = normalizeRuntimeStatus(provider.status);
-  if (providerIsReady(provider)) return "success";
+  if (providerIsDesktopReady(provider)) return "success";
+  if (providerIsReady(provider) && !providerSupportsDesktop(provider))
+    return "idle";
   if (providerNeedsSetup(provider)) return "warning";
-  if (status === "error" || status === "failed" || status === "unavailable") return "danger";
+  if (status === "error" || status === "failed" || status === "unavailable")
+    return "danger";
   return "idle";
 }
 
@@ -46,15 +84,27 @@ export function runtimeAvailability(
   checking = false,
 ): RuntimeAvailability {
   const providers = doctor?.providers ?? providersResponse?.providers ?? [];
-  const selectedProviderId = doctor?.selected_provider_id ?? providersResponse?.selected_provider_id ?? providersResponse?.default_provider_id ?? null;
-  const preferredProvider = providers.find((provider) => provider.provider_id === selectedProviderId)
-    ?? providers.find((provider) => provider.selected)
-    ?? providers[0]
-    ?? null;
-  const readyProvider = providers.find((provider) => provider.provider_id === selectedProviderId && providerIsReady(provider))
-    ?? providers.find((provider) => provider.selected && providerIsReady(provider))
-    ?? providers.find(providerIsReady)
-    ?? null;
+  const selectedProviderId =
+    doctor?.selected_provider_id ??
+    providersResponse?.selected_provider_id ??
+    providersResponse?.default_provider_id ??
+    null;
+  const preferredProvider =
+    providers.find((provider) => provider.provider_id === selectedProviderId) ??
+    providers.find((provider) => provider.selected) ??
+    providers[0] ??
+    null;
+  const readyProvider =
+    providers.find(
+      (provider) =>
+        provider.provider_id === selectedProviderId &&
+        providerIsDesktopReady(provider),
+    ) ??
+    providers.find(
+      (provider) => provider.selected && providerIsDesktopReady(provider),
+    ) ??
+    providers.find(providerIsDesktopReady) ??
+    null;
   const selectedProvider = readyProvider ?? preferredProvider;
   const missing = [
     ...(doctor?.missing ?? []),
@@ -76,34 +126,49 @@ export function runtimeAvailability(
       status: "unavailable",
       selectedProvider,
       providers,
-      missing: [{
-        code: "runtime_api_unavailable",
-        severity: "error",
-        message: "The runtime API is not available from this defaultspack backend.",
-        detail: error,
-      }],
+      missing: [
+        {
+          code: "runtime_api_unavailable",
+          severity: "error",
+          message:
+            "The runtime API is not available from this defaultspack backend.",
+          detail: error,
+        },
+      ],
       message: "Rumi Managed Runtime API is unavailable.",
     };
   }
 
-  if (providers.some(providerIsReady) || (providers.length === 0 && normalizeRuntimeStatus(doctor?.status) === "ready")) {
+  if (
+    providers.some(providerIsDesktopReady) ||
+    (providers.length === 0 &&
+      normalizeRuntimeStatus(doctor?.status) === "ready")
+  ) {
     const provider = readyProvider ?? selectedProvider;
     return {
       status: "ready",
       selectedProvider: provider,
       providers,
       missing,
-      message: provider ? `${providerLabel(provider)} is ready.` : "Rumi Managed Runtime is ready.",
+      message: provider
+        ? `${providerLabel(provider)} is ready.`
+        : "Rumi Managed Runtime is ready.",
     };
   }
 
-  if (providers.some(providerNeedsSetup) || normalizeRuntimeStatus(doctor?.status) === "needs_setup") {
+  if (
+    providers.some(providerNeedsSetup) ||
+    normalizeRuntimeStatus(doctor?.status) === "needs_setup"
+  ) {
     return {
       status: "needs_setup",
       selectedProvider,
       providers,
       missing,
-      message: doctor?.message || selectedProvider?.message || "Rumi Managed Runtime needs setup before desktops can start.",
+      message:
+        doctor?.message ||
+        selectedProvider?.message ||
+        "Rumi Managed Runtime needs setup before desktops can start.",
     };
   }
 
@@ -113,7 +178,8 @@ export function runtimeAvailability(
       selectedProvider,
       providers,
       missing,
-      message: doctor?.message || error || "Rumi Managed Runtime reported an error.",
+      message:
+        doctor?.message || error || "Rumi Managed Runtime reported an error.",
     };
   }
 
@@ -122,7 +188,10 @@ export function runtimeAvailability(
     selectedProvider,
     providers,
     missing,
-    message: doctor?.message || selectedProvider?.message || "No desktop-capable runtime provider is available.",
+    message:
+      doctor?.message ||
+      selectedProvider?.message ||
+      "No desktop-capable runtime provider is available.",
   };
 }
 
@@ -131,9 +200,13 @@ export function diagnosticsText(value: {
   doctor?: RuntimeDoctorResult | null;
   error?: string | null;
 }): string {
-  return JSON.stringify({
-    runtime_providers: value.providersResponse,
-    runtime_doctor: value.doctor,
-    error: value.error ?? undefined,
-  }, null, 2);
+  return JSON.stringify(
+    {
+      runtime_providers: value.providersResponse,
+      runtime_doctor: value.doctor,
+      error: value.error ?? undefined,
+    },
+    null,
+    2,
+  );
 }

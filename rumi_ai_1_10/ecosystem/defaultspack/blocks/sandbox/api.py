@@ -44,6 +44,7 @@ from ecosystem.defaultspack.backend.sandbox.template_catalog import sandbox_temp
 
 RUNTIME_NOT_READY = "MANAGED_RUNTIME_NOT_READY"
 RUNNING_STATES = {"ready", "busy", "running"}
+DESKTOP_RUNTIME_CAPABILITIES = frozenset({"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"})
 
 
 class _SandboxApiService:
@@ -221,7 +222,7 @@ def _runtime_doctor(service: _SandboxApiService) -> dict[str, Any]:
     providers = providers_response["providers"]
     selected_provider_id = providers_response.get("selected_provider_id")
     selected = next((provider for provider in providers if provider.get("provider_id") == selected_provider_id), providers[0] if providers else {})
-    ready = selected.get("ready") is True
+    ready = selected.get("ready") is True and _provider_payload_supports_desktop(selected)
     return {
         "status": "ready" if ready else "needs_setup",
         "providers": providers,
@@ -432,15 +433,33 @@ def _runtime_operation(status: str, *, provider_id: Any = None, operation_id: st
 
 def _selected_runtime_provider_id(statuses: list[RuntimeProviderStatus], *, default_provider_id: str) -> str:
     default_status = next((status for status in statuses if status.provider_id == default_provider_id), None)
-    if default_status is not None and default_status.ready:
+    if default_status is not None and _status_is_desktop_ready(default_status):
         return default_status.provider_id
-    ready_status = next((status for status in statuses if status.ready), None)
+    ready_status = next((status for status in statuses if _status_is_desktop_ready(status)), None)
     if ready_status is not None:
         return ready_status.provider_id
     if default_status is not None:
         return default_status.provider_id
+    desktop_status = next((status for status in statuses if _status_supports_desktop(status)), None)
+    if desktop_status is not None:
+        return desktop_status.provider_id
+    if default_provider_id:
+        return default_provider_id
     first_status = statuses[0] if statuses else None
     return first_status.provider_id if first_status is not None else default_provider_id
+
+
+def _status_supports_desktop(status: RuntimeProviderStatus) -> bool:
+    return DESKTOP_RUNTIME_CAPABILITIES.issubset(status.capabilities)
+
+
+def _status_is_desktop_ready(status: RuntimeProviderStatus) -> bool:
+    return status.ready and _status_supports_desktop(status)
+
+
+def _provider_payload_supports_desktop(provider: dict[str, Any]) -> bool:
+    capabilities = provider.get("capabilities") if isinstance(provider.get("capabilities"), list) else []
+    return DESKTOP_RUNTIME_CAPABILITIES.issubset({str(capability) for capability in capabilities})
 
 
 def _sandbox_create(service: _SandboxApiService, payload: dict[str, Any], *, display: bool):

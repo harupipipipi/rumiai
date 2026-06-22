@@ -3,26 +3,43 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type { RuntimeProviderStatus, SandboxTemplate } from "../../features/sandboxes/types";
+import type {
+  RuntimeProviderStatus,
+  SandboxTemplate,
+} from "../../features/sandboxes/types";
 import { DesktopCreateDialog } from "./DesktopCreateDialog";
 
-const templates: SandboxTemplate[] = [{
-  template_id: "desktop.linux_native",
-  name: "Linux Native Desktop",
-  provider_requirements: ["sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"],
-}];
+const templates: SandboxTemplate[] = [
+  {
+    template_id: "desktop.linux_native",
+    name: "Linux Native Desktop",
+    provider_requirements: [
+      "sandbox.desktop",
+      "sandbox.desktop_input",
+      "sandbox.snapshot",
+    ],
+  },
+];
 
-const providers: RuntimeProviderStatus[] = [{
-  provider_id: "linux_native",
-  status: "ready",
-  ready: true,
-  capabilities: ["sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"],
-}];
+const providers: RuntimeProviderStatus[] = [
+  {
+    provider_id: "linux_native",
+    status: "ready",
+    ready: true,
+    capabilities: [
+      "sandbox.desktop",
+      "sandbox.desktop_input",
+      "sandbox.snapshot",
+    ],
+  },
+];
 
-function renderDialog(overrides: Partial<{
-  providers: RuntimeProviderStatus[];
-  selectedProviderId: string | null;
-}> = {}): string {
+function renderDialog(
+  overrides: Partial<{
+    providers: RuntimeProviderStatus[];
+    selectedProviderId: string | null;
+  }> = {},
+): string {
   return renderToStaticMarkup(
     createElement(DesktopCreateDialog, {
       isOpen: true,
@@ -46,17 +63,51 @@ test("desktop create dialog keeps workspace unmounted by default", () => {
 
 test("desktop create dialog disables creation for a detected provider that is not ready", () => {
   const html = renderDialog({
-    providers: [{
-      provider_id: "linux_native",
-      status: "needs_setup",
-      available: true,
-      installed: false,
-      ready: false,
-      capabilities: ["sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"],
-    }],
+    providers: [
+      {
+        provider_id: "linux_native",
+        status: "needs_setup",
+        available: true,
+        installed: false,
+        ready: false,
+        capabilities: [
+          "sandbox.desktop",
+          "sandbox.desktop_input",
+          "sandbox.snapshot",
+        ],
+      },
+    ],
     selectedProviderId: "linux_native",
   });
 
-  assert.match(html, /<option value="linux_native" disabled="">linux native<\/option>/);
+  assert.match(
+    html,
+    /<option value="linux_native" disabled="">linux native<\/option>/,
+  );
+  assert.match(html, /<button type="submit" disabled=""/);
+});
+
+test("desktop create dialog does not fall back to incompatible templates for exec-only providers", () => {
+  const html = renderDialog({
+    providers: [
+      {
+        provider_id: "docker",
+        label: "Docker",
+        status: "ready",
+        available: true,
+        installed: true,
+        ready: true,
+        capabilities: ["sandbox.exec", "sandbox.files"],
+      },
+    ],
+    selectedProviderId: "docker",
+  });
+
+  assert.match(
+    html,
+    /No desktop templates match the selected runtime provider/,
+  );
+  assert.doesNotMatch(html, /Linux Native Desktop<\/option>/);
+  assert.match(html, /<option value="docker" disabled="">Docker<\/option>/);
   assert.match(html, /<button type="submit" disabled=""/);
 });

@@ -1346,7 +1346,44 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert desktops["data"]["desktops"] == []
 
 
-def test_runtime_doctor_selects_ready_nondefault_provider(monkeypatch, tmp_path) -> None:
+def test_runtime_doctor_selects_ready_desktop_provider(monkeypatch, tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    monkeypatch.setattr("ecosystem.defaultspack.blocks.sandbox.api.platform.system", lambda: "Linux")
+    registry = ProviderRegistry()
+    registry.register(FakeRuntimeProvider(provider_id="linux_native", ready=False, capabilities={"sandbox.desktop"}))
+    registry.register(FakeRuntimeProvider(provider_id="docker", ready=True, capabilities={"sandbox.exec", "sandbox.files"}))
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="mac_lima",
+            ready=True,
+            capabilities={"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"},
+        )
+    )
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        providers = api.run({"_handler": "runtime_providers"}, {})
+        doctor = api.run({"_handler": "runtime_doctor"}, {})
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert providers["data"]["default_provider_id"] == "linux_native"
+    assert providers["data"]["selected_provider_id"] == "mac_lima"
+    selected = {provider["provider_id"]: provider["selected"] for provider in providers["data"]["providers"]}
+    assert selected["linux_native"] is False
+    assert selected["docker"] is False
+    assert selected["mac_lima"] is True
+    assert doctor["data"]["status"] == "ready"
+    assert doctor["data"]["selected_provider_id"] == "mac_lima"
+
+
+def test_runtime_doctor_does_not_treat_exec_only_provider_as_desktop_ready(monkeypatch, tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 
     monkeypatch.setattr("ecosystem.defaultspack.blocks.sandbox.api.platform.system", lambda: "Linux")
@@ -1367,12 +1404,12 @@ def test_runtime_doctor_selects_ready_nondefault_provider(monkeypatch, tmp_path)
         api._reset_service_for_tests(None)
 
     assert providers["data"]["default_provider_id"] == "linux_native"
-    assert providers["data"]["selected_provider_id"] == "docker"
+    assert providers["data"]["selected_provider_id"] == "linux_native"
     selected = {provider["provider_id"]: provider["selected"] for provider in providers["data"]["providers"]}
-    assert selected["linux_native"] is False
-    assert selected["docker"] is True
-    assert doctor["data"]["status"] == "ready"
-    assert doctor["data"]["selected_provider_id"] == "docker"
+    assert selected["linux_native"] is True
+    assert selected["docker"] is False
+    assert doctor["data"]["status"] == "needs_setup"
+    assert doctor["data"]["selected_provider_id"] == "linux_native"
 
 
 def test_defaultspack_runtime_service_registers_cross_platform_providers(tmp_path, monkeypatch) -> None:
