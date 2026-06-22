@@ -57,6 +57,8 @@ class HostIntent:
         stream = raw_stream if isinstance(raw_stream, dict) else {}
         raw_caller = payload.get("caller")
         caller = raw_caller if isinstance(raw_caller, dict) else {}
+        trusted_conversation_id = str(conversation_id or "").strip()
+        payload_conversation_id = str(payload.get("conversation_id") or "").strip()
         return cls(
             type=str(payload.get("type") or "").strip(),
             operation=normalize_host_permission_id(str(payload.get("operation") or "").strip()),
@@ -65,7 +67,7 @@ class HostIntent:
             reason=str(payload.get("reason") or "").strip(),
             caller_pack_id=str(caller.get("pack_id") or caller_pack_id or "").strip(),
             caller_function_id=str(caller.get("function_id") or caller_function_id or "").strip(),
-            conversation_id=str(payload.get("conversation_id") or conversation_id or "").strip(),
+            conversation_id=trusted_conversation_id or payload_conversation_id,
             host_function_id=str(payload.get("host_function_id") or "").strip(),
         )
 

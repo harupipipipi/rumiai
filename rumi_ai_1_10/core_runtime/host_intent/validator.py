@@ -43,6 +43,10 @@ def validate_host_intent(
             errors.append("caller pack id does not match execution context")
         if supplied_function_id and expected_function_id and supplied_function_id != expected_function_id:
             errors.append("caller function id does not match execution context")
+    supplied_conversation_id = str(payload.get("conversation_id") or "").strip()
+    expected_conversation_id = str(conversation_id or "").strip()
+    if supplied_conversation_id and expected_conversation_id and supplied_conversation_id != expected_conversation_id:
+        errors.append("conversation id does not match execution context")
     if intent.type not in HOST_INTENT_TYPES:
         errors.append("host intent type is invalid")
     definition = get_host_permission_definition(intent.operation)

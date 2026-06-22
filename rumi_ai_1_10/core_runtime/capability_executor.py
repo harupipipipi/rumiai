@@ -1126,6 +1126,7 @@ class CapabilityExecutor:
             request_id=request_id,
             start_time=start_time,
             request_context=request_context,
+            args=args,
         )
         if host_boundary_resp is not None:
             self._audit(
@@ -1486,6 +1487,7 @@ class CapabilityExecutor:
             request_id=request_id,
             start_time=start_time,
             request_context=request_context,
+            args=args,
         )
         if host_boundary_resp is not None:
             self._audit(
@@ -1753,9 +1755,11 @@ class CapabilityExecutor:
         request_id: str,
         start_time: float,
         request_context: dict[str, Any] | None = None,
+        args: dict[str, Any] | None = None,
     ) -> CapabilityResponse | None:
         phrase = self._host_confirmation_phrase_for_entry(entry)
         manifest = getattr(entry, "manifest", None)
+        args_hash = self._host_execution_args_hash(args)
         resource = {
             "kind": "critical_host_function",
             "pack_id": getattr(entry, "pack_id", ""),
@@ -1763,6 +1767,8 @@ class CapabilityExecutor:
             "function_qualified_name": getattr(entry, "qualified_name", ""),
             "calling_convention": getattr(entry, "calling_convention", None),
             "host_operation": manifest.get("host_operation") if isinstance(manifest, dict) else None,
+            "args_hash": args_hash,
+            "args_summary": self._host_execution_args_summary(args),
             "confirmation_phrase": phrase,
             "typed_confirmation_required": True,
         }
@@ -1815,6 +1821,7 @@ class CapabilityExecutor:
         request_id: str,
         start_time: float,
         request_context: dict[str, Any] | None = None,
+        args: dict[str, Any] | None = None,
     ) -> CapabilityResponse | None:
         pack_id = str(getattr(entry, "pack_id", "") or "").strip()
         if self._is_host_capability_pack(pack_id):
@@ -1827,6 +1834,7 @@ class CapabilityExecutor:
             request_id=request_id,
             start_time=start_time,
             request_context=request_context,
+            args=args,
         )
 
     @staticmethod
@@ -1845,6 +1853,30 @@ class CapabilityExecutor:
         )
         digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8].upper()
         return f"RUMI-HOST-{digest}"
+
+    @staticmethod
+    def _host_execution_args_hash(args: dict[str, Any] | None) -> str:
+        normalized = args if isinstance(args, dict) else {}
+        payload = json.dumps(
+            {"args": normalized},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _host_execution_args_summary(args: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(args, dict):
+            return {"type": type(args).__name__, "keys": [], "count": 0}
+        keys = sorted(str(key) for key in args.keys())
+        return {
+            "type": "object",
+            "keys": keys[:20],
+            "count": len(keys),
+            "truncated": len(keys) > 20,
+        }
 
     @staticmethod
     def _authority_context_token_for_permission(

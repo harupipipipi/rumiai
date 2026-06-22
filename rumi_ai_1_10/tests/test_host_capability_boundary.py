@@ -4,6 +4,7 @@ import importlib.util
 import sys
 import time
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -203,9 +204,30 @@ def test_host_intent_validator_enforces_typed_operations_and_stream_rules():
         caller_pack_id="pack.voice",
         caller_function_id="listen",
     )
+    inherited_conversation = validate_host_intent(
+        {
+            "type": "host_intent",
+            "operation": "host.permission.status",
+        },
+        caller_pack_id="pack.permissions",
+        caller_function_id="status",
+        conversation_id="trusted-conv",
+    )
+    spoofed_conversation = validate_host_intent(
+        {
+            "type": "host_intent",
+            "operation": "host.permission.status",
+            "conversation_id": "spoofed-conv",
+        },
+        caller_pack_id="pack.permissions",
+        caller_function_id="status",
+        conversation_id="trusted-conv",
+    )
 
     assert ok.ok is True
     assert ok.intent.operation == "host.permission.status"
+    assert inherited_conversation.ok is True
+    assert inherited_conversation.intent.conversation_id == "trusted-conv"
     assert stream_rejected.ok is False
     assert any("does not allow streams" in error for error in stream_rejected.errors)
     assert rejected.ok is False
@@ -216,6 +238,8 @@ def test_host_intent_validator_enforces_typed_operations_and_stream_rules():
     assert any("caller pack id does not match" in error for error in spoofed_pack.errors)
     assert spoofed_function.ok is False
     assert any("caller function id does not match" in error for error in spoofed_function.errors)
+    assert spoofed_conversation.ok is False
+    assert any("conversation id does not match" in error for error in spoofed_conversation.errors)
 
 
 def test_default_builtin_grants_allow_host_pack_but_not_exec_guarded(tmp_path):
@@ -419,10 +443,12 @@ def test_host_intent_executor_dispatches_approved_status_to_viewer_broker(monkey
 
     captured: dict[str, object] = {}
     authority_checks: list[dict] = []
+    events: list[str] = []
 
     class Authority:
         def check(self, **kwargs):
             authority_checks.append(kwargs)
+            events.append(f"authority:{kwargs.get('consume_approval_token')}")
             captured["authority_check"] = kwargs
             return AuthorityDecision(
                 allowed=True,
@@ -435,13 +461,16 @@ def test_host_intent_executor_dispatches_approved_status_to_viewer_broker(monkey
 
     class FakeClient:
         def available(self):
+            events.append("available")
             return True
 
         def execute_intent(self, payload):
+            events.append("dispatch")
             captured["broker_payload"] = dict(payload)
             return {"ok": True, "result": {"permission_id": "host.camera.capture", "status": "unknown"}}
 
     def fake_issue_execution_token(request_id, args_hash, **kwargs):
+        events.append("issue")
         captured["execution_token"] = {
             "request_id": request_id,
             "args_hash": args_hash,
@@ -487,6 +516,84 @@ def test_host_intent_executor_dispatches_approved_status_to_viewer_broker(monkey
     assert captured["execution_token"]["function_id"] == "host_permission_status"
     assert captured["execution_token"]["pack_id"] == "rumi_ambient_trigger_pack"
     assert captured["execution_token"]["conversation_id"] == "conv-1"
+    assert authority_checks[0]["resource"]["conversation_id"] == "conv-1"
+    assert [item.get("consume_approval_token") for item in authority_checks] == [False, True]
+    assert events == ["authority:False", "available", "authority:True", "issue", "dispatch"]
+
+
+def test_host_intent_consume_failure_does_not_dispatch_to_viewer_broker(monkeypatch):
+    from core_runtime.authority.models import AuthorityDecision
+    from core_runtime.host_intent import executor as host_intent_executor
+    from core_runtime.host_intent.executor import HostIntentExecutor
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+    from ecosystem.defaultspack.domain.safety import approval
+
+    broker_calls: list[dict] = []
+    authority_checks: list[dict] = []
+
+    class Authority:
+        def check(self, **kwargs):
+            authority_checks.append(kwargs)
+            if kwargs.get("consume_approval_token"):
+                return AuthorityDecision(
+                    allowed=False,
+                    permission_id=kwargs["permission_id"],
+                    principal_id=kwargs["principal_id"],
+                    reason="one-shot token already consumed",
+                    approval_required=True,
+                    request_id="auth-retry",
+                    risk_level="high",
+                    resource=kwargs["resource"],
+                )
+            return AuthorityDecision(
+                allowed=True,
+                permission_id=kwargs["permission_id"],
+                principal_id=kwargs["principal_id"],
+                reason="preflight verified",
+                risk_level="high",
+                resource=kwargs["resource"],
+            )
+
+    class FakeClient:
+        def available(self):
+            return True
+
+        def execute_intent(self, payload):
+            broker_calls.append(dict(payload))
+            return {"ok": True}
+
+    monkeypatch.setattr(host_intent_executor, "get_authority_service", lambda: Authority())
+    monkeypatch.setattr(ViewerBrokerClient, "from_environment", classmethod(lambda cls: FakeClient()))
+    monkeypatch.setattr(approval, "issue_execution_token", lambda *args, **kwargs: "viewer-execution-token")
+
+    result = HostIntentExecutor().handle(
+        {
+            "type": "host_intent",
+            "operation": "host.permission.status",
+            "args": {"permission_id": "host.camera.capture"},
+            "caller": {
+                "pack_id": "rumi_ambient_trigger_pack",
+                "function_id": "ambient_permission_check",
+            },
+            "host_function_id": "host_permission_status",
+        },
+        principal_id="rumi_ambient_trigger_pack",
+        caller_pack_id="rumi_ambient_trigger_pack",
+        caller_function_id="ambient_permission_check",
+        request_context={
+            "conversation_id": "conv-1",
+            "authority": {
+                "permission_id": "host.permission.status",
+                "request_id": "auth-1",
+                "approval_token": "authority-token",
+            },
+        },
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "approval_required"
+    assert result["host_broker"] == {"available": True, "dispatched": False}
+    assert broker_calls == []
     assert [item.get("consume_approval_token") for item in authority_checks] == [False, True]
 
 
@@ -560,7 +667,7 @@ def test_host_intent_exec_guarded_has_confirmation_phrase_and_approves(tmp_path,
     assert retry_again["status"] == "host_broker_unavailable"
 
 
-def test_host_intent_broker_error_does_not_consume_authority_token(tmp_path, monkeypatch):
+def test_host_intent_broker_error_consumes_before_dispatch_and_blocks_replay(tmp_path, monkeypatch):
     from core_runtime.host_intent.executor import HostIntentExecutor
     from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
     from ecosystem.defaultspack.domain.safety import approval
@@ -624,8 +731,92 @@ def test_host_intent_broker_error_does_not_consume_authority_token(tmp_path, mon
 
     assert failed["status"] == "host_broker_error"
     assert failed["success"] is False
-    assert failed_again["status"] == "host_broker_error"
+    assert failed_again["status"] == "approval_required"
     assert failed_again["success"] is False
+
+
+def test_host_intent_same_approval_token_concurrent_dispatches_once(tmp_path, monkeypatch):
+    from core_runtime.host_intent.executor import HostIntentExecutor
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+    from ecosystem.defaultspack.domain.safety import approval
+
+    service = _authority_service(tmp_path, monkeypatch)
+    monkeypatch.setattr("core_runtime.host_intent.executor.get_authority_service", lambda: service)
+
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    broker_calls: list[dict] = []
+
+    class RaceBroker:
+        def available(self):
+            barrier.wait(timeout=5)
+            return True
+
+        def execute_intent(self, payload):
+            with lock:
+                broker_calls.append(dict(payload))
+            return {"ok": True, "result": {"status": "ran"}}
+
+    monkeypatch.setattr(ViewerBrokerClient, "from_environment", classmethod(lambda cls: RaceBroker()))
+    monkeypatch.setattr(approval, "issue_execution_token", lambda *args, **kwargs: "viewer-execution-token")
+
+    payload = {
+        "type": "host_intent",
+        "operation": "host.process.exec_guarded",
+        "args": {"argv": ["/bin/echo", "hello"]},
+        "caller": {
+            "pack_id": "third_party_pack",
+            "function_id": "run_shell",
+        },
+        "host_function_id": "host_process_exec_guarded",
+    }
+    first = HostIntentExecutor().handle(
+        payload,
+        principal_id="third_party_pack",
+        caller_pack_id="third_party_pack",
+        caller_function_id="run_shell",
+        request_context={"conversation_id": "conv-1"},
+    )
+    phrase = first["confirmation_phrase"]
+    approved = service.approve_request(
+        first["request_id"],
+        scope="once",
+        config={"confirmation_text": phrase},
+        ui_operator=_ui_operator(first["request_id"]),
+    )
+    context = {
+        "conversation_id": "conv-1",
+        **_authority_context("host.process.exec_guarded", first["request_id"], approved["token"]),
+    }
+
+    results: list[dict] = []
+    errors: list[BaseException] = []
+
+    def run_once():
+        try:
+            results.append(
+                HostIntentExecutor().handle(
+                    payload,
+                    principal_id="third_party_pack",
+                    caller_pack_id="third_party_pack",
+                    caller_function_id="run_shell",
+                    request_context=context,
+                )
+            )
+        except BaseException as exc:  # pragma: no cover - assertion below reports thread failures.
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run_once), threading.Thread(target=run_once)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert errors == []
+    assert len(results) == 2
+    assert sum(1 for result in results if result.get("status") == "executed") == 1
+    assert sum(1 for result in results if result.get("status") == "approval_required") == 1
+    assert len(broker_calls) == 1
 
 
 def test_host_intent_executor_fails_closed_without_viewer_broker(monkeypatch):
@@ -858,6 +1049,10 @@ def test_direct_host_function_from_non_host_pack_becomes_critical_authority_requ
         principal_id="third_party_pack",
         request_id="req-host",
         start_time=time.time(),
+        args={
+            "argv": ["/bin/echo", "hello"],
+            "env": {"API_KEY": "secret-value-must-not-leak"},
+        },
     )
 
     assert response is not None
@@ -868,6 +1063,72 @@ def test_direct_host_function_from_non_host_pack_becomes_critical_authority_requ
     assert response.output["permission_id"] == "host.process.exec_guarded"
     assert response.output["typed_confirmation_required"] is True
     assert authority.calls[0]["permission_id"] == "host.process.exec_guarded"
+    resource = authority.calls[0]["resource"]
+    assert resource["args_hash"] == executor._host_execution_args_hash(
+        {
+            "argv": ["/bin/echo", "hello"],
+            "env": {"API_KEY": "secret-value-must-not-leak"},
+        }
+    )
+    assert resource["args_summary"]["keys"] == ["argv", "env"]
+    assert "secret-value-must-not-leak" not in json.dumps(resource, ensure_ascii=False)
+
+
+def test_direct_host_args_hash_is_canonical_and_approval_bound(tmp_path, monkeypatch):
+    service = _authority_service(tmp_path, monkeypatch)
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
+    executor = _executor_for_direct_host_retry()
+    entry = _direct_host_entry()
+    safe_args = {"payload": {"a": 1, "b": 2}}
+    same_safe_args_different_order = {"payload": {"b": 2, "a": 1}}
+    changed_args = {"payload": {"a": 1, "b": 3}}
+
+    assert executor._host_execution_args_hash(safe_args) == executor._host_execution_args_hash(
+        same_safe_args_different_order
+    )
+    assert executor._host_execution_args_hash(safe_args) != executor._host_execution_args_hash(changed_args)
+
+    first = executor._unified_execute(
+        entry,
+        "third_party_pack",
+        {"args": safe_args, "request_id": "run-1"},
+        time.time(),
+    )
+    assert first.error_type == "critical_host_confirmation_required"
+    approved = service.approve_request(
+        first.output["request_id"],
+        scope="once",
+        config={"confirmation_text": first.output["confirmation_phrase"]},
+        ui_operator=_ui_operator(first.output["request_id"]),
+    )
+    context = _authority_context("host.process.exec_guarded", first.output["request_id"], approved["token"])
+
+    changed_retry = executor._unified_execute(
+        entry,
+        "third_party_pack",
+        {
+            "args": changed_args,
+            "request_id": "run-2",
+            "context": context,
+        },
+        time.time(),
+    )
+    assert changed_retry.success is False
+    assert changed_retry.error_type == "critical_host_confirmation_required"
+    assert changed_retry.output["request_id"] != first.output["request_id"]
+
+    original_retry = executor._unified_execute(
+        entry,
+        "third_party_pack",
+        {
+            "args": same_safe_args_different_order,
+            "request_id": "run-3",
+            "context": context,
+        },
+        time.time(),
+    )
+    assert original_retry.success is True
+    assert original_retry.output == {"executed": True}
 
 
 def test_direct_host_boundary_consumes_approved_retry_token(tmp_path, monkeypatch):
