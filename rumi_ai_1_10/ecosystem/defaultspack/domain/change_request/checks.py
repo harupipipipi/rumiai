@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ntpath
 import os
 import shlex
 import subprocess
@@ -22,6 +23,16 @@ WRITE_FLAGS = {
     "--snapshot-update",
     "--bless",
     "-w",
+}
+PATH_VALUE_OPTIONS = {
+    "--manifest-path",
+    "--config",
+    "--config-file",
+    "--ignore-path",
+    "--rootdir",
+    "--basetemp",
+    "--junitxml",
+    "--cov-config",
 }
 ALLOWED_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("npm", "test"),
@@ -67,8 +78,8 @@ def suggested_checks_for(workspace_root: str, snapshot: dict[str, Any] | None = 
 
 
 def run_allowed_check(workspace_root: str, command: Any, *, cwd: str | None = None) -> dict[str, Any]:
-    args = validate_check_command(command)
     check_cwd = resolve_check_cwd(workspace_root, cwd)
+    args = validate_check_command(command, workspace_root=workspace_root, cwd=str(check_cwd))
     started = _utc_now()
     start = time.monotonic()
     try:
@@ -121,7 +132,7 @@ def run_allowed_check(workspace_root: str, command: Any, *, cwd: str | None = No
         }
 
 
-def validate_check_command(command: Any) -> list[str]:
+def validate_check_command(command: Any, *, workspace_root: str | None = None, cwd: str | None = None) -> list[str]:
     if isinstance(command, (list, tuple)):
         args = [str(item).strip() for item in command if str(item).strip()]
     else:
@@ -139,7 +150,7 @@ def validate_check_command(command: Any) -> list[str]:
     normalized = tuple(args)
     for prefix in ALLOWED_PREFIXES:
         if normalized[: len(prefix)] == prefix:
-            _validate_extra_args(args[len(prefix) :])
+            _validate_extra_args(args[len(prefix) :], workspace_root=workspace_root, cwd=cwd)
             return args
     raise ValueError("check command is not in the Rumi Review allowlist")
 
@@ -157,12 +168,56 @@ def resolve_check_cwd(workspace_root: str, cwd: str | None) -> Path:
     return Path(resolved)
 
 
-def _validate_extra_args(args: list[str]) -> None:
+def _validate_extra_args(args: list[str], *, workspace_root: str | None = None, cwd: str | None = None) -> None:
+    pending_path_option = ""
     for arg in args:
         if arg in {";", "&&", "||", "|", ">", "<"}:
             raise ValueError("check command contains unsupported shell syntax")
-        if str(arg).startswith(("../", "~/")) or os.path.isabs(str(arg)):
-            raise ValueError("check command arguments must stay inside the workspace")
+        text = str(arg)
+        if pending_path_option:
+            _validate_workspace_arg_path(text, workspace_root=workspace_root, cwd=cwd)
+            pending_path_option = ""
+            continue
+        key, sep, value = text.partition("=")
+        if sep and key in PATH_VALUE_OPTIONS:
+            _validate_workspace_arg_path(value, workspace_root=workspace_root, cwd=cwd)
+            continue
+        if text in PATH_VALUE_OPTIONS:
+            pending_path_option = text
+            continue
+        _reject_obvious_path_escape(text)
+    if pending_path_option:
+        raise ValueError("check command path option requires a value")
+
+
+def _reject_obvious_path_escape(value: str) -> None:
+    text = str(value or "")
+    if text.startswith(("~/", "~\\")) or os.path.isabs(text) or ntpath.isabs(text):
+        raise ValueError("check command arguments must stay inside the workspace")
+    parts = text.replace("\\", "/").split("/")
+    if ".." in parts:
+        raise ValueError("check command arguments must stay inside the workspace")
+
+
+def _validate_workspace_arg_path(value: str, *, workspace_root: str | None, cwd: str | None) -> None:
+    _reject_obvious_path_escape(value)
+    if not workspace_root:
+        return
+    root = Path(workspace_root).expanduser().resolve()
+    base = Path(cwd).expanduser().resolve() if cwd else root
+    jail = WorkspaceJail(root)
+    if Path(value).expanduser().is_absolute():
+        resolved = jail.resolve(value, allow_absolute=True)
+    else:
+        try:
+            relative = base.relative_to(root) / value
+        except ValueError:
+            relative = Path(value)
+        resolved = jail.resolve(relative.as_posix(), allow_absolute=False)
+    rel = jail.relative(resolved)
+    reason = jail.restriction_reason(rel)
+    if reason:
+        raise ValueError("check command arguments are restricted: " + reason)
 
 
 def _snapshot_paths(snapshot: dict[str, Any] | None) -> list[str]:

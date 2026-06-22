@@ -9,14 +9,20 @@ from domain.company.runtime_store import CompanyRuntimeStore
 from domain.company.store import CompanyStore
 from domain.coding.file_ops import FileOps
 from domain.coding.git_ops import GitOps
+from domain.coding.workspace_policy import WorkspaceTrustRequired, require_registered_trusted_workspace, require_trusted_workspace
 from domain.coding.workspace_resolver import WorkspaceResolver
 
 from .models import team_metadata
+from .service import SubagentTeamService, is_denial
+
+
+class ChannelHistoryAccessError(PermissionError):
+    code = "CHANNEL_HISTORY_FORBIDDEN"
 
 
 def build_file_tree(input_data: dict[str, Any] | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
     data = input_data if isinstance(input_data, dict) else {}
-    resolution = WorkspaceResolver().resolve(data, context or {}, allow_cwd_fallback=True)
+    resolution = _resolve_trusted_workspace(data, context or {}, operation="read subagent file tree")
     directory = str(data.get("directory") or ".")
     recursive = bool(data.get("recursive", True))
     limit = data.get("limit", 400)
@@ -64,12 +70,12 @@ def open_file_tree_node(input_data: dict[str, Any] | None = None, context: dict[
     data = input_data if isinstance(input_data, dict) else {}
     node_kind, node_id = _node_kind_and_id(data)
     if node_kind in {"history", "channel"}:
-        return _open_history_node(data, node_kind=node_kind, node_id=node_id)
+        return _open_history_node(data, context or {}, node_kind=node_kind, node_id=node_id)
     return _open_file_node(data, context or {}, node_id=node_id)
 
 
 def _open_file_node(data: dict[str, Any], context: dict[str, Any], *, node_id: str) -> dict[str, Any]:
-    resolution = WorkspaceResolver().resolve(data, context, allow_cwd_fallback=True)
+    resolution = _resolve_trusted_workspace(data, context, operation="open subagent file tree node")
     ops = FileOps(resolution.root_path)
     path = str(data.get("path") or data.get("file_path") or node_id or ".").strip() or "."
     root_hash = hashlib.sha256(str(resolution.root_path or "").encode("utf-8")).hexdigest()[:16]
@@ -117,7 +123,7 @@ def _open_file_node(data: dict[str, Any], context: dict[str, Any], *, node_id: s
     }
 
 
-def _open_history_node(data: dict[str, Any], *, node_kind: str, node_id: str) -> dict[str, Any]:
+def _open_history_node(data: dict[str, Any], context: dict[str, Any], *, node_kind: str, node_id: str) -> dict[str, Any]:
     company_id = str(data.get("company_id") or "").strip()
     if not company_id:
         raise ValueError("company_id is required for history/channel nodes")
@@ -128,6 +134,9 @@ def _open_history_node(data: dict[str, Any], *, node_kind: str, node_id: str) ->
         channel_id = channel_id.split(":", 1)[1]
     if channel_id.startswith("history:"):
         channel_id = channel_id.split(":", 1)[1] or DEFAULT_CHANNEL_ID
+    access = SubagentTeamService().authorize_channel_read(company_id, channel_id, context=context)
+    if is_denial(access):
+        raise ChannelHistoryAccessError(str(access.get("message") or "channel history access denied"))
     limit = data.get("limit", 50)
     try:
         limit = max(1, int(limit))
@@ -151,6 +160,25 @@ def _open_history_node(data: dict[str, Any], *, node_kind: str, node_id: str) ->
         },
         "policy": {"read_only": True},
     }
+
+
+def _resolve_trusted_workspace(data: dict[str, Any], context: dict[str, Any], *, operation: str):
+    resolution = WorkspaceResolver().resolve(data, context, allow_cwd_fallback=True)
+    if _allows_unregistered_workspace_root(context):
+        if resolution.uses_workspace_id:
+            require_trusted_workspace(resolution, operation=operation)
+        return resolution
+    if not resolution.uses_workspace_id:
+        raise WorkspaceTrustRequired("registered trusted workspace_id required for " + operation)
+    return require_registered_trusted_workspace(resolution, operation=operation)
+
+
+def _allows_unregistered_workspace_root(context: dict[str, Any]) -> bool:
+    return bool(
+        context.get("trusted_internal")
+        or context.get("_trusted_internal")
+        or context.get("allow_unregistered_workspace_root")
+    )
 
 
 def _counts(files: list[dict[str, Any]], git_status: dict[str, Any] | None) -> dict[str, int]:

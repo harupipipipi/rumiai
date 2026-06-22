@@ -8,7 +8,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .models import SCHEMA_VERSION, normalize_record, sanitize_change_request_id, utc_now
 
@@ -105,6 +105,23 @@ class ChangeRequestStore:
             record.update(updates)
             record["updated_at"] = utc_now()
             normalized = normalize_record(record)
+            data["change_requests"][cr_id] = normalized
+            data["updated_at"] = normalized["updated_at"]
+            self._save_unlocked(data)
+        return copy.deepcopy(normalized)
+
+    def mutate(self, change_request_id: str, mutator: Callable[[dict[str, Any]], dict[str, Any] | None]) -> dict[str, Any]:
+        cr_id = sanitize_change_request_id(change_request_id)
+        with self._lock:
+            data = self._load_unlocked()
+            record = data["change_requests"].get(cr_id)
+            if record is None:
+                raise KeyError(cr_id)
+            draft = copy.deepcopy(record)
+            result = mutator(draft)
+            next_record = result if isinstance(result, dict) else draft
+            next_record["updated_at"] = utc_now()
+            normalized = normalize_record(next_record)
             data["change_requests"][cr_id] = normalized
             data["updated_at"] = normalized["updated_at"]
             self._save_unlocked(data)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from blocks._common import error, ok
 from blocks.change_request._helpers import invalid_input_response, not_found_response, service, service_error_response
+from blocks.coding._workspace import workspace_error_response
 
 
 def run(input_data, context=None):
@@ -28,4 +29,7 @@ def run(input_data, context=None):
     except ValueError as exc:
         return invalid_input_response(exc)
     except Exception as exc:
+        workspace_error = workspace_error_response(exc, error)
+        if workspace_error:
+            return workspace_error
         return service_error_response(exc)

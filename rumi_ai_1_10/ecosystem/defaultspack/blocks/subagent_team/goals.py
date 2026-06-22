@@ -57,6 +57,8 @@ def run(input_data, context):
                 if key not in {"company_id", "action", "goal_id", "task_id", "id"}
             }
             goal = service.update_goal(company_id, str(goal_id), updates)
+            if is_denied(goal):
+                return denied(goal)
             if goal is None:
                 return error("goal not found: " + str(goal_id), "NOT_FOUND")
             return ok(goal)

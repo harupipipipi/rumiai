@@ -266,6 +266,26 @@ def test_store_normalizes_legacy_check_full_log_to_bounded_refs(tmp_path):
     assert len(stored_check["log_tail"]) <= 12000
 
 
+def test_store_mutate_applies_read_modify_write_under_single_lock(tmp_path):
+    store_cls = _change_request_store_class()
+    store = store_cls(tmp_path / "change_requests.json")
+    store.create({"id": "cr_test", "title": "Atomic update", "comments": []})
+
+    def add_comment(body: str):
+        def mutate(record: dict[str, Any]) -> dict[str, Any]:
+            comments = list(record.get("comments") or [])
+            comments.append({"id": body, "thread_id": body, "kind": "comment", "body": body})
+            record["comments"] = comments
+            return record
+
+        return store.mutate("cr_test", mutate)
+
+    add_comment("first")
+    updated = add_comment("second")
+
+    assert [comment["body"] for comment in updated["comments"]] == ["first", "second"]
+
+
 def test_synthetic_untracked_diff_looks_like_new_file_diff(tmp_path, monkeypatch):
     workspace = tmp_path / "reviewed-repo"
     workspace.mkdir()
@@ -379,3 +399,24 @@ def test_service_payloads_hide_absolute_roots_and_drop_patch_metadata(tmp_path, 
     assert "normalized_patch" in listed[0]["latest_snapshot"]
     assert "leaked_path" not in (patched.get("metadata") or {})
     assert "arbitrary" not in (patched.get("metadata") or {})
+
+
+def test_rename_snapshot_preserves_previous_path_for_reviewed_commit_paths(tmp_path, monkeypatch):
+    workspace = tmp_path / "reviewed-repo"
+    workspace.mkdir()
+    _init_git_repo(workspace)
+    (workspace / "old_name.txt").write_text("clean\n", encoding="utf-8")
+    _git_commit_all(workspace)
+    subprocess.run(["git", "mv", "old_name.txt", "new_name.txt"], cwd=workspace, check=True)
+    (workspace / "new_name.txt").write_text("clean\nrenamed\n", encoding="utf-8")
+
+    store = _make_store(tmp_path, monkeypatch)
+    created = _create_change_request(store, workspace)
+    snapshot = _snapshot(created)
+    stat = next(item for item in snapshot["file_stats"] if item["path"] == "new_name.txt")
+
+    from domain.change_request.service import selected_snapshot_paths
+
+    assert stat["status"] == "renamed"
+    assert stat["previousPath"] == "old_name.txt"
+    assert selected_snapshot_paths(snapshot) == ["old_name.txt", "new_name.txt"]

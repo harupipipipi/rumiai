@@ -12,7 +12,7 @@ def run(input_data, context):
             return ok(open_file_tree_node(input_data, context if isinstance(context, dict) else {}))
         return ok(build_file_tree(input_data, context if isinstance(context, dict) else {}))
     except PermissionError as exc:
-        return error(str(exc), "PATH_RESTRICTED")
+        return error(str(exc), str(getattr(exc, "code", "") or "PATH_RESTRICTED"))
     except ValueError as exc:
         return error(str(exc), "PATH_TRAVERSAL")
     except Exception as exc:

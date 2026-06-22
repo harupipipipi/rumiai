@@ -23,6 +23,7 @@ class StatusEntry:
     git_path: str
     path: str
     previous_path: str | None = None
+    previous_git_path: str | None = None
 
 
 class ChangeRequestSnapshotter:
@@ -40,7 +41,7 @@ class ChangeRequestSnapshotter:
         tracked_entries = [entry for entry in entries if entry.xy != "??"]
         untracked_entries = self._untracked_entries(entries)
 
-        tracked_patch_chunks = [self._tracked_patch(entry.git_path) for entry in tracked_entries]
+        tracked_patch_chunks = [self._tracked_patch(entry) for entry in tracked_entries]
         untracked_chunks = []
         untracked_hashes: dict[str, str] = {}
         file_stats = []
@@ -137,7 +138,16 @@ class ChangeRequestSnapshotter:
             if not visible:
                 continue
             previous = self._visible_workspace_path(paths[0]) if len(paths) > 1 else None
-            entries.append(StatusEntry(xy=xy, git_path=git_path, path=visible, previous_path=previous))
+            previous_git_path = paths[0] if len(paths) > 1 else None
+            entries.append(
+                StatusEntry(
+                    xy=xy,
+                    git_path=git_path,
+                    path=visible,
+                    previous_path=previous,
+                    previous_git_path=previous_git_path,
+                )
+            )
         return entries
 
     def _untracked_entries(self, status_entries: list[StatusEntry]) -> list[StatusEntry]:
@@ -166,16 +176,17 @@ class ChangeRequestSnapshotter:
             return ""
         return rel
 
-    def _tracked_patch(self, git_path: str) -> str:
+    def _tracked_patch(self, entry: StatusEntry) -> str:
+        pathspecs = _tracked_pathspecs(entry)
         return self._run_git(
-            ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", git_path]
+            ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", *pathspecs]
         )
 
     def _tracked_file_stat(self, entry: StatusEntry) -> dict[str, Any]:
         additions = 0
         deletions = 0
         binary = False
-        numstat = self._run_git(["diff", "--numstat", "HEAD", "--", entry.git_path])
+        numstat = self._run_git(["diff", "--numstat", "HEAD", "--", *_tracked_pathspecs(entry)])
         for line in numstat.splitlines():
             parts = line.split("\t")
             if len(parts) < 3:
@@ -247,6 +258,11 @@ def normalize_patch(patch: str) -> str:
     if text and not text.endswith("\n"):
         text += "\n"
     return text
+
+
+def _tracked_pathspecs(entry: StatusEntry) -> list[str]:
+    paths = [entry.previous_git_path, entry.git_path] if entry.previous_git_path else [entry.git_path]
+    return [str(path) for path in paths if str(path or "").strip()]
 
 
 def working_tree_hash_for(

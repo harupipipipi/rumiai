@@ -74,6 +74,17 @@ def test_change_request_api_routes_are_registered_when_backend_exists():
             assert forbidden_term not in target_text
 
 
+def test_change_request_run_check_routes_are_sensitive_local_routes():
+    from domain.safety.local_guard import is_sensitive_coding_path
+
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/checks", "POST") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/checks", "GET") is False
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/checks/run", "POST") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/checks/run-check", "POST") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/run-check", "POST") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/checks/run", "GET") is False
+
+
 def test_change_request_commit_route_is_default_off_and_flagged(monkeypatch):
     if not _has_change_request_backend():
         pytest.skip("change_request backend implementation is not present yet")

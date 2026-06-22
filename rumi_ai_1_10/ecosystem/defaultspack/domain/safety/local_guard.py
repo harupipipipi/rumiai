@@ -121,6 +121,8 @@ def is_sensitive_coding_path(path: str, method: str | None = None) -> bool:
         return normalized_method in methods
     if _is_workspace_member_mutation_path(normalized_path, normalized_method):
         return True
+    if _is_change_request_check_run_path(normalized_path, normalized_method):
+        return True
     return is_sensitive_local_path(normalized_path, method)
 
 
@@ -167,6 +169,23 @@ def _is_workspace_member_mutation_path(path: str, method: str | None) -> bool:
     if len(parts) == 1:
         return method is None or method == "PUT"
     if len(parts) == 2 and parts[1] in {"select", "trust"}:
+        return method is None or method == "POST"
+    return False
+
+
+def _is_change_request_check_run_path(path: str, method: str | None) -> bool:
+    prefix = "/api/change-requests/"
+    if not path.startswith(prefix):
+        return False
+    suffix = path[len(prefix):].strip("/")
+    if not suffix:
+        return False
+    parts = suffix.split("/")
+    if len(parts) == 2 and parts[1] == "checks":
+        return method is None or method == "POST"
+    if len(parts) == 3 and parts[1] == "checks" and parts[2] in {"run", "run-check"}:
+        return method is None or method == "POST"
+    if len(parts) == 2 and parts[1] == "run-check":
         return method is None or method == "POST"
     return False
 

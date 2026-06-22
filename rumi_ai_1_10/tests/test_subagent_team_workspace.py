@@ -40,6 +40,7 @@ def _configure_temp_runtime(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(tmp_path / "agent_runtime"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "coding_workspaces.json"))
     _reset_team_workspace_singletons()
 
 
@@ -56,6 +57,13 @@ def _create_workspace(*, settings: dict[str, Any] | None = None) -> tuple[Any, A
         metadata={"surface": "subagent_team_workspace"},
     )
     return store, runtime_store, company
+
+
+def _trusted_coding_workspace(workspace: Path, workspace_id: str = "trusted-team-workspace") -> str:
+    from domain.coding.workspace_store import WorkspaceStore
+
+    WorkspaceStore().create(workspace, workspace_id=workspace_id, trusted=True)
+    return workspace_id
 
 
 def test_team_workspace_short_ids_are_stable_and_non_uuid():
@@ -181,15 +189,17 @@ def test_creator_preview_returns_plan_without_workspace_side_effects(tmp_path, m
     assert before_messages == after_messages
 
 
-def test_file_tree_payload_hides_absolute_workspace_root(tmp_path):
+def test_file_tree_payload_hides_absolute_workspace_root(tmp_path, monkeypatch):
+    _configure_temp_runtime(tmp_path, monkeypatch)
     workspace = tmp_path / "team-workspace"
     workspace.mkdir()
     (workspace / "notes.txt").write_text("hello\n", encoding="utf-8")
+    workspace_id = _trusted_coding_workspace(workspace)
 
     from domain.subagent_team.file_tree import build_file_tree
 
     payload = build_file_tree(
-        {"workspace_root": str(workspace), "directory": ".", "include_git": False},
+        {"workspace_id": workspace_id, "directory": ".", "include_git": False},
         {},
     )
     encoded = json.dumps(payload, sort_keys=True)
@@ -198,7 +208,7 @@ def test_file_tree_payload_hides_absolute_workspace_root(tmp_path):
     assert "/Users/" not in encoded
     assert payload["root"] == "."
     assert str(payload["workspace_root"]).startswith("workspace:")
-    assert str(payload["workspace_id"]).startswith("ws_")
+    assert str(payload["workspace_id"]) == workspace_id
     assert payload["files"][0]["path"] == "notes.txt"
 
 
@@ -208,13 +218,26 @@ def test_file_tree_open_returns_sanitized_file_preview_and_channel_history(tmp_p
     workspace = tmp_path / "team-workspace"
     workspace.mkdir()
     (workspace / "notes.txt").write_text(f"root={workspace.resolve()}\nhello\n", encoding="utf-8")
+    workspace_id = _trusted_coding_workspace(workspace)
 
     from blocks.subagent_team import file_tree as file_tree_block
+
+    raw_open = file_tree_block.run(
+        {
+            "action": "open",
+            "workspace_root": str(workspace),
+            "path": "notes.txt",
+            "include_git": False,
+        },
+        {},
+    )
+    assert raw_open["status"] == "error"
+    assert raw_open["error"]["code"] == "WORKSPACE_UNTRUSTED"
 
     opened_file = file_tree_block.run(
         {
             "action": "open",
-            "workspace_root": str(workspace),
+            "workspace_id": workspace_id,
             "path": "notes.txt",
             "include_git": False,
         },
@@ -240,7 +263,7 @@ def test_file_tree_open_returns_sanitized_file_preview_and_channel_history(tmp_p
             "node_type": "channel",
             "node_id": "channel:ops-company",
         },
-        {},
+        {"actor_id": "project_manager"},
     )
     assert opened_history["status"] == "ok"
     assert opened_history["data"]["kind"] == "channel"
@@ -254,6 +277,7 @@ def test_file_tree_includes_team_workspace_virtual_history(tmp_path, monkeypatch
     workspace = tmp_path / "team-workspace"
     workspace.mkdir()
     (workspace / "notes.txt").write_text("hello\n", encoding="utf-8")
+    workspace_id = _trusted_coding_workspace(workspace)
 
     from domain.subagent_team.service import SubagentTeamService
     from domain.subagent_team.file_tree import build_file_tree
@@ -272,7 +296,7 @@ def test_file_tree_includes_team_workspace_virtual_history(tmp_path, monkeypatch
     )
 
     tree = build_file_tree(
-        {"workspace_root": str(workspace), "company_id": company["id"], "include_git": False},
+        {"workspace_id": workspace_id, "company_id": company["id"], "include_git": False},
         {},
     )
 
@@ -330,6 +354,54 @@ def test_channel_check_context_includes_membership_pm_gate_and_rich_policy(tmp_p
     assert context["pm_required"] is False
     assert context["rich_allowed"] is True
     assert context["task_completion_condition"]["pm_receipt_grants_user_approval"] is False
+
+
+def test_channel_and_dm_history_reads_require_trusted_member_or_pm_actor(tmp_path, monkeypatch):
+    _configure_temp_runtime(tmp_path, monkeypatch)
+    store, runtime_store, company = _create_workspace()
+
+    from domain.subagent_team.service import SubagentTeamService
+
+    service = SubagentTeamService(company_store=store, runtime_store=runtime_store)
+    service.upsert_channel(
+        company["id"],
+        {"id": "private-build", "name": "Private Build", "members": ["project_manager", "coding_engineer"]},
+    )
+    runtime_store.add_message(
+        company["id"],
+        channel_id="private-build",
+        sender_id="project_manager",
+        content="private history",
+    )
+
+    missing_actor = service.list_messages(company["id"], {"channel_id": "private-build"})
+    outsider = service.list_messages(company["id"], {"channel_id": "private-build"}, context={"actor_id": "research_specialist"})
+    member = service.list_messages(company["id"], {"channel_id": "private-build"}, context={"actor_id": "coding_engineer"})
+    pm = service.list_messages(company["id"], {"channel_id": "private-build"}, context={"actor_id": "project_manager"})
+
+    assert missing_actor["denied"] is True
+    assert missing_actor["code"] == "ACTOR_REQUIRED"
+    assert outsider["denied"] is True
+    assert outsider["code"] == "CHANNEL_MEMBERSHIP_REQUIRED"
+    assert member[0][0]["content"] == "private history"
+    assert pm[0][0]["content"] == "private history"
+
+    dm = service.ensure_dm(
+        company["id"],
+        {"sender_id": "project_manager", "agent_id": "coding_engineer"},
+    )
+    runtime_store.add_message(
+        company["id"],
+        channel_id=dm["id"],
+        sender_id="project_manager",
+        content="dm history",
+    )
+    dm_outsider = service.list_messages(company["id"], {"channel_id": dm["id"]}, context={"actor_id": "reviewer"})
+    dm_member = service.list_messages(company["id"], {"channel_id": dm["id"]}, context={"actor_id": "coding_engineer"})
+
+    assert dm_outsider["denied"] is True
+    assert dm_outsider["code"] == "DM_PARTICIPANT_REQUIRED"
+    assert dm_member[0][0]["content"] == "dm history"
 
 
 def test_pm_decision_requires_stored_manager_actor_and_ignores_client_approval_flags(tmp_path, monkeypatch):
@@ -407,6 +479,61 @@ def test_pm_decision_requires_stored_manager_actor_and_ignores_client_approval_f
     assert metadata["approval_receipt_id"].startswith("pmr_")
     assert metadata["approval_receipt"]["actor_id"] == "project_manager"
     assert metadata["approval_receipt"]["grants_user_approval"] is False
+
+
+def test_goal_generic_update_cannot_bypass_pm_decision_route(tmp_path, monkeypatch):
+    _configure_temp_runtime(tmp_path, monkeypatch)
+    _, runtime_store, company = _create_workspace()
+
+    from blocks.subagent_team import goals as goals_block
+
+    task = runtime_store.create_task(
+        company["id"],
+        channel_id="ops-company",
+        title="Guarded goal",
+        description="Needs PM decision",
+        target_agent_ids=["coding_engineer"],
+        source="goal",
+        status="waiting_approval",
+    )
+
+    blocked_status = goals_block.run(
+        {
+            "company_id": company["id"],
+            "action": "update",
+            "goal_id": task["task_id"],
+            "updates": {"status": "queued", "approved": True},
+        },
+        {"actor_id": "coding_engineer"},
+    )
+    blocked_metadata = goals_block.run(
+        {
+            "company_id": company["id"],
+            "action": "update",
+            "goal_id": task["task_id"],
+            "updates": {"metadata": {"approval": "approved", "approval_receipt_id": "client"}},
+        },
+        {"actor_id": "coding_engineer"},
+    )
+    safe_title = goals_block.run(
+        {
+            "company_id": company["id"],
+            "action": "update",
+            "goal_id": task["task_id"],
+            "updates": {"title": "Retitled guarded goal"},
+        },
+        {"actor_id": "coding_engineer"},
+    )
+    stored = runtime_store.get_task(task["task_id"], company_id=company["id"])
+
+    assert blocked_status["status"] == "error"
+    assert blocked_status["error"]["code"] == "GOAL_DECISION_REQUIRED"
+    assert blocked_metadata["status"] == "error"
+    assert blocked_metadata["error"]["code"] == "GOAL_DECISION_REQUIRED"
+    assert safe_title["status"] == "ok"
+    assert safe_title["data"]["title"] == "Retitled guarded goal"
+    assert stored["status"] == "waiting_approval"
+    assert "approval" not in (stored.get("metadata") or {})
 
 
 def test_rich_state_persists_and_creator_cannot_self_enable_or_exceed_cap(tmp_path, monkeypatch):

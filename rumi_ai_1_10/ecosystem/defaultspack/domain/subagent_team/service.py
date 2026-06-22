@@ -293,14 +293,18 @@ class SubagentTeamService:
         agent["metadata"] = lifecycle_update(agent.get("metadata"), state="archived", actor_id=actor_id)
         return self.company_store.upsert_agent(company_id, agent)
 
-    def list_messages(self, company_id: str, data: dict[str, Any]) -> tuple[list[dict[str, Any]], int] | None:
+    def list_messages(self, company_id: str, data: dict[str, Any], *, context: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], int] | dict[str, Any] | None:
         if self.company_store.get_company(company_id) is None:
             return None
+        channel_id = str(data.get("channel_id") or DEFAULT_CHANNEL_ID)
+        auth = self.authorize_channel_read(company_id, channel_id, context=context)
+        if is_denial(auth):
+            return auth
         limit = int(data.get("limit") if isinstance(data.get("limit"), int) else 50)
         offset = int(data.get("offset") if isinstance(data.get("offset"), int) else 0)
         return self.runtime_store.list_messages(
             company_id,
-            channel_id=data.get("channel_id"),
+            channel_id=channel_id,
             thread_id=data.get("thread_id"),
             limit=max(1, limit),
             offset=max(0, offset),
@@ -528,11 +532,12 @@ class SubagentTeamService:
     def update_goal(self, company_id: str, goal_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
         if self.company_store.get_company(company_id) is None:
             return None
-        clean = dict(updates or {})
-        metadata = clean.get("metadata") if isinstance(clean.get("metadata"), dict) else {}
-        if "status" in clean:
-            metadata = lifecycle_update(metadata, state=str(clean["status"]), actor_id=str(clean.get("actor_id") or "creator"))
-            clean["metadata"] = metadata
+        clean_or_denied = sanitize_goal_patch_updates(updates)
+        if is_denial(clean_or_denied):
+            return clean_or_denied
+        clean = clean_or_denied
+        if not clean:
+            return self.get_goal(company_id, goal_id)
         return self.runtime_store.update_task(goal_id, clean, company_id=company_id)
 
     def decide_goal(
@@ -752,6 +757,30 @@ class SubagentTeamService:
             "reason": reason,
         }
 
+    def authorize_channel_read(self, company_id: str, channel_id: str, *, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        actor_id = trusted_actor_from_context(context)
+        if not actor_id:
+            return _deny("trusted context actor is required to read channel history", "ACTOR_REQUIRED")
+        channel_id = str(channel_id or DEFAULT_CHANNEL_ID).strip() or DEFAULT_CHANNEL_ID
+        channel = self.company_store.get_channel(company_id, channel_id)
+        if channel is None:
+            return _deny("channel not found: " + channel_id, "CHANNEL_NOT_FOUND")
+        auth = self.authorize_pm_actor(company_id, actor_id, channel_id=channel_id)
+        if auth["allowed"]:
+            return {**auth, "allowed": True, "read_scope": "pm"}
+        actor = self.resolve_agent_id(company_id, actor_id) or str(actor_id or "").strip().lstrip("@")
+        members = self._resolved_channel_members(company_id, channel)
+        if actor in members:
+            return {**auth, "allowed": True, "read_scope": "member", "actor_id": actor}
+        visibility = str(channel.get("visibility") or "")
+        code = "DM_PARTICIPANT_REQUIRED" if _is_dm(channel) or visibility == "dm" else "CHANNEL_MEMBERSHIP_REQUIRED"
+        return _deny(
+            "actor is not a participant of channel history: " + actor,
+            code,
+            auth=auth,
+            channel_id=channel_id,
+        )
+
     def _unresolved_target_ids(self, company_id: str, target_agent_ids: list[str]) -> list[str]:
         if not target_agent_ids:
             return []
@@ -919,6 +948,86 @@ def _deny(message: str, code: str, **extra: Any) -> dict[str, Any]:
         "message": str(message or "denied"),
         **extra,
     }
+
+
+GOAL_PATCH_ALLOWED_KEYS = {"title", "description", "priority", "thread_id", "metadata"}
+GOAL_PATCH_BLOCKED_KEYS = {
+    "status",
+    "target_agent_ids",
+    "source",
+    "channel_id",
+    "created_at",
+    "updated_at",
+    "completed_at",
+    "closed_at",
+    "approved_at",
+    "approval",
+    "approved",
+    "approval_token",
+    "_tool_server_approved",
+    "approval_receipt",
+    "approval_receipt_id",
+    "approval_receipts",
+    "channel_check",
+    "task_completion_condition",
+    "pm_gate",
+    "actor_id",
+    "sender_id",
+}
+GOAL_PATCH_BLOCKED_METADATA_KEYS = {
+    "approval",
+    "approval_receipt",
+    "approval_receipt_id",
+    "approval_receipts",
+    "channel_check",
+    "task_completion_condition",
+    "pm_gate",
+    "lifecycle",
+    "status",
+    "state",
+}
+
+
+def sanitize_goal_patch_updates(updates: dict[str, Any] | None) -> dict[str, Any]:
+    raw = dict(updates or {})
+    blocked = sorted(
+        key
+        for key in raw
+        if key in GOAL_PATCH_BLOCKED_KEYS
+        or key.startswith("approval_")
+        or key.startswith("metadata.approval")
+        or key.startswith("lifecycle_")
+    )
+    if blocked:
+        return _deny(
+            "goal lifecycle, approval, and target changes must use the PM decision route",
+            "GOAL_DECISION_REQUIRED",
+            blocked_fields=blocked,
+        )
+    clean: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key not in GOAL_PATCH_ALLOWED_KEYS:
+            continue
+        if key == "metadata":
+            if not isinstance(value, dict):
+                continue
+            metadata_blocked = sorted(
+                meta_key
+                for meta_key in value
+                if meta_key in GOAL_PATCH_BLOCKED_METADATA_KEYS
+                or str(meta_key).startswith("approval")
+                or str(meta_key).startswith("lifecycle")
+            )
+            if metadata_blocked:
+                return _deny(
+                    "goal approval metadata must use the PM decision route",
+                    "GOAL_DECISION_REQUIRED",
+                    blocked_fields=["metadata." + key for key in metadata_blocked],
+                )
+            clean["metadata"] = dict(value)
+            continue
+        clean[key] = value
+    return clean
 
 
 def is_denial(value: Any) -> bool:

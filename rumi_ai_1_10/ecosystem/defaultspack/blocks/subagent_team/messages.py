@@ -14,9 +14,11 @@ def run(input_data, context):
     service = SubagentTeamService()
     try:
         if action == "list":
-            result = service.list_messages(company_id, input_data)
+            result = service.list_messages(company_id, input_data, context=context if isinstance(context, dict) else {})
             if result is None:
                 return missing_team(company_id)
+            if is_denied(result):
+                return denied(result)
             messages, total = result
             return ok({"messages": messages, "total": total})
         if action in {"send", "create", "add"}:

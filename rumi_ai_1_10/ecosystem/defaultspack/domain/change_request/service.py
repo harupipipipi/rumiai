@@ -6,9 +6,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from domain.coding.workspace_policy import require_registered_trusted_workspace
+from domain.coding.workspace_resolver import WorkspaceResolver
 from domain.coding.git_ops import GitOps
 
-from .checks import run_allowed_check, suggested_checks_for, validate_check_command
+from .checks import run_allowed_check, suggested_checks_for
 from .models import (
     COMMENT_KIND_VALUES,
     DECISION_VALUES,
@@ -162,7 +164,6 @@ class ChangeRequestService:
         }
 
     def add_comment(self, change_request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        record = self._record_or_raise(change_request_id)
         now = utc_now()
         kind = str(payload.get("kind") or "comment").strip()
         if kind not in COMMENT_KIND_VALUES:
@@ -189,104 +190,134 @@ class ChangeRequestService:
             "created_at": now,
             "updated_at": now,
         }
-        comments = [*self._comments(record), comment]
-        threads = ensure_thread(self._threads(record), thread_id, path=path, line=line_value, now=now)
-        updates = {"comments": comments, "review_threads": threads}
-        if record.get("decision") == "none" and kind == "change_request":
-            updates["decision"] = "commented"
-        updated = self._update_with_counts(change_request_id, updates)
+
+        def mutate(record: dict[str, Any]) -> dict[str, Any]:
+            record["comments"] = [*self._comments(record), comment]
+            record["review_threads"] = ensure_thread(self._threads(record), thread_id, path=path, line=line_value, now=now)
+            if record.get("decision") == "none" and kind == "change_request":
+                record["decision"] = "commented"
+            refresh_review_counts(record)
+            return record
+
+        updated = self.store.mutate(change_request_id, mutate)
         return {"change_request": self._public_record(updated), "comment": comment}
 
     def update_comment(self, change_request_id: str, comment_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        record = self._record_or_raise(change_request_id)
         now = utc_now()
-        comments = self._comments(record)
-        matched = None
-        for comment in comments:
-            if comment.get("id") == comment_id:
-                matched = comment
-                break
-        threads = self._threads(record)
-        if matched is None:
-            for thread in threads:
-                if thread.get("id") == comment_id:
-                    next_resolved = bool(payload.get("resolved", thread.get("resolved")))
-                    thread["resolved"] = next_resolved
-                    thread["updated_at"] = now
-                    for comment in comments:
-                        if comment.get("thread_id") == comment_id:
-                            comment["resolved"] = next_resolved
-                            comment["updated_at"] = now
-                    updated = self._update_with_counts(change_request_id, {"comments": comments, "review_threads": threads})
-                    return {"change_request": self._public_record(updated), "thread": thread}
-            raise KeyError(comment_id)
-        if "body" in payload or "text" in payload:
-            matched["body"] = str(payload.get("body") or payload.get("text") or "")
-        if "suggested_patch" in payload:
-            matched["suggested_patch"] = str(payload.get("suggested_patch") or "")
-        if "kind" in payload:
-            kind = str(payload.get("kind") or "").strip()
-            if kind not in COMMENT_KIND_VALUES:
-                raise ValueError("unsupported review comment kind: " + kind)
-            matched["kind"] = kind
-        if "resolved" in payload:
-            matched["resolved"] = bool(payload.get("resolved"))
-        matched["updated_at"] = now
-        threads = update_thread_resolution_from_comments(threads, comments, str(matched.get("thread_id") or ""), now)
-        updated = self._update_with_counts(change_request_id, {"comments": comments, "review_threads": threads})
-        return {"change_request": self._public_record(updated), "comment": matched}
+        result: dict[str, Any] = {}
+
+        def mutate(record: dict[str, Any]) -> dict[str, Any]:
+            comments = self._comments(record)
+            matched = None
+            for comment in comments:
+                if comment.get("id") == comment_id:
+                    matched = comment
+                    break
+            threads = self._threads(record)
+            if matched is None:
+                for thread in threads:
+                    if thread.get("id") == comment_id:
+                        next_resolved = bool(payload.get("resolved", thread.get("resolved")))
+                        thread["resolved"] = next_resolved
+                        thread["updated_at"] = now
+                        for comment in comments:
+                            if comment.get("thread_id") == comment_id:
+                                comment["resolved"] = next_resolved
+                                comment["updated_at"] = now
+                        record["comments"] = comments
+                        record["review_threads"] = threads
+                        refresh_review_counts(record)
+                        result["thread"] = thread
+                        return record
+                raise KeyError(comment_id)
+            if "body" in payload or "text" in payload:
+                matched["body"] = str(payload.get("body") or payload.get("text") or "")
+            if "suggested_patch" in payload:
+                matched["suggested_patch"] = str(payload.get("suggested_patch") or "")
+            if "kind" in payload:
+                kind = str(payload.get("kind") or "").strip()
+                if kind not in COMMENT_KIND_VALUES:
+                    raise ValueError("unsupported review comment kind: " + kind)
+                matched["kind"] = kind
+            if "resolved" in payload:
+                matched["resolved"] = bool(payload.get("resolved"))
+            matched["updated_at"] = now
+            record["comments"] = comments
+            record["review_threads"] = update_thread_resolution_from_comments(threads, comments, str(matched.get("thread_id") or ""), now)
+            refresh_review_counts(record)
+            result["comment"] = matched
+            return record
+
+        updated = self.store.mutate(change_request_id, mutate)
+        if "thread" in result:
+            return {"change_request": self._public_record(updated), "thread": result["thread"]}
+        return {"change_request": self._public_record(updated), "comment": result.get("comment")}
 
     def submit_decision(self, change_request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        record = self._record_or_raise(change_request_id)
         decision = normalize_decision(payload.get("decision") or payload.get("action") or payload.get("status"))
-        status = status_for_decision(decision, current_status=str(record.get("status") or "open"))
         now = utc_now()
         event = {
             "decision": decision,
-            "status": status,
+            "status": "",
             "body": str(payload.get("body") or payload.get("comment") or ""),
             "author": str(payload.get("author") or "local"),
             "created_at": now,
         }
-        decisions = [*self._decisions(record), event]
-        updates = {"decision": decision, "status": status, "review_decisions": decisions}
-        if event["body"]:
-            comment_result = self.add_comment(
-                change_request_id,
-                {
+        result: dict[str, Any] = {"decision": event}
+
+        def mutate(record: dict[str, Any]) -> dict[str, Any]:
+            status = status_for_decision(decision, current_status=str(record.get("status") or "open"))
+            event["status"] = status
+            record["decision"] = decision
+            record["status"] = status
+            record["review_decisions"] = [*self._decisions(record), dict(event)]
+            if event["body"]:
+                comment = {
+                    "id": new_review_comment_id(),
+                    "thread_id": new_review_thread_id(),
                     "kind": "change_request",
                     "body": event["body"],
+                    "path": "",
+                    "line": None,
+                    "side": "new",
                     "author": event["author"],
+                    "suggested_patch": "",
                     "resolved": True,
-                },
-            )
-            record = self.store.get(change_request_id) or record
-            decisions = [*self._decisions(record), event]
-            updates = {"decision": decision, "status": status, "review_decisions": decisions}
-            updated = self._update_with_counts(change_request_id, updates)
-            return {
-                "change_request": self._public_record(updated),
-                "decision": event,
-                "comment": comment_result.get("comment"),
-            }
-        updated = self._update_with_counts(change_request_id, updates)
-        return {"change_request": self._public_record(updated), "decision": event}
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                record["comments"] = [*self._comments(record), comment]
+                record["review_threads"] = ensure_thread(self._threads(record), comment["thread_id"], path="", line=None, now=now)
+                result["comment"] = comment
+            refresh_review_counts(record)
+            return record
+
+        updated = self.store.mutate(change_request_id, mutate)
+        response = {"change_request": self._public_record(updated), "decision": event}
+        if "comment" in result:
+            response["comment"] = result["comment"]
+        return response
 
     def set_viewed_file(self, change_request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        record = self._record_or_raise(change_request_id)
-        viewed_files = dict(record.get("viewed_files") or {})
         now = utc_now()
-        if isinstance(payload.get("viewed_files"), dict):
-            for path, viewed in payload["viewed_files"].items():
-                text = str(path or "").strip()
-                if text:
-                    viewed_files[text] = {"path": text, "viewed": bool(viewed), "updated_at": now}
-        else:
-            path = str(payload.get("path") or payload.get("file_path") or "").strip()
-            if not path:
-                raise ValueError("path is required")
-            viewed_files[path] = {"path": path, "viewed": bool(payload.get("viewed", True)), "updated_at": now}
-        updated = self._update_with_counts(change_request_id, {"viewed_files": viewed_files})
+
+        def mutate(record: dict[str, Any]) -> dict[str, Any]:
+            viewed_files = dict(record.get("viewed_files") or {})
+            if isinstance(payload.get("viewed_files"), dict):
+                for path, viewed in payload["viewed_files"].items():
+                    text = str(path or "").strip()
+                    if text:
+                        viewed_files[text] = {"path": text, "viewed": bool(viewed), "updated_at": now}
+            else:
+                path = str(payload.get("path") or payload.get("file_path") or "").strip()
+                if not path:
+                    raise ValueError("path is required")
+                viewed_files[path] = {"path": path, "viewed": bool(payload.get("viewed", True)), "updated_at": now}
+            record["viewed_files"] = viewed_files
+            refresh_review_counts(record)
+            return record
+
+        updated = self.store.mutate(change_request_id, mutate)
         return {"change_request": self._public_record(updated), "viewed_files": updated.get("viewed_files") or {}}
 
     def list_checks(self, change_request_id: str) -> dict[str, Any]:
@@ -307,10 +338,10 @@ class ChangeRequestService:
 
     def run_check(self, change_request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         record = self._record_or_raise(change_request_id)
+        _require_registered_record_workspace(record, operation="run change request check")
         command = payload.get("command")
         if not command and payload.get("suggested_check_id"):
             command = self._command_for_suggestion(record, str(payload.get("suggested_check_id") or ""))
-        validate_check_command(command)
         result = run_allowed_check(record["workspace_root"], command, cwd=payload.get("cwd"))
         full_log = str(result.pop("_full_log", ""))
         check_id = new_review_check_id()
@@ -322,8 +353,13 @@ class ChangeRequestService:
             "full_log_ref": log_ref,
             **result,
         }
-        checks = [*self._checks(record), check]
-        updated = self._update_with_counts(change_request_id, {"checks": checks})
+
+        def mutate(current: dict[str, Any]) -> dict[str, Any]:
+            current["checks"] = [*self._checks(current), check]
+            refresh_review_counts(current)
+            return current
+
+        updated = self.store.mutate(change_request_id, mutate)
         persisted_check = next(
             (item for item in self._checks(updated) if item.get("id") == check_id),
             check,
@@ -430,13 +466,12 @@ class ChangeRequestService:
         return record
 
     def _update_with_counts(self, change_request_id: str, updates: dict[str, Any]) -> dict[str, Any]:
-        record = self._record_or_raise(change_request_id)
-        next_record = {**record, **updates}
-        refresh_review_counts(next_record)
-        counted_updates = dict(updates)
-        for key in ("unresolved_count", "unresolved_comment_count", "suggestion_count", "viewed_file_count", "check_summary"):
-            counted_updates[key] = next_record.get(key)
-        return self.store.update(change_request_id, counted_updates)
+        def mutate(record: dict[str, Any]) -> dict[str, Any]:
+            record.update(dict(updates or {}))
+            refresh_review_counts(record)
+            return record
+
+        return self.store.mutate(change_request_id, mutate)
 
     def _comments(self, record: dict[str, Any]) -> list[dict[str, Any]]:
         return [copy.deepcopy(item) for item in record.get("comments", []) if isinstance(item, dict)]
@@ -568,11 +603,16 @@ def update_thread_resolution_from_comments(
 
 def selected_snapshot_paths(snapshot: dict[str, Any]) -> list[str]:
     stats = snapshot.get("file_stats") if isinstance(snapshot, dict) else []
-    paths = [
-        str(item.get("path") or "").strip()
-        for item in (stats if isinstance(stats, list) else [])
-        if isinstance(item, dict) and str(item.get("path") or "").strip()
-    ]
+    paths: list[str] = []
+    for item in (stats if isinstance(stats, list) else []):
+        if not isinstance(item, dict):
+            continue
+        previous = str(item.get("previousPath") or "").strip()
+        current = str(item.get("path") or "").strip()
+        if previous:
+            paths.append(previous)
+        if current:
+            paths.append(current)
     return list(dict.fromkeys(paths))
 
 
@@ -609,6 +649,16 @@ def staged_paths_outside_snapshot(record: dict[str, Any], selected_paths: list[s
             continue
         outside.append(display_git_path(snapshotter.git_root, workspace_root, git_path))
     return sorted(dict.fromkeys(outside))
+
+
+def _require_registered_record_workspace(record: dict[str, Any], *, operation: str) -> None:
+    payload = {}
+    if record.get("workspace_id"):
+        payload["workspace_id"] = record.get("workspace_id")
+    else:
+        payload["workspace_root"] = record.get("workspace_root")
+    resolution = WorkspaceResolver().resolve(payload, {}, touch=False)
+    require_registered_trusted_workspace(resolution, operation=operation)
 
 
 def git_relative_path(git_root: Path, absolute_path: Path) -> str:

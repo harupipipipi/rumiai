@@ -32,9 +32,17 @@ def _commit_all(path: Path, message: str = "initial") -> None:
 
 def _service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHANGE_REQUEST_STORE_PATH", str(tmp_path / "store" / "change_requests.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "store" / "coding_workspaces.json"))
     from domain.change_request import ChangeRequestService, ChangeRequestStore
 
     return ChangeRequestService(store=ChangeRequestStore())
+
+
+def _trusted_workspace_id(workspace: Path, workspace_id: str = "trusted-review") -> str:
+    from domain.coding.workspace_store import WorkspaceStore
+
+    WorkspaceStore().create(workspace, workspace_id=workspace_id, trusted=True)
+    return workspace_id
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -87,10 +95,15 @@ def test_run_check_uses_allowlist_and_persists_log_tail(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     service = _service(tmp_path, monkeypatch)
-    created = service.create(workspace_root=str(workspace), title="Review")
+    workspace_id = _trusted_workspace_id(workspace)
+    created = service.create(workspace_root=str(workspace), workspace_id=workspace_id, title="Review")
 
     with pytest.raises(ValueError):
         service.run_check(created["id"], {"command": "python -m pytest && rm -rf ."})
+    with pytest.raises(ValueError):
+        service.run_check(created["id"], {"command": "cargo test --manifest-path=../../other-project/Cargo.toml"})
+    with pytest.raises(ValueError):
+        service.run_check(created["id"], {"command": ["python", "-m", "pytest", "--rootdir", "../outside"]})
 
     result = service.run_check(created["id"], {"command": "python -m pytest test_sample.py -q -s"})
     check = result["check"]
@@ -110,6 +123,22 @@ def test_run_check_uses_allowlist_and_persists_log_tail(tmp_path, monkeypatch):
     assert len(stored_check["stderr_tail"]) <= 12000
     assert len(stored_check["log_tail"]) <= 12000
     assert fetched["check_summary"]["passed"] == 1
+
+
+def test_change_request_collection_requires_registered_trusted_workspace(tmp_path, monkeypatch):
+    workspace = _workspace(tmp_path)
+    _service(tmp_path, monkeypatch)
+
+    from blocks.change_request.collection import run as collection_run
+
+    raw = collection_run({"_method": "POST", "workspace_root": str(workspace), "title": "Review"}, {})
+    assert raw["status"] == "error"
+    assert raw["error"]["code"] == "WORKSPACE_UNTRUSTED"
+
+    workspace_id = _trusted_workspace_id(workspace)
+    trusted = collection_run({"_method": "POST", "workspace_id": workspace_id, "title": "Review"}, {})
+    assert trusted["status"] == "ok"
+    assert trusted["data"]["workspace_id"] == workspace_id
 
 
 def test_commit_seal_blocks_drift_and_commit_updates_status(tmp_path, monkeypatch):
