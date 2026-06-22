@@ -100,7 +100,7 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
         if handler == "runtime_update":
             return ok(_runtime_update(service, payload))
         if handler == "runtime_uninstall":
-            return ok(_runtime_uninstall(service, payload))
+            return _runtime_operation_response(_runtime_uninstall(service, payload))
         if handler == "runtime_operations":
             return ok({"operations": _operation_store(service).list()})
         if handler in {"runtime_operation", "runtime_operation_get"}:
@@ -188,6 +188,12 @@ def _operation_cancellations(service: _SandboxApiService) -> CancellationRegistr
     registry = CancellationRegistry()
     setattr(service, "operation_cancellations", registry)
     return registry
+
+
+def _runtime_operation_response(result: dict[str, Any]) -> dict[str, Any]:
+    if result.get("status") == "error" and isinstance(result.get("error"), dict):
+        return result
+    return ok(result)
 
 
 def _sweep_lifecycle(service: _SandboxApiService) -> list[dict[str, Any]]:

@@ -1796,9 +1796,9 @@ def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -
     assert operation_cancel["data"]["operation_id"] == "fake-update"
     assert operation_cancel["data"]["cancelled"] is False
     assert operation_cancel["data"]["status"] == "completed"
-    assert uninstall_without_confirmation["status"] == "ok"
-    assert uninstall_without_confirmation["data"]["status"] == "error"
-    assert uninstall_without_confirmation["data"]["error"]["code"] == "DESTRUCTIVE_ACTION_CONFIRMATION_REQUIRED"
+    assert uninstall_without_confirmation["status"] == "error"
+    assert uninstall_without_confirmation["_http_status"] == 409
+    assert uninstall_without_confirmation["error"]["code"] == "DESTRUCTIVE_ACTION_CONFIRMATION_REQUIRED"
     assert uninstall["data"]["operation_id"] == "fake-uninstall"
     assert uninstall["data"]["status"] == "running"
     assert uninstall_done["status"] == "completed"
