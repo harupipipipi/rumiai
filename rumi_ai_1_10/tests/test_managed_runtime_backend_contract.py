@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import json
+from pathlib import Path
 import threading
 import time
 from types import SimpleNamespace
@@ -37,6 +39,8 @@ from ecosystem.defaultspack.backend.sandbox.testing.fake_guest_agent import Fake
 from ecosystem.defaultspack.backend.sandbox.testing.fake_provider import FakeRuntimeProvider
 from ecosystem.defaultspack.domain.tool_policy.internal_context import mark_tool_server_approval_context
 from ecosystem.defaultspack.domain.coding.workspace_store import WorkspaceStore
+
+DEFAULTSPACK_ROOT = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
 
 
 pytestmark = pytest.mark.contract
@@ -940,6 +944,14 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert route_specs[("GET", "/api/runtime/providers")].function_id == "managed_runtime_providers"
     assert route_specs[("POST", "/api/desktops/{seat_id}/input")].legacy_block_module == ""
     assert route_specs[("POST", "/api/desktops/{seat_id}/input")].path_inject == {"seat_id": "seat_id"}
+    static_routes = {
+        (route["method"], route["path"]): route.get("function_id")
+        for route in json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))["routes"]
+        if str(route.get("path", "")).startswith(("/api/runtime", "/api/sandbox", "/api/desktops"))
+    }
+    for key, spec in route_specs.items():
+        assert static_routes.get(key) == spec.function_id
+
     providers = api.run({"_handler": "runtime_providers"}, {})
     doctor = api.run({"_handler": "runtime_doctor"}, {})
     ensure = api.run({"_handler": "runtime_ensure", "provider_id": "missing-provider"}, {})
