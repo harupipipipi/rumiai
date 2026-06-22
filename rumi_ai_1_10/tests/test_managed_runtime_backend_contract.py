@@ -836,6 +836,26 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert desktops["data"]["desktops"] == []
 
 
+def test_defaultspack_runtime_service_registers_cross_platform_providers(tmp_path, monkeypatch) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR", str(tmp_path))
+    service = api._SandboxApiService()
+    provider_ids = set(service.provider_registry.provider_ids())
+    mac_isolation = api._provider_isolation("mac_lima", True)
+    windows_isolation = api._provider_isolation("windows_wsl", True)
+    linux_isolation = api._provider_isolation("linux_native", True)
+    docker_isolation = api._provider_isolation("docker", True)
+
+    assert provider_ids == {"docker", "linux_native", "mac_lima", "windows_wsl"}
+    assert mac_isolation["mode"] == "lima_vm"
+    assert mac_isolation["vm"] is True
+    assert windows_isolation["mode"] == "wsl2_vm"
+    assert windows_isolation["vm"] is True
+    assert linux_isolation["mode"] == "native_x11"
+    assert docker_isolation["container"] is True
+
+
 def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 

@@ -950,15 +950,35 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
             "container": True,
             "summary": "Optional provider only; Docker Desktop is never installed silently.",
         }
+    if provider_id == "mac_lima":
+        return {
+            "mode": "lima_vm" if ready else "lima_pending",
+            "vm": True,
+            "container": False,
+            "host_process_namespace": False,
+            "host_filesystem_shared": False,
+            "host_network_shared": False,
+            "summary": "macOS provider uses a Rumi-owned Lima Ubuntu VM for sandbox and desktop runtime isolation.",
+        }
+    if provider_id == "windows_wsl":
+        return {
+            "mode": "wsl2_vm" if ready else "wsl2_pending",
+            "vm": True,
+            "container": False,
+            "host_process_namespace": False,
+            "host_filesystem_shared": False,
+            "host_network_shared": False,
+            "summary": "Windows provider uses a Rumi-owned WSL2 Ubuntu distribution for sandbox and desktop runtime isolation.",
+        }
     return {"mode": "unavailable", "summary": "Runtime isolation is unavailable until a provider is ready."}
 
 
 def _placeholder_provider(provider_id: str, *, selected: bool) -> dict[str, Any]:
     missing_code = {
-        "mac_lima": "lima_provider_not_bundled",
-        "windows_wsl": "wsl_provider_not_bundled",
-        "linux_native": "linux_native_provider_not_bundled",
-    }.get(provider_id, "runtime_provider_not_bundled")
+        "mac_lima": "lima_provider_unavailable",
+        "windows_wsl": "wsl_provider_unavailable",
+        "linux_native": "linux_native_provider_unavailable",
+    }.get(provider_id, "runtime_provider_unavailable")
     return {
         "provider_id": provider_id,
         "label": _provider_label(provider_id),
@@ -975,8 +995,8 @@ def _placeholder_provider(provider_id: str, *, selected: bool) -> dict[str, Any]
         "missing": [{
             "code": missing_code,
             "severity": "warning",
-            "message": "Managed provider setup helper is not bundled in this build.",
-            "remediation": "Use the managed runtime diagnostics bundle when continuing provider implementation.",
+            "message": "Managed provider is registered but not available on this host.",
+            "remediation": "Run runtime setup or select an available provider for this platform.",
         }],
         "isolation": _provider_isolation(provider_id, False),
         "message": "Setup is required before managed desktops can start.",
