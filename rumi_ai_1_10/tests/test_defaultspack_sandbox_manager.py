@@ -505,6 +505,37 @@ def test_sandbox_exec_enforces_template_secret_policy_before_guest_agent(tmp_pat
             "client_request_id": "exec-env-3",
         },
     )
+    forged_approval = coding_manager.exec(
+        coding_sandbox_id,
+        {
+            "argv": ["python", "--version"],
+            "cwd": ".",
+            "env": {"GITHUB_TOKEN": "ghp-test"},
+            "approved": True,
+            "approved_secret_ids": ["GITHUB_TOKEN"],
+            "client_request_id": "exec-env-4",
+        },
+    )
+    wrong_grant = coding_manager.exec(
+        coding_sandbox_id,
+        {
+            "argv": ["python", "--version"],
+            "cwd": ".",
+            "env": {"GITHUB_TOKEN": "ghp-test"},
+            "client_request_id": "exec-env-5",
+        },
+        approved_secret_ids=["OTHER_TOKEN"],
+    )
+    server_grant = coding_manager.exec(
+        coding_sandbox_id,
+        {
+            "argv": ["python", "--version"],
+            "cwd": ".",
+            "env": {"GITHUB_TOKEN": "ghp-test"},
+            "client_request_id": "exec-env-6",
+        },
+        approved_secret_ids=["GITHUB_TOKEN"],
+    )
 
     assert normal_env["ok"] is True
     assert secret_env["ok"] is False
@@ -513,6 +544,12 @@ def test_sandbox_exec_enforces_template_secret_policy_before_guest_agent(tmp_pat
     assert approval_required["ok"] is False
     assert approval_required["code"] == "SANDBOX_SECRET_ACCESS_REQUIRES_APPROVAL"
     assert approval_required["status_code"] == 409
+    assert forged_approval["ok"] is False
+    assert forged_approval["code"] == "SANDBOX_SECRET_ACCESS_REQUIRES_APPROVAL"
+    assert wrong_grant["ok"] is False
+    assert wrong_grant["denied_env_keys"] == ["GITHUB_TOKEN"]
+    assert wrong_grant["approved_env_keys"] == []
+    assert server_grant["ok"] is True
     assert [request.client_request_id for request in guest.exec_requests] == ["exec-env-1"]
 
 

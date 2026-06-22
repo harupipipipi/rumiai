@@ -619,7 +619,13 @@ class SandboxManager:
             self._touch_ready_instance(inst.sandbox_id)
         return result
 
-    def exec(self, sandbox_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def exec(
+        self,
+        sandbox_id: str,
+        payload: Dict[str, Any],
+        *,
+        approved_secret_ids: Any = None,
+    ) -> Dict[str, Any]:
         self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
@@ -634,7 +640,11 @@ class SandboxManager:
             resource_policy_error = self._require_exec_resource_policy(inst, request)
             if resource_policy_error is not None:
                 return resource_policy_error
-            secret_policy_error = self._require_secret_policy(inst, request)
+            secret_policy_error = self._require_secret_policy(
+                inst,
+                request,
+                approved_secret_ids=approved_secret_ids,
+            )
             if secret_policy_error is not None:
                 return secret_policy_error
             agent = self._provider_agent(inst)
@@ -1397,7 +1407,12 @@ class SandboxManager:
         }
 
     @staticmethod
-    def _require_secret_policy(inst: SandboxInstance, request: GuestExecRequest) -> Dict[str, Any] | None:
+    def _require_secret_policy(
+        inst: SandboxInstance,
+        request: GuestExecRequest,
+        *,
+        approved_secret_ids: Any = None,
+    ) -> Dict[str, Any] | None:
         if not request.env:
             return None
         policy = inst.secrets_policy
@@ -1426,8 +1441,14 @@ class SandboxManager:
                 "status_code": 403,
             }
         if policy.approval_required or mode in {"explicit", "explicit_read_only", "read_only"}:
+            approved = _normalize_secret_grant_ids(approved_secret_ids)
+            missing = [key for key in sensitive_keys if key not in approved]
+            if not missing:
+                return None
             return {
                 **base,
+                "denied_env_keys": missing,
+                "approved_env_keys": sorted(key for key in sensitive_keys if key in approved),
                 "error": "Sandbox template requires an approved secret grant before secret-bearing environment variables can be used.",
                 "code": "SANDBOX_SECRET_ACCESS_REQUIRES_APPROVAL",
                 "status_code": 409,
@@ -2080,6 +2101,39 @@ def _clean_string_list(value: Any, *, max_items: int = 24, max_len: int = 512) -
         if len(result) >= max_items:
             break
     return tuple(result)
+
+
+def _normalize_secret_grant_ids(value: Any) -> set[str]:
+    result: set[str] = set()
+
+    def add(item: Any) -> None:
+        text = _optional_clean_string(item, max_len=128)
+        if text:
+            result.add(text)
+
+    def visit(item: Any) -> None:
+        if item is None:
+            return
+        if isinstance(item, str):
+            for part in _clean_string_list(item, max_items=128, max_len=128):
+                add(part)
+            return
+        if isinstance(item, dict):
+            for key in ("secret_id", "id", "env_key", "name"):
+                add(item.get(key))
+            for key in ("secret_ids", "env_keys", "allowed_secret_ids", "allowed_env_keys", "grants"):
+                visit(item.get(key))
+            env = item.get("env")
+            if isinstance(env, dict):
+                for key in env:
+                    add(key)
+            return
+        if isinstance(item, (list, tuple, set, frozenset)):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    return result
 
 
 def _default_template_id(*, display: bool, provider_id: str | None) -> str:

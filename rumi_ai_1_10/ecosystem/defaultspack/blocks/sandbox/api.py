@@ -17,11 +17,12 @@ except ModuleNotFoundError:
 
 try:
     from ecosystem.defaultspack.domain.tool_policy.internal_context import (
+        internal_tool_decision,
         internal_tool_decision_allows,
         tool_server_approval_context_is_internal,
     )
 except ModuleNotFoundError:
-    from domain.tool_policy.internal_context import internal_tool_decision_allows, tool_server_approval_context_is_internal  # type: ignore
+    from domain.tool_policy.internal_context import internal_tool_decision, internal_tool_decision_allows, tool_server_approval_context_is_internal  # type: ignore
 
 from ecosystem.defaultspack.backend.sandbox.control_lease import ControlLeaseManager
 from ecosystem.defaultspack.backend.sandbox.cancellation import (
@@ -115,7 +116,7 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
         if handler == "sandbox_get":
             return _sandbox_get(service, payload)
         if handler == "sandbox_exec":
-            return _sandbox_exec(service, payload)
+            return _sandbox_exec(service, payload, context_payload)
         if handler == "sandbox_files_apply_patch":
             return _sandbox_files_apply_patch(service, payload)
         if handler == "sandbox_port_expose":
@@ -572,9 +573,13 @@ def _sandbox_get(service: _SandboxApiService, payload: dict[str, Any]):
     return ok(_sandbox_payload(status))
 
 
-def _sandbox_exec(service: _SandboxApiService, payload: dict[str, Any]):
+def _sandbox_exec(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     sandbox_id = str(payload.get("sandbox_id") or "")
-    result = service.manager.exec(sandbox_id, payload)
+    result = service.manager.exec(
+        sandbox_id,
+        payload,
+        approved_secret_ids=_approved_secret_ids_from_context(context),
+    )
     if result.get("ok") is not True:
         return _api_error(str(result.get("error") or "Sandbox exec failed"), str(result.get("code") or "SANDBOX_EXEC_FAILED"), int(result.get("status_code") or 400), details=result.get("details"))
     return ok(result)
@@ -1217,6 +1222,50 @@ def _jsonable(value: Any) -> Any:
 
 def _context_has_server_approval(context: dict[str, Any]) -> bool:
     return internal_tool_decision_allows(context) or tool_server_approval_context_is_internal(context)
+
+
+def _approved_secret_ids_from_context(context: dict[str, Any]) -> list[str]:
+    if not isinstance(context, dict):
+        return []
+    grants: list[str] = []
+
+    def add(value: Any) -> None:
+        text = str(value or "").strip()
+        if text and text not in grants:
+            grants.append(text[:128])
+
+    def visit(value: Any) -> None:
+        if value is None:
+            return
+        if isinstance(value, str):
+            for part in value.replace(",", "\n").splitlines():
+                add(part)
+            return
+        if isinstance(value, dict):
+            for key in ("secret_id", "id", "env_key", "name"):
+                add(value.get(key))
+            for key in ("secret_ids", "env_keys", "allowed_secret_ids", "allowed_env_keys", "grants"):
+                visit(value.get(key))
+            env = value.get("env")
+            if isinstance(env, dict):
+                for key in env:
+                    add(key)
+            return
+        if isinstance(value, (list, tuple, set, frozenset)):
+            for item in value:
+                visit(item)
+
+    decision = internal_tool_decision(context) if internal_tool_decision_allows(context) else None
+    if decision is not None:
+        for key in ("secret_ids", "env_keys", "allowed_secret_ids", "allowed_env_keys", "sandbox_secret_grants"):
+            visit(decision.get(key))
+        resource = decision.get("resource")
+        if isinstance(resource, dict):
+            visit(resource)
+    if tool_server_approval_context_is_internal(context):
+        for key in ("_sandbox_secret_grants", "sandbox_secret_grants"):
+            visit(context.get(key))
+    return grants
 
 
 def _destructive_confirmation_error(payload: dict[str, Any], *, action: str, resource: str) -> dict[str, Any] | None:

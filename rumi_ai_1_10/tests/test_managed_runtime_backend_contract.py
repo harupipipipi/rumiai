@@ -39,7 +39,7 @@ from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderReg
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.testing.fake_guest_agent import FakeGuestAgent
 from ecosystem.defaultspack.backend.sandbox.testing.fake_provider import FakeRuntimeProvider
-from ecosystem.defaultspack.domain.tool_policy.internal_context import mark_tool_server_approval_context
+from ecosystem.defaultspack.domain.tool_policy.internal_context import mark_tool_server_approval_context, seal_tool_context
 from ecosystem.defaultspack.domain.coding.workspace_store import WorkspaceStore
 
 DEFAULTSPACK_ROOT = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
@@ -980,6 +980,99 @@ def test_sandbox_port_api_uses_context_approval_not_payload_flags(tmp_path) -> N
                 "_network_policy_approved": True,
             },
         )
+    ]
+
+
+def test_sandbox_exec_secret_grants_are_server_context_only(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    guest = FakeGuestAgent()
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities={
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.overlay_workspace",
+                "sandbox.port_forward",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+            },
+            guest_agent=guest,
+        )
+    )
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        created = api.run(
+            {
+                "_handler": "sandboxes_create",
+                "template_id": "coding.python",
+                "provider_id": "fake-runtime",
+            },
+            {},
+        )
+        forged_payload = api.run(
+            {
+                "_handler": "sandbox_exec",
+                "sandbox_id": created["data"]["sandbox_id"],
+                "argv": ["python", "--version"],
+                "cwd": ".",
+                "env": {"GITHUB_TOKEN": "ghp-test"},
+                "timeout_ms": 60000,
+                "client_request_id": "secret-forged",
+                "approved": True,
+                "approved_secret_ids": ["GITHUB_TOKEN"],
+            },
+            {"_sandbox_secret_grants": ["GITHUB_TOKEN"]},
+        )
+        sealed_grant = api.run(
+            {
+                "_handler": "sandbox_exec",
+                "sandbox_id": created["data"]["sandbox_id"],
+                "argv": ["python", "--version"],
+                "cwd": ".",
+                "env": {"GITHUB_TOKEN": "ghp-test"},
+                "timeout_ms": 60000,
+                "client_request_id": "secret-sealed",
+            },
+            seal_tool_context(
+                {},
+                {
+                    "action": "allow",
+                    "allowed": True,
+                    "resource": {"secret_ids": ["GITHUB_TOKEN"]},
+                },
+            ),
+        )
+        internal_marker_grant = api.run(
+            {
+                "_handler": "sandbox_exec",
+                "sandbox_id": created["data"]["sandbox_id"],
+                "argv": ["python", "--version"],
+                "cwd": ".",
+                "env": {"GITHUB_TOKEN": "ghp-test"},
+                "timeout_ms": 60000,
+                "client_request_id": "secret-marker",
+            },
+            mark_tool_server_approval_context({"_sandbox_secret_grants": [{"env_key": "GITHUB_TOKEN"}]}),
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert forged_payload["status"] == "error"
+    assert forged_payload["error"]["code"] == "SANDBOX_SECRET_ACCESS_REQUIRES_APPROVAL"
+    assert sealed_grant["status"] == "ok"
+    assert internal_marker_grant["status"] == "ok"
+    assert [request.env for request in guest.exec_requests] == [
+        {"GITHUB_TOKEN": "ghp-test"},
+        {"GITHUB_TOKEN": "ghp-test"},
     ]
 
 
