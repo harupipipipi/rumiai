@@ -653,12 +653,20 @@ class WindowsWslProvider(ManagedUbuntuProvider):
         os.makedirs(cache_dir, exist_ok=True)
         filename = os.path.basename(urllib.parse.urlparse(url).path) or "rumi-ubuntu-wsl.rootfs.tar.gz"
         destination = os.path.join(cache_dir, filename)
+        sidecar_path = f"{destination}.sha256"
+        cached_sha256 = _read_verified_sha256_sidecar(sidecar_path)
+        if cached_sha256 and os.path.isfile(destination) and os.path.getsize(destination) > 0:
+            actual_sha256 = _sha256_file(destination)
+            if actual_sha256.casefold() == cached_sha256.casefold():
+                return destination
         expected_sha256 = self._rootfs_expected_sha256(url, filename)
         if os.path.isfile(destination) and os.path.getsize(destination) > 0:
             actual_sha256 = _sha256_file(destination)
             if actual_sha256.casefold() == expected_sha256.casefold():
+                _write_verified_sha256_sidecar(sidecar_path, expected_sha256)
                 return destination
             _unlink(destination)
+            _unlink(sidecar_path)
         tmp_path = f"{destination}.tmp-{uuid.uuid4().hex}"
         try:
             self._rootfs_downloader(url, tmp_path)
@@ -678,6 +686,7 @@ class WindowsWslProvider(ManagedUbuntuProvider):
                     details={"url": url},
                 )
             os.replace(tmp_path, destination)
+            _write_verified_sha256_sidecar(sidecar_path, expected_sha256)
             return destination
         except SandboxContractError:
             raise
@@ -987,6 +996,31 @@ def _sha256_file(path: str) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _read_verified_sha256_sidecar(path: str) -> str | None:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            value = handle.read().strip().split()[0]
+    except (OSError, IndexError):
+        return None
+    if len(value) == 64 and all(char in "0123456789abcdefABCDEF" for char in value):
+        return value
+    return None
+
+
+def _write_verified_sha256_sidecar(path: str, digest: str) -> None:
+    tmp_path = f"{path}.tmp-{uuid.uuid4().hex}"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            handle.write(f"{digest.strip().lower()}\n")
+        try:
+            os.chmod(tmp_path, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp_path, path)
+    finally:
+        _unlink(tmp_path)
 
 
 def _host_arch() -> str:

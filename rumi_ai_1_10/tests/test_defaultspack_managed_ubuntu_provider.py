@@ -379,6 +379,46 @@ def test_windows_wsl_provider_replaces_corrupt_cached_rootfs(monkeypatch, tmp_pa
     assert fake.imported_rootfs_path == str(cached_rootfs)
 
 
+def test_windows_wsl_provider_uses_verified_cached_rootfs_offline(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
+    monkeypatch.delenv(WSL_ROOTFS_ENV, raising=False)
+    monkeypatch.setenv("PROCESSOR_ARCHITECTURE", "AMD64")
+    cache_dir = tmp_path / "rootfs-cache"
+    cache_dir.mkdir()
+    cached_rootfs = cache_dir / "ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz"
+    cached_rootfs.write_bytes(b"rootfs")
+    (cache_dir / f"{cached_rootfs.name}.sha256").write_text(
+        hashlib.sha256(b"rootfs").hexdigest() + "\n",
+        encoding="utf-8",
+    )
+    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name=DEFAULT_WSL_RUNTIME_NAME)
+
+    def unexpected_downloader(url: str, destination: str) -> None:
+        raise AssertionError(f"unexpected rootfs download: {url} -> {destination}")
+
+    def unexpected_checksum_fetcher(url: str) -> str:
+        raise AssertionError(f"unexpected SHA256SUMS fetch: {url}")
+
+    provider = WindowsWslProvider(
+        command_path="C:/Windows/System32/wsl.exe",
+        runner=fake,
+        rootfs_cache_dir=str(cache_dir),
+        rootfs_downloader=unexpected_downloader,
+        checksum_fetcher=unexpected_checksum_fetcher,
+    )
+
+    ensured = provider.ensure(
+        EnsureRuntimeRequest(
+            provider_id="windows_wsl",
+            requirements=RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec"})),
+        ),
+        NullProgressSink(),
+    )
+
+    assert ensured.ok is True
+    assert fake.imported_rootfs_path == str(cached_rootfs)
+
+
 def test_managed_ubuntu_exec_enforces_template_output_and_timeout_limits(monkeypatch) -> None:
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
     fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
