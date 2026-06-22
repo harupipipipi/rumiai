@@ -104,6 +104,42 @@ MAX_RESPONSE_SIZE = 1 * 1024 * 1024
 
 # args 要約の最大長（監査ログ用）
 MAX_ARGS_SUMMARY_LENGTH = 500
+MAX_HOST_ARGS_SUMMARY_VALUE_LENGTH = 160
+MAX_HOST_ARGS_SUMMARY_ITEMS = 6
+_HOST_ARG_SECRET_TOKENS = {
+    "apikey",
+    "authorization",
+    "credential",
+    "credentials",
+    "env",
+    "environment",
+    "key",
+    "passwd",
+    "password",
+    "private",
+    "pwd",
+    "secret",
+    "stdin",
+    "token",
+}
+_HOST_ARG_TARGET_TOKENS = {
+    "cwd",
+    "directory",
+    "dir",
+    "endpoint",
+    "file",
+    "files",
+    "path",
+    "paths",
+    "target",
+    "targets",
+    "uri",
+    "url",
+    "urls",
+    "working",
+}
+_HOST_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+_HOST_WINDOWS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
 logger = logging.getLogger(__name__)
 FUNCTION_RUNNER_PATH = Path(__file__).with_name("function_runner.py")
@@ -277,10 +313,145 @@ def _get_secure_tmp_dir() -> str:
         return str(_SECURE_TMP_DIR)
 
 
+def _arg_key_tokens(key: Any) -> list[str]:
+    raw = str(key or "")
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", raw)
+    return [token for token in re.split(r"[^a-z0-9]+", spaced.lower()) if token]
+
+
+def _is_sensitive_arg_key(key: Any) -> bool:
+    tokens = _arg_key_tokens(key)
+    joined = "_".join(tokens)
+    if "api_key" in joined or "private_key" in joined:
+        return True
+    return any(token in _HOST_ARG_SECRET_TOKENS for token in tokens)
+
+
+def _is_target_arg_key(key: Any) -> bool:
+    tokens = _arg_key_tokens(key)
+    joined = "_".join(tokens)
+    if joined in {"working_dir", "working_directory"}:
+        return True
+    return any(token in _HOST_ARG_TARGET_TOKENS for token in tokens)
+
+
+def _safe_host_summary_text(value: Any, max_length: int = MAX_HOST_ARGS_SUMMARY_VALUE_LENGTH) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) > max_length:
+        return text[:max(0, max_length - 14)] + "...(truncated)"
+    return text
+
+
+def _sanitize_host_url(value: Any) -> str:
+    text = _safe_host_summary_text(value)
+    match = re.match(r"^(https?://[^?#\s]+)", text, re.IGNORECASE)
+    return _safe_host_summary_text(match.group(1)) if match else ""
+
+
+def _looks_like_host_path(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text or _HOST_URL_RE.match(text):
+        return False
+    return (
+        text.startswith(("/", "./", "../", "~/", "\\\\"))
+        or bool(_HOST_WINDOWS_PATH_RE.match(text))
+    )
+
+
+def _append_limited_unique(target: list[str], value: str) -> None:
+    if value and value not in target and len(target) < MAX_HOST_ARGS_SUMMARY_ITEMS:
+        target.append(value)
+
+
+def _split_flag_value(token: Any) -> str:
+    text = str(token or "").strip()
+    if text.startswith("-") and "=" in text:
+        return text.split("=", 1)[1]
+    return text
+
+
+def _collect_host_targets(value: Any, *, paths: list[str], urls: list[str]) -> None:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if _is_sensitive_arg_key(key):
+                continue
+            if _is_target_arg_key(key):
+                _collect_host_targets(nested, paths=paths, urls=urls)
+        return
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            _collect_host_targets(item, paths=paths, urls=urls)
+        return
+    text = _split_flag_value(value)
+    url = _sanitize_host_url(text)
+    if url:
+        _append_limited_unique(urls, url)
+        return
+    if _looks_like_host_path(text):
+        _append_limited_unique(paths, _safe_host_summary_text(text))
+
+
+def _host_command_tokens(args: dict[str, Any]) -> list[str]:
+    raw_argv = args.get("argv")
+    if isinstance(raw_argv, (list, tuple)):
+        return [_safe_host_summary_text(item) for item in raw_argv if str(item or "").strip()]
+    raw_args = args.get("args")
+    if isinstance(raw_args, (list, tuple)):
+        return [_safe_host_summary_text(item) for item in raw_args if str(item or "").strip()]
+    for key in ("executable", "binary", "program"):
+        value = args.get(key)
+        if value is not None:
+            return [_safe_host_summary_text(value)]
+    for key in ("command", "cmd"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            return [_safe_host_summary_text(part) for part in value.split() if part.strip()]
+    return []
+
+
+def _is_sensitive_cli_token(value: Any) -> bool:
+    text = str(value or "").strip().lower().lstrip("-/")
+    if not text:
+        return False
+    token_name = re.split(r"[=\s:]", text, maxsplit=1)[0]
+    return _is_sensitive_arg_key(token_name)
+
+
+def _redact_sensitive_args(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        redacted_count = 0
+        for key, nested in value.items():
+            if _is_sensitive_arg_key(key):
+                redacted_count += 1
+                continue
+            redacted[str(key)] = _redact_sensitive_args(nested)
+        if redacted_count:
+            redacted["_redacted_field_count"] = redacted_count
+        return redacted
+    if isinstance(value, (list, tuple)):
+        redacted_items: list[Any] = []
+        skip_next = False
+        for item in value:
+            if skip_next:
+                redacted_items.append("[redacted]")
+                skip_next = False
+                continue
+            if isinstance(item, str) and _is_sensitive_cli_token(item):
+                redacted_items.append("[redacted]")
+                skip_next = "=" not in item
+                continue
+            redacted_items.append(_redact_sensitive_args(item))
+        return redacted_items
+    if isinstance(value, str) and _HOST_URL_RE.match(value.strip()):
+        return _sanitize_host_url(value)
+    return value
+
+
 def _summarize_args(args: Any, max_length: int = MAX_ARGS_SUMMARY_LENGTH) -> str:
     """args を監査ログ用に要約"""
     try:
-        s = json.dumps(args, ensure_ascii=False, default=str)
+        s = json.dumps(_redact_sensitive_args(args), ensure_ascii=False, default=str)
     except Exception:
         s = str(args)
     if len(s) > max_length:
@@ -1870,13 +2041,43 @@ class CapabilityExecutor:
     def _host_execution_args_summary(args: dict[str, Any] | None) -> dict[str, Any]:
         if not isinstance(args, dict):
             return {"type": type(args).__name__, "keys": [], "count": 0}
-        keys = sorted(str(key) for key in args.keys())
-        return {
+        visible_keys = sorted(str(key) for key in args.keys() if not _is_sensitive_arg_key(key))
+        redacted_field_count = len(args) - len(visible_keys)
+        summary: dict[str, Any] = {
             "type": "object",
-            "keys": keys[:20],
-            "count": len(keys),
-            "truncated": len(keys) > 20,
+            "keys": visible_keys[:20],
+            "count": len(visible_keys),
+            "truncated": len(visible_keys) > 20,
         }
+        tokens = _host_command_tokens(args)
+        paths: list[str] = []
+        urls: list[str] = []
+        if tokens:
+            summary["executable"] = tokens[0]
+            summary["argument_count"] = max(0, len(tokens) - 1)
+            for token in tokens[1:]:
+                if _is_sensitive_cli_token(token):
+                    continue
+                _collect_host_targets(token, paths=paths, urls=urls)
+        for key in ("cwd", "working_dir", "working_directory"):
+            if key in args and not _is_sensitive_arg_key(key):
+                cwd = _safe_host_summary_text(args.get(key))
+                if cwd:
+                    summary["cwd"] = cwd
+                break
+        for key, value in args.items():
+            if str(key) in {"cwd", "working_dir", "working_directory"}:
+                continue
+            if _is_sensitive_arg_key(key) or not _is_target_arg_key(key):
+                continue
+            _collect_host_targets(value, paths=paths, urls=urls)
+        if paths:
+            summary["target_paths"] = paths
+        if urls:
+            summary["target_urls"] = urls
+        if redacted_field_count:
+            summary["redacted_field_count"] = redacted_field_count
+        return summary
 
     @staticmethod
     def _authority_context_token_for_permission(

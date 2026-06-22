@@ -223,6 +223,15 @@ def test_host_intent_validator_enforces_typed_operations_and_stream_rules():
         caller_function_id="status",
         conversation_id="trusted-conv",
     )
+    untrusted_conversation = validate_host_intent(
+        {
+            "type": "host_intent",
+            "operation": "host.permission.status",
+            "conversation_id": "borrowed-conv",
+        },
+        caller_pack_id="pack.permissions",
+        caller_function_id="status",
+    )
 
     assert ok.ok is True
     assert ok.intent.operation == "host.permission.status"
@@ -240,6 +249,8 @@ def test_host_intent_validator_enforces_typed_operations_and_stream_rules():
     assert any("caller function id does not match" in error for error in spoofed_function.errors)
     assert spoofed_conversation.ok is False
     assert any("conversation id does not match" in error for error in spoofed_conversation.errors)
+    assert untrusted_conversation.ok is False
+    assert any("conversation id requires trusted execution context" in error for error in untrusted_conversation.errors)
 
 
 def test_default_builtin_grants_allow_host_pack_but_not_exec_guarded(tmp_path):
@@ -389,6 +400,7 @@ def test_host_mediator_function_returns_valid_host_intent(monkeypatch):
         result,
         caller_pack_id="rumi_ambient_trigger_pack",
         caller_function_id="ambient_permission_check",
+        conversation_id="conversation-1",
     )
 
     assert result["type"] == "host_intent"
@@ -1014,7 +1026,7 @@ def test_host_intent_executor_fails_closed_when_broker_class_is_missing(monkeypa
 
 def test_direct_host_function_from_non_host_pack_becomes_critical_authority_request(monkeypatch):
     from core_runtime.authority.models import AuthorityDecision
-    from core_runtime.capability_executor import CapabilityExecutor
+    from core_runtime.capability_executor import CapabilityExecutor, _summarize_args
 
     class Authority:
         calls: list[dict] = []
@@ -1050,7 +1062,13 @@ def test_direct_host_function_from_non_host_pack_becomes_critical_authority_requ
         request_id="req-host",
         start_time=time.time(),
         args={
-            "argv": ["/bin/echo", "hello"],
+            "argv": ["/bin/rm", "-rf", "/tmp/unsafe-target", "--token", "cli-token-value"],
+            "cwd": "/tmp/project",
+            "path": "/tmp/unsafe-target",
+            "stdin": "secret-stdin-must-not-leak",
+            "password": "secret-password-must-not-leak",
+            "token": "secret-token-must-not-leak",
+            "url": "https://example.test/hook?token=query-secret-must-not-leak",
             "env": {"API_KEY": "secret-value-must-not-leak"},
         },
     )
@@ -1064,14 +1082,44 @@ def test_direct_host_function_from_non_host_pack_becomes_critical_authority_requ
     assert response.output["typed_confirmation_required"] is True
     assert authority.calls[0]["permission_id"] == "host.process.exec_guarded"
     resource = authority.calls[0]["resource"]
+    original_args = {
+        "argv": ["/bin/rm", "-rf", "/tmp/unsafe-target", "--token", "cli-token-value"],
+        "cwd": "/tmp/project",
+        "path": "/tmp/unsafe-target",
+        "stdin": "secret-stdin-must-not-leak",
+        "password": "secret-password-must-not-leak",
+        "token": "secret-token-must-not-leak",
+        "url": "https://example.test/hook?token=query-secret-must-not-leak",
+        "env": {"API_KEY": "secret-value-must-not-leak"},
+    }
     assert resource["args_hash"] == executor._host_execution_args_hash(
-        {
-            "argv": ["/bin/echo", "hello"],
-            "env": {"API_KEY": "secret-value-must-not-leak"},
-        }
+        original_args
     )
-    assert resource["args_summary"]["keys"] == ["argv", "env"]
-    assert "secret-value-must-not-leak" not in json.dumps(resource, ensure_ascii=False)
+    summary = resource["args_summary"]
+    assert summary["keys"] == ["argv", "cwd", "path", "url"]
+    assert summary["executable"] == "/bin/rm"
+    assert summary["argument_count"] == 4
+    assert summary["cwd"] == "/tmp/project"
+    assert summary["target_paths"] == ["/tmp/unsafe-target"]
+    assert summary["target_urls"] == ["https://example.test/hook"]
+    assert summary["redacted_field_count"] == 4
+    resource_json = json.dumps(resource, ensure_ascii=False)
+    audit_summary = _summarize_args(original_args)
+    for secret_fragment in (
+        "API_KEY",
+        "cli-token-value",
+        "env",
+        "password",
+        "query-secret-must-not-leak",
+        "secret-password-must-not-leak",
+        "secret-stdin-must-not-leak",
+        "secret-token-must-not-leak",
+        "secret-value-must-not-leak",
+        "stdin",
+        "token",
+    ):
+        assert secret_fragment not in resource_json
+        assert secret_fragment not in audit_summary
 
 
 def test_direct_host_args_hash_is_canonical_and_approval_bound(tmp_path, monkeypatch):
