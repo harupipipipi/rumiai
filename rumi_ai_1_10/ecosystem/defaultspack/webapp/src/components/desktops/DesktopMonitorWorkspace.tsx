@@ -189,8 +189,10 @@ export function DesktopMonitorWorkspace() {
       operation={runtime.operation}
       doctorLoading={runtime.doctorLoading}
       setupLoading={runtime.setupLoading}
+      operationCancelLoading={runtime.operationCancelLoading}
       onSetup={() => void runtime.ensureRuntime(runtime.availability.selectedProvider?.provider_id)}
       onDoctor={() => void runtime.runDoctor()}
+      onCancelOperation={() => void runtime.cancelRuntimeOperation()}
       onCopyDiagnostics={handleCopyDiagnostics}
     />
   ) : null;

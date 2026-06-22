@@ -11,8 +11,10 @@ type DesktopProviderNoticeProps = {
   operation: RuntimeOperation | null;
   doctorLoading?: boolean;
   setupLoading?: boolean;
+  operationCancelLoading?: boolean;
   onSetup: () => void;
   onDoctor: () => void;
+  onCancelOperation?: () => void;
   onCopyDiagnostics: () => void;
 };
 
@@ -28,8 +30,10 @@ export function DesktopProviderNotice({
   operation,
   doctorLoading = false,
   setupLoading = false,
+  operationCancelLoading = false,
   onSetup,
   onDoctor,
+  onCancelOperation,
   onCopyDiagnostics,
 }: DesktopProviderNoticeProps) {
   const showSetup = availability.status !== "ready";
@@ -113,7 +117,11 @@ export function DesktopProviderNotice({
       </div>
 
       <div className="mt-3">
-        <RuntimeSetupDialog operation={operation} />
+        <RuntimeSetupDialog
+          operation={operation}
+          cancelLoading={operationCancelLoading}
+          onCancel={onCancelOperation}
+        />
       </div>
     </section>
   );

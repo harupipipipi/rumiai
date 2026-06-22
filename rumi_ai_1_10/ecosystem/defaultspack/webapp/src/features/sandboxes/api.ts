@@ -158,6 +158,13 @@ export const sandboxesApi = {
     return request<RuntimeOperation>(`/api/runtime/operations/${encodeId(operationId)}`, { cache: "no-store" });
   },
 
+  cancelRuntimeOperation(operationId: string) {
+    return request<RuntimeOperation>(`/api/runtime/operations/${encodeId(operationId)}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: requestId("runtime-cancel") }),
+    });
+  },
+
   listSandboxTemplates() {
     return request<{ templates: SandboxTemplate[] }>("/api/sandbox/templates", { cache: "no-store" });
   },

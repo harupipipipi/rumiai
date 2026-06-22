@@ -6,7 +6,7 @@ import type { RuntimeDoctorResult, RuntimeOperation, RuntimeProvidersResponse } 
 
 type RuntimeDoctorClient = Pick<
   typeof sandboxesApi,
-  "listRuntimeProviders" | "runRuntimeDoctor" | "ensureRuntime" | "getRuntimeOperation"
+  "listRuntimeProviders" | "runRuntimeDoctor" | "ensureRuntime" | "getRuntimeOperation" | "cancelRuntimeOperation"
 >;
 
 export function useRuntimeDoctor({
@@ -22,6 +22,7 @@ export function useRuntimeDoctor({
   const [loading, setLoading] = useState(true);
   const [doctorLoading, setDoctorLoading] = useState(false);
   const [setupLoading, setSetupLoading] = useState(false);
+  const [operationCancelLoading, setOperationCancelLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refreshProviders = useCallback(async (signal?: AbortSignal) => {
@@ -74,6 +75,22 @@ export function useRuntimeDoctor({
     }
   }, [client]);
 
+  const cancelRuntimeOperation = useCallback(async () => {
+    if (!operation?.operation_id || ["completed", "failed", "cancelled"].includes(operation.status)) return null;
+    setOperationCancelLoading(true);
+    try {
+      const result = await client.cancelRuntimeOperation(operation.operation_id);
+      setOperation(result);
+      setError(null);
+      return result;
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : "Runtime operation cancellation failed.");
+      return null;
+    } finally {
+      setOperationCancelLoading(false);
+    }
+  }, [client, operation?.operation_id, operation?.status]);
+
   useEffect(() => {
     const controller = new AbortController();
     void refreshProviders(controller.signal).then(() => {
@@ -119,9 +136,11 @@ export function useRuntimeDoctor({
     loading,
     doctorLoading,
     setupLoading,
+    operationCancelLoading,
     error,
     refreshProviders,
     runDoctor,
     ensureRuntime,
+    cancelRuntimeOperation,
   };
 }
