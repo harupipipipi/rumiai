@@ -296,6 +296,116 @@ def test_fake_provider_create_lifecycle_is_local_only_contract_state() -> None:
     assert started.provider_instance_id not in provider.instances
 
 
+def test_expired_lifecycle_is_enforced_before_sandbox_operations(tmp_path) -> None:
+    agent = FakeGuestAgent()
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+            "sandbox.desktop",
+            "sandbox.desktop_input",
+            "sandbox.snapshot",
+        },
+        guest_agent=agent,
+        sandbox_id_factory=lambda: "ttl-seat",
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+
+    created = manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.ubuntu",
+        access_owner_id="local-user",
+    )
+    assert created["ok"] is True
+    with manager._lock:
+        inst = manager._instances["ttl-seat"]
+        inst.lifecycle_policy = LifecyclePolicy(ttl_seconds=1, destroy_on_exit=True)
+        inst.last_activity_at = time.time() - 5
+        manager._save_registry()
+
+    result = manager.exec(
+        "ttl-seat",
+        {
+            "argv": ["echo", "hello"],
+            "cwd": ".",
+            "env": {},
+            "timeout_ms": 1000,
+            "client_request_id": "ttl-exec",
+        },
+    )
+    status = manager.status("ttl-seat")
+
+    assert result["ok"] is False
+    assert result["code"] == "SANDBOX_NOT_RUNNING"
+    assert result["state"] == "destroyed"
+    assert status["state"] == "destroyed"
+    assert agent.exec_requests == []
+    assert provider.instances == {}
+
+
+def test_expired_lifecycle_blocks_desktop_control_lease(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+            "sandbox.desktop",
+            "sandbox.desktop_input",
+            "sandbox.snapshot",
+        },
+        sandbox_id_factory=lambda: "ttl-control",
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    lease_manager = ControlLeaseManager(token_factory=lambda: "lease-token")
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=lease_manager,
+    )
+    api._reset_service_for_tests(service)
+    try:
+        created = api.run(
+            {
+                "_handler": "desktops_create",
+                "template_id": "desktop.ubuntu",
+                "provider_id": "fake-runtime",
+                "owner_id": "local-user",
+            },
+            {},
+        )
+        assert created["status"] == "ok"
+        with service.manager._lock:
+            inst = service.manager._instances["ttl-control"]
+            inst.lifecycle_policy = LifecyclePolicy(ttl_seconds=1, destroy_on_exit=True)
+            inst.last_activity_at = time.time() - 5
+            service.manager._save_registry()
+
+        acquire = api.run(
+            {"_handler": "desktop_control_acquire", "seat_id": "ttl-control", "owner_id": "local-user"},
+            {},
+        )
+        status = service.manager.status("ttl-control")
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert acquire["status"] == "error"
+    assert acquire["error"]["code"] == "DESKTOP_NOT_RUNNING"
+    assert status["state"] == "destroyed"
+    assert lease_manager.active_lease("ttl-control") is None
+
+
 def test_linux_native_provider_desktop_session_capture_and_input(monkeypatch) -> None:
     from ecosystem.defaultspack.backend.sandbox.providers.linux_native import LinuxNativeProvider
 

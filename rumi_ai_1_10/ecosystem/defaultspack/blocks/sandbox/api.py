@@ -703,6 +703,9 @@ def _desktop_control_acquire(service: _SandboxApiService, payload: dict[str, Any
     access_error = _desktop_access_error(service, seat_id, payload)
     if access_error is not None:
         return access_error
+    running_error = _desktop_running_error(service, seat_id)
+    if running_error is not None:
+        return running_error
     owner_id = str(payload.get("owner_id") or "human")
     grant = service.lease_manager.acquire(seat_id, owner_id)
     response = grant.to_response()
@@ -715,6 +718,9 @@ def _desktop_control_renew(service: _SandboxApiService, payload: dict[str, Any])
     access_error = _desktop_access_error(service, seat_id, payload)
     if access_error is not None:
         return access_error
+    running_error = _desktop_running_error(service, seat_id)
+    if running_error is not None:
+        return running_error
     owner_id = str(payload.get("owner_id") or "human")
     lease_token = str(payload.get("lease_token") or "")
     renewed = service.lease_manager.renew(seat_id, owner_id, lease_token)
@@ -1138,6 +1144,25 @@ def _desktop_access_error(service: _SandboxApiService, seat_id: str, payload: di
         str(result.get("code") or "DESKTOP_ACCESS_DENIED"),
         int(result.get("status_code") or 403),
         details={key: value for key, value in result.items() if key in {"sandbox_id", "key_hint"}},
+    )
+
+
+def _desktop_running_error(service: _SandboxApiService, seat_id: str) -> dict[str, Any] | None:
+    status = service.manager.status(seat_id)
+    if status.get("ok") is not True:
+        return _api_error(
+            str(status.get("error") or "Desktop not found"),
+            str(status.get("code") or "DESKTOP_NOT_FOUND"),
+            int(status.get("status_code") or 404),
+        )
+    state = str(status.get("state") or status.get("status") or "unknown")
+    if state in RUNNING_STATES:
+        return None
+    return _api_error(
+        f"Desktop is not running ({state}): {seat_id}",
+        "DESKTOP_NOT_RUNNING",
+        409,
+        details={"seat_id": seat_id, "state": state},
     )
 
 

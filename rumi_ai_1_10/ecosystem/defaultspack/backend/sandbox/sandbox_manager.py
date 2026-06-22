@@ -411,6 +411,7 @@ class SandboxManager:
         return self.start(sandbox_id)
 
     def screenshot(self, sandbox_id: str) -> Dict[str, Any]:
+        self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
             if error is not None:
@@ -433,6 +434,7 @@ class SandboxManager:
         return self._backend_unavailable(inst, "screenshot")
 
     def click(self, sandbox_id: str, x: int, y: int) -> Dict[str, Any]:
+        self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
             if error is not None:
@@ -452,6 +454,7 @@ class SandboxManager:
         return result
 
     def type_text(self, sandbox_id: str, text: str) -> Dict[str, Any]:
+        self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
             if error is not None:
@@ -471,6 +474,7 @@ class SandboxManager:
         return result
 
     def scroll(self, sandbox_id: str, direction: str = "down", amount: int = 3) -> Dict[str, Any]:
+        self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
             if error is not None:
@@ -496,6 +500,7 @@ class SandboxManager:
         *,
         actor: str = "human",
     ) -> Dict[str, Any]:
+        self._enforce_lifecycle_for_instance(seat_id)
         normalized_actor = "ai" if actor == "ai" else "human"
         agent_id = _optional_clean_string(
             payload.get("agent_id") or payload.get("actor_agent_id") or payload.get("assigned_agent_id"),
@@ -577,6 +582,7 @@ class SandboxManager:
         return result
 
     def exec(self, sandbox_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
             if error is not None:
@@ -617,6 +623,7 @@ class SandboxManager:
         return result
 
     def apply_file_patch(self, sandbox_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
             if error is not None:
@@ -669,6 +676,7 @@ class SandboxManager:
         return result
 
     def expose_port(self, sandbox_id: str, payload: Dict[str, Any], *, approved: bool = False) -> Dict[str, Any]:
+        self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
             if error is not None:
@@ -765,6 +773,19 @@ class SandboxManager:
             result["lifecycle_action"] = action
             results.append(result)
         return results
+
+    def _enforce_lifecycle_for_instance(self, sandbox_id: str, *, now: float | None = None) -> list[dict[str, Any]]:
+        current_time = time.time() if now is None else float(now)
+        with self._lock:
+            inst = self._instances.get(str(sandbox_id))
+            if inst is None:
+                return []
+            action = self._lifecycle_action(inst, current_time)
+        if action is None:
+            return []
+        result = self.destroy(sandbox_id) if action == "destroy" else self.stop(sandbox_id)
+        result["lifecycle_action"] = action
+        return [result]
 
     def mark_provider_uninstalled(self, provider_id: str, *, remove_state: bool = False) -> list[str]:
         clean_provider_id = str(provider_id or "").strip()
