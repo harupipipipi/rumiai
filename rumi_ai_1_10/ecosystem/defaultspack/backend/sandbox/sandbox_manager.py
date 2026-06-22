@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import hashlib
+import re
 import secrets
 import tempfile
 import threading
@@ -76,6 +77,10 @@ DESKTOP_MAX_PIXELS = 3840 * 2160
 DESKTOP_INPUT_RATE_WINDOW_SECONDS = 5.0
 DESKTOP_INPUT_RATE_MAX_EVENTS = 30
 DESKTOP_CONTROL_AUDIT_FILENAME = "desktop_control_audit.jsonl"
+SECRET_ENV_KEY_RE = re.compile(
+    r"(^|_)(API_KEY|AUTH|COOKIE|CREDENTIAL|KEY|OAUTH|PASS|PASSWD|PASSWORD|PRIVATE_KEY|SECRET|SESSION|TOKEN)($|_)",
+    re.IGNORECASE,
+)
 
 
 class SandboxManager:
@@ -240,6 +245,7 @@ class SandboxManager:
             lifecycle_policy=template.lifecycle,
             workspace_binding=workspace_binding,
             network_policy=template.network,
+            secrets_policy=template.secrets,
             desktop_spec=template.desktop,
             desktop_rules=rule_config,
             desktop_access=access_policy,
@@ -574,6 +580,9 @@ class SandboxManager:
                 return operation_error
         try:
             request = GuestExecRequest.from_payload(payload)
+            secret_policy_error = self._require_secret_policy(inst, request)
+            if secret_policy_error is not None:
+                return secret_policy_error
             agent = self._provider_agent(inst)
             result = agent.exec(inst.sandbox_id, request.to_agent_payload())
         except SandboxContractError as exc:
@@ -1194,6 +1203,51 @@ class SandboxManager:
             "allowed_operations": sorted(allowed),
         }
 
+    @staticmethod
+    def _require_secret_policy(inst: SandboxInstance, request: GuestExecRequest) -> Dict[str, Any] | None:
+        if not request.env:
+            return None
+        policy = inst.secrets_policy
+        declared_secret_ids = set(policy.secret_ids)
+        sensitive_keys = sorted(
+            key
+            for key in request.env
+            if SECRET_ENV_KEY_RE.search(key) or key in declared_secret_ids
+        )
+        if not sensitive_keys:
+            return None
+        mode = str(policy.mode or "denied").strip().lower().replace("-", "_")
+        base = {
+            "ok": False,
+            "sandbox_id": inst.sandbox_id,
+            "status": inst.state,
+            "state": inst.state,
+            "template_id": inst.template_id,
+            "denied_env_keys": sensitive_keys,
+        }
+        if mode in {"deny", "denied", "none", "off"}:
+            return {
+                **base,
+                "error": "Sandbox template denies secret-bearing environment variables.",
+                "code": "SANDBOX_SECRET_ENV_DENIED",
+                "status_code": 403,
+            }
+        if policy.approval_required or mode in {"explicit", "explicit_read_only", "read_only"}:
+            return {
+                **base,
+                "error": "Sandbox template requires an approved secret grant before secret-bearing environment variables can be used.",
+                "code": "SANDBOX_SECRET_ACCESS_REQUIRES_APPROVAL",
+                "status_code": 409,
+            }
+        if mode in {"allow", "allowed", "explicit_approved"}:
+            return None
+        return {
+            **base,
+            "error": f"Unsupported sandbox secret policy mode: {policy.mode}",
+            "code": "SANDBOX_SECRET_POLICY_UNSUPPORTED",
+            "status_code": 403,
+        }
+
     def _mark_failed(self, sandbox_id: str, message: str, *, code: str) -> Dict[str, Any]:
         with self._lock:
             inst = self._instances.get(str(sandbox_id))
@@ -1241,6 +1295,7 @@ class SandboxManager:
         opaque_state.setdefault("image", inst.image)
         opaque_state.setdefault("workspace_binding", model_to_dict(inst.workspace_binding))
         opaque_state.setdefault("network_policy", model_to_dict(inst.network_policy))
+        opaque_state.setdefault("secrets_policy", model_to_dict(inst.secrets_policy))
         opaque_state.setdefault("resource_limits", model_to_dict(inst.resource_limits))
         opaque_state.setdefault("desktop_provisioning", model_to_dict(inst.desktop_provisioning))
         opaque_state.setdefault("desktop_rules", model_to_dict(inst.desktop_rules))
@@ -1578,6 +1633,7 @@ class SandboxManager:
             ),
             secrets=SecretsPolicy(
                 mode=str(secrets_policy.get("mode") or "denied"),
+                secret_ids=tuple(_clean_string_list(secrets_policy.get("secret_ids"), max_items=128, max_len=128)),
                 approval_required=bool(secrets_policy.get("requires_approval")),
             ),
             resources=ResourceLimits(
@@ -1647,6 +1703,7 @@ class SandboxManager:
             lifecycle_policy=_lifecycle_policy_from_dict(data.get("lifecycle_policy")),
             workspace_binding=_workspace_binding_from_dict(data.get("workspace_binding")),
             network_policy=_network_policy_from_dict(data.get("network_policy")),
+            secrets_policy=_secrets_policy_from_dict(data.get("secrets_policy")),
             desktop_spec=_desktop_spec_from_dict(data.get("desktop_spec"), display=display),
             desktop_rules=_desktop_rules_from_dict(data.get("desktop_rules")),
             desktop_access=_desktop_access_from_dict(data.get("desktop_access")),
@@ -1799,6 +1856,16 @@ def _network_policy_from_dict(value: Any) -> NetworkPolicy:
     return NetworkPolicy(
         mode=str(value.get("mode") or "off")[:80],
         allowlist=_clean_string_list(value.get("allowlist"), max_items=128, max_len=256),
+        approval_required=bool(value.get("approval_required")),
+    )
+
+
+def _secrets_policy_from_dict(value: Any) -> SecretsPolicy:
+    if not isinstance(value, dict):
+        return SecretsPolicy()
+    return SecretsPolicy(
+        mode=str(value.get("mode") or "denied")[:80],
+        secret_ids=_clean_string_list(value.get("secret_ids"), max_items=128, max_len=128),
         approval_required=bool(value.get("approval_required")),
     )
 

@@ -280,6 +280,7 @@ class SandboxInstance:
     lifecycle_policy: LifecyclePolicy = field(default_factory=LifecyclePolicy)
     workspace_binding: WorkspaceBinding = field(default_factory=WorkspaceBinding)
     network_policy: NetworkPolicy = field(default_factory=NetworkPolicy)
+    secrets_policy: SecretsPolicy = field(default_factory=SecretsPolicy)
     desktop_spec: DesktopSpec | None = None
     desktop_rules: DesktopRuleConfig = field(default_factory=DesktopRuleConfig)
     desktop_access: DesktopAccessPolicy = field(default_factory=DesktopAccessPolicy)

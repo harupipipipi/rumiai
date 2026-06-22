@@ -7,6 +7,7 @@ from ecosystem.defaultspack.backend.sandbox.gui_sandbox import GUISandbox
 from ecosystem.defaultspack.backend.sandbox.models import ProviderInstance, ReconcileResult
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
+from ecosystem.defaultspack.backend.sandbox.testing.fake_guest_agent import FakeGuestAgent
 from ecosystem.defaultspack.backend.sandbox.testing.fake_provider import FakeRuntimeProvider
 from ecosystem.defaultspack.backend.sandbox.errors import SandboxContractError
 from ecosystem.defaultspack.domain.coding.workspace_store import WorkspaceStore
@@ -235,6 +236,8 @@ def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path, monk
     status = manager.status(sandbox_id)
     assert status["template_id"] == "desktop.coding"
     assert status["network_policy"]["mode"] == "project_policy_or_first_use_approval"
+    assert status["secrets_policy"]["mode"] == "explicit_read_only"
+    assert status["secrets_policy"]["approval_required"] is True
     assert status["resource_limits"]["memory_mb"] == 4096
     assert status["workspace_binding"]["mode"] == "read_only"
     assert status["workspace_binding"]["root"] == str(workspace_root)
@@ -245,6 +248,8 @@ def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path, monk
     reloaded_status = reloaded.status(sandbox_id)
 
     assert reloaded_status["network_policy"]["mode"] == "project_policy_or_first_use_approval"
+    assert reloaded_status["secrets_policy"]["mode"] == "explicit_read_only"
+    assert reloaded_status["secrets_policy"]["approval_required"] is True
     assert reloaded_status["resource_limits"]["timeout_ms"] == 14_400_000
     assert reloaded_status["desktop_spec"]["width"] == 1440
     assert reloaded_status["assigned_agent_id"] == "agent-1"
@@ -427,6 +432,77 @@ def test_sandbox_exec_is_guest_agent_only_and_template_gated(tmp_path):
     assert raw_command["code"] == "RAW_COMMAND_REJECTED"
     assert denied["ok"] is False
     assert denied["code"] == "SANDBOX_OPERATION_NOT_ALLOWED"
+
+
+def test_sandbox_exec_enforces_template_secret_policy_before_guest_agent(tmp_path):
+    guest = FakeGuestAgent()
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"},
+        guest_agent=guest,
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    sandbox_id = manager.create(
+        display=False,
+        provider_id="fake-runtime",
+        template_id="tool.ephemeral",
+    )["sandbox_id"]
+
+    normal_env = manager.exec(
+        sandbox_id,
+        {
+            "argv": ["python", "--version"],
+            "cwd": ".",
+            "env": {"PYTHONUNBUFFERED": "1"},
+            "client_request_id": "exec-env-1",
+        },
+    )
+    secret_env = manager.exec(
+        sandbox_id,
+        {
+            "argv": ["python", "--version"],
+            "cwd": ".",
+            "env": {"OPENAI_API_KEY": "sk-test"},
+            "client_request_id": "exec-env-2",
+        },
+    )
+
+    coding_manager = _manager(
+        tmp_path / "coding",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+        },
+    )
+    coding_sandbox_id = coding_manager.create(
+        display=False,
+        provider_id="fake-runtime",
+        template_id="coding.python",
+    )["sandbox_id"]
+    approval_required = coding_manager.exec(
+        coding_sandbox_id,
+        {
+            "argv": ["python", "--version"],
+            "cwd": ".",
+            "env": {"GITHUB_TOKEN": "ghp-test"},
+            "client_request_id": "exec-env-3",
+        },
+    )
+
+    assert normal_env["ok"] is True
+    assert secret_env["ok"] is False
+    assert secret_env["code"] == "SANDBOX_SECRET_ENV_DENIED"
+    assert secret_env["denied_env_keys"] == ["OPENAI_API_KEY"]
+    assert approval_required["ok"] is False
+    assert approval_required["code"] == "SANDBOX_SECRET_ACCESS_REQUIRES_APPROVAL"
+    assert approval_required["status_code"] == 409
+    assert [request.client_request_id for request in guest.exec_requests] == ["exec-env-1"]
 
 
 def test_ai_desktop_input_rate_limit_is_actor_scoped(tmp_path):
