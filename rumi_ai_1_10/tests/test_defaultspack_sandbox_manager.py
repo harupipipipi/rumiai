@@ -6,7 +6,14 @@ from collections.abc import Callable
 from ecosystem.defaultspack.backend.sandbox.gui_sandbox import GUISandbox
 from ecosystem.defaultspack.backend.sandbox.models import ProviderInstance, ReconcileResult
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
-from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
+from ecosystem.defaultspack.backend.sandbox.sandbox_manager import (
+    SANDBOX_MAX_CPU_COUNT,
+    SANDBOX_MAX_MEMORY_MB,
+    SANDBOX_MAX_OUTPUT_BYTES,
+    SANDBOX_MAX_PIDS,
+    SANDBOX_MAX_TIMEOUT_MS,
+    SandboxManager,
+)
 from ecosystem.defaultspack.backend.sandbox.testing.fake_guest_agent import FakeGuestAgent
 from ecosystem.defaultspack.backend.sandbox.testing.fake_provider import FakeRuntimeProvider
 from ecosystem.defaultspack.backend.sandbox.errors import SandboxContractError
@@ -738,6 +745,87 @@ def test_persisted_desktop_resolution_is_sanitized_before_provider_reconcile(tmp
     assert provider.reconciled[0].opaque_state["width"] == 1440
     assert provider.reconciled[0].opaque_state["height"] == 900
     assert provider.reconciled[0].opaque_state["desktop_spec"]["width"] == 1440
+
+
+def test_persisted_resource_limits_are_sanitized_before_provider_reconcile(tmp_path):
+    registry_path = tmp_path / "sandboxes.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "instances": {
+                    "seat-huge-resources": {
+                        "sandbox_id": "seat-huge-resources",
+                        "name": "Huge Resources",
+                        "image": "ubuntu:22.04",
+                        "display": True,
+                        "template_id": "desktop.ubuntu",
+                        "provider_id": "fake-runtime",
+                        "provider_instance_id": "fake-seat-huge-resources",
+                        "runtime_id": "fake-runtime",
+                        "state": "ready",
+                        "created_at": 10,
+                        "updated_at": 11,
+                        "resource_limits": {
+                            "cpu_count": 9999,
+                            "memory_mb": 9_999_999,
+                            "pids": 9_999_999,
+                            "output_bytes": 9_999_999_999,
+                            "timeout_ms": 9_999_999_999,
+                        },
+                        "provider_opaque_state": {
+                            "cpu_count": 7777,
+                            "memory_mb": 7_777_777,
+                            "pids": 7_777_777,
+                            "output_bytes": 7_777_777_777,
+                            "timeout_ms": 7_777_777_777,
+                            "resource_limits": {
+                                "cpu_count": 8888,
+                                "memory_mb": 8_888_888,
+                                "pids": 8_888_888,
+                                "output_bytes": 8_888_888_888,
+                                "timeout_ms": 8_888_888_888,
+                            },
+                        },
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class CaptureReconcileProvider(FakeRuntimeProvider):
+        def __init__(self) -> None:
+            super().__init__(provider_id="fake-runtime")
+            self.reconciled: list[ProviderInstance] = []
+
+        def reconcile(self, persisted: ProviderInstance) -> ReconcileResult:
+            self.reconciled.append(persisted)
+            return ReconcileResult(instance=persisted, changed=False)
+
+    provider = CaptureReconcileProvider()
+    registry = ProviderRegistry()
+    registry.register(provider)
+
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    status = manager.status("seat-huge-resources")
+    expected = {
+        "cpu_count": SANDBOX_MAX_CPU_COUNT,
+        "memory_mb": SANDBOX_MAX_MEMORY_MB,
+        "pids": SANDBOX_MAX_PIDS,
+        "output_bytes": SANDBOX_MAX_OUTPUT_BYTES,
+        "timeout_ms": SANDBOX_MAX_TIMEOUT_MS,
+    }
+
+    assert status["ok"] is True
+    assert status["resource_limits"] == expected
+    opaque_state = provider.reconciled[0].opaque_state
+    assert opaque_state["resource_limits"] == expected
+    assert opaque_state["cpu_count"] == SANDBOX_MAX_CPU_COUNT
+    assert opaque_state["memory_mb"] == SANDBOX_MAX_MEMORY_MB
+    assert opaque_state["pids"] == SANDBOX_MAX_PIDS
+    assert opaque_state["output_bytes"] == SANDBOX_MAX_OUTPUT_BYTES
+    assert opaque_state["timeout_ms"] == SANDBOX_MAX_TIMEOUT_MS
 
 
 def test_sandbox_screenshot_fails_closed_without_backend(tmp_path):

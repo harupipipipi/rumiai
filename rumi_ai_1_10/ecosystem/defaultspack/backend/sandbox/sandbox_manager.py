@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import platform
 import hashlib
@@ -74,6 +75,11 @@ DESKTOP_MIN_HEIGHT = 480
 DESKTOP_MAX_WIDTH = 3840
 DESKTOP_MAX_HEIGHT = 2160
 DESKTOP_MAX_PIXELS = 3840 * 2160
+SANDBOX_MAX_CPU_COUNT = 32.0
+SANDBOX_MAX_MEMORY_MB = 64 * 1024
+SANDBOX_MAX_PIDS = 32768
+SANDBOX_MAX_OUTPUT_BYTES = 64 * 1024 * 1024
+SANDBOX_MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000
 DESKTOP_INPUT_RATE_WINDOW_SECONDS = 5.0
 DESKTOP_INPUT_RATE_MAX_EVENTS = 30
 DESKTOP_CONTROL_AUDIT_FILENAME = "desktop_control_audit.jsonl"
@@ -1560,7 +1566,14 @@ class SandboxManager:
         opaque_state.setdefault("workspace_binding", model_to_dict(inst.workspace_binding))
         opaque_state.setdefault("network_policy", model_to_dict(inst.network_policy))
         opaque_state.setdefault("secrets_policy", model_to_dict(inst.secrets_policy))
-        opaque_state.setdefault("resource_limits", model_to_dict(inst.resource_limits))
+        resource_limits = model_to_dict(inst.resource_limits)
+        opaque_state["resource_limits"] = resource_limits
+        for key in ("memory_mb", "cpu_count", "pids", "output_bytes", "timeout_ms"):
+            value = resource_limits.get(key)
+            if value is None:
+                opaque_state.pop(key, None)
+            else:
+                opaque_state[key] = value
         opaque_state.setdefault("desktop_provisioning", model_to_dict(inst.desktop_provisioning))
         opaque_state.setdefault("desktop_rules", model_to_dict(inst.desktop_rules))
         if inst.desktop_spec is not None:
@@ -1902,12 +1915,12 @@ class SandboxManager:
                 secret_ids=tuple(_clean_string_list(secrets_policy.get("secret_ids"), max_items=128, max_len=128)),
                 approval_required=bool(secrets_policy.get("requires_approval")),
             ),
-            resources=ResourceLimits(
+            resources=_bounded_resource_limits(
                 cpu_count=_optional_float(resources_policy.get("cpu")) or 1,
-                memory_mb=int(_float_or_zero(resources_policy.get("memory_mb")) or 2048),
-                pids=int(_float_or_zero(resources_policy.get("pids")) or 0) or None,
-                output_bytes=int(_float_or_zero(resources_policy.get("max_output_bytes")) or 0) or None,
-                timeout_ms=int((_float_or_zero(resources_policy.get("timeout_seconds")) or 600) * 1000),
+                memory_mb=_float_or_zero(resources_policy.get("memory_mb")) or 2048,
+                pids=_float_or_zero(resources_policy.get("pids")),
+                output_bytes=_float_or_zero(resources_policy.get("max_output_bytes")),
+                timeout_ms=(_float_or_zero(resources_policy.get("timeout_seconds")) or 600) * 1000,
             ),
             lifecycle=LifecyclePolicy(
                 ttl_seconds=int(_float_or_zero(lifecycle_policy.get("ttl_seconds")) or 900),
@@ -2117,13 +2130,52 @@ def _validated_desktop_resolution(
 def _resource_limits_from_dict(value: Any) -> ResourceLimits:
     if not isinstance(value, dict):
         return ResourceLimits()
-    return ResourceLimits(
-        cpu_count=_optional_float(value.get("cpu_count")),
-        memory_mb=int(_float_or_zero(value.get("memory_mb")) or 0) or None,
-        pids=int(_float_or_zero(value.get("pids")) or 0) or None,
-        output_bytes=int(_float_or_zero(value.get("output_bytes")) or 0) or None,
-        timeout_ms=int(_float_or_zero(value.get("timeout_ms")) or 0) or None,
+    return _bounded_resource_limits(
+        cpu_count=value.get("cpu_count"),
+        memory_mb=value.get("memory_mb"),
+        pids=value.get("pids"),
+        output_bytes=value.get("output_bytes"),
+        timeout_ms=value.get("timeout_ms"),
     )
+
+
+def _bounded_resource_limits(
+    *,
+    cpu_count: Any,
+    memory_mb: Any,
+    pids: Any,
+    output_bytes: Any,
+    timeout_ms: Any,
+) -> ResourceLimits:
+    return ResourceLimits(
+        cpu_count=_bounded_optional_float(cpu_count, maximum=SANDBOX_MAX_CPU_COUNT),
+        memory_mb=_bounded_optional_int(memory_mb, maximum=SANDBOX_MAX_MEMORY_MB),
+        pids=_bounded_optional_int(pids, maximum=SANDBOX_MAX_PIDS),
+        output_bytes=_bounded_optional_int(output_bytes, maximum=SANDBOX_MAX_OUTPUT_BYTES),
+        timeout_ms=_bounded_optional_int(timeout_ms, maximum=SANDBOX_MAX_TIMEOUT_MS),
+    )
+
+
+def _bounded_optional_int(value: Any, *, maximum: int) -> int | None:
+    parsed = _finite_float(value)
+    if parsed is None or parsed <= 0:
+        return None
+    return min(int(parsed), maximum)
+
+
+def _bounded_optional_float(value: Any, *, maximum: float) -> float | None:
+    parsed = _finite_float(value)
+    if parsed is None or parsed <= 0:
+        return None
+    return min(parsed, maximum)
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def _bounded_text_output(value: str, max_bytes: int) -> tuple[str, bool]:
