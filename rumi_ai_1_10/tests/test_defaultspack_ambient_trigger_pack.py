@@ -704,7 +704,7 @@ def test_local_whisper_status_detects_bundled_whisper_cpp(monkeypatch, tmp_path)
     model_dir = app_dir / "bundled" / "whisper" / "models"
     bin_dir.mkdir(parents=True)
     model_dir.mkdir(parents=True)
-    whisper_cli = bin_dir / "whisper-cli"
+    whisper_cli = bin_dir / ("whisper-cli.exe" if sys.platform.startswith("win") else "whisper-cli")
     whisper_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     whisper_cli.chmod(0o755)
     (model_dir / "ggml-tiny.bin").write_bytes(b"tiny")

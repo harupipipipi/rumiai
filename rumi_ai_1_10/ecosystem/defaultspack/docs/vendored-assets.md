@@ -19,6 +19,8 @@ npm run check:vendored-assets -- --require-ui
 
 That mode requires both `webapp/public/` and the generated packaged `ui/`
 copies to exist and match the recorded hashes.
+The checker normalizes JavaScript asset line endings to LF before hashing so
+Windows checkouts do not report false drift for text assets.
 
 ## MediaPipe hand tracking
 

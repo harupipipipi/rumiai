@@ -10,7 +10,7 @@ const sourceCache = new Map<string, string>();
 function readCachedSource(filePath: string): string {
   const cached = sourceCache.get(filePath);
   if (cached !== undefined) return cached;
-  const source = readFileSync(filePath, "utf8");
+  const source = readFileSync(filePath, "utf8").replace(/\r\n/g, "\n");
   sourceCache.set(filePath, source);
   return source;
 }

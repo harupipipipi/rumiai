@@ -44,11 +44,13 @@ def test_viewer_host_broker_operation_allowlists_match_canonical_registry():
         for operation_id, definition in canonical.items()
         if definition.get("broker_runner_implemented") is True
     }
-    assert _rust_match_string_set(host_broker_source, "host_operation_allowed") == implemented
-    assert _rust_match_string_set(
+    assert _rust_const_string_set(host_broker_source, "IMPLEMENTED_HOST_OPERATIONS") == implemented
+    assert _rust_const_string_set(
         host_broker_source,
-        "host_operation_stream_allowed",
+        "IMPLEMENTED_HOST_STREAM_OPERATIONS",
     ) == set()
+    assert "IMPLEMENTED_HOST_OPERATIONS.contains(&operation)" in host_broker_source
+    assert "IMPLEMENTED_HOST_STREAM_OPERATIONS.contains(&operation)" in host_broker_source
     assert {
         operation_id
         for operation_id, definition in canonical.items()
@@ -65,4 +67,11 @@ def _rust_match_string_set(source: str, function_name: str) -> set[str]:
     if not match and re.search(rf"fn {re.escape(function_name)}\(operation: &str\) -> bool \{{\s*let _ = operation;\s*false\s*\}}", source):
         return set()
     assert match, f"Could not find {function_name} matches! body"
+    return set(re.findall(r'"([^"]+)"', match.group("body")))
+
+
+def _rust_const_string_set(source: str, const_name: str) -> set[str]:
+    pattern = rf"const {re.escape(const_name)}: &\[&str\]\s*=\s*&\[(?P<body>.*?)\];"
+    match = re.search(pattern, source, flags=re.DOTALL)
+    assert match, f"Could not find {const_name} string slice"
     return set(re.findall(r'"([^"]+)"', match.group("body")))

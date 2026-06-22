@@ -63,7 +63,11 @@ const ASSETS = [
 const NOTICE_PATH = "mediapipe/NOTICE.md";
 
 function sha256(filePath) {
-  return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+  const bytes = readFileSync(filePath);
+  const hashBytes = filePath.endsWith(".js")
+    ? Buffer.from(bytes.toString("utf8").replace(/\r\n/g, "\n"), "utf8")
+    : bytes;
+  return createHash("sha256").update(hashBytes).digest("hex");
 }
 
 function assertPackageLock(errors) {

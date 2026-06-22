@@ -242,8 +242,16 @@ def test_default_builtin_grants_allow_host_pack_but_not_exec_guarded(tmp_path):
 
 
 def test_host_capabilities_pack_contract_names_boundary_and_privacy():
-    ecosystem = json.loads((ROOT / "ecosystem" / "rumi_host_capabilities_pack" / "ecosystem.json").read_text())
-    setup = json.loads((ROOT / "ecosystem" / "setup_pack" / "rumi_host_capabilities_pack" / "pack.json").read_text())
+    ecosystem = json.loads(
+        (ROOT / "ecosystem" / "rumi_host_capabilities_pack" / "ecosystem.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    setup = json.loads(
+        (
+            ROOT / "ecosystem" / "setup_pack" / "rumi_host_capabilities_pack" / "pack.json"
+        ).read_text(encoding="utf-8")
+    )
 
     assert ecosystem["pack_id"] == "rumi_host_capabilities_pack"
     assert ecosystem["security_boundary"]["defaultspack_role"] == "ui_orchestration_and_authority_only"
