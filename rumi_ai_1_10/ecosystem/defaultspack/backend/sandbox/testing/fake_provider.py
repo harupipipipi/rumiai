@@ -15,6 +15,7 @@ from ..models import (
     SandboxCreateSpec,
     UninstallRuntimeRequest,
     UpdateRuntimeRequest,
+    model_to_dict,
 )
 from ..providers.base import GuestAgentClient, ProgressSink
 from .fake_guest_agent import FakeGuestAgent
@@ -37,6 +38,7 @@ class FakeRuntimeProvider:
         self.platform = platform
         self.guest_agent = guest_agent or FakeGuestAgent()
         self.instances: dict[str, ProviderInstance] = {}
+        self.create_specs: list[SandboxCreateSpec] = []
         self._sandbox_id_factory = sandbox_id_factory
 
     def doctor(self, request: RuntimeRequirements) -> RuntimeProviderStatus:
@@ -73,6 +75,7 @@ class FakeRuntimeProvider:
         return OperationResult(ok=True, provider_id=self.provider_id, operation_id="fake-uninstall", status="uninstalled")
 
     def create(self, spec: SandboxCreateSpec) -> ProviderInstance:
+        self.create_specs.append(spec)
         sandbox_id = self._sandbox_id_factory() if self._sandbox_id_factory is not None else str(uuid.uuid4())
         instance = ProviderInstance(
             provider_id=self.provider_id,
@@ -80,7 +83,11 @@ class FakeRuntimeProvider:
             sandbox_id=sandbox_id,
             runtime_id="fake-runtime",
             state="stopped",
-            opaque_state={"template_id": spec.template.template_id},
+            opaque_state={
+                "template_id": spec.template.template_id,
+                "workspace_binding": model_to_dict(spec.workspace_binding),
+                "metadata": model_to_dict(dict(spec.metadata)),
+            },
         )
         self.instances[instance.provider_instance_id] = instance
         return instance

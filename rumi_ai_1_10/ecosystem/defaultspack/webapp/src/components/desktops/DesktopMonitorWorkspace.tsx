@@ -31,6 +31,7 @@ export function DesktopMonitorWorkspace() {
   const [accessKeys, setAccessKeys] = useState<Record<string, string>>({});
   const [accessMessage, setAccessMessage] = useState<string | null>(null);
   const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
+  const [stopTargetSeatId, setStopTargetSeatId] = useState<string | null>(null);
   const [deleteTargetSeatId, setDeleteTargetSeatId] = useState<string | null>(null);
   const selectedAccessKey = selectedSeatId ? accessKeys[selectedSeatId] || "" : "";
   const control = useDesktopControlLease(selectedSeatId, sandboxesApi, selectedAccessKey);
@@ -48,6 +49,7 @@ export function DesktopMonitorWorkspace() {
   const selectedDesktop = desktopInstances.desktops.find((desktop) => desktop.seat_id === selectedSeatId)
     ?? desktopInstances.desktops[0]
     ?? null;
+  const stopTarget = desktopInstances.desktops.find((desktop) => desktop.seat_id === stopTargetSeatId) ?? null;
   const deleteTarget = desktopInstances.desktops.find((desktop) => desktop.seat_id === deleteTargetSeatId) ?? null;
 
   useEffect(() => {
@@ -124,6 +126,7 @@ export function DesktopMonitorWorkspace() {
       if (action === "restart") await sandboxesApi.restartDesktop(seatId);
       if (action === "stop") await sandboxesApi.stopDesktop(seatId);
       if (action === "delete") await sandboxesApi.deleteDesktop(seatId, accessKeys[seatId] || undefined);
+      if (action === "stop") setStopTargetSeatId(null);
       if (action === "delete" && seatId === selectedSeatId) {
         setSelectedSeatId(null);
         setDeleteTargetSeatId(null);
@@ -239,7 +242,7 @@ export function DesktopMonitorWorkspace() {
                 onInputClick={handleInputClick}
                 onStart={(seatId) => void runDesktopAction(seatId, "start")}
                 onRestart={(seatId) => void runDesktopAction(seatId, "restart")}
-                onStop={(seatId) => void runDesktopAction(seatId, "stop")}
+                onStop={setStopTargetSeatId}
                 onDelete={setDeleteTargetSeatId}
               />
               <DesktopInspector
@@ -270,6 +273,51 @@ export function DesktopMonitorWorkspace() {
         }}
         onCreate={handleCreateDesktop}
       />
+
+      {stopTarget && (
+        <div className="absolute inset-0 rumi-layer-modal flex items-center justify-center bg-black/60 p-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="desktop-stop-title" className="w-[min(420px,100%)] rounded-lg border border-amber-500/25 bg-[#0b0b0d] shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-amber-500/20 px-4 py-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-100">
+                  <AlertTriangle size={15} />
+                </span>
+                <div className="min-w-0">
+                  <p id="desktop-stop-title" className="truncate text-sm font-semibold text-zinc-100">Stop Desktop</p>
+                  <p className="truncate text-xs text-zinc-500">{stopTarget.name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStopTargetSeatId(null)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                aria-label="Close stop confirmation"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <div className="px-4 py-4 text-sm leading-6 text-zinc-300">
+              This stops the desktop session and releases its cached frame and active control lease.
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-zinc-800/70 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setStopTargetSeatId(null)}
+                className="h-8 rounded-md border border-zinc-800 px-3 text-xs font-medium text-zinc-300 hover:bg-zinc-900"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void runDesktopAction(stopTarget.seat_id, "stop")}
+                className="h-8 rounded-md bg-amber-400 px-3 text-xs font-semibold text-zinc-950 hover:bg-amber-300"
+              >
+                Stop
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteTarget && (
         <div className="absolute inset-0 rumi-layer-modal flex items-center justify-center bg-black/60 p-4">

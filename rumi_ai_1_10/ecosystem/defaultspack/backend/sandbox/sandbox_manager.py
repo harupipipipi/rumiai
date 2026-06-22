@@ -10,6 +10,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 from .errors import RUNTIME_PROVIDER_UNAVAILABLE, SandboxContractError
 from .guest.protocol import GuestExecRequest
@@ -65,6 +66,7 @@ TERMINAL_STATES = {DESTROYED, FAILED}
 SUPPORTED_MODEL_MODES = {"fast", "heavy"}
 STATE_DIR_ENV = "RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR"
 DESKTOP_ACCESS_MODES = {"owner_only", "key_required"}
+DESKTOP_STARTERS = {"empty", "browser_url", "terminal"}
 WORKSPACE_ACCESS_MODES = {"none", "read_only", "overlay"}
 DESKTOP_MIN_WIDTH = 640
 DESKTOP_MIN_HEIGHT = 480
@@ -120,6 +122,8 @@ class SandboxManager:
         assigned_agent_id: str | None = None,
         workspace_id: str | None = None,
         workspace_access: str | None = None,
+        starter: str | None = None,
+        browser_url: str | None = None,
     ) -> Dict[str, Any]:
         image = str(image or "").strip() or "ubuntu:22.04"
         display = bool(display)
@@ -131,6 +135,8 @@ class SandboxManager:
                 provider_id=provider_id,
                 width=width,
                 height=height,
+                starter=starter,
+                browser_url=browser_url,
             )
         except SandboxContractError as exc:
             return exc.to_dict()
@@ -173,6 +179,8 @@ class SandboxManager:
             if provisioning is not None
             else template_provisioning
         )
+        startup = _desktop_startup_from_create(starter=starter, browser_url=browser_url, desktop=template.desktop)
+        assigned_agent = _optional_clean_string(assigned_agent_id)
         provider = None
         provider_instance: ProviderInstance | None = None
         started: ProviderInstance | None = None
@@ -183,7 +191,15 @@ class SandboxManager:
                     name=instance_name,
                     template=template,
                     provider_id=provider.provider_id,
-                    metadata={"image": image, "display": display},
+                    workspace_binding=workspace_binding,
+                    metadata={
+                        "image": image,
+                        "display": display,
+                        "startup": startup,
+                        "desktop_rules": model_to_dict(rule_config),
+                        "desktop_provisioning": model_to_dict(provisioning_plan),
+                        "assigned_agent_id": assigned_agent,
+                    },
                 )
             )
             started = provider.start(provider_instance)
@@ -213,6 +229,7 @@ class SandboxManager:
             template_version=template.template_version,
             provider_id=started.provider_id,
             provider_instance_id=started.provider_instance_id,
+            provider_opaque_state=dict(started.opaque_state),
             runtime_id=started.runtime_id,
             state=_canonical_state(started.state),
             created_at=now,
@@ -227,7 +244,7 @@ class SandboxManager:
             desktop_rules=rule_config,
             desktop_access=access_policy,
             desktop_provisioning=provisioning_plan,
-            assigned_agent_id=_optional_clean_string(assigned_agent_id),
+            assigned_agent_id=assigned_agent,
             generation=max(1, int(started.generation or 1)),
             desktop_access_key_hash=access_key_hash,
         )
@@ -1156,6 +1173,7 @@ class SandboxManager:
     def _apply_provider_instance(inst: SandboxInstance, provider_instance: ProviderInstance) -> None:
         inst.provider_id = provider_instance.provider_id
         inst.provider_instance_id = provider_instance.provider_instance_id
+        inst.provider_opaque_state = dict(provider_instance.opaque_state)
         inst.runtime_id = provider_instance.runtime_id
         inst.generation = max(1, int(provider_instance.generation or inst.generation or 1))
 
@@ -1218,13 +1236,25 @@ class SandboxManager:
             pass
 
     def _provider_instance(self, inst: SandboxInstance) -> ProviderInstance:
+        opaque_state = dict(inst.provider_opaque_state)
+        opaque_state.setdefault("template_id", inst.template_id)
+        opaque_state.setdefault("image", inst.image)
+        opaque_state.setdefault("workspace_binding", model_to_dict(inst.workspace_binding))
+        opaque_state.setdefault("network_policy", model_to_dict(inst.network_policy))
+        opaque_state.setdefault("resource_limits", model_to_dict(inst.resource_limits))
+        opaque_state.setdefault("desktop_provisioning", model_to_dict(inst.desktop_provisioning))
+        opaque_state.setdefault("desktop_rules", model_to_dict(inst.desktop_rules))
+        if inst.desktop_spec is not None:
+            opaque_state.setdefault("desktop_spec", model_to_dict(inst.desktop_spec))
+        if inst.assigned_agent_id:
+            opaque_state.setdefault("assigned_agent_id", inst.assigned_agent_id)
         return ProviderInstance(
             provider_id=inst.provider_id,
             provider_instance_id=inst.provider_instance_id,
             sandbox_id=inst.sandbox_id,
             runtime_id=inst.runtime_id,
             state=inst.state,
-            opaque_state={"template_id": inst.template_id},
+            opaque_state=opaque_state,
             generation=inst.generation,
         )
 
@@ -1462,6 +1492,8 @@ class SandboxManager:
         provider_id: str | None = None,
         width: int | None = None,
         height: int | None = None,
+        starter: str | None = None,
+        browser_url: str | None = None,
     ) -> ResolvedSandboxTemplate:
         requested_template_id = str(template_id or _default_template_id(display=display, provider_id=provider_id)).strip()
         raw_template = _load_sandbox_template(requested_template_id)
@@ -1514,12 +1546,18 @@ class SandboxManager:
                 default_width=int(_float_or_zero(desktop_policy.get("width")) or 1440),
                 default_height=int(_float_or_zero(desktop_policy.get("height")) or 900),
             )
+            startup = _desktop_startup_from_create(
+                starter=starter,
+                browser_url=browser_url,
+                desktop=DesktopSpec(enabled=True),
+            )
+            preset = startup.get("starter") if str(starter or "").strip() else desktop_policy.get("starter") or desktop_policy.get("preset")
             desktop = DesktopSpec(
                 enabled=True,
                 width=resolved_width,
                 height=resolved_height,
                 display_backend=str(desktop_policy.get("display_backend") or "xvfb_openbox"),
-                preset=str(desktop_policy.get("starter") or desktop_policy.get("preset") or "") or None,
+                preset=str(preset or "") or None,
             )
         return ResolvedSandboxTemplate(
             template_id=resolved_template_id,
@@ -1594,6 +1632,7 @@ class SandboxManager:
             template_version=str(data.get("template_version") or "compat"),
             provider_id=provider_id,
             provider_instance_id=provider_instance_id,
+            provider_opaque_state=dict(data.get("provider_opaque_state") or {}),
             runtime_id=str(data.get("runtime_id") or ""),
             state=state,
             created_at=_float_or_now(data.get("created_at")),
@@ -1804,6 +1843,42 @@ def _desktop_rules_from_dict(value: Any) -> DesktopRuleConfig:
         rules=value.get("rule_ids") or value.get("rules"),
         instructions=value.get("instructions"),
     )
+
+
+def _desktop_startup_from_create(
+    *,
+    starter: Any = None,
+    browser_url: Any = None,
+    desktop: DesktopSpec | None = None,
+) -> dict[str, Any]:
+    if desktop is None or not desktop.enabled:
+        return {}
+    normalized_starter = str(starter or "").strip().lower()
+    if not normalized_starter:
+        normalized_starter = "empty"
+    if normalized_starter not in DESKTOP_STARTERS:
+        raise SandboxContractError(
+            "DESKTOP_STARTER_INVALID",
+            "Desktop starter must be empty, terminal, or browser_url.",
+            status_code=400,
+        )
+    startup: dict[str, Any] = {"starter": normalized_starter}
+    if normalized_starter == "browser_url":
+        parsed_url = _validated_browser_url(browser_url)
+        startup["browser_url"] = parsed_url
+    return startup
+
+
+def _validated_browser_url(value: Any) -> str:
+    url = str(value or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise SandboxContractError(
+            "DESKTOP_BROWSER_URL_INVALID",
+            "Desktop browser_url starter requires an http or https URL.",
+            status_code=400,
+        )
+    return url[:2048]
 
 
 def _desktop_access_from_create(

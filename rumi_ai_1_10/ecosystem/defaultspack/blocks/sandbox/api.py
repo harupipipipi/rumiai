@@ -281,6 +281,8 @@ def _sandbox_create(service: _SandboxApiService, payload: dict[str, Any], *, dis
         assigned_agent_id=str(payload.get("assigned_agent") or payload.get("assigned_agent_id") or ""),
         workspace_id=str(payload.get("workspace_id") or ""),
         workspace_access=str(payload.get("workspace_access") or ""),
+        starter=str(payload.get("starter") or ""),
+        browser_url=str(payload.get("browser_url") or ""),
     )
     if created.get("ok") is not True:
         return _api_error(str(created.get("error") or "Sandbox create failed"), str(created.get("code") or RUNTIME_NOT_READY), int(created.get("status_code") or 503))

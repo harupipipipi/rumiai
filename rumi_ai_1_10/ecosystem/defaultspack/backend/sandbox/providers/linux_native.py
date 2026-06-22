@@ -20,6 +20,7 @@ from ..models import (
     SandboxCreateSpec,
     UninstallRuntimeRequest,
     UpdateRuntimeRequest,
+    model_to_dict,
 )
 from .base import ProgressSink
 
@@ -146,6 +147,13 @@ class LinuxNativeProvider:
                 "template_id": spec.template.template_id,
                 "width": spec.template.desktop.width,
                 "height": spec.template.desktop.height,
+                "workspace_binding": model_to_dict(spec.workspace_binding),
+                "network_policy": model_to_dict(spec.template.network),
+                "resource_limits": model_to_dict(spec.template.resources),
+                "desktop_provisioning": spec.metadata.get("desktop_provisioning") or {},
+                "desktop_rules": spec.metadata.get("desktop_rules") or {},
+                "assigned_agent_id": spec.metadata.get("assigned_agent_id"),
+                "startup": spec.metadata.get("startup") or {},
             },
         )
         self._instances[instance.provider_instance_id] = instance

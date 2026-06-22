@@ -241,6 +241,86 @@ def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path):
     assert reloaded_status["lifecycle_policy"]["destroy_on_exit"] is False
 
 
+def test_desktop_create_spec_carries_user_selected_runtime_context(tmp_path):
+    provider = FakeRuntimeProvider(
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+            "sandbox.desktop",
+            "sandbox.desktop_input",
+            "sandbox.snapshot",
+            "desktop.app.install",
+            "desktop.browser.launch",
+            "desktop.mcp.install.request",
+            "sandbox.network.allowlist",
+        },
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+
+    created = manager.create(
+        display=True,
+        provider_id="fake",
+        template_id="desktop.coding",
+        access_owner_id="local-user",
+        role="browser operator",
+        rules={"rule_ids": ["browser-only"], "instructions": "Open only the requested URL."},
+        assigned_agent_id="agent-1",
+        workspace_id="workspace-1",
+        workspace_access="read_only",
+        provisioning={"apps": ["chrome"], "mcp_servers": ["playwright"]},
+        starter="browser_url",
+        browser_url="https://example.com/task",
+    )
+
+    assert created["ok"] is True
+    assert len(provider.create_specs) == 1
+    spec = provider.create_specs[0]
+    assert spec.workspace_binding.workspace_id == "workspace-1"
+    assert spec.workspace_binding.mode == "read_only"
+    assert spec.metadata["startup"] == {
+        "starter": "browser_url",
+        "browser_url": "https://example.com/task",
+    }
+    assert spec.metadata["desktop_rules"]["role"] == "browser operator"
+    assert spec.metadata["desktop_rules"]["instructions"] == "Open only the requested URL."
+    assert spec.metadata["desktop_provisioning"]["apps"] == ["chrome"]
+    assert spec.metadata["desktop_provisioning"]["mcp_servers"] == ["playwright"]
+    assert spec.metadata["assigned_agent_id"] == "agent-1"
+
+    status = manager.status(created["sandbox_id"])
+    assert status["desktop_spec"]["preset"] == "browser_url"
+    assert status["provider_opaque_state"]["metadata"]["startup"]["browser_url"] == "https://example.com/task"
+    assert status["provider_opaque_state"]["workspace_binding"]["workspace_id"] == "workspace-1"
+
+    reloaded = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    reloaded_status = reloaded.status(created["sandbox_id"])
+    assert reloaded_status["provider_opaque_state"]["metadata"]["desktop_provisioning"]["apps"] == ["chrome"]
+    assert reloaded_status["provider_opaque_state"]["metadata"]["assigned_agent_id"] == "agent-1"
+
+
+def test_desktop_create_rejects_invalid_browser_url_starter(tmp_path):
+    manager = _manager(tmp_path)
+
+    created = manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.ubuntu",
+        access_owner_id="local-user",
+        starter="browser_url",
+        browser_url="file:///etc/passwd",
+    )
+
+    assert created["ok"] is False
+    assert created["code"] == "DESKTOP_BROWSER_URL_INVALID"
+    assert created["status_code"] == 400
+
+
 def test_sandbox_lifecycle_policy_enforces_idle_stop_or_destroy(tmp_path):
     manager = _manager(
         tmp_path,

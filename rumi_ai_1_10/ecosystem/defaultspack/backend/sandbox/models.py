@@ -265,6 +265,7 @@ class SandboxInstance:
     template_version: str = "0"
     provider_id: str = ""
     provider_instance_id: str = ""
+    provider_opaque_state: Mapping[str, Any] = field(default_factory=dict)
     runtime_id: str = ""
     state: str = "creating"
     created_at: float = field(default_factory=time.time)
@@ -290,6 +291,7 @@ class SandboxInstance:
 
     def __post_init__(self) -> None:
         self.capabilities = frozenset(self.capabilities)
+        self.provider_opaque_state = dict(self.provider_opaque_state or {})
         if self.state not in SANDBOX_STATES:
             self.state = "failed"
             self.last_error = "Unknown sandbox state in persisted instance"
