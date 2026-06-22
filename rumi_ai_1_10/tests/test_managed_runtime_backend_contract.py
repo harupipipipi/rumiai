@@ -460,6 +460,68 @@ def test_exec_timeout_cannot_exceed_template_resource_limit(tmp_path) -> None:
     assert [request.client_request_id for request in agent.exec_requests] == ["timeout-ok"]
 
 
+def test_exec_output_is_bounded_by_template_resource_limit(tmp_path) -> None:
+    class LoudGuestAgent(FakeGuestAgent):
+        def exec(self, sandbox_id: str, payload):
+            request = GuestExecRequest.from_payload(payload)
+            self.exec_requests.append(request)
+            return {
+                "ok": True,
+                "sandbox_id": sandbox_id,
+                "argv": list(request.argv),
+                "cwd": request.cwd,
+                "exit_code": 0,
+                "stdout": "abcdefghij",
+                "stderr": "uvwxyz",
+            }
+
+    agent = LoudGuestAgent()
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities={
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.overlay_workspace",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+            },
+            guest_agent=agent,
+            sandbox_id_factory=lambda: "output-seat",
+        )
+    )
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    created = manager.create(
+        display=False,
+        provider_id="fake-runtime",
+        template_id="tool.ephemeral",
+    )
+    assert created["ok"] is True
+    with manager._lock:
+        inst = manager._instances["output-seat"]
+        inst.resource_limits = replace(inst.resource_limits, output_bytes=4)
+        manager._save_registry()
+
+    result = manager.exec(
+        "output-seat",
+        {
+            "argv": ["python", "-V"],
+            "cwd": ".",
+            "env": {},
+            "timeout_ms": 1000,
+            "client_request_id": "output-limit",
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["stdout"] == "abcd"
+    assert result["stderr"] == "uvwx"
+    assert result["stdout_truncated"] is True
+    assert result["stderr_truncated"] is True
+    assert [request.client_request_id for request in agent.exec_requests] == ["output-limit"]
+
+
 def test_linux_native_provider_desktop_session_capture_and_input(monkeypatch) -> None:
     from ecosystem.defaultspack.backend.sandbox.providers.linux_native import LinuxNativeProvider
 

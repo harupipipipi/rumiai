@@ -617,6 +617,7 @@ class SandboxManager:
                 "code": "SANDBOX_EXEC_FAILED",
                 "status_code": 502,
             }
+        result = self._apply_exec_output_policy(inst, result)
         result.setdefault("sandbox_id", inst.sandbox_id)
         result.setdefault("status", inst.state)
         result.setdefault("state", inst.state)
@@ -1421,6 +1422,21 @@ class SandboxManager:
         }
 
     @staticmethod
+    def _apply_exec_output_policy(inst: SandboxInstance, result: Dict[str, Any]) -> Dict[str, Any]:
+        max_bytes = inst.resource_limits.output_bytes
+        if max_bytes is None or max_bytes <= 0:
+            return result
+        bounded = dict(result)
+        for field, flag in (("stdout", "stdout_truncated"), ("stderr", "stderr_truncated")):
+            value = bounded.get(field)
+            if not isinstance(value, str):
+                continue
+            clipped, truncated = _bounded_text_output(value, max_bytes)
+            bounded[field] = clipped
+            bounded[flag] = bool(bounded.get(flag)) or truncated
+        return bounded
+
+    @staticmethod
     def _require_network_policy(inst: SandboxInstance, *, approved: bool) -> Dict[str, Any] | None:
         policy = inst.network_policy
         mode = str(policy.mode or "off").strip().lower().replace("-", "_")
@@ -2078,6 +2094,13 @@ def _resource_limits_from_dict(value: Any) -> ResourceLimits:
         output_bytes=int(_float_or_zero(value.get("output_bytes")) or 0) or None,
         timeout_ms=int(_float_or_zero(value.get("timeout_ms")) or 0) or None,
     )
+
+
+def _bounded_text_output(value: str, max_bytes: int) -> tuple[str, bool]:
+    encoded = value.encode("utf-8", errors="replace")
+    if len(encoded) <= max_bytes:
+        return value, False
+    return encoded[:max_bytes].decode("utf-8", errors="replace"), True
 
 
 def _lifecycle_policy_from_dict(value: Any) -> LifecyclePolicy:
