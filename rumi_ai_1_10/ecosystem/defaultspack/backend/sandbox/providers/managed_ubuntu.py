@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import os
 import platform
@@ -9,6 +10,8 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import urllib.parse
+import urllib.request
 import uuid
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -54,8 +57,14 @@ DEFAULT_DISPLAY = ":98"
 DEFAULT_WSL_RUNTIME_NAME = "RumiUbuntu"
 WSL_ROOTFS_ENV = "RUMI_WSL_ROOTFS_TARBALL"
 WSL_INSTALL_DIR_ENV = "RUMI_WSL_INSTALL_DIR"
+WSL_ROOTFS_CACHE_DIR_ENV = "RUMI_WSL_ROOTFS_CACHE_DIR"
+WSL_ROOTFS_URL_ENV = "RUMI_WSL_ROOTFS_URL"
 MAX_FILE_PATCH_BYTES = 2 * 1024 * 1024
 MAX_WORKSPACE_SEED_BYTES = 64 * 1024 * 1024
+DEFAULT_WSL_ROOTFS_URLS = {
+    "amd64": "https://cloud-images.ubuntu.com/wsl/releases/22.04/current/ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz",
+    "arm64": "https://cloud-images.ubuntu.com/wsl/releases/22.04/current/ubuntu-jammy-wsl-arm64-wsl.rootfs.tar.gz",
+}
 GUEST_APP_PACKAGE_MAP = {
     "ca-certificates": ("ca-certificates",),
     "chromium": ("chromium-browser",),
@@ -96,6 +105,8 @@ class GuestCommandResult:
 
 
 CommandRunner = Callable[[Sequence[str], str | None, float | None], GuestCommandResult]
+RootfsDownloader = Callable[[str, str], None]
+ChecksumFetcher = Callable[[str], str]
 
 
 class ManagedUbuntuProvider:
@@ -567,10 +578,18 @@ class WindowsWslProvider(ManagedUbuntuProvider):
         runtime_name: str = DEFAULT_WSL_RUNTIME_NAME,
         rootfs_path: str | None = None,
         install_dir: str | None = None,
+        rootfs_cache_dir: str | None = None,
+        rootfs_url: str | None = None,
+        rootfs_downloader: RootfsDownloader | None = None,
+        checksum_fetcher: ChecksumFetcher | None = None,
     ) -> None:
         super().__init__(command_path=command_path, runner=runner, runtime_name=runtime_name)
         self._configured_rootfs_path = str(rootfs_path).strip() if rootfs_path else None
         self._configured_install_dir = str(install_dir).strip() if install_dir else None
+        self._configured_rootfs_cache_dir = str(rootfs_cache_dir).strip() if rootfs_cache_dir else None
+        self._configured_rootfs_url = str(rootfs_url).strip() if rootfs_url else None
+        self._rootfs_downloader = rootfs_downloader or _download_file
+        self._checksum_fetcher = checksum_fetcher or _fetch_text
 
     def _guest_exists(self, command_path: str) -> bool:
         result = self._run((command_path, "-l", "-q"), timeout=10)
@@ -579,13 +598,13 @@ class WindowsWslProvider(ManagedUbuntuProvider):
     def _ensure_guest(self, command_path: str) -> None:
         if self._guest_exists(command_path):
             return
-        rootfs_path = self._rootfs_path()
+        rootfs_path = self._rootfs_path_or_download()
         if not rootfs_path or not os.path.isfile(rootfs_path):
             raise SandboxContractError(
                 RUNTIME_PROVIDER_UNAVAILABLE,
-                "RumiUbuntu WSL rootfs tarball is not bundled or configured.",
+                "RumiUbuntu WSL rootfs tarball is not available.",
                 status_code=503,
-                details={"env": WSL_ROOTFS_ENV, "runtime_name": self._runtime_name},
+                details={"env": WSL_ROOTFS_ENV, "runtime_name": self._runtime_name, "download_url": self._rootfs_url()},
             )
         install_dir = self._install_dir()
         os.makedirs(install_dir, exist_ok=True)
@@ -614,6 +633,100 @@ class WindowsWslProvider(ManagedUbuntuProvider):
         value = self._configured_rootfs_path or os.environ.get(WSL_ROOTFS_ENV)
         text = str(value or "").strip()
         return text or None
+
+    def _rootfs_path_or_download(self) -> str:
+        configured = self._rootfs_path()
+        if configured:
+            return configured
+        return self._download_rootfs()
+
+    def _download_rootfs(self) -> str:
+        url = self._rootfs_url()
+        if not url:
+            raise SandboxContractError(
+                RUNTIME_PROVIDER_UNAVAILABLE,
+                "RumiUbuntu WSL rootfs download URL could not be resolved for this host architecture.",
+                status_code=503,
+                details={"arch": _host_arch()},
+            )
+        cache_dir = self._rootfs_cache_dir()
+        os.makedirs(cache_dir, exist_ok=True)
+        filename = os.path.basename(urllib.parse.urlparse(url).path) or "rumi-ubuntu-wsl.rootfs.tar.gz"
+        destination = os.path.join(cache_dir, filename)
+        if os.path.isfile(destination) and os.path.getsize(destination) > 0:
+            return destination
+        tmp_path = f"{destination}.tmp-{uuid.uuid4().hex}"
+        try:
+            self._rootfs_downloader(url, tmp_path)
+            expected_sha256 = self._rootfs_expected_sha256(url, filename)
+            if expected_sha256:
+                actual_sha256 = _sha256_file(tmp_path)
+                if actual_sha256.casefold() != expected_sha256.casefold():
+                    raise SandboxContractError(
+                        RUNTIME_PROVIDER_UNAVAILABLE,
+                        "Downloaded RumiUbuntu WSL rootfs checksum did not match Ubuntu SHA256SUMS.",
+                        status_code=503,
+                        details={"url": url, "expected": expected_sha256, "actual": actual_sha256},
+                    )
+            if not os.path.isfile(tmp_path) or os.path.getsize(tmp_path) <= 0:
+                raise SandboxContractError(
+                    RUNTIME_PROVIDER_UNAVAILABLE,
+                    "Downloaded RumiUbuntu WSL rootfs was empty.",
+                    status_code=503,
+                    details={"url": url},
+                )
+            os.replace(tmp_path, destination)
+            return destination
+        except SandboxContractError:
+            raise
+        except Exception as exc:
+            raise SandboxContractError(
+                RUNTIME_PROVIDER_UNAVAILABLE,
+                f"RumiUbuntu WSL rootfs download failed: {exc}",
+                status_code=503,
+                details={"url": url, "cache_dir": cache_dir},
+            ) from exc
+        finally:
+            _unlink(tmp_path)
+
+    def _rootfs_url(self) -> str:
+        configured = self._configured_rootfs_url or os.environ.get(WSL_ROOTFS_URL_ENV)
+        if configured:
+            return str(configured).strip()
+        return DEFAULT_WSL_ROOTFS_URLS.get(_host_arch(), "")
+
+    def _rootfs_cache_dir(self) -> str:
+        if self._configured_rootfs_cache_dir:
+            return self._configured_rootfs_cache_dir
+        env_dir = str(os.environ.get(WSL_ROOTFS_CACHE_DIR_ENV) or "").strip()
+        if env_dir:
+            return env_dir
+        local_app_data = str(os.environ.get("LOCALAPPDATA") or "").strip()
+        if local_app_data:
+            return os.path.join(local_app_data, "Rumi AI", "wsl", "rootfs")
+        return os.path.join(tempfile.gettempdir(), "rumi-ai", "wsl", "rootfs")
+
+    def _rootfs_expected_sha256(self, url: str, filename: str) -> str | None:
+        sums_url = urllib.parse.urljoin(url, "SHA256SUMS")
+        try:
+            text = self._checksum_fetcher(sums_url)
+        except Exception as exc:
+            raise SandboxContractError(
+                RUNTIME_PROVIDER_UNAVAILABLE,
+                "Could not fetch Ubuntu SHA256SUMS for RumiUbuntu WSL rootfs.",
+                status_code=503,
+                details={"url": sums_url, "error": str(exc)},
+            ) from exc
+        for line in text.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 2 and parts[1].lstrip("*") == filename:
+                return parts[0]
+        raise SandboxContractError(
+            RUNTIME_PROVIDER_UNAVAILABLE,
+            "Ubuntu SHA256SUMS did not include the selected RumiUbuntu WSL rootfs.",
+            status_code=503,
+            details={"url": sums_url, "filename": filename},
+        )
 
     def _install_dir(self) -> str:
         if self._configured_install_dir:
@@ -854,6 +967,38 @@ def _unlink(path: str) -> None:
         os.unlink(path)
     except OSError:
         pass
+
+
+def _download_file(url: str, destination: str) -> None:
+    with urllib.request.urlopen(url, timeout=900) as response, open(destination, "wb") as handle:
+        shutil.copyfileobj(response, handle)
+
+
+def _fetch_text(url: str) -> str:
+    with urllib.request.urlopen(url, timeout=30) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _host_arch() -> str:
+    value = (
+        os.environ.get("PROCESSOR_ARCHITECTURE")
+        or os.environ.get("PROCESSOR_ARCHITEW6432")
+        or platform.machine()
+    )
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    if normalized in {"amd64", "x86_64", "x64"}:
+        return "amd64"
+    if normalized in {"arm64", "aarch64"}:
+        return "arm64"
+    return normalized
 
 
 def _workspace_binding(opaque_state: Mapping[str, object]) -> Mapping[str, object]:

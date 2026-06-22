@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import tarfile
 from collections.abc import Sequence
@@ -289,11 +290,32 @@ def test_windows_wsl_provider_does_not_claim_existing_user_ubuntu_distribution(m
     assert "managed_guest" in status.missing_requirements
 
 
-def test_windows_wsl_provider_fails_closed_without_rumi_rootfs(monkeypatch) -> None:
+def test_windows_wsl_provider_downloads_rumi_rootfs_when_not_configured(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
     monkeypatch.delenv(WSL_ROOTFS_ENV, raising=False)
+    monkeypatch.setenv("PROCESSOR_ARCHITECTURE", "AMD64")
+    install_dir = tmp_path / "RumiUbuntu"
+    cache_dir = tmp_path / "rootfs-cache"
     fake = FakeManagedUbuntuCli(mode="wsl", runtime_name=DEFAULT_WSL_RUNTIME_NAME)
-    provider = WindowsWslProvider(command_path="C:/Windows/System32/wsl.exe", runner=fake)
+    downloaded: list[tuple[str, str]] = []
+
+    def downloader(url: str, destination: str) -> None:
+        downloaded.append((url, destination))
+        with open(destination, "wb") as handle:
+            handle.write(b"rootfs")
+
+    def checksum_fetcher(url: str) -> str:
+        digest = hashlib.sha256(b"rootfs").hexdigest()
+        return f"{digest}  ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz\n"
+
+    provider = WindowsWslProvider(
+        command_path="C:/Windows/System32/wsl.exe",
+        runner=fake,
+        install_dir=str(install_dir),
+        rootfs_cache_dir=str(cache_dir),
+        rootfs_downloader=downloader,
+        checksum_fetcher=checksum_fetcher,
+    )
 
     ensured = provider.ensure(
         EnsureRuntimeRequest(
@@ -303,9 +325,14 @@ def test_windows_wsl_provider_fails_closed_without_rumi_rootfs(monkeypatch) -> N
         NullProgressSink(),
     )
 
-    assert ensured.ok is False
-    assert [diagnostic.code for diagnostic in ensured.diagnostics] == ["RUNTIME_PROVIDER_UNAVAILABLE"]
-    assert fake.guest_exists is False
+    assert ensured.ok is True
+    assert fake.guest_exists is True
+    assert fake.deps_installed is True
+    assert len(downloaded) == 1
+    assert downloaded[0][0] == "https://cloud-images.ubuntu.com/wsl/releases/22.04/current/ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz"
+    assert downloaded[0][1].startswith(str(cache_dir / "ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz.tmp-"))
+    assert fake.imported_rootfs_path == str(cache_dir / "ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz")
+    assert fake.imported_install_dir == str(install_dir)
 
 
 def test_managed_ubuntu_exec_enforces_template_output_and_timeout_limits(monkeypatch) -> None:
