@@ -625,7 +625,7 @@ def _desktop_input(service: _SandboxApiService, payload: dict[str, Any]):
     result = service.manager.desktop_input(seat_id, payload, actor="human")
     if result.get("ok") is not True:
         return _api_error(str(result.get("error") or "Desktop input failed"), str(result.get("code") or "DESKTOP_INPUT_FAILED"), int(result.get("status_code") or 400))
-    return ok({"accepted": True, "seat_id": seat_id, "action": result.get("action")})
+    return ok(_desktop_input_payload(result, seat_id=seat_id, actor="human"))
 
 
 def _desktop_ai_input(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
@@ -639,7 +639,7 @@ def _desktop_ai_input(service: _SandboxApiService, payload: dict[str, Any], cont
     result = service.manager.desktop_input(seat_id, manager_payload, actor="ai")
     if result.get("ok") is not True:
         return _api_error(str(result.get("error") or "Desktop input failed"), str(result.get("code") or "DESKTOP_INPUT_FAILED"), int(result.get("status_code") or 400))
-    return ok({"accepted": True, "seat_id": seat_id, "action": result.get("action"), "actor": "ai", "agent_id": result.get("agent_id")})
+    return ok(_desktop_input_payload(result, seat_id=seat_id, actor="ai"))
 
 
 def _desktop_rules_update(service: _SandboxApiService, payload: dict[str, Any]):
@@ -870,6 +870,24 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
         "last_error": item.get("last_error"),
         "created_at": item.get("created_at"),
         "updated_at": item.get("updated_at"),
+    }
+
+
+def _desktop_input_payload(result: dict[str, Any], *, seat_id: str, actor: str) -> dict[str, Any]:
+    rules = result.get("desktop_rules") if isinstance(result.get("desktop_rules"), dict) else {}
+    return {
+        "accepted": True,
+        "seat_id": seat_id,
+        "action": result.get("action"),
+        "actor": actor,
+        "agent_id": result.get("agent_id"),
+        "assigned_agent": result.get("assigned_agent_id"),
+        "role": rules.get("role"),
+        "rules": {
+            "role": rules.get("role"),
+            "instructions": rules.get("instructions") or "",
+            "rule_ids": rules.get("rule_ids") or [],
+        },
     }
 
 

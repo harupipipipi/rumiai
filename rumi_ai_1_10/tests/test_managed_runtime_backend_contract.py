@@ -772,6 +772,10 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
     assert wrong_agent_click["error"]["code"] == "DESKTOP_AGENT_NOT_ASSIGNED"
     assert ai_click["status"] == "ok"
     assert ai_click["data"]["agent_id"] == "agent-1"
+    assert ai_click["data"]["assigned_agent"] == "agent-1"
+    assert ai_click["data"]["role"] == "coding desktop"
+    assert ai_click["data"]["rules"]["role"] == "coding desktop"
+    assert ai_click["data"]["rules"]["rule_ids"] == ["playwright-ok"]
     assert lease["data"]["lease_token"] == "lease-token"
     assert ai_conflict["status"] == "error"
     assert ai_conflict["error"]["code"] == DESKTOP_CONTROL_CONFLICT

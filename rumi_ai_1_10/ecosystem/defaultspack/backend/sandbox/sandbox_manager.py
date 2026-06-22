@@ -554,6 +554,8 @@ class SandboxManager:
         result.setdefault("status", inst.state)
         result.setdefault("state", inst.state)
         result.setdefault("actor", normalized_actor)
+        result.setdefault("desktop_rules", model_to_dict(inst.desktop_rules))
+        result.setdefault("assigned_agent_id", inst.assigned_agent_id)
         if agent_id:
             result.setdefault("agent_id", agent_id)
         self._append_desktop_audit_event(
