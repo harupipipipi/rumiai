@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shlex
 import sys
 from typing import Any
@@ -8,7 +7,7 @@ from typing import Any
 from domain.coding.terminal_policy import SHELL_ESCAPE_MARKERS
 from domain.tool_policy.internal_context import internal_tool_decision_allows
 
-from ._agent_os_common import err, now_slug, ok, write_text_file, workspace
+from ._agent_os_common import err, now_slug, ok, workspace
 
 MANAGED_RUNTIME_NOT_READY = "MANAGED_RUNTIME_NOT_READY"
 
@@ -23,34 +22,37 @@ def sandbox_exec(arguments: dict[str, Any], context: dict[str, Any] | None = Non
     argv = plan["argv"]
     if not argv:
         return err("'command' is required", "INVALID_INPUT")
+    timeout_ms = _timeout_ms(arguments)
     sandbox_id = str(arguments.get("sandbox_id") or "").strip()
     if sandbox_id:
-        try:
-            if arguments.get("timeout_ms") is not None:
-                timeout_ms = int(arguments.get("timeout_ms"))
-            else:
-                timeout_ms = int(arguments.get("timeout") or 60) * 1000
-        except (TypeError, ValueError):
-            timeout_ms = 60_000
-        return _sandbox_api().run(
-            {
-                "_handler": "sandbox_exec",
-                "sandbox_id": sandbox_id,
-                "argv": argv,
-                "cwd": arguments.get("cwd") or ".",
-                "env": arguments.get("env") or {},
-                "stdin": arguments.get("stdin"),
-                "timeout_ms": timeout_ms,
-                "client_request_id": str(arguments.get("client_request_id") or f"sandbox-exec-{now_slug()}"),
-            },
-            context or {},
-        )
-    return err(
-        "Managed sandbox runtime is not ready; sandbox_exec will not fall back to host execution.",
-        MANAGED_RUNTIME_NOT_READY,
-        argv=argv,
-        template_id=str(arguments.get("template_id") or "tool.ephemeral"),
+        return _sandbox_exec_call(sandbox_id, arguments, argv, timeout_ms, context)
+
+    template_id = str(arguments.get("template_id") or "tool.ephemeral")
+    create = _sandbox_api().run(
+        {
+            "_handler": "sandboxes_create",
+            "template_id": template_id,
+            "provider_id": str(arguments.get("provider_id") or "auto"),
+            "name": str(arguments.get("name") or f"Ephemeral Sandbox {now_slug()}"),
+        },
+        context or {},
     )
+    if create.get("status") != "ok":
+        return err(
+            "Managed sandbox runtime is not ready; sandbox_exec will not fall back to host execution.",
+            MANAGED_RUNTIME_NOT_READY,
+            argv=argv,
+            template_id=template_id,
+            provider_id=str(arguments.get("provider_id") or "auto"),
+            runtime_error=create.get("error"),
+        )
+    sandbox_id = str((create.get("data") or {}).get("sandbox_id") or "")
+    if not sandbox_id:
+        return err("Managed sandbox runtime did not return a sandbox id.", MANAGED_RUNTIME_NOT_READY, argv=argv, template_id=template_id)
+    try:
+        return _sandbox_exec_call(sandbox_id, arguments, argv, timeout_ms, context)
+    finally:
+        _sandbox_api().run({"_handler": "sandbox_delete", "sandbox_id": sandbox_id}, context or {})
 
 
 def python_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -62,14 +64,20 @@ def python_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None
     if not code and not script_path:
         return err("'code' or 'script_path' is required", "INVALID_INPUT")
     try:
-        ws = workspace(context)
         if script_path:
+            ws = workspace(context)
             resolved = ws.resolve(str(script_path), must_exist=True)
             script_path = ws.relative(resolved)
         if code:
-            script = ws.resolve(f".sandbox/python-{now_slug()}.py")
-            write_text_file(script, str(code))
-            script_path = ws.relative(script)
+            return sandbox_exec(
+                {
+                    "argv": ["python", "-c", str(code)],
+                    "timeout": arguments.get("timeout") or 30,
+                    "template_id": arguments.get("template_id") or "coding.python",
+                    "provider_id": arguments.get("provider_id") or "auto",
+                },
+                context,
+            )
         return sandbox_exec({"argv": [sys.executable, str(script_path)], "timeout": arguments.get("timeout") or 30}, context)
     except Exception as exc:
         return err(str(exc), "PYTHON_EXEC_FAILED")
@@ -84,14 +92,20 @@ def node_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) 
     if not code and not script_path:
         return err("'code' or 'script_path' is required", "INVALID_INPUT")
     try:
-        ws = workspace(context)
         if script_path:
+            ws = workspace(context)
             resolved = ws.resolve(str(script_path), must_exist=True)
             script_path = ws.relative(resolved)
         if code:
-            script = ws.resolve(f".sandbox/node-{now_slug()}.js")
-            write_text_file(script, str(code))
-            script_path = ws.relative(script)
+            return sandbox_exec(
+                {
+                    "argv": ["node", "-e", str(code)],
+                    "timeout": arguments.get("timeout") or 30,
+                    "template_id": arguments.get("template_id") or "coding.node",
+                    "provider_id": arguments.get("provider_id") or "auto",
+                },
+                context,
+            )
         return sandbox_exec({"argv": ["node", str(script_path)], "timeout": arguments.get("timeout") or 30}, context)
     except Exception as exc:
         return err(str(exc), "NODE_EXEC_FAILED")
@@ -129,6 +143,37 @@ def _sandbox_api():
     except ModuleNotFoundError:
         from blocks.sandbox import api  # type: ignore
     return api
+
+
+def _sandbox_exec_call(
+    sandbox_id: str,
+    arguments: dict[str, Any],
+    argv: list[str],
+    timeout_ms: int,
+    context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return _sandbox_api().run(
+        {
+            "_handler": "sandbox_exec",
+            "sandbox_id": sandbox_id,
+            "argv": argv,
+            "cwd": arguments.get("cwd") or ".",
+            "env": arguments.get("env") or {},
+            "stdin": arguments.get("stdin"),
+            "timeout_ms": timeout_ms,
+            "client_request_id": str(arguments.get("client_request_id") or f"sandbox-exec-{now_slug()}"),
+        },
+        context or {},
+    )
+
+
+def _timeout_ms(arguments: dict[str, Any]) -> int:
+    try:
+        if arguments.get("timeout_ms") is not None:
+            return int(arguments.get("timeout_ms"))
+        return int(arguments.get("timeout") or 60) * 1000
+    except (TypeError, ValueError):
+        return 60_000
 
 
 def _command_plan(arguments: dict[str, Any]) -> dict[str, Any]:

@@ -39,6 +39,7 @@ DOCKER_CAPABILITIES = frozenset(
 )
 DEFAULT_DOCKER_IMAGE = "ubuntu:22.04"
 CODING_PYTHON_IMAGE = "python:3.11-slim"
+CODING_NODE_IMAGE = "node:20-bookworm-slim"
 CONTAINER_WORKDIR = "/workspace"
 
 
@@ -424,6 +425,8 @@ def _image_for_spec(spec: SandboxCreateSpec) -> str:
     requested = str(spec.metadata.get("image") or "").strip()
     if spec.template.template_id == "coding.python" and (not requested or requested == DEFAULT_DOCKER_IMAGE):
         return CODING_PYTHON_IMAGE
+    if spec.template.template_id == "coding.node" and (not requested or requested == DEFAULT_DOCKER_IMAGE):
+        return CODING_NODE_IMAGE
     return requested or DEFAULT_DOCKER_IMAGE
 
 

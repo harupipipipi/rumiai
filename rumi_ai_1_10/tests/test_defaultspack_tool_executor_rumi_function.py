@@ -766,10 +766,21 @@ def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
     assert result["widget"]["approval_required"] is True
 
 
-def test_sandbox_exec_fails_closed_after_internal_tool_decision_until_managed_runtime_exists(tmp_path):
+def test_sandbox_exec_fails_closed_after_internal_tool_decision_until_managed_runtime_exists(tmp_path, monkeypatch):
     from domain.tool.executor import ToolExecutor
+    from domain.tool import sandbox_tools
     from domain.tool_policy.internal_context import seal_tool_context
 
+    class MissingRuntimeApi:
+        def run(self, payload, context):
+            if payload.get("_handler") == "sandboxes_create":
+                return {
+                    "status": "error",
+                    "error": {"code": "MANAGED_RUNTIME_NOT_READY", "message": "runtime not ready"},
+                }
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: MissingRuntimeApi())
     context = seal_tool_context(
         {"workspace_root": str(tmp_path)},
         {"action": "allow", "allowed": True},
@@ -780,6 +791,40 @@ def test_sandbox_exec_fails_closed_after_internal_tool_decision_until_managed_ru
     assert result["is_error"] is True
     assert result["widget"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
     assert result["widget"]["error"]["argv"] == ["pwd"]
+
+
+def test_sandbox_exec_creates_ephemeral_sandbox_when_no_sandbox_id(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            if payload.get("_handler") == "sandboxes_create":
+                return {"status": "ok", "data": {"sandbox_id": "sandbox-1"}}
+            if payload.get("_handler") == "sandbox_exec":
+                return {"status": "ok", "data": {"sandbox_id": payload["sandbox_id"], "argv": payload["argv"]}}
+            if payload.get("_handler") == "sandbox_delete":
+                return {"status": "ok", "data": {"deleted": True, "sandbox_id": payload["sandbox_id"]}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = sandbox_tools.sandbox_exec({"argv": ["pwd"], "timeout": 5}, context)
+
+    assert result["status"] == "ok"
+    assert [call["_handler"] for call in fake_api.calls] == ["sandboxes_create", "sandbox_exec", "sandbox_delete"]
+    assert fake_api.calls[0]["template_id"] == "tool.ephemeral"
+    assert fake_api.calls[1]["argv"] == ["pwd"]
+    assert fake_api.calls[1]["timeout_ms"] == 5000
 
 
 def test_sandbox_exec_rejects_shell_strings_after_internal_tool_decision(tmp_path):
@@ -795,6 +840,43 @@ def test_sandbox_exec_rejects_shell_strings_after_internal_tool_decision(tmp_pat
 
     assert result["is_error"] is True
     assert result["widget"]["error"]["code"] == "SANDBOX_SHELL_STRING_REJECTED"
+
+
+def test_python_and_node_exec_code_use_coding_templates(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            if payload.get("_handler") == "sandboxes_create":
+                return {"status": "ok", "data": {"sandbox_id": f"{payload['template_id']}-seat"}}
+            if payload.get("_handler") == "sandbox_exec":
+                return {"status": "ok", "data": {"sandbox_id": payload["sandbox_id"], "argv": payload["argv"]}}
+            if payload.get("_handler") == "sandbox_delete":
+                return {"status": "ok", "data": {"deleted": True, "sandbox_id": payload["sandbox_id"]}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    python_result = sandbox_tools.python_exec({"code": "print('ok')"}, context)
+    node_result = sandbox_tools.node_exec({"code": "console.log('ok')"}, context)
+
+    assert python_result["status"] == "ok"
+    assert node_result["status"] == "ok"
+    creates = [call for call in fake_api.calls if call["_handler"] == "sandboxes_create"]
+    execs = [call for call in fake_api.calls if call["_handler"] == "sandbox_exec"]
+    assert [call["template_id"] for call in creates] == ["coding.python", "coding.node"]
+    assert execs[0]["argv"] == ["python", "-c", "print('ok')"]
+    assert execs[1]["argv"] == ["node", "-e", "console.log('ok')"]
 
 
 def test_sandbox_exec_direct_call_requires_server_side_approval(tmp_path):

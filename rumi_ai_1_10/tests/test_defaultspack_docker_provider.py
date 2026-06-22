@@ -117,3 +117,14 @@ def test_docker_provider_uses_python_image_for_python_template(tmp_path) -> None
     assert "python:3.11-slim" in docker_run
     assert "--memory" in docker_run
     assert "4096m" in docker_run
+
+
+def test_docker_provider_uses_node_image_for_node_template(tmp_path) -> None:
+    fake = FakeDockerCli()
+    manager = _manager(tmp_path, fake)
+
+    created = manager.create(display=False, provider_id="docker", template_id="coding.node")
+
+    assert created["ok"] is True
+    docker_run = fake.command_with("run")
+    assert "node:20-bookworm-slim" in docker_run
