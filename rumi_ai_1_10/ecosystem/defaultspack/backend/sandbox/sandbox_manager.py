@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
 from .errors import RUNTIME_PROVIDER_UNAVAILABLE, SandboxContractError
-from .guest.protocol import GuestExecRequest
+from .guest.protocol import DesktopInputRequest, GuestExecRequest
 from .models import (
     DesktopAccessPolicy,
     DesktopProvisioningPlan,
@@ -508,6 +508,7 @@ class SandboxManager:
         )
         action = str(payload.get("action") or "")
         client_action_id = _optional_clean_string(payload.get("client_action_id"), max_len=160)
+        normalized_payload: dict[str, Any] | None = None
         with self._lock:
             inst, error = self._ready_instance(seat_id)
             if error is not None:
@@ -516,6 +517,33 @@ class SandboxManager:
             operation_error = self._require_operation(inst, "desktop.input.with_lease", "sandbox.desktop_input")
             if operation_error is not None:
                 return operation_error
+            try:
+                request = DesktopInputRequest.from_payload(
+                    payload,
+                    width=inst.desktop_spec.width if inst.desktop_spec is not None else None,
+                    height=inst.desktop_spec.height if inst.desktop_spec is not None else None,
+                    require_lease=normalized_actor != "ai",
+                )
+            except SandboxContractError as exc:
+                self._append_desktop_audit_event(
+                    inst,
+                    actor=normalized_actor,
+                    agent_id=agent_id,
+                    action=action,
+                    client_action_id=client_action_id,
+                    ok=False,
+                    code=exc.code,
+                )
+                return {
+                    **exc.to_dict(),
+                    "sandbox_id": inst.sandbox_id,
+                    "seat_id": inst.sandbox_id,
+                    "status": inst.state,
+                    "state": inst.state,
+                }
+            action = request.action
+            client_action_id = request.client_action_id
+            normalized_payload = request.to_agent_payload()
             auth_error = self._authorize_desktop_actor(inst, normalized_actor, agent_id)
             if auth_error is not None:
                 self._append_desktop_audit_event(
@@ -542,7 +570,7 @@ class SandboxManager:
                 return rate_error
         try:
             agent = self._provider_agent(inst)
-            result = agent.desktop_input(inst.sandbox_id, inst.sandbox_id, payload, actor=normalized_actor)
+            result = agent.desktop_input(inst.sandbox_id, inst.sandbox_id, normalized_payload or {}, actor=normalized_actor)
         except SandboxContractError as exc:
             result = exc.to_dict()
         except Exception as exc:

@@ -522,6 +522,84 @@ def test_exec_output_is_bounded_by_template_resource_limit(tmp_path) -> None:
     assert [request.client_request_id for request in agent.exec_requests] == ["output-limit"]
 
 
+def test_manager_validates_and_sanitizes_desktop_input_before_provider(tmp_path) -> None:
+    class PermissiveDesktopAgent(FakeGuestAgent):
+        def __init__(self) -> None:
+            super().__init__(width=800, height=600)
+            self.provider_inputs: list[dict[str, object]] = []
+
+        def desktop_input(self, sandbox_id: str, seat_id: str, payload, *, actor: str = "human"):
+            self.provider_inputs.append(dict(payload))
+            return {"ok": True, "sandbox_id": sandbox_id, "seat_id": seat_id, "action": payload.get("action")}
+
+    agent = PermissiveDesktopAgent()
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities={
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+                "sandbox.desktop",
+                "sandbox.desktop_input",
+                "sandbox.snapshot",
+            },
+            guest_agent=agent,
+            sandbox_id_factory=lambda: "input-seat",
+        )
+    )
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    created = manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.ubuntu",
+        width=800,
+        height=600,
+        access_owner_id="local-user",
+    )
+    assert created["ok"] is True
+
+    invalid = manager.desktop_input(
+        "input-seat",
+        {
+            "action": "click",
+            "client_action_id": "bad-click",
+            "lease_token": "lease-token",
+            "x": 801,
+            "y": 20,
+            "button": "left",
+        },
+    )
+    valid = manager.desktop_input(
+        "input-seat",
+        {
+            "action": "click",
+            "client_action_id": "good-click",
+            "lease_token": "lease-token",
+            "x": 10,
+            "y": 20,
+            "button": "left",
+            "ignored_by_policy": "do-not-forward",
+        },
+    )
+
+    assert invalid["ok"] is False
+    assert invalid["code"] == "INVALID_DESKTOP_INPUT"
+    assert valid["ok"] is True
+    assert agent.provider_inputs == [
+        {
+            "action": "click",
+            "client_action_id": "good-click",
+            "lease_token": "lease-token",
+            "x": 10,
+            "y": 20,
+            "button": "left",
+        }
+    ]
+
+
 def test_linux_native_provider_desktop_session_capture_and_input(monkeypatch) -> None:
     from ecosystem.defaultspack.backend.sandbox.providers.linux_native import LinuxNativeProvider
 
