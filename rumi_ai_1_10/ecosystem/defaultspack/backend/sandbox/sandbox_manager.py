@@ -1994,7 +1994,13 @@ def _workspace_binding_from_create(
         }
     if mode not in WORKSPACE_ACCESS_MODES:
         mode = "read_only"
-    return WorkspaceBinding(workspace_id=clean_workspace_id, mode=mode, root=".")
+    if mode == "none":
+        return WorkspaceBinding(workspace_id=clean_workspace_id, mode=mode, root=".")
+    try:
+        record = _trusted_workspace_record(clean_workspace_id)
+    except SandboxContractError as exc:
+        return exc.to_dict()
+    return WorkspaceBinding(workspace_id=clean_workspace_id, mode=mode, root=str(record["root_path"]))
 
 
 def _workspace_binding_from_dict(value: Any) -> WorkspaceBinding:
@@ -2009,6 +2015,39 @@ def _workspace_binding_from_dict(value: Any) -> WorkspaceBinding:
         mode=mode if workspace_id else "none",
         root=str(value.get("root") or ".")[:512],
     )
+
+
+def _trusted_workspace_record(workspace_id: str) -> dict[str, Any]:
+    try:
+        from ecosystem.defaultspack.domain.coding.workspace_store import WorkspaceStore, normalize_workspace_root
+    except ModuleNotFoundError:
+        from domain.coding.workspace_store import WorkspaceStore, normalize_workspace_root  # type: ignore
+
+    store = WorkspaceStore()
+    record = store.get(workspace_id)
+    if record is None:
+        raise SandboxContractError(
+            "SANDBOX_WORKSPACE_NOT_FOUND",
+            f"Sandbox workspace is not registered: {workspace_id}",
+            status_code=404,
+        )
+    if not bool(record.get("trusted")):
+        raise SandboxContractError(
+            "SANDBOX_WORKSPACE_UNTRUSTED",
+            f"Sandbox workspace must be trusted before it can be bound: {workspace_id}",
+            status_code=403,
+        )
+    try:
+        root_path = normalize_workspace_root(record.get("root_path"))
+    except ValueError as exc:
+        raise SandboxContractError(
+            "SANDBOX_WORKSPACE_INVALID",
+            f"Sandbox workspace root is invalid: {workspace_id}",
+            status_code=400,
+        ) from exc
+    touched = store.touch(workspace_id) or record
+    touched["root_path"] = root_path
+    return touched
 
 
 def _template_workspace_access(value: Any) -> str:

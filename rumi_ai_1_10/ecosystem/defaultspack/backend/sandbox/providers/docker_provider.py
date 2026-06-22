@@ -212,6 +212,7 @@ class DockerProvider:
         result = self._run(command, timeout=120)
         if result.returncode != 0:
             raise _docker_error("DOCKER_START_FAILED", "Docker sandbox container did not start.", result, status_code=503)
+        self._seed_overlay_workspace(docker_path, name, instance.opaque_state)
         return self._started(instance)
 
     def stop(self, instance: ProviderInstance, *, force: bool = False) -> None:
@@ -291,6 +292,22 @@ class DockerProvider:
         if result.returncode != 0:
             return None
         return result.stdout.strip() or None
+
+    def _seed_overlay_workspace(self, docker_path: str, name: str, opaque_state: Mapping[str, object]) -> None:
+        workspace = _workspace_binding(opaque_state)
+        if workspace.get("mode") != "overlay":
+            return
+        root = str(workspace.get("root") or "")
+        if not _usable_host_workspace_root(root):
+            return
+        result = self._run([docker_path, "cp", os.path.join(root, "."), f"{name}:{CONTAINER_WORKDIR}"], timeout=300)
+        if result.returncode != 0:
+            raise _docker_error(
+                "DOCKER_WORKSPACE_SEED_FAILED",
+                "Docker sandbox workspace seed failed.",
+                result,
+                status_code=503,
+            )
 
     def _require_docker_ready(self, required_capabilities: frozenset[str]) -> str:
         docker_path = self._docker_path()
@@ -597,8 +614,25 @@ def _docker_run_command(docker_path: str, name: str, opaque_state: Mapping[str, 
     pids = _positive_int(opaque_state.get("pids"))
     if pids:
         command.extend(["--pids-limit", str(pids)])
+    workspace = _workspace_binding(opaque_state)
+    if workspace.get("mode") == "read_only" and _usable_host_workspace_root(workspace.get("root")):
+        command.extend([
+            "--mount",
+            f"type=bind,source={workspace['root']},target={CONTAINER_WORKDIR},readonly",
+        ])
     command.extend([str(opaque_state.get("image") or DEFAULT_DOCKER_IMAGE), "sleep", "infinity"])
     return command
+
+
+def _workspace_binding(opaque_state: Mapping[str, object]) -> Mapping[str, object]:
+    workspace = opaque_state.get("workspace_binding")
+    return workspace if isinstance(workspace, Mapping) else {}
+
+
+def _usable_host_workspace_root(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    return os.path.isabs(value) and os.path.isdir(value)
 
 
 def _image_for_spec(spec: SandboxCreateSpec) -> str:

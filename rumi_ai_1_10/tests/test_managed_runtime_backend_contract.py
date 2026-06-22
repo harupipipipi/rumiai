@@ -31,6 +31,7 @@ from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderReg
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.testing.fake_guest_agent import FakeGuestAgent
 from ecosystem.defaultspack.backend.sandbox.testing.fake_provider import FakeRuntimeProvider
+from ecosystem.defaultspack.domain.coding.workspace_store import WorkspaceStore
 
 
 pytestmark = pytest.mark.contract
@@ -45,6 +46,14 @@ class Clock:
 
     def advance(self, seconds: float) -> None:
         self.now += seconds
+
+
+def _trusted_workspace(tmp_path, monkeypatch, *, workspace_id: str = "workspace-1"):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
+    root = tmp_path / "workspace"
+    root.mkdir(exist_ok=True)
+    WorkspaceStore().create(root, workspace_id=workspace_id, trusted=True)
+    return root
 
 
 def test_exec_protocol_rejects_raw_command_strings_and_accepts_argv() -> None:
@@ -423,7 +432,8 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
     assert agent.desktop_inputs[0].action == "click"
 
 
-def test_desktop_access_key_rules_and_ai_input_contract(tmp_path) -> None:
+def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -> None:
+    _trusted_workspace(tmp_path, monkeypatch)
     from ecosystem.defaultspack.blocks.sandbox import api
 
     lease_manager = ControlLeaseManager(ttl_seconds=30, token_factory=lambda: "lease-token")

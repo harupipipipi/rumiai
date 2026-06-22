@@ -8,6 +8,7 @@ from ecosystem.defaultspack.backend.sandbox.providers.docker_provider import (
     DockerProvider,
 )
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
+from ecosystem.defaultspack.domain.coding.workspace_store import WorkspaceStore
 
 
 class FakeDockerCli:
@@ -87,6 +88,15 @@ def _manager(tmp_path, fake: FakeDockerCli) -> SandboxManager:
     return SandboxManager(state_dir=tmp_path, provider_registry=registry)
 
 
+def _trusted_workspace(tmp_path, monkeypatch, *, trusted: bool = True) -> str:
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    WorkspaceStore().create(root, workspace_id="trusted", trusted=trusted)
+    return str(root)
+
+
 def test_docker_provider_runs_sandbox_exec_inside_container(tmp_path) -> None:
     fake = FakeDockerCli()
     manager = _manager(tmp_path, fake)
@@ -154,6 +164,64 @@ def test_docker_provider_uses_node_image_for_node_template(tmp_path) -> None:
     assert created["ok"] is True
     docker_run = fake.command_with("run")
     assert "node:20-bookworm-slim" in docker_run
+
+
+def test_docker_provider_mounts_trusted_workspace_read_only(tmp_path, monkeypatch) -> None:
+    workspace_root = _trusted_workspace(tmp_path, monkeypatch)
+    fake = FakeDockerCli()
+    manager = _manager(tmp_path / "state", fake)
+
+    created = manager.create(
+        display=False,
+        provider_id="docker",
+        template_id="coding.python",
+        workspace_id="trusted",
+        workspace_access="read_only",
+    )
+
+    assert created["ok"] is True
+    docker_run = fake.command_with("run")
+    assert "--mount" in docker_run
+    mount = docker_run[docker_run.index("--mount") + 1]
+    assert mount == f"type=bind,source={workspace_root},target=/workspace,readonly"
+
+
+def test_docker_provider_seeds_trusted_workspace_overlay(tmp_path, monkeypatch) -> None:
+    workspace_root = _trusted_workspace(tmp_path, monkeypatch)
+    fake = FakeDockerCli()
+    manager = _manager(tmp_path / "state", fake)
+
+    created = manager.create(
+        display=False,
+        provider_id="docker",
+        template_id="coding.python",
+        workspace_id="trusted",
+        workspace_access="overlay",
+    )
+
+    assert created["ok"] is True
+    docker_run = fake.command_with("run")
+    docker_cp = fake.command_with("cp")
+    assert "--mount" not in docker_run
+    assert docker_cp[-2:] == [f"{workspace_root}/.", docker_run[docker_run.index("--name") + 1] + ":/workspace"]
+
+
+def test_docker_provider_rejects_untrusted_workspace_binding(tmp_path, monkeypatch) -> None:
+    _trusted_workspace(tmp_path, monkeypatch, trusted=False)
+    fake = FakeDockerCli()
+    manager = _manager(tmp_path / "state", fake)
+
+    created = manager.create(
+        display=False,
+        provider_id="docker",
+        template_id="coding.python",
+        workspace_id="trusted",
+        workspace_access="read_only",
+    )
+
+    assert created["ok"] is False
+    assert created["code"] == "SANDBOX_WORKSPACE_UNTRUSTED"
+    assert fake.calls == []
 
 
 def test_docker_provider_applies_file_patch_inside_container(tmp_path) -> None:

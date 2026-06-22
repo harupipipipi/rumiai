@@ -9,6 +9,7 @@ from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderReg
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.testing.fake_provider import FakeRuntimeProvider
 from ecosystem.defaultspack.backend.sandbox.errors import SandboxContractError
+from ecosystem.defaultspack.domain.coding.workspace_store import WorkspaceStore
 
 
 def _registry(
@@ -51,6 +52,14 @@ def _manager(
         gui_backend=gui_backend,
         provider_registry=_registry(capabilities=capabilities, ready=ready, sandbox_id_factory=sandbox_id_factory),
     )
+
+
+def _trusted_workspace(tmp_path, monkeypatch, *, workspace_id: str = "workspace-1"):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
+    root = tmp_path / "workspace"
+    root.mkdir(exist_ok=True)
+    WorkspaceStore().create(root, workspace_id=workspace_id, trusted=True)
+    return root
 
 
 def test_sandbox_create_fails_closed_without_registered_provider(tmp_path):
@@ -207,7 +216,8 @@ def test_sandbox_create_rejects_endpoint_template_kind_mismatch(tmp_path):
     assert tool_template_on_desktop_endpoint["code"] == "SANDBOX_TEMPLATE_NOT_DESKTOP"
 
 
-def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path):
+def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path, monkeypatch):
+    workspace_root = _trusted_workspace(tmp_path, monkeypatch)
     manager = _manager(tmp_path)
 
     created = manager.create(
@@ -227,6 +237,7 @@ def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path):
     assert status["network_policy"]["mode"] == "project_policy_or_first_use_approval"
     assert status["resource_limits"]["memory_mb"] == 4096
     assert status["workspace_binding"]["mode"] == "read_only"
+    assert status["workspace_binding"]["root"] == str(workspace_root)
     assert status["assigned_agent_id"] == "agent-1"
     assert "desktop.mcp.install.request" in status["capabilities"]
 
@@ -241,7 +252,8 @@ def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path):
     assert reloaded_status["lifecycle_policy"]["destroy_on_exit"] is False
 
 
-def test_desktop_create_spec_carries_user_selected_runtime_context(tmp_path):
+def test_desktop_create_spec_carries_user_selected_runtime_context(tmp_path, monkeypatch):
+    workspace_root = _trusted_workspace(tmp_path, monkeypatch)
     provider = FakeRuntimeProvider(
         capabilities={
             "sandbox.exec",
@@ -283,6 +295,7 @@ def test_desktop_create_spec_carries_user_selected_runtime_context(tmp_path):
     spec = provider.create_specs[0]
     assert spec.workspace_binding.workspace_id == "workspace-1"
     assert spec.workspace_binding.mode == "read_only"
+    assert spec.workspace_binding.root == str(workspace_root)
     assert spec.metadata["startup"] == {
         "starter": "browser_url",
         "browser_url": "https://example.com/task",
