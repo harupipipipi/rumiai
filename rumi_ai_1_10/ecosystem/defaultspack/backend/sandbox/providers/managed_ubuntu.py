@@ -49,6 +49,9 @@ GUEST_WORKDIR = "/workspace"
 GUEST_DEPS = ("Xvfb", "openbox", "xdotool", "import", "python3", "xterm", "unshare")
 APT_PACKAGES = ("xvfb", "openbox", "xdotool", "imagemagick", "python3", "xterm", "x11-utils", "ca-certificates", "util-linux")
 DEFAULT_DISPLAY = ":98"
+DEFAULT_WSL_RUNTIME_NAME = "RumiUbuntu"
+WSL_ROOTFS_ENV = "RUMI_WSL_ROOTFS_TARBALL"
+WSL_INSTALL_DIR_ENV = "RUMI_WSL_INSTALL_DIR"
 MAX_FILE_PATCH_BYTES = 2 * 1024 * 1024
 GUEST_APP_PACKAGE_MAP = {
     "ca-certificates": ("ca-certificates",),
@@ -522,9 +525,13 @@ class WindowsWslProvider(ManagedUbuntuProvider):
         *,
         command_path: str | None = None,
         runner: CommandRunner | None = None,
-        runtime_name: str = "Ubuntu",
+        runtime_name: str = DEFAULT_WSL_RUNTIME_NAME,
+        rootfs_path: str | None = None,
+        install_dir: str | None = None,
     ) -> None:
         super().__init__(command_path=command_path, runner=runner, runtime_name=runtime_name)
+        self._configured_rootfs_path = str(rootfs_path).strip() if rootfs_path else None
+        self._configured_install_dir = str(install_dir).strip() if install_dir else None
 
     def _guest_exists(self, command_path: str) -> bool:
         result = self._run((command_path, "-l", "-q"), timeout=10)
@@ -533,7 +540,17 @@ class WindowsWslProvider(ManagedUbuntuProvider):
     def _ensure_guest(self, command_path: str) -> None:
         if self._guest_exists(command_path):
             return
-        result = self._run((command_path, "--install", "-d", self._runtime_name), timeout=900)
+        rootfs_path = self._rootfs_path()
+        if not rootfs_path or not os.path.isfile(rootfs_path):
+            raise SandboxContractError(
+                RUNTIME_PROVIDER_UNAVAILABLE,
+                "RumiUbuntu WSL rootfs tarball is not bundled or configured.",
+                status_code=503,
+                details={"env": WSL_ROOTFS_ENV, "runtime_name": self._runtime_name},
+            )
+        install_dir = self._install_dir()
+        os.makedirs(install_dir, exist_ok=True)
+        result = self._run((command_path, "--import", self._runtime_name, install_dir, rootfs_path, "--version", "2"), timeout=900)
         if result.returncode != 0:
             raise SandboxContractError(
                 RUNTIME_PROVIDER_UNAVAILABLE,
@@ -553,6 +570,22 @@ class WindowsWslProvider(ManagedUbuntuProvider):
 
     def _version_command(self, command_path: str) -> tuple[str, ...]:
         return (command_path, "--version")
+
+    def _rootfs_path(self) -> str | None:
+        value = self._configured_rootfs_path or os.environ.get(WSL_ROOTFS_ENV)
+        text = str(value or "").strip()
+        return text or None
+
+    def _install_dir(self) -> str:
+        if self._configured_install_dir:
+            return self._configured_install_dir
+        env_dir = str(os.environ.get(WSL_INSTALL_DIR_ENV) or "").strip()
+        if env_dir:
+            return env_dir
+        local_app_data = str(os.environ.get("LOCALAPPDATA") or "").strip()
+        if local_app_data:
+            return os.path.join(local_app_data, "Rumi AI", "wsl", self._runtime_name)
+        return os.path.join(tempfile.gettempdir(), "rumi-ai", "wsl", self._runtime_name)
 
 
 class ManagedUbuntuGuestAgent:

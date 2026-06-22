@@ -23,9 +23,11 @@ from ecosystem.defaultspack.backend.sandbox.errors import SandboxContractError
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.providers.base import NullProgressSink
 from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import (
+    DEFAULT_WSL_RUNTIME_NAME,
     GuestCommandResult,
     MANAGED_UBUNTU_CAPABILITIES,
     MacLimaProvider,
+    WSL_ROOTFS_ENV,
     WindowsWslProvider,
 )
 
@@ -39,6 +41,8 @@ class FakeManagedUbuntuCli:
         self.guest_exists = False
         self.deps_installed = False
         self.desktop_running = False
+        self.imported_rootfs_path: str | None = None
+        self.imported_install_dir: str | None = None
 
     def __call__(
         self,
@@ -84,8 +88,10 @@ class FakeManagedUbuntuCli:
             return GuestCommandResult(returncode=0, stdout="WSL version: 2.0\n")
         if cmd[1:] == ["-l", "-q"]:
             return GuestCommandResult(returncode=0, stdout=f"{self.runtime_name}\n" if self.guest_exists else "")
-        if cmd[1:4] == ["--install", "-d", self.runtime_name]:
+        if len(cmd) >= 7 and cmd[1:3] == ["--import", self.runtime_name]:
             self.guest_exists = True
+            self.imported_install_dir = cmd[3]
+            self.imported_rootfs_path = cmd[4]
             return GuestCommandResult(returncode=0)
         if cmd[1:3] == ["--terminate", self.runtime_name]:
             return GuestCommandResult(returncode=0)
@@ -216,10 +222,18 @@ def test_mac_lima_provider_ensure_and_guest_desktop_flow(monkeypatch) -> None:
     assert fake.command_containing("shell", "rumi-managed-runtime", "--", "echo", "hello")[-2:] == ["echo", "hello"]
 
 
-def test_windows_wsl_provider_ensure_installs_distribution(monkeypatch) -> None:
+def test_windows_wsl_provider_ensure_imports_rumi_owned_distribution(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
-    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name="Ubuntu")
-    provider = WindowsWslProvider(command_path="C:/Windows/System32/wsl.exe", runner=fake)
+    rootfs = tmp_path / "rumi-ubuntu-rootfs.tar"
+    rootfs.write_bytes(b"rootfs")
+    install_dir = tmp_path / "RumiUbuntu"
+    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name=DEFAULT_WSL_RUNTIME_NAME)
+    provider = WindowsWslProvider(
+        command_path="C:/Windows/System32/wsl.exe",
+        runner=fake,
+        rootfs_path=str(rootfs),
+        install_dir=str(install_dir),
+    )
     requirements = RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec", "sandbox.files"}))
 
     ensured = provider.ensure(EnsureRuntimeRequest(provider_id="windows_wsl", requirements=requirements), NullProgressSink())
@@ -233,8 +247,42 @@ def test_windows_wsl_provider_ensure_installs_distribution(monkeypatch) -> None:
     assert status.ready is True
     assert fake.guest_exists is True
     assert fake.deps_installed is True
+    assert fake.imported_rootfs_path == str(rootfs)
+    assert fake.imported_install_dir == str(install_dir)
     assert executed["stdout"] == "hello\n"
-    assert fake.command_containing("-d", "Ubuntu", "--", "echo", "hello")[-2:] == ["echo", "hello"]
+    assert fake.command_containing("--import", DEFAULT_WSL_RUNTIME_NAME, str(install_dir), str(rootfs), "--version", "2")
+    assert fake.command_containing("-d", DEFAULT_WSL_RUNTIME_NAME, "--", "echo", "hello")[-2:] == ["echo", "hello"]
+
+
+def test_windows_wsl_provider_does_not_claim_existing_user_ubuntu_distribution(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
+    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name="Ubuntu")
+    fake.guest_exists = True
+    provider = WindowsWslProvider(command_path="C:/Windows/System32/wsl.exe", runner=fake)
+
+    status = provider.doctor(RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec"})))
+
+    assert status.ready is False
+    assert "managed_guest" in status.missing_requirements
+
+
+def test_windows_wsl_provider_fails_closed_without_rumi_rootfs(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
+    monkeypatch.delenv(WSL_ROOTFS_ENV, raising=False)
+    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name=DEFAULT_WSL_RUNTIME_NAME)
+    provider = WindowsWslProvider(command_path="C:/Windows/System32/wsl.exe", runner=fake)
+
+    ensured = provider.ensure(
+        EnsureRuntimeRequest(
+            provider_id="windows_wsl",
+            requirements=RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec"})),
+        ),
+        NullProgressSink(),
+    )
+
+    assert ensured.ok is False
+    assert [diagnostic.code for diagnostic in ensured.diagnostics] == ["RUNTIME_PROVIDER_UNAVAILABLE"]
+    assert fake.guest_exists is False
 
 
 def test_managed_ubuntu_exec_enforces_template_output_and_timeout_limits(monkeypatch) -> None:
