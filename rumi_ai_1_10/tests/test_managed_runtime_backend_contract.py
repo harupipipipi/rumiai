@@ -406,6 +406,60 @@ def test_expired_lifecycle_blocks_desktop_control_lease(tmp_path) -> None:
     assert lease_manager.active_lease("ttl-control") is None
 
 
+def test_exec_timeout_cannot_exceed_template_resource_limit(tmp_path) -> None:
+    agent = FakeGuestAgent()
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities={
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.overlay_workspace",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+            },
+            guest_agent=agent,
+            sandbox_id_factory=lambda: "resource-seat",
+        )
+    )
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+
+    created = manager.create(
+        display=False,
+        provider_id="fake-runtime",
+        template_id="tool.ephemeral",
+    )
+    assert created["ok"] is True
+
+    over_limit = manager.exec(
+        "resource-seat",
+        {
+            "argv": ["python", "-V"],
+            "cwd": ".",
+            "env": {},
+            "timeout_ms": 300_001,
+            "client_request_id": "timeout-over",
+        },
+    )
+    within_limit = manager.exec(
+        "resource-seat",
+        {
+            "argv": ["python", "-V"],
+            "cwd": ".",
+            "env": {},
+            "timeout_ms": 300_000,
+            "client_request_id": "timeout-ok",
+        },
+    )
+
+    assert over_limit["ok"] is False
+    assert over_limit["code"] == "SANDBOX_RESOURCE_LIMIT_EXCEEDED"
+    assert over_limit["max_timeout_ms"] == 300_000
+    assert within_limit["ok"] is True
+    assert [request.client_request_id for request in agent.exec_requests] == ["timeout-ok"]
+
+
 def test_linux_native_provider_desktop_session_capture_and_input(monkeypatch) -> None:
     from ecosystem.defaultspack.backend.sandbox.providers.linux_native import LinuxNativeProvider
 

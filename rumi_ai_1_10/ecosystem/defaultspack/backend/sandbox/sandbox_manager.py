@@ -593,6 +593,9 @@ class SandboxManager:
                 return operation_error
         try:
             request = GuestExecRequest.from_payload(payload)
+            resource_policy_error = self._require_exec_resource_policy(inst, request)
+            if resource_policy_error is not None:
+                return resource_policy_error
             secret_policy_error = self._require_secret_policy(inst, request)
             if secret_policy_error is not None:
                 return secret_policy_error
@@ -1397,6 +1400,24 @@ class SandboxManager:
             "error": f"Unsupported sandbox secret policy mode: {policy.mode}",
             "code": "SANDBOX_SECRET_POLICY_UNSUPPORTED",
             "status_code": 403,
+        }
+
+    @staticmethod
+    def _require_exec_resource_policy(inst: SandboxInstance, request: GuestExecRequest) -> Dict[str, Any] | None:
+        timeout_ms = inst.resource_limits.timeout_ms
+        if timeout_ms is None or timeout_ms <= 0 or request.timeout_ms <= timeout_ms:
+            return None
+        return {
+            "ok": False,
+            "error": "Sandbox exec timeout exceeds the template resource limit.",
+            "code": "SANDBOX_RESOURCE_LIMIT_EXCEEDED",
+            "status_code": 400,
+            "sandbox_id": inst.sandbox_id,
+            "status": inst.state,
+            "state": inst.state,
+            "template_id": inst.template_id,
+            "requested_timeout_ms": request.timeout_ms,
+            "max_timeout_ms": timeout_ms,
         }
 
     @staticmethod
