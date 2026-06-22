@@ -198,13 +198,18 @@ class _RecordingProgressSink:
 
 def _runtime_providers(service: _SandboxApiService) -> dict[str, Any]:
     default_provider_id = _default_provider_id()
-    statuses = [_provider_payload(status, selected=status.provider_id == default_provider_id) for status in service.provider_registry.doctor_all()]
+    provider_statuses = list(service.provider_registry.doctor_all())
+    selected_provider_id = _selected_runtime_provider_id(provider_statuses, default_provider_id=default_provider_id)
+    statuses = [
+        _provider_payload(status, selected=status.provider_id == selected_provider_id)
+        for status in provider_statuses
+    ]
     if not any(provider.get("provider_id") == default_provider_id for provider in statuses):
-        statuses.insert(0, _placeholder_provider(default_provider_id, selected=True))
+        statuses.insert(0, _placeholder_provider(default_provider_id, selected=selected_provider_id == default_provider_id))
     statuses.sort(key=lambda provider: (provider.get("provider_id") != default_provider_id, str(provider.get("provider_id") or "")))
     return {
         "providers": statuses,
-        "selected_provider_id": default_provider_id,
+        "selected_provider_id": selected_provider_id,
         "default_provider_id": default_provider_id,
         "runtime_version": None,
         "guest_protocol": 1,
@@ -212,8 +217,10 @@ def _runtime_providers(service: _SandboxApiService) -> dict[str, Any]:
 
 
 def _runtime_doctor(service: _SandboxApiService) -> dict[str, Any]:
-    providers = _runtime_providers(service)["providers"]
-    selected = next((provider for provider in providers if provider.get("provider_id") == _default_provider_id()), providers[0] if providers else {})
+    providers_response = _runtime_providers(service)
+    providers = providers_response["providers"]
+    selected_provider_id = providers_response.get("selected_provider_id")
+    selected = next((provider for provider in providers if provider.get("provider_id") == selected_provider_id), providers[0] if providers else {})
     ready = selected.get("ready") is True
     return {
         "status": "ready" if ready else "needs_setup",
@@ -406,20 +413,34 @@ def _runtime_operation_id(payload: dict[str, Any], *, provider_id: str, action: 
 
 def _runtime_operation(status: str, *, provider_id: Any = None, operation_id: str = "managed-runtime-setup") -> dict[str, Any]:
     failed = status == "failed"
+    message = "Managed runtime provider is not registered." if failed else "Runtime operation completed."
     return {
         "operation_id": operation_id,
         "status": status,
         "step": "provider_setup",
-        "message": "Managed runtime provider setup is not available in this build." if failed else "Runtime operation completed.",
+        "message": message,
         "progress": 0 if failed else 100,
         "reboot_required": False,
         "provider_id": str(provider_id or _default_provider_id()),
         "updated_at": timestamp(),
         "error": {
             "code": RUNTIME_NOT_READY,
-            "message": "Managed runtime provider setup is not available in this build.",
+            "message": message,
         } if failed else None,
     }
+
+
+def _selected_runtime_provider_id(statuses: list[RuntimeProviderStatus], *, default_provider_id: str) -> str:
+    default_status = next((status for status in statuses if status.provider_id == default_provider_id), None)
+    if default_status is not None and default_status.ready:
+        return default_status.provider_id
+    ready_status = next((status for status in statuses if status.ready), None)
+    if ready_status is not None:
+        return ready_status.provider_id
+    if default_status is not None:
+        return default_status.provider_id
+    first_status = statuses[0] if statuses else None
+    return first_status.provider_id if first_status is not None else default_provider_id
 
 
 def _sandbox_create(service: _SandboxApiService, payload: dict[str, Any], *, display: bool):

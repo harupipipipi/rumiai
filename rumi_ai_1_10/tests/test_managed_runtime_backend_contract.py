@@ -1330,10 +1330,13 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert doctor["data"]["status"] == "needs_setup"
     assert ensure["data"]["status"] == "failed"
     assert ensure["data"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
+    assert ensure["data"]["error"]["message"] == "Managed runtime provider is not registered."
     assert update["data"]["status"] == "failed"
     assert update["data"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
+    assert update["data"]["error"]["message"] == "Managed runtime provider is not registered."
     assert uninstall["data"]["status"] == "failed"
     assert uninstall["data"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
+    assert uninstall["data"]["error"]["message"] == "Managed runtime provider is not registered."
     assert {template["template_id"] for template in templates["data"]["templates"]} >= {"desktop.linux_native", "desktop.ubuntu", "tool.ephemeral"}
     coding_template = next(template for template in templates["data"]["templates"] if template["template_id"] == "desktop.coding")
     assert coding_template["trust_level"] == "builtin"
@@ -1341,6 +1344,35 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     assert "google-chrome-stable" in {app["name"] for app in coding_template["provisioning"]["packages"]}
     assert "playwright" in coding_template["provisioning"]["mcp_servers"]
     assert desktops["data"]["desktops"] == []
+
+
+def test_runtime_doctor_selects_ready_nondefault_provider(monkeypatch, tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    monkeypatch.setattr("ecosystem.defaultspack.blocks.sandbox.api.platform.system", lambda: "Linux")
+    registry = ProviderRegistry()
+    registry.register(FakeRuntimeProvider(provider_id="linux_native", ready=False, capabilities={"sandbox.desktop"}))
+    registry.register(FakeRuntimeProvider(provider_id="docker", ready=True, capabilities={"sandbox.exec", "sandbox.files"}))
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        providers = api.run({"_handler": "runtime_providers"}, {})
+        doctor = api.run({"_handler": "runtime_doctor"}, {})
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert providers["data"]["default_provider_id"] == "linux_native"
+    assert providers["data"]["selected_provider_id"] == "docker"
+    selected = {provider["provider_id"]: provider["selected"] for provider in providers["data"]["providers"]}
+    assert selected["linux_native"] is False
+    assert selected["docker"] is True
+    assert doctor["data"]["status"] == "ready"
+    assert doctor["data"]["selected_provider_id"] == "docker"
 
 
 def test_defaultspack_runtime_service_registers_cross_platform_providers(tmp_path, monkeypatch) -> None:
