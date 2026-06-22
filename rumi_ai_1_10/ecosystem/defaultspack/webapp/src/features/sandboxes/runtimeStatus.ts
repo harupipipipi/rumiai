@@ -47,11 +47,15 @@ export function runtimeAvailability(
 ): RuntimeAvailability {
   const providers = doctor?.providers ?? providersResponse?.providers ?? [];
   const selectedProviderId = doctor?.selected_provider_id ?? providersResponse?.selected_provider_id ?? providersResponse?.default_provider_id ?? null;
-  const selectedProvider = providers.find((provider) => provider.provider_id === selectedProviderId)
+  const preferredProvider = providers.find((provider) => provider.provider_id === selectedProviderId)
     ?? providers.find((provider) => provider.selected)
-    ?? providers.find(providerIsReady)
     ?? providers[0]
     ?? null;
+  const readyProvider = providers.find((provider) => provider.provider_id === selectedProviderId && providerIsReady(provider))
+    ?? providers.find((provider) => provider.selected && providerIsReady(provider))
+    ?? providers.find(providerIsReady)
+    ?? null;
+  const selectedProvider = readyProvider ?? preferredProvider;
   const missing = [
     ...(doctor?.missing ?? []),
     ...providers.flatMap((provider) => provider.missing ?? []),
@@ -83,12 +87,13 @@ export function runtimeAvailability(
   }
 
   if (providers.some(providerIsReady) || (providers.length === 0 && normalizeRuntimeStatus(doctor?.status) === "ready")) {
+    const provider = readyProvider ?? selectedProvider;
     return {
       status: "ready",
-      selectedProvider,
+      selectedProvider: provider,
       providers,
       missing,
-      message: selectedProvider ? `${providerLabel(selectedProvider)} is ready.` : "Rumi Managed Runtime is ready.",
+      message: provider ? `${providerLabel(provider)} is ready.` : "Rumi Managed Runtime is ready.",
     };
   }
 

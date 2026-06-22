@@ -45,6 +45,10 @@ function templateMatchesProvider(template: SandboxTemplate, provider: RuntimePro
   return requirements.every((requirement) => capabilities.has(requirement));
 }
 
+function providerIsReady(provider: RuntimeProviderStatus | null): boolean {
+  return provider?.ready === true;
+}
+
 type DesktopAccessMode = "owner_only" | "key_required";
 
 export function DesktopCreateDialog({
@@ -75,10 +79,14 @@ export function DesktopCreateDialog({
 
   const selectedProvider = useMemo(() => {
     if (providerId !== "auto") return providers.find((provider) => provider.provider_id === providerId) ?? null;
-    return providers.find((provider) => provider.provider_id === selectedProviderId)
+    return providers.find((provider) => provider.provider_id === selectedProviderId && providerIsReady(provider))
+      ?? providers.find((provider) => provider.selected && providerIsReady(provider))
+      ?? providers.find(providerIsReady)
+      ?? providers.find((provider) => provider.provider_id === selectedProviderId)
       ?? providers.find((provider) => provider.selected)
       ?? null;
   }, [providerId, providers, selectedProviderId]);
+  const selectedProviderReady = selectedProvider ? providerIsReady(selectedProvider) : providers.length === 0;
   const visibleTemplates = useMemo(() => {
     const compatible = templates.filter((template) => templateMatchesProvider(template, selectedProvider));
     return compatible.length > 0 ? compatible : templates;
@@ -86,7 +94,7 @@ export function DesktopCreateDialog({
   const firstTemplate = visibleTemplates[0]?.template_id ?? "";
   const effectiveTemplateId = templateId || firstTemplate;
   const selectedTemplate = visibleTemplates.find((template) => template.template_id === effectiveTemplateId) ?? visibleTemplates[0] ?? null;
-  const selectedTemplateCompatible = selectedTemplate ? templateMatchesProvider(selectedTemplate, selectedProvider) : false;
+  const selectedTemplateCompatible = selectedTemplate ? selectedProviderReady && templateMatchesProvider(selectedTemplate, selectedProvider) : false;
   const showLinuxNativeWarning = selectedProvider?.provider_id === "linux_native"
     || selectedProvider?.isolation?.host_process_namespace
     || selectedProvider?.isolation?.host_filesystem_shared
@@ -205,7 +213,7 @@ export function DesktopCreateDialog({
                 >
                   <option value="auto">Auto</option>
                   {providers.map((provider) => (
-                    <option key={provider.provider_id} value={provider.provider_id}>
+                    <option key={provider.provider_id} value={provider.provider_id} disabled={!providerIsReady(provider)}>
                       {providerLabel(provider)}
                     </option>
                   ))}

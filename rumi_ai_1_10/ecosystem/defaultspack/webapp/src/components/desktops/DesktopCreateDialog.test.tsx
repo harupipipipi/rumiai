@@ -19,13 +19,16 @@ const providers: RuntimeProviderStatus[] = [{
   capabilities: ["sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"],
 }];
 
-function renderDialog(): string {
+function renderDialog(overrides: Partial<{
+  providers: RuntimeProviderStatus[];
+  selectedProviderId: string | null;
+}> = {}): string {
   return renderToStaticMarkup(
     createElement(DesktopCreateDialog, {
       isOpen: true,
       templates,
-      providers,
-      selectedProviderId: "linux_native",
+      providers: overrides.providers ?? providers,
+      selectedProviderId: overrides.selectedProviderId ?? "linux_native",
       onClose: () => undefined,
       onCreate: () => undefined,
     }),
@@ -39,4 +42,21 @@ test("desktop create dialog keeps workspace unmounted by default", () => {
   assert.match(html, /<option value="none" selected="">None<\/option>/);
   assert.match(html, /<option value="read_only">Read only<\/option>/);
   assert.doesNotMatch(html, /read_write/);
+});
+
+test("desktop create dialog disables creation for a detected provider that is not ready", () => {
+  const html = renderDialog({
+    providers: [{
+      provider_id: "linux_native",
+      status: "needs_setup",
+      available: true,
+      installed: false,
+      ready: false,
+      capabilities: ["sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"],
+    }],
+    selectedProviderId: "linux_native",
+  });
+
+  assert.match(html, /<option value="linux_native" disabled="">linux native<\/option>/);
+  assert.match(html, /<button type="submit" disabled=""/);
 });
