@@ -516,6 +516,13 @@ test("SettingsModalRenderer renders continuity handoff controls", () => {
   assert.match(html, /Workstation/);
   assert.match(html, /openai\/primary\/gpt-4\.1/);
   assert.match(html, /handoff-demo/);
+  assert.match(html, /Current primary/);
+  assert.match(html, /Source/);
+  assert.match(html, /Destination/);
+  assert.match(html, /Completed/);
+  assert.match(html, /Return to this device/);
+  assert.match(html, /Advanced routing details/);
+  assert.doesNotMatch(html, /COMPLETED/);
 });
 
 test("Settings > Tools contains detailed tool settings", () => {

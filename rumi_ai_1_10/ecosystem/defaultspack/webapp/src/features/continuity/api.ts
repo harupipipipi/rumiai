@@ -59,4 +59,8 @@ export const continuityApi = {
   cancelHandoff(operationId: string) {
     return api.cancelContinuityHandoff(operationId);
   },
+
+  returnHandoff(operationId: string) {
+    return api.returnContinuityHandoff(operationId);
+  },
 };

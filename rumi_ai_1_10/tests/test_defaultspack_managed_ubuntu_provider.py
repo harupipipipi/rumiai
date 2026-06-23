@@ -150,6 +150,20 @@ class FakeManagedUbuntuCli:
         return GuestCommandResult(returncode=0)
 
 
+def test_managed_provider_without_launcher_does_not_advertise_capabilities(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.shutil.which", lambda _name: None)
+    provider = MacLimaProvider()
+
+    status = provider.doctor(RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES))
+
+    assert status.available is False
+    assert status.ready is False
+    assert status.capabilities == frozenset()
+    assert "command:limactl" in status.missing_requirements
+    assert "Install or bundle limactl" in str(status.user_action)
+
+
 def _template(
     *,
     desktop: bool = True,
@@ -239,8 +253,10 @@ def test_mac_lima_provider_ensure_and_guest_desktop_flow(monkeypatch) -> None:
     assert started.state == "ready"
     assert executed["stdout"] == "hello\n"
     assert patched["ok"] is True
+    assert exposed["ok"] is False
+    assert exposed["code"] == "SANDBOX_PORT_FORWARD_UNAVAILABLE"
     assert exposed["target_url"] == "http://127.0.0.1:3000"
-    assert exposed["forwarding"] == "managed-runtime-localhost"
+    assert exposed["forwarding"] == "unavailable"
     assert any("socket.create_connection" in " ".join(command) for command, _input, _timeout in fake.calls)
     assert frame["data"] == b"png"
     assert click["ok"] is True
@@ -628,9 +644,11 @@ def test_managed_ubuntu_port_exposure_respects_network_policy(monkeypatch) -> No
         {"port": 3000, "protocol": "http", "_network_policy_approved": True},
     )
     assert getattr(excinfo.value, "code", "") == "SANDBOX_NETWORK_DENIED"
-    assert approved["ok"] is True
+    assert approved["ok"] is False
+    assert approved["code"] == "SANDBOX_PORT_FORWARD_UNAVAILABLE"
     assert approved["target_url"] == "http://127.0.0.1:3000"
-    assert approved["forwarding"] == "managed-runtime-localhost"
+    assert approved["host_reachable"] is False
+    assert approved["forwarding"] == "unavailable"
 
 
 def test_managed_ubuntu_port_exposure_requires_listening_guest_service(monkeypatch) -> None:

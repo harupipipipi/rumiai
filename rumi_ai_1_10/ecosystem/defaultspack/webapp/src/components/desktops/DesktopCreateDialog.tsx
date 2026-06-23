@@ -72,6 +72,14 @@ function templateSupportsGuestProvisioning(
 }
 
 type DesktopAccessMode = "owner_only" | "key_required" | "request_required" | "shared_link";
+type DesktopStarterSelection = "template_default" | DesktopStarter;
+
+function starterLabel(starter: DesktopStarter | undefined): string {
+  if (starter === "browser_url") return "Browser URL";
+  if (starter === "browser") return "Browser";
+  if (starter === "terminal") return "Terminal";
+  return "Empty";
+}
 
 export function DesktopCreateDialog({
   isOpen,
@@ -89,7 +97,7 @@ export function DesktopCreateDialog({
   const [resolution, setResolution] = useState<DesktopResolution>(
     RESOLUTIONS[0],
   );
-  const [starter, setStarter] = useState<DesktopStarter>("empty");
+  const [starter, setStarter] = useState<DesktopStarterSelection>("template_default");
   const [browserUrl, setBrowserUrl] = useState("");
   const [workspaceId, setWorkspaceId] = useState("");
   const [workspaceAccess, setWorkspaceAccess] = useState<
@@ -149,6 +157,8 @@ export function DesktopCreateDialog({
     : false;
   const selectedTemplateSupportsProvisioning =
     templateSupportsGuestProvisioning(selectedTemplate);
+  const templateStarter = selectedTemplate?.desktop?.starter ?? "empty";
+  const effectiveStarter = starter === "template_default" ? templateStarter : starter;
   const showLinuxNativeWarning =
     selectedProvider?.provider_id === "linux_native" ||
     selectedProvider?.isolation?.host_process_namespace ||
@@ -202,9 +212,9 @@ export function DesktopCreateDialog({
       template_id: effectiveTemplateId,
       provider_id: providerId === "auto" ? null : providerId,
       resolution,
-      starter,
+      ...(starter === "template_default" ? {} : { starter }),
       browser_url:
-        starter === "browser_url" ? browserUrl.trim() || undefined : undefined,
+        effectiveStarter === "browser_url" ? browserUrl.trim() || undefined : undefined,
       workspace_id: workspaceId.trim() || null,
       workspace_access: workspaceAccess,
       assigned_agent: assignedAgent.trim() || null,
@@ -214,7 +224,6 @@ export function DesktopCreateDialog({
         : null,
       access: {
         mode: accessMode,
-        owner_id: "local-user",
         ...(accessMode === "key_required" && accessKey
           ? { access_key: accessKey }
           : {}),
@@ -350,10 +359,13 @@ export function DesktopCreateDialog({
                   <select
                     value={starter}
                     onChange={(event) =>
-                      setStarter(event.target.value as DesktopStarter)
+                      setStarter(event.target.value as DesktopStarterSelection)
                     }
                     className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
                   >
+                    <option value="template_default">
+                      Template default ({starterLabel(templateStarter)})
+                    </option>
                     <option value="empty">Empty</option>
                     <option value="browser">Browser</option>
                     <option value="browser_url">Browser URL</option>
@@ -361,7 +373,7 @@ export function DesktopCreateDialog({
                   </select>
                 </label>
 
-                {starter === "browser_url" && (
+                {effectiveStarter === "browser_url" && (
                   <label className="grid gap-1.5 text-xs text-zinc-400">
                     <span>URL</span>
                     <input

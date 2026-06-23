@@ -15,7 +15,7 @@ function desktopResponse(status: "running" | "stopped") {
   };
 }
 
-test("createDesktop sends owner-bound access policy for request-required desktops", async () => {
+test("createDesktop does not accept client-supplied owner authority", async () => {
   let requestUrl = "";
   let requestInit: RequestInit | undefined;
   const originalFetch = globalThis.fetch;
@@ -33,7 +33,6 @@ test("createDesktop sends owner-bound access policy for request-required desktop
       name: "Owner desktop",
       template_id: "desktop.ubuntu",
       resolution: { width: 1280, height: 800 },
-      starter: "empty",
       workspace_access: "none",
       access: { mode: "request_required" },
     });
@@ -45,9 +44,10 @@ test("createDesktop sends owner-bound access policy for request-required desktop
   assert.equal(requestUrl, "/api/desktops");
   assert.equal(requestInit?.method, "POST");
   const body = JSON.parse(String(requestInit?.body));
-  assert.equal(body.owner_id, "local-user");
+  assert.equal(body.owner_id, undefined);
   assert.equal(body.access.mode, "request_required");
-  assert.equal(body.access.owner_id, "local-user");
+  assert.equal(body.access.owner_id, undefined);
+  assert.equal(body.starter, undefined);
   assert.match(body.request_id, /^desktop-create-/);
 });
 
@@ -72,7 +72,6 @@ test("createDesktop preserves generated shared-link access token from backend", 
       name: "Shared desktop",
       template_id: "desktop.ubuntu",
       resolution: { width: 1280, height: 800 },
-      starter: "empty",
       workspace_access: "none",
       access: { mode: "shared_link" },
     });
@@ -85,7 +84,7 @@ test("createDesktop preserves generated shared-link access token from backend", 
   }
 });
 
-test("requestDesktopAccess sends requester identity without claiming owner authority", async () => {
+test("requestDesktopAccess lets the backend derive requester identity", async () => {
   let requestUrl = "";
   let requestInit: RequestInit | undefined;
   const originalFetch = globalThis.fetch;
@@ -97,7 +96,6 @@ test("requestDesktopAccess sends requester identity without claiming owner autho
       data: {
         seat_id: "seat-1",
         request_id: "dreq-1",
-        requester_id: "local-user",
         reason: "Need access",
         status: "pending",
       },
@@ -114,7 +112,7 @@ test("requestDesktopAccess sends requester identity without claiming owner autho
   assert.equal(requestUrl, "/api/desktops/seat-1/access-requests");
   assert.equal(requestInit?.method, "POST");
   const body = JSON.parse(String(requestInit?.body));
-  assert.equal(body.requester_id, "local-user");
+  assert.equal(body.requester_id, undefined);
   assert.equal(body.owner_id, undefined);
   assert.equal(body.reason, "Need access");
   assert.match(body.request_id, /^desktop-access-/);
@@ -146,6 +144,37 @@ test("listDesktops normalizes unknown provisioning status to the explicit fallba
   }
 });
 
+test("fetchDesktopFrame sends access key without caller-owned authority headers", async () => {
+  let requestUrl = "";
+  let requestInit: RequestInit | undefined;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestInit = init;
+    return new Response(new Blob(["frame"], { type: "image/png" }), {
+      status: 200,
+      headers: {
+        "Content-Type": "image/png",
+        "X-Rumi-Frame-Seq": "7",
+        "X-Rumi-Frame-Width": "800",
+        "X-Rumi-Frame-Height": "600",
+      },
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.fetchDesktopFrame("seat-1", { accessKey: "key-1" });
+    assert.equal(result.status, "frame");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/desktops/seat-1/frame");
+  const headers = new Headers(requestInit?.headers);
+  assert.equal(headers.get("X-Rumi-Desktop-Access-Key"), "key-1");
+  assert.equal(headers.get("X-Rumi-Desktop-Owner"), null);
+});
+
 test("stopDesktop confirms the destructive action after the UI confirmation flow", async () => {
   let requestUrl = "";
   let requestInit: RequestInit | undefined;
@@ -169,7 +198,7 @@ test("stopDesktop confirms the destructive action after the UI confirmation flow
   assert.equal(requestUrl, "/api/desktops/seat-1/stop");
   assert.equal(requestInit?.method, "POST");
   const body = JSON.parse(String(requestInit?.body));
-  assert.equal(body.owner_id, "local-user");
+  assert.equal(body.owner_id, undefined);
   assert.equal(body.access_key, "key-1");
   assert.equal(body.confirm_destructive, true);
   assert.match(body.request_id, /^desktop-stop-/);
@@ -222,9 +251,10 @@ test("deleteDesktop confirms the destructive action after the UI confirmation fl
   assert.match(requestUrl, /^\/api\/desktops\/seat-1\?/);
   assert.equal(requestInit?.method, "DELETE");
   assert.equal(new Headers(requestInit?.headers).get("X-Rumi-Desktop-Access-Key"), "key-1");
+  assert.equal(new Headers(requestInit?.headers).get("X-Rumi-Desktop-Owner"), null);
   assert.equal(requestInit?.body, undefined);
   const query = new URLSearchParams(requestUrl.split("?", 2)[1]);
-  assert.equal(query.get("owner_id"), "local-user");
+  assert.equal(query.get("owner_id"), null);
   assert.equal(query.get("confirm_destructive"), "true");
   assert.match(query.get("request_id") || "", /^desktop-delete-/);
 });
@@ -258,7 +288,7 @@ test("grantDesktopAccess sends owner approval to the request grant endpoint", as
   assert.equal(requestUrl, "/api/desktops/seat-1/access-requests/dreq-1/grant");
   assert.equal(requestInit?.method, "POST");
   const body = JSON.parse(String(requestInit?.body));
-  assert.equal(body.owner_id, "local-user");
+  assert.equal(body.owner_id, undefined);
   assert.equal(body.approved, true);
   assert.match(body.request_id, /^desktop-access-grant-/);
 });

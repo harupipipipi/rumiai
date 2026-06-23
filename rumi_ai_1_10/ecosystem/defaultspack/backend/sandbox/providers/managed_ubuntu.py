@@ -153,8 +153,8 @@ class ManagedUbuntuProvider:
             diagnostics.append(
                 Diagnostic(
                     code=f"{self.provider_id.upper()}_COMMAND_MISSING",
-                    message=f"{self._launcher_command} was not found on PATH.",
-                    severity="warning",
+                    message=f"{self._launcher_command} was not found on PATH; this build cannot bootstrap that launcher itself.",
+                    severity="error",
                 )
             )
         elif platform_ok:
@@ -189,18 +189,19 @@ class ManagedUbuntuProvider:
 
         missing_capabilities = sorted(request.required_capabilities - MANAGED_UBUNTU_CAPABILITIES)
         missing.extend(missing_capabilities)
-        ready = platform_ok and command_path is not None and guest_ready and not missing_deps and not missing_capabilities
+        launcher_available = platform_ok and command_path is not None
+        ready = launcher_available and guest_ready and not missing_deps and not missing_capabilities
         return RuntimeProviderStatus(
             provider_id=self.provider_id,
             platform=self._host_platform,
-            available=platform_ok,
-            installed=guest_ready and not missing_deps,
+            available=launcher_available,
+            installed=launcher_available and guest_ready and not missing_deps,
             ready=ready,
             version=version,
-            capabilities=MANAGED_UBUNTU_CAPABILITIES if platform_ok else frozenset(),
+            capabilities=MANAGED_UBUNTU_CAPABILITIES if launcher_available else frozenset(),
             missing_requirements=tuple(missing),
             requires_user_action=not ready,
-            user_action=None if ready else self._setup_message(),
+            user_action=None if ready else self._setup_message(launcher_missing=platform_ok and command_path is None),
             reboot_required=False,
             diagnostics=tuple(diagnostics),
         )
@@ -525,7 +526,9 @@ class ManagedUbuntuProvider:
             details={"display_min": GUEST_DISPLAY_MIN, "display_max": GUEST_DISPLAY_MAX},
         )
 
-    def _setup_message(self) -> str:
+    def _setup_message(self, *, launcher_missing: bool = False) -> str:
+        if launcher_missing:
+            return f"Install or bundle {self._launcher_command} before using the {self.provider_id} managed runtime provider."
         return "Open the managed runtime setup flow to create and provision the Ubuntu guest."
 
     def _guest_exists(self, command_path: str) -> bool:
@@ -880,14 +883,17 @@ class ManagedUbuntuGuestAgent:
         scheme = "http" if protocol == "tcp" else protocol
         url = f"{scheme}://127.0.0.1:{port}"
         return {
-            "ok": True,
+            "ok": False,
             "sandbox_id": sandbox_id,
             "port": port,
             "protocol": protocol,
             "url": url,
             "target_url": url,
-            "host_reachable": True,
-            "forwarding": "managed-runtime-localhost",
+            "host_reachable": False,
+            "forwarding": "unavailable",
+            "code": "SANDBOX_PORT_FORWARD_UNAVAILABLE",
+            "error": "Managed Ubuntu host port forwarding is not implemented for this provider.",
+            "status_code": 501,
             "provider_runtime": self._provider_id,
         }
 

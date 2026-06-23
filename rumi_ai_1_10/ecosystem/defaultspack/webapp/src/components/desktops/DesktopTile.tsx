@@ -1,11 +1,25 @@
 import { AlertTriangle, Bot, Circle, Monitor, UserCheck } from "lucide-react";
-import { useRef } from "react";
+import { useRef, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
 
 import { cn } from "../../lib/cn";
-import type { DesktopInstance } from "../../features/sandboxes/types";
+import type { DesktopInputAction, DesktopInstance } from "../../features/sandboxes/types";
 import { useDesktopFrame } from "../../features/sandboxes/useDesktopFrames";
 import { pointerToDesktopCoordinates } from "./desktopCoordinates";
 import { DesktopControlSurface } from "./DesktopControlSurface";
+
+const MOVE_THROTTLE_MS = 50;
+const DRAG_THRESHOLD_PX = 4;
+
+type DesktopPointerButton = "left" | "middle" | "right";
+
+type PointerSession = {
+  pointerId: number;
+  viewX: number;
+  viewY: number;
+  desktopX: number;
+  desktopY: number;
+  button: DesktopPointerButton;
+};
 
 type DesktopTileProps = {
   desktop: DesktopInstance;
@@ -18,7 +32,7 @@ type DesktopTileProps = {
   onSelect: (seatId: string) => void;
   onTakeOver: () => void;
   onReturnToAI: () => void;
-  onInputClick: (x: number, y: number) => void;
+  onInput: (input: DesktopInputAction) => void;
   onStart: () => void;
   onRestart: () => void;
   onStop: () => void;
@@ -39,6 +53,32 @@ function frameAgeLabel(ageMs: number | null): string {
   return `${Math.round(ageMs / 60000)}m ago`;
 }
 
+function pointerButton(button: number): DesktopPointerButton {
+  if (button === 1) return "middle";
+  if (button === 2) return "right";
+  return "left";
+}
+
+function desktopKey(event: KeyboardEvent<HTMLDivElement>): string | null {
+  const map: Record<string, string> = {
+    ArrowDown: "Down",
+    ArrowLeft: "Left",
+    ArrowRight: "Right",
+    ArrowUp: "Up",
+    Backspace: "BackSpace",
+    Delete: "Delete",
+    End: "End",
+    Enter: "Return",
+    Escape: "Escape",
+    Home: "Home",
+    PageDown: "Page_Down",
+    PageUp: "Page_Up",
+    Tab: "Tab",
+    " ": "space",
+  };
+  return map[event.key] ?? null;
+}
+
 export function DesktopTile({
   desktop,
   selected,
@@ -50,13 +90,15 @@ export function DesktopTile({
   onSelect,
   onTakeOver,
   onReturnToAI,
-  onInputClick,
+  onInput,
   onStart,
   onRestart,
   onStop,
   onDelete,
 }: DesktopTileProps) {
   const frameRegionRef = useRef<HTMLDivElement | null>(null);
+  const pointerSessionRef = useRef<PointerSession | null>(null);
+  const lastMoveRef = useRef(0);
   const { frame, error, ageMs, pollNow } = useDesktopFrame({
     seatId: desktop.seat_id,
     status: desktop.status,
@@ -75,17 +117,108 @@ export function DesktopTile({
       ? "AI control"
       : "Control available";
 
-  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+  const mapPointer = (event: PointerEvent<HTMLDivElement> | MouseEvent<HTMLDivElement> | WheelEvent<HTMLDivElement>) => {
     if (!hasLease || !frame || !frameRegionRef.current) return;
     const rect = frameRegionRef.current.getBoundingClientRect();
-    const mapped = pointerToDesktopCoordinates(
+    return pointerToDesktopCoordinates(
       { x: event.clientX - rect.left, y: event.clientY - rect.top },
       { width: rect.width, height: rect.height },
       { width: resolution.width, height: resolution.height },
     );
+  };
+
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    const mapped = mapPointer(event);
     if (!mapped) return;
     event.preventDefault();
-    onInputClick(mapped.desktopX, mapped.desktopY);
+    frameRegionRef.current?.focus();
+    frameRegionRef.current?.setPointerCapture(event.pointerId);
+    pointerSessionRef.current = {
+      pointerId: event.pointerId,
+      viewX: event.clientX,
+      viewY: event.clientY,
+      desktopX: mapped.desktopX,
+      desktopY: mapped.desktopY,
+      button: pointerButton(event.button),
+    };
+    onInput({ action: "move", x: mapped.desktopX, y: mapped.desktopY });
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const mapped = mapPointer(event);
+    if (!mapped) return;
+    const now = Date.now();
+    if (now - lastMoveRef.current < MOVE_THROTTLE_MS) return;
+    lastMoveRef.current = now;
+    onInput({ action: "move", x: mapped.desktopX, y: mapped.desktopY });
+  };
+
+  const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    const session = pointerSessionRef.current;
+    const mapped = mapPointer(event);
+    if (!session || !mapped) return;
+    event.preventDefault();
+    pointerSessionRef.current = null;
+    if (frameRegionRef.current?.hasPointerCapture(event.pointerId)) {
+      frameRegionRef.current.releasePointerCapture(event.pointerId);
+    }
+    const viewDistance = Math.hypot(event.clientX - session.viewX, event.clientY - session.viewY);
+    if (viewDistance > DRAG_THRESHOLD_PX) {
+      onInput({
+        action: "drag",
+        x: session.desktopX,
+        y: session.desktopY,
+        to_x: mapped.desktopX,
+        to_y: mapped.desktopY,
+        button: session.button,
+      });
+      return;
+    }
+    onInput({ action: "click", x: mapped.desktopX, y: mapped.desktopY, button: session.button });
+  };
+
+  const handlePointerCancel = (event: PointerEvent<HTMLDivElement>) => {
+    pointerSessionRef.current = null;
+    if (frameRegionRef.current?.hasPointerCapture(event.pointerId)) {
+      frameRegionRef.current.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const handleDoubleClick = (event: MouseEvent<HTMLDivElement>) => {
+    const mapped = mapPointer(event);
+    if (!mapped) return;
+    event.preventDefault();
+    onInput({ action: "double_click", x: mapped.desktopX, y: mapped.desktopY, button: "left" });
+  };
+
+  const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
+    const mapped = mapPointer(event);
+    if (!mapped) return;
+    const deltaY = Math.max(-20, Math.min(20, Math.trunc(event.deltaY / 60) || (event.deltaY > 0 ? 1 : -1)));
+    const deltaX = Math.trunc(event.deltaX / 60);
+    event.preventDefault();
+    onInput({ action: "scroll", x: mapped.desktopX, y: mapped.desktopY, delta_x: deltaX, delta_y: deltaY });
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!hasLease || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key.length === 1) {
+      event.preventDefault();
+      onInput({ action: "type_text", text: event.key });
+      return;
+    }
+    const key = desktopKey(event);
+    if (!key) return;
+    event.preventDefault();
+    onInput({ action: "key", key });
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    if (!hasLease) return;
+    const text = event.clipboardData.getData("text");
+    if (!text) return;
+    event.preventDefault();
+    onInput({ action: "type_text", text });
   };
 
   return (
@@ -122,6 +255,17 @@ export function DesktopTile({
       <div
         ref={frameRegionRef}
         onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        onDoubleClick={handleDoubleClick}
+        onWheel={handleWheel}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        onContextMenu={(event) => {
+          if (hasLease) event.preventDefault();
+        }}
+        tabIndex={hasLease ? 0 : -1}
         className={cn(
           "relative m-3 flex min-h-[154px] items-center justify-center overflow-hidden rounded-md border border-zinc-800 bg-black",
           hasLease ? "cursor-crosshair" : "cursor-default",
@@ -129,7 +273,7 @@ export function DesktopTile({
           prominent && "m-2 min-h-[520px] flex-1",
         )}
         style={{ aspectRatio: frameAspectRatio }}
-        role="img"
+        role="application"
         aria-label={`${desktop.name} live snapshot`}
       >
         {frame ? (

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Copy, KeyRound, Link2, Loader2, Play, RefreshCw, Route, Server, ShieldAlert, ShieldCheck } from "lucide-react";
+import { CheckCircle2, ChevronDown, Copy, KeyRound, Link2, Loader2, Play, RefreshCw, Route, Server, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { cn } from "../../lib/cn";
 import type { SettingsFieldRendererProps } from "../../renderers/settings/fieldRendererRegistry";
@@ -88,6 +88,28 @@ function latestOperation(operations: ContinuityHandoffOperation[]): ContinuityHa
   return operations[0] ?? null;
 }
 
+function operationStatusLabel(status: string | undefined): string {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "completed") return "Completed";
+  if (normalized === "failed") return "Failed";
+  if (normalized === "running" || normalized === "handoff-started") return "In progress";
+  if (normalized === "cancelled" || normalized === "canceled") return "Canceled";
+  return status || "Not started";
+}
+
+function checkLabel(value: unknown): string {
+  const text = String(value || "Check").replace(/[_-]+/g, " ").trim();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "Check";
+}
+
+function formatBytes(value: unknown): string {
+  const bytes = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "Size pending";
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 function copyText(text: string, onCopied: (label: string) => void) {
   if (!navigator.clipboard?.writeText) return;
   void navigator.clipboard.writeText(text).then(() => onCopied("copied")).catch(() => undefined);
@@ -116,13 +138,17 @@ export function ContinuitySettingsField({
   const [action, setAction] = useState<"idle" | "pairing" | "probe" | "plan" | "handoff">("idle");
   const [error, setError] = useState("");
   const [copyState, setCopyState] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const destinationNodes = nodes.filter((node) => node.destination_kind !== "source");
+  const primaryNode = nodes.find((node) => node.destination_kind === "source") ?? localNode;
   const selectedNode = destinationNodes.find((node) => node.node_id === selectedNodeId) ?? destinationNodes[0];
   const portableRoutes = routes.filter((route) => route.portable);
   const selectedRoute = routes.find((route) => route.route_id === selectedRouteId) ?? portableRoutes[0] ?? routes[0];
   const operation = latestOperation(operations);
   const canRun = Boolean(selectedNode?.node_id && selectedRoute?.route_id && selectedRoute.portable);
+  const completed = String(operation?.status || "").toLowerCase() === "completed";
+  const estimate = asRecord(plan?.checkpoint_estimate);
 
   const persistConfig = (patch: Partial<ContinuityFieldConfig>) => {
     const next = {
@@ -231,6 +257,20 @@ export function ContinuitySettingsField({
     }
   };
 
+  const handleReturnToDevice = async () => {
+    if (!operation?.operation_id) return;
+    setAction("handoff");
+    setError("");
+    try {
+      const result = await continuityApi.returnHandoff(operation.operation_id);
+      setOperations((current) => [result.operation, ...current.filter((item) => item.operation_id !== result.operation.operation_id)]);
+    } catch (returnError) {
+      setError(formatError(returnError));
+    } finally {
+      setAction("idle");
+    }
+  };
+
   const handoffPrompt = [
     "Use this continuity destination for the next handoff.",
     `sandbox_id: ${sandboxId.trim() || "logical-sandbox"}`,
@@ -249,6 +289,9 @@ export function ContinuitySettingsField({
           <p className="mt-1 text-xs text-zinc-500">
             {localNode?.display_name || "This device"} · {destinationNodes.length} destinations · {routes.length} provider routes
           </p>
+          <p className="mt-1 text-xs text-zinc-400">
+            Current primary: <span className="text-zinc-200">{nodeLabel(primaryNode ?? undefined)}</span>
+          </p>
         </div>
         <button
           type="button"
@@ -265,6 +308,22 @@ export function ContinuitySettingsField({
           {error}
         </div>
       )}
+
+      <div className="grid gap-1.5 sm:grid-cols-3 lg:grid-cols-7">
+        {["Source", "Destination", "Provider", "Preflight", "Transfer", "Verify", "Switch primary"].map((step, index) => (
+          <div
+            key={step}
+            className={cn(
+              "rounded-md border px-2.5 py-2 text-[11px]",
+              index <= (completed ? 6 : plan ? 3 : probe ? 3 : selectedNode ? 1 : 0)
+                ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100"
+                : "border-zinc-800 bg-zinc-950 text-zinc-500",
+            )}
+          >
+            {step}
+          </div>
+        ))}
+      </div>
 
       <div className="grid gap-3 lg:grid-cols-3">
         <label className="space-y-1.5">
@@ -341,7 +400,7 @@ export function ContinuitySettingsField({
             ))}
           </select>
           <p className="min-h-5 truncate font-mono text-[11px] text-zinc-500">
-            {selectedRoute?.endpoint_class || "endpoint unknown"} · {selectedRoute?.credential_ref || "credential ref missing"}
+            {selectedRoute?.endpoint_class || "Endpoint pending"}
           </p>
           <div className="flex flex-wrap gap-2">
             <button
@@ -351,7 +410,7 @@ export function ContinuitySettingsField({
               className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-xs text-zinc-300 hover:border-zinc-700 disabled:cursor-not-allowed disabled:opacity-45"
             >
               {action === "probe" ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
-              Probe
+              Check route
             </button>
             <button
               type="button"
@@ -360,7 +419,7 @@ export function ContinuitySettingsField({
               title="Copy handoff instruction"
             >
               <Copy size={13} />
-              {copyState ? "Copied" : "Copy"}
+              {copyState ? "Copied" : "Copy instruction"}
             </button>
           </div>
         </div>
@@ -369,10 +428,10 @@ export function ContinuitySettingsField({
           <div className="flex items-center justify-between gap-2">
             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-300">
               <KeyRound size={14} />
-              Pairing
+              Paired destination
             </span>
             <span className="rounded-full border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[10px] text-zinc-500">
-              X25519 envelope
+              {selectedNode?.online ? "online" : "needs check"}
             </span>
           </div>
           {pairing ? (
@@ -400,13 +459,44 @@ export function ContinuitySettingsField({
               className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-xs text-zinc-300 hover:border-zinc-700 disabled:cursor-not-allowed disabled:opacity-45"
             >
               {action === "pairing" ? <Loader2 size={13} className="animate-spin" /> : <Link2 size={13} />}
-              New pairing code
+              Pair a new device
             </button>
           )}
           <p className="text-[11px] text-zinc-500">
             {selectedNode ? `${nodeLabel(selectedNode)} · ${selectedNode.platform || "platform unknown"} · ${selectedNode.online ? "online" : "offline"}` : "Add a paired destination before handoff."}
           </p>
         </div>
+      </div>
+
+      <div className="rounded-md border border-zinc-800 bg-zinc-950/40">
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((current) => !current)}
+          className="flex min-h-10 w-full items-center justify-between gap-3 px-3 text-left text-xs text-zinc-300"
+        >
+          <span>Advanced routing details</span>
+          <ChevronDown size={14} className={cn("transition-transform", showAdvanced && "rotate-180")} />
+        </button>
+        {showAdvanced && (
+          <div className="grid gap-2 border-t border-zinc-800 px-3 py-3 text-[11px] text-zinc-500 sm:grid-cols-2">
+            <div>
+              <span className="block text-zinc-600">Credential reference</span>
+              <span className="font-mono text-zinc-300">{selectedRoute?.credential_ref || "Not configured"}</span>
+            </div>
+            <div>
+              <span className="block text-zinc-600">Envelope</span>
+              <span className="font-mono text-zinc-300">X25519 handoff envelope</span>
+            </div>
+            <div>
+              <span className="block text-zinc-600">Route id</span>
+              <span className="font-mono text-zinc-300">{selectedRoute?.route_id || "Unselected"}</span>
+            </div>
+            <div>
+              <span className="block text-zinc-600">Destination id</span>
+              <span className="font-mono text-zinc-300">{selectedNode?.node_id || "Unselected"}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
@@ -423,12 +513,12 @@ export function ContinuitySettingsField({
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {(probe?.checks ?? []).slice(0, 3).map((check, index) => (
               <div key={`${String(check.code ?? "check")}-${index}`} className="rounded border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-400">
-                <span className="font-mono text-zinc-200">{String(check.code ?? "CHECK")}</span>
+                <span className="text-zinc-200">{checkLabel(check.label ?? check.code)}</span>
               </div>
             ))}
             {(probe?.errors ?? []).slice(0, 3).map((item, index) => (
               <div key={`${String(item.code ?? "error")}-${index}`} className="rounded border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-100">
-                <span className="font-mono">{String(item.code ?? "ERROR")}</span>
+                <span>{checkLabel(item.message ?? item.code ?? "Needs attention")}</span>
               </div>
             ))}
             {!probe && !plan && (
@@ -440,6 +530,20 @@ export function ContinuitySettingsField({
         </div>
 
         <div className="space-y-2">
+          <div className="rounded-md border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-[11px] text-zinc-400">
+            <div className="flex items-center justify-between gap-2">
+              <span>Transfer</span>
+              <span className="text-zinc-200">{formatBytes(estimate.total_bytes ?? estimate.bytes)}</span>
+            </div>
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <span>ETA</span>
+              <span className="text-zinc-200">{stringValue(estimate.eta ?? estimate.eta_seconds, "Pending")}</span>
+            </div>
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <span>Source</span>
+              <span className="text-zinc-200">{mode === "move" ? "Kept until verify" : "Remains primary"}</span>
+            </div>
+          </div>
           <button
             type="button"
             disabled={!canRun || action !== "idle"}
@@ -447,7 +551,7 @@ export function ContinuitySettingsField({
             className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-200 hover:border-zinc-700 disabled:cursor-not-allowed disabled:opacity-45"
           >
             {action === "plan" ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
-            Plan
+            Review move
           </button>
           <button
             type="button"
@@ -456,7 +560,7 @@ export function ContinuitySettingsField({
             className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 text-xs font-medium text-emerald-100 hover:border-emerald-400/70 disabled:cursor-not-allowed disabled:opacity-45"
           >
             {action === "handoff" ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-            Start handoff
+            {completed ? "Start another handoff" : "Start handoff"}
           </button>
         </div>
       </div>
@@ -472,8 +576,34 @@ export function ContinuitySettingsField({
               ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
               : "border-zinc-800 bg-zinc-950 text-zinc-400",
           )}>
-            {operation.status}
+            {operationStatusLabel(operation.status)}
           </span>
+          {completed && (
+            <div className="flex w-full flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => void handleReturnToDevice()}
+                disabled={action !== "idle"}
+                className="h-8 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-[11px] text-zinc-300 hover:border-zinc-700 disabled:opacity-45"
+              >
+                Return to this device
+              </button>
+              <button
+                type="button"
+                onClick={() => setCopyState("kept")}
+                className="h-8 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-[11px] text-zinc-300 hover:border-zinc-700"
+              >
+                Keep running on destination
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(true)}
+                className="h-8 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-[11px] text-zinc-300 hover:border-zinc-700"
+              >
+                View transfer details
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

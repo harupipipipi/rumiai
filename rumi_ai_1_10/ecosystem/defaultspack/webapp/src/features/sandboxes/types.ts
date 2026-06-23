@@ -123,6 +123,13 @@ export type SandboxTemplate = {
     summary?: string;
     mode?: string;
   };
+  desktop?: {
+    enabled?: boolean;
+    starter?: DesktopStarter;
+    browser_url?: string | null;
+    width?: number;
+    height?: number;
+  };
   provisioning?: DesktopProvisioning;
   isolation?: RuntimeIsolationFacts;
 };
@@ -272,7 +279,7 @@ export type CreateDesktopRequest = {
   template_id: string;
   provider_id?: string | null;
   resolution: DesktopResolution;
-  starter: DesktopStarter;
+  starter?: DesktopStarter;
   browser_url?: string;
   workspace_id?: string | null;
   workspace_access?: "none" | "read_only" | "overlay" | null;
@@ -281,7 +288,6 @@ export type CreateDesktopRequest = {
   rules?: DesktopRules | string[] | null;
   access?: {
     mode?: DesktopAccessPolicy["mode"];
-    owner_id?: string | null;
     access_key?: string;
   };
   provisioning?: DesktopProvisioning | null;
@@ -335,32 +341,39 @@ export type DesktopControlLeaseRenewal = {
 
 export type DesktopControlLease = DesktopControlLeaseGrant;
 
-export type DesktopInputRequest =
+export type DesktopInputAction =
+  | {
+      action: "move";
+      x: number;
+      y: number;
+    }
   | {
       action: "click";
       x: number;
       y: number;
       button?: "left" | "middle" | "right";
-      lease_token: string;
-      access_key?: string;
-      client_action_id?: string;
-      request_id?: string;
+    }
+  | {
+      action: "double_click";
+      x: number;
+      y: number;
+      button?: "left" | "middle" | "right";
+    }
+  | {
+      action: "drag";
+      x: number;
+      y: number;
+      to_x: number;
+      to_y: number;
+      button?: "left" | "middle" | "right";
     }
   | {
       action: "key";
       key: string;
-      lease_token: string;
-      access_key?: string;
-      client_action_id?: string;
-      request_id?: string;
     }
   | {
       action: "type_text";
       text: string;
-      lease_token: string;
-      access_key?: string;
-      client_action_id?: string;
-      request_id?: string;
     }
   | {
       action: "scroll";
@@ -368,11 +381,14 @@ export type DesktopInputRequest =
       y: number;
       delta_x?: number;
       delta_y?: number;
-      lease_token: string;
-      access_key?: string;
-      client_action_id?: string;
-      request_id?: string;
     };
+
+export type DesktopInputRequest = DesktopInputAction & {
+  lease_token: string;
+  access_key?: string;
+  client_action_id?: string;
+  request_id?: string;
+};
 
 const runtimeStatuses: RuntimeStatusKind[] = [
   "ready",

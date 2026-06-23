@@ -1,7 +1,7 @@
 import { Monitor } from "lucide-react";
 
 import { cn } from "../../lib/cn";
-import type { DesktopInstance } from "../../features/sandboxes/types";
+import type { DesktopInputAction, DesktopInstance } from "../../features/sandboxes/types";
 import type { DesktopDensity } from "./DesktopToolbar";
 import { DesktopTile } from "./DesktopTile";
 
@@ -16,7 +16,7 @@ type DesktopGridProps = {
   onSelect: (seatId: string) => void;
   onTakeOver: (seatId: string) => void;
   onReturnToAI: () => void;
-  onInputClick: (seatId: string, x: number, y: number) => void;
+  onInput: (seatId: string, input: DesktopInputAction) => void;
   onStart: (seatId: string) => void;
   onRestart: (seatId: string) => void;
   onStop: (seatId: string) => void;
@@ -50,7 +50,7 @@ export function DesktopGrid({
   onSelect,
   onTakeOver,
   onReturnToAI,
-  onInputClick,
+  onInput,
   onStart,
   onRestart,
   onStop,
@@ -99,7 +99,7 @@ export function DesktopGrid({
           onSelect={onSelect}
           onTakeOver={() => onTakeOver(desktop.seat_id)}
           onReturnToAI={onReturnToAI}
-          onInputClick={(x, y) => onInputClick(desktop.seat_id, x, y)}
+          onInput={(input) => onInput(desktop.seat_id, input)}
           onStart={() => onStart(desktop.seat_id)}
           onRestart={() => onRestart(desktop.seat_id)}
           onStop={() => onStop(desktop.seat_id)}

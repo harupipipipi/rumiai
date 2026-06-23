@@ -28,7 +28,7 @@ function renderGrid(desktops: DesktopInstance[]) {
       onSelect: noop,
       onTakeOver: noop,
       onReturnToAI: noop,
-      onInputClick: noop,
+      onInput: noop,
       onStart: noop,
       onRestart: noop,
       onStop: noop,

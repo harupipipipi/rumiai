@@ -397,7 +397,7 @@ def test_expired_lifecycle_blocks_desktop_control_lease(tmp_path) -> None:
                 "provider_id": "fake-runtime",
                 "owner_id": "local-user",
             },
-            {},
+            {"user_id": "local-user"},
         )
         assert created["status"] == "ok"
         with service.manager._lock:
@@ -408,7 +408,7 @@ def test_expired_lifecycle_blocks_desktop_control_lease(tmp_path) -> None:
 
         acquire = api.run(
             {"_handler": "desktop_control_acquire", "seat_id": "ttl-control", "owner_id": "local-user"},
-            {},
+            {"user_id": "local-user"},
         )
         status = service.manager.status("ttl-control")
     finally:
@@ -833,7 +833,7 @@ def test_linux_native_api_default_desktop_template_is_compatible(monkeypatch, tm
                 "owner_id": "local-user",
                 "resolution": {"width": 800, "height": 600},
             },
-            {},
+            {"user_id": "local-user"},
         )
     finally:
         api._reset_service_for_tests(None)
@@ -938,7 +938,7 @@ def test_desktop_create_rejects_guest_provisioning_for_desktop_only_provider(tmp
                     "mcp_servers": ["playwright"],
                 },
             },
-            {},
+            {"user_id": "local-user"},
         )
     finally:
         api._reset_service_for_tests(None)
@@ -1157,20 +1157,21 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
                 "name": "CI Ubuntu",
                 "template_id": "desktop.ubuntu",
                 "provider_id": "fake-runtime",
-                "owner_id": "local-user",
                 "resolution": {"width": 800, "height": 600},
             },
-            {},
+            {"user_id": "owner-1"},
         )
-        anonymous_get = api.run({"_handler": "desktop_get", "seat_id": "seat-1"}, {})
-        owner_get = api.run({"_handler": "desktop_get", "seat_id": "seat-1", "owner_id": "local-user"}, {})
-        frame = api.run({"_handler": "desktop_frame", "seat_id": "seat-1", "owner_id": "local-user"}, {})
-        lease = api.run({"_handler": "desktop_control_acquire", "seat_id": "seat-1", "owner_id": "local-user"}, {})
+        spoofed_get = api.run(
+            {"_handler": "desktop_get", "seat_id": "seat-1", "owner_id": "owner-1"},
+            {"user_id": "attacker-1"},
+        )
+        owner_get = api.run({"_handler": "desktop_get", "seat_id": "seat-1"}, {"user_id": "owner-1"})
+        frame = api.run({"_handler": "desktop_frame", "seat_id": "seat-1"}, {"user_id": "owner-1"})
+        lease = api.run({"_handler": "desktop_control_acquire", "seat_id": "seat-1"}, {"user_id": "owner-1"})
         click = api.run(
             {
                 "_handler": "desktop_input",
                 "seat_id": "seat-1",
-                "owner_id": "local-user",
                 "action": "click",
                 "client_action_id": "act-1",
                 "lease_token": "lease-token",
@@ -1178,29 +1179,27 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
                 "y": 20,
                 "button": "left",
             },
-            {},
+            {"user_id": "owner-1"},
         )
-        stop_without_confirmation = api.run({"_handler": "desktop_stop", "seat_id": "seat-1", "owner_id": "local-user"}, {})
+        stop_without_confirmation = api.run({"_handler": "desktop_stop", "seat_id": "seat-1"}, {"user_id": "owner-1"})
         stop = api.run(
             {
                 "_handler": "desktop_stop",
                 "seat_id": "seat-1",
-                "owner_id": "local-user",
                 "confirm_destructive": True,
             },
-            {},
+            {"user_id": "owner-1"},
         )
-        start = api.run({"_handler": "desktop_start", "seat_id": "seat-1", "owner_id": "local-user"}, {})
-        restart = api.run({"_handler": "desktop_restart", "seat_id": "seat-1", "owner_id": "local-user"}, {})
-        delete_without_confirmation = api.run({"_handler": "desktop_delete", "seat_id": "seat-1", "owner_id": "local-user"}, {})
+        start = api.run({"_handler": "desktop_start", "seat_id": "seat-1"}, {"user_id": "owner-1"})
+        restart = api.run({"_handler": "desktop_restart", "seat_id": "seat-1"}, {"user_id": "owner-1"})
+        delete_without_confirmation = api.run({"_handler": "desktop_delete", "seat_id": "seat-1"}, {"user_id": "owner-1"})
         delete = api.run(
             {
                 "_handler": "desktop_delete",
                 "seat_id": "seat-1",
-                "owner_id": "local-user",
                 "confirm_destructive": True,
             },
-            {},
+            {"user_id": "owner-1"},
         )
     finally:
         api._reset_service_for_tests(None)
@@ -1209,8 +1208,8 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
     assert created["data"]["seat_id"] == "seat-1"
     assert created["data"]["status"] == "running"
     assert created["data"]["network_policy"]["default"] == "limited_or_approval_gated"
-    assert anonymous_get["status"] == "error"
-    assert anonymous_get["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
+    assert spoofed_get["status"] == "error"
+    assert spoofed_get["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
     assert owner_get["status"] == "ok"
     assert frame["_binary"] is True
     assert frame["body"] == b"fake-png"
@@ -1390,7 +1389,7 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
         )
         access_request = api.run(
             {"_handler": "desktop_access_request", "seat_id": "seat-locked"},
-            {},
+            {"user_id": "local-user"},
         )
         wrong_agent_click = api.run(
             {
@@ -1422,7 +1421,7 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
                 "seat_id": "seat-locked",
                 "access_key": "correct-key",
             },
-            {},
+            {"user_id": "local-user"},
         )
         ai_conflict = api.run(
             {
@@ -1514,7 +1513,7 @@ def test_desktop_owner_only_and_shared_link_access_are_distinct(tmp_path) -> Non
                 "owner_id": "owner-1",
                 "access": {"mode": "owner_only", "owner_id": "owner-1"},
             },
-            {},
+            {"user_id": "owner-1"},
         )
         shared_link = api.run(
             {
@@ -1523,15 +1522,15 @@ def test_desktop_owner_only_and_shared_link_access_are_distinct(tmp_path) -> Non
                 "provider_id": "fake-runtime",
                 "access": {"mode": "shared_link"},
             },
-            {},
+            {"user_id": "owner-1"},
         )
-        owner_denied_without_identity = api.run(
-            {"_handler": "desktop_get", "seat_id": "owner-seat"},
-            {},
+        owner_spoof_denied = api.run(
+            {"_handler": "desktop_get", "seat_id": "owner-seat", "owner_id": "owner-1"},
+            {"user_id": "attacker-1"},
         )
         owner_allowed = api.run(
-            {"_handler": "desktop_get", "seat_id": "owner-seat", "owner_id": "owner-1"},
-            {},
+            {"_handler": "desktop_get", "seat_id": "owner-seat"},
+            {"user_id": "owner-1"},
         )
         link_denied_without_token = api.run(
             {"_handler": "desktop_get", "seat_id": "link-seat"},
@@ -1553,8 +1552,8 @@ def test_desktop_owner_only_and_shared_link_access_are_distinct(tmp_path) -> Non
     assert shared_link["data"]["access_key"]
     assert shared_link["data"]["access_key_hint"] == shared_link["data"]["access_policy"]["key_hint"]
     assert shared_link["data"]["access_key"] not in str(shared_link["data"]["access_policy"])
-    assert owner_denied_without_identity["status"] == "error"
-    assert owner_denied_without_identity["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
+    assert owner_spoof_denied["status"] == "error"
+    assert owner_spoof_denied["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
     assert owner_allowed["status"] == "ok"
     assert link_denied_without_token["status"] == "error"
     assert link_denied_without_token["error"]["code"] == "DESKTOP_SHARED_LINK_TOKEN_REQUIRED"
@@ -1599,42 +1598,40 @@ def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, 
                 "owner_id": "owner-1",
                 "access": {"mode": "request_required"},
             },
-            {},
+            {"user_id": "owner-1"},
         )
         requester_denied = api.run(
-            {"_handler": "desktop_get", "seat_id": "seat-request", "owner_id": "requester-1"},
-            {},
+            {"_handler": "desktop_get", "seat_id": "seat-request", "owner_id": "owner-1"},
+            {"user_id": "requester-1"},
         )
         owner_allowed = api.run(
-            {"_handler": "desktop_get", "seat_id": "seat-request", "owner_id": "owner-1"},
-            {},
+            {"_handler": "desktop_get", "seat_id": "seat-request"},
+            {"user_id": "owner-1"},
         )
         access_request = api.run(
             {
                 "_handler": "desktop_access_request",
                 "seat_id": "seat-request",
-                "owner_id": "requester-1",
                 "reason": "Need to inspect the browser session.",
             },
-            {},
+            {"user_id": "requester-1"},
         )
         wrong_owner_grant = api.run(
             {
                 "_handler": "desktop_access_grant",
                 "seat_id": "seat-request",
                 "request_id": access_request["data"]["request_id"],
-                "owner_id": "requester-1",
+                "owner_id": "owner-1",
             },
-            {},
+            {"user_id": "requester-1"},
         )
         granted = api.run(
             {
                 "_handler": "desktop_access_grant",
                 "seat_id": "seat-request",
                 "request_id": access_request["data"]["request_id"],
-                "owner_id": "owner-1",
             },
-            {},
+            {"user_id": "owner-1"},
         )
         granted_key = granted["data"]["access_key"]
         requester_allowed = api.run(
@@ -1645,10 +1642,9 @@ def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, 
             {
                 "_handler": "desktop_rules_update",
                 "seat_id": "seat-request",
-                "owner_id": "owner-1",
                 "access": {"mode": "owner_only"},
             },
-            {},
+            {"user_id": "owner-1"},
         )
         requester_after_revert = api.run(
             {"_handler": "desktop_get", "seat_id": "seat-request", "access_key": granted_key},
@@ -1658,9 +1654,8 @@ def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, 
             {
                 "_handler": "desktop_access_request",
                 "seat_id": "seat-request",
-                "owner_id": "requester-2",
             },
-            {},
+            {"user_id": "requester-2"},
         )
         registry_after_revert = service.manager.registry_path.read_text(encoding="utf-8")
         registry_text = service.manager.registry_path.read_text(encoding="utf-8")
@@ -1764,7 +1759,7 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
     desktops = api.run({"_handler": "desktops_list"}, {})
 
     assert providers["status"] == "ok"
-    assert providers["data"]["providers"][0]["status"] == "needs_setup"
+    assert providers["data"]["providers"][0]["status"] == "unavailable"
     assert doctor["data"]["status"] == "needs_setup"
     assert ensure["data"]["status"] == "failed"
     assert ensure["data"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"

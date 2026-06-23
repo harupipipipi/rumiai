@@ -121,6 +121,31 @@ test("desktop create dialog shows app provisioning for guest runtime templates",
   assert.match(html, /placeholder="playwright"/);
 });
 
+test("desktop create dialog honors template default starter", () => {
+  const html = renderDialog({
+    templates: [
+      {
+        template_id: "desktop.browser",
+        name: "Browser Desktop",
+        provider_requirements: [
+          "sandbox.desktop",
+          "sandbox.desktop_input",
+          "sandbox.snapshot",
+        ],
+        desktop: {
+          enabled: true,
+          starter: "browser",
+        },
+      },
+    ],
+  });
+
+  assert.match(
+    html,
+    /<option value="template_default" selected="">Template default \(Browser\)<\/option>/,
+  );
+});
+
 test("desktop create dialog disables creation for a detected provider that is not ready", () => {
   const html = renderDialog({
     providers: [

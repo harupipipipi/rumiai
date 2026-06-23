@@ -22,8 +22,6 @@ type ApiEnvelope<T> =
   | { status: "ok"; data: T }
   | { status: "error"; error: { code?: string; message?: string } };
 
-const LOCAL_DESKTOP_OWNER_ID = "local-user";
-
 function encodeId(value: string): string {
   return encodeURIComponent(value);
 }
@@ -133,7 +131,6 @@ export async function fetchDesktopFrame(
     method: "GET",
     headers: {
       Accept: "image/webp,image/jpeg,image/png",
-      "X-Rumi-Desktop-Owner": LOCAL_DESKTOP_OWNER_ID,
       ...(options.accessKey ? { "X-Rumi-Desktop-Access-Key": options.accessKey } : {}),
     },
     cache: "no-store",
@@ -213,11 +210,6 @@ export const sandboxesApi = {
       method: "POST",
       body: JSON.stringify({
         ...payload,
-        owner_id: payload.access?.owner_id || LOCAL_DESKTOP_OWNER_ID,
-        access: {
-          ...payload.access,
-          owner_id: payload.access?.owner_id || LOCAL_DESKTOP_OWNER_ID,
-        },
         request_id: payload.request_id ?? requestId("desktop-create"),
       }),
     }).then(normalizeDesktopInstance);
@@ -227,7 +219,6 @@ export const sandboxesApi = {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/start`, {
       method: "POST",
       body: JSON.stringify({
-        owner_id: LOCAL_DESKTOP_OWNER_ID,
         access_key: accessKey || undefined,
         request_id: requestId("desktop-start"),
       }),
@@ -238,7 +229,6 @@ export const sandboxesApi = {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/stop`, {
       method: "POST",
       body: JSON.stringify({
-        owner_id: LOCAL_DESKTOP_OWNER_ID,
         access_key: accessKey || undefined,
         request_id: requestId("desktop-stop"),
         confirm_destructive: true,
@@ -250,7 +240,6 @@ export const sandboxesApi = {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/restart`, {
       method: "POST",
       body: JSON.stringify({
-        owner_id: LOCAL_DESKTOP_OWNER_ID,
         access_key: accessKey || undefined,
         request_id: requestId("desktop-restart"),
       }),
@@ -260,13 +249,11 @@ export const sandboxesApi = {
   deleteDesktop(seatId: string, accessKey?: string | null) {
     const query = new URLSearchParams({
       confirm_destructive: "true",
-      owner_id: LOCAL_DESKTOP_OWNER_ID,
       request_id: requestId("desktop-delete"),
     });
     return request<{ deleted: boolean; seat_id: string }>(`/api/desktops/${encodeId(seatId)}?${query.toString()}`, {
       method: "DELETE",
       headers: {
-        "X-Rumi-Desktop-Owner": LOCAL_DESKTOP_OWNER_ID,
         ...(accessKey ? { "X-Rumi-Desktop-Access-Key": accessKey } : {}),
       },
     });
@@ -285,7 +272,6 @@ export const sandboxesApi = {
       method: "POST",
       body: JSON.stringify({
         ...payload,
-        owner_id: LOCAL_DESKTOP_OWNER_ID,
         request_id: requestId("desktop-rules"),
       }),
     }).then(normalizeDesktopInstance);
@@ -295,7 +281,6 @@ export const sandboxesApi = {
     return request<DesktopAccessRequest>(`/api/desktops/${encodeId(seatId)}/access-requests`, {
       method: "POST",
       body: JSON.stringify({
-        requester_id: LOCAL_DESKTOP_OWNER_ID,
         reason,
         request_id: requestId("desktop-access"),
       }),
@@ -308,7 +293,6 @@ export const sandboxesApi = {
       {
         method: "POST",
         body: JSON.stringify({
-          owner_id: LOCAL_DESKTOP_OWNER_ID,
           approved,
           request_id: requestId("desktop-access-grant"),
         }),
@@ -322,7 +306,6 @@ export const sandboxesApi = {
     return request<DesktopControlLeaseGrant>(`/api/desktops/${encodeId(seatId)}/control/acquire`, {
       method: "POST",
       body: JSON.stringify({
-        owner_id: LOCAL_DESKTOP_OWNER_ID,
         access_key: accessKey || undefined,
         request_id: requestId("desktop-control-acquire"),
       }),
@@ -333,7 +316,6 @@ export const sandboxesApi = {
     return request<DesktopControlLeaseRenewal>(`/api/desktops/${encodeId(seatId)}/control/renew`, {
       method: "POST",
       body: JSON.stringify({
-        owner_id: LOCAL_DESKTOP_OWNER_ID,
         access_key: accessKey || undefined,
         lease_token: leaseToken,
         request_id: requestId("desktop-control-renew"),
@@ -345,7 +327,6 @@ export const sandboxesApi = {
     return request<{ released: boolean; seat_id: string }>(`/api/desktops/${encodeId(seatId)}/control/release`, {
       method: "POST",
       body: JSON.stringify({
-        owner_id: LOCAL_DESKTOP_OWNER_ID,
         access_key: accessKey || undefined,
         lease_token: leaseToken,
         request_id: requestId("desktop-control-release"),
@@ -358,7 +339,6 @@ export const sandboxesApi = {
       method: "POST",
       body: JSON.stringify({
         ...payload,
-        owner_id: LOCAL_DESKTOP_OWNER_ID,
         client_action_id: payload.client_action_id ?? requestId("desktop-action"),
         request_id: payload.request_id ?? requestId("desktop-input"),
       }),

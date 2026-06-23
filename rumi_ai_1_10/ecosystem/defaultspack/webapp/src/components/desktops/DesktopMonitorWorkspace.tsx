@@ -3,7 +3,7 @@ import { AlertTriangle, Trash2, X } from "lucide-react";
 
 import { sandboxesApi } from "../../features/sandboxes/api";
 import { diagnosticsText } from "../../features/sandboxes/runtimeStatus";
-import type { CreateDesktopRequest } from "../../features/sandboxes/types";
+import type { CreateDesktopRequest, DesktopInputAction } from "../../features/sandboxes/types";
 import { useDesktopControlLease } from "../../features/sandboxes/useDesktopControlLease";
 import { useDesktopInstances } from "../../features/sandboxes/useSandboxInstances";
 import { useRuntimeDoctor } from "../../features/sandboxes/useRuntimeDoctor";
@@ -58,6 +58,12 @@ export function DesktopMonitorWorkspace() {
     const linkedSeatId = query.get("desktop");
     if (!linkedSeatId) return;
     const linkedAccessKey = query.get("desktop_access_key") || query.get("access_key") || "";
+    if (linkedAccessKey) {
+      query.delete("desktop_access_key");
+      query.delete("access_key");
+      const nextUrl = `${window.location.pathname}${query.toString() ? `?${query.toString()}` : ""}${window.location.hash}`;
+      window.history.replaceState(window.history.state, "", nextUrl);
+    }
     if (linkedAccessKey) {
       setAccessKeys((current) => (
         current[linkedSeatId] === linkedAccessKey
@@ -158,14 +164,11 @@ export function DesktopMonitorWorkspace() {
     void control.acquire();
   }, [control, selectedSeatId]);
 
-  const handleInputClick = useCallback((seatId: string, x: number, y: number) => {
+  const handleDesktopInput = useCallback((seatId: string, input: DesktopInputAction) => {
     const token = control.lease?.lease_token;
     if (!token || seatId !== selectedSeatId) return;
     void sandboxesApi.sendDesktopInput(seatId, {
-      action: "click",
-      x,
-      y,
-      button: "left",
+      ...input,
       lease_token: token,
       access_key: accessKeys[seatId] || undefined,
     }).then(() => {
@@ -269,7 +272,7 @@ export function DesktopMonitorWorkspace() {
                 onSelect={setSelectedSeatId}
                 onTakeOver={handleTakeOver}
                 onReturnToAI={() => void control.release()}
-                onInputClick={handleInputClick}
+                onInput={handleDesktopInput}
                 onStart={(seatId) => void runDesktopAction(seatId, "start")}
                 onRestart={(seatId) => void runDesktopAction(seatId, "restart")}
                 onStop={setStopTargetSeatId}
