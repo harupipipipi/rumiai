@@ -243,6 +243,8 @@ export type DesktopInstance = {
   assigned_agent?: string | null;
   role?: string | null;
   rules?: DesktopRules | string[] | null;
+  access_key?: string;
+  access_key_hint?: string | null;
   access_policy?: DesktopAccessPolicy | null;
   provisioning?: DesktopProvisioning | null;
   control?: DesktopControlState | null;

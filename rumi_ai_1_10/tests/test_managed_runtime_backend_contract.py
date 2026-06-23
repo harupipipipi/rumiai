@@ -1488,8 +1488,16 @@ def test_desktop_owner_only_and_shared_link_access_are_distinct(tmp_path) -> Non
             {"_handler": "desktop_get", "seat_id": "owner-seat", "owner_id": "owner-1"},
             {},
         )
-        link_allowed_without_identity = api.run(
+        link_denied_without_token = api.run(
             {"_handler": "desktop_get", "seat_id": "link-seat"},
+            {},
+        )
+        link_allowed_with_token = api.run(
+            {
+                "_handler": "desktop_get",
+                "seat_id": "link-seat",
+                "access_key": shared_link["data"]["access_key"],
+            },
             {},
         )
     finally:
@@ -1497,12 +1505,17 @@ def test_desktop_owner_only_and_shared_link_access_are_distinct(tmp_path) -> Non
 
     assert owner_only["status"] == "ok"
     assert shared_link["status"] == "ok"
+    assert shared_link["data"]["access_key"]
+    assert shared_link["data"]["access_key_hint"] == shared_link["data"]["access_policy"]["key_hint"]
+    assert shared_link["data"]["access_key"] not in str(shared_link["data"]["access_policy"])
     assert owner_denied_without_identity["status"] == "error"
     assert owner_denied_without_identity["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
     assert owner_allowed["status"] == "ok"
-    assert link_allowed_without_identity["status"] == "ok"
-    assert link_allowed_without_identity["data"]["access_policy"]["mode"] == "shared_link"
-    assert link_allowed_without_identity["data"]["access_policy"]["link_enabled"] is True
+    assert link_denied_without_token["status"] == "error"
+    assert link_denied_without_token["error"]["code"] == "DESKTOP_SHARED_LINK_TOKEN_REQUIRED"
+    assert link_allowed_with_token["status"] == "ok"
+    assert link_allowed_with_token["data"]["access_policy"]["mode"] == "shared_link"
+    assert link_allowed_with_token["data"]["access_policy"]["link_enabled"] is True
 
 
 def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, monkeypatch) -> None:

@@ -54,8 +54,17 @@ export function DesktopMonitorWorkspace() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const linkedSeatId = new URLSearchParams(window.location.search).get("desktop");
+    const query = new URLSearchParams(window.location.search);
+    const linkedSeatId = query.get("desktop");
     if (!linkedSeatId) return;
+    const linkedAccessKey = query.get("desktop_access_key") || query.get("access_key") || "";
+    if (linkedAccessKey) {
+      setAccessKeys((current) => (
+        current[linkedSeatId] === linkedAccessKey
+          ? current
+          : { ...current, [linkedSeatId]: linkedAccessKey }
+      ));
+    }
     if (desktopInstances.desktops.some((desktop) => desktop.seat_id === linkedSeatId)) {
       setSelectedSeatId(linkedSeatId);
     }
@@ -100,10 +109,11 @@ export function DesktopMonitorWorkspace() {
     setCreateError(null);
     try {
       const desktop = await sandboxesApi.createDesktop(request);
-      if (request.access?.access_key) {
+      const returnedAccessKey = desktop.access_key || request.access?.access_key || "";
+      if (returnedAccessKey) {
         setAccessKeys((current) => ({
           ...current,
-          [desktop.seat_id]: request.access?.access_key || "",
+          [desktop.seat_id]: returnedAccessKey,
         }));
       }
       setSelectedSeatId(desktop.seat_id);

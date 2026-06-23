@@ -71,8 +71,13 @@ export function DesktopInspector({
     if (!desktop?.seat_id || typeof window === "undefined") return "";
     const url = new URL(window.location.href);
     url.searchParams.set("desktop", desktop.seat_id);
+    if (accessKey) {
+      url.searchParams.set("desktop_access_key", accessKey);
+    } else {
+      url.searchParams.delete("desktop_access_key");
+    }
     return url.toString();
-  }, [desktop?.seat_id]);
+  }, [accessKey, desktop?.seat_id]);
 
   const copyText = (label: string, text: string) => {
     if (!navigator.clipboard?.writeText) return;

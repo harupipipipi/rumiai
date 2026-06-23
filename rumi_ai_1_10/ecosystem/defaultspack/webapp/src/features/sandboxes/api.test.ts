@@ -51,6 +51,40 @@ test("createDesktop sends owner-bound access policy for request-required desktop
   assert.match(body.request_id, /^desktop-create-/);
 });
 
+test("createDesktop preserves generated shared-link access token from backend", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    status: "ok",
+    data: {
+      ...desktopResponse("running"),
+      access_key: "generated-link-token",
+      access_key_hint: "ends:oken",
+      access_policy: {
+        mode: "shared_link",
+        link_enabled: true,
+        key_hint: "ends:oken",
+      },
+    },
+  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.createDesktop({
+      name: "Shared desktop",
+      template_id: "desktop.ubuntu",
+      resolution: { width: 1280, height: 800 },
+      starter: "empty",
+      workspace_access: "none",
+      access: { mode: "shared_link" },
+    });
+
+    assert.equal(result.access_key, "generated-link-token");
+    assert.equal(result.access_policy?.mode, "shared_link");
+    assert.equal(result.access_policy?.link_enabled, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("requestDesktopAccess sends requester identity without claiming owner authority", async () => {
   let requestUrl = "";
   let requestInit: RequestInit | undefined;

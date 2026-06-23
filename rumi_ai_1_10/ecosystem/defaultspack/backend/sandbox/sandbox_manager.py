@@ -160,7 +160,7 @@ class SandboxManager:
             provider_id=provider_id,
         )
         try:
-            access_policy, access_key_hash = _desktop_access_from_create(
+            access_policy, access_key_hash, returned_access_key = _desktop_access_from_create(
                 mode=access_mode,
                 access_key=access_key,
                 owner_id=access_owner_id,
@@ -280,7 +280,7 @@ class SandboxManager:
                 "code": "SANDBOX_REGISTRY_SAVE_FAILED",
                 "status_code": 500,
             }
-        return {
+        result = {
             "ok": True,
             "created": True,
             "sandbox_id": inst.sandbox_id,
@@ -291,6 +291,10 @@ class SandboxManager:
             "registry_path": str(self.registry_path),
             "desktop_access": model_to_dict(inst.desktop_access),
         }
+        if returned_access_key:
+            result["access_key"] = returned_access_key
+            result["access_key_hint"] = _access_key_hint(returned_access_key)
+        return result
 
     def destroy(self, sandbox_id: str) -> Dict[str, Any]:
         with self._lock:
@@ -894,6 +898,7 @@ class SandboxManager:
                     rules=rules if rules is not None else inst.desktop_rules.rule_ids,
                     instructions=inst.desktop_rules.instructions,
                 )
+            returned_access_key: str | None = None
             if access_mode is not None or access_key is not None or access_request_required is not None:
                 previous_access = inst.desktop_access
                 wants_key_required = str(access_mode or inst.desktop_access.mode or "").strip().lower() == "key_required"
@@ -906,13 +911,15 @@ class SandboxManager:
                         "sandbox_id": str(seat_id),
                     }
                 try:
-                    access_policy, access_key_hash = _desktop_access_from_create(
+                    access_policy, access_key_hash, returned_access_key = _desktop_access_from_create(
                         mode=access_mode or inst.desktop_access.mode,
                         access_key=access_key,
                         owner_id=access_owner_id or inst.desktop_access.owner_id,
                         request_required=access_request_required,
                         previous_key_hint=inst.desktop_access.key_hint,
                         previous_key_required=inst.desktop_access.key_required,
+                        previous_link_enabled=inst.desktop_access.link_enabled,
+                        previous_key_present=bool(inst.desktop_access_key_hash),
                         previous_owner_id=inst.desktop_access.owner_id,
                     )
                 except SandboxContractError as exc:
@@ -920,7 +927,9 @@ class SandboxManager:
                 inst.desktop_access = access_policy
                 if access_key is not None:
                     inst.desktop_access_key_hash = access_key_hash
-                elif access_policy.mode != "key_required":
+                elif returned_access_key:
+                    inst.desktop_access_key_hash = access_key_hash
+                elif access_policy.mode not in {"key_required", "shared_link"}:
                     inst.desktop_access_key_hash = None
                 if (
                     access_policy.mode != "request_required"
@@ -930,7 +939,11 @@ class SandboxManager:
                     self._drop_desktop_access_requests(inst.sandbox_id)
             inst.touch()
             self._save_registry()
-            return {"ok": True, **self._instance_to_dict(inst)}
+            result = {"ok": True, **self._instance_to_dict(inst)}
+            if returned_access_key:
+                result["access_key"] = returned_access_key
+                result["access_key_hint"] = _access_key_hint(returned_access_key)
+            return result
 
     def validate_desktop_access(
         self,
@@ -957,7 +970,18 @@ class SandboxManager:
                     "sandbox_id": inst.sandbox_id,
                 }
             if policy.mode == "shared_link" or policy.link_enabled:
-                return {"ok": True, "sandbox_id": inst.sandbox_id}
+                if owner_id and policy.owner_id and secrets.compare_digest(owner_id, policy.owner_id):
+                    return {"ok": True, "sandbox_id": inst.sandbox_id}
+                if _verify_access_key(inst.desktop_access_key_hash, access_key):
+                    return {"ok": True, "sandbox_id": inst.sandbox_id}
+                return {
+                    "ok": False,
+                    "error": "Desktop shared link token is required.",
+                    "code": "DESKTOP_SHARED_LINK_TOKEN_REQUIRED",
+                    "status_code": 403,
+                    "sandbox_id": inst.sandbox_id,
+                    "key_hint": policy.key_hint,
+                }
             if policy.mode == "owner_only" and not policy.key_required:
                 if owner_id and policy.owner_id and secrets.compare_digest(owner_id, policy.owner_id):
                     return {"ok": True, "sandbox_id": inst.sandbox_id}
@@ -2391,8 +2415,10 @@ def _desktop_access_from_create(
     require_owner: bool = True,
     previous_key_hint: str | None = None,
     previous_key_required: bool = False,
+    previous_link_enabled: bool = False,
+    previous_key_present: bool = False,
     previous_owner_id: str | None = None,
-) -> tuple[DesktopAccessPolicy, str | None]:
+) -> tuple[DesktopAccessPolicy, str | None, str | None]:
     normalized_mode = str(mode or "owner_only").strip().lower()
     if normalized_mode == "request_required" or bool(request_required):
         normalized_mode = "request_required"
@@ -2400,8 +2426,24 @@ def _desktop_access_from_create(
         normalized_mode = "owner_only"
     key_text = str(access_key or "")
     key_required = normalized_mode == "key_required" or (previous_key_required and normalized_mode == "key_required")
-    key_hint = _access_key_hint(key_text) if key_text else (previous_key_hint if key_required else None)
-    key_hash = _hash_access_key(key_text) if key_text and key_required else None
+    link_enabled = normalized_mode == "shared_link"
+    returned_access_key: str | None = None
+    key_hash: str | None = None
+    if key_required:
+        key_hash = _hash_access_key(key_text) if key_text else None
+        key_hint = _access_key_hint(key_text) if key_text else previous_key_hint
+    elif link_enabled:
+        if key_text:
+            key_hash = _hash_access_key(key_text)
+            key_hint = _access_key_hint(key_text)
+        elif previous_link_enabled and previous_key_present:
+            key_hint = previous_key_hint
+        else:
+            returned_access_key = secrets.token_urlsafe(24)
+            key_hash = _hash_access_key(returned_access_key)
+            key_hint = _access_key_hint(returned_access_key)
+    else:
+        key_hint = None
     clean_owner_id = _optional_clean_string(owner_id, max_len=160) or previous_owner_id
     if require_owner and normalized_mode in {"owner_only", "request_required"} and not clean_owner_id:
         raise SandboxContractError(
@@ -2416,9 +2458,10 @@ def _desktop_access_from_create(
             key_required=key_required,
             request_required=normalized_mode == "request_required",
             key_hint=key_hint,
-            link_enabled=normalized_mode == "shared_link",
+            link_enabled=link_enabled,
         ),
         key_hash,
+        returned_access_key,
     )
 
 

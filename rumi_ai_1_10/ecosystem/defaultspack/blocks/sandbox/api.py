@@ -572,6 +572,9 @@ def _sandbox_create(service: _SandboxApiService, payload: dict[str, Any], *, dis
         return _api_error(str(created.get("error") or "Sandbox create failed"), str(created.get("code") or RUNTIME_NOT_READY), int(created.get("status_code") or 503))
     status = service.manager.status(str(created["sandbox_id"]))
     data = _desktop_payload(service, status) if display else _sandbox_payload(status)
+    if display and created.get("access_key"):
+        data["access_key"] = created.get("access_key")
+        data["access_key_hint"] = created.get("access_key_hint")
     return ok(data)
 
 
@@ -801,7 +804,11 @@ def _desktop_rules_update(service: _SandboxApiService, payload: dict[str, Any]):
     )
     if result.get("ok") is not True:
         return _api_error(str(result.get("error") or "Desktop rules update failed"), str(result.get("code") or "DESKTOP_RULES_UPDATE_FAILED"), int(result.get("status_code") or 400))
-    return ok(_desktop_payload(service, result))
+    data = _desktop_payload(service, result)
+    if result.get("access_key"):
+        data["access_key"] = result.get("access_key")
+        data["access_key_hint"] = result.get("access_key_hint")
+    return ok(data)
 
 
 def _desktop_access_request(service: _SandboxApiService, payload: dict[str, Any]):
