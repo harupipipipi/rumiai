@@ -10,7 +10,7 @@
   "supports_file_upload": true,
   "supports_reasoning": true,
   "supported_roles": ["system", "developer", "user", "assistant", "tool"],
-  "supported_content_blocks": ["text", "image", "image_url", "file", "pdf", "tool_call", "tool_result", "reasoning"],
+  "supported_content_blocks": ["text", "image", "image_url", "audio", "input_audio", "file", "pdf", "tool_call", "tool_result", "reasoning"],
   "tool_choice_modes": ["auto", "none", "required"],
   "schema_support": {"json_schema": true, "strict_json_schema": true},
   "params": {"temperature": true, "max_tokens": true, "max_completion_tokens": true, "reasoning_effort": true},

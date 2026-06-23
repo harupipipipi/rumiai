@@ -924,7 +924,7 @@ function ProviderApiKeyPrompt({
               onClick={onCancel}
               className="h-8 rounded-lg px-3 text-xs text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-zinc-100"
             >
-              Cancel
+              キャンセル
             </button>
             <button
               type="button"
@@ -936,7 +936,7 @@ function ProviderApiKeyPrompt({
                   : "bg-zinc-900 text-zinc-600 cursor-not-allowed"
               }`}
             >
-              {isSaving ? "Saving..." : "Save and use"}
+              {isSaving ? "保存中..." : "保存して使う"}
             </button>
           </div>
         </div>
@@ -1517,8 +1517,8 @@ export function ComposerRenderer({
   const contextDegrees = Math.round(contextUsage.ratio * 360);
   const contextTitle =
     contextUsage.maxContext < 0
-      ? `${contextUsage.usedTokens} tokens / unlimited`
-      : `${contextUsage.usedTokens} / ${contextUsage.maxContext || "unknown"} tokens`;
+      ? `${contextUsage.usedTokens} tokens / unlimited · ${selectedModelRouteLabel}`
+      : `${contextUsage.usedTokens} / ${contextUsage.maxContext || "unknown"} tokens · ${selectedModelRouteLabel}`;
   const templateComposerInputId = templateComposerText(composerInput?.id, 80);
   const templateComposerPlaceholder = templateComposerText(composerInput?.placeholder);
   const templateComposerHelp = templateComposerText(composerInput?.help || composerInput?.description, 220);
@@ -2475,19 +2475,19 @@ export function ComposerRenderer({
               onClick={() => setModelDropdownOpen((v) => !v)}
               className="flex w-full min-w-0 items-center gap-1 text-[12px] font-medium text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-50"
             >
-              <span className="min-w-0 flex-1 truncate" title={profileName}>{compactSelectedProfileName}</span>
+              <span className="min-w-0 flex-1 truncate" title={profileName}>モデル: {compactSelectedProfileName}</span>
               <ChevronDown size={12} className={`flex-shrink-0 transition-transform ${modelDropdownOpen ? "rotate-180" : ""}`} />
             </button>
-            <span className="block max-w-full truncate text-[10px] leading-none text-zinc-500" title={selectedModelRouteLabel}>
-              {selectedModelRouteLabel}
-            </span>
             {modelDropdownOpen && (
               <ModelDropdown
                 profiles={selectableProfiles}
                 selectedProfile={selectedProfile}
                 isGenerating={isGenerating}
                 placement={isNewConversation ? "below" : "above"}
-                onSelect={(profile) => requestModelProfileSelect(profile.profile_id)}
+                onSelect={(profile) => {
+                  requestModelProfileSelect(profile.profile_id);
+                  setModelDropdownOpen(false);
+                }}
                 onClose={() => setModelDropdownOpen(false)}
               />
             )}

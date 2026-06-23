@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from domain.ai_client.audio_capability import metadata_supports_audio_input
 from domain.ai_client.model_capability_schema import (
     ModelCapabilityFlags,
     ModelCapabilityRecord,
@@ -42,9 +43,11 @@ def infer_model_capabilities(model: dict[str, Any]) -> ModelCapabilityRecord:
     supports_thinking = _supports_thinking(item)
     thinking_levels = _thinking_levels(item, supports_thinking)
     supports_vision = _supports_vision(item)
+    supports_audio = _supports_audio_input(item)
     supports_tool_calling = _supports_tool_calling(item)
     if provider_id == "stub":
         supports_vision = False
+        supports_audio = False
         supports_tool_calling = True
         supports_thinking = True
         thinking_levels = ["low", "medium", "high", "xhigh"]
@@ -57,6 +60,7 @@ def infer_model_capabilities(model: dict[str, Any]) -> ModelCapabilityRecord:
     tags = _capability_tags(
         {
             "supports_vision": supports_vision,
+            "supports_audio": supports_audio,
             "supports_tool_calling": supports_tool_calling,
             "supports_thinking": supports_thinking,
             "supports_fast": supports_fast,
@@ -64,7 +68,7 @@ def infer_model_capabilities(model: dict[str, Any]) -> ModelCapabilityRecord:
             "max_context": _int(item.get("max_context", item.get("context_window", -1)), -1),
         }
     )
-    input_modalities = ["text"] + (["image"] if supports_vision else [])
+    input_modalities = ["text"] + (["image"] if supports_vision else []) + (["audio"] if supports_audio else [])
     roles_allowed = _allowed_roles(item, supports_vision, supports_tool_calling, supports_thinking, supports_fast, knowledge_level)
     roles_recommended = _recommended_roles(roles_allowed, supports_vision, supports_thinking, supports_fast, knowledge_level)
     return ModelCapabilityRecord(
@@ -75,7 +79,7 @@ def infer_model_capabilities(model: dict[str, Any]) -> ModelCapabilityRecord:
             text=True,
             vision=supports_vision,
             image_input=supports_vision,
-            audio_input=_capability_truthy(item, "audio_input", "audio", "transcription"),
+            audio_input=supports_audio,
             tool_calling=supports_tool_calling,
             json_schema=structured_output,
             structured_output=structured_output,
@@ -130,6 +134,18 @@ def _supports_vision(model: dict[str, Any]) -> bool:
     if provider_id == "stub":
         return True
     if provider_id in VISION_CAPABLE_PROVIDERS and VISION_MODEL_RE.search(f"{model_id} {qualified}"):
+        return True
+    return False
+
+
+def _supports_audio_input(model: dict[str, Any]) -> bool:
+    explicit = _explicit_bool(model, "supports_audio", "supports_audio_input", "audio_input", "input_audio")
+    if explicit is True:
+        return True
+    model_type = str(model.get("type") or "chat").lower()
+    if model_type not in {"chat", "reasoning", "vision"}:
+        return False
+    if metadata_supports_audio_input(model):
         return True
     return False
 
@@ -321,6 +337,8 @@ def _capability_tags(values: dict[str, Any]) -> list[str]:
     tags = []
     if values.get("supports_vision"):
         tags.append("vision")
+    if values.get("supports_audio"):
+        tags.append("audio")
     if values.get("supports_tool_calling"):
         tags.append("tools")
     if values.get("supports_thinking"):

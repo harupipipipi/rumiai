@@ -23,7 +23,14 @@ def test_builtin_external_io_templates_split_input_and_output():
     input_ids = {item["id"] for item in catalog["input"]}
     output_ids = {item["id"] for item in catalog["output"]}
 
-    assert {"line.input.default", "line.input.computer_use", "discord.input.default", "slack.input.default", "custom.input"} <= input_ids
+    assert {
+        "line.input.default",
+        "line.input.computer_use",
+        "discord.input.default",
+        "slack.input.default",
+        "ambient.input.webhook",
+        "custom.input",
+    } <= input_ids
     assert {
         "line.output.default",
         "discord.output.bot_channel",
@@ -36,6 +43,7 @@ def test_builtin_external_io_templates_split_input_and_output():
         "line.input.computer_use",
         "discord.input.default",
         "slack.input.default",
+        "ambient.input.webhook",
     }
     discord_webhook = next(item for item in catalog["output"] if item["id"] == "discord.output.webhook")
     assert discord_webhook["setup_mode"] == "copy_paste_select"
@@ -55,6 +63,11 @@ def test_builtin_external_io_templates_split_input_and_output():
     assert line_computer_use["copy_paste_setup"]["fields"][0]["id"] == "line_biz_chat_url"
     assert not line_computer_use["response"].get("auto_approve_computer_use")
     assert not line_computer_use["response"].get("yolo_mode")
+    ambient_hook = next(item for item in catalog["input"] if item["id"] == "ambient.input.webhook")
+    assert ambient_hook["origin"] == "template"
+    assert ambient_hook["template_id"] == "rumi.ambient_trigger.default"
+    assert ambient_hook["copy_paste_setup"]["routes"] == ["/api/ambient/events"]
+    assert ambient_hook["copy_paste_setup"]["input_profile_id"] == "ambient.webhook"
     custom_input = next(item for item in catalog["input"] if item["id"] == "custom.input")
     assert custom_input["setup_mode"] == "custom"
 

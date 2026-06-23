@@ -4,6 +4,7 @@ from copy import deepcopy
 import re
 from typing import Any
 
+from domain.ai_client.audio_capability import metadata_supports_audio_input
 from domain.ai_client.model_groups import normalize_model_groups
 
 
@@ -94,6 +95,8 @@ def get_model_capabilities(profile_id: str, *, profiles: list[dict[str, Any]] | 
                     "display_name": pack.display_name or pack.id,
                     "supports_vision": any(bool(item.get("supports_vision") or item.get("supports_image_input")) for item in member_caps),
                     "supports_image_input": any(bool(item.get("supports_image_input") or item.get("supports_vision")) for item in member_caps),
+                    "supports_audio": any(bool(item.get("supports_audio") or item.get("supports_audio_input")) for item in member_caps),
+                    "supports_audio_input": any(bool(item.get("supports_audio_input") or item.get("supports_audio")) for item in member_caps),
                     "supports_tool_calling": any(bool(item.get("supports_tool_calling")) for item in member_caps),
                     "supports_thinking": any(bool(item.get("supports_thinking")) for item in member_caps),
                     "supports_fast": any(bool(item.get("supports_fast")) for item in member_caps),
@@ -278,6 +281,7 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
     display_name = str(profile.get("display_name") or profile.get("name") or model_id or profile_id).strip()
     model_type = str(profile.get("type") or "chat").strip().lower() or "chat"
     availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+    supports_audio = metadata_supports_audio_input(profile)
     configured = bool(
         profile.get("configured")
         or availability.get("configured")
@@ -306,6 +310,8 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
         "requires_api_key": bool(provider_id and provider_id not in {"stub"} and not configured),
         "supports_vision": bool(profile.get("supports_vision")),
         "supports_image_input": bool(profile.get("supports_image_input") or profile.get("supports_vision")),
+        "supports_audio": supports_audio,
+        "supports_audio_input": supports_audio,
         "supports_tool_calling": bool(profile.get("supports_tool_calling")),
         "supports_thinking": bool(profile.get("supports_thinking")),
         "thinking_levels": list(profile.get("thinking_levels") or []),
@@ -341,6 +347,8 @@ def _matches_required_capabilities(item: dict[str, Any], requires: dict[str, Any
     mapping = {
         "vision": "supports_vision",
         "image_input": "supports_image_input",
+        "audio": "supports_audio",
+        "audio_input": "supports_audio",
         "tool_calling": "supports_tool_calling",
         "tools": "supports_tool_calling",
         "thinking": "supports_thinking",
@@ -357,6 +365,7 @@ def _score_model(item: dict[str, Any], filters: dict[str, Any]) -> int:
     score += 25 if item.get("configured") else 0
     score += 10 if item.get("supports_thinking") and (filters.get("requires") or {}).get("thinking") else 0
     score += 10 if item.get("supports_vision") and (filters.get("requires") or {}).get("vision") else 0
+    score += 10 if item.get("supports_audio") and (filters.get("requires") or {}).get("audio") else 0
     score += 8 if item.get("supports_tool_calling") and (filters.get("requires") or {}).get("tool_calling") else 0
     score += 6 if item.get("speed_tier") == "fast" else 0
     score += 4 if item.get("local") else 0
@@ -412,6 +421,8 @@ def _recommendation_reasons(selected: dict[str, Any] | None, request: dict[str, 
     requires = request.get("requires") if isinstance(request.get("requires"), dict) else {}
     if requires.get("vision") and selected.get("supports_vision"):
         reasons.append("requires_vision")
+    if requires.get("audio") and selected.get("supports_audio"):
+        reasons.append("requires_audio")
     if requires.get("tool_calling") and selected.get("supports_tool_calling"):
         reasons.append("requires_tool_calling")
     if requires.get("thinking") and selected.get("supports_thinking"):

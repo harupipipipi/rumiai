@@ -169,6 +169,29 @@ def test_tool_loading_defaults_to_vector_and_only_always_is_eager():
     assert [tool["tool_id"] for tool in vector] == ["web_search", "calculator"]
 
 
+def test_tool_search_is_eager_discovery_fallback():
+    from domain.tool.loading import tool_loading_mode
+    from domain.tool.registry import ToolRegistry
+
+    tool = ToolRegistry().get("tool_search")
+
+    assert tool is not None
+    assert tool_loading_mode(tool) == "always"
+
+
+def test_tool_discovery_fallback_prompt_points_to_names_and_search():
+    from domain.chat import run_request
+
+    prompt = run_request._tool_discovery_fallback_prompt([
+        {"tool_id": "tool_names"},
+        {"tool_id": "tool_search"},
+    ])
+
+    assert "tool_names" in prompt
+    assert "tool_search" in prompt
+    assert '"query":"coding"' in prompt
+
+
 def test_select_relevant_keeps_always_tools_when_vector_matches_are_empty(monkeypatch):
     from blocks.tool import select_relevant
 

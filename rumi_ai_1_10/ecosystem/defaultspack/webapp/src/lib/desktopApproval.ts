@@ -1,4 +1,4 @@
-import type { AuthorityUiOperator } from "./api";
+import type { AuthorityApprovalContext } from "./api";
 
 type TauriInvoke = <T = unknown>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -9,11 +9,6 @@ type TauriWindow = Window & {
       invoke?: TauriInvoke;
     };
   };
-};
-
-export type AuthorityApprovalContext = {
-  request_id: string;
-  ui_operator: AuthorityUiOperator;
 };
 
 function tauriInvoke(): TauriInvoke | null {
@@ -43,6 +38,59 @@ export async function openAuthorityApprovalWindow(requestId: string): Promise<bo
   if (!invoke) return false;
   await invoke("open_authority_approval_window", { requestId });
   return true;
+}
+
+export async function openAmbientTriggerWindow(): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_ambient_trigger_window");
+  return true;
+}
+
+export async function openFingerRecordingWindow(): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_finger_recording_window");
+  return true;
+}
+
+export async function openDefaultspackMainWindow(path = "/chat"): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_defaultspack_main_window", { path });
+  return true;
+}
+
+export async function openDefaultsConsoleWindow(): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_defaults_console_window");
+  return true;
+}
+
+export async function openHostPermissionsPageWindow(): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_host_permissions_window");
+  return true;
+}
+
+export async function openHostPermissionSettings(permissionId: string): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("open_host_permission_settings", { permissionId });
+  return true;
+}
+
+export async function closeCurrentWindow(): Promise<boolean> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) return false;
+  await invoke("close_current_window");
+  return true;
+}
+
+export async function openHostPermissionsWindow(permissionId: string): Promise<boolean> {
+  return openHostPermissionSettings(permissionId);
 }
 
 export async function getAuthorityApprovalContext(requestId: string): Promise<AuthorityApprovalContext> {

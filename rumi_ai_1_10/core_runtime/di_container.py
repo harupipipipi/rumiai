@@ -267,7 +267,14 @@ def _register_defaults(container: DIContainer) -> None:
 
     def _capability_grant_manager_factory() -> "CapabilityGrantManager":  # noqa: F821
         from .capability_grant_manager import get_capability_grant_manager
-        return get_capability_grant_manager()
+        instance = get_capability_grant_manager()
+        try:
+            from .bootstrap.default_builtin_grants import apply_default_builtin_grants
+
+            apply_default_builtin_grants(instance)
+        except Exception:
+            pass
+        return instance
 
     # --- Wave 4: orchestration / composition ---
     def _container_orchestrator_factory() -> "ContainerOrchestrator":  # noqa: F821

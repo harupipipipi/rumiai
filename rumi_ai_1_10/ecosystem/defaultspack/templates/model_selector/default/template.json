@@ -42,10 +42,10 @@
       "renderer": "model_select",
       "component": "SettingsFieldRendererHost",
       "part_id": "settings",
-      "label": "Preferred Model",
+      "label": "Default Model",
       "default": "stub/default",
       "data_source": "selectable_model_profiles",
-      "help": "新しい会話と composer の既定モデルです。"
+      "help": "新しい会話と composer が最初に使う既定モデルです。"
     },
     {
       "id": "model_group",

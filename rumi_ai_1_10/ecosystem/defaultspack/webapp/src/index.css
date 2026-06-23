@@ -120,6 +120,38 @@ body {
   border: 1px solid rgba(244, 244, 245, 0.10);
 }
 
+.ambient-mini-button {
+  display: inline-flex;
+  min-width: 0;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(63, 63, 70, 0.9);
+  background: rgba(24, 24, 27, 0.72);
+  padding: 0 0.5rem;
+  color: rgba(212, 212, 216, 0.95);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.ambient-mini-button:hover {
+  border-color: rgba(113, 113, 122, 0.95);
+  background: rgba(39, 39, 42, 0.86);
+  color: rgba(244, 244, 245, 1);
+}
+
+.ambient-mini-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .rumi-luxe-pill-dot {
   width: 0.4rem;
   height: 0.4rem;

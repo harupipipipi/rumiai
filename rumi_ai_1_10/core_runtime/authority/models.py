@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from ..host_permissions.models import HOST_PERMISSION_IDS
+
 
 AUTHORITY_PERMISSION_IDS = frozenset(
     {
@@ -17,8 +19,14 @@ AUTHORITY_PERMISSION_IDS = frozenset(
         "tool.execute",
         "file.read",
         "file.write",
+        "authority.request.read",
+        "authority.request.list",
+        "authority.request.approve",
+        "authority.request.deny",
+        "authority.host_intent.approve",
+        "authority.host_intent.deny",
     }
-)
+) | HOST_PERMISSION_IDS
 
 
 @dataclass(frozen=True)

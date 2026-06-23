@@ -12,7 +12,7 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 4. AI が「ツール呼び出し」を返した場合 → ユーザー承認待ち（status: `waiting_approval`）。
 5. ユーザーが `approve` → ツール実行 → 結果を AI に返す → 3 に戻る。
 6. ユーザーが `reject` → 拒否理由を AI に返す → AI が代替案を提案 → 3 に戻る。
-7. ツール呼び出し深度が `MAX_FLOW_CALL_DEPTH`（10）に達した場合 → エラー。
+7. `max_tool_calls` が明示された場合は実 tool execution 数で停止する。未指定時は通常上限を設けず、operator emergency budget 到達時のみ resumable pause にする。
 
 `blocks/agent/_state.py` がインメモリで実行中の `AgentEngine` インスタンスを管理します。`execution_id` をキーとして `set_engine()` / `get_engine()` / `remove_engine()` で管理されます。
 

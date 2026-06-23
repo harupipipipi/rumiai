@@ -73,6 +73,9 @@ class SetupPackDefinition:
     marketplace: Dict[str, Any] = field(default_factory=dict)
     signing: Dict[str, Any] = field(default_factory=dict)
     schema_issues: List[Dict[str, Any]] = field(default_factory=list)
+    required_permissions: List[str] = field(default_factory=list)
+    install_surfaces: List[str] = field(default_factory=list)
+    install_prompt: Dict[str, Any] = field(default_factory=dict)
     source_path: str = ""
 
 
@@ -142,6 +145,17 @@ class SetupPackManager:
                 marketplace=_as_dict(raw.get("marketplace")),
                 signing=_as_dict(raw.get("signing")),
                 schema_issues=schema_issues,
+                required_permissions=[
+                    str(item)
+                    for item in raw.get("required_permissions", [])
+                    if str(item).strip()
+                ] if isinstance(raw.get("required_permissions"), list) else [],
+                install_surfaces=[
+                    str(item)
+                    for item in raw.get("install_surfaces", [])
+                    if str(item).strip()
+                ] if isinstance(raw.get("install_surfaces"), list) else [],
+                install_prompt=_as_dict(raw.get("install_prompt")),
                 source_path=str(path.parent.resolve()),
             )
         return result
@@ -180,6 +194,10 @@ class SetupPackManager:
                 "compatibility": dict(item.compatibility),
                 "marketplace": dict(item.marketplace),
                 "signing": dict(item.signing),
+                "schema_issues": list(item.schema_issues),
+                "required_permissions": list(item.required_permissions),
+                "install_surfaces": list(item.install_surfaces),
+                "install_prompt": dict(item.install_prompt),
                 "source_path": item.source_path,
                 "selected": item.pack_id in selected_ids,
             })

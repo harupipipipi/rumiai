@@ -23,6 +23,10 @@ domains:
     - domain/temporal_context
     - domain/tool
     path: domain/ai_client
+  ambient:
+    may_import:
+    - domain/input
+    path: domain/ambient
   api_map:
     may_import:
     - domain/external
@@ -296,4 +300,8 @@ domains:
     may_import:
     - domain/coding
     path: domain/workspace
-exceptions: []
+exceptions:
+- file: domain/ambient/router.py
+  from: ambient
+  import: domain/chat
+  reason: ambient trigger routing creates destination conversations through the chat store

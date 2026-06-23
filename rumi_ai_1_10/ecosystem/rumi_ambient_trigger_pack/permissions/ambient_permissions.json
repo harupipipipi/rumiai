@@ -1,0 +1,24 @@
+{
+  "permissions": [
+    {
+      "id": "host.microphone.capture",
+      "label": "Microphone capture",
+      "risk": "high",
+      "requires_user_grant": true,
+      "os_permission_hint": "Windows/macOS/Linux microphone permission may also be required."
+    },
+    {
+      "id": "host.camera.capture",
+      "label": "Camera capture",
+      "risk": "high",
+      "requires_user_grant": true,
+      "os_permission_hint": "Windows/macOS/Linux camera permission may also be required."
+    },
+    {
+      "id": "ambient.trigger.dispatch",
+      "label": "Create Rumi input from ambient triggers",
+      "risk": "medium",
+      "requires_user_grant": true
+    }
+  ]
+}

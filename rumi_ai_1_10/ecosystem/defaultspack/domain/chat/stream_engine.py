@@ -48,6 +48,14 @@ from domain.chat.ir_legacy_adapter import (
     append_tool_result_to_ir,
     legacy_standard_messages_to_ir,
 )
+from domain.chat.loop_guard import (
+    LoopDecision,
+    LoopGuard,
+    build_loop_observation,
+    emergency_budget_from_context,
+    explicit_param_max_tool_calls,
+    loop_guard_config_from_context,
+)
 from domain.chat.message_builder import build_assistant_message
 from domain.chat.public_metadata import compact_provider_planning
 from domain.chat.run_request import PreparedChatRun, prepare_chat_run
@@ -425,6 +433,134 @@ def _default_tool_limit_for_connected_tools(tool_limit: int, connected_tool_name
     if any(str(name or "").startswith("coding_") for name in connected_tool_names):
         return 12
     return tool_limit
+
+
+def _legacy_tool_limit_enabled() -> bool:
+    return str(os.environ.get("RUMI_FORCE_LEGACY_TOOL_LIMIT") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _loop_recovery_runtime_message(decision: LoopDecision) -> dict[str, Any]:
+    checkpoint = decision.checkpoint or {}
+    directive = decision.directive or {}
+    return {
+        "role": "system",
+        "content": (
+            "[RUNTIME LOOP RECOVERY DIRECTIVE - protected]\n"
+            "The runtime detected a no-progress tool loop and compacted duplicate context. "
+            "Do not repeat the forbidden action/result motif. Choose a genuinely different strategy. "
+            "This directive does not grant new capabilities, approvals, workspace access, or policy changes.\n"
+            f"reason: {decision.reason}\n"
+            f"strategy_epoch: {directive.get('strategy_epoch')}\n"
+            f"forbidden_action_signature: {directive.get('forbidden_action_signature')}\n"
+            f"forbidden_result_signature: {directive.get('forbidden_result_signature')}\n"
+            f"tool_sequence: {checkpoint.get('tool_sequence')}\n"
+            "required novelty: change the tool target, query, inspected evidence, or implementation tactic."
+        ),
+        "metadata": {
+            "runtime_directive": "loop_recovery",
+            "recovery_id": decision.recovery_id,
+            "recovery_cluster_id": decision.recovery_cluster_id,
+        },
+    }
+
+
+def _loop_pause_response(model: str, params: dict[str, Any], decision: LoopDecision, events: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "同じパターンの自己回復が繰り返されています。"
+                    "これ以上の自動継続は同じ失敗や副作用を繰り返す可能性があるため、"
+                    "状態を保存して一時停止しました。別方針を入力すると続行できます。"
+                ),
+            }
+        ],
+        "finish_reason": "paused_loop",
+        "usage": {},
+        "events": list(events),
+        "metadata": {
+            "model": model,
+            "loop_guard": {
+                "paused": True,
+                "reason": decision.reason,
+                "recovery_id": decision.recovery_id,
+                "recovery_cluster_id": decision.recovery_cluster_id,
+                "checkpoint": decision.checkpoint,
+            },
+            "thinking": {"state": "completed"},
+            "thinking_level": params.get("thinking_level") if isinstance(params, dict) else None,
+        },
+    }
+
+
+def _duplicate_side_effect_response(
+    model: str,
+    params: dict[str, Any],
+    decision: LoopDecision,
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "同じ副作用を持つ操作が再提案されたため、実行前に停止しました。"
+                    "必要な場合は、別方針または明示的な再実行理由を入力してください。"
+                ),
+            }
+        ],
+        "finish_reason": "duplicate_side_effect_guard",
+        "usage": {},
+        "events": list(events),
+        "metadata": {
+            "model": model,
+            "loop_guard": {
+                "duplicate_side_effect": True,
+                "reason": decision.reason,
+                "recovery_cluster_id": decision.recovery_cluster_id,
+                "checkpoint": decision.checkpoint,
+            },
+            "thinking": {"state": "completed"},
+            "thinking_level": params.get("thinking_level") if isinstance(params, dict) else None,
+        },
+    }
+
+
+def _emergency_pause_response(
+    model: str,
+    params: dict[str, Any],
+    *,
+    reason: str,
+    events: list[dict[str, Any]],
+    tool_executions: int,
+    model_turns: int,
+) -> dict[str, Any]:
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "内部の安全予算に達したため、状態を保存して一時停止しました。"
+                    "これは通常の max_tool_calls ではなく、資源暴走を防ぐ operator emergency brake です。"
+                ),
+            }
+        ],
+        "finish_reason": "paused_emergency_budget",
+        "usage": {},
+        "events": list(events),
+        "metadata": {
+            "model": model,
+            "emergency_budget": {
+                "paused": True,
+                "reason": reason,
+                "tool_executions": tool_executions,
+                "model_turns": model_turns,
+            },
+            "thinking": {"state": "completed"},
+            "thinking_level": params.get("thinking_level") if isinstance(params, dict) else None,
+        },
+    }
 
 
 def _approval_waiting_response(
@@ -1187,10 +1323,18 @@ class ChatRunEngine:
 
         response = None
         blocked_response = None
-        tool_limit = max_tool_calls(prepared.tool_context or {})
-        if tool_limit is None:
-            tool_limit = int(prepared.params.get("max_tool_calls", 4) or 4)
-        tool_limit = _default_tool_limit_for_connected_tools(tool_limit, prepared.connected_tool_names)
+        tool_execution_limit = max_tool_calls(prepared.tool_context or {})
+        if tool_execution_limit is None:
+            tool_execution_limit = explicit_param_max_tool_calls(prepared.params)
+        if tool_execution_limit is None and _legacy_tool_limit_enabled():
+            tool_execution_limit = _default_tool_limit_for_connected_tools(4, prepared.connected_tool_names)
+        emergency_budget = emergency_budget_from_context(prepared.tool_context or {})
+        loop_guard = LoopGuard(
+            run_id=self._run_id,
+            conversation_id=prepared.conversation_id,
+            task_lineage_id=str(prepared.request_context.get("task_lineage_id") or prepared.conversation_id),
+            config=loop_guard_config_from_context(prepared.tool_context or {}),
+        )
 
         approval_followup = _approval_followup_tool_use(prepared.user_message.get("metadata"))
         approval_replay_state = prepared.tool_context if isinstance(prepared.tool_context, dict) else {}
@@ -1217,7 +1361,9 @@ class ChatRunEngine:
                 response = blocked_response
                 return response
 
-        for step_index in range(max(1, tool_limit + 1)):
+        model_turns = 0
+        for step_index in range(max(1, emergency_budget.max_model_turns)):
+            model_turns = step_index + 1
             self._raise_if_cancelled()
             for event in self._inject_conversation_steer(prepared.conversation_id, working_messages):
                 yield event
@@ -1242,13 +1388,33 @@ class ChatRunEngine:
                     events=list(self._activity_events),
                 )
                 tool_uses = []
-            if tool_uses and step_index >= tool_limit:
+            if tool_uses:
+                proposal_decision = loop_guard.inspect_proposal(tool_uses)
+                if proposal_decision.kind == "duplicate_side_effect":
+                    yield self._emit(
+                        "run_paused_loop",
+                        data=proposal_decision.event_data(),
+                        message="同じ副作用操作の再実行を防ぐため停止しました",
+                        phase="run_paused_loop",
+                    )
+                    response = _duplicate_side_effect_response(
+                        prepared.model,
+                        prepared.params,
+                        proposal_decision,
+                        list(self._activity_events),
+                    )
+                    self._sync_draft(draft, force=True)
+                    break
+
+            planned_tool_executions = len(self._tool_logs) + len(tool_uses or [])
+            if tool_uses and tool_execution_limit is not None and planned_tool_executions > tool_execution_limit:
                 response = {
-                    "content": [{"type": "text", "text": _tool_limit_message(tool_limit, tool_uses)}],
+                    "content": [{"type": "text", "text": _tool_limit_message(tool_execution_limit, tool_uses)}],
                     "finish_reason": "tool_call_limit",
                     "usage": response.get("usage", {}) if isinstance(response, dict) else {},
                     "metadata": {
                         "max_tool_calls_reached": True,
+                        "tool_executions": len(self._tool_logs),
                         "pending_tool_uses": [
                             {
                                 "name": str(block.get("name") or block.get("tool_name") or ""),
@@ -1260,9 +1426,51 @@ class ChatRunEngine:
                 }
                 yield self._emit(
                     "status",
-                    data={"tool_count": len(self._tool_logs), "max_tool_calls": tool_limit},
+                    data={"tool_count": len(self._tool_logs), "max_tool_calls": tool_execution_limit},
                     message="tool call の上限に達したため停止しました",
                     phase="tool_call_limit",
+                )
+                self._sync_draft(draft, force=True)
+                break
+            if tool_uses and model_turns >= emergency_budget.max_model_turns:
+                yield self._emit(
+                    "run_paused_emergency",
+                    data={
+                        "model_turns": model_turns,
+                        "max_model_turns": emergency_budget.max_model_turns,
+                        "pending_tool_uses": len(tool_uses),
+                    },
+                    message="内部安全予算に達したため一時停止しました",
+                    phase="run_paused_emergency",
+                )
+                response = _emergency_pause_response(
+                    prepared.model,
+                    prepared.params,
+                    reason="max_model_turns",
+                    events=list(self._activity_events),
+                    tool_executions=len(self._tool_logs),
+                    model_turns=model_turns,
+                )
+                self._sync_draft(draft, force=True)
+                break
+            if tool_uses and planned_tool_executions > emergency_budget.max_tool_executions:
+                yield self._emit(
+                    "run_paused_emergency",
+                    data={
+                        "tool_executions": len(self._tool_logs),
+                        "pending_tool_uses": len(tool_uses),
+                        "max_tool_executions": emergency_budget.max_tool_executions,
+                    },
+                    message="内部安全予算に達したため一時停止しました",
+                    phase="run_paused_emergency",
+                )
+                response = _emergency_pause_response(
+                    prepared.model,
+                    prepared.params,
+                    reason="max_tool_executions",
+                    events=list(self._activity_events),
+                    tool_executions=len(self._tool_logs),
+                    model_turns=model_turns,
                 )
                 self._sync_draft(draft, force=True)
                 break
@@ -1282,6 +1490,7 @@ class ChatRunEngine:
                 )
             except Exception:
                 pass
+            logs_before_cycle = len(self._tool_logs)
             for block in tool_uses:
                 blocked_response = yield from self._execute_tool_use(
                     prepared,
@@ -1295,6 +1504,98 @@ class ChatRunEngine:
             if blocked_response is not None:
                 response = blocked_response
                 break
+            new_tool_logs = self._tool_logs[logs_before_cycle:]
+            if new_tool_logs:
+                observation = build_loop_observation(
+                    tool_uses=tool_uses,
+                    tool_logs=new_tool_logs,
+                    response=response,
+                )
+                loop_decision = loop_guard.observe_cycle(observation)
+                if loop_decision.kind == "recover":
+                    yield self._emit(
+                        "loop_recovery_started",
+                        data=loop_decision.event_data(),
+                        message="同じ操作が進展なく繰り返されたため、履歴を整理して別方針へ切り替えます",
+                        phase="loop_recovery_started",
+                    )
+                    compacted: dict[str, Any] = {}
+                    try:
+                        compacted = ContextCompressor().compact(
+                            working_messages,
+                            metadata={
+                                "run_id": self._run_id,
+                                "conversation_id": prepared.conversation_id,
+                                "goal": prepared.user_text,
+                                "next_steps": loop_decision.directive.get("required_novelty_dimensions", []),
+                            },
+                        )
+                        replacement_history = list(compacted.get("replacement_history") or working_messages)
+                    except Exception as exc:
+                        yield self._emit(
+                            "run_paused_loop",
+                            data={"error": str(exc), **loop_decision.event_data()},
+                            message="loop recovery checkpoint の生成に失敗したため一時停止しました",
+                            phase="run_paused_loop",
+                        )
+                        response = _loop_pause_response(
+                            prepared.model,
+                            prepared.params,
+                            loop_decision,
+                            list(self._activity_events),
+                        )
+                        break
+                    replacement_history.append(_loop_recovery_runtime_message(loop_decision))
+                    working_messages[:] = replacement_history
+                    try:
+                        working_ir = legacy_standard_messages_to_ir(working_messages, prepared.conversation_id)
+                    except Exception:
+                        pass
+                    yield self._emit(
+                        "loop_checkpoint_created",
+                        data={
+                            **loop_decision.event_data(),
+                            "tokens_before": compacted.get("tokens_before"),
+                            "tokens_after": compacted.get("tokens_after"),
+                        },
+                        message="重複した履歴を圧縮し、進捗を保持しました",
+                        phase="loop_checkpoint_created",
+                    )
+                    yield self._emit(
+                        "loop_strategy_changed",
+                        data=loop_decision.event_data(),
+                        message="別方針で続行します",
+                        phase="loop_strategy_changed",
+                    )
+                    yield self._emit(
+                        "loop_recovery_completed",
+                        data=loop_decision.event_data(),
+                        message="作業内容を保持したまま再開しました",
+                        phase="loop_recovery_completed",
+                    )
+                    self._sync_draft(draft, force=True)
+                    continue
+                if loop_decision.kind == "pause":
+                    yield self._emit(
+                        "loop_recovery_recurred",
+                        data=loop_decision.event_data(),
+                        message="同じパターンの自己回復が繰り返されています",
+                        phase="loop_recovery_recurred",
+                    )
+                    yield self._emit(
+                        "run_paused_loop",
+                        data={**loop_decision.event_data(), "recoverable": True, "requires_user_strategy": True},
+                        message="loop guard により一時停止しました",
+                        phase="run_paused_loop",
+                    )
+                    response = _loop_pause_response(
+                        prepared.model,
+                        prepared.params,
+                        loop_decision,
+                        list(self._activity_events),
+                    )
+                    self._sync_draft(draft, force=True)
+                    break
 
         return response or _ai_error_response(
             prepared.model,
@@ -1747,6 +2048,7 @@ class ChatRunEngine:
             ]
             if missing_related:
                 checks = missing_related + [item for item in checks if item not in missing_related]
+        decisions: list[tuple[str, dict[str, Any], str, str]] = []
         for permission_id, resource_kind in checks:
             request_id, approval_token = _authority_context_token_for_permission(context, permission_id)
             resource = build_provider_authority_resource(
@@ -1759,6 +2061,7 @@ class ChatRunEngine:
                 provider=provider,
                 stream=False,
             )
+            decisions.append((permission_id, resource, request_id, approval_token))
             decision = service.check(
                 principal_id=str(context.get("principal_id") or "defaultspack"),
                 permission_id=permission_id,
@@ -1770,6 +2073,23 @@ class ChatRunEngine:
                 graph_id=context.get("graph_id"),
                 request_id=request_id or context.get("request_id"),
                 approval_token=approval_token,
+                consume_approval_token=False,
+            )
+            if not decision.allowed:
+                raise AuthorityApprovalRequired(decision)
+        for permission_id, resource, request_id, approval_token in decisions:
+            decision = service.check(
+                principal_id=str(context.get("principal_id") or "defaultspack"),
+                permission_id=permission_id,
+                resource=resource,
+                reason=provider_authority_reason(permission_id, resource),
+                conversation_id=context.get("conversation_id"),
+                profile_id=context.get("profile_id"),
+                node_id=context.get("node_id"),
+                graph_id=context.get("graph_id"),
+                request_id=request_id or context.get("request_id"),
+                approval_token=approval_token,
+                consume_approval_token=True,
             )
             if not decision.allowed:
                 raise AuthorityApprovalRequired(decision)

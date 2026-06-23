@@ -24,15 +24,16 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
 
         self.assertEqual(result, "disabled")
 
-    def test_browser_surface_is_default(self):
+    def test_webview_surface_is_default_and_does_not_open_browser_when_missing(self):
         from defaultspack.native_webview import open_desktop_surface
 
         with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_OPEN_BROWSER": "1"}, clear=True):
-            with patch("webbrowser.open") as mock_open:
-                result = open_desktop_surface("http://127.0.0.1:8766/")
+            with patch.dict(sys.modules, {"webview": None}):
+                with patch("webbrowser.open") as mock_open:
+                    result = open_desktop_surface("http://127.0.0.1:8766/")
 
-        self.assertEqual(result, "browser")
-        mock_open.assert_called_once_with("http://127.0.0.1:8766/")
+        self.assertEqual(result, "webview_unavailable")
+        mock_open.assert_not_called()
 
     def test_webview_surface_falls_back_when_optional_dependency_is_missing(self):
         from defaultspack.native_webview import open_desktop_surface
@@ -43,7 +44,7 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
                     result = open_desktop_surface("http://127.0.0.1:8766/")
 
         self.assertEqual(result, "webview_unavailable")
-        mock_open.assert_called_once_with("http://127.0.0.1:8766/")
+        mock_open.assert_not_called()
 
     def test_desktop_app_main_stops_server_after_blocking_webview_closes(self):
         from defaultspack import desktop_app

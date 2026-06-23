@@ -98,6 +98,7 @@ class TestLaunchAppArguments:
         env = call_kwargs.get("env")
         assert env is not None
         assert env.get("RUMI_API_TOKEN") == "secret-token-xyz"
+        assert env.get("RUMI_DEFAULTSPACK_LOCAL_TOKEN") == "secret-token-xyz"
 
     @mock.patch("subprocess.Popen")
     @mock.patch("os.path.isfile", return_value=True)
@@ -222,6 +223,7 @@ class TestLaunchAppArguments:
         assert cmd_list == [desktop_app_manager._runtime_python_for_app(), "app.py"]
         env = mock_popen.call_args.kwargs["env"]
         assert env["RUMI_API_TOKEN"] == "issued-token"
+        assert env["RUMI_DEFAULTSPACK_LOCAL_TOKEN"] == "issued-token"
         assert env["RUMI_TOKEN"] == "issued-token"
         assert env["AUTOPACK_PORT"] == "9999"
         assert str(Path(sys.executable).resolve().parent) in env["PATH"]

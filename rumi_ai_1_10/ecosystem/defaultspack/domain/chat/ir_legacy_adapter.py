@@ -95,6 +95,8 @@ def ir_to_legacy_standard_messages(ir: RumiChatIR) -> list[dict[str, Any]]:
                 text_parts.append(_ir_block_to_stored_block(block))
             elif block.type == "image" and block.data.get("source"):
                 text_parts.append(_ir_block_to_stored_block(block))
+            elif block.type in {"audio", "input_audio"}:
+                text_parts.append(_ir_block_to_stored_block(block))
             elif block.type == "tool_call" and block.tool_call is not None:
                 tool_calls.append(
                     {

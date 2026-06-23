@@ -28,6 +28,73 @@ def test_computer_use_action_suffix_tool_name_is_normalized():
     }
 
 
+def test_chat_run_engine_has_no_default_four_tool_call_limit(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    model_turns = {"count": 0}
+    executed = []
+
+    def fake_model_turn(self, prepared, messages, draft):
+        if False:
+            yield {}
+        model_turns["count"] += 1
+        if model_turns["count"] <= 5:
+            return (
+                {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": f"call-{model_turns['count']}",
+                            "name": "lookup",
+                            "input": {"path": f"file-{model_turns['count']}.txt"},
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                    "usage": {},
+                },
+                [
+                    {
+                        "type": "tool_use",
+                        "id": f"call-{model_turns['count']}",
+                        "name": "lookup",
+                        "input": {"path": f"file-{model_turns['count']}.txt"},
+                    }
+                ],
+            )
+        return {"content": [{"type": "text", "text": "done"}], "finish_reason": "stop", "usage": {}}, []
+
+    def fake_execute_tool(self, prepared, tool_name, tool_call_id, arguments):
+        executed.append((tool_name, dict(arguments)))
+        return {"status": "ok", "data": {"content": arguments.get("path")}}
+
+    monkeypatch.setattr(ChatRunEngine, "_model_turn", fake_model_turn)
+    monkeypatch.setattr(ChatRunEngine, "_execute_tool", fake_execute_tool)
+
+    engine = ChatRunEngine()
+    events = list(
+        engine.stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "read several files"},
+                "tools": [{"name": "lookup", "description": "lookup"}],
+                "params": {},
+            },
+            {},
+        )
+    )
+
+    assert len(executed) == 5
+    assert not any(event.get("phase") == "tool_call_limit" for event in events)
+    ChatStore._instance = None
+
+
 def test_send_and_stream_wrappers_consume_same_engine_final_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.send import run as send_run

@@ -9,6 +9,8 @@ from domain.input.envelope import RumiInputEnvelope
 
 def handle(envelope: RumiInputEnvelope, context: dict[str, Any] | None = None) -> dict[str, Any]:
     cleaned_text = str(envelope.input or "").strip()
+    if not cleaned_text and envelope.attachments:
+        cleaned_text = _default_attachment_text(envelope.attachments)
     if not cleaned_text:
         return {"status": "ignored", "reason": "empty message", "assistant_text": ""}
 
@@ -199,6 +201,16 @@ def _extract_assistant_text(message: dict[str, Any]) -> str:
             elif isinstance(block, dict) and block.get("type") == "text":
                 parts.append(str(block.get("text") or ""))
     return "\n".join(part for part in parts if part).strip()
+
+
+def _default_attachment_text(attachments: list[Any]) -> str:
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        mime_type = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
+        if mime_type.startswith("audio/"):
+            return "この録音音声を入力として処理してください。"
+    return "添付ファイルを入力として処理してください。"
 
 
 def apply_external_source_context(

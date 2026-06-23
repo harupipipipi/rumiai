@@ -86,7 +86,7 @@ def merged_tool_policy(context: dict[str, Any] | None = None) -> dict[str, Any]:
                 "write_actions_require_approval": False,
                 "destructive_actions_require_approval": False,
                 "full_access": True,
-                "max_tool_calls": 80,
+                "max_tool_calls": None,
                 "yolo_mode": True,
             },
         )

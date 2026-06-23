@@ -26,6 +26,13 @@ from domain.tool.schema_adapter import (
     resolve_runtime_profile_context,
     tool_name_from_definition,
 )
+from domain.chat.loop_guard import (
+    LoopGuard,
+    build_loop_observation,
+    emergency_budget_from_context,
+    explicit_param_max_tool_calls,
+    loop_guard_config_from_context,
+)
 
 
 MAX_ATTACHMENT_TEXT_CHARS = 240_000
@@ -1519,15 +1526,22 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         insert_at = 1 if working_messages and working_messages[0].get("role") == "system" else 0
         working_messages.insert(insert_at, tool_context_message)
     response = None
+    connected_names = connected_tool_names(tools, context.get("runtime_profile") if isinstance(context, dict) else None)
     limit = max_tool_calls(context or {})
     if limit is None:
-        limit = int(params.get("max_tool_calls", 4) or 4)
-    connected_names = connected_tool_names(tools, context.get("runtime_profile") if isinstance(context, dict) else None)
-    if limit == 4 and connected_names.intersection({"browser_companion", "browser_computer", "browser_use", "computer_use"}):
-        limit = 12
+        limit = explicit_param_max_tool_calls(params)
+    if limit is None and str(os.environ.get("RUMI_FORCE_LEGACY_TOOL_LIMIT") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        limit = 12 if connected_names.intersection({"browser_companion", "browser_computer", "browser_use", "computer_use"}) else 4
+    emergency_budget = emergency_budget_from_context(context or {})
+    loop_guard = LoopGuard(
+        run_id=str((context or {}).get("run_id") or ""),
+        conversation_id=str((context or {}).get("conversation_id") or ""),
+        task_lineage_id=str((context or {}).get("task_lineage_id") or (context or {}).get("conversation_id") or ""),
+        config=loop_guard_config_from_context(context or {}),
+    )
 
     blocked_response = None
-    for step_index in range(max(1, limit + 1)):
+    for step_index in range(max(1, emergency_budget.max_model_turns)):
         _raise_if_cancelled(context)
         ai_params = {
             "model": model,
@@ -1648,13 +1662,15 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                     retry_response["metadata"] = retry_metadata
                     response = retry_response
                     tool_uses = _tool_use_blocks(response)
-        if tool_uses and step_index >= limit:
+        planned_tool_executions = len(tool_logs) + len(tool_uses or [])
+        if tool_uses and limit is not None and planned_tool_executions > limit:
             response = {
                 "content": [{"type": "text", "text": _tool_limit_message(limit, tool_uses)}],
                 "finish_reason": "tool_call_limit",
                 "usage": response.get("usage", {}) if isinstance(response, dict) else {},
                 "metadata": {
                     "max_tool_calls_reached": True,
+                    "tool_executions": len(tool_logs),
                     "pending_tool_uses": [
                         {
                             "name": str(block.get("name") or block.get("tool_name") or ""),
@@ -1674,6 +1690,56 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                     tool_count=len(tool_logs),
                     max_tool_calls=limit,
                 )
+            )
+            break
+        if tool_uses and step_index + 1 >= emergency_budget.max_model_turns:
+            response = {
+                "content": [{"type": "text", "text": "内部の安全予算に達したため、状態を保存して一時停止しました。"}],
+                "finish_reason": "paused_emergency_budget",
+                "usage": {},
+                "metadata": {
+                    "emergency_budget": {
+                        "paused": True,
+                        "reason": "max_model_turns",
+                        "model_turns": step_index + 1,
+                    }
+                },
+            }
+            _append_event(
+                events,
+                context,
+                _event(
+                    "run_paused_emergency",
+                    "内部安全予算に達したため一時停止しました",
+                    phase="run_paused_emergency",
+                    model_turns=step_index + 1,
+                    max_model_turns=emergency_budget.max_model_turns,
+                ),
+            )
+            break
+        if tool_uses and planned_tool_executions > emergency_budget.max_tool_executions:
+            response = {
+                "content": [{"type": "text", "text": "内部の安全予算に達したため、状態を保存して一時停止しました。"}],
+                "finish_reason": "paused_emergency_budget",
+                "usage": {},
+                "metadata": {
+                    "emergency_budget": {
+                        "paused": True,
+                        "reason": "max_tool_executions",
+                        "tool_executions": len(tool_logs),
+                    }
+                },
+            }
+            _append_event(
+                events,
+                context,
+                _event(
+                    "run_paused_emergency",
+                    "内部安全予算に達したため一時停止しました",
+                    phase="run_paused_emergency",
+                    tool_executions=len(tool_logs),
+                    max_tool_executions=emergency_budget.max_tool_executions,
+                ),
             )
             break
         if not tool_uses:
@@ -1696,8 +1762,28 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 )
             )
             break
+        proposal_decision = loop_guard.inspect_proposal(tool_uses)
+        if proposal_decision.kind == "duplicate_side_effect":
+            response = {
+                "content": [{"type": "text", "text": "同じ副作用を持つ操作が再提案されたため、実行前に停止しました。"}],
+                "finish_reason": "duplicate_side_effect_guard",
+                "usage": {},
+                "metadata": {"loop_guard": proposal_decision.event_data()},
+            }
+            _append_event(
+                events,
+                context,
+                _event(
+                    "run_paused_loop",
+                    "同じ副作用操作の再実行を防ぐため停止しました",
+                    phase="run_paused_loop",
+                    **proposal_decision.event_data(),
+                ),
+            )
+            break
 
         _append_assistant_tool_use_message(working_messages, tool_uses)
+        logs_before_cycle = len(tool_logs)
         for block in tool_uses:
             _raise_if_cancelled(context)
             tool_name = str(block.get("name") or block.get("tool_name") or "")
@@ -1787,6 +1873,57 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         if blocked_response is not None:
             response = blocked_response
             break
+        new_tool_logs = tool_logs[logs_before_cycle:]
+        if new_tool_logs:
+            observation = build_loop_observation(tool_uses=tool_uses, tool_logs=new_tool_logs, response=response)
+            loop_decision = loop_guard.observe_cycle(observation)
+            if loop_decision.kind == "recover":
+                working_messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "[RUNTIME LOOP RECOVERY DIRECTIVE - protected]\n"
+                            "A no-progress tool loop was detected. Continue with a different strategy. "
+                            "This directive grants no new capabilities or approvals.\n"
+                            f"reason: {loop_decision.reason}\n"
+                            f"forbidden_action_signature: {loop_decision.directive.get('forbidden_action_signature')}"
+                        ),
+                    }
+                )
+                _append_event(
+                    events,
+                    context,
+                    _event(
+                        "loop_recovery_completed",
+                        "作業内容を保持したまま、別方針で再開します",
+                        phase="loop_recovery_completed",
+                        **loop_decision.event_data(),
+                    ),
+                )
+                continue
+            if loop_decision.kind == "pause":
+                response = {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "同じパターンの自己回復が繰り返されたため、状態を保存して一時停止しました。",
+                        }
+                    ],
+                    "finish_reason": "paused_loop",
+                    "usage": {},
+                    "metadata": {"loop_guard": loop_decision.event_data()},
+                }
+                _append_event(
+                    events,
+                    context,
+                    _event(
+                        "run_paused_loop",
+                        "loop guard により一時停止しました",
+                        phase="run_paused_loop",
+                        **loop_decision.event_data(),
+                    ),
+                )
+                break
 
     response = response or _ai_error_response(
         model,

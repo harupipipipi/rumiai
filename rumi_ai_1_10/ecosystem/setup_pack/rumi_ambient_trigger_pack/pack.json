@@ -1,0 +1,54 @@
+{
+  "pack_id": "rumi_ambient_trigger_pack",
+  "display_name": "Rumi Ambient Trigger Pack",
+  "description": "Voice wake and camera pinch trigger extension for defaultspack input.",
+  "target_pack_id": "rumi_ambient_trigger_pack",
+  "version": "0.1.0",
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "compatibility": {
+    "target_pack_version": ">=0.1.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "marketplace": {
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "recommended": false,
+  "risk_level": "high",
+  "supports_all_ok": false,
+  "required_permissions": [
+    "host.microphone.capture",
+    "host.camera.capture",
+    "ambient.trigger.dispatch"
+  ],
+  "install_surfaces": [
+    "small_window",
+    "defaultspack_input"
+  ],
+  "install_prompt": {
+    "title": "このpackはマイク/カメラを要求しています",
+    "body": "Rumi側の host.microphone.capture / host.camera.capture / ambient.trigger.dispatch 許可は、OSのマイク/カメラ許可とは別に管理されます。",
+    "confirm_label": "許可",
+    "deny_label": "拒否",
+    "surface_question": "小型windowとdefaultspack inputへ追加しますか？"
+  },
+  "overlap_policy": {
+    "frontend": "add_small_control_window_and_settings_section",
+    "defaultspack_core": "do_not_override"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "High-risk ambient capture should remain opt-in until permission and audit UX is stable."
+  }
+}

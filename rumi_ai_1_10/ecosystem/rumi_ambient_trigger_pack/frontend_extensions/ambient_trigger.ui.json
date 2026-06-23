@@ -1,0 +1,64 @@
+{
+  "extension_id": "rumi_ambient_trigger_pack.ui",
+  "display_name": "Ambient Trigger Mini Window",
+  "surfaces": [
+    {
+      "id": "ambient_mini_window",
+      "aliases": ["small_window"],
+      "type": "floating_panel",
+      "component": "AmbientTriggerPanel",
+      "default_enabled": true
+    },
+    {
+      "id": "defaultspack_input",
+      "type": "input_dispatcher_alias",
+      "alias": "defaults.console.input",
+      "default_enabled": true
+    }
+  ],
+  "actions": [
+    {
+      "id": "ambient.test_send.hello",
+      "type": "ambient_trigger_test",
+      "label": "テスト送信",
+      "button_label": "テスト送信",
+      "description": "Send a fixed hello message through the ambient router to verify model permission, approval, and response flow without camera or audio.",
+      "source": "hook",
+      "trigger": "external_hook",
+      "mode": "preset_text",
+      "action_id": "chat.message",
+      "input_text": "hello",
+      "requires": ["ambient.trigger.dispatch"],
+      "approval_aware": true,
+      "local_first": true
+    }
+  ],
+  "install_prompt": {
+    "title": "このpackはマイク/カメラを要求しています",
+    "body": "Rumi側の host.microphone.capture / host.camera.capture / ambient.trigger.dispatch 許可は、OSのマイク/カメラ許可とは別に管理されます。",
+    "confirm_label": "許可",
+    "deny_label": "拒否",
+    "surface_question": "小型windowとdefaultspack inputへ追加しますか？"
+  },
+  "privacy": {
+    "store_audio": false,
+    "store_images": false,
+    "audit_event_only": true,
+    "pinch_audio": {
+      "capture_mode": "record_while_thumb_index_touch",
+      "dispatch_on": "pinch_release",
+      "persist_recording": false
+    },
+    "gesture_choice": {
+      "choices": [2, 3, 4],
+      "hold_ms": 3000,
+      "requires_audio": false,
+      "profile_mutation": false
+    },
+    "approval_gesture": {
+      "reject": "index_only_horizontal_swipe_or_choice_2",
+      "approve": "index_only_vertical_swipe_or_choice_3",
+      "requires_thumb_index_contact": false
+    }
+  }
+}
