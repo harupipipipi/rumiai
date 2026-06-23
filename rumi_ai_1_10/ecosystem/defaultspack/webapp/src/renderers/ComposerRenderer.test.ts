@@ -434,7 +434,7 @@ test("new conversation composer input is not locked to one visual line", () => {
   );
 
   assert.match(html, /rumi-composer-input-new-overlay/);
-  assert.match(html, /rumi-composer-input-new[^"]*min-h-\[22px\]/);
+  assert.match(html, /rumi-composer-input-new[^"]*min-h-\[24px\]/);
   assert.doesNotMatch(html, /rumi-composer-input-new[^"]*\sh-\[22px\]/);
   assert.match(html, /style="[^"]*flex:0 1 9ch;min-width:5.5rem;max-width:12rem/);
 });

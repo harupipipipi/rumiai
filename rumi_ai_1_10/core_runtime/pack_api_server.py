@@ -824,6 +824,8 @@ class PackAPIHandler(
             "owner_pack": "defaultspack",
             "inputs": {},
             "_facade": facade,
+            "_authenticated_device_id": self._authenticated_device_id or "",
+            "_authenticated_scopes": list(self._authenticated_scopes or []),
         }
 
     def _dispatch_defaultspack_http_route(
@@ -956,7 +958,20 @@ class PackAPIHandler(
             return False
         return True
 
-    def _check_bearer_auth(self) -> bool:
+    def _reset_request_auth_state(self) -> None:
+        self._request_auth_mode = None
+        self._panel_session = None
+        self._panel_session_cookie = None
+        self._authenticated_device_id = None
+        self._authenticated_scopes = []
+
+    def _check_bearer_auth(
+        self,
+        method: str | None = None,
+        path: str | None = None,
+        *,
+        allow_device: bool = True,
+    ) -> bool:
         auth_header = self.headers.get('Authorization', '')
 
         if not auth_header:
@@ -969,17 +984,32 @@ class PackAPIHandler(
 
         # 0. Device token (scoped mobile auth) — checked first for /api/mobile/v1/*
         if token.startswith("dtk_"):
+            self._authenticated_device_id = None
+            self._authenticated_scopes = []
+            if not allow_device or not method or not path:
+                return False
+            if not str(path).startswith("/api/mobile/v1/"):
+                return False
             try:
+                from ecosystem.defaultspack.domain.mobile.contract import required_device_scope
                 from ecosystem.defaultspack.domain.p2p.device_store import DeviceStore
+
+                required_scope = required_device_scope(method, path)
+                if not required_scope:
+                    return False
                 store = DeviceStore()
                 device = store.verify_token(token)
-                if device is not None:
-                    self._authenticated_device_id = device.device_id
-                    self._authenticated_scopes = list(device.scopes)
-                    store.touch(device.device_id)
-                    return True
+                if device is None:
+                    return False
+                scopes = set(device.scopes)
+                if required_scope not in scopes:
+                    return False
+                self._authenticated_device_id = device.device_id
+                self._authenticated_scopes = list(device.scopes)
+                store.touch(device.device_id)
+                return True
             except Exception:
-                pass
+                logger.debug("device token auth failed", exc_info=True)
             return False
 
         # 1. HMACKeyManager 経由で検証（ローテーション対応）
@@ -1037,7 +1067,7 @@ class PackAPIHandler(
         if session is None:
             return False
 
-        if method.upper() in {"POST", "PUT", "DELETE"}:
+        if method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
             if not self._check_panel_origin():
                 return False
             csrf_header = self.headers.get("X-Rumi-CSRF", "")
@@ -1056,7 +1086,7 @@ class PackAPIHandler(
         return True
 
     def _check_auth(self, method: str, path: str) -> bool:
-        if self._check_bearer_auth():
+        if self._check_bearer_auth(method, path):
             self._request_auth_mode = "bearer"
             return True
 
@@ -1068,7 +1098,7 @@ class PackAPIHandler(
         return False
 
     def _check_web_mount_auth(self, method: str, web_mount: dict[str, Any]) -> bool:
-        if self._check_bearer_auth():
+        if self._check_bearer_auth(method, web_mount.get("path_prefix", ""), allow_device=False):
             self._request_auth_mode = "bearer"
             return True
 
@@ -1551,9 +1581,7 @@ class PackAPIHandler(
         path = urlparse(self.path).path
         if not self._check_rate_limit(path):
             return
-        self._request_auth_mode = None
-        self._panel_session = None
-        self._panel_session_cookie = None
+        self._reset_request_auth_state()
 
         if self._handle_builtin_public_get(path):
             return
@@ -1675,9 +1703,7 @@ class PackAPIHandler(
         _pre_auth_path_post = urlparse(self.path).path
         if not self._check_rate_limit(_pre_auth_path_post):
             return
-        self._request_auth_mode = None
-        self._panel_session = None
-        self._panel_session_cookie = None
+        self._reset_request_auth_state()
         result: Any = None
 
         # --- テーブル駆動: pre-auth API ルート ---
@@ -2182,9 +2208,7 @@ class PackAPIHandler(
         _pre_auth_path_put = urlparse(self.path).path
         if not self._check_rate_limit(_pre_auth_path_put):
             return
-        self._request_auth_mode = None
-        self._panel_session = None
-        self._panel_session_cookie = None
+        self._reset_request_auth_state()
         # --- テーブル駆動: 認証チェック ---
         if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth("PUT", _pre_auth_path_put):
             self._discard_request_body()
@@ -2221,15 +2245,46 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
     def do_PATCH(self) -> None:
-        return self.do_PUT()
+        """PATCH method for table-driven API routes."""
+        _pre_auth_path_patch = urlparse(self.path).path
+        if not self._check_rate_limit(_pre_auth_path_patch):
+            return
+        self._reset_request_auth_state()
+        if not self._is_pre_auth_route("PATCH", _pre_auth_path_patch) and not self._check_auth("PATCH", _pre_auth_path_patch):
+            self._discard_request_body()
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return
+
+        try:
+            body = self._parse_body()
+            if body is None:
+                return
+            parsed = urlparse(self.path)
+            path = parsed.path
+            query = {
+                key: values[-1]
+                for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
+                if values
+            }
+            if self._dispatch_api_route("PATCH", path, body, query=query):
+                return
+            if self._dispatch_defaultspack_http_route("PATCH", path, body):
+                return
+            match = self._match_pack_route(path, "PATCH")
+            if match:
+                self._handle_pack_route_request(path, body, "PATCH", match)
+            else:
+                logger.debug("Unmatched PATCH path: %s", path)
+                self._send_response(APIResponse(False, error="Not found"), 404)
+        except Exception as e:
+            _log_internal_error("do_PATCH", e)
+            self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
     def do_DELETE(self) -> None:
         _pre_auth_path_del = urlparse(self.path).path
         if not self._check_rate_limit(_pre_auth_path_del):
             return
-        self._request_auth_mode = None
-        self._panel_session = None
-        self._panel_session_cookie = None
+        self._reset_request_auth_state()
         result: Any = None
         # --- テーブル駆動: 認証チェック ---
         if not self._is_pre_auth_route("DELETE", _pre_auth_path_del) and not self._check_auth("DELETE", _pre_auth_path_del):

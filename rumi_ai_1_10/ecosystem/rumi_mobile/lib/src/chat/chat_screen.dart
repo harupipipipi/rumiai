@@ -9,6 +9,7 @@ import '../data/pc/device_store.dart';
 import '../data/pc/pc_chat_backend.dart';
 import '../domain/chat_event.dart';
 import '../domain/connection_state.dart';
+import '../domain/conversation_backend.dart';
 import '../domain/conversation_locator.dart';
 import '../domain/space.dart';
 import '../features/chat/connection_chip.dart';
@@ -16,6 +17,7 @@ import '../settings/api_config_store.dart';
 import '../settings/settings_screen.dart';
 import '../app_theme.dart';
 import 'chat_drawer.dart';
+import 'chat_models.dart';
 import 'chat_store.dart';
 import 'composer_bar.dart';
 import 'message_view.dart';
@@ -51,6 +53,7 @@ class _ChatScreenState extends State<ChatScreen> {
   List<Space> _spaces = [Space.local];
   String _activeSpaceId = Space.local.id;
   List<PcConversationItem> _pcConversations = [];
+  ConversationSnapshot? _activePcSnapshot;
   bool _loadingPc = false;
   List<PairedDevice> _pairedDevices = [];
 
@@ -108,33 +111,32 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadPcConversations() async {
-    final space = _spaces.where((s) => s.id == _activeSpaceId).firstOrNull;
+    final space = _activeSpace();
     if (space == null || !space.isPc) {
       _pcConversations = [];
       return;
     }
-    final connection = space.pcConnection;
-    if (connection == null || !connection.isConfigured) {
+    final backend = _ensurePcBackendForSpace(space);
+    if (backend == null) {
       _pcConversations = [];
       return;
     }
     setState(() => _loadingPc = true);
     try {
-      final backend = PcConversationBackend(
-          connection: connection, deviceId: space.deviceId);
       final summaries = await backend.listConversations();
-      backend.close();
       if (!mounted) return;
       setState(() {
         _pcConversations = summaries
-            .map((s) => PcConversationItem(
-                  id: s.id,
-                  title: s.title,
-                  messageCount: s.messageCount,
-                  updatedAt: s.updatedAt,
-                  pinned: s.pinned,
-                  preview: '',
-                ))
+            .map(
+              (s) => PcConversationItem(
+                id: s.id,
+                title: s.title,
+                messageCount: s.messageCount,
+                updatedAt: s.updatedAt,
+                pinned: s.pinned,
+                preview: '',
+              ),
+            )
             .toList();
         _loadingPc = false;
       });
@@ -159,6 +161,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _activeSpaceId = spaceId;
       _pcConversations = [];
+      _activePcSnapshot = null;
     });
     if (spaceId != Space.local.id) {
       await _loadPcConversations();
@@ -195,6 +198,46 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Space? _activeSpace() {
+    for (final space in _spaces) {
+      if (space.id == _activeSpaceId) return space;
+    }
+    return Space.local;
+  }
+
+  bool get _activeSpaceIsPc => _activeSpace()?.isPc ?? false;
+
+  PcConversationBackend? _ensurePcBackendForSpace(Space space) {
+    final connection = space.pcConnection;
+    if (connection == null || !connection.isConfigured) return null;
+    final current = _pcBackend;
+    if (current != null &&
+        current.connection.baseUrl == connection.baseUrl &&
+        current.connection.token == connection.token &&
+        current.deviceId == space.deviceId) {
+      _router.setPc(current);
+      return current;
+    }
+    _pcBackend?.close();
+    final backend = PcConversationBackend(
+      connection: connection,
+      deviceId: space.deviceId,
+    );
+    _pcBackend = backend;
+    _router.setPc(backend);
+    return backend;
+  }
+
+  Conversation? _displayConversation() {
+    if (_activeSpaceIsPc) return _activePcSnapshot?.conversation;
+    return widget.store.active;
+  }
+
+  String? _displayActiveId() {
+    if (_activeSpaceIsPc) return _activePcSnapshot?.locator.conversationId;
+    return widget.store.active?.id;
+  }
+
   void _onScroll() {}
 
   void _scrollToBottom({bool animate = true}) {
@@ -202,8 +245,11 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!_scrollController.hasClients) return;
       final max = _scrollController.position.maxScrollExtent;
       if (animate) {
-        _scrollController.animateTo(max,
-            duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
+        _scrollController.animateTo(
+          max,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+        );
       } else {
         _scrollController.jumpTo(max);
       }
@@ -211,13 +257,87 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _newChat() async {
+    if (_activeSpaceIsPc) {
+      final space = _activeSpace();
+      if (space == null) return;
+      final backend = _ensurePcBackendForSpace(space);
+      if (backend == null) {
+        _promptPcConfigure();
+        return;
+      }
+      try {
+        final locator = await backend.createConversation(
+          CreateConversationRequest(
+            authority: ConversationAuthorityKind.pc,
+            deviceId: space.deviceId,
+          ),
+        );
+        final snapshot = await backend.getConversation(locator);
+        if (!mounted) return;
+        setState(() => _activePcSnapshot = snapshot);
+        await _loadPcConversations();
+      } catch (e) {
+        _updateSpaceOffline(_activeSpaceId, true);
+        if (mounted) setState(() {});
+      }
+      return;
+    }
     await widget.store.createAndPersist();
     if (mounted) setState(() {});
   }
 
   Future<void> _select(String id) async {
+    if (_activeSpaceIsPc) {
+      await _selectPcConversation(id);
+      return;
+    }
     await widget.store.select(id);
     if (mounted) setState(() {});
+  }
+
+  Future<void> _selectPcConversation(String id) async {
+    final space = _activeSpace();
+    if (space == null) return;
+    final backend = _ensurePcBackendForSpace(space);
+    if (backend == null) {
+      _promptPcConfigure();
+      return;
+    }
+    try {
+      final locator = ConversationLocator.pc(id, deviceId: space.deviceId);
+      final snapshot = await backend.getConversation(locator);
+      if (!mounted) return;
+      setState(() => _activePcSnapshot = snapshot);
+      _scrollToBottom(animate: false);
+    } catch (e) {
+      _updateSpaceOffline(_activeSpaceId, true);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _reconnectActiveSpace() async {
+    _updateSpaceOffline(_activeSpaceId, false);
+    if (mounted) setState(() {});
+    await _loadPcConversations();
+  }
+
+  Future<void> _continuePcConversationLocally() async {
+    final snapshot = _activePcSnapshot;
+    if (snapshot == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('コピーできるPC会話がありません')));
+      return;
+    }
+    final local = await widget.store.createAndPersist();
+    await widget.store.rename(local.id, snapshot.conversation.title);
+    for (final message in snapshot.conversation.messages) {
+      await widget.store.addMessage(local.id, message.copy());
+    }
+    setState(() {
+      _activeSpaceId = Space.local.id;
+      _activePcSnapshot = null;
+    });
   }
 
   Future<void> _delete(String id) async {
@@ -244,8 +364,9 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('キャンセル')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル'),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
             child: const Text('保存'),
@@ -260,20 +381,22 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _openSettings() async {
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => SettingsScreen(
-        configStore: widget.configStore,
-        deviceStore: widget.deviceStore,
-        onApiChanged: (next) {
-          setState(() => _apiConfig = next);
-        },
-        onDevicePaired: (device) async {
-          await _loadPcConnection();
-          await _loadSpaces();
-          if (mounted) setState(() {});
-        },
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SettingsScreen(
+          configStore: widget.configStore,
+          deviceStore: widget.deviceStore,
+          onApiChanged: (next) {
+            setState(() => _apiConfig = next);
+          },
+          onDevicePaired: (device) async {
+            await _loadPcConnection();
+            await _loadSpaces();
+            if (mounted) setState(() {});
+          },
+        ),
       ),
-    ));
+    );
     final refreshed = await widget.configStore.loadApi();
     await _loadPcConnection();
     await _loadSpaces();
@@ -282,6 +405,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _send(String text) async {
     if (text.trim().isEmpty) return;
+    if (_activeSpaceIsPc) {
+      await _sendToPc(text);
+      return;
+    }
     final config = _apiConfig;
     if (config == null || !config.isConfigured) {
       _promptConfigure();
@@ -335,10 +462,164 @@ class _ChatScreenState extends State<ChatScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _sendToPc(String text) async {
+    final space = _activeSpace();
+    if (space == null) return;
+    final backend = _ensurePcBackendForSpace(space);
+    if (backend == null) {
+      _promptPcConfigure();
+      return;
+    }
+
+    var snapshot = _activePcSnapshot;
+    if (snapshot == null) {
+      final locator = await backend.createConversation(
+        CreateConversationRequest(
+          authority: ConversationAuthorityKind.pc,
+          deviceId: space.deviceId,
+        ),
+      );
+      snapshot = await backend.getConversation(locator);
+      if (!mounted) return;
+      setState(() => _activePcSnapshot = snapshot);
+    }
+    final locator = snapshot.locator;
+    final clientMessageId = _uuid.v4();
+    final expectedRevision = snapshot.revision;
+    _appendPcMessage(
+      ChatMessage(
+        id: clientMessageId,
+        role: ChatRole.user,
+        content: text,
+        createdAt: DateTime.now(),
+      ),
+    );
+
+    setState(() {
+      _busy = true;
+      _streaming = true;
+    });
+    _scrollToBottom();
+
+    try {
+      await for (final event in backend.sendMessage(
+        locator: locator,
+        text: text,
+        clientMessageId: clientMessageId,
+        expectedRevision: expectedRevision,
+      )) {
+        if (!mounted) break;
+        _applyPcEvent(event);
+        _scrollToBottom(animate: false);
+      }
+      try {
+        final refreshed = await backend.getConversation(locator);
+        if (mounted) setState(() => _activePcSnapshot = refreshed);
+        await _loadPcConversations();
+      } catch (_) {
+        // Keep optimistic snapshot if refresh fails.
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _streaming = false;
+        });
+      }
+    }
+  }
+
+  void _appendPcMessage(ChatMessage message) {
+    final snapshot = _activePcSnapshot;
+    if (snapshot == null) return;
+    final messages = snapshot.conversation.messages;
+    if (messages.any((m) => m.id == message.id)) return;
+    setState(() {
+      messages.add(message);
+      snapshot.conversation.revision += 1;
+      snapshot.conversation.updatedAt = DateTime.now();
+    });
+  }
+
+  void _updatePcMessage(
+    String id,
+    String content, {
+    bool? pending,
+    bool? error,
+  }) {
+    final snapshot = _activePcSnapshot;
+    if (snapshot == null) return;
+    final messages = snapshot.conversation.messages;
+    final matches = messages.where((m) => m.id == id);
+    if (matches.isEmpty) return;
+    final message = matches.first;
+    setState(() {
+      message.content = content;
+      if (pending != null) message.pending = pending;
+      if (error != null) message.error = error;
+      snapshot.conversation.updatedAt = DateTime.now();
+    });
+  }
+
+  void _applyPcEvent(ChatEvent event) {
+    switch (event) {
+      case ChatRunStarted():
+        _appendPcMessage(
+          ChatMessage(
+            id: event.assistantMessageId,
+            role: ChatRole.assistant,
+            content: '',
+            createdAt: DateTime.now(),
+            pending: true,
+          ),
+        );
+        break;
+      case ChatDelta():
+        _updatePcMessage(
+          event.assistantMessageId,
+          event.accumulatedContent,
+          pending: true,
+        );
+        break;
+      case ChatMessageCommitted():
+        _updatePcMessage(
+          event.messageId,
+          event.content,
+          pending: false,
+          error: event.error,
+        );
+        break;
+      case ChatErrorEvent():
+        final assistantId = event.assistantMessageId;
+        if (assistantId != null) {
+          _updatePcMessage(
+            assistantId,
+            event.message,
+            pending: false,
+            error: true,
+          );
+        }
+        break;
+      case ChatRunCompleted():
+      case ChatRunStopped():
+      case ToolCallEvent():
+      case ApprovalEvent():
+        break;
+    }
+  }
+
   void _stop() {
+    if (_activeSpaceIsPc) {
+      final locator = _activePcSnapshot?.locator;
+      if (locator != null) {
+        unawaited(_router.backendFor(locator).stop(locator.conversationId));
+      }
+      setState(() => _streaming = false);
+      return;
+    }
     final id = widget.store.active?.id;
     if (id != null) {
-      _router.local.stop(id);
+      unawaited(_router.local.stop(id));
     }
     setState(() => _streaming = false);
   }
@@ -347,16 +628,22 @@ class _ChatScreenState extends State<ChatScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: const Text('APIを設定してください'),
-        action: SnackBarAction(
-          label: '設定',
-          onPressed: _openSettings,
-        ),
+        action: SnackBarAction(label: '設定', onPressed: _openSettings),
+      ),
+    );
+  }
+
+  void _promptPcConfigure() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('PCとペアリングしてください'),
+        action: SnackBarAction(label: '設定', onPressed: _openSettings),
       ),
     );
   }
 
   String _activeSpaceLabel() {
-    final space = _spaces.where((s) => s.id == _activeSpaceId).firstOrNull;
+    final space = _activeSpace();
     if (space == null) return '';
     if (space.isLocal) return 'このスマホ';
     return space.isOffline ? '${space.label} — オフライン' : space.label;
@@ -376,7 +663,7 @@ class _ChatScreenState extends State<ChatScreen> {
               conversations: widget.store.conversations,
               pcConversations: _pcConversations,
               loadingPc: _loadingPc,
-              activeId: widget.store.active?.id,
+              activeId: _displayActiveId(),
               onNewChat: () {
                 Navigator.of(context).pop();
                 _newChat();
@@ -392,6 +679,14 @@ class _ChatScreenState extends State<ChatScreen> {
               onDelete: _delete,
               onRename: _rename,
               onPin: _pin,
+              onReconnectSpace: () {
+                Navigator.of(context).pop();
+                _reconnectActiveSpace();
+              },
+              onContinueOffline: () {
+                Navigator.of(context).pop();
+                _continuePcConversationLocally();
+              },
               onOpenSettings: () {
                 Navigator.of(context).pop();
                 _openSettings();
@@ -410,7 +705,7 @@ class _ChatScreenState extends State<ChatScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.store.active?.title ?? 'Rumi',
+                  _displayConversation()?.title ?? 'Rumi',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -453,7 +748,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (snapshot.connectionState != ConnectionState.done) {
       return const Center(child: CircularProgressIndicator());
     }
-    final convo = widget.store.active;
+    final convo = _displayConversation();
     if (convo == null || convo.messages.isEmpty) {
       return _EmptyState(onSuggest: _send, busy: _busy);
     }
@@ -470,11 +765,7 @@ class _ChatScreenState extends State<ChatScreen> {
             },
           ),
         ),
-        ComposerBar(
-          onSend: _send,
-          onStop: _stop,
-          busy: _streaming,
-        ),
+        ComposerBar(onSend: _send, onStop: _stop, busy: _streaming),
       ],
     );
   }
@@ -510,26 +801,36 @@ class _EmptyState extends StatelessWidget {
                     color: colors.accent,
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: const Icon(Icons.auto_awesome,
-                      color: Colors.white, size: 28),
+                  child: const Icon(
+                    Icons.auto_awesome,
+                    color: Colors.white,
+                    size: 28,
+                  ),
                 ),
                 const SizedBox(height: 16),
-                Text('Rumiへようこそ',
-                    style: theme.textTheme.titleLarge
-                        ?.copyWith(fontWeight: FontWeight.w700)),
+                Text(
+                  'Rumiへようこそ',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(height: 6),
-                Text('何でも聞いてください。スマホ単体でも動作します。',
-                    style: theme.textTheme.bodySmall),
+                Text(
+                  '何でも聞いてください。スマホ単体でも動作します。',
+                  style: theme.textTheme.bodySmall,
+                ),
                 const SizedBox(height: 24),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   alignment: WrapAlignment.center,
                   children: _suggestions
-                      .map((s) => ActionChip(
-                            label: Text(s),
-                            onPressed: busy ? null : () => onSuggest(s),
-                          ))
+                      .map(
+                        (s) => ActionChip(
+                          label: Text(s),
+                          onPressed: busy ? null : () => onSuggest(s),
+                        ),
+                      )
                       .toList(),
                 ),
               ],

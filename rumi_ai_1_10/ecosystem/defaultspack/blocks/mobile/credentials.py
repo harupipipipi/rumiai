@@ -30,6 +30,8 @@ def _now_ms() -> int:
 
 
 def _transfers_dir(store_path) -> str:
+    import json
+    import json
     import pathlib
     d = pathlib.Path(store_path) / "credential_transfers"
     d.mkdir(parents=True, exist_ok=True)
@@ -51,6 +53,31 @@ def _merged(input_data: dict) -> dict:
     return merged
 
 
+def _authenticated_device_id(context) -> str:
+    if isinstance(context, dict):
+        return str(
+            context.get("_authenticated_device_id")
+            or context.get("authenticated_device_id")
+            or ""
+        ).strip()
+    return ""
+
+
+def _load_transfer(path):
+    import json
+
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def _device_mismatch(record: dict, context) -> bool:
+    device_id = _authenticated_device_id(context)
+    return not device_id or device_id != str(record.get("device_id") or "").strip()
+
+
 def create_transfer(input_data, context=None):
     """PC creates an encrypted credential transfer for a specific device."""
     args = _merged(input_data)
@@ -60,35 +87,16 @@ def create_transfer(input_data, context=None):
 
     provider_id = str(args.get("provider_id") or "").strip()
     label = str(args.get("label") or "").strip()
-    api_key = str(args.get("api_key") or args.get("secret") or "").strip()
-    base_url = str(args.get("base_url") or "").strip()
-    default_model = str(args.get("default_model") or "").strip()
     ciphertext = str(args.get("ciphertext") or "").strip()
     nonce = str(args.get("nonce") or "").strip()
     algorithm = str(args.get("algorithm") or "x25519-aes-gcm").strip()
 
-    if not ciphertext:
-        # If no pre-encrypted ciphertext, store the plaintext temporarily
-        # for the PC to encrypt before sending. In production, the PC
-        # encrypts with the device's public key before calling this.
-        # For now, accept plaintext and wrap it.
-        if not api_key:
-            return error("ciphertext or api_key is required", "INVALID_INPUT")
-        # Store as a simple base64 wrapper (real E2E encryption happens
-        # in the webapp JS before calling this endpoint)
-        import base64
-        payload = {
-            "provider_id": provider_id,
-            "label": label,
-            "api_key": api_key,
-            "base_url": base_url,
-            "default_model": default_model,
-        }
-        import json
-        ciphertext = base64.b64encode(
-            json.dumps(payload).encode("utf-8")
-        ).decode("ascii")
-        algorithm = "base64-wrapper"
+    if _authenticated_device_id(context):
+        return error("credential transfers must be created from the PC", "FORBIDDEN")
+    if not ciphertext or not nonce:
+        return error("ciphertext and nonce are required", "INVALID_INPUT")
+    if algorithm in {"base64-wrapper", "plaintext"}:
+        return error("plaintext credential transfer is not allowed", "INVALID_INPUT")
 
     s = settings_from(input_data, context)
     transfer_id = "transfer-" + uuid.uuid4().hex[:12]
@@ -103,7 +111,7 @@ def create_transfer(input_data, context=None):
         "algorithm": algorithm,
         "ciphertext": ciphertext,
         "nonce": nonce,
-        "api_key_suffix": api_key[-4:] if api_key else "",
+        "status": "pending",
         "created_at": now,
         "expires_at": expires_at,
         "acked": False,
@@ -120,9 +128,8 @@ def create_transfer(input_data, context=None):
         encoding="utf-8",
     )
 
-    # Don't return the ciphertext in the response — only metadata
     safe = {k: v for k, v in record.items() if k != "ciphertext"}
-    return ok({"transfer": safe})
+    return ok({"transfer": safe, "transfer_id": transfer_id, "status": "pending"})
 
 
 def get_transfer(input_data, context=None):
@@ -138,10 +145,11 @@ def get_transfer(input_data, context=None):
     transfer_path = pathlib.Path(s.store_path) / "credential_transfers" / f"{transfer_id}.json"
     if not transfer_path.exists():
         return error("transfer not found or expired", "NOT_FOUND")
-    try:
-        record = json.loads(transfer_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    record = _load_transfer(transfer_path)
+    if record is None:
         return error("transfer record corrupted", "CORRUPT")
+    if _device_mismatch(record, context):
+        return error("transfer is not for this device", "FORBIDDEN")
 
     if _now_ms() > record.get("expires_at", 0):
         transfer_path.unlink(missing_ok=True)
@@ -150,6 +158,7 @@ def get_transfer(input_data, context=None):
     if record.get("acked"):
         return error("transfer already acknowledged", "ALREADY_ACKED")
 
+    record["status"] = "pending"
     return ok({"transfer": record})
 
 
@@ -166,7 +175,12 @@ def ack_transfer(input_data, context=None):
     if not transfer_path.exists():
         return error("transfer not found", "NOT_FOUND")
 
-    # Delete the transfer record after ACK
+    record = _load_transfer(transfer_path)
+    if record is None:
+        return error("transfer record corrupted", "CORRUPT")
+    if _device_mismatch(record, context):
+        return error("transfer is not for this device", "FORBIDDEN")
+
     transfer_path.unlink(missing_ok=True)
     return ok({"acked": True, "transfer_id": transfer_id})
 

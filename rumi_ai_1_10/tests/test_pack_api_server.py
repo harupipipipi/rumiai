@@ -278,6 +278,30 @@ class TestCheckAuth:
         )
         assert handler._check_auth("GET", "/api/packs") is False
 
+    def test_device_token_is_limited_to_mobile_scope(self, tmp_path, monkeypatch) -> None:
+        from ecosystem.defaultspack.domain.p2p import device_store as device_store_module
+        from ecosystem.defaultspack.domain.p2p.device_store import DeviceStore
+
+        monkeypatch.setattr(
+            device_store_module,
+            "default_store_path",
+            lambda: tmp_path,
+        )
+        _device, token = DeviceStore(tmp_path).issue_token(
+            "mobile-1",
+            scopes=["chat.read"],
+        )
+        handler = _make_handler(
+            headers=_make_headers(Authorization=f"Bearer {token}"),
+            _hmac_key_manager=None,
+            internal_token="",
+        )
+
+        assert handler._check_auth("GET", "/api/mobile/v1/conversations") is True
+        assert handler._authenticated_device_id == "mobile-1"
+        assert handler._check_auth("POST", "/api/mobile/v1/conversations/c1/stream") is False
+        assert handler._check_auth("GET", "/api/packs") is False
+
     def test_panel_session_auth_success_for_get(self) -> None:
         panel_mgr = PanelAuthManager(bootstrap_secret="bootstrap")
         reset_panel_auth_manager_for_tests(panel_mgr)

@@ -4,7 +4,7 @@ import { Check, Loader2, Send, Smartphone, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import { mobileApiResources } from "../features/mobile/resources/mobileApiResources";
-import type { MobileDevice, CredentialTransferPayload } from "../features/mobile/resources/mobileApiResources";
+import type { MobileDevice } from "../features/mobile/resources/mobileApiResources";
 
 type CredentialTransferModalProps = {
   providerId: string;
@@ -19,10 +19,7 @@ type CredentialTransferModalProps = {
 export function CredentialTransferModal({
   providerId,
   providerLabel,
-  apiKey,
   apiId,
-  baseUrl,
-  defaultModel,
   onClose,
 }: CredentialTransferModalProps) {
   const [devices, setDevices] = useState<MobileDevice[]>([]);
@@ -76,16 +73,7 @@ export function CredentialTransferModal({
     setBusy(true);
     setError("");
     try {
-      const payloads: CredentialTransferPayload[] = Array.from(selected).map((deviceId) => ({
-        device_id: deviceId,
-        provider_id: providerId,
-        api_key: apiKey,
-        api_id: apiId,
-        base_url: baseUrl,
-        default_model: defaultModel,
-      }));
-      await Promise.all(payloads.map((p) => mobileApiResources.createCredentialTransfer(p)));
-      setDone(true);
+      throw new Error("端末へのAPI設定転送にはE2E暗号化が必要です。暗号化payloadを作成できないため送信しません。");
     } catch (err) {
       setError(err instanceof Error ? err.message : "送信に失敗しました");
     } finally {

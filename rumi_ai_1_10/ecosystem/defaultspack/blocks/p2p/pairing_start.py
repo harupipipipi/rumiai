@@ -6,6 +6,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import ok
+from domain.mobile.base_urls import mobile_base_urls_from_headers
 from blocks.p2p._helpers import settings_from
 from domain.p2p.pairing import PairingManager
 
@@ -23,4 +24,8 @@ def run(input_data, context=None):
         allowed_company_ids=input_data.get("allowed_company_ids") if isinstance(input_data.get("allowed_company_ids"), list) else None,
         settings=settings,
     )
-    return ok({"pairing": session.as_dict()})
+    pairing = session.as_dict()
+    pairing["base_urls"] = mobile_base_urls_from_headers(
+        input_data.get("_headers") if isinstance(input_data.get("_headers"), dict) else None,
+    )
+    return ok({"pairing": pairing})

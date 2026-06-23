@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import error, ok
 from blocks.p2p._helpers import settings_from
 from domain.p2p.device_store import DeviceStore, DEFAULT_SCOPES, ALL_SCOPES
-from domain.p2p.pairing import PairingManager
+from domain.p2p.pairing import PairingManager, hmac_compare_code
 
 
 def _merged(input_data: dict) -> dict:
@@ -53,9 +53,10 @@ def claim(input_data, context=None):
     manager = PairingManager(s.store_path)
     result = manager.claim_pairing(
         pairing_id,
+        code=str(args.get("code") or ""),
         device_id=device_id,
         device_label=str(args.get("device_label") or args.get("label") or ""),
-        device_public_key=str(args.get("device_public_key") or ""),
+        device_public_key=str(args.get("device_public_key") or args.get("public_key") or ""),
         requested_capabilities=args.get("requested_capabilities") if isinstance(args.get("requested_capabilities"), list) else None,
     )
     if not result.get("ok"):
@@ -119,17 +120,27 @@ def status(input_data, context=None):
     session = manager.get_pairing(pairing_id)
     if session is None:
         return error("pairing not found", "PAIRING_NOT_FOUND")
-    result: dict = {"pairing": session.as_dict()}
-    # When accepted, include the device token so the mobile can store it.
-    # The token was issued at approve time; we look it up from DeviceStore.
-    if session.status == "accepted" and session.claimed_device_id:
+    pairing = session.as_dict()
+    result: dict = dict(pairing)
+    result["pairing"] = pairing
+    if session.status == "approved" and session.claimed_device_id:
+        result["approved_device_id"] = session.claimed_device_id
+
+    # After PC approval, the mobile may pick up a device token only if it
+    # presents the original pairing code and the claimed device id.
+    requested_code = str(args.get("code") or "").strip()
+    requested_device_id = str(args.get("device_id") or "").strip()
+    can_pick_up_token = (
+        bool(requested_code)
+        and bool(requested_device_id)
+        and hmac_compare_code(requested_code, session.code)
+        and hmac_compare_code(requested_device_id, session.claimed_device_id)
+    )
+    if session.status == "approved" and session.claimed_device_id and can_pick_up_token:
         try:
             ds = DeviceStore(s.store_path)
             device = ds.get_device(session.claimed_device_id)
             if device and device.active and device.pairing_id == pairing_id:
-                # Re-issue a fresh token for the mobile to pick up.
-                # This is safe because the mobile proved its identity via
-                # the claim flow (device_id + public_key).
                 device, token = ds.issue_token(
                     session.claimed_device_id,
                     label=session.claimed_device_label,
@@ -139,6 +150,8 @@ def status(input_data, context=None):
                 )
                 result["device_token"] = token
                 result["device"] = device.as_dict()
+                result["scopes"] = list(device.scopes)
+                result["confirmation_code"] = device.confirmation_code
                 result["pc_base_url"] = _detect_base_url(input_data, context)
         except Exception:
             pass

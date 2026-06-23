@@ -21,6 +21,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import ok
+from domain.mobile.contract import mobile_capability_flags
 
 
 def _server_info() -> dict:
@@ -35,12 +36,7 @@ def run(input_data, context):
     return ok(
         {
             "server": _server_info(),
-            "capabilities": {
-                "chat": True,
-                "tools": True,
-                "approvals": True,
-                "credential_transfer": True,
-            },
+            "capabilities": mobile_capability_flags(),
             "cursor": "event-0",
         }
     )

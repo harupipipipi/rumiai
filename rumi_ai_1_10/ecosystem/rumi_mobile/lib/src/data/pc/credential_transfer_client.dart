@@ -15,37 +15,38 @@ class CredentialTransfer {
   const CredentialTransfer({
     required this.transferId,
     required this.status,
-    this.apiKey,
-    this.baseUrl,
-    this.model,
+    this.ciphertext,
+    this.nonce,
+    this.algorithm,
     this.label,
   });
 
   final String transferId;
   final String status;
-  final String? apiKey;
-  final String? baseUrl;
-  final String? model;
+  final String? ciphertext;
+  final String? nonce;
+  final String? algorithm;
   final String? label;
 
   bool get isPending => status == 'pending';
-  bool get isCompleted => status == 'completed';
+  bool get isCompleted => status == 'acked' || status == 'completed';
 
   factory CredentialTransfer.fromJson(Map<String, dynamic> json) {
+    final transfer = json['transfer'] as Map<String, dynamic>? ?? json;
     return CredentialTransfer(
-      transferId: json['transfer_id'] as String? ?? '',
-      status: json['status'] as String? ?? '',
-      apiKey: json['api_key'] as String?,
-      baseUrl: json['base_url'] as String?,
-      model: json['model'] as String?,
-      label: json['label'] as String?,
+      transferId: transfer['transfer_id'] as String? ?? '',
+      status: transfer['status'] as String? ?? json['status'] as String? ?? '',
+      ciphertext: transfer['ciphertext'] as String?,
+      nonce: transfer['nonce'] as String?,
+      algorithm: transfer['algorithm'] as String?,
+      label: transfer['label'] as String?,
     );
   }
 }
 
 class CredentialTransferClient {
   CredentialTransferClient({http.Client? client})
-      : _http = client ?? http.Client();
+    : _http = client ?? http.Client();
 
   final http.Client _http;
   bool _closed = false;
@@ -56,9 +57,9 @@ class CredentialTransferClient {
   }
 
   Map<String, String> _headers(String token) => {
-        'Authorization': 'Bearer $token',
-        'Accept': 'application/json',
-      };
+    'Authorization': 'Bearer $token',
+    'Accept': 'application/json',
+  };
 
   Uri _uri(String baseUrl, String path) {
     var trimmed = baseUrl.trim();
@@ -77,8 +78,10 @@ class CredentialTransferClient {
     if (_closed) {
       throw const CredentialTransferException('クライアントは閉じられました。');
     }
-    final uri =
-        _uri(pc.baseUrl, '/api/mobile/v1/credential-transfers/$transferId');
+    final uri = _uri(
+      pc.baseUrl,
+      '/api/mobile/v1/credential-transfers/$transferId',
+    );
     final resp = await _http
         .get(uri, headers: _headers(pc.token))
         .timeout(const Duration(seconds: 15));
@@ -101,8 +104,10 @@ class CredentialTransferClient {
     if (_closed) {
       throw const CredentialTransferException('クライアントは閉じられました。');
     }
-    final uri =
-        _uri(pc.baseUrl, '/api/mobile/v1/credential-transfers/$transferId/ack');
+    final uri = _uri(
+      pc.baseUrl,
+      '/api/mobile/v1/credential-transfers/$transferId/ack',
+    );
     final resp = await _http
         .post(uri, headers: _headers(pc.token))
         .timeout(const Duration(seconds: 15));

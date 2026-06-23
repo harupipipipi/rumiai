@@ -18,9 +18,8 @@ const SCOPE_LABELS: Record<string, string> = {
   "chat.read": "チャットの読み取り",
   "chat.write": "チャットの送信",
   "tools.observe": "ツールの監視",
-  "tools.execute": "ツールの実行",
-  "settings.read": "設定の読み取り",
-  "settings.write": "設定の変更",
+  "tools.approve": "ツール承認",
+  "credentials.request": "API設定の受け取り",
 };
 
 function scopeLabel(scope: string): string {

@@ -102,15 +102,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   ApiConfig _buildConfig() => ApiConfig(
-        baseUrl: _baseUrl.text.trim(),
-        apiKey: _apiKey.text.trim(),
-        model: _model.text.trim().isEmpty
-            ? ApiConfig.defaults.model
-            : _model.text.trim(),
-        label: _label.text.trim(),
-        systemPrompt: _systemPrompt.text.trim(),
-        temperature: _config.temperature,
-      );
+    baseUrl: _baseUrl.text.trim(),
+    apiKey: _apiKey.text.trim(),
+    model: _model.text.trim().isEmpty
+        ? ApiConfig.defaults.model
+        : _model.text.trim(),
+    label: _label.text.trim(),
+    systemPrompt: _systemPrompt.text.trim(),
+    temperature: _config.temperature,
+  );
 
   Future<void> _save() async {
     setState(() => _saving = true);
@@ -119,7 +119,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final pc = _pcUrl.text.trim().isEmpty || _pcToken.text.trim().isEmpty
         ? null
         : PcConnection(
-            baseUrl: _pcUrl.text.trim(), token: _pcToken.text.trim());
+            baseUrl: _pcUrl.text.trim(),
+            token: _pcToken.text.trim(),
+          );
     await widget.configStore.savePc(pc);
     if (!mounted) return;
     setState(() {
@@ -129,9 +131,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
     widget.onApiChanged(config);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('設定を保存しました')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('設定を保存しました')));
     }
   }
 
@@ -207,8 +209,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final client = PcPairingClient();
     try {
-      final selectedUrl =
-          payload.baseUrls.isNotEmpty ? payload.baseUrls.first : '';
+      final selectedUrl = payload.baseUrls.isNotEmpty
+          ? payload.baseUrls.first
+          : '';
       if (selectedUrl.isEmpty) {
         throw const PcPairingException('接続URLが見つかりません');
       }
@@ -223,6 +226,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'chat.read',
           'chat.write',
           'tools.observe',
+          'tools.approve',
+          'credentials.request',
         ],
       );
 
@@ -270,7 +275,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await Future<void>.delayed(interval);
 
       try {
-        final statusResp = await client.pollStatus(pc, pairingId: pairingId);
+        final statusResp = await client.pollStatus(
+          pc,
+          pairingId: pairingId,
+          code: payload.code,
+          deviceId: _deviceIdentity!.deviceId,
+        );
         if (statusResp.isAccepted) {
           final token = statusResp.deviceToken ?? '';
           final device = PairedDevice(
@@ -328,8 +338,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _fetchPcCatalog() async {
@@ -353,7 +364,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _fetchingCatalog = false;
       });
       _toast(
-          '${catalog.providers.length}プロバイダー / ${catalog.models.length}モデルを取得しました');
+        '${catalog.providers.length}プロバイダー / ${catalog.models.length}モデルを取得しました',
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -463,7 +475,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ? const SizedBox(
                             width: 16,
                             height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
                         : const Icon(Icons.save_outlined),
                     label: const Text('保存'),
                     onPressed: _saving ? null : _save,
@@ -479,10 +492,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 12),
             if (_pairedDevice != null) ...[
-              _PairedDeviceCard(
-                device: _pairedDevice!,
-                onUnpair: _unpair,
-              ),
+              _PairedDeviceCard(device: _pairedDevice!, onUnpair: _unpair),
               const SizedBox(height: 12),
             ],
             if (_pairedDevice == null) ...[
@@ -493,8 +503,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     color: Theme.of(context).cardTheme.color,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                        color: Theme.of(context).dividerTheme.color ??
-                            Colors.transparent),
+                      color:
+                          Theme.of(context).dividerTheme.color ??
+                          Colors.transparent,
+                    ),
                   ),
                   child: Column(
                     children: [
@@ -525,8 +537,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(height: 8),
                 const Center(
-                  child: Text('または',
-                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  child: Text(
+                    'または',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 TextField(
@@ -571,10 +585,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
             if (_pairingError != null && !_pairingInProgress) ...[
               const SizedBox(height: 8),
-              Text(_pairingError!,
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.error)),
+              Text(
+                _pairingError!,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
             ],
             if (_pc != null && _pc!.isConfigured) ...[
               const SizedBox(height: 16),
@@ -583,17 +600,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.cloud_download_outlined),
                 label: const Text('PCからプロバイダー/モデルを取得'),
                 onPressed: _fetchingCatalog ? null : _fetchPcCatalog,
               ),
               if (_catalogError != null) ...[
                 const SizedBox(height: 8),
-                Text(_catalogError!,
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.error)),
+                Text(
+                  _catalogError!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
               ],
               if (_pcBootstrap != null) ...[
                 const SizedBox(height: 12),
@@ -654,7 +675,8 @@ class _PairedDeviceCard extends StatelessWidget {
         color: Theme.of(context).cardTheme.color,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-            color: Theme.of(context).dividerTheme.color ?? Colors.transparent),
+          color: Theme.of(context).dividerTheme.color ?? Colors.transparent,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -686,11 +708,13 @@ class _PairedDeviceCard extends StatelessWidget {
               spacing: 4,
               runSpacing: 4,
               children: device.scopes
-                  .map((s) => Chip(
-                        label: Text(s, style: const TextStyle(fontSize: 10)),
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ))
+                  .map(
+                    (s) => Chip(
+                      label: Text(s, style: const TextStyle(fontSize: 10)),
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  )
                   .toList(),
             ),
           ],
@@ -732,10 +756,12 @@ class _SectionTitle extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(title, style: Theme.of(context).textTheme.titleSmall),
-              Text(subtitle,
-                  style: Theme.of(context).textTheme.bodySmall,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis),
+              Text(
+                subtitle,
+                style: Theme.of(context).textTheme.bodySmall,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
           ),
         ),
@@ -757,7 +783,8 @@ class _ComingSoonCard extends StatelessWidget {
         color: Theme.of(context).cardTheme.color,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-            color: Theme.of(context).dividerTheme.color ?? Colors.transparent),
+          color: Theme.of(context).dividerTheme.color ?? Colors.transparent,
+        ),
       ),
       child: Row(
         children: [
@@ -777,8 +804,10 @@ class _ComingSoonCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(999),
               border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
             ),
-            child: Text('Coming soon',
-                style: TextStyle(fontSize: 11, color: Colors.amber.shade200)),
+            child: Text(
+              'Coming soon',
+              style: TextStyle(fontSize: 11, color: Colors.amber.shade200),
+            ),
           ),
         ],
       ),
@@ -801,7 +830,8 @@ class _PcInfoCard extends StatelessWidget {
         color: Theme.of(context).cardTheme.color,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-            color: Theme.of(context).dividerTheme.color ?? Colors.transparent),
+          color: Theme.of(context).dividerTheme.color ?? Colors.transparent,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -811,11 +841,15 @@ class _PcInfoCard extends StatelessWidget {
               const Icon(Icons.desktop_windows, size: 18),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(bootstrap.label,
-                    style: Theme.of(context).textTheme.titleSmall),
+                child: Text(
+                  bootstrap.label,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
               ),
-              Text(bootstrap.version,
-                  style: Theme.of(context).textTheme.bodySmall),
+              Text(
+                bootstrap.version,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -832,19 +866,22 @@ class _PcInfoCard extends StatelessWidget {
           if (catalog != null) ...[
             const SizedBox(height: 10),
             Text(
-                'プロバイダー ${catalog!.providers.length}件（設定済み ${configured.length}）/ モデル ${catalog!.models.length}件 / プロファイル ${catalog!.profiles.length}件 / テンプレート ${catalog!.templates.length}件',
-                style: Theme.of(context).textTheme.bodySmall),
+              'プロバイダー ${catalog!.providers.length}件（設定済み ${configured.length}）/ モデル ${catalog!.models.length}件 / プロファイル ${catalog!.profiles.length}件 / テンプレート ${catalog!.templates.length}件',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
             if (configured.isNotEmpty) ...[
               const SizedBox(height: 6),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
                 children: configured
-                    .map((p) => Chip(
-                          label: Text(p.displayName),
-                          avatar: const Icon(Icons.cloud_done, size: 16),
-                          visualDensity: VisualDensity.compact,
-                        ))
+                    .map(
+                      (p) => Chip(
+                        label: Text(p.displayName),
+                        avatar: const Icon(Icons.cloud_done, size: 16),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    )
                     .toList(),
               ),
             ],
@@ -869,18 +906,25 @@ class _CapChip extends StatelessWidget {
         color: on ? scheme.primary.withValues(alpha: 0.15) : null,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-            color: on ? scheme.primary.withValues(alpha: 0.4) : scheme.outline),
+          color: on ? scheme.primary.withValues(alpha: 0.4) : scheme.outline,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(on ? Icons.check_circle : Icons.remove_circle_outline,
-              size: 13, color: on ? scheme.primary : scheme.outline),
+          Icon(
+            on ? Icons.check_circle : Icons.remove_circle_outline,
+            size: 13,
+            color: on ? scheme.primary : scheme.outline,
+          ),
           const SizedBox(width: 4),
-          Text(label,
-              style: TextStyle(
-                  fontSize: 11,
-                  color: on ? scheme.primary : scheme.onSurfaceVariant)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: on ? scheme.primary : scheme.onSurfaceVariant,
+            ),
+          ),
         ],
       ),
     );
@@ -903,20 +947,24 @@ class _PcModelPickerState extends State<_PcModelPicker> {
   void initState() {
     super.initState();
     final configured = widget.catalog.configuredProviders;
-    _selectedProvider =
-        configured.isNotEmpty ? configured.first.providerId : null;
+    _selectedProvider = configured.isNotEmpty
+        ? configured.first.providerId
+        : null;
   }
 
   @override
   Widget build(BuildContext context) {
     final providers = widget.catalog.providers;
     final models = widget.catalog.models
-        .where((m) =>
-            _selectedProvider == null || m.providerId == _selectedProvider)
-        .where((m) =>
-            _query.isEmpty ||
-            m.displayName.toLowerCase().contains(_query.toLowerCase()) ||
-            m.modelId.toLowerCase().contains(_query.toLowerCase()))
+        .where(
+          (m) => _selectedProvider == null || m.providerId == _selectedProvider,
+        )
+        .where(
+          (m) =>
+              _query.isEmpty ||
+              m.displayName.toLowerCase().contains(_query.toLowerCase()) ||
+              m.modelId.toLowerCase().contains(_query.toLowerCase()),
+        )
         .toList();
 
     return DraggableScrollableSheet(
@@ -950,11 +998,12 @@ class _PcModelPickerState extends State<_PcModelPicker> {
               ),
               items: [
                 const DropdownMenuItem(value: null, child: Text('すべて')),
-                ...providers.map((p) => DropdownMenuItem(
-                      value: p.providerId,
-                      child:
-                          Text('${p.displayName}${p.configured ? " ✓" : ""}'),
-                    )),
+                ...providers.map(
+                  (p) => DropdownMenuItem(
+                    value: p.providerId,
+                    child: Text('${p.displayName}${p.configured ? " ✓" : ""}'),
+                  ),
+                ),
               ],
               onChanged: (v) => setState(() => _selectedProvider = v),
             ),
@@ -983,12 +1032,15 @@ class _PcModelPickerState extends State<_PcModelPicker> {
                     m.supportsVision
                         ? Icons.visibility_outlined
                         : m.supportsThinking
-                            ? Icons.psychology_outlined
-                            : Icons.chat_outlined,
+                        ? Icons.psychology_outlined
+                        : Icons.chat_outlined,
                     size: 20,
                   ),
-                  title: Text(m.displayName,
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  title: Text(
+                    m.displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   subtitle: Text(
                     '${m.providerId} · ${m.modelId}${m.maxContext > 0 ? " · ${_formatContext(m.maxContext)}" : ""}',
                     maxLines: 1,
