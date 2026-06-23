@@ -1,5 +1,5 @@
 import { defaultspackApiFetch, explainDefaultspackApiError } from "../../lib/api";
-import { normalizeDesktopStatus, normalizeSandboxState } from "./types";
+import { normalizeDesktopProvisioningStatus, normalizeDesktopStatus, normalizeSandboxState } from "./types";
 import type {
   CreateDesktopRequest,
   DesktopAccessPolicy,
@@ -84,6 +84,12 @@ function normalizeDesktopInstance(instance: DesktopInstance): DesktopInstance {
   return {
     ...instance,
     status: normalizeDesktopStatus(instance.status),
+    provisioning: instance.provisioning
+      ? {
+          ...instance.provisioning,
+          status: normalizeDesktopProvisioningStatus(instance.provisioning.status),
+        }
+      : instance.provisioning,
   };
 }
 

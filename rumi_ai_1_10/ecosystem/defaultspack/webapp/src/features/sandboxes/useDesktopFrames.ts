@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { sandboxesApi } from "./api";
 import { normalizeDesktopStatus } from "./types";
-import type { DesktopFrameQuality, DesktopFrameResult, DesktopFrameView } from "./types";
+import type { DesktopFrameQuality, DesktopFrameResult, DesktopFrameView, DesktopStatus, SandboxState } from "./types";
 
 export type DesktopFrameFetcher = (
   seatId: string,
@@ -93,7 +93,9 @@ function isDocumentHidden(): boolean {
   return typeof document !== "undefined" && document.visibilityState === "hidden";
 }
 
-export function isRunningStatus(status: string | undefined): boolean {
+type DesktopFrameRuntimeStatus = DesktopStatus | SandboxState | undefined;
+
+export function isRunningStatus(status: DesktopFrameRuntimeStatus): boolean {
   return normalizeDesktopStatus(status) === "running";
 }
 
@@ -112,7 +114,7 @@ export function useDesktopFrame({
   fetcher = sandboxesApi.fetchDesktopFrame,
 }: {
   seatId: string;
-  status?: string;
+  status?: DesktopFrameRuntimeStatus;
   selected: boolean;
   hasControlLease: boolean;
   accessKey?: string | null;

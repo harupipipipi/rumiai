@@ -86,6 +86,32 @@ test("requestDesktopAccess sends requester identity without claiming owner autho
   assert.match(body.request_id, /^desktop-access-/);
 });
 
+test("listDesktops normalizes unknown provisioning status to the explicit fallback", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    status: "ok",
+    data: {
+      desktops: [
+        {
+          ...desktopResponse("running"),
+          provisioning: {
+            apps: ["google-chrome-stable"],
+            mcp_servers: ["playwright"],
+            status: "provider-specific-status",
+          },
+        },
+      ],
+    },
+  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.listDesktops();
+    assert.equal(result.desktops[0].provisioning?.status, "unknown");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("stopDesktop confirms the destructive action after the UI confirmation flow", async () => {
   let requestUrl = "";
   let requestInit: RequestInit | undefined;

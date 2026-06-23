@@ -208,9 +208,17 @@ export type DesktopProvisioning = {
   packages?: Array<{ name?: string; version?: string | null; source?: string | null }>;
   apps?: string[];
   mcp_servers?: string[];
-  status?: string;
+  status?: DesktopProvisioningStatus;
   default?: boolean;
 };
+
+export type DesktopProvisioningStatus =
+  | "declared"
+  | "installing"
+  | "installed"
+  | "skipped"
+  | "failed"
+  | "unknown";
 
 export type DesktopFrameMetadata = {
   frame_seq?: number | null;
@@ -401,6 +409,15 @@ const desktopStatuses: DesktopStatus[] = [
   "unknown",
 ];
 
+const desktopProvisioningStatuses: DesktopProvisioningStatus[] = [
+  "declared",
+  "installing",
+  "installed",
+  "skipped",
+  "failed",
+  "unknown",
+];
+
 export function normalizeRuntimeStatus(value: unknown): RuntimeStatusKind {
   const status = String(value || "").toLowerCase();
   return runtimeStatuses.includes(status as RuntimeStatusKind) ? status as RuntimeStatusKind : "unavailable";
@@ -418,4 +435,11 @@ export function normalizeDesktopStatus(value: unknown): DesktopStatus {
   if (desktopStatuses.includes(raw as DesktopStatus)) return raw as DesktopStatus;
   const status = normalizeSandboxState(raw);
   return desktopStatuses.includes(status as DesktopStatus) ? status as DesktopStatus : "unknown";
+}
+
+export function normalizeDesktopProvisioningStatus(value: unknown): DesktopProvisioningStatus {
+  const status = String(value || "").toLowerCase();
+  return desktopProvisioningStatuses.includes(status as DesktopProvisioningStatus)
+    ? status as DesktopProvisioningStatus
+    : "unknown";
 }
