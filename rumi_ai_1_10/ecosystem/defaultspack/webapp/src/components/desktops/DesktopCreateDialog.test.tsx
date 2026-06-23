@@ -65,6 +65,7 @@ test("desktop create dialog keeps workspace unmounted by default", () => {
 test("desktop create dialog exposes request-required access policy", () => {
   const html = renderDialog();
 
+  assert.match(html, /<option value="shared_link">Shared link<\/option>/);
   assert.match(html, /<option value="request_required">Request required<\/option>/);
 });
 

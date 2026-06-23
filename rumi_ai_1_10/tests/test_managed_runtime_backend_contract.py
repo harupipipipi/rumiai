@@ -1433,6 +1433,78 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
     assert all("correct-key" not in str(event) and "lease-token" not in str(event) for event in audit_events)
 
 
+def test_desktop_owner_only_and_shared_link_access_are_distinct(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    ids = iter(["owner-seat", "link-seat"])
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities={
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+                "sandbox.desktop",
+                "sandbox.desktop_input",
+                "sandbox.snapshot",
+            },
+            sandbox_id_factory=lambda: next(ids),
+        )
+    )
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(ttl_seconds=30),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        owner_only = api.run(
+            {
+                "_handler": "desktops_create",
+                "template_id": "desktop.ubuntu",
+                "provider_id": "fake-runtime",
+                "owner_id": "owner-1",
+                "access": {"mode": "owner_only", "owner_id": "owner-1"},
+            },
+            {},
+        )
+        shared_link = api.run(
+            {
+                "_handler": "desktops_create",
+                "template_id": "desktop.ubuntu",
+                "provider_id": "fake-runtime",
+                "access": {"mode": "shared_link"},
+            },
+            {},
+        )
+        owner_denied_without_identity = api.run(
+            {"_handler": "desktop_get", "seat_id": "owner-seat"},
+            {},
+        )
+        owner_allowed = api.run(
+            {"_handler": "desktop_get", "seat_id": "owner-seat", "owner_id": "owner-1"},
+            {},
+        )
+        link_allowed_without_identity = api.run(
+            {"_handler": "desktop_get", "seat_id": "link-seat"},
+            {},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert owner_only["status"] == "ok"
+    assert shared_link["status"] == "ok"
+    assert owner_denied_without_identity["status"] == "error"
+    assert owner_denied_without_identity["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
+    assert owner_allowed["status"] == "ok"
+    assert link_allowed_without_identity["status"] == "ok"
+    assert link_allowed_without_identity["data"]["access_policy"]["mode"] == "shared_link"
+    assert link_allowed_without_identity["data"]["access_policy"]["link_enabled"] is True
+
+
 def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, monkeypatch) -> None:
     _trusted_workspace(tmp_path, monkeypatch)
     from ecosystem.defaultspack.blocks.sandbox import api

@@ -183,6 +183,7 @@ export function DesktopInspector({
         <div className="rounded-md border border-zinc-800 bg-zinc-950/60 px-3">
           {factRow("Mode", desktop.access_policy?.mode || "owner_only")}
           {factRow("Key", desktop.access_policy?.key_required ? desktop.access_policy.key_hint || "Required" : "Not required", desktop.access_policy?.key_required ? "warning" : "default")}
+          {factRow("Link", desktop.access_policy?.link_enabled ? "Enabled" : "No", desktop.access_policy?.link_enabled ? "warning" : "default")}
           {factRow("Request", desktop.access_policy?.request_required ? "Required" : "No")}
         </div>
         {desktop.access_policy?.key_required && (

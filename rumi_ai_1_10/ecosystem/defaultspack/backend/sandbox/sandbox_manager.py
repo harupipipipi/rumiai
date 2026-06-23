@@ -67,7 +67,7 @@ RUNNING_STATES = {READY, BUSY}
 TERMINAL_STATES = {DESTROYED, FAILED}
 SUPPORTED_MODEL_MODES = {"fast", "heavy"}
 STATE_DIR_ENV = "RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR"
-DESKTOP_ACCESS_MODES = {"owner_only", "key_required", "request_required"}
+DESKTOP_ACCESS_MODES = {"owner_only", "key_required", "request_required", "shared_link"}
 DESKTOP_STARTERS = {"empty", "browser_url", "terminal"}
 WORKSPACE_ACCESS_MODES = {"none", "read_only", "overlay"}
 DESKTOP_MIN_WIDTH = 640
@@ -956,6 +956,8 @@ class SandboxManager:
                     "status_code": 403,
                     "sandbox_id": inst.sandbox_id,
                 }
+            if policy.mode == "shared_link" or policy.link_enabled:
+                return {"ok": True, "sandbox_id": inst.sandbox_id}
             if policy.mode == "owner_only" and not policy.key_required:
                 if owner_id and policy.owner_id and secrets.compare_digest(owner_id, policy.owner_id):
                     return {"ok": True, "sandbox_id": inst.sandbox_id}
@@ -2394,12 +2396,6 @@ def _desktop_access_from_create(
     normalized_mode = str(mode or "owner_only").strip().lower()
     if normalized_mode == "request_required" or bool(request_required):
         normalized_mode = "request_required"
-    if normalized_mode == "shared_link":
-        raise SandboxContractError(
-            "DESKTOP_SHARED_LINK_NOT_READY",
-            "Desktop shared-link access is not available until link-token verification is implemented.",
-            status_code=501,
-        )
     if normalized_mode not in DESKTOP_ACCESS_MODES:
         normalized_mode = "owner_only"
     key_text = str(access_key or "")
@@ -2416,11 +2412,11 @@ def _desktop_access_from_create(
     return (
         DesktopAccessPolicy(
             mode=normalized_mode,
-            owner_id=clean_owner_id if normalized_mode in {"owner_only", "request_required"} else None,
+            owner_id=clean_owner_id if normalized_mode in {"owner_only", "request_required", "shared_link"} else None,
             key_required=key_required,
             request_required=normalized_mode == "request_required",
             key_hint=key_hint,
-            link_enabled=False,
+            link_enabled=normalized_mode == "shared_link",
         ),
         key_hash,
     )
@@ -2438,7 +2434,7 @@ def _desktop_access_from_dict(value: Any) -> DesktopAccessPolicy:
         key_required=bool(value.get("key_required")) and mode == "key_required",
         request_required=mode == "request_required" or bool(value.get("request_required")),
         key_hint=str(value.get("key_hint")) if value.get("key_hint") is not None else None,
-        link_enabled=False,
+        link_enabled=mode == "shared_link" or bool(value.get("link_enabled")),
     )
 
 

@@ -47,6 +47,7 @@ class FakeManagedUbuntuCli:
         self.desktop_running = False
         self.imported_rootfs_path: str | None = None
         self.imported_install_dir: str | None = None
+        self.port_probe_returncode = 0
 
     def __call__(
         self,
@@ -134,6 +135,8 @@ class FakeManagedUbuntuCli:
         if argv[:2] == ["mkdir", "-p"]:
             return GuestCommandResult(returncode=0)
         if argv[:2] == ["python3", "-c"]:
+            if len(argv) > 2 and "socket.create_connection" in argv[2]:
+                return GuestCommandResult(returncode=self.port_probe_returncode, stderr="connection refused" if self.port_probe_returncode else "")
             assert input_text
             return GuestCommandResult(returncode=0)
         if argv[:3] == ["env", "DISPLAY=:98", "bash"]:
@@ -237,6 +240,8 @@ def test_mac_lima_provider_ensure_and_guest_desktop_flow(monkeypatch) -> None:
     assert executed["stdout"] == "hello\n"
     assert patched["ok"] is True
     assert exposed["target_url"] == "http://127.0.0.1:3000"
+    assert exposed["forwarding"] == "managed-runtime-localhost"
+    assert any("socket.create_connection" in " ".join(command) for command, _input, _timeout in fake.calls)
     assert frame["data"] == b"png"
     assert click["ok"] is True
     install_script = next(script for script in fake.guest_scripts if "$RUMI_SUDO apt-get install -y xvfb" in script)
@@ -604,6 +609,27 @@ def test_managed_ubuntu_port_exposure_respects_network_policy(monkeypatch) -> No
     assert getattr(excinfo.value, "code", "") == "SANDBOX_NETWORK_DENIED"
     assert approved["ok"] is True
     assert approved["target_url"] == "http://127.0.0.1:3000"
+    assert approved["forwarding"] == "managed-runtime-localhost"
+
+
+def test_managed_ubuntu_port_exposure_requires_listening_guest_service(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    fake.port_probe_returncode = 1
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(_create_spec(_template(network_mode="host_shared", network_approval_required=False)))
+    started = provider.start(instance)
+    agent = provider.connect_agent(started)
+    exposed = agent.expose_port(started.sandbox_id, {"port": 3000, "protocol": "http"})
+
+    assert ensured.ok is True
+    assert exposed["ok"] is False
+    assert exposed["code"] == "SANDBOX_PORTS_NOT_READY"
+    assert exposed["status_code"] == 503
+    assert exposed["details"]["stderr"] == "connection refused"
 
 
 def test_managed_ubuntu_desktop_provisioning_installs_declared_apps_and_mcp(monkeypatch) -> None:

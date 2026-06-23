@@ -868,6 +868,15 @@ class ManagedUbuntuGuestAgent:
         protocol = str(payload.get("protocol") or "http").strip().lower()
         if protocol not in {"http", "https", "tcp"}:
             raise SandboxContractError("INVALID_SANDBOX_PORT", "Sandbox port protocol must be http, https, or tcp.", status_code=400)
+        probe = self._run(_port_probe_argv(port), timeout=5)
+        if probe.returncode != 0:
+            return _guest_error(
+                sandbox_id,
+                "SANDBOX_PORTS_NOT_READY",
+                "Sandbox port exposure could not verify a listening guest service.",
+                probe,
+                status_code=503,
+            )
         scheme = "http" if protocol == "tcp" else protocol
         url = f"{scheme}://127.0.0.1:{port}"
         return {
@@ -878,6 +887,7 @@ class ManagedUbuntuGuestAgent:
             "url": url,
             "target_url": url,
             "host_reachable": True,
+            "forwarding": "managed-runtime-localhost",
             "provider_runtime": self._provider_id,
         }
 
@@ -1476,6 +1486,16 @@ def _port_number(value: object) -> int:
     return port
 
 
+def _port_probe_argv(port: int) -> tuple[str, ...]:
+    script = (
+        "import socket, sys\n"
+        "port = int(sys.argv[1])\n"
+        "with socket.create_connection(('127.0.0.1', port), timeout=1.0):\n"
+        "    pass\n"
+    )
+    return ("python3", "-c", script, str(int(port)))
+
+
 def _positive_int(value: object, fallback: int) -> int:
     try:
         parsed = int(value or 0)
@@ -1513,12 +1533,19 @@ def _button(value: object) -> str:
     return {"left": "1", "middle": "2", "right": "3"}.get(str(value or "left").lower(), "1")
 
 
-def _guest_error(sandbox_id: str, code: str, message: str, result: GuestCommandResult) -> dict[str, object]:
+def _guest_error(
+    sandbox_id: str,
+    code: str,
+    message: str,
+    result: GuestCommandResult,
+    *,
+    status_code: int = 502,
+) -> dict[str, object]:
     return {
         "ok": False,
         "sandbox_id": sandbox_id,
         "code": code,
         "error": message,
-        "status_code": 502,
+        "status_code": status_code,
         "details": {"stderr": result.stderr.strip()[:1000]},
     }

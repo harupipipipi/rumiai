@@ -181,7 +181,7 @@ export type DesktopRules = {
 };
 
 export type DesktopAccessPolicy = {
-  mode?: "owner_only" | "key_required" | "request_required";
+  mode?: "owner_only" | "key_required" | "request_required" | "shared_link";
   owner_id?: string | null;
   key_required?: boolean;
   request_required?: boolean;
@@ -278,7 +278,7 @@ export type CreateDesktopRequest = {
   role?: string | null;
   rules?: DesktopRules | string[] | null;
   access?: {
-    mode?: "owner_only" | "key_required" | "request_required";
+    mode?: DesktopAccessPolicy["mode"];
     owner_id?: string | null;
     access_key?: string;
   };
