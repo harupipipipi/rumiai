@@ -1,0 +1,49 @@
+{
+  "function_id": "continuity_return_to_device",
+  "description": "Return primary execution ownership to the source device.",
+  "tags": [
+    "continuity",
+    "return"
+  ],
+  "risk": "high",
+  "requires": [
+    "continuity.return.to.device"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.continuity.return_to_device",
+    "defaultspack.continuity.return_to_device",
+    "defaults.continuity.return.to.device",
+    "defaultspack.continuity.return.to.device",
+    "continuity.return_to_device"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.continuity.api",
+      "default_args": {
+        "_handler": "handoff_return"
+      }
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "function_id": "continuity_status",
+  "description": "Get a continuity handoff operation status.",
+  "tags": [
+    "continuity",
+    "handoff"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.continuity.status",
+    "defaultspack.continuity.status",
+    "continuity.status"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.continuity.api",
+      "default_args": {
+        "_handler": "handoff_get"
+      }
+    }
+  }
+}
