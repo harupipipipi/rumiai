@@ -5,11 +5,11 @@ from typing import Any
 
 from core_runtime.ai_input_graph_builder import MODEL_INPUT_NODE_ID, build_ai_input_graph_response
 from core_runtime.ai_input_models import normalize_ai_input_config
+from core_runtime.ai_input_tokenizer import apply_tokenizer_to_ai_input_response
 from core_runtime.ai_input_trace_store import AiInputTraceStore
 from core_runtime.profile_paths import active_profile_id
 from core_runtime.profile_runtime_selection import apply_profile_graph_selection
 from core_runtime.profile_workspace import ProfileWorkspaceManager, validate_profile_id
-from domain.ai_client.tokenizer import apply_tokenizer_to_ai_input_response
 
 
 def active_prompt_summary(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -19,6 +19,7 @@ def active_prompt_summary(input_data: dict[str, Any] | None = None) -> dict[str,
     request_context = _request_context(data)
     model_profile_id = _model_profile_id(data, request_context)
     model = _model_name(data, request_context, model_profile_id)
+    model_profiles = _model_profiles(data)
     if model_profile_id:
         request_context.setdefault("model_profile_id", model_profile_id)
     if model:
@@ -33,6 +34,7 @@ def active_prompt_summary(input_data: dict[str, Any] | None = None) -> dict[str,
         response,
         model_profile_id=model_profile_id,
         model=model,
+        profiles=model_profiles,
     )
     usage = prompt_usage_from_graph_response(
         response,
@@ -98,6 +100,7 @@ def toggle_prompt_edge(input_data: dict[str, Any] | None = None, *, preview: boo
     request_context = _request_context(data)
     model_profile_id = _model_profile_id(data, request_context)
     model = _model_name(data, request_context, model_profile_id)
+    model_profiles = _model_profiles(data)
     if model_profile_id:
         request_context.setdefault("model_profile_id", model_profile_id)
     if model:
@@ -122,6 +125,7 @@ def toggle_prompt_edge(input_data: dict[str, Any] | None = None, *, preview: boo
         response,
         model_profile_id=model_profile_id,
         model=model,
+        profiles=model_profiles,
     )
     if not preview:
         raw_profile = _load_raw_profile(profile_id)
@@ -663,6 +667,11 @@ def _model_profile_id(data: dict[str, Any], request_context: dict[str, Any]) -> 
 
 def _model_name(data: dict[str, Any], request_context: dict[str, Any], model_profile_id: str) -> str:
     return str(data.get("model") or request_context.get("model") or model_profile_id or "").strip()
+
+
+def _model_profiles(data: dict[str, Any]) -> list[dict[str, Any]]:
+    profiles = data.get("model_profiles") if isinstance(data.get("model_profiles"), list) else data.get("profiles")
+    return [profile for profile in profiles if isinstance(profile, dict)] if isinstance(profiles, list) else []
 
 
 def _profile_with_edge_state(profile: dict[str, Any], *, edge_id: str, enabled: bool) -> dict[str, Any]:

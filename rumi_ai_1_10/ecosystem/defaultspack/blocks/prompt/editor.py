@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from blocks._common import error, ok
+from blocks.prompt._model_profiles import with_model_profiles
 from domain.prompt.editor import (
     compact_prompt_text,
     create_profile_override,
@@ -16,7 +17,7 @@ from domain.prompt.editor import (
 
 def run(input_data: dict, context: dict) -> dict:
     del context
-    data = input_data if isinstance(input_data, dict) else {}
+    data = with_model_profiles(input_data if isinstance(input_data, dict) else {})
     action = str(data.get("action") or "load").strip().lower()
     try:
         if action == "load":

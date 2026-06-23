@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from blocks._common import error, ok
+from blocks.prompt._model_profiles import with_model_profiles
 from domain.prompt.editor import test_prompt_input
 from domain.skill_trigger import RuntimeSkillTriggerService
 from domain.templates.tool_policy_resolution import resolve_template_tool_policy
@@ -33,10 +34,11 @@ def _template_tool_policy_resolver(
 
 def run(input_data: dict, context: dict) -> dict:
     del context
+    data = with_model_profiles(input_data if isinstance(input_data, dict) else {})
     try:
         return ok(
             test_prompt_input(
-                input_data,
+                data,
                 skill_evaluator=_runtime_skill_evaluator,
                 template_policy_resolver=_template_tool_policy_resolver,
             )

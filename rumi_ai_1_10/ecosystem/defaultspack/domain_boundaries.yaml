@@ -305,11 +305,3 @@ exceptions:
   from: ambient
   import: domain/chat
   reason: ambient trigger routing creates destination conversations through the chat store
-- file: domain/prompt/editor.py
-  from: prompt
-  import: domain/ai_client
-  reason: Prompt Studio displays model-specific token estimates through the passive tokenizer helper.
-- file: domain/prompt/usage.py
-  from: prompt
-  import: domain/ai_client
-  reason: Prompt usage traces display model-specific token estimates through the passive tokenizer helper.
