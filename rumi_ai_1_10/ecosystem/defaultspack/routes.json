@@ -476,6 +476,114 @@
     },
     {
       "method": "GET",
+      "path": "/api/ambient/status",
+      "flow_id": "transport_direct",
+      "description": "Read ambient trigger monitor status, Rumi permissions, OS permissions, and recent trigger audit events"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/monitor/start",
+      "flow_id": "transport_direct",
+      "description": "Enable ambient_monitor.enabled and start voice wake and camera pinch monitors"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/monitor/stop",
+      "flow_id": "transport_direct",
+      "description": "Disable ambient_monitor.enabled and pause voice wake and camera pinch monitors"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/config",
+      "flow_id": "transport_direct",
+      "description": "Configure ambient trigger chat routing and new-chat defaults"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/events",
+      "flow_id": "transport_direct",
+      "description": "Submit a voice wake, camera pinch, or external hook ambient trigger event through ambient_trigger_router"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/permissions/grant",
+      "flow_id": "transport_direct",
+      "description": "Grant a Rumi ambient permission such as host.microphone.capture, host.camera.capture, or ambient.trigger.dispatch"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/permissions/revoke",
+      "flow_id": "transport_direct",
+      "description": "Revoke a Rumi ambient permission while keeping OS permission status separate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ambient/permissions/check",
+      "flow_id": "transport_direct",
+      "description": "Record observed OS microphone and camera permission state without changing Rumi permissions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/authority/browser-ui-operator",
+      "flow_id": "transport_direct",
+      "description": "Mint a signed ui_operator for local browser approval QA when RUMI_AUTHORITY_BROWSER_TEST_TOKEN is configured"
+    },
+    {
+      "method": "GET",
+      "path": "/chat",
+      "flow_id": "transport_direct",
+      "description": "Render the canonical Defaultspack chat shell"
+    },
+    {
+      "method": "GET",
+      "path": "/defaultspack",
+      "flow_id": "transport_direct",
+      "description": "Render the Defaultspack chat shell alias"
+    },
+    {
+      "method": "GET",
+      "path": "/pack/defaultspack",
+      "flow_id": "transport_direct",
+      "description": "Render the Defaultspack chat shell pack alias"
+    },
+    {
+      "method": "GET",
+      "path": "/approval",
+      "flow_id": "transport_direct",
+      "description": "Render the dedicated authority approval window"
+    },
+    {
+      "method": "GET",
+      "path": "/ambient",
+      "flow_id": "transport_direct",
+      "description": "Render the ambient trigger window surface"
+    },
+    {
+      "method": "GET",
+      "path": "/ambient-debug",
+      "flow_id": "transport_direct",
+      "description": "Render the finger recording debug QA window surface"
+    },
+    {
+      "method": "GET",
+      "path": "/finger-recording",
+      "flow_id": "transport_direct",
+      "description": "Render the dedicated finger recording window surface"
+    },
+    {
+      "method": "GET",
+      "path": "/console",
+      "flow_id": "transport_direct",
+      "description": "Render the dedicated Defaultspack detailed log window"
+    },
+    {
+      "method": "GET",
+      "path": "/host-permissions",
+      "flow_id": "transport_direct",
+      "description": "Render the local host permissions window"
+    },
+    {
+      "method": "GET",
       "path": "/api/agent/companies",
       "flow_id": "company_workspace",
       "description": "List company workspaces"

@@ -264,6 +264,33 @@
       "label": "Show Advanced Commands",
       "default": false,
       "help": "Advanced slash commandsを候補に含めます。hidden command は直接入力か将来の管理UI向けです。"
+    },
+    {
+      "id": "registered_slash_commands_renderer",
+      "kind": "field_renderer",
+      "order": 61.5,
+      "renderer": "slash_commands",
+      "component": "SlashCommandsField",
+      "field_types": [
+        "slash_commands"
+      ],
+      "part_id": "settings",
+      "fallback": "text"
+    },
+    {
+      "id": "registered_slash_commands",
+      "kind": "settings_field",
+      "slot": "commands",
+      "order": 62,
+      "section_id": "commands",
+      "field_id": "registered_slash_commands",
+      "type": "slash_commands",
+      "renderer": "slash_commands",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Slash Commands",
+      "default": [],
+      "help": "会話で /name と打った時に実行するショートカットを登録します。任意コードではなく、許可済みの既存アクションだけを選べます。"
     }
   ]
 }

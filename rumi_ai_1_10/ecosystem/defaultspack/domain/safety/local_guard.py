@@ -45,6 +45,7 @@ METHOD_SENSITIVE_CODING_PATHS = {
 SENSITIVE_LOCAL_PATHS = {
     "/api/authority/requests",
     "/api/authority/test/request",
+    "/api/authority/browser-ui-operator",
     "/api/browser/artifacts",
     "/api/tools/browser-computer",
     "/api/tools/create",

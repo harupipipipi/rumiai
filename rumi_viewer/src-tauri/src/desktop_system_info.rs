@@ -14,6 +14,23 @@ pub struct DesktopPermissionStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DesktopHostPermissionStatus {
+    pub id: String,
+    pub label: String,
+    pub status: String,
+    pub granted: Option<bool>,
+    pub rumi_status: String,
+    pub rumi_granted: Option<bool>,
+    pub os_status: String,
+    pub os_granted: Option<bool>,
+    pub risk_level: String,
+    pub stream_allowed: Option<bool>,
+    pub required_by_functions: Vec<String>,
+    pub detail: String,
+    pub settings_hint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DesktopSystemInfo {
     pub source: String,
     pub reliable: bool,
@@ -25,6 +42,7 @@ pub struct DesktopSystemInfo {
     pub platform_release: String,
     pub permission_subject: String,
     pub host_broker: HostBrokerStatus,
+    pub host_permissions: Vec<DesktopHostPermissionStatus>,
     pub permissions: Vec<DesktopPermissionStatus>,
 }
 
@@ -35,8 +53,23 @@ pub fn get_desktop_system_info(
     collect_desktop_system_info(host_broker.inner().status_snapshot())
 }
 
+#[tauri::command]
+pub fn get_host_permission_status(
+    host_broker: tauri::State<'_, HostBrokerRuntime>,
+) -> Vec<DesktopHostPermissionStatus> {
+    collect_desktop_system_info(host_broker.inner().status_snapshot()).host_permissions
+}
+
+#[tauri::command]
+pub fn open_host_permission_settings(permission_id: String) -> Result<(), String> {
+    let url = host_permission_settings_url(&permission_id)
+        .ok_or_else(|| format!("No OS Settings pane is available for {permission_id}"))?;
+    open::that_detached(url).map_err(|error| format!("failed to open OS Settings: {error}"))
+}
+
 pub fn collect_desktop_system_info(host_broker: HostBrokerStatus) -> DesktopSystemInfo {
     let viewer_version = env!("CARGO_PKG_VERSION").to_string();
+    let permissions = collect_permissions();
     DesktopSystemInfo {
         source: "viewer_tauri".to_string(),
         reliable: true,
@@ -48,7 +81,8 @@ pub fn collect_desktop_system_info(host_broker: HostBrokerStatus) -> DesktopSyst
         platform_release: platform_release(),
         permission_subject: "Rumi Viewer".to_string(),
         host_broker,
-        permissions: collect_permissions(),
+        host_permissions: collect_host_permissions(&permissions),
+        permissions,
     }
 }
 
@@ -103,9 +137,222 @@ pub fn collect_permissions() -> Vec<DesktopPermissionStatus> {
     }
 }
 
+pub fn collect_host_permissions(
+    os_permissions: &[DesktopPermissionStatus],
+) -> Vec<DesktopHostPermissionStatus> {
+    vec![
+        host_permission_row(
+            "host.microphone.capture",
+            "Microphone",
+            "high",
+            Some(true),
+            &["microphone"],
+            &["ambient_monitor_start", "ai_transcribe", "recording_capture"],
+            os_permissions,
+            "Capture microphone input after Rumi approval. Raw audio is not stored by defaultspack.",
+            "System Settings > Privacy & Security > Microphone",
+        ),
+        host_permission_row(
+            "host.camera.capture",
+            "Camera",
+            "high",
+            Some(true),
+            &["camera"],
+            &["ambient_monitor_start", "recording_capture"],
+            os_permissions,
+            "Capture camera frames for gesture tracking. Raw frames are not stored by defaultspack.",
+            "System Settings > Privacy & Security > Camera",
+        ),
+        host_permission_row(
+            "host.screen.capture",
+            "Screen Capture",
+            "high",
+            Some(false),
+            &["screen_recording"],
+            &["computer_screenshot", "recording_capture"],
+            os_permissions,
+            "Capture visible screen content for approved computer-use workflows.",
+            "System Settings > Privacy & Security > Screen Recording",
+        ),
+        host_permission_row(
+            "host.audio.capture",
+            "System Audio Capture",
+            "high",
+            Some(true),
+            &[],
+            &["recording_capture"],
+            os_permissions,
+            "Capture system audio after Rumi approval. Raw audio is not stored by defaultspack.",
+            "",
+        ),
+        host_permission_row(
+            "host.input.pointer",
+            "Pointer Input",
+            "high",
+            Some(false),
+            &["accessibility", "input_monitoring"],
+            &["computer_click"],
+            os_permissions,
+            "Move or click the pointer through approved computer-use actions.",
+            "System Settings > Privacy & Security > Accessibility",
+        ),
+        host_permission_row(
+            "host.input.keyboard",
+            "Keyboard Input",
+            "high",
+            Some(false),
+            &["accessibility", "input_monitoring"],
+            &["computer_type"],
+            os_permissions,
+            "Type keystrokes through approved computer-use actions.",
+            "System Settings > Privacy & Security > Input Monitoring",
+        ),
+        DesktopHostPermissionStatus {
+            id: "host.clipboard.*".to_string(),
+            label: "Clipboard".to_string(),
+            status: "unknown".to_string(),
+            granted: None,
+            rumi_status: "unknown".to_string(),
+            rumi_granted: None,
+            os_status: "unsupported".to_string(),
+            os_granted: None,
+            risk_level: "high".to_string(),
+            stream_allowed: Some(false),
+            required_by_functions: vec![
+                "media_clipboard_read".to_string(),
+                "media_clipboard_write".to_string(),
+            ],
+            detail: "Clipboard access is mediated by Rumi approval; there is no separate OS privacy pane on this platform.".to_string(),
+            settings_hint: String::new(),
+        },
+    ]
+}
+
+fn host_permission_row(
+    id: &str,
+    label: &str,
+    risk_level: &str,
+    stream_allowed: Option<bool>,
+    os_aliases: &[&str],
+    required_by_functions: &[&str],
+    os_permissions: &[DesktopPermissionStatus],
+    detail: &str,
+    settings_hint: &str,
+) -> DesktopHostPermissionStatus {
+    let (os_status, os_granted) = combined_os_status(os_aliases, os_permissions);
+    DesktopHostPermissionStatus {
+        id: id.to_string(),
+        label: label.to_string(),
+        status: "unknown".to_string(),
+        granted: None,
+        rumi_status: "unknown".to_string(),
+        rumi_granted: None,
+        os_status,
+        os_granted,
+        risk_level: risk_level.to_string(),
+        stream_allowed,
+        required_by_functions: required_by_functions
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect(),
+        detail: detail.to_string(),
+        settings_hint: settings_hint.to_string(),
+    }
+}
+
+fn combined_os_status(
+    aliases: &[&str],
+    os_permissions: &[DesktopPermissionStatus],
+) -> (String, Option<bool>) {
+    let matches: Vec<&DesktopPermissionStatus> = os_permissions
+        .iter()
+        .filter(|row| aliases.iter().any(|alias| row.id == *alias))
+        .collect();
+    if matches.is_empty() {
+        return ("unknown".to_string(), None);
+    }
+    if matches.iter().any(|row| row.granted == Some(false)) {
+        return ("missing".to_string(), Some(false));
+    }
+    if matches.iter().all(|row| row.granted == Some(true)) {
+        return ("granted".to_string(), Some(true));
+    }
+    if matches.iter().any(|row| row.status == "unsupported") {
+        return ("unsupported".to_string(), None);
+    }
+    ("not_checked".to_string(), None)
+}
+
+fn host_permission_settings_url(permission_id: &str) -> Option<&'static str> {
+    let normalized = permission_id.trim().to_ascii_lowercase();
+
+    #[cfg(target_os = "macos")]
+    {
+        match normalized.as_str() {
+            "host.microphone.capture" | "microphone" | "microphone.capture" => {
+                Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            }
+            "host.camera.capture" | "camera" | "camera.capture" => {
+                Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")
+            }
+            "host.screen.capture" | "screen_recording" | "screen.capture" => Some(
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+            ),
+            "host.accessibility.read"
+            | "host.accessibility.mutate"
+            | "host.input.pointer"
+            | "accessibility" => Some(
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+            ),
+            "host.input.keyboard" | "input_monitoring" => {
+                Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+            }
+            _ => None,
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        match normalized.as_str() {
+            "host.microphone.capture" | "microphone" | "microphone.capture" => {
+                Some("ms-settings:privacy-microphone")
+            }
+            "host.camera.capture" | "camera" | "camera.capture" => {
+                Some("ms-settings:privacy-webcam")
+            }
+            "host.screen.capture" | "screen_recording" | "screen.capture" => {
+                Some("ms-settings:privacy-graphicsCaptureProgrammatic")
+            }
+            _ => None,
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = normalized;
+        None
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn macos_permissions() -> Vec<DesktopPermissionStatus> {
     vec![
+        DesktopPermissionStatus {
+            id: "microphone".to_string(),
+            label: "Microphone".to_string(),
+            status: "not_checked".to_string(),
+            granted: None,
+            detail: "macOS may prompt the first time Rumi requests microphone capture. Verify it manually if capture fails.".to_string(),
+            settings_hint: "System Settings > Privacy & Security > Microphone".to_string(),
+        },
+        DesktopPermissionStatus {
+            id: "camera".to_string(),
+            label: "Camera".to_string(),
+            status: "not_checked".to_string(),
+            granted: None,
+            detail: "macOS may prompt the first time Rumi requests camera capture. Verify it manually if gesture tracking fails.".to_string(),
+            settings_hint: "System Settings > Privacy & Security > Camera".to_string(),
+        },
         permission_row(
             "accessibility",
             "Accessibility",
@@ -196,6 +443,10 @@ mod tests {
         assert_eq!(info.permission_subject, "Rumi Viewer");
         assert_eq!(info.source, "viewer_tauri");
         assert!(info.reliable);
+        assert!(info
+            .host_permissions
+            .iter()
+            .any(|row| row.id == "host.microphone.capture"));
     }
 
     #[test]
@@ -204,6 +455,8 @@ mod tests {
         let ids: Vec<&str> = info.permissions.iter().map(|row| row.id.as_str()).collect();
         #[cfg(target_os = "macos")]
         {
+            assert!(ids.contains(&"microphone"));
+            assert!(ids.contains(&"camera"));
             assert!(ids.contains(&"accessibility"));
             assert!(ids.contains(&"screen_recording"));
         }
@@ -228,5 +481,52 @@ mod tests {
             info.host_broker.url.as_deref(),
             Some("http://127.0.0.1:8770")
         );
+    }
+
+    #[test]
+    fn host_permission_rows_map_os_permissions_without_claiming_rumi_approval() {
+        let rows = collect_host_permissions(&[
+            DesktopPermissionStatus {
+                id: "microphone".to_string(),
+                label: "Microphone".to_string(),
+                status: "granted".to_string(),
+                granted: Some(true),
+                detail: String::new(),
+                settings_hint: String::new(),
+            },
+            DesktopPermissionStatus {
+                id: "camera".to_string(),
+                label: "Camera".to_string(),
+                status: "missing".to_string(),
+                granted: Some(false),
+                detail: String::new(),
+                settings_hint: String::new(),
+            },
+        ]);
+
+        let mic = rows
+            .iter()
+            .find(|row| row.id == "host.microphone.capture")
+            .expect("microphone host permission row");
+        let camera = rows
+            .iter()
+            .find(|row| row.id == "host.camera.capture")
+            .expect("camera host permission row");
+
+        assert_eq!(mic.os_status, "granted");
+        assert_eq!(mic.rumi_status, "unknown");
+        assert_eq!(camera.os_status, "missing");
+        assert_eq!(camera.risk_level, "high");
+
+        let screen = rows
+            .iter()
+            .find(|row| row.id == "host.screen.capture")
+            .expect("screen capture host permission row");
+        let audio = rows
+            .iter()
+            .find(|row| row.id == "host.audio.capture")
+            .expect("system audio host permission row");
+        assert_eq!(screen.stream_allowed, Some(false));
+        assert_eq!(audio.stream_allowed, Some(true));
     }
 }

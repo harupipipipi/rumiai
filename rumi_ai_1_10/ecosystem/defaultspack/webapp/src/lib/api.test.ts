@@ -1,10 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, defaultspackUrlWithLocalAuth, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
+import { authorityApprovalRuntimeContent } from "./authorityApproval";
+import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
+
+const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
+  "Thank you for granting",
+  "approved provider",
+  "approved model",
+  "I can now use",
+  "使用を許可しました",
+];
+
+function assertNoRiskyAuthorityFollowupPhrases(text: string): void {
+  for (const phrase of RISKY_AUTHORITY_FOLLOWUP_PHRASES) {
+    assert.equal(text.includes(phrase), false, `unexpected risky phrase: ${phrase}`);
+  }
+}
 
 test("frontend command args prefer backend-coerced values", () => {
   assert.deepEqual(
@@ -118,6 +134,123 @@ test("composer command merge keeps backend command definitions authoritative", (
   assert.equal(merged[0].risk, "medium");
   assert.equal(parseSlashCommandInput("/goal frontend handoff", merged)?.command.id, "goal");
   assert.equal(parseSlashCommandInput("/context-txt frontend handoff", merged)?.command.id, "context_txt");
+});
+
+test("registered slash command settings create safe frontend shortcuts", () => {
+  const registered = registeredSlashCommandsFromSettings([
+    {
+      name: "/go",
+      action: "toggle_yolo",
+      aliases: ["ship it"],
+      description: "Enable YOLO from settings.",
+      enabled: true,
+    },
+    {
+      name: "/bad",
+      action: "run_arbitrary_code",
+    },
+  ]);
+
+  assert.equal(registered.length, 1);
+  assert.equal(registered[0].name, "go");
+  assert.equal(registered[0].execution.type, "frontend");
+  assert.equal(registered[0].execution.type === "frontend" ? registered[0].execution.action : "", "toggle_yolo");
+
+  const parsed = parseSlashCommandInput("/ship it on", registered);
+  assert.equal(parsed?.command.name, "go");
+  assert.deepEqual(parsed?.args, { enabled: "on" });
+});
+
+test("registered slash commands merge into composer catalog without replacing built-ins", () => {
+  const builtInYolo: ComposerCommandItem = {
+    id: "yolo",
+    name: "yolo",
+    label: "Yolo Approvals",
+    category: "mode",
+    visibility: "hidden",
+    risk: "medium",
+    execution: { type: "frontend", action: "toggle_yolo" },
+  };
+  const registered = registeredSlashCommandsFromSettings([
+    { name: "yolo", action: "toggle_yolo" },
+    { name: "doit", action: "toggle_yolo" },
+  ]);
+
+  const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
+
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].id, "yolo");
+  assert.equal(merged[0].visibility, "default");
+  assert.equal(parseSlashCommandInput("/yolo", merged)?.command.id, "yolo");
+  assert.equal(parseSlashCommandInput("/doit", merged)?.command.id, "registered:doit");
+});
+
+test("registered slash command aliases are claimed after built-in merges", () => {
+  const builtInYolo: ComposerCommandItem = {
+    id: "yolo",
+    name: "yolo",
+    label: "Yolo Approvals",
+    category: "mode",
+    visibility: "hidden",
+    risk: "medium",
+    execution: { type: "frontend", action: "toggle_yolo" },
+  };
+  const registered = registeredSlashCommandsFromSettings([
+    { name: "yolo", action: "toggle_yolo", aliases: ["go"] },
+    { name: "go", action: "open_settings" },
+  ]);
+
+  const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].id, "yolo");
+  assert.deepEqual(merged[0].aliases, ["go"]);
+  assert.equal(parseSlashCommandInput("/go", merged)?.command.id, "yolo");
+});
+
+test("registered slash commands reject collisions with different actions", () => {
+  const builtInYolo: ComposerCommandItem = {
+    id: "yolo",
+    name: "yolo",
+    label: "Yolo Approvals",
+    category: "mode",
+    visibility: "hidden",
+    risk: "medium",
+    execution: { type: "frontend", action: "toggle_yolo" },
+  };
+  const registered = registeredSlashCommandsFromSettings([
+    { name: "camera", action: "open_settings", aliases: ["yolo"] },
+  ]);
+
+  const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].id, "yolo");
+  assert.deepEqual(merged[0].aliases, undefined);
+  assert.equal(parseSlashCommandInput("/camera", merged), null);
+});
+
+test("registered slash command rejected collisions do not reserve hidden primary names", () => {
+  const builtInYolo: ComposerCommandItem = {
+    id: "yolo",
+    name: "yolo",
+    label: "Yolo Approvals",
+    category: "mode",
+    visibility: "hidden",
+    risk: "medium",
+    execution: { type: "frontend", action: "toggle_yolo" },
+  };
+  const registered = registeredSlashCommandsFromSettings([
+    { name: "camera", action: "open_settings", aliases: ["yolo"] },
+    { name: "go", action: "toggle_yolo", aliases: ["camera"] },
+  ]);
+
+  const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
+
+  assert.equal(merged.length, 2);
+  assert.equal(parseSlashCommandInput("/yolo", merged)?.command.id, "yolo");
+  assert.equal(parseSlashCommandInput("/camera", merged)?.command.id, "registered:go");
+  assert.equal(parseSlashCommandInput("/go", merged)?.command.id, "registered:go");
 });
 
 test("composer command feedback surfaces pack block result messages and paths", () => {
@@ -531,6 +664,29 @@ test("defaultspack API errors include status and recovery context", () => {
   assert.match(message, /権限|承認/);
 });
 
+test("browser authority QA disabled errors explain the launch requirement", () => {
+  const message = explainDefaultspackApiError(404, {
+    code: "AUTHORITY_BROWSER_TEST_DISABLED",
+    message: "browser approval test endpoint is disabled",
+  }, "Not Found");
+
+  assert.match(message, /AUTHORITY_BROWSER_TEST_DISABLED/);
+  assert.match(message, /ブラウザ承認QA/);
+  assert.match(message, /Rumi Viewer/);
+  assert.doesNotMatch(message, /対象の会話、モデル、ファイル/);
+});
+
+test("authority ui operator unavailable errors explain the viewer signing secret requirement", () => {
+  const message = explainDefaultspackApiError(503, {
+    code: "AUTHORITY_UI_OPERATOR_UNAVAILABLE",
+    message: "authority ui_operator signing secret is unavailable",
+  }, "Service Unavailable");
+
+  assert.match(message, /AUTHORITY_UI_OPERATOR_UNAVAILABLE/);
+  assert.match(message, /署名secret/);
+  assert.match(message, /RUMI_PANEL_BOOTSTRAP_SECRET/);
+});
+
 test("selected tools are cleared after send unless settings opt in", () => {
   assert.equal(keepSelectedToolsAfterSend({}), false);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: "false" } }), false);
@@ -621,6 +777,21 @@ test("sendMessage preserves an empty selected tools filter", async () => {
 
 test("sendMessage preserves authority followup display metadata", async () => {
   let requestBody: any = null;
+  const hiddenResumeText = "Internal authority resume.";
+  const runtimeContent = authorityApprovalRuntimeContent({
+    requestId: "approval-1",
+    principalId: "local-user",
+    permissionId: "model.invoke",
+    resource: {
+      provider_id: "opencode-go",
+      model_id: "deepseek-v4-pro",
+    },
+  }, "token-1");
+  assertNoRiskyAuthorityFollowupPhrases(hiddenResumeText);
+  assertNoRiskyAuthorityFollowupPhrases(runtimeContent);
+  assert.match(runtimeContent, /never mention approval, authority, API keys, providers, model access/i);
+  assert.match(runtimeContent, /do not thank the user for permission/i);
+
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     requestBody = JSON.parse(String(init?.body ?? "{}"));
@@ -637,7 +808,7 @@ test("sendMessage preserves authority followup display metadata", async () => {
   }) as typeof fetch;
 
   try {
-    await api.sendMessage("c1", "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。", {
+    await api.sendMessage("c1", hiddenResumeText, {
       metadata: {
         authority_followup: {
           request_id: "approval-1",
@@ -649,13 +820,14 @@ test("sendMessage preserves authority followup display metadata", async () => {
           hidden: true,
           reason: "authority_followup",
         },
-        runtime_content: "continue with approved authority",
+        runtime_content: runtimeContent,
       },
     });
   } finally {
     globalThis.fetch = originalFetch;
   }
 
+  assert.equal(requestBody?.message?.content, hiddenResumeText);
   assert.deepEqual(requestBody?.message?.metadata?.authority_followup, {
     request_id: "approval-1",
     permission_id: "model.invoke",
@@ -666,7 +838,7 @@ test("sendMessage preserves authority followup display metadata", async () => {
     hidden: true,
     reason: "authority_followup",
   });
-  assert.equal(requestBody?.message?.metadata?.runtime_content, "continue with approved authority");
+  assert.equal(requestBody?.message?.metadata?.runtime_content, runtimeContent);
 });
 
 test("approveAuthorityApproval serializes bundled related permissions", async () => {
@@ -1273,6 +1445,146 @@ test("safe API requests do not include a local CSRF header", async () => {
   const headers = requestHeaders as Headers | null;
   assert.ok(headers);
   assert.equal(headers.get("X-Rumi-CSRF"), null);
+});
+
+test("API headers consume Viewer local auth from URL fragment", () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const values = new Map<string, string>();
+  let replacedUrl = "";
+  const fakeWindow = {
+    location: {
+      pathname: "/chat",
+      search: "?chat=c1",
+      hash: "#rumi_local_auth=local-token-1&panel=main",
+    },
+    history: {
+      state: { from: "test" },
+      replaceState: (_state: unknown, _title: string, url: string) => {
+        replacedUrl = url;
+        fakeWindow.location.hash = "#panel=main";
+      },
+    },
+  };
+
+  Object.defineProperty(globalThis, "window", { configurable: true, value: fakeWindow });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { title: "rumi DP" } });
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+    },
+  });
+
+  try {
+    const headers = defaultspackApiHeaders("GET");
+    assert.equal(headers.get("Authorization"), "Bearer local-token-1");
+    assert.equal(values.get("rumi-defaultspack-local-auth"), "local-token-1");
+    assert.equal(replacedUrl, "/chat?chat=c1#panel=main");
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+    if (previousDocument) Object.defineProperty(globalThis, "document", previousDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+    if (previousSessionStorage) Object.defineProperty(globalThis, "sessionStorage", previousSessionStorage);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});
+
+test("API headers keep explicit Authorization over Viewer local auth", () => {
+  const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => (key === "rumi-defaultspack-local-auth" ? "local-token-1" : null),
+      setItem: () => {},
+      removeItem: () => {},
+    },
+  });
+
+  try {
+    const headers = defaultspackApiHeaders("GET", { Authorization: "Bearer explicit-token" });
+    assert.equal(headers.get("Authorization"), "Bearer explicit-token");
+  } finally {
+    if (previousSessionStorage) Object.defineProperty(globalThis, "sessionStorage", previousSessionStorage);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});
+
+test("local auth URL helper carries Viewer token into child windows", () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { location: { origin: "http://127.0.0.1:8766" } },
+  });
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => (key === "rumi-defaultspack-local-auth" ? "local-token-1" : null),
+      setItem: () => {},
+      removeItem: () => {},
+    },
+  });
+
+  try {
+    assert.equal(
+      defaultspackUrlWithLocalAuth("/finger-recording?authority_approved=1"),
+      "/finger-recording?authority_approved=1#rumi_local_auth=local-token-1",
+    );
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+    if (previousSessionStorage) Object.defineProperty(globalThis, "sessionStorage", previousSessionStorage);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});
+
+test("browser authority ui operator forwards browser QA token in query header and body", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestHeaderToken = "";
+  let requestBody = "";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestHeaderToken = new Headers(init?.headers).get("X-Rumi-Approval-Browser-Token") ?? "";
+    requestBody = String(init?.body ?? "");
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        request_id: "auth_1",
+        ui_operator: {
+          version: 1,
+          kind: "ui_operator",
+          origin: "browser_qa",
+          window_label: "browser",
+          request_id: "auth_1",
+          issued_at: 1,
+          expires_at: 2,
+          nonce: "n",
+          signature: "s",
+        },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.browserAuthorityUiOperator("auth_1", "ambient-browser-qa");
+
+    assert.equal(result.request_id, "auth_1");
+    assert.equal(requestUrl, "/api/authority/browser-ui-operator?browser_approval_token=ambient-browser-qa");
+    assert.equal(requestHeaderToken, "ambient-browser-qa");
+    assert.equal(JSON.parse(requestBody).browser_approval_token, "ambient-browser-qa");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("streamMessage includes a local CSRF header", async () => {

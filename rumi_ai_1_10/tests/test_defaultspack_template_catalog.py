@@ -39,6 +39,7 @@ def test_template_projector_builds_stable_catalog_metadata():
     assert "rumi.composer.default" in template_ids
     assert "rumi.external_io.default" in template_ids
     assert "rumi.backend.prompt_compaction.default" in template_ids
+    assert "rumi.ambient_trigger.default" in template_ids
 
     assert _field_types(catalog["settings_sections"]) >= {
         "model_select",
@@ -60,6 +61,10 @@ def test_template_projector_builds_stable_catalog_metadata():
         for item in catalog["backend_services"]
     )
     assert any(item.get("service_id") == "prompt_compactor" for item in catalog["backend_services"])
+    assert any(
+        item.get("service_id") == "ambient_trigger_router"
+        for item in catalog["backend_services"]
+    )
     assert catalog["api_routes"] == []
     assert any(
         item.get("route_metadata", {}).get("path") == "/api/ai/models/route"
@@ -70,6 +75,10 @@ def test_template_projector_builds_stable_catalog_metadata():
         item.get("permission_id") == "external_io.configure" for item in catalog["permissions"]
     )
     assert any(item.get("permission_id") == "context.compact" for item in catalog["permissions"])
+    assert any(
+        item.get("permission_id") == "ambient.trigger.dispatch"
+        for item in catalog["permissions"]
+    )
     assert not catalog["template_diagnostics"]
 
     projected_ids = {
@@ -154,6 +163,11 @@ def test_template_catalog_projects_external_io_and_prompt_compaction_bundles():
     external_template = next(
         item for item in catalog["external_io_templates"] if item["id"] == "line.input.default"
     )
+    ambient_template = next(
+        item
+        for item in catalog["external_io_templates"]
+        if item["id"] == "ambient.input.webhook"
+    )
     compact_command = next(
         item for item in catalog["commands"] if item.get("id") == "compact_context"
     )
@@ -176,10 +190,32 @@ def test_template_catalog_projects_external_io_and_prompt_compaction_bundles():
     assert (
         external_template["projected_id"] == "rumi.external_io.default:line_input_default_template"
     )
+    assert ambient_template["template_id"] == "rumi.ambient_trigger.default"
+    assert ambient_template["provider"] == "web"
+    assert ambient_template["endpoint"]["route"] == "/api/ambient/events"
     assert compact_command["execution"]["qualified_name"] == "defaultspack:context.compact"
     assert compact_policy["format"] == "text/plain"
     assert token_source["route_path"] == "/api/context/token-estimate"
     assert compact_action["route_path"] == "/api/context/compact"
+
+
+def test_template_catalog_projects_ambient_ai_input_and_tool_policy():
+    catalog = build_template_catalog(defaultspack_root=DEFAULTSPACK_ROOT)
+
+    ai_input = next(item for item in catalog["ai_inputs"] if item["id"] == "ambient_finger_recording")
+    tool_policy = next(
+        item for item in catalog["tool_policies"] if item["id"] == "ambient_finger_recording_tools"
+    )
+    context_policy = next(
+        item for item in catalog["context_policies"] if item["id"] == "ambient_audio_transcript"
+    )
+
+    assert ai_input["template_id"] == "rumi.ambient_trigger.default"
+    assert ai_input["context_policy"] == "ambient_audio_transcript"
+    assert ai_input["tool_policy"] == "ambient_finger_recording_tools"
+    assert tool_policy["toggleable"] is True
+    assert tool_policy["params"]["audio_source"] == "finger_recording"
+    assert context_policy["mode"] == "ambient_audio_transcript"
 
 
 def test_template_catalog_projects_ai_input_and_tool_policy_metadata():

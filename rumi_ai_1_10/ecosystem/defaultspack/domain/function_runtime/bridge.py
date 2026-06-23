@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Any
@@ -8,16 +9,78 @@ from typing import Any
 from .context import principal_from_context
 from .response import error, normalize_output
 
+logger = logging.getLogger(__name__)
 
 _REQUEST_CONTEXT_KEYS = {
     "_tool_server_approved",
     "approval_id",
+    "authority_principal_id",
     "conversation_id",
+    "graph_id",
+    "node_id",
+    "profile_id",
     "request_id",
     "source",
     "tool_call_id",
     "user_id",
 }
+_AUTHORITY_CONTEXT_KEYS = {
+    "approval_token",
+    "conversation_id",
+    "graph_id",
+    "node_id",
+    "permission_id",
+    "principal_id",
+    "profile_id",
+    "request_id",
+    "run_request_id",
+}
+_AUTHORITY_APPROVAL_KEYS = {"approval_token", "permission_id", "request_id", "token"}
+
+
+def _sanitized_authority_approval(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    sanitized: dict[str, Any] = {}
+    for key in _AUTHORITY_APPROVAL_KEYS:
+        if key not in raw:
+            continue
+        value = raw.get(key)
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            sanitized[key] = value
+    return sanitized
+
+
+def _sanitized_authority_context(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    sanitized: dict[str, Any] = {}
+    for key in _AUTHORITY_CONTEXT_KEYS:
+        if key not in raw:
+            continue
+        value = raw.get(key)
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            sanitized[key] = value
+    approval_tokens = raw.get("approval_tokens")
+    if isinstance(approval_tokens, dict):
+        nested: dict[str, dict[str, Any]] = {}
+        for permission_id, approval in approval_tokens.items():
+            permission_key = str(permission_id or "").strip()
+            sanitized_approval = _sanitized_authority_approval(approval)
+            if permission_key and sanitized_approval:
+                nested[permission_key] = sanitized_approval
+        if nested:
+            sanitized["approval_tokens"] = nested
+    approvals = raw.get("approvals")
+    if isinstance(approvals, list):
+        nested_list = [
+            sanitized_approval(item)
+            for item in approvals
+            if isinstance(item, dict) and sanitized_approval(item)
+        ]
+        if nested_list:
+            sanitized["approvals"] = nested_list
+    return sanitized
 
 
 def _sanitized_request_context(context: dict[str, Any] | None) -> dict[str, Any]:
@@ -29,6 +92,9 @@ def _sanitized_request_context(context: dict[str, Any] | None) -> dict[str, Any]
             value = context[key]
             if isinstance(value, (str, int, float, bool)) or value is None:
                 sanitized[key] = value
+    authority = _sanitized_authority_context(context.get("authority"))
+    if authority:
+        sanitized["authority"] = authority
     return sanitized
 
 
@@ -120,6 +186,22 @@ def invoke_function(
         return error(f"Capability execution failed: {exc}", "CAPABILITY_EXECUTION_FAILED")
 
     if not getattr(response, "success", False):
+        if getattr(response, "error_type", None) == "caller_requires_denied":
+            authority = sanitized_context.get("authority") if isinstance(sanitized_context.get("authority"), dict) else {}
+            approval_tokens = authority.get("approval_tokens") if isinstance(authority.get("approval_tokens"), dict) else {}
+            logger.warning(
+                "function bridge caller_requires denied: function=%s principal=%s approved=%s source=%s approval_id=%s authority_principal=%s authority_permission=%s authority_has_token=%s approval_token_keys=%s context_keys=%s",
+                qualified_name,
+                principal,
+                sanitized_context.get("_tool_server_approved") is True,
+                str(sanitized_context.get("source") or ""),
+                str(sanitized_context.get("approval_id") or ""),
+                str(sanitized_context.get("authority_principal_id") or authority.get("principal_id") or ""),
+                str(authority.get("permission_id") or ""),
+                bool(authority.get("approval_token")),
+                sorted(str(key) for key in approval_tokens.keys()),
+                sorted(str(key) for key in sanitized_context.keys()),
+            )
         return error(
             getattr(response, "error", None) or "Function call failed",
             (getattr(response, "error_type", None) or "FUNCTION_CALL_FAILED").upper(),

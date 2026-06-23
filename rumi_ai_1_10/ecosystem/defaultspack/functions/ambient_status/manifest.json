@@ -1,0 +1,28 @@
+{
+  "function_id": "ambient_status",
+  "description": "Read ambient trigger monitor, permission, OS permission, and privacy status.",
+  "tags": ["ambient", "permission"],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ambient.status",
+    "defaultspack.ambient.status"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ambient.status",
+      "default_args": {}
+    }
+  }
+}

@@ -64,6 +64,10 @@ pyyaml==6.0.2 \
     --hash=sha256:6395c297d42274772abc367baaa79683958044e5d3835486c16da75d2a694631 \
     --hash=sha256:39693e1f8320ae4f43943590b49779ffb98acb81f788220ea932a6b6c51004d8
 
+# Template compatibility/version checks (required by defaultspack template kernel)
+packaging==26.2 \
+    --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e
+
 # Secret at-rest encryption (required)
 # cryptography 48.0.1: 48 wheel hashes; source archives omitted.
 cryptography==48.0.1 \

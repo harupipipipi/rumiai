@@ -4,14 +4,29 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from .models import AUTHORITY_PERMISSION_IDS, AuthorityDecision, AuthorityRequest
 from .principal import build_principal_id, parse_principal_parts, principal_scope_candidates
 from .request_store import AuthorityRequestStore, sanitize_authority_resource
 from .ui_operator import ui_operator_audit_record, verify_ui_operator
+from ..host_permissions import get_host_permission_definition
 
 
 AUTHORITY_APPROVAL_SCOPES = frozenset({"once", "conversation", "profile", "node"})
+
+RESOURCE_CONFIG_FIELDS: tuple[tuple[str, str], ...] = (
+    ("provider_id", "provider_ids"),
+    ("api_id", "api_ids"),
+    ("model_id", "model_ids"),
+    ("function_id", "function_ids"),
+    ("pack_id", "pack_ids"),
+    ("caller_pack_id", "caller_pack_ids"),
+    ("caller_function_id", "caller_function_ids"),
+    ("domain", "domains"),
+    ("host_action", "host_actions"),
+    ("operation", "host_actions"),
+)
 
 
 class AuthorityService:
@@ -49,6 +64,64 @@ class AuthorityService:
         graph_id: str | None = None,
         request_id: str | None = None,
         approval_token: str | None = None,
+        consume_approval_token: bool = True,
+    ) -> AuthorityDecision:
+        return self._check(
+            principal_id=principal_id,
+            permission_id=permission_id,
+            resource=resource,
+            reason=reason,
+            conversation_id=conversation_id,
+            profile_id=profile_id,
+            node_id=node_id,
+            graph_id=graph_id,
+            request_id=request_id,
+            approval_token=approval_token,
+            consume_approval_token=consume_approval_token,
+        )
+
+    def preflight_check(
+        self,
+        *,
+        principal_id: str,
+        permission_id: str,
+        resource: dict[str, Any],
+        reason: str = "",
+        conversation_id: str | None = None,
+        profile_id: str | None = None,
+        node_id: str | None = None,
+        graph_id: str | None = None,
+        request_id: str | None = None,
+        approval_token: str | None = None,
+    ) -> AuthorityDecision:
+        return self.check(
+            principal_id=principal_id,
+            permission_id=permission_id,
+            resource=resource,
+            reason=reason,
+            conversation_id=conversation_id,
+            profile_id=profile_id,
+            node_id=node_id,
+            graph_id=graph_id,
+            request_id=request_id,
+            approval_token=approval_token,
+            consume_approval_token=False,
+        )
+
+    def _check(
+        self,
+        *,
+        principal_id: str,
+        permission_id: str,
+        resource: dict[str, Any],
+        reason: str = "",
+        conversation_id: str | None = None,
+        profile_id: str | None = None,
+        node_id: str | None = None,
+        graph_id: str | None = None,
+        request_id: str | None = None,
+        approval_token: str | None = None,
+        consume_approval_token: bool = True,
     ) -> AuthorityDecision:
         permission_id = str(permission_id or "").strip()
         principal_id = str(principal_id or "").strip() or build_principal_id(
@@ -83,14 +156,22 @@ class AuthorityService:
             return self._decision(False, permission_id, principal_id, resource, str(deny.get("reason") or "Explicitly denied"), risk_level)
 
         if request_id and approval_token:
-            if self._request_store.consume_one_shot(
+            token_allowed = self._request_store.consume_one_shot(
                 request_id=request_id,
                 principal_id=principal_id,
                 permission_id=permission_id,
                 resource=resource,
                 token=approval_token,
-            ):
-                return self._decision(True, permission_id, principal_id, resource, "One-shot approval consumed", risk_level)
+            ) if consume_approval_token else self._request_store.one_shot_matches_request(
+                request_id=request_id,
+                principal_id=principal_id,
+                permission_id=permission_id,
+                resource=resource,
+                token=approval_token,
+            )
+            if token_allowed:
+                token_reason = "One-shot approval consumed" if consume_approval_token else "One-shot approval verified"
+                return self._decision(True, permission_id, principal_id, resource, token_reason, risk_level)
 
         grant_match = self._matching_capability_grant(candidates, permission_id, resource)
         if grant_match is not None:
@@ -148,9 +229,33 @@ class AuthorityService:
             self._request_store.set_request_status(request.request_id, "expired")
             return {"success": False, "error": "Authority request expired", "status_code": 409}
 
+        config = dict(config or {})
         scope = str(scope or "once").strip().lower()
         if scope not in AUTHORITY_APPROVAL_SCOPES:
             return {"success": False, "error": "Authority approval scope is invalid", "status_code": 400}
+        confirmation_text = str(config.pop("confirmation_text", "") or "").strip()
+        if self._typed_confirmation_required(request):
+            if scope != "once":
+                return {
+                    "success": False,
+                    "error": "Critical host approval must use once scope",
+                    "status_code": 400,
+                }
+            confirmation_phrase = self._confirmation_phrase(request)
+            if not confirmation_phrase or confirmation_text != confirmation_phrase:
+                self._request_store.audit(
+                    "authority_typed_confirmation_rejected",
+                    {
+                        "request_id": request.request_id,
+                        "permission_id": request.permission_id,
+                        "resource_hash": self._request_store.resource_hash(request.resource),
+                    },
+                )
+                return {
+                    "success": False,
+                    "error": "Typed confirmation is required for this host operation",
+                    "status_code": 400,
+                }
         operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
         if not operator_ok:
             self._request_store.audit(
@@ -416,6 +521,30 @@ class AuthorityService:
             return {"success": False, "error": "Authority request not found", "status_code": 404}
         return {"success": True, "request": self._request_view(request)}
 
+    def one_shot_approval_issued(
+        self,
+        *,
+        request_id: str,
+        permission_id: str,
+        token: str,
+        conversation_id: str | None = None,
+        principal_id: str | None = None,
+    ) -> bool:
+        request = self._request_store.get_request(request_id)
+        if request is None:
+            return False
+        if request.permission_id != str(permission_id or "").strip():
+            return False
+        if conversation_id and request.conversation_id and request.conversation_id != conversation_id:
+            return False
+        expected_principal = str(principal_id or request.principal_id or "").strip() or None
+        return self._request_store.one_shot_matches_request(
+            request_id=request.request_id,
+            principal_id=expected_principal,
+            permission_id=request.permission_id,
+            token=token,
+        )
+
     def list_grants(self, principal_id: str = "") -> dict[str, Any]:
         manager = self._capability_grant_manager
         if manager is None:
@@ -472,22 +601,18 @@ class AuthorityService:
 
     @staticmethod
     def _resource_allowed(config: dict[str, Any], resource: dict[str, Any]) -> bool:
-        checks = (
-            ("provider_ids", "provider_id"),
-            ("api_ids", "api_id"),
-            ("model_ids", "model_id"),
-            ("function_ids", "function_id"),
-            ("pack_ids", "pack_id"),
-            ("domains", "domain"),
-            ("host_actions", "host_action"),
-        )
-        for config_key, resource_key in checks:
+        for config_key, resource_keys in AuthorityService._config_resource_fields().items():
             if config_key not in config:
                 continue
             allowed = set(AuthorityService._string_values(config.get(config_key)))
             if not allowed:
                 return False
-            if str(resource.get(resource_key) or "") not in allowed:
+            resource_values = {
+                value
+                for resource_key in resource_keys
+                if (value := str(resource.get(resource_key) or "").strip())
+            }
+            if not resource_values.intersection(allowed):
                 return False
         if "ports" in config:
             allowed_ports = set(AuthorityService._port_values(config.get("ports")))
@@ -547,7 +672,10 @@ class AuthorityService:
 
     @staticmethod
     def _risk_level(permission_id: str, resource: dict[str, Any]) -> str:
-        if permission_id == "host.execute":
+        if permission_id.startswith("host."):
+            definition = get_host_permission_definition(permission_id)
+            if definition is not None:
+                return definition.risk_level
             return "high"
         if permission_id == "network.egress" and resource.get("domain") == "*":
             return "high"
@@ -563,19 +691,12 @@ class AuthorityService:
     @staticmethod
     def _grant_config_from_resource(resource: dict[str, Any]) -> dict[str, Any]:
         config: dict[str, Any] = {}
-        mapping = {
-            "provider_id": "provider_ids",
-            "api_id": "api_ids",
-            "model_id": "model_ids",
-            "function_id": "function_ids",
-            "pack_id": "pack_ids",
-            "domain": "domains",
-            "host_action": "host_actions",
-        }
-        for resource_key, config_key in mapping.items():
+        for resource_key, config_key in RESOURCE_CONFIG_FIELDS:
             value = str(resource.get(resource_key) or "").strip()
             if value:
-                config[config_key] = [value]
+                values = config.setdefault(config_key, [])
+                if value not in values:
+                    values.append(value)
         if resource.get("stream"):
             config["allow_stream"] = True
         if resource.get("port") is not None:
@@ -594,7 +715,7 @@ class AuthorityService:
         if not isinstance(client_config, dict):
             return grant_config
 
-        for key in ("provider_ids", "api_ids", "model_ids", "function_ids", "pack_ids", "domains", "host_actions"):
+        for key in AuthorityService._resource_config_keys():
             if key not in client_config or key not in grant_config:
                 continue
             base_values = AuthorityService._string_values(grant_config.get(key))
@@ -622,6 +743,17 @@ class AuthorityService:
             )
 
         return grant_config
+
+    @staticmethod
+    def _resource_config_keys() -> tuple[str, ...]:
+        return tuple(dict.fromkeys(config_key for _, config_key in RESOURCE_CONFIG_FIELDS))
+
+    @staticmethod
+    def _config_resource_fields() -> dict[str, tuple[str, ...]]:
+        fields: dict[str, list[str]] = {}
+        for resource_key, config_key in RESOURCE_CONFIG_FIELDS:
+            fields.setdefault(config_key, []).append(resource_key)
+        return {config_key: tuple(resource_keys) for config_key, resource_keys in fields.items()}
 
     @staticmethod
     def _principal_for_scope(request: AuthorityRequest, scope: str) -> str:
@@ -693,12 +825,37 @@ class AuthorityService:
         subject = " / ".join(item for item in (provider_id, api_id, model_id, function_id, pack_id) if item)
         title = subject or request.permission_id
         summary = request.reason or f"{request.permission_id} requires approval"
+        host_definition = get_host_permission_definition(request.permission_id)
         permission_label = {
             "model.invoke": "Model/API",
             "api_key.use": "API key",
             "network.egress": "Network access",
-        }.get(request.permission_id, request.permission_id)
+        }.get(request.permission_id, host_definition.label if host_definition is not None else request.permission_id)
         access_summary = ""
+        host_execution_summary: dict[str, Any] = {}
+        typed_confirmation_required = self._typed_confirmation_required(request)
+        confirmation_phrase = self._confirmation_phrase(request)
+        if resource.get("kind") == "host_intent" or request.permission_id.startswith("host."):
+            operation = str(resource.get("operation") or resource.get("host_operation") or request.permission_id)
+            caller = " / ".join(
+                item
+                for item in (
+                    resource.get("caller_pack_id") or resource.get("pack_id"),
+                    resource.get("caller_function_id") or resource.get("function_id"),
+                )
+                if item
+            )
+            stream_label = "stream" if resource.get("stream_enabled") else "one-shot"
+            title = f"Host操作 {operation} を許可しますか？"
+            summary = f"{caller or request.principal_id} が {operation} ({stream_label}) を要求しています。"
+            access_summary = f"{operation} / {stream_label}"
+            host_execution_summary = _host_execution_display_summary(resource.get("args_summary"))
+            if host_execution_summary:
+                access_summary = _host_execution_access_summary(
+                    operation=operation,
+                    stream_label=stream_label,
+                    summary=host_execution_summary,
+                )
         if has_rich_provider_metadata and request.permission_id in {"model.invoke", "api_key.use", "network.egress"}:
             app_label = app_name or "defaultspack"
             provider_label = provider_display_name or provider_id or "provider"
@@ -734,7 +891,10 @@ class AuthorityService:
             "credential_label": credential_label or None,
             "permission_label": permission_label,
             "access_summary": access_summary or None,
+            "host_execution_summary": host_execution_summary or None,
             "risk_level": request.risk_level,
+            "typed_confirmation_required": typed_confirmation_required,
+            "confirmation_phrase": confirmation_phrase or None,
             "audit_text": (
                 "Approving records a signed local UI-operator action and grants only "
                 "the requested resource constraints."
@@ -742,6 +902,8 @@ class AuthorityService:
         }
 
     def _allowed_scopes(self, request: AuthorityRequest) -> list[str]:
+        if self._typed_confirmation_required(request):
+            return ["once"]
         scopes = ["once"]
         if request.conversation_id:
             scopes.append("conversation")
@@ -751,6 +913,21 @@ class AuthorityService:
         if request.node_id or parts.get("node"):
             scopes.append("node")
         return scopes
+
+    def _typed_confirmation_required(self, request: AuthorityRequest) -> bool:
+        resource = dict(request.resource or {})
+        definition = get_host_permission_definition(request.permission_id)
+        return bool(
+            request.risk_level == "critical"
+            or request.permission_id == "host.process.exec_guarded"
+            or resource.get("typed_confirmation_required")
+            or (definition.typed_confirmation_required if definition is not None else False)
+        )
+
+    @staticmethod
+    def _confirmation_phrase(request: AuthorityRequest) -> str:
+        resource = dict(request.resource or {})
+        return str(resource.get("confirmation_phrase") or resource.get("typed_confirmation_phrase") or "").strip()
 
     def _audit_check(self, action: str, principal_id: str, permission_id: str, resource: dict[str, Any]) -> None:
         self._request_store.audit(
@@ -764,3 +941,109 @@ class AuthorityService:
                 "model_id": resource.get("model_id"),
             },
         )
+
+
+def _host_execution_display_summary(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    summary: dict[str, Any] = {}
+    executable = _display_text(value.get("executable"))
+    if executable:
+        summary["executable"] = executable
+    argument_count = _display_int(value.get("argument_count"))
+    if argument_count is not None:
+        summary["argument_count"] = argument_count
+    cwd = _display_text(value.get("cwd"))
+    if cwd:
+        summary["cwd"] = cwd
+    target_paths = _display_text_list(value.get("target_paths"))
+    if target_paths:
+        summary["target_paths"] = target_paths
+    target_urls = _display_url_list(value.get("target_urls"))
+    if target_urls:
+        summary["target_urls"] = target_urls
+    return summary
+
+
+def _host_execution_access_summary(*, operation: str, stream_label: str, summary: dict[str, Any]) -> str:
+    parts = [f"{operation} / {stream_label}"]
+    executable = _display_text(summary.get("executable"))
+    if executable:
+        parts.append(f"exec: {executable}")
+    argument_count = _display_int(summary.get("argument_count"))
+    if argument_count is not None:
+        parts.append(f"args: {argument_count}")
+    cwd = _display_text(summary.get("cwd"))
+    if cwd:
+        parts.append(f"cwd: {cwd}")
+    target_paths = _display_text_list(summary.get("target_paths"))
+    if target_paths:
+        parts.append("paths: " + ", ".join(target_paths))
+    target_urls = _display_text_list(summary.get("target_urls"))
+    if target_urls:
+        parts.append("urls: " + ", ".join(target_urls))
+    return " / ".join(parts)
+
+
+def _display_text(value: Any, *, max_length: int = 160) -> str:
+    text = " ".join(str(value or "").strip().split())
+    if len(text) > max_length:
+        return text[: max(0, max_length - 14)] + "...(truncated)"
+    return text
+
+
+def _display_text_list(value: Any, *, max_items: int = 6) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = _display_text(item)
+        if text and text not in result:
+            result.append(text)
+        if len(result) >= max_items:
+            break
+    return result
+
+
+def _display_url_list(value: Any, *, max_items: int = 6) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        url = _display_url(item)
+        if url and url not in result:
+            result.append(url)
+        if len(result) >= max_items:
+            break
+    return result
+
+
+def _display_url(value: Any) -> str:
+    text = _display_text(value)
+    candidate = text.split()[0] if text else ""
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        return ""
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return ""
+    if ":" in hostname and not (hostname.startswith("[") and hostname.endswith("]")):
+        hostname = f"[{hostname}]"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    netloc = f"{hostname}:{port}" if port is not None else hostname
+    return _display_text(urlunsplit((scheme, netloc, parsed.path or "", "", "")))
+
+
+def _display_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None

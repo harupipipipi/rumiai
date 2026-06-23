@@ -1661,6 +1661,7 @@ class ChatRunEngine:
             ]
             if missing_related:
                 checks = missing_related + [item for item in checks if item not in missing_related]
+        decisions: list[tuple[str, dict[str, Any], str, str]] = []
         for permission_id, resource_kind in checks:
             request_id, approval_token = _authority_context_token_for_permission(context, permission_id)
             resource = build_provider_authority_resource(
@@ -1673,6 +1674,7 @@ class ChatRunEngine:
                 provider=provider,
                 stream=False,
             )
+            decisions.append((permission_id, resource, request_id, approval_token))
             decision = service.check(
                 principal_id=str(context.get("principal_id") or "defaultspack"),
                 permission_id=permission_id,
@@ -1684,6 +1686,23 @@ class ChatRunEngine:
                 graph_id=context.get("graph_id"),
                 request_id=request_id or context.get("request_id"),
                 approval_token=approval_token,
+                consume_approval_token=False,
+            )
+            if not decision.allowed:
+                raise AuthorityApprovalRequired(decision)
+        for permission_id, resource, request_id, approval_token in decisions:
+            decision = service.check(
+                principal_id=str(context.get("principal_id") or "defaultspack"),
+                permission_id=permission_id,
+                resource=resource,
+                reason=provider_authority_reason(permission_id, resource),
+                conversation_id=context.get("conversation_id"),
+                profile_id=context.get("profile_id"),
+                node_id=context.get("node_id"),
+                graph_id=context.get("graph_id"),
+                request_id=request_id or context.get("request_id"),
+                approval_token=approval_token,
+                consume_approval_token=True,
             )
             if not decision.allowed:
                 raise AuthorityApprovalRequired(decision)

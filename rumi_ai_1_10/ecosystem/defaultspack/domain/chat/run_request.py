@@ -63,7 +63,9 @@ from domain.tool.schema_adapter import (
 MAX_ATTACHMENT_TEXT_CHARS = 240_000
 MAX_ATTACHMENT_TEXT_CHARS_PER_FILE = 120_000
 MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
+MAX_ATTACHMENT_AUDIO_BYTES = 25 * 1024 * 1024
 _DATA_IMAGE_PREFIX = "data:image/"
+_DATA_AUDIO_PREFIX = "data:audio/"
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _VECTOR_TOOL_ASSIST_PROFILE_IDS = {"defaultspack.mimo_coding_company"}
 _COMPUTER_USE_REQUEST_RE = re.compile(
@@ -84,6 +86,9 @@ _COMPUTER_USE_VIVALDI_TARGET_RE = re.compile(
 )
 _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
+_AUTHORITY_FOLLOWUP_PERMISSION_IDS = frozenset(
+    {"model.invoke", "api_key.use", "network.egress"}
+)
 _TOOL_SELECTION_MODES = {"auto", "manual", "none"}
 _TOOL_SELECTION_SCOPES = {"turn"}
 
@@ -177,7 +182,7 @@ def prepare_chat_run(
     conversation = _conversation_with_active_profile_prompt(conversation, active_startup_profile)
 
     message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
-    content, metadata = _prepared_user_content(store, conversation_id, message)
+    content, metadata, runtime_content = _prepared_user_content(store, conversation_id, message)
     chat_references = _chat_references(store, conversation_id, metadata)
     metadata = dict(metadata) if isinstance(metadata, dict) else {}
     metadata.setdefault("chat_references", chat_references)
@@ -192,10 +197,19 @@ def prepare_chat_run(
     if user_message is None:
         raise RuntimeError("Failed to add user message")
 
+    user_message_for_ir = dict(user_message)
+    if runtime_content is not None:
+        user_message_for_ir["content"] = runtime_content
+
     if _current_turn_history_only(context):
-        message_chain = [user_message]
+        message_chain = [user_message_for_ir]
     else:
         message_chain = store.get_message_chain(conversation_id, user_message["id"])
+        if runtime_content is not None:
+            message_chain = [
+                user_message_for_ir if item.get("id") == user_message.get("id") else item
+                for item in message_chain
+            ]
     chat_ir = stored_messages_to_ir(conversation_id, message_chain)
     standard_messages = ir_to_legacy_standard_messages(chat_ir)
     runtime_content = _runtime_user_content_override(metadata)
@@ -411,6 +425,7 @@ def prepare_chat_run(
             conversation_id=conversation_id,
             user_text=user_text,
             has_images=bool(modalities.get("has_images")),
+            has_audio=bool(modalities.get("has_audio")),
             has_files=bool(modalities.get("has_files")),
             requested_tools=[
                 tool_name_from_definition(tool)
@@ -872,8 +887,10 @@ def prefocus_computer_use_target_window(prepared: PreparedChatRun) -> Any:
 
 
 def _prepared_user_content(
-    store: ChatStore, conversation_id: str, message: dict[str, Any]
-) -> tuple[list[Any], dict[str, Any] | None]:
+    store: ChatStore,
+    conversation_id: str,
+    message: dict[str, Any],
+) -> tuple[list[Any], dict[str, Any] | None, list[Any] | None]:
     content = message.get("content", [])
     attachments = message.get("attachments")
     has_attachments = isinstance(attachments, list) and len(attachments) > 0
@@ -884,18 +901,34 @@ def _prepared_user_content(
     if isinstance(content, list):
         content = list(content)
     metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    runtime_content: list[Any] | None = None
     if isinstance(attachments, list):
         metadata = dict(metadata)
-        persisted_attachments = store.persist_attachments(conversation_id, attachments)
+        persisted_attachments = store.persist_attachments(
+            conversation_id,
+            [attachment for attachment in attachments if not _attachment_is_ephemeral(attachment)],
+        )
         metadata["attachments"] = _sanitize_attachment_metadata(attachments)
         if persisted_attachments:
             metadata["workspace_attachments"] = persisted_attachments
         if isinstance(content, list):
             content.extend(_attachment_text_blocks(attachments))
             content.extend(_attachment_image_blocks(attachments))
-    return content if isinstance(content, list) else [
-        {"type": "text", "text": str(content)}
-    ], metadata or None
+            content.extend(
+                _attachment_audio_transcript_blocks(
+                    attachments,
+                    existing_text=_content_text_for_transcript_dedupe(content),
+                )
+            )
+            audio_blocks = _attachment_audio_blocks(attachments)
+            audio_placeholders = _attachment_audio_placeholders(attachments)
+            if audio_blocks:
+                runtime_content = list(content)
+                runtime_content.extend(audio_blocks)
+                content.extend(audio_placeholders)
+            elif audio_placeholders:
+                content.extend(audio_placeholders)
+    return content if isinstance(content, list) else [{"type": "text", "text": str(content)}], metadata or None, runtime_content
 
 
 def _chat_references(
@@ -1206,29 +1239,42 @@ def _apply_authority_context(
     followup: dict[str, str] = {}
     approval_tokens: dict[str, dict[str, str]] = {}
 
-    def add_authority_followup(raw: Any) -> None:
+    def add_authority_followup(raw: Any, *, prefer_primary: bool = True, require_issued: bool = False) -> None:
         nonlocal followup
         if not isinstance(raw, dict):
             return
         permission_id = str(raw.get("permission_id") or "").strip()
-        if permission_id not in {"model.invoke", "api_key.use"}:
+        if permission_id not in _AUTHORITY_FOLLOWUP_PERMISSION_IDS and not (
+            permission_id.startswith("host.") or permission_id.startswith("authority.")
+        ):
             return
         token = str(raw.get("approval_token") or raw.get("token") or "").strip()
-        authority_request_id = str(
-            raw.get("request_id") or raw.get("approval_request_id") or ""
-        ).strip()
+        authority_request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+        if require_issued and not _authority_followup_was_issued(
+            raw,
+            conversation_id=conversation_id,
+            principal_id=authority_principal_id,
+        ):
+            return
         if token and authority_request_id:
             approval_tokens[permission_id] = {
                 "approval_token": token,
                 "request_id": authority_request_id,
                 "permission_id": permission_id,
             }
-        if not followup:
+        if prefer_primary or not followup:
             followup = {
                 "approval_token": token,
                 "request_id": authority_request_id,
                 "permission_id": permission_id,
             }
+
+    for raw_followup in _trusted_authority_followups_from_current_chain(conversation_id):
+        approvals = raw_followup.get("approvals") if isinstance(raw_followup, dict) else None
+        if isinstance(approvals, list):
+            for item in approvals:
+                add_authority_followup(item, prefer_primary=False, require_issued=True)
+        add_authority_followup(raw_followup, prefer_primary=False, require_issued=True)
 
     if isinstance(metadata, dict):
         raw_followup = metadata.get("authority_followup")
@@ -1238,8 +1284,8 @@ def _apply_authority_context(
             approvals = raw_followup.get("approvals")
             if isinstance(approvals, list):
                 for item in approvals:
-                    add_authority_followup(item)
-            add_authority_followup(raw_followup)
+                    add_authority_followup(item, prefer_primary=False)
+            add_authority_followup(raw_followup, prefer_primary=True)
 
     authority_context = {
         "principal_id": authority_principal_id,
@@ -1258,6 +1304,83 @@ def _apply_authority_context(
         authority_context["approval_tokens"] = approval_tokens
     request_context["authority_principal_id"] = authority_principal_id
     request_context["authority"] = authority_context
+
+
+def _trusted_authority_followups_from_current_chain(conversation_id: str) -> list[dict[str, Any]]:
+    """Return hidden authority followups since the last visible user turn."""
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return []
+    try:
+        conversation = ChatStore().get_conversation(conversation_id)
+    except Exception:
+        return []
+    messages = conversation.get("messages") if isinstance(conversation, dict) else None
+    if not isinstance(messages, list):
+        return []
+
+    followups: list[dict[str, Any]] = []
+    for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        raw_followup = _hidden_authority_followup_from_metadata(metadata)
+        if raw_followup is not None:
+            followups.append(raw_followup)
+            continue
+        if str(message.get("role") or "").strip().lower() == "user":
+            break
+    followups.reverse()
+    return followups
+
+
+def _hidden_authority_followup_from_metadata(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    raw_followup = metadata.get("authority_followup")
+    if not isinstance(raw_followup, dict):
+        raw_followup = metadata.get("authorityFollowup")
+    if not isinstance(raw_followup, dict):
+        return None
+    chat_display = metadata.get("chat_display")
+    if not isinstance(chat_display, dict):
+        chat_display = metadata.get("chatDisplay")
+    hidden = bool(raw_followup.get("hidden"))
+    if isinstance(chat_display, dict):
+        hidden = hidden or (
+            bool(chat_display.get("hidden"))
+            and str(chat_display.get("reason") or "").strip() == "authority_followup"
+        )
+    return raw_followup if hidden else None
+
+
+def _authority_followup_was_issued(
+    raw: dict[str, Any],
+    *,
+    conversation_id: str,
+    principal_id: str,
+) -> bool:
+    permission_id = str(raw.get("permission_id") or "").strip()
+    authority_request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+    token = str(raw.get("approval_token") or raw.get("token") or "").strip()
+    if not permission_id or not authority_request_id or not token:
+        return False
+    try:
+        from core_runtime.authority import get_authority_service
+
+        service = get_authority_service()
+        issued = getattr(service, "one_shot_approval_issued", None)
+        if not callable(issued):
+            return False
+        return bool(
+            issued(
+                request_id=authority_request_id,
+                permission_id=permission_id,
+                token=token,
+                conversation_id=conversation_id,
+                principal_id=principal_id,
+            )
+        )
+    except Exception:
+        return False
 
 
 def _consume_turn_model_route_override(
@@ -1452,23 +1575,180 @@ def _attachment_image_blocks(attachments: list[dict[str, Any]]) -> list[dict[str
     return blocks
 
 
+def _attachment_audio_blocks(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    blocks = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        if _attachment_audio_transcript(attachment) and not _attachment_include_audio_with_transcript(attachment):
+            continue
+        mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
+        data_url = attachment.get("dataUrl") or attachment.get("data_url")
+        if not mime.startswith("audio/") or not isinstance(data_url, str) or not data_url.startswith("data:"):
+            continue
+        size = attachment.get("size")
+        if isinstance(size, int) and size > MAX_ATTACHMENT_AUDIO_BYTES:
+            continue
+        byte_length = _audio_data_url_byte_length(data_url)
+        if byte_length is None or byte_length > MAX_ATTACHMENT_AUDIO_BYTES:
+            continue
+        header, encoded = data_url.split(",", 1) if "," in data_url else ("", "")
+        if not encoded:
+            continue
+        audio_format = _audio_format_from_mime(header or mime)
+        blocks.append({"type": "input_audio", "input_audio": {"data": encoded, "format": audio_format}})
+    return blocks
+
+
+def _attachment_audio_placeholders(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    blocks = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        if _attachment_audio_transcript(attachment):
+            continue
+        mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
+        if not mime.startswith("audio/"):
+            continue
+        name = str(attachment.get("name") or "ambient-recording").strip()[:200] or "ambient-recording"
+        duration_ms = attachment.get("duration_ms") or attachment.get("durationMs")
+        suffix = f" ({int(duration_ms)}ms)" if isinstance(duration_ms, (int, float)) else ""
+        blocks.append({"type": "text", "text": f"\n\n音声入力: {name}{suffix}"})
+    return blocks
+
+
+def _attachment_audio_transcript_blocks(
+    attachments: list[dict[str, Any]],
+    *,
+    existing_text: str = "",
+) -> list[dict[str, Any]]:
+    from blocks.chat.materialize_context import (
+        materialized_audio_transcript,
+        materialized_audio_transcript_blocks,
+    )
+
+    existing_normalized = _normalize_transcript_for_dedupe(existing_text)
+    blocks: list[dict[str, Any]] = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        transcript = materialized_audio_transcript(attachment)
+        if transcript and existing_normalized:
+            transcript_normalized = _normalize_transcript_for_dedupe(transcript)
+            if transcript_normalized and transcript_normalized in existing_normalized:
+                continue
+        blocks.extend(materialized_audio_transcript_blocks([attachment]))
+    return blocks
+
+
+def _content_text_for_transcript_dedupe(content: list[Any]) -> str:
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if str(block.get("type") or "text") != "text":
+            continue
+        text = block.get("text")
+        if isinstance(text, str) and text.strip():
+            parts.append(text)
+    return "\n".join(parts)
+
+
+def _normalize_transcript_for_dedupe(value: str) -> str:
+    text = str(value or "")
+    text = re.sub(r"音声入力の文字起こし\s*[:：][^\n]*(?:\n|$)", "\n", text)
+    text = re.sub(r"^\s*文字起こし\s*[:：]\s*", "", text)
+    return re.sub(r"\s+", "", text)
+
+
+def _attachment_audio_transcript(attachment: dict[str, Any]) -> str:
+    for key in ("transcript", "transcription", "text_transcript"):
+        value = attachment.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    metadata = attachment.get("metadata") if isinstance(attachment.get("metadata"), dict) else {}
+    for key in ("transcript", "transcription", "text_transcript"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _attachment_include_audio_with_transcript(attachment: dict[str, Any]) -> bool:
+    if bool(attachment.get("include_audio_with_transcript")):
+        return True
+    metadata = attachment.get("metadata") if isinstance(attachment.get("metadata"), dict) else {}
+    return bool(metadata.get("include_audio_with_transcript"))
+
+
+def _audio_format_from_mime(value: str) -> str:
+    lowered = str(value or "").lower()
+    if "audio/webm" in lowered:
+        return "webm"
+    if "audio/wav" in lowered or "audio/x-wav" in lowered:
+        return "wav"
+    if "audio/mp4" in lowered or "audio/m4a" in lowered:
+        return "mp4"
+    if "audio/mpeg" in lowered or "audio/mp3" in lowered:
+        return "mp3"
+    if "audio/ogg" in lowered:
+        return "ogg"
+    return "webm"
+
+
+def _attachment_is_ephemeral(attachment: Any) -> bool:
+    return isinstance(attachment, dict) and (
+        bool(attachment.get("ephemeral"))
+        or bool(attachment.get("do_not_persist"))
+        or bool(attachment.get("no_persist"))
+    )
+
+
 def _sanitize_attachment_metadata(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     sanitized = []
     for attachment in attachments:
         if not isinstance(attachment, dict):
             continue
-        sanitized.append(
-            {
-                key: attachment.get(key)
-                for key in ("id", "name", "size", "type", "truncated", "source", "sourcePath")
-                if key in attachment
-            }
-        )
+        item = {
+            key: attachment.get(key)
+            for key in ("id", "name", "size", "type", "truncated", "source", "sourcePath")
+            if key in attachment
+        }
+        if _attachment_audio_transcript(attachment):
+            item["transcribed"] = True
+            item["transcript_length"] = len(_attachment_audio_transcript(attachment))
+            source = attachment.get("transcript_source") or attachment.get("transcription_source")
+            metadata = attachment.get("metadata") if isinstance(attachment.get("metadata"), dict) else {}
+            if not source:
+                source = metadata.get("transcript_source") or metadata.get("transcription_source")
+            if isinstance(source, str) and source.strip():
+                item["transcript_source"] = source.strip()[:80]
+            status = attachment.get("transcription_status") or metadata.get("transcription_status")
+            if isinstance(status, str) and status.strip():
+                item["transcription_status"] = status.strip()[:80]
+            model = attachment.get("transcription_model") or metadata.get("transcription_model")
+            if isinstance(model, str) and model.strip():
+                item["transcription_model"] = model.strip()[:120]
+            if _attachment_include_audio_with_transcript(attachment):
+                item["audio_included_with_transcript"] = True
+        sanitized.append(item)
     return sanitized
 
 
 def _image_data_url_byte_length(data_url: Any) -> int | None:
     if not isinstance(data_url, str) or not data_url.startswith(_DATA_IMAGE_PREFIX):
+        return None
+    header, separator, encoded = data_url.partition(",")
+    if not separator or ";base64" not in header.lower():
+        return None
+    try:
+        return len(base64.b64decode(encoded, validate=True))
+    except Exception:
+        return None
+
+
+def _audio_data_url_byte_length(data_url: Any) -> int | None:
+    if not isinstance(data_url, str) or not data_url.startswith(_DATA_AUDIO_PREFIX):
         return None
     header, separator, encoded = data_url.partition(",")
     if not separator or ";base64" not in header.lower():

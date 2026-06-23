@@ -4,6 +4,7 @@ from typing import Any
 
 
 IMAGE_BLOCK_TYPES = {"image_url", "image"}
+AUDIO_BLOCK_TYPES = {"audio", "input_audio"}
 
 
 def detect_modalities(
@@ -20,6 +21,7 @@ def detect_modalities(
             attachment_items.extend(item for item in raw if isinstance(item, dict))
 
     has_images = any(_block_is_image(block) for block in blocks) or any(_attachment_is_image(item) for item in attachment_items)
+    has_audio = any(_block_is_audio(block) for block in blocks) or any(_attachment_is_audio(item) for item in attachment_items)
     has_files = any(_attachment_is_file(item) for item in attachment_items)
     has_text = any(_block_has_text(block) for block in blocks)
     image_attachment_ids = []
@@ -29,8 +31,9 @@ def detect_modalities(
     return {
         "has_text": has_text,
         "has_images": has_images,
+        "has_audio": has_audio,
         "has_files": has_files,
-        "input_modalities": _dedupe(["text"] + (["image"] if has_images else []) + (["file"] if has_files else [])),
+        "input_modalities": _dedupe(["text"] + (["image"] if has_images else []) + (["audio"] if has_audio else []) + (["file"] if has_files else [])),
         "image_attachment_ids": [item for item in image_attachment_ids if item],
         "attachment_count": len(attachment_items),
     }
@@ -57,6 +60,10 @@ def _block_is_image(block: Any) -> bool:
     return isinstance(block, dict) and str(block.get("type") or "") in IMAGE_BLOCK_TYPES
 
 
+def _block_is_audio(block: Any) -> bool:
+    return isinstance(block, dict) and str(block.get("type") or "") in AUDIO_BLOCK_TYPES
+
+
 def _block_has_text(block: Any) -> bool:
     if isinstance(block, str):
         return bool(block.strip())
@@ -68,8 +75,15 @@ def _attachment_is_image(attachment: dict[str, Any]) -> bool:
     return mime.startswith("image/")
 
 
+def _attachment_is_audio(attachment: dict[str, Any]) -> bool:
+    if attachment.get("transcribed") is True or attachment.get("transcript_available") is True:
+        return False
+    mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
+    return mime.startswith("audio/")
+
+
 def _attachment_is_file(attachment: dict[str, Any]) -> bool:
-    return not _attachment_is_image(attachment)
+    return not _attachment_is_image(attachment) and not _attachment_is_audio(attachment)
 
 
 def _dedupe(values: list[str]) -> list[str]:

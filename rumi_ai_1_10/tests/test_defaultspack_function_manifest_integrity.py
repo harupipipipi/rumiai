@@ -12,9 +12,12 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from core_runtime.function_registry import FunctionRegistry  # noqa: E402
-from domain.function_runtime.manifest_factory import FUNCTION_SPECS_BY_ID  # noqa: E402
+from domain.function_runtime.manifest_factory import FUNCTION_SPECS_BY_ID, manifest_for  # noqa: E402
 from domain.function_runtime.registry import TOOL_FUNCTION_ACTIONS  # noqa: E402
 from domain.function_runtime.security import HIGH_RISK_CALLER_REQUIREMENT  # noqa: E402
+
+
+AMBIENT_CUSTOM_WRAPPER_FUNCTIONS = frozenset({"ambient_monitor_start"})
 
 
 def _manifest(function_id: str) -> dict:
@@ -44,6 +47,55 @@ def test_generated_defaultspack_function_manifests_are_valid():
         for alias in vocab_aliases:
             assert alias not in aliases, alias
             aliases[alias] = function_id
+
+
+def _generated_main_template(function_id: str) -> str:
+    return f'''from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+PACK_ROOT = Path(__file__).resolve().parents[2]
+RUMI_ROOT = PACK_ROOT.parents[1]
+for path in (str(PACK_ROOT), str(RUMI_ROOT)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+from domain.function_runtime.dispatcher import run_defaultspack_function
+
+
+def run(context, args):
+    return run_defaultspack_function("{function_id}", args, context)
+'''
+
+
+def test_ambient_function_manifests_and_wrappers_follow_factory_specs():
+    factory_owned_manifest_keys = {
+        "function_id",
+        "description",
+        "tags",
+        "risk",
+        "requires",
+        "caller_requires",
+        "host_execution",
+        "calling_convention",
+        "entrypoint",
+        "vocab_aliases",
+        "extensions",
+    }
+
+    for function_id, spec in FUNCTION_SPECS_BY_ID.items():
+        if not function_id.startswith("ambient_"):
+            continue
+        committed = _manifest(function_id)
+        generated = manifest_for(spec)
+        for key in factory_owned_manifest_keys:
+            assert committed.get(key) == generated.get(key), f"{function_id}:{key}"
+        main_path = DEFAULTSPACK_ROOT / "functions" / function_id / "main.py"
+        if function_id in AMBIENT_CUSTOM_WRAPPER_FUNCTIONS:
+            assert main_path.read_text(encoding="utf-8") != _generated_main_template(function_id)
+        else:
+            assert main_path.read_text(encoding="utf-8") == _generated_main_template(function_id)
 
 
 def test_high_risk_functions_declare_caller_requirements():
