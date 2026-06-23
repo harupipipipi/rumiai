@@ -12,6 +12,7 @@ import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } fr
 import { settingsFieldSearchText, settingsSectionSearchText } from "../lib/settingsSearch";
 import { settingsApiResources } from "../features/settings/resources/settingsApiResources";
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../features/settings/resources/useModelAvailability";
+import { ContinuitySettingsField } from "../features/continuity/ContinuitySettingsField";
 import type { SettingsModalRendererProps } from "./types";
 import type { DesktopPermissionStatus, DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import {
@@ -29,6 +30,13 @@ const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry([
     renderers: ["model_routing", "model_api_routes", "ModelApiRoutesSettingsField"],
     component: "ModelApiRoutesSettingsField",
     render: ModelApiRoutesSettingsFieldRenderer,
+  },
+  {
+    id: "builtin-settings-continuity",
+    types: ["continuity"],
+    renderers: ["continuity", "ContinuitySettingsField"],
+    component: "ContinuitySettingsField",
+    render: ContinuitySettingsField,
   },
 ]);
 
@@ -2841,7 +2849,7 @@ export function SettingsModalRenderer({
       key={`${activeSection?.id}.${field.id}`}
       className={cn(
         "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
-        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || String(field.type) === "api_key_setup" || field.type === "external_tokens" || field.type === "public_url" || field.type === "model_api_routes" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
+        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || String(field.type) === "api_key_setup" || field.type === "external_tokens" || field.type === "public_url" || field.type === "model_api_routes" || field.type === "continuity" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
       )}
     >
       <SettingsFieldRendererHost

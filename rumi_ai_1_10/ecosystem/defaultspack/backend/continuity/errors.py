@@ -1,0 +1,39 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+
+LOCAL_MODEL_PROVIDER_NOT_PORTABLE = "LOCAL_MODEL_PROVIDER_NOT_PORTABLE"
+PROVIDER_ENDPOINT_SOURCE_ONLY = "PROVIDER_ENDPOINT_SOURCE_ONLY"
+DESTINATION_PROVIDER_UNREACHABLE = "DESTINATION_PROVIDER_UNREACHABLE"
+DESTINATION_RUNTIME_INSUFFICIENT = "DESTINATION_RUNTIME_INSUFFICIENT"
+PROVIDER_EXTENSION_UNAVAILABLE = "PROVIDER_EXTENSION_UNAVAILABLE"
+OAUTH_NOT_PORTABLE = "OAUTH_NOT_PORTABLE"
+NO_ELIGIBLE_FALLBACK_ROUTE = "NO_ELIGIBLE_FALLBACK_ROUTE"
+PROVIDER_ROUTE_NOT_FOUND = "PROVIDER_ROUTE_NOT_FOUND"
+CREDENTIAL_UNAVAILABLE = "CREDENTIAL_UNAVAILABLE"
+CREDENTIAL_SCOPE_DENIED = "CREDENTIAL_SCOPE_DENIED"
+CHECKPOINT_SECRET_LEAK = "CHECKPOINT_SECRET_LEAK"
+PRIMARY_LEASE_CONFLICT = "PRIMARY_LEASE_CONFLICT"
+STALE_GENERATION = "STALE_GENERATION"
+HANDOFF_NOT_FOUND = "HANDOFF_NOT_FOUND"
+NODE_NOT_FOUND = "NODE_NOT_FOUND"
+PAIRING_CODE_INVALID = "PAIRING_CODE_INVALID"
+
+
+@dataclass
+class ContinuityError(Exception):
+    message: str
+    code: str = "CONTINUITY_ERROR"
+    status_code: int = 400
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "error": self.message,
+            "code": self.code,
+            "status_code": self.status_code,
+            "details": dict(self.details),
+        }
