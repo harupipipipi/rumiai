@@ -696,7 +696,7 @@ def test_prepare_chat_run_authority_off_allows_inferred_pr_write_tools(tmp_path,
     assert filter_status["coding_file_write"] == "allowed"
     assert filter_status["coding_git_commit"] == "allowed"
     assert filter_status["coding_git_push"] == "allowed"
-    assert max_tool_calls(prepared.tool_context) == 80
+    assert max_tool_calls(prepared.tool_context) is None
     assert prepared.request_context["profile_policy"]["allow_shell"] is True
     ChatStore._instance = None
 
