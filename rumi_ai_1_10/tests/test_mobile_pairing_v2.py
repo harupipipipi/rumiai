@@ -22,17 +22,20 @@ def test_pairing_v2_claim_approve_flow():
     # Claim
     claim = pm.claim_pairing(
         session.pairing_id,
+        code=session.code,
         device_id="iphone-1",
         device_label="はるのiPhone",
         device_public_key="pk-abc",
         requested_capabilities=["chat.read", "chat.write", "tools.observe"],
     )
     assert claim["ok"]
+    assert claim["pairing"]["status"] == "claimed"
     assert claim["pairing"]["claimed_device_id"] == "iphone-1"
 
     # Approve
     approve = pm.approve_pairing_v2(session.pairing_id)
     assert approve["ok"]
+    assert approve["pairing"]["status"] == "approved"
     assert approve["device_id"] == "iphone-1"
     assert "chat.read" in approve["scopes"]
 
@@ -65,7 +68,7 @@ def test_pairing_v2_reject():
     tmp = tempfile.mkdtemp()
     pm = PairingManager(tmp)
     session = pm.start_pairing()
-    pm.claim_pairing(session.pairing_id, device_id="d1")
+    pm.claim_pairing(session.pairing_id, code=session.code, device_id="d1")
     result = pm.reject_pairing(session.code)
     assert result["ok"]
     assert result["pairing"]["status"] == "rejected"
@@ -80,6 +83,7 @@ def test_pairing_v2_claim_expired():
     # Force expiry
     result = pm.claim_pairing(
         session.pairing_id,
+        code=session.code,
         device_id="d1",
         now_ms=session.expires_at + 1000,
     )
@@ -118,6 +122,103 @@ def test_device_token_is_scoped():
     assert "credentials.request" not in device.scopes
 
 
+def test_pairing_claim_requires_matching_code():
+    from domain.p2p.pairing import PairingManager
+
+    tmp = tempfile.mkdtemp()
+    pm = PairingManager(tmp)
+    session = pm.start_pairing()
+
+    result = pm.claim_pairing(
+        session.pairing_id,
+        code="WRNG-CODE",
+        device_id="d1",
+    )
+
+    assert not result["ok"]
+    assert result["code"] == "PAIRING_CODE_MISMATCH"
+
+
+def test_mobile_pairing_status_requires_code_and_device_for_token():
+    from domain.p2p.pairing import PairingManager
+    from blocks.mobile.pairing import run
+
+    tmp = tempfile.mkdtemp()
+    session = PairingManager(tmp).start_pairing(
+        capabilities=["chat.read", "chat.write", "tools.observe"],
+    )
+
+    claim = run({
+        "action": "claim",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "code": session.code,
+        "device_id": "mobile-1",
+        "device_label": "iPhone",
+        "public_key": "pk-mobile",
+        "requested_capabilities": ["chat.read", "chat.write"],
+    }, None)
+    assert claim["status"] == "ok"
+    assert claim["data"]["pairing"]["status"] == "claimed"
+
+    approved = run({
+        "action": "approve",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+    }, None)
+    assert approved["status"] == "ok"
+    assert approved["data"]["pairing"]["status"] == "approved"
+
+    without_code = run({
+        "action": "status",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+    }, None)
+    assert without_code["status"] == "ok"
+    assert "device_token" not in without_code["data"]
+
+    with_code = run({
+        "action": "status",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "code": session.code,
+        "device_id": "mobile-1",
+    }, None)
+    assert with_code["status"] == "ok"
+    assert with_code["data"]["device_token"].startswith("dtk_")
+    assert with_code["data"]["scopes"] == ["chat.read", "chat.write"]
+
+
+def test_mobile_pairing_base_urls_do_not_advertise_loopback():
+    from domain.mobile.base_urls import mobile_base_urls_from_headers
+
+    urls = mobile_base_urls_from_headers(
+        {"Host": "localhost:8765"},
+        local_addresses=["127.0.0.1", "192.168.1.44"],
+    )
+
+    assert urls == ["http://192.168.1.44:8765"]
+
+
+def test_pairing_start_returns_mobile_reachable_base_urls(monkeypatch):
+    from blocks.p2p import pairing_start
+
+    tmp = tempfile.mkdtemp()
+    monkeypatch.setattr(
+        pairing_start,
+        "mobile_base_urls_from_headers",
+        lambda headers: ["http://192.168.1.44:8765"],
+    )
+
+    result = pairing_start.run({
+        "store_path": tmp,
+        "_headers": {"Host": "localhost:8765"},
+    }, None)
+
+    assert result["status"] == "ok"
+    assert result["data"]["pairing"]["base_urls"] == ["http://192.168.1.44:8765"]
+
+
 def test_mobile_conversations_list_create_get():
     from blocks.mobile.conversations import run
 
@@ -140,25 +241,37 @@ def test_mobile_credentials_create_get_ack():
         "action": "create",
         "device_id": "d1",
         "provider_id": "openai",
-        "api_key": "sk-test1234",
-        "base_url": "https://api.openai.com/v1",
-        "default_model": "gpt-4o",
+        "ciphertext": "encrypted-payload",
+        "nonce": "nonce-1",
     }, None)
     assert r["status"] == "ok"
     tid = r["data"]["transfer"]["transfer_id"]
-    assert r["data"]["transfer"]["api_key_suffix"] == "1234"
     # Ciphertext must not be in the create response
     assert "ciphertext" not in r["data"]["transfer"]
 
-    r = run({"action": "get", "transfer_id": tid}, None)
+    device_context = {"_authenticated_device_id": "d1"}
+    r = run({"action": "get", "transfer_id": tid}, device_context)
     assert r["status"] == "ok"
     assert "ciphertext" in r["data"]["transfer"]
 
-    r = run({"action": "ack", "transfer_id": tid}, None)
+    r = run({"action": "ack", "transfer_id": tid}, device_context)
     assert r["status"] == "ok"
 
     # After ack, get should fail
-    r = run({"action": "get", "transfer_id": tid}, None)
+    r = run({"action": "get", "transfer_id": tid}, device_context)
+    assert r["status"] == "error"
+
+
+def test_mobile_credentials_reject_plaintext_fallback():
+    from blocks.mobile.credentials import run
+
+    r = run({
+        "action": "create",
+        "device_id": "d1",
+        "provider_id": "openai",
+        "api_key": "sk-test1234",
+    }, None)
+
     assert r["status"] == "error"
 
 
@@ -170,11 +283,12 @@ def test_mobile_credentials_expired():
         "action": "create",
         "device_id": "d1",
         "provider_id": "openai",
-        "api_key": "sk-test1234",
+        "ciphertext": "encrypted-payload",
+        "nonce": "nonce-1",
     }, None)
     tid = r["data"]["transfer"]["transfer_id"]
 
     # Wait for expiry (TTL is 60s, so we test the path differently)
     # Just verify the endpoint exists and returns properly
-    r = run({"action": "get", "transfer_id": tid}, None)
+    r = run({"action": "get", "transfer_id": tid}, {"_authenticated_device_id": "d1"})
     assert r["status"] == "ok"

@@ -96,6 +96,8 @@ void main() {
         onDelete: (_) {},
         onRename: (_) {},
         onPin: (_) {},
+        onReconnectSpace: () {},
+        onContinueOffline: () {},
         onOpenSettings: () {},
       ),
     )));

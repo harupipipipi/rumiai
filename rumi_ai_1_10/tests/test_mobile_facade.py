@@ -98,3 +98,73 @@ def test_mobile_capabilities_provider_summary_has_openai_compatible_flag():
 
     providers = run({}, None)["data"]["providers"]
     assert any("openai_compatible" in p for p in providers)
+
+
+def test_mobile_route_contract_is_reflected_in_registry():
+    from domain.mobile.contract import iter_mobile_route_contracts
+    from transport.registry import canonical_http_route_specs
+
+    specs = {
+        (spec.method, spec.pattern): spec
+        for spec in canonical_http_route_specs(include_always_available=False)
+    }
+
+    for route in iter_mobile_route_contracts():
+        spec = specs.get((route.method, route.pattern))
+        assert spec is not None, f"missing mobile route spec: {route.method} {route.pattern}"
+        assert spec.block_module == route.block_module
+        assert spec.flow_id == route.flow_id
+        assert spec.fallback_block_module == (
+            route.fallback_block_module or route.block_module
+        )
+
+
+def test_mobile_pc_equivalent_routes_exist_for_parity_guard():
+    from domain.mobile.contract import iter_mobile_route_contracts
+    from transport.registry import canonical_http_route_specs
+
+    specs = {
+        f"{spec.method} {spec.pattern}"
+        for spec in canonical_http_route_specs(include_always_available=False)
+    }
+    equivalents = [
+        route.pc_equivalent
+        for route in iter_mobile_route_contracts()
+        if route.pc_equivalent
+    ]
+
+    assert equivalents
+    for equivalent in equivalents:
+        assert equivalent in specs
+
+
+def test_mobile_contract_covers_pc_conversation_routes():
+    from domain.mobile.contract import iter_mobile_route_contracts
+    from transport.registry import canonical_http_route_specs
+
+    pc_conversation_routes = {
+        f"{spec.method} {spec.pattern}"
+        for spec in canonical_http_route_specs(include_always_available=False)
+        if spec.pattern.startswith("/api/chat/conversations")
+    }
+    mobile_equivalents = {
+        route.pc_equivalent
+        for route in iter_mobile_route_contracts()
+        if route.pc_equivalent
+    }
+
+    assert pc_conversation_routes <= mobile_equivalents
+
+
+def test_mobile_device_scope_contract_blocks_unknown_routes():
+    from domain.mobile.contract import required_device_scope
+
+    assert required_device_scope("GET", "/api/mobile/v1/conversations") == "chat.read"
+    assert (
+        required_device_scope(
+            "POST",
+            "/api/mobile/v1/conversations/convo-1/stream",
+        )
+        == "chat.write"
+    )
+    assert required_device_scope("GET", "/api/packs") == ""

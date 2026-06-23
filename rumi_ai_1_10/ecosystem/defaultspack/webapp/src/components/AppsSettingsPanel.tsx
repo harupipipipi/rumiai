@@ -18,6 +18,7 @@ import {
 import { cn } from "../lib/cn";
 import { mobileApiResources } from "../features/mobile/resources/mobileApiResources";
 import type { MobileDevice, P2PPairing } from "../features/mobile/resources/mobileApiResources";
+import { buildMobilePairingBaseUrls, isLoopbackHost } from "../lib/mobilePairingUrls";
 import { MobilePairingApproval } from "./MobilePairingApproval";
 
 type AppsSettingsPanelProps = {
@@ -171,10 +172,15 @@ function ComingSoonBadge() {
 function lanHost() {
   if (typeof window === "undefined") return "";
   const host = window.location.hostname;
-  if (!host || host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0") {
+  if (isLoopbackHost(host)) {
     return "";
   }
   return host;
+}
+
+function windowOrigin() {
+  if (typeof window === "undefined") return "";
+  return window.location?.origin ?? "";
 }
 
 function formatRelativeTime(isoString: string | undefined): string {
@@ -192,8 +198,9 @@ function formatRelativeTime(isoString: string | undefined): string {
   return `${diffDay}日前`;
 }
 
-function PairingV2Section() {
+function PairingV2Section({ kernelBaseUrl }: { kernelBaseUrl?: string }) {
   const [pairing, setPairing] = useState<P2PPairing | null>(null);
+  const [manualBaseUrl, setManualBaseUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showApproval, setShowApproval] = useState(false);
@@ -219,10 +226,17 @@ function PairingV2Section() {
     setBusy(true);
     setError("");
     setPairing(null);
+    setManualBaseUrl("");
     setShowApproval(false);
     try {
       const result = await mobileApiResources.startPairing({
-        capabilities: ["chat.read", "chat.write", "tools.observe"],
+        capabilities: [
+          "chat.read",
+          "chat.write",
+          "tools.observe",
+          "tools.approve",
+          "credentials.request",
+        ],
       });
       if (!mountedRef.current) return;
       setPairing(result.pairing);
@@ -265,12 +279,22 @@ function PairingV2Section() {
     };
   }, [pairing, stopPolling]);
 
-  const qrPayload: PairV2QrPayload | null = pairing ? {
+  const advertisedBaseUrls = useMemo(
+    () => pairing?.base_urls?.filter((value): value is string => typeof value === "string") ?? [],
+    [pairing?.base_urls],
+  );
+  const currentOrigin = windowOrigin();
+  const qrBaseUrls = useMemo(
+    () => buildMobilePairingBaseUrls([manualBaseUrl, ...advertisedBaseUrls, kernelBaseUrl, currentOrigin]),
+    [advertisedBaseUrls, currentOrigin, kernelBaseUrl, manualBaseUrl],
+  );
+
+  const qrPayload: PairV2QrPayload | null = pairing && qrBaseUrls.length > 0 ? {
     kind: "rumi_pair_v2",
     version: 2,
     pairingId: pairing.pairing_id,
     code: pairing.code,
-    baseUrls: [window.location.origin],
+    baseUrls: qrBaseUrls,
     serverPublicKey: "",
     expiresAt: pairing.expires_at,
   } : null;
@@ -313,10 +337,30 @@ function PairingV2Section() {
               <img src={qr.dataUrl} alt="ペアリングQR" className="h-56 w-56" />
             ) : (
               <div className="flex h-56 w-56 items-center justify-center text-[11px] text-zinc-600">
-                {qr.error ? <span className="text-rose-300">{qr.error}</span> : "QRを生成中..."}
+                {qr.error ? (
+                  <span className="text-rose-300">{qr.error}</span>
+                ) : qrBaseUrls.length === 0 ? (
+                  "LAN URLを入力するとQRが表示されます。"
+                ) : (
+                  "QRを生成中..."
+                )}
               </div>
             )}
           </div>
+
+          <CopyField
+            label="PC LAN URL"
+            value={manualBaseUrl || qrBaseUrls[0] || ""}
+            onChange={setManualBaseUrl}
+            placeholder="http://192.168.x.x:8765"
+            mono
+          />
+
+          {qrBaseUrls.length === 0 && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-200">
+              スマホから到達できるPCのLAN URLを検出できませんでした。localhostでは接続できないため、PCのLAN IPを入力してください。
+            </div>
+          )}
 
           <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-center">
             <div className="text-[11px] uppercase text-emerald-400">確認コード</div>
@@ -480,7 +524,10 @@ function LegacyQrSection({
 }) {
   const defaultPcBase = useMemo(() => {
     const host = lanHost();
-    return kernelBaseUrl && kernelBaseUrl.trim().length > 0
+    const detected = buildMobilePairingBaseUrls([kernelBaseUrl, windowOrigin()])[0] ?? "";
+    return detected
+      ? detected
+      : kernelBaseUrl && kernelBaseUrl.trim().length > 0
       ? kernelBaseUrl.trim()
       : host
         ? `http://${host}:8765`
@@ -520,7 +567,7 @@ function LegacyQrSection({
         return "";
       }
     })();
-    return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "";
+    return isLoopbackHost(host);
   }, [pcBaseUrl]);
 
   return (
@@ -661,7 +708,7 @@ export function AppsSettingsPanel({ kernelBaseUrl, cloudflarePagesUrl }: AppsSet
         </div>
       </div>
 
-      <PairingV2Section />
+      <PairingV2Section kernelBaseUrl={kernelBaseUrl} />
 
       <DeviceManagementSection />
 

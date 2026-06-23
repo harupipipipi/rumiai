@@ -17,6 +17,8 @@ class ChatDrawer extends StatelessWidget {
     required this.onRename,
     required this.onPin,
     required this.onOpenSettings,
+    required this.onReconnectSpace,
+    required this.onContinueOffline,
     this.pcConversations = const [],
     this.loadingPc = false,
   });
@@ -33,6 +35,8 @@ class ChatDrawer extends StatelessWidget {
   final ValueChanged<String> onRename;
   final ValueChanged<String> onPin;
   final VoidCallback onOpenSettings;
+  final VoidCallback onReconnectSpace;
+  final VoidCallback onContinueOffline;
   final bool loadingPc;
 
   @override
@@ -48,9 +52,12 @@ class ChatDrawer extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: Text('Rumi',
-                      style: theme.textTheme.titleLarge
-                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  child: Text(
+                    'Rumi',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
                 IconButton(
                   tooltip: '新規チャット',
@@ -74,13 +81,12 @@ class ChatDrawer extends StatelessWidget {
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(44),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ),
-          Expanded(
-            child: _buildConversationList(activeSpace, theme),
-          ),
+          Expanded(child: _buildConversationList(activeSpace, theme)),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.settings_outlined),
@@ -101,16 +107,21 @@ class ChatDrawer extends StatelessWidget {
 
   Widget _buildConversationList(Space space, ThemeData theme) {
     if (space.isPc && space.isOffline) {
-      return _OfflineSpaceView(space: space);
+      return _OfflineSpaceView(
+        space: space,
+        onReconnect: onReconnectSpace,
+        onContinue: onContinueOffline,
+      );
     }
 
     if (space.isPc) {
       if (loadingPc) {
         return const Center(
-            child: Padding(
-          padding: EdgeInsets.all(24),
-          child: CircularProgressIndicator(),
-        ));
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: CircularProgressIndicator(),
+          ),
+        );
       }
       if (pcConversations.isEmpty) {
         return const Padding(
@@ -260,21 +271,22 @@ class _SpaceSelector extends StatelessWidget {
                         color: isOffline
                             ? Colors.grey
                             : isActive
-                                ? theme.colorScheme.primary
-                                : theme.colorScheme.onSurfaceVariant,
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.onSurfaceVariant,
                       ),
                       const SizedBox(width: 6),
                       Text(
                         space.label,
                         style: TextStyle(
                           fontSize: 12,
-                          fontWeight:
-                              isActive ? FontWeight.w600 : FontWeight.w400,
+                          fontWeight: isActive
+                              ? FontWeight.w600
+                              : FontWeight.w400,
                           color: isOffline
                               ? Colors.grey
                               : isActive
-                                  ? theme.colorScheme.primary
-                                  : theme.colorScheme.onSurface,
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.onSurface,
                         ),
                       ),
                     ],
@@ -291,8 +303,8 @@ class _SpaceSelector extends StatelessWidget {
                           color: isOffline
                               ? Colors.grey
                               : space.isLocal
-                                  ? Colors.green
-                                  : theme.colorScheme.primary,
+                              ? Colors.green
+                              : theme.colorScheme.primary,
                         ),
                       ),
                       const SizedBox(width: 5),
@@ -318,8 +330,14 @@ class _SpaceSelector extends StatelessWidget {
 }
 
 class _OfflineSpaceView extends StatelessWidget {
-  const _OfflineSpaceView({required this.space});
+  const _OfflineSpaceView({
+    required this.space,
+    required this.onReconnect,
+    required this.onContinue,
+  });
   final Space space;
+  final VoidCallback onReconnect;
+  final VoidCallback onContinue;
 
   @override
   Widget build(BuildContext context) {
@@ -344,13 +362,13 @@ class _OfflineSpaceView extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             FilledButton.icon(
-              onPressed: () {},
+              onPressed: onReconnect,
               icon: const Icon(Icons.refresh),
               label: const Text('再接続する'),
             ),
             const SizedBox(height: 10),
             TextButton(
-              onPressed: () {},
+              onPressed: onContinue,
               child: const Text('この地点からスマホで続ける'),
             ),
           ],
@@ -368,9 +386,14 @@ class _GroupHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-      child: Text(text,
-          style: const TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey)),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: Colors.grey,
+        ),
+      ),
     );
   }
 }
@@ -436,11 +459,13 @@ class _ConversationTile extends StatelessWidget {
           itemBuilder: (_) => [
             const PopupMenuItem(value: 'rename', child: Text('名前を変更')),
             PopupMenuItem(
-                value: 'pin',
-                child: Text(conversation.pinned ? 'ピン留め解除' : 'ピン留め')),
+              value: 'pin',
+              child: Text(conversation.pinned ? 'ピン留め解除' : 'ピン留め'),
+            ),
             const PopupMenuItem(
-                value: 'delete',
-                child: Text('削除', style: TextStyle(color: Colors.redAccent))),
+              value: 'delete',
+              child: Text('削除', style: TextStyle(color: Colors.redAccent)),
+            ),
           ],
         ),
         onTap: onSelect,
@@ -475,11 +500,7 @@ class _PcConversationTile extends StatelessWidget {
           size: 18,
           color: Colors.grey,
         ),
-        title: Text(
-          item.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
         subtitle: Text(
           item.preview,
           maxLines: 1,

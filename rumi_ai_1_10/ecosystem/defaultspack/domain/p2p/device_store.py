@@ -145,7 +145,11 @@ class DeviceStore:
         devices = self._devices()
         now = _now_ms()
         plaintext = _generate_token()
-        resolved_scopes = _string_list(scopes) if scopes else list(DEFAULT_SCOPES)
+        requested_scopes = _string_list(scopes) if scopes else list(DEFAULT_SCOPES)
+        allowed_scopes = set(ALL_SCOPES)
+        resolved_scopes = [scope for scope in requested_scopes if scope in allowed_scopes]
+        if not resolved_scopes:
+            resolved_scopes = list(DEFAULT_SCOPES)
         code = f"{_confirmation_emoji()}・{secrets.randbelow(90) + 10}"
         device = DeviceRecord(
             device_id=clean_id,

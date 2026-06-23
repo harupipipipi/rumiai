@@ -433,6 +433,23 @@ def flow_http_output_is_compatible(flow_id: str, output: Any, *, fallback_block_
     return True
 
 
+def _mobile_http_route_specs() -> list[HttpRouteSpec]:
+    from ecosystem.defaultspack.domain.mobile.contract import iter_mobile_route_contracts
+
+    return [
+        HttpRouteSpec(
+            route.method,
+            route.pattern,
+            block_module=route.block_module,
+            flow_id=route.flow_id,
+            fallback_block_module=route.fallback_block_module,
+            path_inject=dict(route.path_inject),
+            defaults=dict(route.defaults),
+        )
+        for route in iter_mobile_route_contracts()
+    ]
+
+
 _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec(
         "POST",
@@ -547,29 +564,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/p2p/pairing/reject", block_module="blocks.p2p.pairing_reject"),
     HttpRouteSpec("POST", "/api/p2p/messages/inbound", block_module="blocks.p2p.messages_inbound"),
     HttpRouteSpec("POST", "/api/p2p/messages/send", block_module="blocks.p2p.messages_send"),
-    HttpRouteSpec("GET", "/api/mobile/v1/bootstrap", block_module="blocks.mobile.bootstrap"),
-    HttpRouteSpec("GET", "/api/mobile/v1/capabilities", block_module="blocks.mobile.capabilities"),
-    HttpRouteSpec("POST", "/api/mobile/v1/pairings/{id}/claim", block_module="blocks.mobile.pairing", path_inject={"id": "pairing_id"}, defaults={"action": "claim"}),
-    HttpRouteSpec("POST", "/api/mobile/v1/pairings/{id}/approve", block_module="blocks.mobile.pairing", path_inject={"id": "pairing_id"}, defaults={"action": "approve"}),
-    HttpRouteSpec("POST", "/api/mobile/v1/pairings/{id}/reject", block_module="blocks.mobile.pairing", path_inject={"id": "pairing_id"}, defaults={"action": "reject"}),
-    HttpRouteSpec("GET", "/api/mobile/v1/pairings/{id}/status", block_module="blocks.mobile.pairing", path_inject={"id": "pairing_id"}, defaults={"action": "status"}),
-    HttpRouteSpec("GET", "/api/mobile/v1/devices", block_module="blocks.mobile.pairing", defaults={"action": "list_devices"}),
-    HttpRouteSpec("PATCH", "/api/mobile/v1/devices/{id}", block_module="blocks.mobile.pairing", path_inject={"id": "device_id"}, defaults={"action": "patch_device"}),
-    HttpRouteSpec("DELETE", "/api/mobile/v1/devices/{id}", block_module="blocks.mobile.pairing", path_inject={"id": "device_id"}, defaults={"action": "delete_device"}),
-    HttpRouteSpec("GET", "/api/mobile/v1/conversations", block_module="blocks.mobile.conversations", defaults={"action": "list"}),
-    HttpRouteSpec("POST", "/api/mobile/v1/conversations", block_module="blocks.mobile.conversations", defaults={"action": "create"}),
-    HttpRouteSpec("GET", "/api/mobile/v1/conversations/{id}", block_module="blocks.mobile.conversations", path_inject={"id": "conversation_id"}, defaults={"action": "get"}),
-    HttpRouteSpec("POST", "/api/mobile/v1/conversations/{id}/stream", block_module="blocks.mobile.conversations", path_inject={"id": "conversation_id"}, defaults={"action": "stream"}),
-    HttpRouteSpec("POST", "/api/mobile/v1/conversations/{id}/stop", block_module="blocks.mobile.conversations", path_inject={"id": "conversation_id"}, defaults={"action": "stop"}),
-    HttpRouteSpec("POST", "/api/mobile/v1/conversations/{id}/branch", block_module="blocks.mobile.conversations", path_inject={"id": "conversation_id"}, defaults={"action": "branch"}),
-    HttpRouteSpec("POST", "/api/mobile/v1/conversations/import-branch", block_module="blocks.mobile.conversations", defaults={"action": "import_branch"}),
-    HttpRouteSpec("POST", "/api/mobile/v1/credential-transfers", block_module="blocks.mobile.credentials", defaults={"action": "create"}),
-    HttpRouteSpec("GET", "/api/mobile/v1/credential-transfers/{id}", block_module="blocks.mobile.credentials", path_inject={"id": "transfer_id"}, defaults={"action": "get"}),
-    HttpRouteSpec("POST", "/api/mobile/v1/credential-transfers/{id}/ack", block_module="blocks.mobile.credentials", path_inject={"id": "transfer_id"}, defaults={"action": "ack"}),
-    HttpRouteSpec("GET", "/api/mobile/v1/events", block_module="blocks.mobile.events", defaults={"action": "list_events"}),
-    HttpRouteSpec("GET", "/api/mobile/v1/approvals", block_module="blocks.mobile.events", defaults={"action": "list_approvals"}),
-    HttpRouteSpec("POST", "/api/mobile/v1/approvals/{id}/approve", block_module="blocks.mobile.events", path_inject={"id": "request_id"}, defaults={"action": "approve"}),
-    HttpRouteSpec("POST", "/api/mobile/v1/approvals/{id}/deny", block_module="blocks.mobile.events", path_inject={"id": "request_id"}, defaults={"action": "deny"}),
+    *_mobile_http_route_specs(),
     HttpRouteSpec("POST", "/api/agent/execute", block_module="blocks.agent.execute"),
     HttpRouteSpec("POST", "/api/agent/{id}/approve", block_module="blocks.agent.approve", path_inject={"id": "execution_id"}),
     HttpRouteSpec("POST", "/api/agent/{id}/reject", block_module="blocks.agent.reject", path_inject={"id": "execution_id"}),

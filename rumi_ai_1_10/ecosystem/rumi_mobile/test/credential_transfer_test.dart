@@ -20,16 +20,16 @@ void main() {
       final t = CredentialTransfer.fromJson({
         'transfer_id': 't1',
         'status': 'pending',
-        'api_key': 'sk-xxx',
-        'base_url': 'https://api.openai.com/v1',
-        'model': 'gpt-4o-mini',
+        'ciphertext': 'encrypted',
+        'nonce': 'nonce-1',
+        'algorithm': 'x25519-aes-gcm',
         'label': 'Main',
       });
       expect(t.transferId, 't1');
       expect(t.isPending, isTrue);
-      expect(t.apiKey, 'sk-xxx');
-      expect(t.baseUrl, 'https://api.openai.com/v1');
-      expect(t.model, 'gpt-4o-mini');
+      expect(t.ciphertext, 'encrypted');
+      expect(t.nonce, 'nonce-1');
+      expect(t.algorithm, 'x25519-aes-gcm');
       expect(t.label, 'Main');
     });
 
@@ -49,9 +49,11 @@ void main() {
       final client = MockClient((request) async {
         requestedPath = request.url.path;
         return _ok({
-          'transfer_id': 't1',
-          'status': 'completed',
-          'api_key': 'sk-test',
+          'transfer': {
+            'transfer_id': 't1',
+            'status': 'completed',
+            'ciphertext': 'encrypted',
+          },
         });
       });
 
@@ -62,7 +64,7 @@ void main() {
       expect(requestedPath, '/api/mobile/v1/credential-transfers/t1');
       expect(transfer.transferId, 't1');
       expect(transfer.isCompleted, isTrue);
-      expect(transfer.apiKey, 'sk-test');
+      expect(transfer.ciphertext, 'encrypted');
     });
 
     test('ackTransfer sends POST to ack endpoint', () async {

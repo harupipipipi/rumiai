@@ -41,17 +41,24 @@ class PairingStatusResponse {
   final List<String> scopes;
   final String? pcLabel;
 
-  bool get isAccepted => status == 'accepted';
+  bool get isAccepted => status == 'approved' || status == 'accepted';
 
   factory PairingStatusResponse.fromJson(Map<String, dynamic> json) {
     final pairing = json['pairing'] as Map<String, dynamic>? ?? json;
+    final device = json['device'] as Map<String, dynamic>?;
+    final rawScopes =
+        (json['scopes'] as List?) ??
+        (device?['scopes'] as List?) ??
+        (pairing['scopes'] as List?) ??
+        (pairing['capabilities'] as List?) ??
+        const [];
     return PairingStatusResponse(
       pairingId: pairing['pairing_id'] as String? ?? '',
       status: pairing['status'] as String? ?? '',
-      deviceToken: pairing['device_token'] as String?,
-      scopes:
-          (pairing['scopes'] as List? ?? []).map((e) => e.toString()).toList(),
-      pcLabel: pairing['pc_label'] as String?,
+      deviceToken:
+          json['device_token'] as String? ?? pairing['device_token'] as String?,
+      scopes: rawScopes.map((e) => e.toString()).toList(),
+      pcLabel: json['pc_label'] as String? ?? pairing['pc_label'] as String?,
     );
   }
 }
@@ -68,10 +75,12 @@ class PcPairingClient {
   }
 
   Map<String, String> _headers(String token) => {
-        'Authorization': 'Bearer $token',
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      };
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+    if (token.trim().isNotEmpty) 'Authorization': 'Bearer $token',
+  };
+
+  bool _hasBaseUrl(PcConnection pc) => pc.baseUrl.trim().isNotEmpty;
 
   Uri _uri(String baseUrl, String path) {
     var trimmed = baseUrl.trim();
@@ -87,7 +96,7 @@ class PcPairingClient {
     required DeviceIdentity device,
     required List<String> requestedCapabilities,
   }) async {
-    if (!pc.isConfigured) {
+    if (!_hasBaseUrl(pc)) {
       throw const PcPairingException('PC接続が設定されていません。');
     }
     if (_closed) {
@@ -116,14 +125,23 @@ class PcPairingClient {
   Future<PairingStatusResponse> pollStatus(
     PcConnection pc, {
     required String pairingId,
+    String? code,
+    String? deviceId,
   }) async {
-    if (!pc.isConfigured) {
+    if (!_hasBaseUrl(pc)) {
       throw const PcPairingException('PC接続が設定されていません。');
     }
     if (_closed) {
       throw const PcPairingException('クライアントは閉じられました。');
     }
-    final uri = _uri(pc.baseUrl, '/api/mobile/v1/pairings/$pairingId/status');
+    final uri = _uri(pc.baseUrl, '/api/mobile/v1/pairings/$pairingId/status')
+        .replace(
+          queryParameters: {
+            if (code != null && code.trim().isNotEmpty) 'code': code.trim(),
+            if (deviceId != null && deviceId.trim().isNotEmpty)
+              'device_id': deviceId.trim(),
+          },
+        );
     final resp = await _http
         .get(uri, headers: _headers(pc.token))
         .timeout(const Duration(seconds: 15));

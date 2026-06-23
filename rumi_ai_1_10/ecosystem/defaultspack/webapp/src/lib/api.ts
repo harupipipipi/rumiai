@@ -721,6 +721,7 @@ export type P2PPairing = {
   claimed_device_label?: string;
   confirmation_code?: string;
   requested_scopes?: string[];
+  base_urls?: string[];
   reason?: string;
 };
 
@@ -760,11 +761,13 @@ export type MobilePairingStatus = {
 export type CredentialTransferPayload = {
   device_id: string;
   provider_id: string;
-  api_key?: string;
   api_id?: string;
   base_url?: string;
   default_model?: string;
   name?: string;
+  ciphertext?: string;
+  nonce?: string;
+  algorithm?: string;
 };
 
 export type ConversationListOptions = {
@@ -3145,7 +3148,7 @@ export const api = {
   },
 
   createCredentialTransfer(payload: CredentialTransferPayload) {
-    return request<{ ok: boolean; transfer_id?: string }>(
+    return request<{ transfer_id?: string; status?: string; transfer?: Record<string, unknown> }>(
       "/api/mobile/v1/credential-transfers",
       { method: "POST", body: JSON.stringify(payload) },
     );

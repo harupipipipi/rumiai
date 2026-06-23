@@ -15,8 +15,8 @@ class PcConversationBackend implements ConversationBackend {
     required this.connection,
     this.deviceId,
     http.Client? client,
-  })  : _http = client ?? http.Client(),
-        _uuid = const Uuid();
+  }) : _http = client ?? http.Client(),
+       _uuid = const Uuid();
 
   final PcConnection connection;
   final String? deviceId;
@@ -36,10 +36,10 @@ class PcConversationBackend implements ConversationBackend {
   }
 
   Map<String, String> get _headers => {
-        'Authorization': 'Bearer ${connection.token}',
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      };
+    'Authorization': 'Bearer ${connection.token}',
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+  };
 
   Uri _uri(String path) {
     var trimmed = connection.baseUrl.trim();
@@ -65,7 +65,8 @@ class PcConversationBackend implements ConversationBackend {
 
   @override
   Future<ConversationSnapshot> getConversation(
-      ConversationLocator locator) async {
+    ConversationLocator locator,
+  ) async {
     _checkReady();
     final uri = _uri('/api/mobile/v1/conversations/${locator.conversationId}');
     final resp = await _http
@@ -84,7 +85,8 @@ class PcConversationBackend implements ConversationBackend {
 
   @override
   Future<ConversationLocator> createConversation(
-      CreateConversationRequest request) async {
+    CreateConversationRequest request,
+  ) async {
     _checkReady();
     final uri = _uri('/api/mobile/v1/conversations');
     final body = <String, dynamic>{};
@@ -96,7 +98,8 @@ class PcConversationBackend implements ConversationBackend {
         .timeout(const Duration(seconds: 15));
     _checkResponse(resp);
     final data = _decodeData(resp.body);
-    final id = data['conversation_id'] as String? ??
+    final id =
+        data['conversation_id'] as String? ??
         (data['conversation'] as Map<String, dynamic>?)?['id'] as String? ??
         '';
     return ConversationLocator.pc(id, deviceId: deviceId);
@@ -120,24 +123,27 @@ class PcConversationBackend implements ConversationBackend {
       assistantMessageId: assistantId,
     );
 
-    final uri =
-        _uri('/api/mobile/v1/conversations/${locator.conversationId}/stream');
+    final uri = _uri(
+      '/api/mobile/v1/conversations/${locator.conversationId}/stream',
+    );
     final body = jsonEncode({
-      'message': text,
+      'message': {
+        'role': 'user',
+        'content': text,
+        'client_message_id': clientMessageId,
+      },
       'client_message_id': clientMessageId,
       'expected_revision': expectedRevision,
     });
 
     try {
       final request = http.Request('POST', uri);
-      request.headers.addAll({
-        ..._headers,
-        'Accept': 'text/event-stream',
-      });
+      request.headers.addAll({..._headers, 'Accept': 'text/event-stream'});
       request.body = body;
 
-      final streamed =
-          await _http.send(request).timeout(const Duration(seconds: 30));
+      final streamed = await _http
+          .send(request)
+          .timeout(const Duration(seconds: 30));
 
       if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
         final errBody = await streamed.stream.bytesToString();
@@ -234,6 +240,7 @@ class PcConversationBackend implements ConversationBackend {
       final type = json['type'] as String? ?? 'delta';
 
       switch (type) {
+        case 'content_delta':
         case 'delta':
           final delta = json['delta'] as String? ?? '';
           final content = json['content'] as String? ?? '';
@@ -249,13 +256,30 @@ class PcConversationBackend implements ConversationBackend {
               runId: runId,
               assistantMessageId: assistantId,
               delta: delta,
-              accumulatedContent:
-                  content.isNotEmpty ? content : contentBuffer.toString(),
+              accumulatedContent: content.isNotEmpty
+                  ? content
+                  : contentBuffer.toString(),
             );
           }
           return null;
 
+        case 'message':
+        case 'done':
+          final content = _messageContent(json['message']);
+          if (content.isEmpty) return null;
+          contentBuffer.clear();
+          contentBuffer.write(content);
+          return ChatDelta(
+            locator: locator,
+            runId: runId,
+            assistantMessageId: assistantId,
+            delta: '',
+            accumulatedContent: content,
+          );
+
         case 'tool_call':
+        case 'tool_call_started':
+        case 'tool_call_completed':
           return ToolCallEvent(
             locator: locator,
             runId: runId,
@@ -268,6 +292,7 @@ class PcConversationBackend implements ConversationBackend {
           );
 
         case 'approval':
+        case 'approval_requested':
           return ApprovalEvent(
             locator: locator,
             runId: runId,
@@ -280,15 +305,17 @@ class PcConversationBackend implements ConversationBackend {
           );
 
         case 'error':
+          final errorValue = json['error'];
+          final fallbackMessage = json['message'] as String? ?? 'Unknown error';
+          final errorMessage = errorValue is Map
+              ? errorValue['message'] as String? ?? fallbackMessage
+              : errorValue?.toString() ?? fallbackMessage;
           return ChatErrorEvent(
             locator: locator,
             runId: runId,
             assistantMessageId: assistantId,
-            message: json['message'] as String? ?? 'Unknown error',
+            message: errorMessage,
           );
-
-        case 'done':
-          return null;
 
         default:
           return null;
@@ -298,13 +325,31 @@ class PcConversationBackend implements ConversationBackend {
     }
   }
 
+  String _messageContent(Object? message) {
+    if (message is Map<String, dynamic>) {
+      final content = message['content'];
+      if (content is String) return content;
+      if (content is List) {
+        return content.map((part) {
+          if (part is String) return part;
+          if (part is Map && part['text'] is String) {
+            return part['text'] as String;
+          }
+          return '';
+        }).join();
+      }
+    }
+    return '';
+  }
+
   ConversationSummary _parseConversationSummary(Map<String, dynamic> json) {
     return ConversationSummary(
       id: json['id'] as String? ?? '',
       title: json['title'] as String? ?? '無題',
       authority: ConversationAuthorityKind.pc,
       messageCount: (json['message_count'] as num?)?.toInt() ?? 0,
-      updatedAt: DateTime.tryParse(json['updated_at'] as String? ?? '') ??
+      updatedAt:
+          DateTime.tryParse(json['updated_at'] as String? ?? '') ??
           DateTime.now(),
       pinned: json['pinned'] as bool? ?? false,
       revision: (json['revision'] as num?)?.toInt() ?? 0,
@@ -319,9 +364,11 @@ class PcConversationBackend implements ConversationBackend {
       id: json['id'] as String? ?? '',
       title: json['title'] as String? ?? '無題',
       messages: messages,
-      createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ??
+      createdAt:
+          DateTime.tryParse(json['created_at'] as String? ?? '') ??
           DateTime.now(),
-      updatedAt: DateTime.tryParse(json['updated_at'] as String? ?? '') ??
+      updatedAt:
+          DateTime.tryParse(json['updated_at'] as String? ?? '') ??
           DateTime.now(),
       pinned: json['pinned'] as bool? ?? false,
       revision: (json['revision'] as num?)?.toInt() ?? 0,

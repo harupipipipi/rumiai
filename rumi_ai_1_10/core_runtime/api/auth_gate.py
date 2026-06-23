@@ -12,11 +12,44 @@ logger = logging.getLogger(__name__)
 
 
 class AuthGateMixin:
-    def _check_bearer_auth(self) -> bool:
+    def _check_bearer_auth(
+        self,
+        method: str | None = None,
+        path: str | None = None,
+        *,
+        allow_device: bool = True,
+    ) -> bool:
         auth_header = self.headers.get("Authorization", "")
         if not auth_header or not auth_header.startswith("Bearer "):
             return False
         token = auth_header[7:]
+        if token.startswith("dtk_"):
+            self._authenticated_device_id = None
+            self._authenticated_scopes = []
+            if not allow_device or not method or not path:
+                return False
+            if not str(path).startswith("/api/mobile/v1/"):
+                return False
+            try:
+                from ecosystem.defaultspack.domain.mobile.contract import required_device_scope
+                from ecosystem.defaultspack.domain.p2p.device_store import DeviceStore
+
+                required_scope = required_device_scope(method, path)
+                if not required_scope:
+                    return False
+                store = DeviceStore()
+                device = store.verify_token(token)
+                if device is None:
+                    return False
+                if required_scope not in set(device.scopes):
+                    return False
+                self._authenticated_device_id = device.device_id
+                self._authenticated_scopes = list(device.scopes)
+                store.touch(device.device_id)
+                return True
+            except Exception:
+                logger.debug("device token auth failed", exc_info=True)
+                return False
         if self._hmac_key_manager is not None:
             return self._hmac_key_manager.verify_token(token)
         if not self.internal_token:
@@ -67,7 +100,7 @@ class AuthGateMixin:
         session = self._panel_auth_manager.verify_session(session_id)
         if session is None:
             return False
-        if method.upper() in {"POST", "PUT", "DELETE"}:
+        if method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
             if not self._check_panel_origin():
                 return False
             csrf_header = self.headers.get("X-Rumi-CSRF", "")
@@ -91,7 +124,7 @@ class AuthGateMixin:
         return True
 
     def _check_auth(self, method: str, path: str) -> bool:
-        if self._check_bearer_auth():
+        if self._check_bearer_auth(method, path):
             self._request_auth_mode = "bearer"
             return True
         if path.startswith("/api/") and self._check_panel_session(method):
@@ -101,8 +134,7 @@ class AuthGateMixin:
         return False
 
     def _check_web_mount_auth(self, method: str, web_mount: dict[str, Any]) -> bool:
-        del web_mount
-        if self._check_bearer_auth():
+        if self._check_bearer_auth(method, web_mount.get("path_prefix", ""), allow_device=False):
             self._request_auth_mode = "bearer"
             return True
         if self._check_panel_session(method):
