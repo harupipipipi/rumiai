@@ -15,6 +15,77 @@ function desktopResponse(status: "running" | "stopped") {
   };
 }
 
+test("createDesktop sends owner-bound access policy for request-required desktops", async () => {
+  let requestUrl = "";
+  let requestInit: RequestInit | undefined;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestInit = init;
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: desktopResponse("running"),
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.createDesktop({
+      name: "Owner desktop",
+      template_id: "desktop.ubuntu",
+      resolution: { width: 1280, height: 800 },
+      starter: "empty",
+      workspace_access: "none",
+      access: { mode: "request_required" },
+    });
+    assert.equal(result.status, "running");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/desktops");
+  assert.equal(requestInit?.method, "POST");
+  const body = JSON.parse(String(requestInit?.body));
+  assert.equal(body.owner_id, "local-user");
+  assert.equal(body.access.mode, "request_required");
+  assert.equal(body.access.owner_id, "local-user");
+  assert.match(body.request_id, /^desktop-create-/);
+});
+
+test("requestDesktopAccess sends requester identity without claiming owner authority", async () => {
+  let requestUrl = "";
+  let requestInit: RequestInit | undefined;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestInit = init;
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        seat_id: "seat-1",
+        request_id: "dreq-1",
+        requester_id: "local-user",
+        reason: "Need access",
+        status: "pending",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.requestDesktopAccess("seat-1", "Need access");
+    assert.equal(result.status, "pending");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/desktops/seat-1/access-requests");
+  assert.equal(requestInit?.method, "POST");
+  const body = JSON.parse(String(requestInit?.body));
+  assert.equal(body.requester_id, "local-user");
+  assert.equal(body.owner_id, undefined);
+  assert.equal(body.reason, "Need access");
+  assert.match(body.request_id, /^desktop-access-/);
+});
+
 test("stopDesktop confirms the destructive action after the UI confirmation flow", async () => {
   let requestUrl = "";
   let requestInit: RequestInit | undefined;

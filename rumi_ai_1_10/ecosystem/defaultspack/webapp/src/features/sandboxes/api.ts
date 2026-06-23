@@ -280,7 +280,7 @@ export const sandboxesApi = {
     return request<DesktopAccessRequest>(`/api/desktops/${encodeId(seatId)}/access-requests`, {
       method: "POST",
       body: JSON.stringify({
-        owner_id: LOCAL_DESKTOP_OWNER_ID,
+        requester_id: LOCAL_DESKTOP_OWNER_ID,
         reason,
         request_id: requestId("desktop-access"),
       }),
