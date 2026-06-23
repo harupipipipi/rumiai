@@ -1,8 +1,13 @@
 import type { ToolPreviewItem } from "../components/ToolPreview";
 import type { AuthorityApprovalScope } from "./authorityApproval";
+import { defaultspackUrlWithLocalAuthToken } from "./defaultspackLocalAuth";
 
 const PANEL_CSRF_STORAGE_KEY = "rumi-panel-csrf";
 const DEFAULTSPACK_CSRF_STORAGE_KEY = "rumi-defaultspack-csrf";
+const DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY = "rumi-defaultspack-local-auth";
+const DEFAULTSPACK_LOCAL_AUTH_FRAGMENT_KEY = "rumi_local_auth";
+let defaultspackLocalAuthMemoryToken = "";
+let defaultspackLocalAuthBootstrapped = false;
 
 export type ChatContentBlock = {
   type?: string;
@@ -191,6 +196,11 @@ export type AuthorityUiOperator = {
   signature: string;
 };
 
+export type AuthorityApprovalContext = {
+  request_id: string;
+  ui_operator: AuthorityUiOperator;
+};
+
 export type AuthorityRequestDisplayMetadata = {
   title?: string;
   summary?: string;
@@ -209,7 +219,16 @@ export type AuthorityRequestDisplayMetadata = {
   endpoint_path?: string | null;
   credential_label?: string | null;
   access_summary?: string | null;
+  host_execution_summary?: {
+    executable?: string;
+    argument_count?: number;
+    cwd?: string;
+    target_paths?: string[];
+    target_urls?: string[];
+  } | null;
   risk_level?: string;
+  typed_confirmation_required?: boolean;
+  confirmation_phrase?: string | null;
   audit_text?: string;
 };
 
@@ -734,6 +753,8 @@ export type ConversationListOptions = {
   company_id?: string;
   workspace_id?: string;
   conversation_kind?: string;
+  group_id?: string;
+  include_messages?: boolean;
   limit?: number;
   offset?: number;
 };
@@ -1157,6 +1178,9 @@ export type ComposerCommandItem = {
   active?: boolean;
   args?: ComposerCommandArg[];
   execution: ComposerCommandExecution;
+  source?: string;
+  template_id?: string;
+  piece_id?: string;
 };
 
 export type ComposerCommandExecuteResult = {
@@ -1661,16 +1685,66 @@ function getDefaultspackCsrfToken(): string {
   return token;
 }
 
+function consumeDefaultspackLocalAuthFromLocation(): string {
+  if (typeof window === "undefined") return "";
+  const storage = sessionStorageOrNull();
+  try {
+    const rawHash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+    if (!rawHash) return defaultspackLocalAuthMemoryToken || storage?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() || "";
+    const params = new URLSearchParams(rawHash);
+    const token = params.get(DEFAULTSPACK_LOCAL_AUTH_FRAGMENT_KEY)?.trim() ?? "";
+    if (!token) return defaultspackLocalAuthMemoryToken || storage?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() || "";
+    defaultspackLocalAuthMemoryToken = token;
+    storage?.setItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY, token);
+    params.delete(DEFAULTSPACK_LOCAL_AUTH_FRAGMENT_KEY);
+    const nextHash = params.toString();
+    const nextUrl = `${window.location.pathname}${window.location.search}${nextHash ? `#${nextHash}` : ""}`;
+    window.history.replaceState(window.history.state, document.title, nextUrl);
+    return token;
+  } catch {
+    return storage?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() ?? "";
+  }
+}
+
+export function bootstrapDefaultspackLocalAuth(): string {
+  const stored = sessionStorageOrNull()?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() || "";
+  if (defaultspackLocalAuthBootstrapped) {
+    if (defaultspackLocalAuthMemoryToken || stored) return defaultspackLocalAuthMemoryToken || stored;
+  }
+  defaultspackLocalAuthBootstrapped = true;
+  const consumed = consumeDefaultspackLocalAuthFromLocation();
+  if (consumed) {
+    defaultspackLocalAuthMemoryToken = consumed;
+    return consumed;
+  }
+  defaultspackLocalAuthMemoryToken = stored;
+  return defaultspackLocalAuthMemoryToken;
+}
+
+function getDefaultspackLocalAuthToken(): string {
+  return bootstrapDefaultspackLocalAuth();
+}
+
+bootstrapDefaultspackLocalAuth();
+
 export function defaultspackApiHeaders(method: string, headers?: HeadersInit): Headers {
   const nextHeaders = new Headers(headers);
   if (!nextHeaders.has("Content-Type")) {
     nextHeaders.set("Content-Type", "application/json");
+  }
+  if (!nextHeaders.has("Authorization")) {
+    const token = getDefaultspackLocalAuthToken();
+    if (token) nextHeaders.set("Authorization", `Bearer ${token}`);
   }
   const csrfHeader = nextHeaders.get("X-Rumi-CSRF");
   if (isUnsafeHttpMethod(method) && (!csrfHeader || !csrfHeader.trim())) {
     nextHeaders.set("X-Rumi-CSRF", getDefaultspackCsrfToken());
   }
   return nextHeaders;
+}
+
+export function defaultspackUrlWithLocalAuth(pathOrUrl: string): string {
+  return defaultspackUrlWithLocalAuthToken(pathOrUrl, getDefaultspackLocalAuthToken());
 }
 
 export function defaultspackApiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
@@ -1688,7 +1762,25 @@ function truncateApiErrorDetail(value: string, limit = 700): string {
   return `${text.slice(0, limit).trim()}...`;
 }
 
-function defaultspackApiStatusHint(status: number): string {
+function defaultspackApiCodeHint(code: string | undefined): string | null {
+  if (code === "AUTHORITY_BROWSER_TEST_DISABLED") {
+    return "ブラウザ承認QAは、このDefaultspack起動では有効化されていません。Rumi Viewerの承認ウィンドウで承認するか、ブラウザQA用tokenを付けて起動してください。";
+  }
+  if (code === "AUTHORITY_BROWSER_TOKEN_REQUIRED") {
+    return "ブラウザで承認するには、承認ページURLまたは設定に browser_approval_token が必要です。";
+  }
+  if (code === "AUTHORITY_BROWSER_TOKEN_INVALID") {
+    return "browser_approval_token がこのDefaultspack起動と一致していません。正しいtokenで開き直してください。";
+  }
+  if (code === "AUTHORITY_UI_OPERATOR_UNAVAILABLE") {
+    return "承認操作の署名secretがこのDefaultspack起動にありません。Rumi Viewerから起動し直すか、ブラウザQAでは Viewer と同じ RUMI_PANEL_BOOTSTRAP_SECRET を渡してください。";
+  }
+  return null;
+}
+
+function defaultspackApiStatusHint(status: number, code?: string): string {
+  const codeHint = defaultspackApiCodeHint(code);
+  if (codeHint) return codeHint;
   if (status === 400) return "リクエスト形式、モデル設定、添付ファイル、または選択中の tool が backend と噛み合っていません。";
   if (status === 401) return "認証が必要です。ログイン状態、APIキー、OAuth 接続を確認してください。";
   if (status === 403) return "権限または承認で拒否されました。承認カード、CSRF、APIキーの利用権限、モデルアクセス権を確認してください。";
@@ -1709,7 +1801,7 @@ export function explainDefaultspackApiError(
   const detail = error?.message ? truncateApiErrorDetail(error.message) : "";
   return [
     `${label}${code}`,
-    defaultspackApiStatusHint(status),
+    defaultspackApiStatusHint(status, error?.code),
     detail ? `詳細: ${detail}` : "",
   ].filter(Boolean).join("\n");
 }
@@ -3052,6 +3144,21 @@ export const api = {
       `/api/authority/requests/${encodeURIComponent(requestId)}`,
       { cache: "no-store" },
     );
+  },
+
+  browserAuthorityUiOperator(requestId: string, browserApprovalToken: string) {
+    return request<AuthorityApprovalContext>(withQuery("/api/authority/browser-ui-operator", {
+      browser_approval_token: browserApprovalToken,
+    }), {
+      method: "POST",
+      headers: {
+        "X-Rumi-Approval-Browser-Token": browserApprovalToken,
+      },
+      body: JSON.stringify({
+        request_id: requestId,
+        browser_approval_token: browserApprovalToken,
+      }),
+    });
   },
 
   approveAuthorityApproval(

@@ -1,0 +1,32 @@
+{
+  "function_id": "ambient_event_submit",
+  "description": "Submit a sanitized ambient trigger event to the ambient trigger router.",
+  "tags": ["ambient", "input"],
+  "risk": "high",
+  "requires": ["ambient.trigger.dispatch"],
+  "caller_requires": ["user.approved.high_risk"],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ambient.event_submit",
+    "defaultspack.ambient.event_submit",
+    "defaults.ambient.event.submit",
+    "defaultspack.ambient.event.submit",
+    "defaults.ambient.events.submit",
+    "defaultspack.ambient.events.submit"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ambient.event_submit",
+      "default_args": {}
+    }
+  }
+}

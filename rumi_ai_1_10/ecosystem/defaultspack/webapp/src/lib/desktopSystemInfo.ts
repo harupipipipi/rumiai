@@ -7,6 +7,31 @@ export type DesktopPermissionStatus = {
   settings_hint: string;
 };
 
+export type HostPermissionId =
+  | "host.microphone.capture"
+  | "host.camera.capture"
+  | "host.screen.capture"
+  | "host.input.pointer"
+  | "host.input.keyboard"
+  | "host.clipboard.*"
+  | string;
+
+export type DesktopHostPermissionStatus = {
+  id: HostPermissionId;
+  label?: string;
+  status?: string;
+  granted?: boolean | null;
+  rumi_status?: string;
+  rumi_granted?: boolean | null;
+  os_status?: string;
+  os_granted?: boolean | null;
+  risk_level?: string;
+  stream_allowed?: boolean | null;
+  required_by_functions?: string[];
+  detail?: string;
+  settings_hint?: string;
+};
+
 export type HostBrokerStatus = {
   enabled: boolean;
   available?: boolean;
@@ -29,6 +54,7 @@ export type DesktopSystemInfo = {
   platform_release: string;
   permission_subject?: string;
   host_broker?: HostBrokerStatus;
+  host_permissions?: DesktopHostPermissionStatus[] | Record<string, DesktopHostPermissionStatus>;
   permissions: DesktopPermissionStatus[];
 };
 

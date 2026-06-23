@@ -135,6 +135,63 @@ def test_bridge_forwards_sanitized_request_context_to_capability_executor():
     }
 
 
+def test_bridge_preserves_authority_context_without_extra_nested_data():
+    from domain.function_runtime.bridge import invoke_function
+
+    executor = MagicMock()
+    executor.execute.return_value = SimpleNamespace(
+        success=True,
+        output={"status": "ok", "data": {}},
+        error=None,
+        error_type=None,
+    )
+
+    with patch("core_runtime.di_container.get_container", return_value=_FakeContainer(executor)):
+        result = invoke_function(
+            "defaultspack:chat_send",
+            {"conversation_id": "c1"},
+            {
+                "request_id": "req-authority",
+                "authority_principal_id": "profile:default-profile__graph:defaultspack.startup",
+                "authority": {
+                    "principal_id": "profile:default-profile__graph:defaultspack.startup",
+                    "permission_id": "model.invoke",
+                    "request_id": "auth_1",
+                    "approval_token": "token-secret",
+                    "approval_tokens": {
+                        "api_key.use": {
+                            "permission_id": "api_key.use",
+                            "request_id": "auth_2",
+                            "approval_token": "token-secret-2",
+                            "extra": {"drop": True},
+                        }
+                    },
+                    "unsafe_nested": {"drop": True},
+                },
+            },
+        )
+
+    assert result == {"status": "ok", "data": {}}
+    _principal_id, request = executor.execute.call_args.args
+    assert request["context"] == {
+        "request_id": "req-authority",
+        "authority_principal_id": "profile:default-profile__graph:defaultspack.startup",
+        "authority": {
+            "principal_id": "profile:default-profile__graph:defaultspack.startup",
+            "permission_id": "model.invoke",
+            "request_id": "auth_1",
+            "approval_token": "token-secret",
+            "approval_tokens": {
+                "api_key.use": {
+                    "permission_id": "api_key.use",
+                    "request_id": "auth_2",
+                    "approval_token": "token-secret-2",
+                }
+            },
+        },
+    }
+
+
 def test_high_risk_defaultspack_function_rejects_unapproved_external_caller():
     from core_runtime.capability_executor import CapabilityExecutor
     from core_runtime.function_registry import FunctionRegistry

@@ -2338,6 +2338,76 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
+  pattern: /api/ambient/status
+  legacy_block_module: blocks.ambient.status
+  replacement_function_id: ambient_status
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/monitor/start
+  legacy_block_module: blocks.ambient.monitor
+  replacement_function_id: ambient_monitor_start
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/monitor/stop
+  legacy_block_module: blocks.ambient.monitor
+  replacement_function_id: ambient_monitor_stop
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/config
+  legacy_block_module: blocks.ambient.config
+  replacement_function_id: ambient_configure
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/events
+  legacy_block_module: blocks.ambient.event_submit
+  replacement_function_id: ambient_event_submit
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/approval/approve
+  legacy_block_module: blocks.ambient.approval
+  replacement_function_id: ''
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/approval/deny
+  legacy_block_module: blocks.ambient.approval
+  replacement_function_id: ''
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/permissions/grant
+  legacy_block_module: blocks.ambient.permissions
+  replacement_function_id: ambient_permission_grant
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/permissions/revoke
+  legacy_block_module: blocks.ambient.permissions
+  replacement_function_id: ambient_permission_revoke
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/permissions/check
+  legacy_block_module: blocks.ambient.permissions
+  replacement_function_id: ambient_permission_check
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
   pattern: /api/tools/names
   legacy_block_module: blocks.tool.names
   replacement_function_id: tool_names

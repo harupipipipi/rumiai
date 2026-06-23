@@ -86,3 +86,32 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None):
 def _safe_filename(value: str) -> str:
     safe = _SAFE_FILENAME_RE.sub("-", value.strip()).strip(".-")
     return safe[:100] or "conversation"
+
+
+def materialized_audio_transcript_blocks(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
+        if not mime.startswith("audio/"):
+            continue
+        transcript = materialized_audio_transcript(attachment)
+        if not transcript:
+            continue
+        name = str(attachment.get("name") or "ambient-recording").strip()[:200] or "ambient-recording"
+        blocks.append({"type": "text", "text": f"\n\n音声入力の文字起こし: {name}\n{transcript}"})
+    return blocks
+
+
+def materialized_audio_transcript(attachment: dict[str, Any]) -> str:
+    for key in ("transcript", "transcription", "text_transcript"):
+        value = attachment.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    metadata = attachment.get("metadata") if isinstance(attachment.get("metadata"), dict) else {}
+    for key in ("transcript", "transcription", "text_transcript"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""

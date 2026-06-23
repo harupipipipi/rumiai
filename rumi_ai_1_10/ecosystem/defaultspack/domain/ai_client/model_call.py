@@ -54,10 +54,12 @@ def call_model(
         or "stub/default"
     ).strip() or "stub/default"
     has_images = _messages_have_images(messages) or model_requirements["image_input"]
+    has_audio = _messages_have_audio(messages)
     decision = route_model_request(
         ModelRoutingRequest(
             user_text=_messages_text(messages),
             has_images=has_images,
+            has_audio=has_audio,
             requires_tool_calling=model_requirements["tool_calling"],
             requires_fast=model_requirements["fast"],
             requested_thinking_level=_requested_thinking_level(payload, required_capabilities),
@@ -246,5 +248,19 @@ def _messages_have_images(messages: list[dict[str, Any]]) -> bool:
             if block_type in {"image", "image_url", "input_image"}:
                 return True
             if isinstance(image_url, dict) and str(image_url.get("url") or "").startswith("data:image/"):
+                return True
+    return False
+
+
+def _messages_have_audio(messages: list[dict[str, Any]]) -> bool:
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = str(block.get("type") or "").casefold()
+            if block_type in {"audio", "input_audio"}:
                 return True
     return False

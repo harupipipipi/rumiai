@@ -24,9 +24,14 @@ def run(input_data, context):
     data = input_data if isinstance(input_data, dict) else {}
     message = data.get("message", data)
     items = _content_items(message)
+    attachments = message.get("attachments") if isinstance(message, dict) and isinstance(message.get("attachments"), list) else []
     has_text = any(str(item.get("type", "")).lower() == "text" and item.get("text") for item in items if isinstance(item, dict))
     has_images = any(str(item.get("type", "")).lower() in {"image", "image_url", "input_image"} for item in items if isinstance(item, dict))
-    has_audio = any(str(item.get("type", "")).lower() in {"audio", "input_audio"} for item in items if isinstance(item, dict))
+    has_audio = any(str(item.get("type", "")).lower() in {"audio", "input_audio"} for item in items if isinstance(item, dict)) or any(
+        str(item.get("type") or item.get("mime_type") or "").lower().startswith("audio/")
+        for item in attachments
+        if isinstance(item, dict)
+    )
     has_files = any(str(item.get("type", "")).lower() in {"file", "attachment"} for item in items if isinstance(item, dict))
     return ok(
         {

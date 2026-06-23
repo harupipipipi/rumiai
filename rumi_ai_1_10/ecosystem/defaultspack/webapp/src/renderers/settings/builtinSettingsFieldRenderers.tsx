@@ -2,6 +2,7 @@ import type { SettingsFieldRendererEntry } from "./fieldRendererRegistry";
 import { BuiltinApiKeySetupRenderer } from "./renderers/apiKeySetupField";
 import { BuiltinModelSelectRenderer } from "./renderers/modelSelectField";
 import { BuiltinProviderSelectRenderer } from "./renderers/providerSelectField";
+import { BuiltinSlashCommandsRenderer } from "./renderers/slashCommandsField";
 
 export const builtinSettingsFieldRendererEntries: SettingsFieldRendererEntry[] = [
   {
@@ -24,5 +25,12 @@ export const builtinSettingsFieldRendererEntries: SettingsFieldRendererEntry[] =
     renderers: ["api_key_setup", "ApiKeySetupField"],
     component: "ApiKeySetupField",
     render: BuiltinApiKeySetupRenderer,
+  },
+  {
+    id: "builtin-settings-slash-commands",
+    types: ["slash_commands"],
+    renderers: ["slash_commands", "SlashCommandsField"],
+    component: "SlashCommandsField",
+    render: BuiltinSlashCommandsRenderer,
   },
 ];
