@@ -293,16 +293,16 @@ def _command_plan(arguments: dict[str, Any]) -> dict[str, Any]:
     if isinstance(argv, (list, tuple)):
         return {"argv": [str(part) for part in argv if str(part) != ""]}
     if isinstance(argv, str):
-        normalized = " ".join(argv.strip().split())
-        if not normalized:
+        stripped = argv.strip()
+        if not stripped:
             return {"argv": []}
-        if any(marker in normalized for marker in SHELL_ESCAPE_MARKERS):
+        if any(marker in stripped for marker in SHELL_ESCAPE_MARKERS):
             return {
                 "error": "sandbox_exec accepts argv arrays; shell syntax is not allowed in command strings",
                 "code": "SANDBOX_SHELL_STRING_REJECTED",
             }
         try:
-            return {"argv": shlex.split(normalized, posix=sys.platform != "win32")}
+            return {"argv": shlex.split(stripped, posix=sys.platform != "win32")}
         except ValueError as exc:
             return {"error": f"invalid command string: {exc}", "code": "INVALID_INPUT"}
     return {"error": "'command' must be a string or argv array", "code": "INVALID_INPUT"}

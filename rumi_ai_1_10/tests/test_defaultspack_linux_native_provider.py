@@ -4,6 +4,7 @@ from collections.abc import Sequence
 
 from ecosystem.defaultspack.backend.sandbox.models import (
     EnsureRuntimeRequest,
+    ProviderInstance,
     RuntimeRequirements,
     UpdateRuntimeRequest,
 )
@@ -51,6 +52,18 @@ class FakeLinuxNativeSession:
         if self._runner.installed:
             return []
         return ["Xvfb", "openbox", "xdotool", "import"]
+
+
+def _persisted_ready_instance(metadata: dict[str, object]) -> ProviderInstance:
+    return ProviderInstance(
+        provider_id="linux_native",
+        provider_instance_id="linux-native-seat-1",
+        sandbox_id="seat-1",
+        runtime_id="linux-native-x11",
+        state="ready",
+        opaque_state={"display": ":88", "x11_session": metadata, "startup_status": {"executed": True}},
+        generation=3,
+    )
 
 
 def test_linux_native_ensure_installs_desktop_dependencies(monkeypatch) -> None:
@@ -138,3 +151,49 @@ def test_linux_native_ensure_fails_closed_when_apt_is_missing(monkeypatch) -> No
     assert ensured.ok is False
     assert runner.calls == []
     assert [diagnostic.code for diagnostic in ensured.diagnostics] == ["LINUX_NATIVE_PACKAGE_MANAGER_MISSING"]
+
+
+def test_linux_native_reconcile_cleans_persisted_x11_session_before_stopping(monkeypatch) -> None:
+    import ecosystem.defaultspack.backend.sandbox.providers.linux_native as linux_native
+
+    metadata = {"display": ":88", "processes": {"xvfb": {"pid": 1001}}}
+    cleanup_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        linux_native,
+        "_cleanup_owned_x11_session",
+        lambda value: cleanup_calls.append(dict(value)) or {"cleaned": True},
+    )
+    provider = LinuxNativeProvider()
+    persisted = _persisted_ready_instance(metadata)
+
+    result = provider.reconcile(persisted)
+
+    assert cleanup_calls == [metadata]
+    assert result.changed is True
+    assert result.instance.state == "stopped"
+    assert result.instance.generation == persisted.generation + 1
+    assert "display" not in result.instance.opaque_state
+    assert "x11_session" not in result.instance.opaque_state
+    assert "startup_status" not in result.instance.opaque_state
+
+
+def test_linux_native_stop_and_destroy_cleanup_missing_in_memory_session(monkeypatch) -> None:
+    import ecosystem.defaultspack.backend.sandbox.providers.linux_native as linux_native
+
+    metadata = {"display": ":89", "processes": {"openbox": {"pid": 1002}, "xvfb": {"pid": 1003}}}
+    cleanup_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        linux_native,
+        "_cleanup_owned_x11_session",
+        lambda value: cleanup_calls.append(dict(value)) or {"cleaned": True},
+    )
+    provider = LinuxNativeProvider()
+    persisted = _persisted_ready_instance(metadata)
+
+    provider.stop(persisted)
+    stopped = provider._instances[persisted.provider_instance_id]
+    provider.destroy(persisted)
+
+    assert cleanup_calls == [metadata, metadata]
+    assert stopped.state == "stopped"
+    assert "x11_session" not in stopped.opaque_state

@@ -265,7 +265,7 @@ export type DesktopInstance = {
   updated_at?: string;
 };
 
-export type DesktopStarter = "empty" | "browser_url" | "terminal";
+export type DesktopStarter = "empty" | "browser" | "browser_url" | "terminal";
 
 export type CreateDesktopRequest = {
   name: string;

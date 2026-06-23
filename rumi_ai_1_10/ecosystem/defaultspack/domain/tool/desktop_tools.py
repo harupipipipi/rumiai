@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-from ._agent_os_common import err
+from ._agent_os_common import err, now_slug
 from .sandbox_tools import _require_server_side_approval
 
 
@@ -60,6 +60,7 @@ def desktop_input(arguments: dict[str, Any], context: dict[str, Any] | None = No
     if not seat_id:
         return err("'seat_id' is required", "INVALID_INPUT")
     payload["seat_id"] = seat_id
+    payload.setdefault("client_action_id", f"desktop-input-{now_slug()}")
     _default_owner(payload, context)
     _default_agent(payload, context)
     payload["_handler"] = "desktop_ai_input"

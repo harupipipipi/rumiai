@@ -68,7 +68,7 @@ TERMINAL_STATES = {DESTROYED, FAILED}
 SUPPORTED_MODEL_MODES = {"fast", "heavy"}
 STATE_DIR_ENV = "RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR"
 DESKTOP_ACCESS_MODES = {"owner_only", "key_required", "request_required", "shared_link"}
-DESKTOP_STARTERS = {"empty", "browser_url", "terminal"}
+DESKTOP_STARTERS = {"empty", "browser", "browser_url", "terminal"}
 WORKSPACE_ACCESS_MODES = {"none", "read_only", "overlay"}
 DESKTOP_MIN_WIDTH = 640
 DESKTOP_MIN_HEIGHT = 480
@@ -2380,11 +2380,11 @@ def _desktop_startup_from_create(
         return {}
     normalized_starter = str(starter or "").strip().lower()
     if not normalized_starter:
-        normalized_starter = "empty"
+        normalized_starter = str(desktop.preset or "empty").strip().lower()
     if normalized_starter not in DESKTOP_STARTERS:
         raise SandboxContractError(
             "DESKTOP_STARTER_INVALID",
-            "Desktop starter must be empty, terminal, or browser_url.",
+            "Desktop starter must be empty, browser, browser_url, or terminal.",
             status_code=400,
         )
     startup: dict[str, Any] = {"starter": normalized_starter}

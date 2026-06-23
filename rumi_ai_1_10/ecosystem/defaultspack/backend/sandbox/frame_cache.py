@@ -66,6 +66,7 @@ class FrameCache:
         self.max_frame_bytes = int(max_frame_bytes)
         self._time_fn = time_fn or time.time
         self._frames: dict[str, DesktopFrame] = {}
+        self._frame_sequences: dict[str, int] = {}
         self._last_capture_at: dict[str, float] = {}
         self._captures_in_flight: set[str] = set()
         self._lock = threading.RLock()
@@ -106,10 +107,11 @@ class FrameCache:
         if width < 1 or height < 1:
             raise ValueError("frame dimensions must be positive")
         with self._lock:
-            previous = self._frames.get(seat_id)
+            frame_seq = self._frame_sequences.get(seat_id, 0) + 1
+            self._frame_sequences[seat_id] = frame_seq
             frame = DesktopFrame(
                 seat_id=seat_id,
-                frame_seq=1 if previous is None else previous.frame_seq + 1,
+                frame_seq=frame_seq,
                 data=data,
                 content_type=content_type,
                 width=width,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 from pathlib import Path
 
@@ -74,6 +75,15 @@ def test_x11_virtual_start_passes_owned_display_env_and_cleanup(monkeypatch, tmp
     lock_metadata = json.loads(lock_metadata_path.read_text(encoding="utf-8"))
     assert lock_metadata["pid"] == os.getpid()
     assert lock_metadata["display_number"] == 88
+    metadata = session.owned_session_metadata()
+    assert metadata["display"] == ":88"
+    assert metadata["display_number"] == 88
+    assert metadata["session_dir"] == str(session_path)
+    assert metadata["display_lock_dir"] == str(lock_metadata_path.parent)
+    assert metadata["processes"] == {
+        "xvfb": {"pid": processes[0].pid},
+        "openbox": {"pid": processes[1].pid},
+    }
     for call in [*popen_calls, *run_calls]:
         env = call["env"]
         assert env["DISPLAY"] == ":88"
@@ -168,6 +178,54 @@ def test_x11_virtual_actions_and_screenshot_use_virtual_display(monkeypatch, tmp
     assert all(call["env"]["DISPLAY"] == ":91" for call in run_calls)
 
 
+def test_x11_virtual_cleanup_owned_display_terminates_only_verified_processes(monkeypatch, tmp_path: Path) -> None:
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.linux import x11_virtual
+
+    session_dir = tmp_path / "rumi-x11-virtual-88-test"
+    lock_dir = tmp_path / "rumi-x11-virtual-displays" / "display-88.lock"
+    session_dir.mkdir()
+    lock_dir.mkdir(parents=True)
+    alive = {101, 102, 103, 104}
+    environs = {
+        101: b"RUMI_X11_VIRTUAL=1\0DISPLAY=:88\0",
+        102: b"RUMI_X11_VIRTUAL=1\0DISPLAY=:88\0",
+        103: b"RUMI_X11_VIRTUAL=1\0DISPLAY=:88\0",
+        104: b"RUMI_X11_VIRTUAL=1\0DISPLAY=:77\0",
+    }
+    kill_calls: list[tuple[int, signal.Signals]] = []
+
+    def fake_kill(pid: int, sig: signal.Signals) -> None:
+        kill_calls.append((pid, sig))
+        if sig in {signal.SIGTERM, signal.SIGKILL}:
+            alive.discard(pid)
+
+    monkeypatch.setattr(x11_virtual.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(x11_virtual, "_process_alive", lambda pid: pid in alive)
+    monkeypatch.setattr(x11_virtual, "_process_environ", lambda pid: environs.get(pid, b""))
+    monkeypatch.setattr(x11_virtual.os, "kill", fake_kill)
+    monkeypatch.setattr(x11_virtual.time, "sleep", lambda seconds: None)
+
+    result = x11_virtual.cleanup_owned_display(
+        {
+            "display": ":88",
+            "session_dir": str(session_dir),
+            "display_lock_dir": str(lock_dir),
+            "processes": {
+                "launch-browser": {"pid": 101},
+                "openbox": {"pid": 102},
+                "xvfb": {"pid": 103},
+                "foreign": {"pid": 104},
+            },
+        }
+    )
+
+    assert result["terminated_pids"] == [101, 102, 103]
+    assert result["skipped_pids"] == [104]
+    assert [pid for pid, sig in kill_calls if sig == signal.SIGTERM] == [101, 102, 103]
+    assert not session_dir.exists()
+    assert not lock_dir.exists()
+
+
 def test_linux_x11_virtual_driver_delegates_to_session(monkeypatch) -> None:
     from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.drivers import linux_x11_virtual
     from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.drivers.linux_x11_virtual import (
@@ -202,9 +260,13 @@ def test_linux_x11_virtual_driver_delegates_to_session(monkeypatch) -> None:
 
 
 class FakeProcess:
+    _next_pid = 10_000
+
     def __init__(self) -> None:
         self.terminated = False
         self.killed = False
+        self.pid = FakeProcess._next_pid
+        FakeProcess._next_pid += 1
 
     def poll(self):
         return None if not self.terminated and not self.killed else 0

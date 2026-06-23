@@ -241,6 +241,9 @@ class LinuxNativeProvider:
             opaque_state["startup_status"] = startup_status
         else:
             opaque_state.pop("startup_status", None)
+        session_metadata = _session_owned_metadata(session)
+        if session_metadata:
+            opaque_state["x11_session"] = session_metadata
         started = ProviderInstance(
             provider_id=instance.provider_id,
             provider_instance_id=instance.provider_instance_id,
@@ -258,13 +261,15 @@ class LinuxNativeProvider:
         session = self._sessions.get(instance.provider_instance_id)
         if session is not None:
             session.stop()
+        else:
+            _cleanup_persisted_x11_session(instance.opaque_state)
         self._instances[instance.provider_instance_id] = ProviderInstance(
             provider_id=instance.provider_id,
             provider_instance_id=instance.provider_instance_id,
             sandbox_id=instance.sandbox_id,
             runtime_id=instance.runtime_id,
             state="stopped",
-            opaque_state=instance.opaque_state,
+            opaque_state=_without_x11_runtime_state(instance.opaque_state),
             generation=instance.generation + 1,
         )
 
@@ -272,19 +277,23 @@ class LinuxNativeProvider:
         session = self._sessions.pop(instance.provider_instance_id, None)
         if session is not None:
             session.stop()
+        else:
+            _cleanup_persisted_x11_session(instance.opaque_state)
         self._instances.pop(instance.provider_instance_id, None)
 
     def reconcile(self, persisted: ProviderInstance) -> ReconcileResult:
         current = self._instances.get(persisted.provider_instance_id)
         if current is None:
+            if persisted.state != "stopped":
+                _cleanup_persisted_x11_session(persisted.opaque_state)
             current = ProviderInstance(
                 provider_id=persisted.provider_id,
                 provider_instance_id=persisted.provider_instance_id,
                 sandbox_id=persisted.sandbox_id,
                 runtime_id=persisted.runtime_id,
                 state="stopped",
-                opaque_state=persisted.opaque_state,
-                generation=persisted.generation,
+                opaque_state=_without_x11_runtime_state(persisted.opaque_state),
+                generation=persisted.generation + (0 if persisted.state == "stopped" else 1),
             )
         return ReconcileResult(instance=current, changed=current != persisted)
 
@@ -324,19 +333,20 @@ class LinuxNativeProvider:
             if not terminal:
                 return {"starter": starter, "skipped": True, "reason": "xterm is not installed in the Linux native runtime."}
             return self._launch_session(session, "terminal", [terminal, "-title", "Rumi Desktop"], stdout_name="starter-terminal.log")
-        if starter == "browser_url":
+        if starter in {"browser", "browser_url"}:
             browser_url = str(startup.get("browser_url") or "").strip()
-            if not browser_url:
+            if starter == "browser_url" and not browser_url:
                 return {"starter": starter, "skipped": True, "reason": "No browser_url was provided."}
-            if not _linux_native_network_allows_startup(instance.opaque_state):
+            if browser_url and not _linux_native_network_allows_startup(instance.opaque_state):
                 return {"starter": starter, "skipped": True, "reason": "Network policy requires approval or is disabled for browser startup."}
-            browser = _first_available_command(LINUX_NATIVE_BROWSER_CANDIDATES)
+            candidates = LINUX_NATIVE_BROWSER_CANDIDATES if browser_url else tuple(name for name in LINUX_NATIVE_BROWSER_CANDIDATES if name != "xdg-open")
+            browser = _first_available_command(candidates)
             if browser is None:
                 return {"starter": starter, "skipped": True, "reason": "No supported browser command was found."}
             command_name, browser_path = browser
             return self._launch_session(
                 session,
-                "browser_url",
+                starter,
                 _browser_launch_args(command_name, browser_path, browser_url, session),
                 stdout_name="starter-browser.log",
             )
@@ -555,6 +565,40 @@ def _unlink_capture_file(path: str) -> bool:
         return False
 
 
+def _session_owned_metadata(session: Any) -> dict[str, Any]:
+    metadata = getattr(session, "owned_session_metadata", None)
+    if not callable(metadata):
+        return {}
+    try:
+        value = metadata()
+    except Exception:
+        return {}
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _cleanup_persisted_x11_session(opaque_state: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = opaque_state.get("x11_session") if isinstance(opaque_state, Mapping) else None
+    if not isinstance(metadata, Mapping):
+        return {"cleaned": False}
+    return _cleanup_owned_x11_session(metadata)
+
+
+def _cleanup_owned_x11_session(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        from ecosystem.rumi_default_tools_pack.domain.computer.linux.x11_virtual import cleanup_owned_display
+    except Exception:
+        return {"cleaned": False}
+    return cleanup_owned_display(metadata)
+
+
+def _without_x11_runtime_state(opaque_state: Mapping[str, Any]) -> dict[str, Any]:
+    cleaned = dict(opaque_state)
+    cleaned.pop("display", None)
+    cleaned.pop("x11_session", None)
+    cleaned.pop("startup_status", None)
+    return cleaned
+
+
 def _failed_from_status(provider_id: str, operation_id: str, status: RuntimeProviderStatus) -> OperationResult:
     return OperationResult(
         ok=False,
@@ -624,17 +668,19 @@ def _first_available_command(candidates: Sequence[str]) -> tuple[str, str] | Non
 def _browser_launch_args(command_name: str, browser_path: str, browser_url: str, session: Any) -> list[str]:
     profile_dir = _browser_profile_dir(session)
     if command_name == "xdg-open":
-        return [browser_path, browser_url]
+        return [browser_path, browser_url] if browser_url else [browser_path]
     if command_name == "firefox":
         args = [browser_path, "--no-remote", "--new-instance"]
         if profile_dir is not None:
             args.extend(["--profile", str(profile_dir)])
-        args.append(browser_url)
+        if browser_url:
+            args.append(browser_url)
         return args
     args = [browser_path, "--no-first-run", "--disable-dev-shm-usage", "--new-window"]
     if profile_dir is not None:
         args.append(f"--user-data-dir={profile_dir}")
-    args.append(browser_url)
+    if browser_url:
+        args.append(browser_url)
     return args
 
 

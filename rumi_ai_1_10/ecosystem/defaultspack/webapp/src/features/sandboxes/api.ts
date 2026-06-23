@@ -223,43 +223,52 @@ export const sandboxesApi = {
     }).then(normalizeDesktopInstance);
   },
 
-  startDesktop(seatId: string) {
+  startDesktop(seatId: string, accessKey?: string | null) {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/start`, {
       method: "POST",
-      body: JSON.stringify({ owner_id: LOCAL_DESKTOP_OWNER_ID, request_id: requestId("desktop-start") }),
+      body: JSON.stringify({
+        owner_id: LOCAL_DESKTOP_OWNER_ID,
+        access_key: accessKey || undefined,
+        request_id: requestId("desktop-start"),
+      }),
     }).then(normalizeDesktopInstance);
   },
 
-  stopDesktop(seatId: string) {
+  stopDesktop(seatId: string, accessKey?: string | null) {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/stop`, {
       method: "POST",
       body: JSON.stringify({
         owner_id: LOCAL_DESKTOP_OWNER_ID,
+        access_key: accessKey || undefined,
         request_id: requestId("desktop-stop"),
         confirm_destructive: true,
       }),
     }).then(normalizeDesktopInstance);
   },
 
-  restartDesktop(seatId: string) {
+  restartDesktop(seatId: string, accessKey?: string | null) {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/restart`, {
       method: "POST",
-      body: JSON.stringify({ owner_id: LOCAL_DESKTOP_OWNER_ID, request_id: requestId("desktop-restart") }),
+      body: JSON.stringify({
+        owner_id: LOCAL_DESKTOP_OWNER_ID,
+        access_key: accessKey || undefined,
+        request_id: requestId("desktop-restart"),
+      }),
     }).then(normalizeDesktopInstance);
   },
 
   deleteDesktop(seatId: string, accessKey?: string | null) {
-    return request<{ deleted: boolean; seat_id: string }>(`/api/desktops/${encodeId(seatId)}`, {
+    const query = new URLSearchParams({
+      confirm_destructive: "true",
+      owner_id: LOCAL_DESKTOP_OWNER_ID,
+      request_id: requestId("desktop-delete"),
+    });
+    return request<{ deleted: boolean; seat_id: string }>(`/api/desktops/${encodeId(seatId)}?${query.toString()}`, {
       method: "DELETE",
       headers: {
         "X-Rumi-Desktop-Owner": LOCAL_DESKTOP_OWNER_ID,
         ...(accessKey ? { "X-Rumi-Desktop-Access-Key": accessKey } : {}),
       },
-      body: JSON.stringify({
-        owner_id: LOCAL_DESKTOP_OWNER_ID,
-        request_id: requestId("desktop-delete"),
-        confirm_destructive: true,
-      }),
     });
   },
 

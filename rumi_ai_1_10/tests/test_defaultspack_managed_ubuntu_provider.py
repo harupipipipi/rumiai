@@ -542,8 +542,29 @@ def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkey
     assert ensured.ok is True
     assert started.state == "ready"
     assert "BROWSER_URL=https://example.com" in start_script
-    assert "google-chrome-stable google-chrome chromium chromium-browser firefox xdg-open" in start_script
+    assert "BROWSER_CANDIDATES='google-chrome-stable google-chrome chromium chromium-browser firefox'" in start_script
+    assert 'BROWSER_CANDIDATES="$BROWSER_CANDIDATES xdg-open"' in start_script
     assert "starter-browser.log" in start_script
+
+
+def test_managed_ubuntu_desktop_browser_starter_opens_browser_without_url(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(_create_spec(_template(), startup={"starter": "browser"}))
+    started = provider.start(instance)
+    start_script = next(script for script in fake.guest_scripts if "BROWSER_URL=" in script)
+
+    assert ensured.ok is True
+    assert started.state == "ready"
+    assert "BROWSER_URL=''" in start_script
+    assert 'BROWSER_CANDIDATES="$BROWSER_CANDIDATES xdg-open"' in start_script
+    assert 'elif [ -n "$BROWSER_URL" ]; then' in start_script
+    assert '"$BROWSER_BIN" --no-first-run --disable-dev-shm-usage --user-data-dir=' in start_script
+    assert "starter-browser.pid" in start_script
 
 
 def test_managed_ubuntu_stop_cleans_desktop_starter_processes(monkeypatch) -> None:

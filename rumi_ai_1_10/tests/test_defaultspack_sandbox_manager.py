@@ -333,6 +333,37 @@ def test_desktop_create_spec_carries_user_selected_runtime_context(tmp_path, mon
     assert reloaded_status["provider_opaque_state"]["metadata"]["assigned_agent_id"] == "agent-1"
 
 
+def test_desktop_create_uses_template_starter_default_when_request_omits_starter(tmp_path):
+    provider = FakeRuntimeProvider(
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+            "sandbox.desktop",
+            "sandbox.desktop_input",
+            "sandbox.snapshot",
+            "desktop.browser.launch",
+        },
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+
+    created = manager.create(
+        display=True,
+        provider_id="fake",
+        template_id="desktop.browser",
+        access_owner_id="local-user",
+    )
+
+    assert created["ok"] is True
+    assert provider.create_specs[0].metadata["startup"] == {"starter": "browser"}
+    status = manager.status(created["sandbox_id"])
+    assert status["desktop_spec"]["preset"] == "browser"
+    assert status["provider_opaque_state"]["metadata"]["startup"]["starter"] == "browser"
+
+
 def test_desktop_create_rejects_invalid_browser_url_starter(tmp_path):
     manager = _manager(tmp_path)
 

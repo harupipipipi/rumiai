@@ -24,6 +24,8 @@ EXPECTED_MANAGED_TEMPLATE_IDS = {
     "coding.rust",
     "desktop.ubuntu",
     "desktop.browser",
+    "desktop.coding",
+    "desktop.linux_native",
     "tool.ephemeral",
 }
 

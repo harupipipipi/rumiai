@@ -42,7 +42,7 @@ def test_desktop_create_manifest_exposes_runtime_context_fields() -> None:
     ]:
         assert field in properties
 
-    assert set(properties["starter"]["enum"]) == {"empty", "terminal", "browser_url"}
+    assert set(properties["starter"]["enum"]) == {"empty", "browser", "terminal", "browser_url"}
     assert set(properties["workspace_access"]["enum"]) == {"none", "read_only", "overlay", None}
 
     access = properties["access"]["properties"]

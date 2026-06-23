@@ -261,6 +261,19 @@ def test_frame_cache_after_seq_returns_not_modified_without_advancing_frame() ->
     assert fetched.frame == second
 
 
+def test_frame_cache_sequence_stays_monotonic_after_discard() -> None:
+    cache = FrameCache(min_capture_interval_seconds=0)
+
+    first = cache.put_frame("seat-1", b"frame-one", content_type="image/png", width=2, height=2)
+    cache.discard("seat-1")
+    second = cache.put_frame("seat-1", b"frame-two", content_type="image/png", width=2, height=2)
+    fetched = cache.get_frame("seat-1", after_seq=first.frame_seq)
+
+    assert second.frame_seq == first.frame_seq + 1
+    assert fetched.status_code == 200
+    assert fetched.frame == second
+
+
 def test_frame_cache_reserve_capture_is_single_flight_per_seat() -> None:
     cache = FrameCache(min_capture_interval_seconds=0)
     barrier = threading.Barrier(8)
@@ -688,6 +701,7 @@ def test_linux_native_provider_desktop_session_capture_and_input(monkeypatch) ->
     )
 
     assert started.state == "ready"
+    assert started.opaque_state["x11_session"]["display"] == ":99"
     assert frame["ok"] is True
     assert frame["data"] == b"png"
     assert frame["width"] == 800
@@ -733,6 +747,37 @@ def test_linux_native_provider_applies_browser_url_starter_when_network_allows(m
     assert any(str(part).startswith("--user-data-dir=") for part in argv)
     assert argv[-1] == "https://example.com/task"
     assert started.opaque_state["startup_status"]["starter"] == "browser_url"
+    assert started.opaque_state["startup_status"]["executed"] is True
+
+
+def test_linux_native_provider_applies_browser_starter_without_url(monkeypatch, tmp_path) -> None:
+    import ecosystem.defaultspack.backend.sandbox.providers.linux_native as linux_native
+    from ecosystem.defaultspack.backend.sandbox.providers.linux_native import LinuxNativeProvider
+
+    monkeypatch.setattr(linux_native.sys, "platform", "linux")
+    monkeypatch.setattr(
+        linux_native.shutil,
+        "which",
+        lambda name: "/usr/bin/google-chrome-stable" if name == "google-chrome-stable" else None,
+    )
+    session = FakeX11Session(width=800, height=600, session_dir=tmp_path)
+    provider = LinuxNativeProvider(session_factory=lambda **kwargs: session)
+
+    instance = provider.create(
+        _create_spec(
+            _desktop_only_template(),
+            metadata={"startup": {"starter": "browser"}},
+        )
+    )
+    started = provider.start(instance)
+
+    launch_call = next(call for call in session.calls if call[0] == "launch")
+    argv = list(launch_call[2])
+    assert launch_call[1] == "browser"
+    assert argv[0] == "/usr/bin/google-chrome-stable"
+    assert "--new-window" in argv
+    assert all(not str(part).startswith("http") for part in argv)
+    assert started.opaque_state["startup_status"]["starter"] == "browser"
     assert started.opaque_state["startup_status"]["executed"] is True
 
 
@@ -2454,6 +2499,9 @@ class FakeX11Session:
             "process": f"launch-{name}",
             "log_path": str(self.session_dir / stdout_name) if self.session_dir is not None and stdout_name else None,
         }
+
+    def owned_session_metadata(self) -> dict[str, object]:
+        return {"display": self.display, "processes": {"xvfb": {"pid": 4321}}}
 
 
 class CaptureGuestAgent(FakeGuestAgent):

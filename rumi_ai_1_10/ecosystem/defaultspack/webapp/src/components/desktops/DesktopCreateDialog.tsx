@@ -355,6 +355,7 @@ export function DesktopCreateDialog({
                     className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
                   >
                     <option value="empty">Empty</option>
+                    <option value="browser">Browser</option>
                     <option value="browser_url">Browser URL</option>
                     <option value="terminal">Terminal</option>
                   </select>

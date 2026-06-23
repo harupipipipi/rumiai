@@ -1205,26 +1205,30 @@ def _desktop_start_script(
             f"  echo 'xterm is not installed; terminal starter skipped' >{runtime_dir}/starter-terminal.log\n"
             "fi\n"
         )
-    elif starter == "browser_url" and browser_url:
+    elif starter in {"browser", "browser_url"}:
         quoted_url = shlex.quote(browser_url)
-        if network_disabled:
+        if network_disabled and browser_url:
             script += f"echo 'browser_url starter skipped by sandbox network policy' >{runtime_dir}/starter-browser.log\n"
         else:
             script += (
                 f"BROWSER_URL={quoted_url}\n"
                 "BROWSER_BIN=''\n"
-                "for candidate in google-chrome-stable google-chrome chromium chromium-browser firefox xdg-open; do\n"
+                "BROWSER_CANDIDATES='google-chrome-stable google-chrome chromium chromium-browser firefox'\n"
+                "if [ -n \"$BROWSER_URL\" ]; then BROWSER_CANDIDATES=\"$BROWSER_CANDIDATES xdg-open\"; fi\n"
+                "for candidate in $BROWSER_CANDIDATES; do\n"
                 "  if command -v \"$candidate\" >/dev/null 2>&1; then BROWSER_BIN=\"$candidate\"; break; fi\n"
                 "done\n"
                 "if [ -n \"$BROWSER_BIN\" ]; then\n"
                 "  mkdir -p " + runtime_dir + "/browser-profile\n"
                 "  if [ \"$BROWSER_BIN\" = 'xdg-open' ]; then\n"
                 f"    rumi_run env DISPLAY={display} \"$BROWSER_BIN\" \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
-                "  else\n"
+                "  elif [ -n \"$BROWSER_URL\" ]; then\n"
                 f"    rumi_run env DISPLAY={display} \"$BROWSER_BIN\" --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
+                "  else\n"
+                f"    rumi_run env DISPLAY={display} \"$BROWSER_BIN\" --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
                 "  fi\n"
                 "else\n"
-                f"  echo 'No browser executable found; browser_url starter skipped' >{runtime_dir}/starter-browser.log\n"
+                f"  echo 'No browser executable found; browser starter skipped' >{runtime_dir}/starter-browser.log\n"
                 "fi\n"
             )
     return script

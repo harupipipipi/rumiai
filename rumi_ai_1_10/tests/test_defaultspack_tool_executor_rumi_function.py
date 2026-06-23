@@ -849,6 +849,38 @@ def test_sandbox_exec_rejects_shell_strings_after_internal_tool_decision(tmp_pat
     assert result["widget"]["error"]["code"] == "SANDBOX_SHELL_STRING_REJECTED"
 
 
+def test_sandbox_exec_command_string_preserves_quoted_whitespace(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            if payload.get("_handler") == "sandboxes_create":
+                return {"status": "ok", "data": {"sandbox_id": "sandbox-1"}}
+            if payload.get("_handler") == "sandbox_exec":
+                return {"status": "ok", "data": {"argv": payload["argv"]}}
+            if payload.get("_handler") == "sandbox_delete":
+                return {"status": "ok", "data": {"deleted": True}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = sandbox_tools.sandbox_exec({"command": "python -c \"print('a  b')\""}, context)
+
+    assert result["status"] == "ok"
+    exec_call = next(call for call in fake_api.calls if call["_handler"] == "sandbox_exec")
+    assert exec_call["argv"] == ["python", "-c", "print('a  b')"]
+
+
 def test_sandbox_file_patch_and_port_tools_forward_to_runtime_api(tmp_path, monkeypatch):
     from domain.tool import sandbox_tools
     from domain.tool_policy.internal_context import seal_tool_context
@@ -1042,6 +1074,34 @@ def test_desktop_frame_tool_returns_base64_frame_payload(monkeypatch):
     assert result["data"]["width"] == 800
     assert result["data"]["height"] == 600
     assert fake_api.calls[0][0]["owner_id"] == "agent-1"
+
+
+def test_desktop_input_tool_generates_client_action_id_when_manifest_omits_it(tmp_path, monkeypatch):
+    from domain.tool import desktop_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            return {"status": "ok", "data": {"ok": True}}
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path), "agent_id": "agent-1"},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = desktop_tools.desktop_input({"desktop_id": "seat-1", "action": "click", "x": 1, "y": 2}, context)
+
+    assert result["status"] == "ok"
+    payload = fake_api.calls[0]
+    assert payload["_handler"] == "desktop_ai_input"
+    assert payload["seat_id"] == "seat-1"
+    assert str(payload["client_action_id"]).startswith("desktop-input-")
 
 
 def test_desktop_control_tools_forward_owner_and_lease_token(tmp_path, monkeypatch):

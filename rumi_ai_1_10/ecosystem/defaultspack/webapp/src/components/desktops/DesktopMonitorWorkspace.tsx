@@ -132,9 +132,10 @@ export function DesktopMonitorWorkspace() {
   ) => {
     setActionError(null);
     try {
-      if (action === "start") await sandboxesApi.startDesktop(seatId);
-      if (action === "restart") await sandboxesApi.restartDesktop(seatId);
-      if (action === "stop") await sandboxesApi.stopDesktop(seatId);
+      const accessKey = accessKeys[seatId] || undefined;
+      if (action === "start") await sandboxesApi.startDesktop(seatId, accessKey);
+      if (action === "restart") await sandboxesApi.restartDesktop(seatId, accessKey);
+      if (action === "stop") await sandboxesApi.stopDesktop(seatId, accessKey);
       if (action === "delete") await sandboxesApi.deleteDesktop(seatId, accessKeys[seatId] || undefined);
       if (action === "stop") setStopTargetSeatId(null);
       if (action === "delete" && seatId === selectedSeatId) {

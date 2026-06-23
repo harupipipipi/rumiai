@@ -35,7 +35,7 @@
           "provider_id": { "type": ["string", "null"] },
           "starter": {
             "type": "string",
-            "enum": ["empty", "terminal", "browser_url"],
+            "enum": ["empty", "browser", "terminal", "browser_url"],
             "description": "Initial desktop startup action. Use browser_url only with an http(s) browser_url."
           },
           "browser_url": {
