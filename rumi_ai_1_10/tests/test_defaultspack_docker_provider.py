@@ -134,6 +134,22 @@ def test_docker_provider_runs_sandbox_exec_inside_container(tmp_path) -> None:
     assert "-c" not in docker_exec
 
 
+def test_docker_provider_rejects_exec_cwd_before_container_exec(tmp_path) -> None:
+    fake = FakeDockerCli()
+    manager = _manager(tmp_path, fake)
+    created = manager.create(display=False, provider_id="docker", template_id="tool.ephemeral")
+    fake.calls.clear()
+
+    result = manager.exec(
+        created["sandbox_id"],
+        {"argv": ["pwd"], "cwd": "/tmp/outside", "client_request_id": "exec-cwd"},
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "INVALID_EXEC_REQUEST"
+    assert all(command[1] != "exec" for command, _input_text, _timeout in fake.calls)
+
+
 def test_docker_provider_auto_resolves_tool_sandbox(tmp_path) -> None:
     fake = FakeDockerCli()
     manager = _manager(tmp_path, fake)

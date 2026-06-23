@@ -247,6 +247,54 @@ def test_mac_lima_provider_ensure_and_guest_desktop_flow(monkeypatch) -> None:
     assert fake.command_containing("shell", "rumi-managed-runtime", "--", "echo", "hello")[-2:] == ["echo", "hello"]
 
 
+def test_managed_ubuntu_guest_agent_rejects_exec_cwd_before_guest_command(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    provider.ensure(
+        EnsureRuntimeRequest(
+            provider_id="mac_lima",
+            requirements=RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES),
+        ),
+        NullProgressSink(),
+    )
+    started = provider.start(
+        provider.create(_create_spec(_template(network_mode="host_shared", network_approval_required=False)))
+    )
+    agent = provider.connect_agent(started)
+    fake.calls.clear()
+
+    with pytest.raises(SandboxContractError) as exc:
+        agent.exec(started.sandbox_id, {"argv": ["pwd"], "cwd": "../outside", "client_request_id": "exec-cwd"})
+
+    assert exc.value.code == "INVALID_EXEC_REQUEST"
+    assert fake.calls == []
+
+
+def test_managed_ubuntu_guest_agent_rejects_file_patch_path_before_guest_command(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    provider.ensure(
+        EnsureRuntimeRequest(
+            provider_id="mac_lima",
+            requirements=RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES),
+        ),
+        NullProgressSink(),
+    )
+    started = provider.start(
+        provider.create(_create_spec(_template(network_mode="host_shared", network_approval_required=False)))
+    )
+    agent = provider.connect_agent(started)
+    fake.calls.clear()
+
+    with pytest.raises(SandboxContractError) as exc:
+        agent.apply_file_patch(started.sandbox_id, {"path": "/tmp/outside.py", "content": "print('outside')"})
+
+    assert exc.value.code == "INVALID_EXEC_REQUEST"
+    assert fake.calls == []
+
+
 def test_managed_ubuntu_desktops_get_distinct_guest_displays(monkeypatch) -> None:
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
     fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
