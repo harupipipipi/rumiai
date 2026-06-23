@@ -135,6 +135,40 @@ test("buildGroupsFromChats keeps custom group workspace metadata and matching ch
   assert.equal(groups.find((group) => group.title === "Recent")?.chats[0]?.id, "plain-chat");
 });
 
+test("buildGroupsFromChats keeps reserved bucket ids unique when custom metadata collides", () => {
+  const chats: ChatItem[] = [
+    {
+      id: "custom-coding-chat",
+      title: "Custom coding lane",
+      date: "Today",
+      type: "chat",
+      metadata: { group_id: "group-coding", group_title: "Repo Coding", workspace_id: "ws-main", mode: "coding" },
+    },
+    {
+      id: "regular-coding-chat",
+      title: "Regular coding bucket",
+      date: "Today",
+      type: "chat",
+      tags: ["coding"],
+      metadata: { workspace_id: "ws-main", mode: "coding" },
+    },
+  ];
+
+  const groups = buildGroupsFromChats(chats);
+  const groupIds = groups.map((group) => group.id);
+
+  assert.equal(new Set(groupIds).size, groupIds.length);
+  assert.equal(groups[0]?.id, "custom-group-coding");
+  assert.equal(groups[0]?.sourceGroupId, "group-coding");
+  assert.deepEqual(groups[0]?.chats.map((chat) => chat.id), ["custom-coding-chat"]);
+  assert.deepEqual(groups.find((group) => group.id === "group-coding")?.chats.map((chat) => chat.id), ["regular-coding-chat"]);
+
+  const railGroupIds = buildCompactHistoryRailItems(groups)
+    .filter((item) => item.type === "group")
+    .map((item) => item.id);
+  assert.equal(new Set(railGroupIds).size, railGroupIds.length);
+});
+
 test("loadCustomGroups migrates legacy and snake_case workspace records", () => {
   const previousDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   const values = new Map<string, string>();

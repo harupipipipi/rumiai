@@ -78,6 +78,7 @@ export type ChatItem = {
 
 export type ChatGroup = {
   id: string;
+  sourceGroupId?: string;
   title: string;
   chats: ChatItem[];
   subGroups: ChatGroup[];
@@ -280,6 +281,38 @@ function saveCustomGroups(groups: CustomGroupInfo[]) {
   }
 }
 
+function collectGroupIds(groups: ChatGroup[], ids = new Set<string>()): Set<string> {
+  for (const group of groups) {
+    ids.add(group.id);
+    collectGroupIds(group.subGroups, ids);
+  }
+  return ids;
+}
+
+function uniqueHistoryGroupId(baseId: string, usedIds: Set<string>, prefix: string): string {
+  const normalizedBaseId = stringOrNull(baseId) ?? "group";
+  let candidate = usedIds.has(normalizedBaseId) ? `${prefix}${normalizedBaseId}` : normalizedBaseId;
+  let suffix = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${prefix}${normalizedBaseId}-${suffix}`;
+    suffix += 1;
+  }
+  usedIds.add(candidate);
+  return candidate;
+}
+
+function uniquifyGroupTreeIds(groups: ChatGroup[], usedIds: Set<string>, prefix: string): ChatGroup[] {
+  return groups.map((group) => {
+    const id = uniqueHistoryGroupId(group.id, usedIds, prefix);
+    return {
+      ...group,
+      id,
+      sourceGroupId: id === group.id ? group.sourceGroupId : group.sourceGroupId ?? group.id,
+      subGroups: uniquifyGroupTreeIds(group.subGroups, usedIds, prefix),
+    };
+  });
+}
+
 export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: CustomGroupInfo[] = []): ChatGroup[] {
   const dateBuckets: Record<'today' | 'recent' | 'older', ChatItem[]> = {
     today: [],
@@ -430,8 +463,12 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
       ];
 
   const visibleGroups = groups.filter((group) => group.chats.length > 0 || group.subGroups.length > 0);
+  const reservedGroupIds = collectGroupIds(visibleGroups);
+  const integration = uniquifyGroupTreeIds([...integrationGroups.values()], reservedGroupIds, "integration-");
+  const usedGroupIds = collectGroupIds([...integration, ...visibleGroups]);
   const custom = [...metadataGroupsById.values()].map((group) => ({
-    id: group.id,
+    id: uniqueHistoryGroupId(group.id, usedGroupIds, "custom-"),
+    sourceGroupId: group.id,
     title: group.title,
     workspaceId: group.workspaceId ?? null,
     workspaceLabel: group.workspaceLabel ?? null,
@@ -442,7 +479,7 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
     subGroups: [],
     custom: true,
   }));
-  return [...custom, ...integrationGroups.values(), ...visibleGroups];
+  return [...custom, ...integration, ...visibleGroups];
 }
 
 // ============================================================
@@ -1598,9 +1635,10 @@ export function HistoryBoard({
 
   // --- Actions ---
   const handleRenameGroup = (id: string, newTitle: string) => {
+    const sourceGroupId = findGroupById(groups, id)?.sourceGroupId ?? id;
     setGroups(prev => mapGroups(prev, g => g.id === id ? { ...g, title: newTitle } : g));
     setCustomGroups((prev) => {
-      const next = prev.map((group) => group.id === id ? { ...group, title: newTitle } : group);
+      const next = prev.map((group) => group.id === sourceGroupId ? { ...group, title: newTitle } : group);
       saveCustomGroups(next);
       return next;
     });
