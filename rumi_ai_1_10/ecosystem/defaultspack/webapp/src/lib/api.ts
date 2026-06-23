@@ -219,6 +219,13 @@ export type AuthorityRequestDisplayMetadata = {
   endpoint_path?: string | null;
   credential_label?: string | null;
   access_summary?: string | null;
+  host_execution_summary?: {
+    executable?: string;
+    argument_count?: number;
+    cwd?: string;
+    target_paths?: string[];
+    target_urls?: string[];
+  } | null;
   risk_level?: string;
   typed_confirmation_required?: boolean;
   confirmation_phrase?: string | null;

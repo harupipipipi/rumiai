@@ -133,6 +133,18 @@ test("authority approval window sends only the terse hidden resume marker", () =
   assert.match(source, /runtime_content: authorityApprovalRuntimeContent\(settledApproval, decision\.token\)/);
 });
 
+test("authority approval window always surfaces host execution summary rows", () => {
+  const source = authorityApprovalWindowSource();
+
+  assert.match(source, /authorityHostExecutionSummary\(metadata\.host_execution_summary\)/);
+  assert.match(source, /label: "操作内容"[\s\S]*metadata\.access_summary/);
+  assert.match(source, /label: "実行ファイル"[\s\S]*hostExecutionSummary\.executable/);
+  assert.match(source, /label: "引数"[\s\S]*hostExecutionSummary\.argument_count/);
+  assert.match(source, /label: "作業フォルダ"[\s\S]*hostExecutionSummary\.cwd/);
+  assert.match(source, /label: "対象path"[\s\S]*hostExecutionSummary\.target_paths/);
+  assert.match(source, /label: "対象URL"[\s\S]*hostExecutionSummary\.target_urls/);
+});
+
 test("pending authority approval detects persisted assistant metadata", () => {
   const approval = pendingAuthorityApproval([
     {

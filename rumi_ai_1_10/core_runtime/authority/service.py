@@ -831,10 +831,11 @@ class AuthorityService:
             "network.egress": "Network access",
         }.get(request.permission_id, host_definition.label if host_definition is not None else request.permission_id)
         access_summary = ""
+        host_execution_summary: dict[str, Any] = {}
         typed_confirmation_required = self._typed_confirmation_required(request)
         confirmation_phrase = self._confirmation_phrase(request)
         if resource.get("kind") == "host_intent" or request.permission_id.startswith("host."):
-            operation = str(resource.get("operation") or request.permission_id)
+            operation = str(resource.get("operation") or resource.get("host_operation") or request.permission_id)
             caller = " / ".join(
                 item
                 for item in (
@@ -847,6 +848,13 @@ class AuthorityService:
             title = f"Host操作 {operation} を許可しますか？"
             summary = f"{caller or request.principal_id} が {operation} ({stream_label}) を要求しています。"
             access_summary = f"{operation} / {stream_label}"
+            host_execution_summary = _host_execution_display_summary(resource.get("args_summary"))
+            if host_execution_summary:
+                access_summary = _host_execution_access_summary(
+                    operation=operation,
+                    stream_label=stream_label,
+                    summary=host_execution_summary,
+                )
         if has_rich_provider_metadata and request.permission_id in {"model.invoke", "api_key.use", "network.egress"}:
             app_label = app_name or "defaultspack"
             provider_label = provider_display_name or provider_id or "provider"
@@ -882,6 +890,7 @@ class AuthorityService:
             "credential_label": credential_label or None,
             "permission_label": permission_label,
             "access_summary": access_summary or None,
+            "host_execution_summary": host_execution_summary or None,
             "risk_level": request.risk_level,
             "typed_confirmation_required": typed_confirmation_required,
             "confirmation_phrase": confirmation_phrase or None,
@@ -931,3 +940,73 @@ class AuthorityService:
                 "model_id": resource.get("model_id"),
             },
         )
+
+
+def _host_execution_display_summary(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    summary: dict[str, Any] = {}
+    executable = _display_text(value.get("executable"))
+    if executable:
+        summary["executable"] = executable
+    argument_count = _display_int(value.get("argument_count"))
+    if argument_count is not None:
+        summary["argument_count"] = argument_count
+    cwd = _display_text(value.get("cwd"))
+    if cwd:
+        summary["cwd"] = cwd
+    target_paths = _display_text_list(value.get("target_paths"))
+    if target_paths:
+        summary["target_paths"] = target_paths
+    target_urls = _display_text_list(value.get("target_urls"))
+    if target_urls:
+        summary["target_urls"] = target_urls
+    return summary
+
+
+def _host_execution_access_summary(*, operation: str, stream_label: str, summary: dict[str, Any]) -> str:
+    parts = [f"{operation} / {stream_label}"]
+    executable = _display_text(summary.get("executable"))
+    if executable:
+        parts.append(f"exec: {executable}")
+    argument_count = _display_int(summary.get("argument_count"))
+    if argument_count is not None:
+        parts.append(f"args: {argument_count}")
+    cwd = _display_text(summary.get("cwd"))
+    if cwd:
+        parts.append(f"cwd: {cwd}")
+    target_paths = _display_text_list(summary.get("target_paths"))
+    if target_paths:
+        parts.append("paths: " + ", ".join(target_paths))
+    target_urls = _display_text_list(summary.get("target_urls"))
+    if target_urls:
+        parts.append("urls: " + ", ".join(target_urls))
+    return " / ".join(parts)
+
+
+def _display_text(value: Any, *, max_length: int = 160) -> str:
+    text = " ".join(str(value or "").strip().split())
+    if len(text) > max_length:
+        return text[: max(0, max_length - 14)] + "...(truncated)"
+    return text
+
+
+def _display_text_list(value: Any, *, max_items: int = 6) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = _display_text(item)
+        if text and text not in result:
+            result.append(text)
+        if len(result) >= max_items:
+            break
+    return result
+
+
+def _display_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None

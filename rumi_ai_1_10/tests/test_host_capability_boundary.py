@@ -1121,6 +1121,24 @@ def test_direct_host_function_from_non_host_pack_becomes_critical_authority_requ
         assert secret_fragment not in resource_json
         assert secret_fragment not in audit_summary
 
+    redacted_summary = executor._host_execution_args_summary(
+        {
+            "argv": [
+                "tool",
+                "--token",
+                "https://secret.example/private-path",
+                "--password",
+                "/tmp/secret-value",
+                "--api-key=https://secret-key.example/path",
+                "--output=/tmp/public-target",
+            ],
+        }
+    )
+    assert redacted_summary["target_paths"] == ["/tmp/public-target"]
+    assert "target_urls" not in redacted_summary
+    assert "secret.example" not in json.dumps(redacted_summary, ensure_ascii=False)
+    assert "/tmp/secret-value" not in json.dumps(redacted_summary, ensure_ascii=False)
+
 
 def test_direct_host_args_hash_is_canonical_and_approval_bound(tmp_path, monkeypatch):
     service = _authority_service(tmp_path, monkeypatch)

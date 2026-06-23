@@ -366,6 +366,52 @@ def test_authority_request_display_metadata_explains_provider_endpoint_and_key(t
     assert "provider provider" not in display["summary"]
 
 
+def test_authority_request_display_metadata_exposes_safe_host_execution_summary(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "critical_host_function",
+        "pack_id": "third_party_pack",
+        "function_id": "run_shell",
+        "host_operation": "shell.exec",
+        "args_summary": {
+            "executable": "/bin/rm",
+            "argument_count": 3,
+            "cwd": "/tmp/project",
+            "target_paths": ["/tmp/unsafe-target"],
+            "target_urls": ["https://example.test/hook"],
+        },
+        "confirmation_phrase": "RUMI-HOST-TEST",
+        "typed_confirmation_required": True,
+    }
+    decision = service.check(
+        principal_id="third_party_pack",
+        permission_id="host.process.exec_guarded",
+        resource=resource,
+        reason="Direct host execution requires typed confirmation",
+    )
+
+    view = service.get_request(decision.request_id)["request"]
+    display = view["display_metadata"]
+
+    assert display["title"] == "Host操作 shell.exec を許可しますか？"
+    assert "third_party_pack / run_shell" in display["summary"]
+    assert display["access_summary"] == (
+        "shell.exec / one-shot / exec: /bin/rm / args: 3 / cwd: /tmp/project / "
+        "paths: /tmp/unsafe-target / urls: https://example.test/hook"
+    )
+    assert display["host_execution_summary"] == {
+        "executable": "/bin/rm",
+        "argument_count": 3,
+        "cwd": "/tmp/project",
+        "target_paths": ["/tmp/unsafe-target"],
+        "target_urls": ["https://example.test/hook"],
+    }
+    assert display["confirmation_phrase"] == "RUMI-HOST-TEST"
+    display_json = json.dumps(display, ensure_ascii=False)
+    assert "secret" not in display_json.lower()
+    assert "token" not in display_json.lower()
+
+
 def test_authority_approve_once_ignores_stream_transport_flag(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     resource = {

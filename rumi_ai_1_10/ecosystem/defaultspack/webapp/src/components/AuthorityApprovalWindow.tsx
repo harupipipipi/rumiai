@@ -129,6 +129,15 @@ function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function stringListValue(value: unknown): string {
+  if (!Array.isArray(value)) return "";
+  return value.map((item) => stringValue(item)).filter(Boolean).join("\n");
+}
+
+function authorityHostExecutionSummary(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 function authorityApprovalErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error || "");
   if (message.includes("AUTHORITY_BROWSER_TEST_DISABLED")) {
@@ -176,12 +185,22 @@ export function AuthorityApprovalWindow() {
     if (!request) return [];
     const resource = request.resource ?? {};
     const metadata = request.display_metadata ?? {};
+    const hostExecutionSummary = authorityHostExecutionSummary(metadata.host_execution_summary);
     return [
       { label: "アプリ", value: metadata.app_display_name || metadata.pack_id || stringValue(resource.app_display_name) || stringValue(resource.pack_id) },
       { label: "提供元", value: metadata.provider_display_name || metadata.provider_id || stringValue(resource.provider_display_name) || stringValue(resource.provider_id) },
       { label: "モデル", value: metadata.model_display_name || metadata.model_id || stringValue(resource.model_display_name) || stringValue(resource.model_id) },
       { label: "API key", value: metadata.credential_label || stringValue(resource.credential_label) || "secret value is never shown" },
       { label: "接続先", value: metadata.endpoint_url || stringValue(resource.endpoint_url) || metadata.endpoint_host || stringValue(resource.domain) },
+      { label: "操作内容", value: metadata.access_summary || stringValue(resource.access_summary) },
+      { label: "実行ファイル", value: stringValue(hostExecutionSummary.executable) },
+      {
+        label: "引数",
+        value: typeof hostExecutionSummary.argument_count === "number" ? `${hostExecutionSummary.argument_count}` : "",
+      },
+      { label: "作業フォルダ", value: stringValue(hostExecutionSummary.cwd) },
+      { label: "対象path", value: stringListValue(hostExecutionSummary.target_paths) },
+      { label: "対象URL", value: stringListValue(hostExecutionSummary.target_urls) },
       { label: "有効期限", value: formattedDate(request.expires_at) },
     ].filter((row) => row.value);
   }, [request]);
@@ -641,9 +660,9 @@ export function AuthorityApprovalWindow() {
 
                 <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2">
                   {detailRows.map((row) => (
-                    <div key={row.label} className={row.label === "接続先" ? "sm:col-span-2" : undefined}>
+                    <div key={row.label} className={["接続先", "操作内容", "対象path", "対象URL"].includes(row.label) ? "sm:col-span-2" : undefined}>
                       <dt className="text-zinc-600">{row.label}</dt>
-                      <dd className="mt-1 break-words text-zinc-200">{row.value}</dd>
+                      <dd className="mt-1 whitespace-pre-wrap break-words text-zinc-200">{row.value}</dd>
                     </div>
                   ))}
                 </dl>

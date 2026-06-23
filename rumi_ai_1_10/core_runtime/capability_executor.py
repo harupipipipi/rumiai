@@ -409,6 +409,18 @@ def _host_command_tokens(args: dict[str, Any]) -> list[str]:
     return []
 
 
+def _collect_host_targets_from_command_tokens(tokens: list[str], *, paths: list[str], urls: list[str]) -> None:
+    skip_next = False
+    for token in tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        if _is_sensitive_cli_token(token):
+            skip_next = "=" not in str(token or "")
+            continue
+        _collect_host_targets(token, paths=paths, urls=urls)
+
+
 def _is_sensitive_cli_token(value: Any) -> bool:
     text = str(value or "").strip().lower().lstrip("-/")
     if not text:
@@ -2055,10 +2067,7 @@ class CapabilityExecutor:
         if tokens:
             summary["executable"] = tokens[0]
             summary["argument_count"] = max(0, len(tokens) - 1)
-            for token in tokens[1:]:
-                if _is_sensitive_cli_token(token):
-                    continue
-                _collect_host_targets(token, paths=paths, urls=urls)
+            _collect_host_targets_from_command_tokens(tokens[1:], paths=paths, urls=urls)
         for key in ("cwd", "working_dir", "working_directory"):
             if key in args and not _is_sensitive_arg_key(key):
                 cwd = _safe_host_summary_text(args.get(key))
