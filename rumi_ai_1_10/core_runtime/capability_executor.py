@@ -21,6 +21,7 @@ import json
 import hashlib
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,7 @@ import shutil
 import uuid
 import logging
 import types
+from urllib.parse import urlsplit, urlunsplit
 from .flow_context_security import sanitize_user_flow_context
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -344,8 +346,27 @@ def _safe_host_summary_text(value: Any, max_length: int = MAX_HOST_ARGS_SUMMARY_
 
 def _sanitize_host_url(value: Any) -> str:
     text = _safe_host_summary_text(value)
-    match = re.match(r"^(https?://[^?#\s]+)", text, re.IGNORECASE)
-    return _safe_host_summary_text(match.group(1)) if match else ""
+    match = re.match(r"^(https?://\S+)", text, re.IGNORECASE)
+    if not match:
+        return ""
+    try:
+        parsed = urlsplit(match.group(1))
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        return ""
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return ""
+    if ":" in hostname and not (hostname.startswith("[") and hostname.endswith("]")):
+        hostname = f"[{hostname}]"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    netloc = f"{hostname}:{port}" if port is not None else hostname
+    return _safe_host_summary_text(urlunsplit((scheme, netloc, parsed.path or "", "", "")))
 
 
 def _looks_like_host_path(value: Any) -> bool:
@@ -405,8 +426,19 @@ def _host_command_tokens(args: dict[str, Any]) -> list[str]:
     for key in ("command", "cmd"):
         value = args.get(key)
         if isinstance(value, str) and value.strip():
-            return [_safe_host_summary_text(part) for part in value.split() if part.strip()]
+            return _tokenize_host_command_text(value)
     return []
+
+
+def _tokenize_host_command_text(value: str) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    try:
+        parts = shlex.split(text)
+    except ValueError:
+        parts = text.split()
+    return [_safe_host_summary_text(part) for part in parts if str(part or "").strip()]
 
 
 def _collect_host_targets_from_command_tokens(tokens: list[str], *, paths: list[str], urls: list[str]) -> None:
@@ -437,6 +469,9 @@ def _redact_sensitive_args(value: Any) -> Any:
             if _is_sensitive_arg_key(key):
                 redacted_count += 1
                 continue
+            if str(key).strip().lower() in {"command", "cmd"} and isinstance(nested, str):
+                redacted[str(key)] = _redact_host_command_text(nested)
+                continue
             redacted[str(key)] = _redact_sensitive_args(nested)
         if redacted_count:
             redacted["_redacted_field_count"] = redacted_count
@@ -458,6 +493,22 @@ def _redact_sensitive_args(value: Any) -> Any:
     if isinstance(value, str) and _HOST_URL_RE.match(value.strip()):
         return _sanitize_host_url(value)
     return value
+
+
+def _redact_host_command_text(value: str) -> list[Any]:
+    redacted_items: list[Any] = []
+    skip_next = False
+    for item in _tokenize_host_command_text(value):
+        if skip_next:
+            redacted_items.append("[redacted]")
+            skip_next = False
+            continue
+        if _is_sensitive_cli_token(item):
+            redacted_items.append("[redacted]")
+            skip_next = "=" not in item
+            continue
+        redacted_items.append(_redact_sensitive_args(item))
+    return redacted_items
 
 
 def _summarize_args(args: Any, max_length: int = MAX_ARGS_SUMMARY_LENGTH) -> str:

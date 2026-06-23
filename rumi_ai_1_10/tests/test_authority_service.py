@@ -378,7 +378,7 @@ def test_authority_request_display_metadata_exposes_safe_host_execution_summary(
             "argument_count": 3,
             "cwd": "/tmp/project",
             "target_paths": ["/tmp/unsafe-target"],
-            "target_urls": ["https://example.test/hook"],
+            "target_urls": ["https://alice:secret@example.test/hook?token=query-secret#frag"],
         },
         "confirmation_phrase": "RUMI-HOST-TEST",
         "typed_confirmation_required": True,
@@ -410,6 +410,7 @@ def test_authority_request_display_metadata_exposes_safe_host_execution_summary(
     display_json = json.dumps(display, ensure_ascii=False)
     assert "secret" not in display_json.lower()
     assert "token" not in display_json.lower()
+    assert "alice" not in display_json.lower()
 
 
 def test_authority_approve_once_ignores_stream_transport_flag(tmp_path, monkeypatch):

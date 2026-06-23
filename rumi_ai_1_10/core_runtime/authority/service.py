@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from .models import AUTHORITY_PERMISSION_IDS, AuthorityDecision, AuthorityRequest
 from .principal import build_principal_id, parse_principal_parts, principal_scope_candidates
@@ -958,7 +959,7 @@ def _host_execution_display_summary(value: Any) -> dict[str, Any]:
     target_paths = _display_text_list(value.get("target_paths"))
     if target_paths:
         summary["target_paths"] = target_paths
-    target_urls = _display_text_list(value.get("target_urls"))
+    target_urls = _display_url_list(value.get("target_urls"))
     if target_urls:
         summary["target_urls"] = target_urls
     return summary
@@ -1002,6 +1003,42 @@ def _display_text_list(value: Any, *, max_items: int = 6) -> list[str]:
         if len(result) >= max_items:
             break
     return result
+
+
+def _display_url_list(value: Any, *, max_items: int = 6) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        url = _display_url(item)
+        if url and url not in result:
+            result.append(url)
+        if len(result) >= max_items:
+            break
+    return result
+
+
+def _display_url(value: Any) -> str:
+    text = _display_text(value)
+    candidate = text.split()[0] if text else ""
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        return ""
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return ""
+    if ":" in hostname and not (hostname.startswith("[") and hostname.endswith("]")):
+        hostname = f"[{hostname}]"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    netloc = f"{hostname}:{port}" if port is not None else hostname
+    return _display_text(urlunsplit((scheme, netloc, parsed.path or "", "", "")))
 
 
 def _display_int(value: Any) -> int | None:

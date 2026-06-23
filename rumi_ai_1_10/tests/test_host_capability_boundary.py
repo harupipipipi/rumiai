@@ -1140,6 +1140,74 @@ def test_direct_host_function_from_non_host_pack_becomes_critical_authority_requ
     assert "/tmp/secret-value" not in json.dumps(redacted_summary, ensure_ascii=False)
 
 
+def test_direct_host_command_string_redacts_resource_display_and_audit(tmp_path, monkeypatch):
+    service = _authority_service(tmp_path, monkeypatch)
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
+    from core_runtime.capability_executor import CapabilityExecutor, _summarize_args
+
+    executor = CapabilityExecutor()
+    args = {
+        "command": (
+            "curl --token TOPSECRET "
+            "https://alice:TOPSECRET@api.example.test/path?token=query-secret#frag"
+        ),
+        "cmd": (
+            "tool --password /tmp/secret-value "
+            "https://bob:SUPERSECRET@other.example.test/hook?password=query#frag"
+        ),
+        "url": "https://carol:URLSECRET@example.test/visible?api_key=query#frag",
+    }
+    response = executor._host_boundary_response_if_needed(
+        entry=_direct_host_entry(),
+        principal_id="third_party_pack",
+        request_id="req-command-redaction",
+        start_time=time.time(),
+        args=args,
+    )
+
+    assert response is not None
+    assert response.error_type == "critical_host_confirmation_required"
+    request_view = service.get_request(response.output["request_id"])["request"]
+    resource = request_view["resource"]
+    display = request_view["display_metadata"]
+
+    summary = resource["args_summary"]
+    assert summary["executable"] == "curl"
+    assert summary["argument_count"] == 3
+    assert summary["target_urls"] == [
+        "https://api.example.test/path",
+        "https://example.test/visible",
+    ]
+    assert display["host_execution_summary"]["target_urls"] == [
+        "https://api.example.test/path",
+        "https://example.test/visible",
+    ]
+    assert "https://api.example.test/path" in display["access_summary"]
+    assert "https://example.test/visible" in display["access_summary"]
+
+    resource_json = json.dumps(resource, ensure_ascii=False)
+    display_json = json.dumps(display, ensure_ascii=False)
+    audit_summary = _summarize_args(args)
+    assert '"command": [' in audit_summary
+    for secret_fragment in (
+        "TOPSECRET",
+        "SUPERSECRET",
+        "URLSECRET",
+        "query-secret",
+        "api_key=query",
+        "password=query",
+        "/tmp/secret-value",
+        "alice",
+        "bob",
+        "carol",
+        "--token",
+        "--password",
+    ):
+        assert secret_fragment not in resource_json
+        assert secret_fragment not in display_json
+        assert secret_fragment not in audit_summary
+
+
 def test_direct_host_args_hash_is_canonical_and_approval_bound(tmp_path, monkeypatch):
     service = _authority_service(tmp_path, monkeypatch)
     monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
