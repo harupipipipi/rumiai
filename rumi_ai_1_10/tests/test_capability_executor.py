@@ -113,6 +113,13 @@ def _make_function_entry(
     return entry
 
 
+def _mark_bundled_defaultspack(entry):
+    function_dir = _project_root / "ecosystem" / "defaultspack" / "domain"
+    entry.function_dir = str(function_dir)
+    entry.main_py_path = str(function_dir / "__init__.py")
+    return entry
+
+
 class TestExecuteMissingPermissionId(unittest.TestCase):
     """permission_id なしで invalid_request"""
 
@@ -332,7 +339,7 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
     def test_function_call_bundled_defaultspack_bypasses_builtin_checks(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
-        entry = _make_function_entry("defaultspack", requires=["tool.write"])
+        entry = _mark_bundled_defaultspack(_make_function_entry("defaultspack", requires=["tool.write"]))
         function_registry = MagicMock()
         function_registry.get.return_value = entry
 
@@ -361,7 +368,7 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
         mock_exec.assert_called_once()
 
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
-    def test_function_call_nonbundled_defaultspack_checks_pack_requires(self, mock_audit_module):
+    def test_function_call_nonbundled_defaultspack_is_rejected_before_pack_requires(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
         entry = _make_function_entry("defaultspack", requires=["tool.write"])
         function_registry = MagicMock()
@@ -386,8 +393,8 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
         )
 
         self.assertFalse(resp.success)
-        self.assertEqual(resp.error_type, "requires_denied")
-        permission_manager.has_permission.assert_called_once_with("defaultspack", "tool.write")
+        self.assertEqual(resp.error_type, "pack_not_approved")
+        permission_manager.has_permission.assert_not_called()
 
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
     def test_function_call_repo_defaultspack_path_is_treated_as_trusted_builtin(self, mock_audit_module):
@@ -425,7 +432,7 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
     def test_function_call_dev_auto_reapproves_stale_pack(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
-        entry = _make_function_entry("defaultspack")
+        entry = _make_function_entry("custom_pack")
         function_registry = MagicMock()
         function_registry.get.return_value = entry
 
@@ -453,12 +460,12 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
         ):
             resp = executor.execute(
                 "principal_a",
-                {"type": "function.call", "qualified_name": "defaultspack:test_func"},
+                {"type": "function.call", "qualified_name": "custom_pack:test_func"},
             )
 
         self.assertTrue(resp.success)
         approval_manager.scan_packs.assert_called_once()
-        approval_manager.approve.assert_called_once_with("defaultspack")
+        approval_manager.approve.assert_called_once_with("custom_pack")
         self.assertEqual(approval_manager.is_pack_approved_and_verified.call_count, 2)
         mock_exec.assert_called_once()
 
@@ -494,7 +501,7 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
     def test_function_call_grant_manager_fulfills_pack_requires_when_permission_manager_denies(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
-        entry = _make_function_entry("defaultspack", requires=["tool.write"])
+        entry = _make_function_entry("tool_pack", requires=["tool.write"])
         function_registry = MagicMock()
         function_registry.get.return_value = entry
 
@@ -523,15 +530,15 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
         with patch.object(executor, "_execute_user_function", return_value=success_response) as mock_exec:
             resp = executor.execute(
                 "principal_a",
-                {"type": "function.call", "qualified_name": "defaultspack:test_func"},
+                {"type": "function.call", "qualified_name": "tool_pack:test_func"},
             )
 
         self.assertTrue(resp.success)
-        permission_manager.has_permission.assert_any_call("defaultspack", "tool.write")
+        permission_manager.has_permission.assert_any_call("tool_pack", "tool.write")
         permission_manager.has_permission.assert_any_call("principal_a", "function.call")
-        grant_manager.check.assert_any_call("defaultspack", "tool.write")
+        grant_manager.check.assert_any_call("tool_pack", "tool.write")
         grant_manager.check.assert_any_call("principal_a", "function.call")
-        grant_manager.check.assert_any_call("defaultspack", "defaultspack:test_func")
+        grant_manager.check.assert_any_call("tool_pack", "tool_pack:test_func")
         mock_exec.assert_called_once()
 
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)

@@ -977,9 +977,11 @@ class CapabilityExecutor:
             return True
         if not pack_id.startswith(_CORE_PACK_ID_PREFIX):
             return False
+        if self._entry_path_looks_like_ecosystem_pack(entry, pack_id):
+            return False
         if pack_id in self._core_function_handlers:
             return True
-        return not self._entry_path_looks_like_ecosystem_pack(entry, pack_id)
+        return True
 
     def _trusted_builtin_pack_path_verdict(self, pack_id: str, pack_root_hint=None) -> bool | None:
         """Return True/False for an existing path hint, or None when no path evidence exists."""
@@ -1163,6 +1165,24 @@ class CapabilityExecutor:
 
         pack_id = str(getattr(entry, "pack_id", "") or "")
         pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
+        builtin_path_verdict = self._trusted_builtin_pack_path_verdict(pack_id, pack_root_hint)
+        if pack_id in TRUSTED_BUILTIN_PACK_IDS and builtin_path_verdict is False:
+            resp = CapabilityResponse(
+                success=False,
+                error=f"Built-in pack path is not trusted: {pack_id}",
+                error_type="pack_not_approved",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id,
+                effective_permission_id,
+                handler_id,
+                resp,
+                args,
+                request_id,
+                detail_reason=f"Pack '{pack_id}' used a reserved built-in id from a non-canonical path",
+            )
+            return resp
         is_trusted_builtin = self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint)
         is_core_builtin = self._is_core_builtin_trust_bypass_entry(entry)
         if self._approval_manager is not None and not (is_core_builtin or is_trusted_builtin):
@@ -1307,9 +1327,12 @@ class CapabilityExecutor:
             "binary",
             "command",
         }
-        # Unified FunctionRegistry execution preserves the legacy capability
-        # boundary: every principal x permission dispatch requires a grant.
-        grant_required = True
+        grant_required = (
+            bool(getattr(entry, "legacy_grant_required", False))
+            or entry_grant_config is not None
+            or host_grant_required
+            or self._grant_manager is not None
+        )
         grant_config = dict(entry_grant_config or {})
         if grant_required:
             if self._grant_manager is None:
@@ -1598,8 +1621,6 @@ class CapabilityExecutor:
         if (
             pack_id in TRUSTED_BUILTIN_PACK_IDS
             and builtin_path_verdict is False
-            and principal_id == pack_id
-            and not is_trusted_builtin
         ):
             resp = CapabilityResponse(
                 success=False,
@@ -1866,16 +1887,29 @@ class CapabilityExecutor:
         *,
         principal_is_trusted_builtin=None,
     ):
-        if principal_is_trusted_builtin is None:
-            principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
-        if not principal_is_trusted_builtin:
+        del principal_id, principal_is_trusted_builtin
+        if not self._caller_requires_high_risk_approval_only(caller_requires):
             return False
         if not isinstance(request_context, dict):
             return False
-        if request_context.get("_tool_server_approved") is not True:
+        token = str(request_context.get("_tool_server_approval_token") or "").strip()
+        operation = str(request_context.get("_tool_server_approval_operation") or "").strip()
+        args_hash = str(request_context.get("_tool_server_approval_args_hash") or "").strip()
+        if not token or not operation or not args_hash:
             return False
-        required = {str(item or "").strip() for item in caller_requires or []}
-        return bool(required) and required <= {"user.approved.high_risk"}
+        try:
+            from domain.safety import approval
+        except Exception:
+            return False
+        verification = approval.verify_execution_token(
+            token,
+            operation,
+            args_hash,
+            pack_id=str(request_context.get("_tool_server_approval_pack_id") or ""),
+            conversation_id=str(request_context.get("_tool_server_approval_conversation_id") or ""),
+            consume=False,
+        )
+        return bool(getattr(verification, "valid", False))
 
     def _caller_requires_diagnostic(
         self,

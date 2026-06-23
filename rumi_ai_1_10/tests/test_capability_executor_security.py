@@ -185,6 +185,16 @@ class TestDockerStrictBoundary:
 class TestHighRiskApprovalCallerRequires:
     """user.approved.high_risk は permissive permission では満たせないこと"""
 
+    def test_forged_tool_server_approved_flag_does_not_satisfy_high_risk(self):
+        executor = _make_test_executor()
+
+        assert executor._request_context_satisfies_caller_requires(
+            "defaultspack",
+            ["user.approved.high_risk"],
+            {"_tool_server_approved": True},
+            principal_is_trusted_builtin=True,
+        ) is False
+
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
     def test_permissive_permission_manager_does_not_satisfy_high_risk_approval(self, mock_audit):
         executor = _make_test_executor()

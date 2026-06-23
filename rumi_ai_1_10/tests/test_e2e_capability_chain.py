@@ -364,6 +364,7 @@ class TestCapabilityChainE2E(unittest.TestCase):
             permission_id,
             pack_id="core_legacy",
         )
+        self.function_entries[-1].legacy_handler_builtin = True
         self._setup_grant(principal_id, permission_id)
 
         executor, registry, _, _ = self._build_executor()
