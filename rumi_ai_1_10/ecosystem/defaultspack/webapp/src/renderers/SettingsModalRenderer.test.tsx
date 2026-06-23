@@ -430,6 +430,94 @@ test("SettingsModalRenderer renders template model_api_routes through registered
   assert.match(html, /google\/main/);
 });
 
+test("SettingsModalRenderer renders continuity handoff controls", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "continuity",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "continuity",
+          label: "Continuity",
+          fields: [
+            {
+              id: "handoff",
+              label: "Cloud / Device Handoff",
+              type: "continuity",
+              default: {
+                sandbox_id: "sandbox-demo",
+                mode: "move",
+                destination_node_id: "node-workstation",
+                route_id: "route-openai",
+                local_node: {
+                  node_id: "node-source",
+                  display_name: "MacBook",
+                  destination_kind: "source",
+                  online: true,
+                },
+                nodes: [
+                  {
+                    node_id: "node-workstation",
+                    display_name: "Workstation",
+                    destination_kind: "cloud_node",
+                    platform: "Linux",
+                    online: true,
+                  },
+                ],
+                routes: [
+                  {
+                    route_id: "route-openai",
+                    provider_id: "openai",
+                    api_id: "primary",
+                    model_id: "gpt-4.1",
+                    qualified_route: "openai/primary/gpt-4.1",
+                    endpoint_class: "public_https",
+                    credential_ref: "RUMIAPI_OPENAI_PRIMARY",
+                    portable: true,
+                  },
+                ],
+                operations: [
+                  {
+                    operation_id: "handoff-demo",
+                    status: "COMPLETED",
+                    sandbox_id: "sandbox-demo",
+                    destination_node_id: "node-workstation",
+                  },
+                ],
+              },
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        continuity: {
+          handoff: {
+            sandbox_id: "sandbox-demo",
+            destination_node_id: "node-workstation",
+            route_id: "route-openai",
+            mode: "move",
+          },
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="continuity"/);
+  assert.match(html, /Workstation/);
+  assert.match(html, /openai\/primary\/gpt-4\.1/);
+  assert.match(html, /handoff-demo/);
+});
+
 test("Settings > Tools contains detailed tool settings", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {

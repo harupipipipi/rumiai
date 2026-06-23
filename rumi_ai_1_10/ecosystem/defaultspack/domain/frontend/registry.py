@@ -1144,6 +1144,25 @@ class FrontendRegistry:
                 ],
             },
             {
+                "id": "continuity",
+                "label": "Continuity",
+                "description": "API provider route, checkpoint, and device/cloud handoff controls.",
+                "fields": [
+                    {
+                        "id": "handoff",
+                        "label": "Cloud / Device Handoff",
+                        "type": "continuity",
+                        "default": {
+                            "sandbox_id": "logical-sandbox",
+                            "mode": "move",
+                            "destination_node_id": "",
+                            "route_id": "",
+                        },
+                        "help": "Pairs destination nodes, probes provider route portability, and starts fenced handoff operations.",
+                    },
+                ],
+            },
+            {
                 "id": "apis",
                 "label": "APIs / Tokens",
                 "description": "LLM の API キーも、LINE / Discord / Slack の token も、ここで一元管理します。値は再表示しません。",
@@ -2533,6 +2552,14 @@ class FrontendRegistry:
             "chat_rendering": {"show_widgets": True, "unknown_block_strategy": "hidden"},
             "models": {
                 **ModelRuntimeSettingsService(self._pack_root).default_model_settings(),
+            },
+            "continuity": {
+                "handoff": {
+                    "sandbox_id": "logical-sandbox",
+                    "mode": "move",
+                    "destination_node_id": "",
+                    "route_id": "",
+                },
             },
             "commands": {
                 "show_advanced_commands": False,

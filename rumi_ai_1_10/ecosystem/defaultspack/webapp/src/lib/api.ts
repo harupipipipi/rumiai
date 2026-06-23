@@ -1036,7 +1036,7 @@ export type SidebarFieldOption = {
 export type SidebarField = {
   id: string;
   label: string;
-  type: "text" | "textarea" | "number" | "toggle" | "select" | "color" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url" | "model_api_routes";
+  type: "text" | "textarea" | "number" | "toggle" | "select" | "color" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url" | "model_api_routes" | "continuity";
   default?: unknown;
   required?: boolean;
   help?: string;
@@ -1047,6 +1047,109 @@ export type SidebarField = {
   configured_field?: string;
   advanced?: boolean;
   api_keys?: Array<Record<string, unknown>>;
+};
+
+export type ContinuityNode = {
+  node_id: string;
+  display_name?: string;
+  destination_kind?: string;
+  platform?: string;
+  architecture?: string;
+  online?: boolean;
+  last_seen_at?: string;
+  app_version?: string;
+  runtime_providers?: string[];
+  sandbox_capabilities?: string[];
+  network_reachability_classes?: string[];
+  desktop_capacity?: number;
+  [key: string]: unknown;
+};
+
+export type ContinuityProviderRoute = {
+  route_id: string;
+  provider_id: string;
+  api_id: string;
+  model_id: string;
+  qualified_route?: string;
+  adapter_id?: string;
+  provider_extension_ref?: string | null;
+  base_url?: string | null;
+  auth_scheme?: string;
+  header_profile?: string | null;
+  allowed_models?: string[];
+  capability_hash?: string;
+  endpoint_class?: string;
+  credential_ref?: string;
+  fallback_routes?: string[];
+  portable?: boolean;
+  blocked_reason?: string | null;
+  [key: string]: unknown;
+};
+
+export type ContinuityPreflightResult = {
+  ok: boolean;
+  route?: ContinuityProviderRoute | Record<string, unknown> | null;
+  destination?: ContinuityNode | Record<string, unknown> | null;
+  checks?: Array<Record<string, unknown>>;
+  errors?: Array<Record<string, unknown>>;
+};
+
+export type ContinuityHandoffPlan = {
+  plan_id: string;
+  mode: string;
+  sandbox_id: string;
+  destination_node_id: string;
+  provider_route_ref: ContinuityProviderRoute | Record<string, unknown>;
+  fallback_route_refs?: Array<ContinuityProviderRoute | Record<string, unknown>>;
+  credential_delegation?: Record<string, unknown>;
+  checkpoint_estimate?: Record<string, unknown>;
+  resource_preflight?: ContinuityPreflightResult | Record<string, unknown>;
+  cutover?: Record<string, unknown>;
+  status: string;
+  created_at?: string;
+  [key: string]: unknown;
+};
+
+export type ContinuityHandoffOperation = {
+  operation_id: string;
+  status: string;
+  mode?: string;
+  sandbox_id?: string;
+  destination_node_id?: string;
+  plan?: ContinuityHandoffPlan | Record<string, unknown>;
+  message?: string;
+  checkpoint_id?: string;
+  credential_envelope_id?: string | null;
+  destination_primary?: boolean;
+  source_primary?: boolean;
+  primary_lease?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+  events?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
+export type ContinuityPairingStartResponse = {
+  request_id: string;
+  code: string;
+  display_name?: string;
+  created_at?: string;
+};
+
+export type ContinuityHandoffRequest = {
+  sandbox_id?: string;
+  seat_id?: string;
+  destination_node_id?: string;
+  node_id?: string;
+  route_id?: string;
+  provider_id?: string;
+  api_id?: string;
+  model_id?: string;
+  provider_route?: Record<string, unknown>;
+  mode?: string;
+  credential_ttl_seconds?: number;
+  credential_max_requests?: number;
+  state?: Record<string, unknown>;
 };
 
 export type SidebarAction = {
@@ -2175,6 +2278,121 @@ export const api = {
     return request<{ values: Record<string, Record<string, unknown>> }>("/api/ui/settings", {
       method: "PUT",
       body: JSON.stringify({ values }),
+    });
+  },
+
+  listContinuityNodes() {
+    return request<{ nodes: ContinuityNode[]; local_node: ContinuityNode }>("/api/continuity/nodes", { cache: "no-store" });
+  },
+
+  startContinuityPairing(payload?: { display_name?: string }) {
+    return request<ContinuityPairingStartResponse>("/api/continuity/pairing/start", {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  acceptContinuityPairing(payload: {
+    request_id: string;
+    code: string;
+    display_name?: string;
+    descriptor?: Record<string, unknown>;
+    simulate_local_destination?: boolean;
+    destination_kind?: string;
+  }) {
+    return request<{ node: ContinuityNode }>("/api/continuity/pairing/accept", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  removeContinuityNode(nodeId: string) {
+    return request<{ removed: boolean; node_id: string }>(`/api/continuity/nodes/${encodeURIComponent(nodeId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  probeContinuityNode(nodeId: string, payload?: Record<string, unknown>) {
+    return request<{ node: ContinuityNode; checks: Array<Record<string, unknown>>; ok: boolean }>(
+      `/api/continuity/nodes/${encodeURIComponent(nodeId)}/probe`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload ?? {}),
+      },
+    );
+  },
+
+  listContinuityProviderRoutes() {
+    return request<{ routes: ContinuityProviderRoute[] }>("/api/continuity/provider-routes", { cache: "no-store" });
+  },
+
+  probeContinuityProviderRoute(routeId: string, payload?: { destination_node_id?: string; node_id?: string }) {
+    return request<ContinuityPreflightResult>(`/api/continuity/provider-routes/${encodeURIComponent(routeId)}/probe`, {
+      method: "POST",
+      body: JSON.stringify({ ...(payload ?? {}), route_id: routeId }),
+    });
+  },
+
+  setContinuityProviderFallbacks(routeId: string, fallbackRouteIds: string[]) {
+    return request<{ route_id: string; fallback_route_ids: string[] }>(
+      `/api/continuity/provider-routes/${encodeURIComponent(routeId)}/set-fallbacks`,
+      {
+        method: "POST",
+        body: JSON.stringify({ route_id: routeId, fallback_route_ids: fallbackRouteIds }),
+      },
+    );
+  },
+
+  listContinuityProviderExtensions() {
+    return request<{ extensions: Array<Record<string, unknown>> }>("/api/continuity/provider-extensions", { cache: "no-store" });
+  },
+
+  planContinuityHandoff(payload: ContinuityHandoffRequest) {
+    return request<{ plan: ContinuityHandoffPlan }>("/api/continuity/plans", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  startContinuityHandoff(payload: ContinuityHandoffRequest) {
+    return request<{ operation: ContinuityHandoffOperation }>("/api/continuity/handoffs", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  listContinuityHandoffs() {
+    return request<{ operations: ContinuityHandoffOperation[] }>("/api/continuity/handoffs", { cache: "no-store" });
+  },
+
+  getContinuityHandoff(operationId: string) {
+    return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}`, {
+      cache: "no-store",
+    });
+  },
+
+  cancelContinuityHandoff(operationId: string) {
+    return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}/cancel`, {
+      method: "POST",
+    });
+  },
+
+  retryContinuityHandoff(operationId: string) {
+    return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}/retry`, {
+      method: "POST",
+    });
+  },
+
+  returnContinuityHandoff(operationId: string) {
+    return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}/return`, {
+      method: "POST",
+    });
+  },
+
+  createContinuityCheckpoint(payload: ContinuityHandoffRequest) {
+    return request<{ operation: ContinuityHandoffOperation; checkpoint: Record<string, unknown> }>("/api/continuity/checkpoints", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 

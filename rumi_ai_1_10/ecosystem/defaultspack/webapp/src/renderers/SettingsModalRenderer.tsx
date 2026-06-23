@@ -12,6 +12,7 @@ import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } fr
 import { settingsFieldSearchText, settingsSectionSearchText } from "../lib/settingsSearch";
 import { settingsApiResources } from "../features/settings/resources/settingsApiResources";
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../features/settings/resources/useModelAvailability";
+import { ContinuitySettingsField } from "../features/continuity/ContinuitySettingsField";
 import type { SettingsModalRendererProps } from "./types";
 import type { DesktopPermissionStatus, DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import {
@@ -29,6 +30,13 @@ const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry([
     renderers: ["model_routing", "model_api_routes", "ModelApiRoutesSettingsField"],
     component: "ModelApiRoutesSettingsField",
     render: ModelApiRoutesSettingsFieldRenderer,
+  },
+  {
+    id: "builtin-settings-continuity",
+    types: ["continuity"],
+    renderers: ["continuity", "ContinuitySettingsField"],
+    component: "ContinuitySettingsField",
+    render: ContinuitySettingsField,
   },
 ]);
 
@@ -78,6 +86,7 @@ function settingsFieldTakesFullWidth(field: SettingsSection["fields"][number]): 
     || type === "external_tokens"
     || type === "public_url"
     || type === "model_api_routes"
+    || type === "continuity"
     || type === "device_lock"
     || type === "slash_commands"
     || field.id.endsWith("_setup_guide")
