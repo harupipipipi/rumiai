@@ -166,6 +166,96 @@ def test_inactive_template_function_routes_are_not_registered(tmp_path):
     assert ("POST", "/api/disabled") not in routes
 
 
+def test_always_available_routes_include_ambient_shell():
+    from ecosystem.defaultspack.transport.registry import _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS
+
+    routes = {
+        (spec.method, spec.pattern, spec.handler_name)
+        for spec in _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS
+    }
+
+    assert ("GET", "/chat", "_handle_static") in routes
+    assert ("GET", "/defaultspack", "_handle_static") in routes
+    assert ("GET", "/pack/defaultspack", "_handle_static") in routes
+    assert ("GET", "/coding", "_handle_static") in routes
+    assert ("GET", "/approval", "_handle_static") in routes
+    assert ("POST", "/api/authority/browser-ui-operator", "_handle_authority_browser_ui_operator") in routes
+    assert ("GET", "/ambient", "_handle_static") in routes
+    assert ("GET", "/ambient-debug", "_handle_static") in routes
+    assert ("GET", "/finger-recording", "_handle_static") in routes
+    assert ("GET", "/console", "_handle_static") in routes
+    assert ("GET", "/host-permissions", "_handle_static") in routes
+
+
+def test_routes_json_transport_direct_entries_match_canonical_registry():
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    routes_json = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))
+    committed_direct_routes = {
+        (str(route["method"]).upper(), route["path"])
+        for route in routes_json["routes"]
+        if route.get("flow_id") == "transport_direct"
+    }
+    canonical_routes = {
+        (spec.method, spec.pattern)
+        for spec in canonical_http_route_specs(include_always_available=True)
+    }
+
+    assert committed_direct_routes <= canonical_routes
+
+
+def test_static_mediapipe_assets_fall_back_to_webapp_public_canonical(monkeypatch):
+    from ecosystem.defaultspack.transport import http as http_transport
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    canonical_dir = DEFAULTSPACK_ROOT / "webapp" / "public" / "mediapipe" / "wasm"
+    canonical_files = sorted(path.name for path in canonical_dir.iterdir() if path.is_file())
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    real_isfile = http_transport.os.path.isfile
+
+    def isfile_without_generated_ui(path):
+        if f"{http_transport.os.sep}ui{http_transport.os.sep}" in str(path):
+            return False
+        return real_isfile(path)
+
+    monkeypatch.setattr(http_transport.os.path, "isfile", isfile_without_generated_ui)
+
+    for name in canonical_files:
+        result = server._handle_static_file(
+            {},
+            {"path": f"mediapipe/wasm/{name}"},
+        )
+        assert result["_static"] is True, name
+        expected_body = (
+            (canonical_dir / name).read_bytes()
+            if name.endswith(".wasm")
+            else (canonical_dir / name).read_text(encoding="utf-8")
+        )
+        assert result["body"] == expected_body
+
+    model_result = server._handle_static_file({}, {"path": "models/hand_landmarker.task"})
+    assert model_result["_static"] is True
+    assert model_result["content_type"] == "application/octet-stream"
+    assert model_result["body"] == (
+        DEFAULTSPACK_ROOT / "webapp" / "public" / "models" / "hand_landmarker.task"
+    ).read_bytes()
+
+
+def test_static_mediapipe_wasm_uses_browser_wasm_mime():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+
+    result = server._handle_static_file(
+        {},
+        {"path": "mediapipe/wasm/vision_wasm_internal.wasm"},
+    )
+
+    assert result["_static"] is True
+    assert result["content_type"] == "application/wasm"
+    assert isinstance(result["body"], bytes)
+
+
 def test_pack_api_dispatches_defaultspack_interface_routes(monkeypatch):
     from core_runtime.pack_api_server import PackAPIHandler
 
@@ -1160,6 +1250,16 @@ def test_routes_json_documents_new_route_groups():
     routes = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))["routes"]
     method_paths = {(route["method"], route["path"]) for route in routes}
     expected = {
+        ("POST", "/api/authority/browser-ui-operator"),
+        ("GET", "/chat"),
+        ("GET", "/defaultspack"),
+        ("GET", "/pack/defaultspack"),
+        ("GET", "/approval"),
+        ("GET", "/ambient"),
+        ("GET", "/ambient-debug"),
+        ("GET", "/finger-recording"),
+        ("GET", "/console"),
+        ("GET", "/host-permissions"),
         ("POST", "/api/chat/conversations/{id}/compact"),
         ("GET", "/api/agent/companies/{company_id}/status"),
         ("POST", "/api/agent/companies/{company_id}/dispatch"),

@@ -175,6 +175,64 @@ def test_authority_approve_once_consumes_token(tmp_path, monkeypatch):
     assert second.approval_required is True
 
 
+def test_authority_non_consuming_check_does_not_spend_one_shot_token(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    resource = {"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"}
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    approval = service.approve_request(
+        decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    preflight = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+        consume_approval_token=False,
+    )
+    reusable_preflight = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+        consume_approval_token=False,
+    )
+    consumed = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+    )
+    after_consumed = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+        consume_approval_token=False,
+    )
+
+    assert preflight.allowed is True
+    assert reusable_preflight.allowed is True
+    assert consumed.allowed is True
+    assert after_consumed.allowed is False
+    assert after_consumed.approval_required is True
+
+
 def test_authority_approve_once_can_bundle_model_api_key_and_network_tokens(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     model_resource = {
@@ -308,6 +366,53 @@ def test_authority_request_display_metadata_explains_provider_endpoint_and_key(t
     assert "provider provider" not in display["summary"]
 
 
+def test_authority_request_display_metadata_exposes_safe_host_execution_summary(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "critical_host_function",
+        "pack_id": "third_party_pack",
+        "function_id": "run_shell",
+        "host_operation": "shell.exec",
+        "args_summary": {
+            "executable": "/bin/rm",
+            "argument_count": 3,
+            "cwd": "/tmp/project",
+            "target_paths": ["/tmp/unsafe-target"],
+            "target_urls": ["https://alice:secret@example.test/hook?token=query-secret#frag"],
+        },
+        "confirmation_phrase": "RUMI-HOST-TEST",
+        "typed_confirmation_required": True,
+    }
+    decision = service.check(
+        principal_id="third_party_pack",
+        permission_id="host.process.exec_guarded",
+        resource=resource,
+        reason="Direct host execution requires typed confirmation",
+    )
+
+    view = service.get_request(decision.request_id)["request"]
+    display = view["display_metadata"]
+
+    assert display["title"] == "Host操作 shell.exec を許可しますか？"
+    assert "third_party_pack / run_shell" in display["summary"]
+    assert display["access_summary"] == (
+        "shell.exec / one-shot / exec: /bin/rm / args: 3 / cwd: /tmp/project / "
+        "paths: /tmp/unsafe-target / urls: https://example.test/hook"
+    )
+    assert display["host_execution_summary"] == {
+        "executable": "/bin/rm",
+        "argument_count": 3,
+        "cwd": "/tmp/project",
+        "target_paths": ["/tmp/unsafe-target"],
+        "target_urls": ["https://example.test/hook"],
+    }
+    assert display["confirmation_phrase"] == "RUMI-HOST-TEST"
+    display_json = json.dumps(display, ensure_ascii=False)
+    assert "secret" not in display_json.lower()
+    assert "token" not in display_json.lower()
+    assert "alice" not in display_json.lower()
+
+
 def test_authority_approve_once_ignores_stream_transport_flag(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     resource = {
@@ -339,6 +444,53 @@ def test_authority_approve_once_ignores_stream_transport_flag(tmp_path, monkeypa
     )
 
     assert followup.allowed is True
+
+
+def test_authority_critical_host_approval_requires_typed_confirmation(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "critical_host_function",
+        "operation": "shell.exec",
+        "confirmation_phrase": "RUMI-HOST-TEST",
+        "typed_confirmation_required": True,
+    }
+    decision = service.check(
+        principal_id="pack:untrusted",
+        permission_id="host.process.exec_guarded",
+        resource=resource,
+        reason="Direct host execution requires typed confirmation",
+    )
+
+    view = service.get_request(decision.request_id)["request"]
+    display = view["display_metadata"]
+    wrong = service.approve_request(
+        decision.request_id,
+        scope="once",
+        config={"confirmation_text": "RUMI-HOST-WRONG"},
+        ui_operator=_ui_operator(decision.request_id),
+    )
+    persistent = service.approve_request(
+        decision.request_id,
+        scope="conversation",
+        config={"confirmation_text": "RUMI-HOST-TEST"},
+        ui_operator=_ui_operator(decision.request_id),
+    )
+    approved = service.approve_request(
+        decision.request_id,
+        scope="once",
+        config={"confirmation_text": "RUMI-HOST-TEST"},
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert view["allowed_scopes"] == ["once"]
+    assert display["typed_confirmation_required"] is True
+    assert display["confirmation_phrase"] == "RUMI-HOST-TEST"
+    assert wrong["success"] is False
+    assert wrong["status_code"] == 400
+    assert persistent["success"] is False
+    assert persistent["status_code"] == 400
+    assert approved["success"] is True
+    assert store.get_request(decision.request_id).status == "approved"
 
 
 def test_authority_service_resolves_from_di(tmp_path, monkeypatch):
@@ -407,6 +559,85 @@ def test_authority_persistent_approval_keeps_resource_constraints(tmp_path, monk
     assert allowed.allowed is True
     assert denied.allowed is False
     assert denied.approval_required is True
+
+
+def test_authority_persistent_host_grant_unions_resource_action_fields(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "host_intent",
+        "host_action": "host.process.open_url",
+        "operation": "host.process.open_url.preview",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="host.process.open_url",
+        resource=resource,
+        profile_id="work",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="profile",
+        config={"host_actions": ["host.process.open_url.preview", "host.process.open_url"]},
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is True
+    assert approval["config"] == {
+        "host_actions": ["host.process.open_url", "host.process.open_url.preview"],
+    }
+
+    grant = grants.get_grant("profile:work")
+    assert grant is not None
+    assert grant.permissions["host.process.open_url"].config == approval["config"]
+
+    host_action_allowed = service.check(
+        principal_id="profile:work",
+        permission_id="host.process.open_url",
+        resource={"kind": "host_intent", "host_action": "host.process.open_url"},
+        profile_id="work",
+    )
+    operation_allowed = service.check(
+        principal_id="profile:work",
+        permission_id="host.process.open_url",
+        resource={"kind": "host_intent", "operation": "host.process.open_url.preview"},
+        profile_id="work",
+    )
+    unrelated_denied = service.check(
+        principal_id="profile:work",
+        permission_id="host.process.open_url",
+        resource={"kind": "host_intent", "operation": "host.process.launch_app"},
+        profile_id="work",
+    )
+
+    assert host_action_allowed.allowed is True
+    assert operation_allowed.allowed is True
+    assert unrelated_denied.allowed is False
+    assert unrelated_denied.approval_required is True
+
+
+def test_authority_persistent_host_grant_dedupes_matching_action_fields(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "host_intent",
+        "host_action": "host.process.open_url",
+        "operation": "host.process.open_url",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="host.process.open_url",
+        resource=resource,
+        profile_id="work",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="profile",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is True
+    assert approval["config"] == {"host_actions": ["host.process.open_url"]}
 
 
 def test_authority_approve_requires_signed_ui_operator(tmp_path, monkeypatch):

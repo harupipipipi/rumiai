@@ -4,6 +4,8 @@ type PromptActiveParams = {
   profile_id?: string;
   conversation_id?: string;
   include_text?: boolean;
+  model_profile_id?: string;
+  model?: string;
 };
 
 type PromptTogglePayload = {
@@ -11,6 +13,8 @@ type PromptTogglePayload = {
   conversation_id?: string;
   edge_id: string;
   enabled: boolean;
+  model_profile_id?: string;
+  model?: string;
 };
 
 export const promptResources = {

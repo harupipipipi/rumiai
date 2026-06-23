@@ -334,6 +334,37 @@ class AuthorityRequestStore:
             self.audit("authority_one_shot_consumed", {"request_id": request_id, "token_id": token_id})
             return True
 
+    def one_shot_matches_request(
+        self,
+        *,
+        request_id: str,
+        permission_id: str,
+        token: str,
+        principal_id: str | None = None,
+        resource: dict[str, Any] | None = None,
+        include_consumed: bool = False,
+    ) -> bool:
+        token_id = hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+        path = self._one_shot_dir / f"{token_id}.json"
+        with self._lock:
+            record = self._read_json(path)
+            if not record:
+                return False
+            if record.get("consumed") and not include_consumed:
+                return False
+            expires_at = _parse_ts(str(record.get("expires_at") or ""))
+            if expires_at and expires_at <= _now_utc():
+                return False
+            if str(record.get("request_id") or "") != str(request_id or ""):
+                return False
+            if str(record.get("permission_id") or "") != str(permission_id or ""):
+                return False
+            if principal_id and str(record.get("principal_id") or "") != str(principal_id or ""):
+                return False
+            if resource is not None and str(record.get("resource_hash") or "") != self.resource_hash(resource):
+                return False
+            return True
+
     def add_deny(
         self,
         *,

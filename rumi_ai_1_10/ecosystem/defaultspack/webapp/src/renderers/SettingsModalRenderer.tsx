@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import type { ModelSearchItem, SettingsSection } from "../lib/api";
@@ -42,6 +42,46 @@ function formatReadonlyValue(value: unknown, fallback: unknown): string {
 function colorFieldValue(value: unknown, fallback: unknown): string {
   const resolved = String(value ?? fallback ?? "#ffffff").trim();
   return /^#[0-9a-fA-F]{6}$/.test(resolved) ? resolved : "#ffffff";
+}
+
+function fieldRecord(field: SettingsSection["fields"][number]): Record<string, unknown> {
+  return field as SettingsSection["fields"][number] & Record<string, unknown>;
+}
+
+function settingsFieldVisible(field: SettingsSection["fields"][number], sectionValues: Record<string, unknown>): boolean {
+  const visibleWhen = fieldRecord(field).visible_when;
+  if (!visibleWhen || typeof visibleWhen !== "object" || Array.isArray(visibleWhen)) return true;
+  const condition = visibleWhen as Record<string, unknown>;
+  const conditionField = String(condition.field ?? condition.setting ?? "").trim();
+  if (!conditionField) return true;
+  const value = sectionValues[conditionField];
+  let matches = true;
+  if ("equals" in condition) {
+    matches = value === condition.equals;
+  } else if ("not_equals" in condition) {
+    matches = value !== condition.not_equals;
+  } else if ("truthy" in condition) {
+    matches = Boolean(value) === Boolean(condition.truthy);
+  } else {
+    matches = Boolean(value);
+  }
+  return condition.not === true ? !matches : matches;
+}
+
+function settingsFieldTakesFullWidth(field: SettingsSection["fields"][number]): boolean {
+  const type = String(field.type);
+  return (
+    type === "textarea"
+    || type === "secret"
+    || type === "api_keys"
+    || type === "api_key_setup"
+    || type === "external_tokens"
+    || type === "public_url"
+    || type === "model_api_routes"
+    || type === "device_lock"
+    || type === "slash_commands"
+    || field.id.endsWith("_setup_guide")
+  );
 }
 
 function permissionStatusLabel(permission: DesktopPermissionStatus): string {
@@ -1675,6 +1715,65 @@ function ApiQuickAddForm({
   );
 }
 
+function DeviceLockField({ field }: { field: SettingsSection["fields"][number] }) {
+  const record = fieldRecord(field);
+  const deviceKind = String(record.device_kind ?? "videoinput");
+  const lockMessage = String(record.lock_message ?? "デバイスが見つかりません。接続してから再読み込みしてください。");
+  const availableMessage = String(record.available_message ?? "デバイスを検出しました。");
+  const checkingMessage = String(record.checking_message ?? "デバイスを確認しています。");
+  const [state, setState] = useState<"checking" | "available" | "missing" | "unavailable">("checking");
+
+  useEffect(() => {
+    let cancelled = false;
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) {
+      setState("unavailable");
+      return;
+    }
+    navigator.mediaDevices.enumerateDevices()
+      .then((devices) => {
+        if (cancelled) return;
+        setState(devices.some((device) => device.kind === deviceKind) ? "available" : "missing");
+      })
+      .catch(() => {
+        if (!cancelled) setState("unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [deviceKind]);
+
+  const blocked = state === "missing" || state === "unavailable";
+  const message = state === "checking"
+    ? checkingMessage
+    : blocked
+      ? lockMessage
+      : availableMessage;
+
+  return (
+    <div
+      data-settings-renderer="device_lock"
+      data-device-state={state}
+      className={cn(
+        "flex items-start gap-3 rounded-lg border px-3 py-2.5 text-sm",
+        blocked
+          ? "border-red-500/30 bg-red-500/10 text-red-100"
+          : state === "checking"
+            ? "border-zinc-700 bg-zinc-900/60 text-zinc-300"
+            : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100",
+      )}
+    >
+      {state === "checking" ? (
+        <Loader2 size={15} className="mt-0.5 shrink-0 animate-spin" />
+      ) : blocked ? (
+        <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+      ) : (
+        <Check size={15} className="mt-0.5 shrink-0" />
+      )}
+      <span className="min-w-0 flex-1 leading-6">{message}</span>
+    </div>
+  );
+}
+
 function SettingsField({
   sectionId,
   field,
@@ -1741,6 +1840,9 @@ function SettingsField({
 
   let control: ReactElement;
   switch (String(field.type)) {
+    case "device_lock":
+      control = <DeviceLockField field={field} />;
+      break;
     case "model_api_routes": {
       const routeText = String(value ?? "");
       const selectedModel = routeModel || String(routeOptions[0]?.value ?? "");
@@ -2812,8 +2914,9 @@ export function SettingsModalRenderer({
   const activeSection = visibleSections.find((section) => section.id === activeSectionId)
     ?? visibleSections[0]
     ?? settingsSections[0];
-  const primaryFields = activeSection?.fields.filter((field) => !field.advanced) ?? [];
-  const advancedFields = activeSection?.fields.filter((field) => field.advanced) ?? [];
+  const activeSectionValues = settingsValues[activeSection?.id ?? ""] ?? {};
+  const primaryFields = activeSection?.fields.filter((field) => !field.advanced && settingsFieldVisible(field, activeSectionValues)) ?? [];
+  const advancedFields = activeSection?.fields.filter((field) => field.advanced && settingsFieldVisible(field, activeSectionValues)) ?? [];
   const activeSectionOwnText = [
     activeSection?.id ?? "",
     activeSection?.label ?? "",
@@ -2841,7 +2944,7 @@ export function SettingsModalRenderer({
       key={`${activeSection?.id}.${field.id}`}
       className={cn(
         "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
-        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || String(field.type) === "api_key_setup" || field.type === "external_tokens" || field.type === "public_url" || field.type === "model_api_routes" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
+        settingsFieldTakesFullWidth(field) ? "lg:col-span-2" : "",
       )}
     >
       <SettingsFieldRendererHost

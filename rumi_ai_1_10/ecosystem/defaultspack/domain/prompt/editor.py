@@ -8,10 +8,10 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from core_runtime.profile_paths import active_profile_id
-from core_runtime.ai_input_token_estimator import estimate_tokens
 from core_runtime.ai_input_trace_store import AiInputTraceStore
+from core_runtime.profile_paths import active_profile_id
 from core_runtime.profile_workspace import ProfileWorkspaceManager, profile_workspace_payload, validate_profile_id
+from domain.ai_client.tokenizer import apply_tokenizer_to_prompt_usage, count_text_tokens, tokenizer_metadata
 
 from .effective import resolve_effective_prompt, validate_prompt_template
 from .manager import get_manager
@@ -27,21 +27,31 @@ def load_prompt_studio(input_data: dict[str, Any] | None = None) -> dict[str, An
     data = input_data if isinstance(input_data, dict) else {}
     profile_id = _resolve_profile_id(data.get("profile_id"))
     prompt_id = str(data.get("prompt_id") or data.get("name") or "").strip()
+    model_profile_id = _model_profile_id(data)
+    model = _model_name(data, model_profile_id)
     active = _studio_active_summary(profile_id, data)
-    prompts = _merge_prompt_records([*_prompt_records(profile_id), *_segment_records_from_active(active.get("segments", []))])
+    prompts = _merge_prompt_records([
+        *_prompt_records(profile_id, model_profile_id=model_profile_id, model=model),
+        *_segment_records_from_active(active.get("segments", [])),
+    ])
     prompts = _annotate_prompt_records(prompts, active.get("segments", []))
     if not prompt_id and prompts:
         active_prompt = next((item for item in prompts if item.get("activation_state") == "active"), None)
         prompt_id = str((active_prompt or prompts[0]).get("name") or (active_prompt or prompts[0]).get("id") or "")
-    selected = _prompt_detail(profile_id, prompt_id, prompts) if prompt_id else None
-    return {
+    selected = _prompt_detail(profile_id, prompt_id, prompts, model_profile_id=model_profile_id, model=model) if prompt_id else None
+    payload = {
         "profile_id": profile_id,
+        "model_profile_id": model_profile_id,
+        "model": model,
         "profile_workspace": profile_workspace_payload(ProfileWorkspaceManager().paths_for_profile(profile_id)),
         "prompts": [_studio_nav_prompt_record(prompt) for prompt in prompts],
         "selected_prompt": selected,
         "active_summary": _studio_summary_payload(active.get("summary", {})),
         "traces": [],
     }
+    if model_profile_id or model:
+        payload["tokenizer"] = tokenizer_metadata(model_profile_id=model_profile_id, model=model)
+    return payload
 
 
 def save_prompt(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -277,9 +287,12 @@ def test_prompt_input(
                 **request_context,
                 "message": user_text,
                 "user_text": user_text,
+                **({"model_profile_id": model_profile_id} if model_profile_id else {}),
                 **({"model": model} if model else {}),
                 "studio_test": True,
             },
+            **({"model_profile_id": model_profile_id} if model_profile_id else {}),
+            **({"model": model} if model else {}),
         }
     )
     usage = dict(active.get("summary") if isinstance(active.get("summary"), dict) else {})
@@ -300,6 +313,11 @@ def test_prompt_input(
     matched_skills = skill_eval.get("matched", []) if isinstance(skill_eval, dict) else []
     skill_instructions = str(skill_eval.get("instructions") or "").strip() if isinstance(skill_eval, dict) else ""
     if skill_instructions:
+        skill_token_count = count_text_tokens(
+            skill_instructions,
+            model_profile_id=model_profile_id,
+            model=model,
+        )
         usage = append_runtime_prompt_segment(
             usage,
             {
@@ -312,7 +330,8 @@ def test_prompt_input(
                 "status": "active",
                 "source": "PromptStudioTestBench",
                 "source_type": "skill",
-                "tokens": int(estimate_tokens(skill_instructions)),
+                "tokens": int(skill_token_count.get("tokens") or 0),
+                "tokenizer": skill_token_count.get("tokenizer"),
                 "reason": "Studio test input matched skill trigger words, explicit skill mentions, or selected tool scope.",
                 "allow_disable": False,
                 "editable": False,
@@ -546,28 +565,32 @@ def _template_policy_summary(resolution: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _prompt_records(profile_id: str) -> list[dict[str, Any]]:
+def _prompt_records(profile_id: str, *, model_profile_id: str = "", model: str = "") -> list[dict[str, Any]]:
     manager = get_manager()
     by_name: dict[str, dict[str, Any]] = {}
     for prompt in manager.list_prompts():
         if not isinstance(prompt, dict):
             continue
-        record = _normalize_prompt_record(prompt)
+        record = _normalize_prompt_record(prompt, model_profile_id=model_profile_id, model=model)
         by_name[str(record.get("name") or record.get("id"))] = record
-    for override in _profile_override_records(profile_id):
+    for override in _profile_override_records(profile_id, model_profile_id=model_profile_id, model=model):
         by_name[str(override.get("name") or override.get("id"))] = override
     return sorted(by_name.values(), key=lambda item: (str(item.get("source_type") or ""), str(item.get("name") or item.get("id") or "")))
 
 
 def _studio_active_summary(profile_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    model_profile_id = _model_profile_id(data)
+    model = _model_name(data, model_profile_id)
     active = active_prompt_summary(
         {
             "profile_id": profile_id,
             "conversation_id": data.get("conversation_id"),
             "include_text": False,
+            **({"model_profile_id": model_profile_id} if model_profile_id else {}),
+            **({"model": model} if model else {}),
         }
     )
-    trace_usage = _trace_usage_for_studio(profile_id, data)
+    trace_usage = _trace_usage_for_studio(profile_id, data, model_profile_id=model_profile_id, model=model)
     if not trace_usage:
         return active
     return {
@@ -580,7 +603,7 @@ def _studio_active_summary(profile_id: str, data: dict[str, Any]) -> dict[str, A
     }
 
 
-def _trace_usage_for_studio(profile_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+def _trace_usage_for_studio(profile_id: str, data: dict[str, Any], *, model_profile_id: str = "", model: str = "") -> dict[str, Any] | None:
     store = AiInputTraceStore()
     trace_id = str(data.get("trace_id") or "").strip()
     trace = store.get_trace(profile_id, trace_id) if trace_id else None
@@ -595,7 +618,10 @@ def _trace_usage_for_studio(profile_id: str, data: dict[str, Any]) -> dict[str, 
                 break
     if not isinstance(trace, dict):
         return None
-    return prompt_usage_from_trace(trace, include_text=False)
+    usage = prompt_usage_from_trace(trace, include_text=False)
+    if model_profile_id or model:
+        usage = apply_tokenizer_to_prompt_usage(usage, model_profile_id=model_profile_id, model=model)
+    return usage
 
 
 def _merge_prompt_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -669,6 +695,8 @@ def _studio_summary_payload(summary: Any) -> dict[str, Any]:
         "total": token_estimate.get("total", 0),
         "by_port": copy.deepcopy(token_estimate.get("by_port") if isinstance(token_estimate.get("by_port"), dict) else {}),
     }
+    if isinstance(token_estimate.get("tokenizer"), dict):
+        compact_token_estimate["tokenizer"] = copy.deepcopy(token_estimate.get("tokenizer"))
     return {
         "trace_id": summary.get("trace_id"),
         "profile_id": summary.get("profile_id"),
@@ -718,6 +746,7 @@ def _studio_summary_segments(segments: Any) -> list[dict[str, Any]]:
                 "source_priority",
                 "tool_signal",
                 "skill_signal",
+                "tokenizer",
             )
             if key in segment
         }
@@ -795,6 +824,7 @@ def _segment_records_from_active(segments: Any) -> list[dict[str, Any]]:
                 "active_edge_id": str(segment.get("edge_id") or ""),
                 "active_reason": str(segment.get("explanation") or segment.get("reason") or ""),
                 "allow_disable": bool(segment.get("allow_disable", True)),
+                "tokenizer": copy.deepcopy(segment.get("tokenizer")) if isinstance(segment.get("tokenizer"), dict) else {},
                 "input_role": segment.get("input_role"),
                 "source_priority": segment.get("source_priority"),
                 "activation_detail": segment.get("activation_detail"),
@@ -806,12 +836,12 @@ def _segment_records_from_active(segments: Any) -> list[dict[str, Any]]:
     return records
 
 
-def _normalize_prompt_record(prompt: dict[str, Any]) -> dict[str, Any]:
+def _normalize_prompt_record(prompt: dict[str, Any], *, model_profile_id: str = "", model: str = "") -> dict[str, Any]:
     metadata = prompt.get("metadata") if isinstance(prompt.get("metadata"), dict) else {}
     source_type = _source_type_for_prompt(prompt)
     body = str(prompt.get("body") or prompt.get("content") or "")
     prompt_id = str(prompt.get("name") or prompt.get("id") or "")
-    return {
+    return _with_prompt_token_metadata({
         "id": str(prompt.get("id") or prompt_id),
         "name": prompt_id,
         "prompt_id": prompt_id,
@@ -828,7 +858,7 @@ def _normalize_prompt_record(prompt: dict[str, Any]) -> dict[str, Any]:
         "preview": " ".join(body.split())[:220],
         "created_at": prompt.get("created_at") or "",
         "updated_at": prompt.get("updated_at") or "",
-    }
+    }, body, model_profile_id=model_profile_id, model=model)
 
 
 def _source_type_for_prompt(prompt: dict[str, Any]) -> str:
@@ -845,7 +875,7 @@ def _source_type_for_prompt(prompt: dict[str, Any]) -> str:
     return "user_data"
 
 
-def _profile_override_records(profile_id: str) -> list[dict[str, Any]]:
+def _profile_override_records(profile_id: str, *, model_profile_id: str = "", model: str = "") -> list[dict[str, Any]]:
     paths = ProfileWorkspaceManager().paths_for_profile(profile_id)
     if not paths.prompts_dir.is_dir():
         return []
@@ -853,14 +883,14 @@ def _profile_override_records(profile_id: str) -> list[dict[str, Any]]:
     for path in sorted(paths.prompts_dir.glob("*")):
         if not path.is_file() or path.suffix.lower() not in {".md", ".txt"}:
             continue
-        records.append(_profile_override_record(profile_id, path))
+        records.append(_profile_override_record(profile_id, path, model_profile_id=model_profile_id, model=model))
     return records
 
 
-def _profile_override_record(profile_id: str, path: Path) -> dict[str, Any]:
+def _profile_override_record(profile_id: str, path: Path, *, model_profile_id: str = "", model: str = "") -> dict[str, Any]:
     body = path.read_text(encoding="utf-8") if path.is_file() else ""
     prompt_id = _prompt_id_from_override_path(path)
-    return {
+    return _with_prompt_token_metadata({
         "id": prompt_id,
         "name": prompt_id,
         "prompt_id": prompt_id,
@@ -877,7 +907,7 @@ def _profile_override_record(profile_id: str, path: Path) -> dict[str, Any]:
         "preview": " ".join(body.split())[:220],
         "created_at": "",
         "updated_at": str(int(path.stat().st_mtime)) if path.is_file() else "",
-    }
+    }, body, model_profile_id=model_profile_id, model=model)
 
 
 def _annotate_prompt_records(prompts: list[dict[str, Any]], segments: Any) -> list[dict[str, Any]]:
@@ -904,13 +934,20 @@ def _annotate_prompt_records(prompts: list[dict[str, Any]], segments: Any) -> li
     return annotated
 
 
-def _prompt_detail(profile_id: str, prompt_id: str, records: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _prompt_detail(
+    profile_id: str,
+    prompt_id: str,
+    records: list[dict[str, Any]],
+    *,
+    model_profile_id: str = "",
+    model: str = "",
+) -> dict[str, Any] | None:
     prompt = next((item for item in records if str(item.get("name") or item.get("id")) == prompt_id), None)
     effective = _resolve_effective_prompt_for(profile_id, prompt_id)
     if prompt is None:
         if str(effective.get("source_type") or "") not in {"profile_snapshot", "profile_override"}:
             return None
-        prompt = _effective_prompt_record(profile_id, prompt_id, effective)
+        prompt = _effective_prompt_record(profile_id, prompt_id, effective, model_profile_id=model_profile_id, model=model)
     metadata = prompt.get("metadata") if isinstance(prompt.get("metadata"), dict) else {}
     if metadata.get("prompt_usage_segment") is True:
         segment = metadata.get("segment") if isinstance(metadata.get("segment"), dict) else {}
@@ -935,24 +972,35 @@ def _prompt_detail(profile_id: str, prompt_id: str, records: list[dict[str, Any]
     if effective_source_type in {"profile_snapshot", "profile_override"}:
         body = effective_body
         prompt = {
-            **prompt,
-            "body": body,
-            "content": body,
-            "source_type": effective_source_type,
-            "source": str(effective.get("source") or prompt.get("source") or ""),
-            "read_only": effective_source_type == "profile_snapshot",
-            "editable": effective_source_type == "profile_override",
-            "tokens": _estimate_tokens(body),
-            "preview": " ".join(body.split())[:220],
+            **_with_prompt_token_metadata(
+                {
+                    **prompt,
+                    "body": body,
+                    "content": body,
+                    "source_type": effective_source_type,
+                    "source": str(effective.get("source") or prompt.get("source") or ""),
+                    "read_only": effective_source_type == "profile_snapshot",
+                    "editable": effective_source_type == "profile_override",
+                    "tokens": _estimate_tokens(body),
+                    "preview": " ".join(body.split())[:220],
+                },
+                body,
+                model_profile_id=model_profile_id,
+                model=model,
+            ),
         }
     validation = validate_prompt_template({"template": body, "variables": prompt.get("variables")})
+    lint = lint_prompt(body)
+    lint["estimated_tokens"] = int(prompt.get("tokens") or 0)
+    if isinstance(prompt.get("tokenizer"), dict):
+        lint["tokenizer"] = copy.deepcopy(prompt.get("tokenizer"))
     return {
         **prompt,
         "source_chain": effective.get("source_chain", []),
         "effective_source": effective.get("source", ""),
         "effective_source_type": effective_source_type,
         "validation": validation,
-        "lint": lint_prompt(body),
+        "lint": lint,
         "versions": prompt_versions({"profile_id": profile_id, "prompt_id": prompt_id}).get("versions", []),
         "safety": {
             "passive_text_only": True,
@@ -989,11 +1037,18 @@ def _resolve_effective_prompt_for(profile_id: str, prompt_id: str) -> dict[str, 
     )
 
 
-def _effective_prompt_record(profile_id: str, prompt_id: str, effective: dict[str, Any]) -> dict[str, Any]:
+def _effective_prompt_record(
+    profile_id: str,
+    prompt_id: str,
+    effective: dict[str, Any],
+    *,
+    model_profile_id: str = "",
+    model: str = "",
+) -> dict[str, Any]:
     body = str(effective.get("final_content") or effective.get("content") or "")
     source_type = str(effective.get("source_type") or "profile_snapshot")
     read_only = source_type != "profile_override"
-    return {
+    return _with_prompt_token_metadata({
         "id": prompt_id,
         "name": prompt_id,
         "prompt_id": prompt_id,
@@ -1014,7 +1069,7 @@ def _effective_prompt_record(profile_id: str, prompt_id: str, effective: dict[st
         "preview": " ".join(body.split())[:220],
         "created_at": "",
         "updated_at": "",
-    }
+    }, body, model_profile_id=model_profile_id, model=model)
 
 
 def _record_version(
@@ -1112,6 +1167,38 @@ def _clean_prompt_id(value: Any) -> str:
 
 def _safe_name(value: str) -> str:
     return "".join(char if char.isalnum() or char in "._-" else "_" for char in value).strip("._") or "prompt"
+
+
+def _model_profile_id(data: dict[str, Any]) -> str:
+    request_context = data.get("request_context") if isinstance(data.get("request_context"), dict) else {}
+    return str(
+        data.get("model_profile_id")
+        or data.get("model_profile")
+        or request_context.get("model_profile_id")
+        or ""
+    ).strip()
+
+
+def _model_name(data: dict[str, Any], model_profile_id: str) -> str:
+    request_context = data.get("request_context") if isinstance(data.get("request_context"), dict) else {}
+    return str(data.get("model") or request_context.get("model") or model_profile_id or "").strip()
+
+
+def _with_prompt_token_metadata(
+    record: dict[str, Any],
+    body: str,
+    *,
+    model_profile_id: str = "",
+    model: str = "",
+) -> dict[str, Any]:
+    if not model_profile_id and not model:
+        return {**record, "tokens": _estimate_tokens(body)}
+    counted = count_text_tokens(body, model_profile_id=model_profile_id, model=model)
+    return {
+        **record,
+        "tokens": int(counted.get("tokens") or 0),
+        "tokenizer": counted.get("tokenizer") if isinstance(counted.get("tokenizer"), dict) else {},
+    }
 
 
 def _estimate_tokens(text: str) -> int:

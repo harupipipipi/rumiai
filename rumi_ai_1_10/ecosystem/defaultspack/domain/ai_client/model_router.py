@@ -29,6 +29,7 @@ class ModelRoutingRequest:
     conversation_id: str = ""
     user_text: str = ""
     has_images: bool = False
+    has_audio: bool = False
     has_files: bool = False
     requested_tools: list[str] = field(default_factory=list)
     requires_tool_calling: bool = False
@@ -72,6 +73,7 @@ def route_model_request(
             {
                 "user_text": routing_request.user_text,
                 "has_images": routing_request.has_images,
+                "has_audio": routing_request.has_audio,
                 "requires_tool_calling": bool(routing_request.requires_tool_calling or routing_request.requested_tools),
                 "requires_fast": bool(routing_request.requires_fast),
                 "requested_thinking_level": routing_request.requested_thinking_level or "",
@@ -116,6 +118,7 @@ def route_model_request(
     warnings: list[str] = []
 
     needs_vision = bool(routing_request.has_images)
+    needs_audio = bool(routing_request.has_audio)
     needs_tools = bool(routing_request.requires_tool_calling or routing_request.requested_tools)
     needs_fast = bool(routing_request.requires_fast)
     needs_thinking = str(routing_request.requested_thinking_level or "").strip() not in {"", "none"}
@@ -129,6 +132,7 @@ def route_model_request(
             or _compatible(
                 original_caps,
                 needs_vision=needs_vision,
+                needs_audio=needs_audio,
                 needs_tools=needs_tools and route_from_preferred_for_tools,
                 needs_fast=needs_fast,
                 needs_thinking=False,
@@ -139,7 +143,7 @@ def route_model_request(
     if routing_request.auto_route_within_group and not keep_original:
         compatible = [
             item for item in candidates
-            if _compatible(item, needs_vision=needs_vision, needs_tools=needs_tools, needs_fast=needs_fast, needs_thinking=needs_thinking)
+            if _compatible(item, needs_vision=needs_vision, needs_audio=needs_audio, needs_tools=needs_tools, needs_fast=needs_fast, needs_thinking=needs_thinking)
         ]
         if compatible:
             selected = _best_candidate(compatible, routing_request)
@@ -221,6 +225,7 @@ def _coerce_routing_request(value: ModelRoutingRequest | dict[str, Any]) -> Mode
         conversation_id=str(raw.get("conversation_id") or ""),
         user_text=str(raw.get("user_text") or ""),
         has_images=bool(raw.get("has_images")),
+        has_audio=bool(raw.get("has_audio")),
         has_files=bool(raw.get("has_files")),
         requested_tools=[str(item) for item in raw.get("requested_tools", [])] if isinstance(raw.get("requested_tools"), list) else [],
         requires_tool_calling=bool(raw.get("requires_tool_calling")),
@@ -234,8 +239,18 @@ def _coerce_routing_request(value: ModelRoutingRequest | dict[str, Any]) -> Mode
     )
 
 
-def _compatible(model: dict[str, Any], *, needs_vision: bool, needs_tools: bool, needs_fast: bool = False, needs_thinking: bool) -> bool:
+def _compatible(
+    model: dict[str, Any],
+    *,
+    needs_vision: bool,
+    needs_audio: bool = False,
+    needs_tools: bool,
+    needs_fast: bool = False,
+    needs_thinking: bool,
+) -> bool:
     if needs_vision and not model.get("supports_vision"):
+        return False
+    if needs_audio and not model.get("supports_audio"):
         return False
     if needs_tools and not model.get("supports_tool_calling"):
         return False
@@ -250,11 +265,12 @@ def _best_candidate(candidates: list[dict[str, Any]], request: ModelRoutingReque
     text = request.user_text or ""
     text_key = text.casefold()
     notes = request.settings.get("model_notes") if isinstance(request.settings, dict) and isinstance(request.settings.get("model_notes"), dict) else {}
-    is_short = len(text.strip()) <= 80 and not request.has_images and not request.has_files
+    is_short = len(text.strip()) <= 80 and not request.has_images and not request.has_audio and not request.has_files
     def score(model: dict[str, Any]) -> tuple[int, str]:
         value = int(model.get("knowledge_level") or 0)
         value += 30 if model.get("configured") else 0
         value += 20 if request.has_images and model.get("supports_vision") else 0
+        value += 20 if request.has_audio and model.get("supports_audio") else 0
         value += 18 if request.requires_tool_calling and model.get("supports_tool_calling") else 0
         value += 16 if request.requires_fast and model.get("supports_fast") else 0
         value += 12 if request.requested_thinking_level and model.get("supports_thinking") else 0
@@ -278,6 +294,8 @@ def _selection_reasons(selected: dict[str, Any], request: ModelRoutingRequest, o
     reasons = ["same_model" if str(selected.get("profile_id") or "") == original else "routed_within_group"]
     if request.has_images and selected.get("supports_vision"):
         reasons.append("requires_vision")
+    if request.has_audio and selected.get("supports_audio"):
+        reasons.append("requires_audio")
     if request.requires_tool_calling and selected.get("supports_tool_calling"):
         reasons.append("requires_tool_calling")
     if request.requires_fast and selected.get("supports_fast"):

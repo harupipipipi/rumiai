@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { Hand, Loader2 } from "lucide-react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
+import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
+import { DefaultsConsoleWindow } from "./ambient/DefaultsConsoleWindow";
+import { ambientTriggerClient, type AmbientRoutingConfig } from "./ambient/ambientTriggerClient";
+import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
+import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { WarmActionIcon } from "./components/WarmActionIcon";
 import {
@@ -21,9 +27,15 @@ import { PromptStudio } from "./pages/PromptStudio";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
-import { authorityApprovalTitle, pendingAuthorityApproval } from "./lib/authorityApproval";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import {
+  AUTHORITY_WAITING_TEXT,
+  authorityApprovalTitle,
+  pendingAuthorityApproval,
+  sanitizeAssistantAuthorityBoilerplate,
+} from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
+import { browserApprovalTokenizedPath } from "./lib/authorityApprovalBrowserToken";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
@@ -31,12 +43,13 @@ import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
-import { openAuthorityApprovalWindow } from "./lib/desktopApproval";
+import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/desktopApproval";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
+import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
@@ -46,6 +59,7 @@ import { promptResources } from "./features/prompts/resources/promptResources";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
+import { LayerPortal } from "./ui/layers/LayerPortal";
 
 type ComposerCandidateMenuState = {
   mode: "model";
@@ -54,6 +68,15 @@ type ComposerCandidateMenuState = {
 } | null;
 
 type BackendConnectionState = "online" | "degraded" | "offline";
+
+const AMBIENT_ROUTING_SETTING_KEYS: Record<string, keyof AmbientRoutingConfig> = {
+  "ambient.routing.mode": "mode",
+  "ambient.routing.model": "model",
+  "ambient.routing.group_enabled": "group_enabled",
+  "ambient.routing.group_id": "group_id",
+  "ambient.routing.group_title": "group_title",
+  "ambient.routing.ai_send_approval_required": "ai_send_approval_required",
+};
 
 type PendingNewTaskContext = {
   groupId?: string;
@@ -2434,6 +2457,33 @@ function ChatApp() {
     : null;
   const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
   const visibleBrowserApproval = !ultraYoloMode ? browserApproval : null;
+  const latestAssistantFinal = useMemo(() => {
+    if (isGenerating || isConversationPending) return null;
+    for (const message of [...messages].reverse()) {
+      if (message.role === "user") return null;
+      if (message.role !== "agent") continue;
+      const rawText = message.rawText.trim();
+      if (!rawText) continue;
+      if (rawText === AUTHORITY_WAITING_TEXT && pendingAuthorityApproval([message])) return null;
+      const text = sanitizeAssistantAuthorityBoilerplate(rawText).trim();
+      if (!text) continue;
+      return {
+        messageId: message.id,
+        createdAt: message.createdAt ?? 0,
+        text,
+      };
+    }
+    return null;
+  }, [isConversationPending, isGenerating, messages]);
+
+  useEffect(() => {
+    if (!latestAssistantFinal) return;
+    publishAmbientFinalAnswer(latestAssistantFinal.text, activeConversationId, {
+      messageId: latestAssistantFinal.messageId,
+      messageCreatedAt: latestAssistantFinal.createdAt,
+      updatedAt: latestAssistantFinal.createdAt || Date.now(),
+    });
+  }, [activeConversationId, latestAssistantFinal]);
 
   useEffect(() => {
     if (!authorityApproval) {
@@ -2526,6 +2576,12 @@ function ChatApp() {
   }, [messageToolPreviews, previews]);
   const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo) || liveBrowserState.state_revision >= 0;
   const effectiveShowPreview = showPreview && canShowCanvas;
+  const effectiveCommandCatalog = useMemo(() => (
+    mergeRegisteredSlashCommands(
+      commandCatalog,
+      registeredSlashCommandsFromSettings(settingsValues.commands?.registered_slash_commands),
+    )
+  ), [commandCatalog, settingsValues.commands?.registered_slash_commands]);
 
   useEffect(() => {
     const preview = canvasPreviews.find(isHumanOperatorCanvasPreview);
@@ -2545,7 +2601,7 @@ function ChatApp() {
     const fastCandidate = fastCandidateForProfile(activeProfile, selectableModelProfiles);
     const priceLowCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "low");
     const priceHighCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "high");
-    return commandCatalog
+    return effectiveCommandCatalog
       .filter((command) => command.visibility !== "hidden")
       .filter((command) => showAdvanced || command.visibility === "default")
       .filter((command) => !command.modes?.length || command.modes.includes(mode as ComposerCommandMode))
@@ -2557,7 +2613,7 @@ function ChatApp() {
         active: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
         enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
       }));
-  }, [activeProfile, commandCatalog, deepthinkEnabled, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, slashCommandsEnabled, ultraYoloMode, yoloMode]);
+  }, [activeProfile, deepthinkEnabled, effectiveCommandCatalog, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, slashCommandsEnabled, ultraYoloMode, yoloMode]);
   const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
@@ -3444,6 +3500,16 @@ function ChatApp() {
           .then(() => refreshCatalog())
           .catch(console.error);
       } else {
+        if (sectionId === "ambient" && fieldId === "ambient.monitor.enabled") {
+          void (Boolean(value)
+            ? ambientTriggerClient.startMonitor({ voice_wake: true, gesture_pinch: true })
+            : ambientTriggerClient.stopMonitor()
+          ).catch(console.error);
+        }
+        const ambientRoutingKey = sectionId === "ambient" ? AMBIENT_ROUTING_SETTING_KEYS[fieldId] : undefined;
+        if (ambientRoutingKey) {
+          void ambientTriggerClient.configure({ [ambientRoutingKey]: value } as AmbientRoutingConfig).catch(console.error);
+        }
         void api.updateUiSettings(next).then((result) => setSettingsValues(withCalendarSettingsValues(result.values))).catch(console.error);
       }
       return next;
@@ -3753,8 +3819,8 @@ function ChatApp() {
   };
 
   const executeComposerCommand = async (commandId: string, rawInput = `/${commandId}`): Promise<boolean | void> => {
-    const parsed = parseSlashCommandInput(rawInput, commandCatalog) ?? {
-      command: commandCatalog.find((command) => command.id === commandId || command.name === commandId),
+    const parsed = parseSlashCommandInput(rawInput, effectiveCommandCatalog) ?? {
+      command: effectiveCommandCatalog.find((command) => command.id === commandId || command.name === commandId),
       args: {},
       raw: rawInput,
     };
@@ -3764,6 +3830,11 @@ function ChatApp() {
     }
     try {
       setError(null);
+      if (isRegisteredSlashCommand(parsed.command)) {
+        const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
+        runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
+        return true;
+      }
       const commandArgs = { ...parsed.args };
       if (parsed.command.id === "think" && commandArgs.level && activeProfile) {
         commandArgs.scope = "profile";
@@ -4505,7 +4576,7 @@ function ChatApp() {
     event.preventDefault();
     if ((!input.trim() && attachedFiles.length === 0) || isGenerating) return;
 
-    const commandInput = parseSlashCommandInput(input, commandCatalog, { enabled: slashCommandsEnabled });
+    const commandInput = parseSlashCommandInput(input, effectiveCommandCatalog, { enabled: slashCommandsEnabled });
     if (commandInput) {
       const shouldClearInput = await executeComposerCommand(commandInput.command.id, commandInput.raw);
       if (shouldClearInput !== false) setInput("");
@@ -5124,6 +5195,8 @@ function ChatApp() {
     if (activePromptProfileId) url.searchParams.set("profile_id", activePromptProfileId);
     if (activeConversationId) url.searchParams.set("conversation_id", activeConversationId);
     if (promptId) url.searchParams.set("prompt_id", promptId);
+    const modelProfileId = profileIdentity(activeProfile) || activeModelId;
+    if (modelProfileId) url.searchParams.set("model_profile_id", modelProfileId);
     window.location.href = `${url.pathname}${url.search}${url.hash}`;
   };
   const renderComposer = (isCentered = false) => (
@@ -5444,7 +5517,7 @@ function ChatApp() {
                         onClick={approveBrowserAction}
                         className="h-8 flex-shrink-0 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
                       >
-                        許可
+                        許可 (2)
                       </button>
                     </div>
                   </div>
@@ -5491,7 +5564,7 @@ function ChatApp() {
                           onClick={denyCodingAction}
                           className="h-8 rounded-lg border border-zinc-800 px-3 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200"
                         >
-                          拒否
+                          拒否 (2)
                         </button>
                         <button
                           type="button"
@@ -5502,7 +5575,7 @@ function ChatApp() {
                           onClick={approveCodingAction}
                           className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
                         >
-                          許可
+                          許可 (3)
                         </button>
                       </div>
                     </div>
@@ -5639,17 +5712,91 @@ function ChatApp() {
           onSettingChange={handleSettingChange}
         />
       )}
+
+      <AmbientWindowLauncher enabled={Boolean(settingsValues.ambient?.["ambient.monitor.enabled"])} />
     </div>
     </RendererBoundary>
   );
 }
 
+function AmbientWindowLauncher({ enabled }: { enabled: boolean }) {
+  const [opening, setOpening] = useState(false);
+  const [fallbackVisible, setFallbackVisible] = useState(false);
+  if (!enabled) return null;
+
+  const openWindow = async () => {
+    if (opening) return;
+    setOpening(true);
+    setFallbackVisible(false);
+    try {
+      const opened = await openFingerRecordingWindow();
+      if (opened) return;
+      const popup = window.open(
+        defaultspackUrlWithLocalAuth(browserApprovalTokenizedPath("/finger-recording")),
+        "rumi-finger-recording",
+        "width=380,height=520",
+      );
+      if (popup) popup.focus();
+      else setFallbackVisible(true);
+    } catch {
+      setFallbackVisible(true);
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <LayerPortal layer="globalOverlay">
+      <div className="fixed bottom-4 right-4 flex flex-col items-end gap-2">
+        {fallbackVisible && (
+          <div className="max-w-64 rounded-lg border border-amber-300/25 bg-zinc-950/95 px-3 py-2 text-xs leading-5 text-amber-50 shadow-xl shadow-black/40">
+            Rumi Viewerから開くと、指録音は専用ウィンドウで表示されます。
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => void openWindow()}
+          disabled={opening}
+          className="inline-flex h-10 items-center gap-2 rounded-lg border border-zinc-700/80 bg-zinc-950/92 px-3 text-sm font-semibold text-zinc-100 shadow-xl shadow-black/40 backdrop-blur hover:border-zinc-500 hover:bg-zinc-900 disabled:cursor-wait disabled:opacity-70"
+          title="指で録音ウィンドウを開く"
+          aria-label="指で録音ウィンドウを開く"
+        >
+          {opening ? <Loader2 size={16} className="animate-spin" /> : <Hand size={16} />}
+          指録音
+        </button>
+      </div>
+    </LayerPortal>
+  );
+}
+
 export default function App() {
-  if (window.location.pathname === "/approval") {
+  const pathname = window.location.pathname;
+  const searchParams = new URLSearchParams(window.location.search);
+  const fingerDebugMode = pathname === "/ambient-debug"
+    || searchParams.get("debug") === "1"
+    || searchParams.get("qa") === "debug";
+  const explicitDebugConversationId = fingerDebugMode ? chatIdFromLocation() : null;
+
+  if (pathname === "/approval") {
     return <AuthorityApprovalWindow />;
   }
-  if (window.location.pathname === "/prompts") {
+  if (pathname === "/prompts") {
     return <PromptStudio />;
+  }
+  if (pathname === "/ambient") {
+    return <AmbientTriggerPanel variant="window" />;
+  }
+  if (pathname === "/ambient-debug" || pathname === "/finger-recording") {
+    return <AmbientTriggerPanel variant="window" debugMode={fingerDebugMode} conversationId={explicitDebugConversationId} />;
+  }
+  if (pathname === "/console") {
+    return <DefaultsConsoleWindow />;
+  }
+  if (pathname === "/host-permissions") {
+    return <HostPermissionsPage />;
+  }
+  if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat") {
+    return <ChatApp />;
   }
   return <ChatApp />;
 }

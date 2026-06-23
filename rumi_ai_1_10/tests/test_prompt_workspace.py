@@ -13,6 +13,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from core_runtime.profile_workspace import ProfileWorkspaceManager, profile_workspace_payload  # noqa: E402
 from core_runtime.ai_input_trace_store import AiInputTraceStore  # noqa: E402
+from domain.ai_client.tokenizer import count_text_tokens  # noqa: E402
 from domain.function_runtime.dispatcher import run_defaultspack_function  # noqa: E402
 from domain.prompt.effective import resolve_effective_prompt  # noqa: E402
 from domain.prompt.editor import load_prompt_studio, rollback_prompt, save_prompt, test_prompt_input as run_prompt_studio_test  # noqa: E402
@@ -323,6 +324,58 @@ def test_low_risk_prompt_preview_toggle_cannot_persist(monkeypatch, tmp_path: Pa
     assert result["data"]["preview"] is True
     assert editable_edge in result["data"]["ai_input"]["disabled_edges"]
     assert saved["metadata"].get("ai_input") is None
+
+
+def test_prompt_tokenizer_warns_when_model_profile_has_no_tokenizer() -> None:
+    result = count_text_tokens(
+        "abcdef",
+        model_profile_id="proxy/foo",
+        profiles=[
+            {
+                "profile_id": "proxy/foo",
+                "provider_id": "proxy",
+                "model_id": "foo",
+                "same_model_across_providers_key": "foo",
+            }
+        ],
+    )
+
+    assert result["tokens"] > 0
+    assert result["tokenizer"]["fallback"] is True
+    assert result["tokenizer"]["warning_code"] == "missing_tokenizer"
+
+
+def test_prompt_tokenizer_borrows_same_model_provider_tokenizer() -> None:
+    result = count_text_tokens(
+        "abcd",
+        model_profile_id="proxy/foo",
+        profiles=[
+            {
+                "profile_id": "proxy/foo",
+                "provider_id": "proxy",
+                "model_id": "foo",
+                "same_model_across_providers_key": "foo",
+            },
+            {
+                "profile_id": "native/foo",
+                "provider_id": "native",
+                "model_id": "foo",
+                "same_model_across_providers_key": "foo",
+                "metadata": {
+                    "tokenizer": {
+                        "kind": "char_divisor",
+                        "characters_per_token": 2,
+                        "tokenizer_id": "native.foo.test",
+                    }
+                },
+            },
+        ],
+    )
+
+    assert result["tokens"] == 2
+    assert result["tokenizer"]["fallback"] is False
+    assert result["tokenizer"]["source"] == "same_model_provider"
+    assert result["tokenizer"]["tokenizer_profile_id"] == "native/foo"
 
 
 def test_runtime_skill_prompt_segment_records_trigger_and_safety_boundary() -> None:

@@ -846,8 +846,8 @@ export function RightSidebar({
   onWorkspaceTabSelect?: (tabId: string) => void;
   onWorkspaceTabClose?: (tabId: string) => void;
   onWorkspaceTabCreate?: (kind: WorkspaceTabKind) => void;
-  onLoadPromptActive?: (params: { profile_id?: string; conversation_id?: string; include_text?: boolean }) => Promise<PromptUsageSummary>;
-  onTogglePromptEdge?: (payload: { profile_id?: string; conversation_id?: string; edge_id: string; enabled: boolean }) => Promise<PromptUsageSummary>;
+  onLoadPromptActive?: (params: { profile_id?: string; conversation_id?: string; include_text?: boolean; model_profile_id?: string; model?: string }) => Promise<PromptUsageSummary>;
+  onTogglePromptEdge?: (payload: { profile_id?: string; conversation_id?: string; edge_id: string; enabled: boolean; model_profile_id?: string; model?: string }) => Promise<PromptUsageSummary>;
   onToggleChatPromptUsage?: (visible: boolean) => void;
   onOpenPromptStudio?: (promptId?: string) => void;
   onToolToggle?: (item: SidebarItem) => void;
@@ -1667,6 +1667,8 @@ export function RightSidebar({
               <PromptSidebarWidget
                 profileId={promptProfileId}
                 conversationId={conversationId}
+                modelProfileId={selectedProfile?.profile_id ?? selectedProfile?.qualified_model_id ?? selectedProfile?.model_id ?? undefined}
+                modelLabel={selectedProfile?.display_name ?? selectedProfile?.model_id ?? undefined}
                 initialUsage={promptUsage}
                 loadPromptActive={onLoadPromptActive}
                 togglePromptEdge={onTogglePromptEdge}

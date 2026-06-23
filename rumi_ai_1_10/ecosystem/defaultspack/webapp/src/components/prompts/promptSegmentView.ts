@@ -1,4 +1,4 @@
-import type { PromptUsageSegment, PromptUsageSummary } from "../../lib/api";
+import type { PromptUsageSegment, PromptUsageSummary, TokenizerInfo } from "../../lib/api";
 
 export type PromptSegmentSignal = {
   kind: "tool" | "skill";
@@ -26,6 +26,30 @@ export function orderPromptCommandSegments(segments: PromptUsageSegment[]): Prom
 export function tokenText(value: unknown): string {
   const n = Number(value ?? 0);
   return Number.isFinite(n) && n > 0 ? `${n.toLocaleString()} tokens` : "0 tokens";
+}
+
+export function tokenizerNeedsWarning(tokenizer?: TokenizerInfo | null): boolean {
+  if (!tokenizer) return false;
+  return tokenizer.fallback === true || tokenizer.available === false || tokenizer.status === "default";
+}
+
+export function tokenizerWarningText(
+  tokenizer?: TokenizerInfo | null,
+  fallback = "Model tokenizer was not found, so the default tokenizer is being used. Counts may be significantly off.",
+): string {
+  if (!tokenizerNeedsWarning(tokenizer)) return "";
+  return String(fallback || tokenizer?.warning || "");
+}
+
+export function tokenizerLabel(tokenizer?: TokenizerInfo | null): string {
+  if (!tokenizer) return "";
+  if (tokenizer.source === "same_model_provider") {
+    return `borrowed: ${tokenizer.tokenizer_profile_id || tokenizer.tokenizer_model || tokenizer.tokenizer_id || "same model"}`;
+  }
+  if (tokenizer.source === "profile" || tokenizer.source === "profile_reference") {
+    return tokenizer.tokenizer_id || tokenizer.tokenizer_profile_id || "profile tokenizer";
+  }
+  return tokenizer.tokenizer_id || "default tokenizer";
 }
 
 export function statusTextClass(status: string | undefined): string {

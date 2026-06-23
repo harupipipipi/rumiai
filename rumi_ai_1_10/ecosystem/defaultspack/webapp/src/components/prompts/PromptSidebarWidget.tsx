@@ -1,16 +1,18 @@
-import { ChevronDown, Edit3, Eye, EyeOff, FileText, RefreshCw, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-react";
+import { AlertTriangle, ChevronDown, Edit3, Eye, EyeOff, FileText, RefreshCw, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { PromptUsageSegment, PromptUsageSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
-import { allPromptUsageSegments, promptSegmentKindLabel, promptSegmentTitle, sourceLine, tokenText } from "./promptSegmentView";
+import { allPromptUsageSegments, promptSegmentKindLabel, promptSegmentTitle, sourceLine, tokenText, tokenizerLabel, tokenizerNeedsWarning, tokenizerWarningText } from "./promptSegmentView";
 
 type PromptSidebarWidgetProps = {
   profileId?: string;
   conversationId?: string | null;
+  modelProfileId?: string;
+  modelLabel?: string;
   initialUsage?: PromptUsageSummary | null;
-  loadPromptActive: (params: { profile_id?: string; conversation_id?: string; include_text?: boolean }) => Promise<PromptUsageSummary>;
-  togglePromptEdge: (payload: { profile_id?: string; conversation_id?: string; edge_id: string; enabled: boolean }) => Promise<PromptUsageSummary>;
+  loadPromptActive: (params: { profile_id?: string; conversation_id?: string; include_text?: boolean; model_profile_id?: string; model?: string }) => Promise<PromptUsageSummary>;
+  togglePromptEdge: (payload: { profile_id?: string; conversation_id?: string; edge_id: string; enabled: boolean; model_profile_id?: string; model?: string }) => Promise<PromptUsageSummary>;
   showChatPromptUsage?: boolean;
   onToggleChatPromptUsage?: (visible: boolean) => void;
   onOpenStudio?: (promptId?: string) => void;
@@ -57,6 +59,8 @@ function compactSegmentReason(segment: PromptUsageSegment): string {
 export function PromptSidebarWidget({
   profileId,
   conversationId,
+  modelProfileId,
+  modelLabel,
   initialUsage = null,
   loadPromptActive,
   togglePromptEdge,
@@ -83,10 +87,17 @@ export function PromptSidebarWidget({
   const activeCount = segments.filter((segment) => segment.status === "active").length;
   const inactiveCount = segments.length - activeCount;
   const totalTokens = Number(summary?.token_estimate?.total ?? segments.reduce((sum, segment) => sum + segmentTokenCount(segment), 0));
+  const summaryTokenizer = summary?.token_estimate?.tokenizer ?? null;
+  const summaryTokenizerWarning = tokenizerWarningText(summaryTokenizer, "モデルの tokenizer が見つからないため、デフォルトの tokenizer を使用しています。大きくズレる可能性があります。");
 
   const load = () => {
     setLoading(true);
-    void loadPromptActive({ profile_id: profileId, conversation_id: conversationId ?? undefined })
+    void loadPromptActive({
+      profile_id: profileId,
+      conversation_id: conversationId ?? undefined,
+      model_profile_id: modelProfileId || undefined,
+      model: modelProfileId || undefined,
+    })
       .then((result) => {
         setSummary(result);
         setError(null);
@@ -101,7 +112,7 @@ export function PromptSidebarWidget({
     setSummary(initialUsage);
   }, [initialUsage]);
 
-  useEffect(load, [profileId, conversationId]);
+  useEffect(load, [profileId, conversationId, modelProfileId]);
 
   const toggleExpanded = (segmentId: string) => {
     setExpandedIds((current) => {
@@ -124,6 +135,8 @@ export function PromptSidebarWidget({
       conversation_id: conversationId ?? undefined,
       edge_id: edgeId,
       enabled: segment.status !== "active",
+      model_profile_id: modelProfileId || undefined,
+      model: modelProfileId || undefined,
     })
       .then((result) => {
         setSummary(result);
@@ -150,6 +163,14 @@ export function PromptSidebarWidget({
               {" · "}
               {tokenText(totalTokens)}
             </p>
+            <div className="mt-1 flex min-w-0 items-center gap-1 text-[10px] text-zinc-600">
+              <span className="min-w-0 truncate">{modelLabel || modelProfileId || "current model"}</span>
+              {tokenizerNeedsWarning(summaryTokenizer) && (
+                <span title={summaryTokenizerWarning} aria-label={summaryTokenizerWarning}>
+                  <AlertTriangle size={12} className="shrink-0 text-amber-300" />
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button
@@ -251,6 +272,15 @@ export function PromptSidebarWidget({
                     <span className="rounded border border-zinc-800 bg-zinc-900/70 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500">
                       {tokenText(segment.tokens)}
                     </span>
+                    {tokenizerNeedsWarning(segment.tokenizer) && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-100"
+                        title={tokenizerWarningText(segment.tokenizer, summaryTokenizerWarning)}
+                      >
+                        <AlertTriangle size={10} />
+                        {tokenizerLabel(segment.tokenizer)}
+                      </span>
+                    )}
                   </div>
                   <p className="mt-2 text-[11px] leading-5 text-zinc-400">{compactSegmentReason(segment)}</p>
                   <div className="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-zinc-600">

@@ -9,6 +9,7 @@ from core_runtime.ai_input_trace_store import AiInputTraceStore
 from core_runtime.profile_paths import active_profile_id
 from core_runtime.profile_runtime_selection import apply_profile_graph_selection
 from core_runtime.profile_workspace import ProfileWorkspaceManager, validate_profile_id
+from domain.ai_client.tokenizer import apply_tokenizer_to_ai_input_response
 
 
 def active_prompt_summary(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -16,17 +17,29 @@ def active_prompt_summary(input_data: dict[str, Any] | None = None) -> dict[str,
     profile_id = _resolve_profile_id(data.get("profile_id"))
     profile = _load_profile(profile_id)
     request_context = _request_context(data)
+    model_profile_id = _model_profile_id(data, request_context)
+    model = _model_name(data, request_context, model_profile_id)
+    if model_profile_id:
+        request_context.setdefault("model_profile_id", model_profile_id)
+    if model:
+        request_context.setdefault("model", model)
+    include_text = bool(data.get("include_text", False))
     response = build_ai_input_graph_response(
         profile,
-        include_text=bool(data.get("include_text", False)),
+        include_text=include_text or bool(model_profile_id or model),
         request_context=request_context,
+    )
+    response = apply_tokenizer_to_ai_input_response(
+        response,
+        model_profile_id=model_profile_id,
+        model=model,
     )
     usage = prompt_usage_from_graph_response(
         response,
         conversation_id=str(data.get("conversation_id") or request_context.get("conversation_id") or ""),
         run_id=str(data.get("run_id") or "active"),
         trace_id=str(data.get("trace_id") or "active"),
-        include_text=bool(data.get("include_text", False)),
+        include_text=include_text,
     )
     return {
         "profile_id": profile_id,
@@ -83,6 +96,12 @@ def toggle_prompt_edge(input_data: dict[str, Any] | None = None, *, preview: boo
     enabled = bool(data.get("enabled", True))
     profile = _load_profile(profile_id)
     request_context = _request_context(data)
+    model_profile_id = _model_profile_id(data, request_context)
+    model = _model_name(data, request_context, model_profile_id)
+    if model_profile_id:
+        request_context.setdefault("model_profile_id", model_profile_id)
+    if model:
+        request_context.setdefault("model", model)
     current = build_ai_input_graph_response(profile, include_text=False, request_context=request_context)
     edge = _find_edge(current.get("graph"), edge_id)
     if edge is None:
@@ -96,8 +115,13 @@ def toggle_prompt_edge(input_data: dict[str, Any] | None = None, *, preview: boo
     patched_profile = _profile_with_edge_state(profile, edge_id=edge_id, enabled=enabled)
     response = build_ai_input_graph_response(
         patched_profile,
-        include_text=bool(data.get("include_text", False)),
+        include_text=bool(data.get("include_text", False)) or bool(model_profile_id or model),
         request_context=request_context,
+    )
+    response = apply_tokenizer_to_ai_input_response(
+        response,
+        model_profile_id=model_profile_id,
+        model=model,
     )
     if not preview:
         raw_profile = _load_raw_profile(profile_id)
@@ -212,12 +236,40 @@ def _compact_token_estimate(value: Any) -> dict[str, Any]:
             for key, amount in by_port.items()
             if isinstance(amount, (int, float))
         }
+    tokenizer = _compact_tokenizer(estimate.get("tokenizer"))
+    if tokenizer:
+        compact["tokenizer"] = tokenizer
     return compact
 
 
 def _compact_toggle_ai_input(value: Any) -> dict[str, Any]:
     ai_input = value if isinstance(value, dict) else {}
     return {"disabled_edges": _compact_string_list(ai_input.get("disabled_edges"), limit=500)}
+
+
+def _compact_tokenizer(value: Any) -> dict[str, Any]:
+    tokenizer = value if isinstance(value, dict) else {}
+    compact: dict[str, Any] = {}
+    for key in ("available", "fallback"):
+        if key in tokenizer:
+            compact[key] = bool(tokenizer.get(key))
+    for key in (
+        "status",
+        "source",
+        "warning",
+        "warning_code",
+        "tokenizer_id",
+        "tokenizer_profile_id",
+        "tokenizer_provider_id",
+        "tokenizer_model",
+        "provider_id",
+        "model_profile_id",
+        "model",
+    ):
+        text = _compact_text(tokenizer.get(key), limit=220)
+        if text:
+            compact[key] = text
+    return compact
 
 
 def _compact_prompt_usage_segment(segment: dict[str, Any]) -> dict[str, Any]:
@@ -241,6 +293,9 @@ def _compact_prompt_usage_segment(segment: dict[str, Any]) -> dict[str, Any]:
     ):
         if key in segment:
             compact[key] = copy.deepcopy(segment.get(key))
+    tokenizer = _compact_tokenizer(segment.get("tokenizer"))
+    if tokenizer:
+        compact["tokenizer"] = tokenizer
     source = _compact_source(segment.get("source"))
     if source:
         compact["source"] = source
@@ -521,6 +576,9 @@ def _segment_payload(
         "metadata": copy.deepcopy(metadata),
         "edge": graph_edge,
     }
+    tokenizer = _compact_tokenizer(segment.get("tokenizer"))
+    if tokenizer:
+        payload["tokenizer"] = tokenizer
     payload.update(_segment_extras(payload, segment, metadata, graph_edge))
     if include_text and "text" in segment:
         payload["text"] = str(segment.get("text") or "")
@@ -588,10 +646,23 @@ def _load_raw_profile(profile_id: str) -> dict[str, Any]:
 def _request_context(data: dict[str, Any]) -> dict[str, Any]:
     context = data.get("request_context") if isinstance(data.get("request_context"), dict) else {}
     merged = dict(context)
-    for key in ("conversation_id", "run_id", "message", "user_text", "knowledge_text", "memory_text"):
+    for key in ("conversation_id", "run_id", "message", "user_text", "knowledge_text", "memory_text", "model_profile_id", "model"):
         if key in data and data.get(key) is not None:
             merged[key] = data.get(key)
     return merged
+
+
+def _model_profile_id(data: dict[str, Any], request_context: dict[str, Any]) -> str:
+    return str(
+        data.get("model_profile_id")
+        or data.get("model_profile")
+        or request_context.get("model_profile_id")
+        or ""
+    ).strip()
+
+
+def _model_name(data: dict[str, Any], request_context: dict[str, Any], model_profile_id: str) -> str:
+    return str(data.get("model") or request_context.get("model") or model_profile_id or "").strip()
 
 
 def _profile_with_edge_state(profile: dict[str, Any], *, edge_id: str, enabled: bool) -> dict[str, Any]:

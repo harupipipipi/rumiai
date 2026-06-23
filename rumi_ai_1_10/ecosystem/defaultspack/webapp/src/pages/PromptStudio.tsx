@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ArrowLeft,
   Braces,
   Check,
@@ -22,11 +23,11 @@ import {
   ToggleRight,
   Wand2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { PromptUsageSegmentCard } from "../components/prompts/PromptUsageSegmentCard";
-import { statusBadgeClass, tokenText } from "../components/prompts/promptSegmentView";
-import { api, type ModelProfile, type PromptStudioData, type PromptStudioPrompt, type PromptStudioTestResult, type PromptUsageSegment, type TemplateCatalogMetadataItem, type UICatalog } from "../lib/api";
+import { statusBadgeClass, tokenText, tokenizerLabel, tokenizerNeedsWarning, tokenizerWarningText } from "../components/prompts/promptSegmentView";
+import { api, type ModelProfile, type PromptStudioData, type PromptStudioPrompt, type PromptStudioTestResult, type PromptUsageSegment, type TemplateCatalogMetadataItem, type TokenizerInfo, type UICatalog } from "../lib/api";
 import { cn } from "../lib/cn";
 import { isLocaleSetting, normalizeLocale, supportedLocales, t, type LocaleSetting } from "../lib/i18n";
 import {
@@ -164,6 +165,13 @@ function modelProfileSubtitle(profile?: ModelProfile | null): string {
     profile.model_id,
     profile.supports_tool_calling ? "tools" : "",
   ].filter(Boolean).join(" / ");
+}
+
+function tokenizerStatusText(tokenizer?: TokenizerInfo | null): string {
+  if (!tokenizer) return "";
+  if (tokenizer.source === "same_model_provider") return "same-model provider";
+  if (tokenizer.status === "default") return "default tokenizer";
+  return tokenizerLabel(tokenizer) || String(tokenizer.status || tokenizer.source || "");
 }
 
 function verdictTone(status?: string): string {
@@ -541,15 +549,28 @@ function promptUsageForPrompt(prompt: PromptStudioPrompt | null | undefined, seg
   });
 }
 
-function updateStudioUrl(profileId: string, conversationId: string, promptId: string) {
+export function resolvePromptStudioSelection(result: PromptStudioData, promptId?: string): PromptStudioPrompt | null {
+  const requestedPromptId = String(promptId || "").trim();
+  const detailPrompt = result.selected_prompt ?? null;
+  if (requestedPromptId && detailPrompt && promptKey(detailPrompt) === requestedPromptId) {
+    return detailPrompt;
+  }
+  const requestedPrompt = requestedPromptId
+    ? result.prompts.find((prompt) => promptKey(prompt) === requestedPromptId)
+    : null;
+  return requestedPrompt ?? detailPrompt ?? result.prompts[0] ?? null;
+}
+
+function updateStudioUrl(profileId: string, conversationId: string, promptId: string, modelProfileId = "") {
   const url = new URL(window.location.href);
   url.pathname = "/prompts";
-  for (const name of ["profile_id", "conversation_id", "prompt_id"]) {
+  for (const name of ["profile_id", "conversation_id", "prompt_id", "model_profile_id", "model"]) {
     url.searchParams.delete(name);
   }
   if (profileId) url.searchParams.set("profile_id", profileId);
   if (conversationId) url.searchParams.set("conversation_id", conversationId);
   if (promptId) url.searchParams.set("prompt_id", promptId);
+  if (modelProfileId) url.searchParams.set("model_profile_id", modelProfileId);
   window.history.replaceState({ promptId }, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
@@ -579,18 +600,24 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
   const [busy, setBusy] = useState<string | null>("load");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const loadRequestRef = useRef(0);
   const resolvedLocale = normalizeLocale(studioLocale);
   const msg = useCallback((key: Parameters<typeof t>[1], values: Record<string, string | number> = {}) => t(studioLocale, key, values), [studioLocale]);
 
-  const loadStudio = useCallback((promptId?: string) => {
+  const loadStudio = useCallback((promptId?: string, modelProfileId = selectedModelProfileId) => {
+    const requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
     setBusy("load");
     void api.getPromptStudio({
       profile_id: profileId || undefined,
       conversation_id: conversationId || undefined,
       prompt_id: promptId || undefined,
+      model_profile_id: modelProfileId || undefined,
+      model: modelProfileId || undefined,
     })
       .then((result) => {
-        const selected = result.selected_prompt ?? result.prompts.find((prompt) => promptKey(prompt) === promptId) ?? result.prompts[0] ?? null;
+        if (loadRequestRef.current !== requestId) return;
+        const selected = resolvePromptStudioSelection(result, promptId);
         const nextPromptId = promptKey(selected);
         setData(result);
         setProfileId(result.profile_id);
@@ -600,11 +627,17 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
         setLintResult(selected?.lint ?? null);
         setCompactResult(null);
         setError(null);
-        updateStudioUrl(result.profile_id, conversationId, nextPromptId);
+        updateStudioUrl(result.profile_id, conversationId, nextPromptId, modelProfileId || result.model_profile_id || "");
       })
-      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : msg("promptStudio.errorLoad")))
-      .finally(() => setBusy(null));
-  }, [conversationId, msg, profileId]);
+      .catch((loadError) => {
+        if (loadRequestRef.current === requestId) {
+          setError(loadError instanceof Error ? loadError.message : msg("promptStudio.errorLoad"));
+        }
+      })
+      .finally(() => {
+        if (loadRequestRef.current === requestId) setBusy(null);
+      });
+  }, [conversationId, msg, profileId, selectedModelProfileId]);
 
   useEffect(() => {
     loadStudio(initialPromptId);
@@ -673,6 +706,9 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
     [modelProfiles, selectedModelProfileId],
   );
   const selectedModel = modelProfileModel(selectedModelProfile) || selectedModelProfileId;
+  const selectedTokenizer = selectedPrompt?.tokenizer ?? data?.tokenizer ?? data?.active_summary?.token_estimate?.tokenizer ?? null;
+  const tokenizerWarning = tokenizerWarningText(selectedTokenizer, msg("promptStudio.tokenizerFallbackWarning"));
+  const showTokenizerWarning = tokenizerNeedsWarning(selectedTokenizer);
   const templateAiInput = useMemo(() => selectTemplateAiInput(uiCatalog, "chat"), [uiCatalog]);
   const templateToolPolicy = useMemo(
     () => selectTemplateToolPolicy(uiCatalog, "chat", templateAiInput),
@@ -732,8 +768,8 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
     setCompactResult(null);
     setTestResult(null);
     setNotice(null);
-    updateStudioUrl(profileId, conversationId, nextId);
-    loadStudio(nextId);
+    updateStudioUrl(profileId, conversationId, nextId, selectedModelProfileId);
+    loadStudio(nextId, selectedModelProfileId);
   };
 
   const runDiff = () => {
@@ -863,6 +899,8 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
     setSelectedModelProfileId(nextProfileId);
     setNotice(null);
     setUrlParam("model_profile_id", nextProfileId);
+    setTestResult(null);
+    loadStudio(selectedId, nextProfileId);
   };
 
   const goBack = () => {
@@ -889,6 +927,34 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <div className="hidden h-8 max-w-[22rem] items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950 px-1.5 md:flex" aria-label={msg("promptStudio.studioModel")}>
+            <Cpu size={13} className="ml-1 shrink-0 text-zinc-600" />
+            <select
+              value={selectedModelProfileId}
+              onChange={(event) => changeModelProfile(event.target.value)}
+              className="h-6 min-w-0 max-w-[15rem] rounded-md border-0 bg-transparent px-1 text-[10px] font-semibold text-zinc-300 outline-none focus:bg-zinc-900"
+              title={selectedModelProfile ? modelProfileSubtitle(selectedModelProfile) : msg("promptStudio.modelFallback")}
+            >
+              {modelProfiles.length === 0 && <option value="">{msg("promptStudio.modelFallback")}</option>}
+              {modelProfiles.map((profile) => (
+                <option key={profile.profile_id} value={profile.profile_id}>
+                  {modelProfileLabel(profile)}
+                </option>
+              ))}
+            </select>
+            {showTokenizerWarning ? (
+              <span title={tokenizerWarning} aria-label={tokenizerWarning}>
+                <AlertTriangle size={13} className="shrink-0 text-amber-300" />
+              </span>
+            ) : (
+              <span
+                className="hidden max-w-[7rem] truncate text-[10px] text-zinc-600 lg:inline"
+                title={tokenizerStatusText(selectedTokenizer)}
+              >
+                {tokenizerStatusText(selectedTokenizer)}
+              </span>
+            )}
+          </div>
           <div className="flex h-8 items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950 px-1.5" aria-label="Prompt Studio language">
             <Languages size={13} className="ml-1 text-zinc-600" />
             <select
@@ -997,7 +1063,14 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
                   <span className={cn("rounded border px-1.5 py-0.5 text-[10px]", statusBadgeClass(selectedPrompt?.activation_state))}>
                     {selectedPrompt?.activation_state || "available"}
                   </span>
-                  <span className="rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-500">{tokenText(selectedPrompt?.tokens)}</span>
+                  <span className="inline-flex items-center gap-1 rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                    {tokenText(selectedPrompt?.tokens)}
+                    {showTokenizerWarning && (
+                      <span title={tokenizerWarning} aria-label={tokenizerWarning}>
+                        <AlertTriangle size={10} className="text-amber-300" />
+                      </span>
+                    )}
+                  </span>
                 </div>
                 <p className="mt-1 truncate text-xs text-zinc-500">{selectedPrompt?.description || selectedPrompt?.source || msg("promptStudio.promptFallback")}</p>
               </div>
@@ -1041,7 +1114,7 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
                 }}
                 readOnly={!canWriteDraft}
                 spellCheck={false}
-                placeholder={msg("promptStudio.editorPlaceholder")}
+                placeholder={busy === "load" ? msg("promptStudio.editorLoading") : msg("promptStudio.editorPlaceholder")}
                 className={cn(
                   "min-h-[calc(100vh-185px)] w-full resize-none rounded-lg border border-zinc-800 bg-zinc-950/75 p-4 font-mono text-[13px] leading-relaxed text-zinc-200 outline-none focus:border-zinc-600",
                   !canWriteDraft && "cursor-default text-zinc-400 focus:border-zinc-800",
@@ -1121,7 +1194,20 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
                     </div>
                     <div className="flex justify-between gap-3">
                       <dt className="text-zinc-500">{msg("promptStudio.tokens")}</dt>
-                      <dd className="text-right text-zinc-200">{tokenText(selectedPrompt?.tokens)}</dd>
+                      <dd className="inline-flex items-center justify-end gap-1 text-right text-zinc-200">
+                        {tokenText(selectedPrompt?.tokens)}
+                        {showTokenizerWarning && (
+                          <span title={tokenizerWarning} aria-label={tokenizerWarning}>
+                            <AlertTriangle size={11} className="text-amber-300" />
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-zinc-500">{msg("promptStudio.tokenizer")}</dt>
+                      <dd className="min-w-0 truncate text-right text-zinc-200" title={tokenizerWarning || tokenizerStatusText(selectedTokenizer)}>
+                        {tokenizerStatusText(selectedTokenizer) || msg("promptStudio.modelFallback")}
+                      </dd>
                     </div>
                   </dl>
                 </section>

@@ -226,6 +226,11 @@ jobs:
         working-directory: ${{ matrix.app }}
         run: npm test
 
+      - name: Verify defaultspack host permission registry sync
+        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        working-directory: ${{ matrix.app }}
+        run: npm run check:host-permissions
+
       - name: Typecheck defaultspack frontend
         if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
         working-directory: ${{ matrix.app }}
@@ -235,6 +240,15 @@ jobs:
         if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
         working-directory: ${{ matrix.app }}
         run: npm run build
+
+      - name: Verify defaultspack vendored assets
+        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        working-directory: ${{ matrix.app }}
+        run: npm run check:vendored-assets -- --require-ui
+
+      - name: Verify defaultspack frontend bundle is synchronized
+        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        run: git diff --exit-code -- rumi_ai_1_10/ecosystem/defaultspack/ui
 
   rumi-ai-static-checks:
     runs-on: ubuntu-latest
