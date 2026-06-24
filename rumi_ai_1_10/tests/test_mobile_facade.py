@@ -119,6 +119,38 @@ def test_mobile_route_contract_is_reflected_in_registry():
         )
 
 
+def test_mobile_route_contract_legacy_routes_build_fallback_table():
+    from domain.mobile.contract import iter_mobile_route_contracts
+    from transport.registry import build_fallback_http_routes
+
+    class _Server:
+        def __getattr__(self, name):
+            if name.startswith("_handle_"):
+                return lambda _request_data, _path_params: {"status": "ok"}
+            raise AttributeError(name)
+
+        def _invoke_fallback_block(self, *_args, **_kwargs):
+            return {"status": "ok"}
+
+        def _invoke_flow_route(self, *_args, **_kwargs):
+            return {"status": "ok"}
+
+        def _invoke_function_route(self, *_args, **_kwargs):
+            return {"status": "ok"}
+
+    routes = build_fallback_http_routes(_Server())
+    compiled_routes = {(method, pattern.pattern) for method, pattern, *_ in routes}
+
+    for route in iter_mobile_route_contracts():
+        assert (
+            route.method,
+            _compiled_pattern_for(route.pattern),
+        ) in compiled_routes, (
+            "mobile fallback route is not buildable: "
+            f"{route.method} {route.pattern}"
+        )
+
+
 def test_mobile_pc_equivalent_routes_exist_for_parity_guard():
     from domain.mobile.contract import iter_mobile_route_contracts
     from transport.registry import canonical_http_route_specs
@@ -168,3 +200,14 @@ def test_mobile_device_scope_contract_blocks_unknown_routes():
         == "chat.write"
     )
     assert required_device_scope("GET", "/api/packs") == ""
+
+
+def _compiled_pattern_for(pattern: str) -> str:
+    import re
+
+    compiled = re.sub(
+        r"\{(\w+)\}",
+        lambda match: rf"(?P<{match.group(1)}>[^/]+)",
+        pattern,
+    )
+    return f"^{compiled}$"

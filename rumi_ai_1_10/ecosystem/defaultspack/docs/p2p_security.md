@@ -52,6 +52,31 @@ Secrets, bearer tokens, cookies, API keys, and provider credentials must never b
 accepted from a peer as authority. If a credential is needed, Rumi should ask the
 local user through the existing local secret and approval flows.
 
+## Mobile Pairing Contracts
+
+Rumi Mobile uses P2P pairing state to bootstrap a scoped mobile API token. The
+recommended QR payload is `kind: "rumi_pair_v2"` with `pairingId`, `code`,
+mobile-reachable `baseUrls`, and `expiresAt`.
+
+- The phone claims a pending pairing with
+  `POST /api/mobile/v1/pairings/{id}/claim`, including the pairing code,
+  `device_id`, label, public key, and requested scopes. The PC operator must
+  still approve.
+- Device tokens use the `dtk_` prefix and are accepted only on
+  `/api/mobile/v1/...` routes whose contract declares the required device
+  scope. A device token must not authenticate PC/admin, pack, file, terminal,
+  git, browser, or generic defaultspack routes.
+- `GET /api/mobile/v1/pairings/{id}/status` may reveal status to the PC, but it
+  returns a device token to the phone only when the request includes both the
+  original pairing code and the claimed `device_id`.
+- Credential transfer is encrypted and device-bound. Creation requires a target
+  device, `ciphertext`, and `nonce`; plaintext or wrapper-only payloads fail
+  closed. Get/ack calls require the authenticated device to match the transfer.
+- LAN HTTP is for trusted private networks. Mobile pairing base URLs must not
+  advertise loopback hosts; Android permits cleartext LAN HTTP through network
+  security config, and iOS uses local-network/ATS local networking entries.
+  Internet exposure should use HTTPS or an explicit reverse proxy design.
+
 ## Non-Goals
 
 P2P is not a remote desktop protocol, a distributed tool bus, a remote approval
