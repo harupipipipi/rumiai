@@ -31,6 +31,7 @@ from domain.chat.ir_legacy_adapter import (
     stored_messages_to_ir,
 )
 from domain.chat.modality_detector import detect_modalities
+from domain.chat.progress_tool import assistant_progress_system_instruction, with_assistant_progress_tool
 from domain.chat.public_metadata import compact_tool_filter_entries
 from domain.chat.store import ChatStore
 from domain.chat.tool_selection_schema import TOOL_SELECTION_MODES, TOOL_SELECTION_SCOPES, TOOL_SELECTION_STRATEGIES, normalize_tool_targets
@@ -650,6 +651,11 @@ def prepare_chat_run(
     params = planned_request.params
     provider_chat_ir = planned_request.ir
     standard_messages = ir_to_legacy_standard_messages(provider_chat_ir)
+    if provider_tools:
+        provider_tools = with_assistant_progress_tool(list(provider_tools))
+        _append_system_context_message(standard_messages, assistant_progress_system_instruction())
+        provider_chat_ir = legacy_standard_messages_to_ir(standard_messages, conversation_id)
+        tool_context["assistant_progress_enabled"] = True
     request_context["chat_params"] = params
     request_context["provider_capabilities"] = provider_capabilities
     request_context["provider_planning"] = provider_planning

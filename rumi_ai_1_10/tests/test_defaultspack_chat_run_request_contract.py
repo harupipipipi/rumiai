@@ -51,6 +51,16 @@ def _setup_store(tmp_path, monkeypatch):
     return store
 
 
+def _external_provider_tool_names(prepared) -> set[str]:
+    return {
+        tool["function"]["name"]
+        for tool in prepared.provider_tools
+        if isinstance(tool, dict)
+        and isinstance(tool.get("function"), dict)
+        and tool["function"].get("name") != "assistant_progress"
+    }
+
+
 def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
@@ -62,7 +72,8 @@ def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeyp
     prepared = prepare_chat_run({"conversation_id": conv["id"], "message": {"content": "new"}}, {})
 
     assert prepared.user_message["content"] == [{"type": "text", "text": "new"}]
-    assert prepared.standard_messages[0] == {"role": "system", "content": "System prompt"}
+    assert prepared.standard_messages[0]["role"] == "system"
+    assert str(prepared.standard_messages[0]["content"]).startswith("System prompt")
     assert prepared.standard_messages[1]["role"] == "system"
     assert "Current date/time:" in prepared.standard_messages[1]["content"]
     assert prepared.standard_messages[-1] == {"role": "user", "content": "new"}
@@ -348,7 +359,7 @@ def test_prepare_chat_run_merges_workspace_profile_with_catalog_profile(tmp_path
 
     assert prepared.request_context.get("profile_policy", {}).get("max_tool_calls") == 18
     assert "coding_file_read" in prepared.request_context.get("profile_policy", {}).get("tool_allowlist", [])
-    tool_names = {tool["function"]["name"] for tool in prepared.provider_tools if isinstance(tool, dict) and isinstance(tool.get("function"), dict)}
+    tool_names = _external_provider_tool_names(prepared)
     assert "coding_file_read" in tool_names
     assert "artifact_export" not in tool_names
     _profile_snapshot.cache_clear()
@@ -398,11 +409,7 @@ def test_prepare_chat_run_marks_selected_terminal_unattached_when_profile_exclud
     }
     assert filter_entries["coding_terminal_exec"]["status"] == "blocked"
     assert filter_entries["coding_terminal_exec"]["reason_code"] == "not_connected_to_profile"
-    tool_names = {
-        tool["function"]["name"]
-        for tool in prepared.provider_tools
-        if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
-    }
+    tool_names = _external_provider_tool_names(prepared)
     assert "coding_file_read" in tool_names
     assert "coding_terminal_exec" not in tool_names
     ChatStore._instance = None
@@ -462,11 +469,7 @@ def test_prepare_chat_run_connects_tools_from_profile_policy_runtime_yaml(tmp_pa
         "coding_file_write",
     ]
     assert "unselected_requested_tools" not in prepared.tool_context
-    assert {
-        tool["function"]["name"]
-        for tool in prepared.provider_tools
-        if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
-    } == {
+    assert _external_provider_tool_names(prepared) == {
         "coding_file_read",
         "coding_terminal_exec",
         "coding_file_write",
@@ -512,11 +515,7 @@ def test_prepare_chat_run_infers_raw_tool_mentions_as_turn_tools(tmp_path, monke
     assert prepared.tool_context["agent_id"] == "client_manager"
     assert "unselected_requested_tools" not in prepared.tool_context
     assert not prepared.request_context.get("user_requested_computer_use")
-    assert {
-        tool["function"]["name"]
-        for tool in prepared.provider_tools
-        if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
-    } == {"coding_terminal_exec"}
+    assert _external_provider_tool_names(prepared) == {"coding_terminal_exec"}
     assert "coding_terminal_exec" in prepared.connected_tool_names
     ChatStore._instance = None
 
@@ -542,11 +541,7 @@ def test_prepare_chat_run_allows_explicit_shell_tool_request_to_attach(tmp_path,
     assert prepared.request_context["profile_policy"]["allow_shell"] is True
     assert prepared.request_context.get("user_requested_shell_tool") is True
     assert "unselected_requested_tools" not in prepared.tool_context
-    tool_names = {
-        tool["function"]["name"]
-        for tool in prepared.provider_tools
-        if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
-    }
+    tool_names = _external_provider_tool_names(prepared)
     assert tool_names == {"coding_terminal_exec"}
     assert "coding_terminal_exec" in prepared.connected_tool_names
     ChatStore._instance = None
@@ -590,11 +585,7 @@ def test_prepare_chat_run_infers_coding_pr_tools_from_broad_request(tmp_path, mo
     assert expected_tools.issubset(set(prepared.input_data["tools"]))
     assert prepared.request_context["profile_policy"]["allow_shell"] is True
     assert "unselected_requested_tools" not in prepared.tool_context
-    tool_names = {
-        tool["function"]["name"]
-        for tool in prepared.provider_tools
-        if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
-    }
+    tool_names = _external_provider_tool_names(prepared)
     assert expected_tools.issubset(tool_names)
     assert expected_tools.issubset(prepared.connected_tool_names)
     ChatStore._instance = None
@@ -646,11 +637,7 @@ def test_prepare_chat_run_keeps_inferred_pr_tools_with_auto_tool_selection(tmp_p
     assert prepared.tool_context["tool_selection"]["mode"] == "manual"
     assert expected_tools.issubset(set(prepared.tool_context["requested_tool_ids"]))
     assert "unselected_requested_tools" not in prepared.tool_context
-    tool_names = {
-        tool["function"]["name"]
-        for tool in prepared.provider_tools
-        if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
-    }
+    tool_names = _external_provider_tool_names(prepared)
     assert expected_tools.issubset(tool_names)
     ChatStore._instance = None
 
@@ -743,11 +730,7 @@ def test_prepare_chat_run_adds_requested_tool_to_existing_agent_profile(tmp_path
     assert connected_agent_tools == ["coding_file_read", "coding_terminal_exec"]
     assert "unselected_requested_tools" not in prepared.tool_context
     assert not prepared.request_context.get("user_requested_computer_use")
-    tool_names = {
-        tool["function"]["name"]
-        for tool in prepared.provider_tools
-        if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
-    }
+    tool_names = _external_provider_tool_names(prepared)
     assert "coding_terminal_exec" in tool_names
     assert "coding_terminal_exec" in prepared.connected_tool_names
     ChatStore._instance = None
