@@ -42,12 +42,14 @@ class PairingStatusResponse {
   final String? pcLabel;
 
   bool get isAccepted => status == 'approved' || status == 'accepted';
+  bool get hasDeviceToken => deviceToken?.trim().isNotEmpty ?? false;
+  bool get isReady => isAccepted && hasDeviceToken;
 
   factory PairingStatusResponse.fromJson(Map<String, dynamic> json) {
     final pairing = json['pairing'] as Map<String, dynamic>? ?? json;
     final device = json['device'] as Map<String, dynamic>?;
-    final rawScopes =
-        (json['scopes'] as List?) ??
+    final server = json['server'] as Map<String, dynamic>?;
+    final rawScopes = (json['scopes'] as List?) ??
         (device?['scopes'] as List?) ??
         (pairing['scopes'] as List?) ??
         (pairing['capabilities'] as List?) ??
@@ -58,7 +60,9 @@ class PairingStatusResponse {
       deviceToken:
           json['device_token'] as String? ?? pairing['device_token'] as String?,
       scopes: rawScopes.map((e) => e.toString()).toList(),
-      pcLabel: json['pc_label'] as String? ?? pairing['pc_label'] as String?,
+      pcLabel: json['pc_label'] as String? ??
+          pairing['pc_label'] as String? ??
+          server?['label'] as String?,
     );
   }
 }
@@ -75,10 +79,10 @@ class PcPairingClient {
   }
 
   Map<String, String> _headers(String token) => {
-    'Accept': 'application/json',
-    'Content-Type': 'application/json',
-    if (token.trim().isNotEmpty) 'Authorization': 'Bearer $token',
-  };
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        if (token.trim().isNotEmpty) 'Authorization': 'Bearer $token',
+      };
 
   bool _hasBaseUrl(PcConnection pc) => pc.baseUrl.trim().isNotEmpty;
 
@@ -134,14 +138,14 @@ class PcPairingClient {
     if (_closed) {
       throw const PcPairingException('クライアントは閉じられました。');
     }
-    final uri = _uri(pc.baseUrl, '/api/mobile/v1/pairings/$pairingId/status')
-        .replace(
-          queryParameters: {
-            if (code != null && code.trim().isNotEmpty) 'code': code.trim(),
-            if (deviceId != null && deviceId.trim().isNotEmpty)
-              'device_id': deviceId.trim(),
-          },
-        );
+    final uri =
+        _uri(pc.baseUrl, '/api/mobile/v1/pairings/$pairingId/status').replace(
+      queryParameters: {
+        if (code != null && code.trim().isNotEmpty) 'code': code.trim(),
+        if (deviceId != null && deviceId.trim().isNotEmpty)
+          'device_id': deviceId.trim(),
+      },
+    );
     final resp = await _http
         .get(uri, headers: _headers(pc.token))
         .timeout(const Duration(seconds: 15));

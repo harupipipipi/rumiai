@@ -22,6 +22,24 @@ const _identity = DeviceIdentity(
 );
 
 void main() {
+  group('friendlyPcLabel', () {
+    test('does not display raw http URL labels', () {
+      expect(
+        friendlyPcLabel(
+            'http://192.168.11.25:8765', 'http://192.168.11.25:8765'),
+        'PC',
+      );
+      expect(
+        friendlyPcLabel('', 'http://haru-macbook.local:8765'),
+        'haru-macbook',
+      );
+      expect(
+        friendlyPcLabel('Haru MacBook', 'http://192.168.11.25:8765'),
+        'Haru MacBook',
+      );
+    });
+  });
+
   group('PairingClaimResponse', () {
     test('parses from json', () {
       final resp = PairingClaimResponse.fromJson({
@@ -44,6 +62,7 @@ void main() {
         },
       });
       expect(resp.isAccepted, isTrue);
+      expect(resp.isReady, isTrue);
       expect(resp.deviceToken, 'dt-xxx');
       expect(resp.scopes, ['chat.read', 'chat.write']);
       expect(resp.pcLabel, 'MacBook');
@@ -54,7 +73,33 @@ void main() {
         'pairing': {'pairing_id': 'p1', 'status': 'pending'},
       });
       expect(resp.isAccepted, isFalse);
+      expect(resp.isReady, isFalse);
       expect(resp.deviceToken, isNull);
+    });
+
+    test('accepted status is not ready without a device token', () {
+      final resp = PairingStatusResponse.fromJson({
+        'pairing': {'pairing_id': 'p1', 'status': 'approved'},
+      });
+
+      expect(resp.isAccepted, isTrue);
+      expect(resp.hasDeviceToken, isFalse);
+      expect(resp.isReady, isFalse);
+    });
+
+    test('parses top-level pc label and token from status response', () {
+      final resp = PairingStatusResponse.fromJson({
+        'pairing': {'pairing_id': 'p1', 'status': 'approved'},
+        'device_token': 'dtk-123',
+        'scopes': ['chat.read'],
+        'pc_label': 'Haru MacBook',
+      });
+
+      expect(resp.isAccepted, isTrue);
+      expect(resp.isReady, isTrue);
+      expect(resp.deviceToken, 'dtk-123');
+      expect(resp.pcLabel, 'Haru MacBook');
+      expect(resp.scopes, ['chat.read']);
     });
   });
 

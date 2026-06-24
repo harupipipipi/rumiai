@@ -1,17 +1,42 @@
 import 'dart:convert';
 
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../platform/platform_services.dart';
 import 'chat_models.dart';
 
 const _kConversationsKey = 'rumi_chat.conversations.v1';
 const _kActiveConversationKey = 'rumi_chat.active_id.v1';
 
+abstract class ChatKeyValueStorage {
+  Future<String?> read(String key);
+  Future<void> write(String key, String value);
+  Future<void> delete(String key);
+}
+
+class PlatformChatStorage implements ChatKeyValueStorage {
+  PlatformChatStorage({PlatformPreferences? preferences})
+      : _preferences = preferences ?? PlatformPreferences();
+
+  final PlatformPreferences _preferences;
+
+  @override
+  Future<String?> read(String key) => _preferences.read(key);
+
+  @override
+  Future<void> write(String key, String value) =>
+      _preferences.write(key, value);
+
+  @override
+  Future<void> delete(String key) => _preferences.delete(key);
+}
+
 class ChatStore {
-  ChatStore();
+  ChatStore({ChatKeyValueStorage? storage})
+      : _storage = storage ?? PlatformChatStorage();
 
   final _uuid = const Uuid();
+  final ChatKeyValueStorage _storage;
   List<Conversation> _conversations = const [];
   String? _activeId;
 
@@ -23,8 +48,7 @@ class ChatStore {
       : _firstWhere(_conversations, (c) => c.id == _activeId);
 
   Future<void> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_kConversationsKey);
+    final raw = await _storage.read(_kConversationsKey);
     if (raw != null && raw.trim().isNotEmpty) {
       try {
         final list = jsonDecode(raw) as List;
@@ -35,7 +59,7 @@ class ChatStore {
         _conversations = const [];
       }
     }
-    _activeId = prefs.getString(_kActiveConversationKey);
+    _activeId = await _storage.read(_kActiveConversationKey);
     if (_activeId != null && !_conversations.any((c) => c.id == _activeId)) {
       _activeId = _conversations.isEmpty ? null : _conversations.first.id;
     }
@@ -45,13 +69,12 @@ class ChatStore {
   }
 
   Future<void> _persist() async {
-    final prefs = await SharedPreferences.getInstance();
     final raw = jsonEncode(_conversations.map((c) => c.toJson()).toList());
-    await prefs.setString(_kConversationsKey, raw);
+    await _storage.write(_kConversationsKey, raw);
     if (_activeId != null) {
-      await prefs.setString(_kActiveConversationKey, _activeId!);
+      await _storage.write(_kActiveConversationKey, _activeId!);
     } else {
-      await prefs.remove(_kActiveConversationKey);
+      await _storage.delete(_kActiveConversationKey);
     }
   }
 

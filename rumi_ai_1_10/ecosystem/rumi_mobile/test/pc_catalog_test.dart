@@ -83,6 +83,26 @@ void main() {
             'updated_at': '2026-01-01T00:00:00Z',
           }
         ],
+        'runtime': {
+          'preferred_model': 'openai/gpt-5.4',
+          'thinking_level': 'high',
+          'deepthink_enabled': true,
+          'favorite_profiles': ['openai/gpt-5.4'],
+        },
+        'commands': [
+          {
+            'id': 'model',
+            'name': 'model',
+            'label': 'Model',
+            'category': 'model',
+            'visibility': 'default',
+            'risk': 'low',
+            'args': [
+              {'name': 'query', 'type': 'string'}
+            ],
+            'execution': {'type': 'model_command', 'action': 'select'}
+          }
+        ],
       });
       expect(catalog.providers.length, 1);
       expect(catalog.providers.first.providerId, 'openai');
@@ -93,6 +113,10 @@ void main() {
       expect(catalog.modelsForProvider('openai').length, 1);
       expect(catalog.modelsForProvider('groq'), isEmpty);
       expect(catalog.configuredProviders.length, 1);
+      expect(catalog.runtime.preferredModel, 'openai/gpt-5.4');
+      expect(catalog.runtime.deepthinkEnabled, isTrue);
+      expect(catalog.commands.single.name, 'model');
+      expect(catalog.commands.single.args.single.name, 'query');
     });
   });
 
@@ -167,6 +191,44 @@ void main() {
 
       expect(catalog.providers.first.providerId, 'groq');
       expect(catalog.models.first.modelId, 'm1');
+    });
+
+    test('executeCommand posts to mobile command bridge', () async {
+      String? requestedPath;
+      Map<String, dynamic>? body;
+      final client = MockClient((request) async {
+        requestedPath = request.url.path;
+        body = jsonDecode(request.body) as Map<String, dynamic>;
+        return _ok({
+          'command': {
+            'id': 'model',
+            'name': 'model',
+            'label': 'Model',
+            'category': 'model',
+            'visibility': 'default',
+            'risk': 'low',
+            'execution': {'type': 'model_command', 'action': 'select'}
+          },
+          'executed': true,
+          'selected_model': {'profile_id': 'openai/gpt-5.4'},
+        });
+      });
+
+      final pcClient = PcCatalogClient(client: client);
+      final result = await pcClient.executeCommand(
+        _pc,
+        command: 'model',
+        args: {'query': 'gpt'},
+        conversationId: 'c1',
+      );
+      pcClient.close();
+
+      expect(requestedPath, '/api/mobile/v1/commands/execute');
+      expect(body?['command'], 'model');
+      expect((body?['args'] as Map)['query'], 'gpt');
+      expect(body?['conversation_id'], 'c1');
+      expect(result.executed, isTrue);
+      expect(result.selectedModel?.effectiveProfileId, 'openai/gpt-5.4');
     });
 
     test('throws on non-ok status', () async {

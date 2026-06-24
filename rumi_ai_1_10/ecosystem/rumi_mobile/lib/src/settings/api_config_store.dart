@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/services.dart';
 
 class ApiConfig {
   const ApiConfig({
@@ -93,26 +93,37 @@ abstract class SecureKeyValueStorage {
   Future<void> delete(String key);
 }
 
-class _FlutterSecureStorageAdapter implements SecureKeyValueStorage {
-  _FlutterSecureStorageAdapter([FlutterSecureStorage? storage])
-      : _storage = storage ?? const FlutterSecureStorage();
-  final FlutterSecureStorage _storage;
+class PlatformSecureStorage implements SecureKeyValueStorage {
+  PlatformSecureStorage({MethodChannel? channel})
+      : _channel =
+            channel ?? const MethodChannel('ai.rumi.remote/secure_storage');
+
+  final MethodChannel _channel;
 
   @override
-  Future<String?> read(String key) => _storage.read(key: key);
+  Future<String?> read(String key) async {
+    return _channel.invokeMethod<String>('read', {'key': key});
+  }
 
   @override
-  Future<void> write(String key, String? value) =>
-      _storage.write(key: key, value: value);
+  Future<void> write(String key, String? value) async {
+    if (value == null) {
+      await delete(key);
+      return;
+    }
+    await _channel.invokeMethod<void>('write', {'key': key, 'value': value});
+  }
 
   @override
-  Future<void> delete(String key) => _storage.delete(key: key);
+  Future<void> delete(String key) async {
+    await _channel.invokeMethod<void>('delete', {'key': key});
+  }
 }
 
 class ApiConfigStore {
   ApiConfigStore({
     SecureKeyValueStorage? storage,
-  }) : _storage = storage ?? _FlutterSecureStorageAdapter();
+  }) : _storage = storage ?? PlatformSecureStorage();
 
   static const _apiKey = 'rumi.api_config.v1';
   static const _pcKey = 'rumi.pc_connection.v1';

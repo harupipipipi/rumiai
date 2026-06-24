@@ -15,8 +15,8 @@ class PcConversationBackend implements ConversationBackend {
     required this.connection,
     this.deviceId,
     http.Client? client,
-  }) : _http = client ?? http.Client(),
-       _uuid = const Uuid();
+  })  : _http = client ?? http.Client(),
+        _uuid = const Uuid();
 
   final PcConnection connection;
   final String? deviceId;
@@ -36,10 +36,10 @@ class PcConversationBackend implements ConversationBackend {
   }
 
   Map<String, String> get _headers => {
-    'Authorization': 'Bearer ${connection.token}',
-    'Accept': 'application/json',
-    'Content-Type': 'application/json',
-  };
+        'Authorization': 'Bearer ${connection.token}',
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      };
 
   Uri _uri(String path) {
     var trimmed = connection.baseUrl.trim();
@@ -98,8 +98,7 @@ class PcConversationBackend implements ConversationBackend {
         .timeout(const Duration(seconds: 15));
     _checkResponse(resp);
     final data = _decodeData(resp.body);
-    final id =
-        data['conversation_id'] as String? ??
+    final id = data['conversation_id'] as String? ??
         (data['conversation'] as Map<String, dynamic>?)?['id'] as String? ??
         '';
     return ConversationLocator.pc(id, deviceId: deviceId);
@@ -111,6 +110,9 @@ class PcConversationBackend implements ConversationBackend {
     required String text,
     required String clientMessageId,
     required int expectedRevision,
+    String? model,
+    String? profileId,
+    Map<String, dynamic>? params,
   }) async* {
     _checkReady();
 
@@ -126,24 +128,41 @@ class PcConversationBackend implements ConversationBackend {
     final uri = _uri(
       '/api/mobile/v1/conversations/${locator.conversationId}/stream',
     );
-    final body = jsonEncode({
+    final requestParams = <String, dynamic>{
+      if (params != null) ...params,
+    };
+    final selectedModel = (model ?? profileId ?? '').trim();
+    final selectedProfile = (profileId ?? model ?? '').trim();
+    if (selectedModel.isNotEmpty) {
+      requestParams['model'] = selectedModel;
+    }
+    if (selectedProfile.isNotEmpty) {
+      requestParams['profile_id'] = selectedProfile;
+    }
+    final metadata = requestParams.remove('metadata');
+
+    final payload = <String, dynamic>{
       'message': {
         'role': 'user',
         'content': text,
         'client_message_id': clientMessageId,
+        if (metadata is Map<String, dynamic>) 'metadata': metadata,
       },
       'client_message_id': clientMessageId,
       'expected_revision': expectedRevision,
-    });
+      if (selectedModel.isNotEmpty) 'model': selectedModel,
+      if (selectedProfile.isNotEmpty) 'profile_id': selectedProfile,
+      if (requestParams.isNotEmpty) 'params': requestParams,
+    };
+    final body = jsonEncode(payload);
 
     try {
       final request = http.Request('POST', uri);
       request.headers.addAll({..._headers, 'Accept': 'text/event-stream'});
       request.body = body;
 
-      final streamed = await _http
-          .send(request)
-          .timeout(const Duration(seconds: 30));
+      final streamed =
+          await _http.send(request).timeout(const Duration(seconds: 30));
 
       if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
         final errBody = await streamed.stream.bytesToString();
@@ -256,9 +275,8 @@ class PcConversationBackend implements ConversationBackend {
               runId: runId,
               assistantMessageId: assistantId,
               delta: delta,
-              accumulatedContent: content.isNotEmpty
-                  ? content
-                  : contentBuffer.toString(),
+              accumulatedContent:
+                  content.isNotEmpty ? content : contentBuffer.toString(),
             );
           }
           return null;
@@ -344,14 +362,12 @@ class PcConversationBackend implements ConversationBackend {
 
   ConversationSummary _parseConversationSummary(Map<String, dynamic> json) {
     return ConversationSummary(
-      id: json['id'] as String? ?? '',
-      title: json['title'] as String? ?? '無題',
+      id: _stringValue(json['id']),
+      title: _stringValue(json['title'], fallback: '無題'),
       authority: ConversationAuthorityKind.pc,
       messageCount: (json['message_count'] as num?)?.toInt() ?? 0,
-      updatedAt:
-          DateTime.tryParse(json['updated_at'] as String? ?? '') ??
-          DateTime.now(),
-      pinned: json['pinned'] as bool? ?? false,
+      updatedAt: _dateTimeValue(json['updated_at']),
+      pinned: _boolValue(json['pinned'] ?? json['is_pinned']),
       revision: (json['revision'] as num?)?.toInt() ?? 0,
     );
   }
@@ -361,29 +377,70 @@ class PcConversationBackend implements ConversationBackend {
         .map((m) => _parseMessage(m as Map<String, dynamic>))
         .toList();
     return Conversation(
-      id: json['id'] as String? ?? '',
-      title: json['title'] as String? ?? '無題',
+      id: _stringValue(json['id']),
+      title: _stringValue(json['title'], fallback: '無題'),
       messages: messages,
-      createdAt:
-          DateTime.tryParse(json['created_at'] as String? ?? '') ??
-          DateTime.now(),
-      updatedAt:
-          DateTime.tryParse(json['updated_at'] as String? ?? '') ??
-          DateTime.now(),
-      pinned: json['pinned'] as bool? ?? false,
+      createdAt: _dateTimeValue(json['created_at']),
+      updatedAt: _dateTimeValue(json['updated_at']),
+      pinned: _boolValue(json['pinned'] ?? json['is_pinned']),
       revision: (json['revision'] as num?)?.toInt() ?? 0,
+      authority: ConversationAuthorityKind.pc,
     );
   }
 
   ChatMessage _parseMessage(Map<String, dynamic> json) {
     return ChatMessage(
-      id: json['id'] as String? ?? '',
-      role: ChatRole.fromString(json['role'] as String? ?? 'assistant'),
-      content: json['content'] as String? ?? '',
-      createdAt: DateTime.tryParse(json['created_at'] as String? ?? ''),
-      pending: json['pending'] as bool? ?? false,
-      error: json['error'] as bool? ?? false,
+      id: _stringValue(json['id']),
+      role: ChatRole.fromString(
+        _stringValue(json['role'], fallback: 'assistant'),
+      ),
+      content: _messageContent(json),
+      createdAt: _dateTimeValueOrNull(json['created_at']),
+      pending: _boolValue(json['pending']),
+      error: _boolValue(json['error']),
     );
+  }
+
+  String _stringValue(Object? value, {String fallback = ''}) {
+    if (value == null) return fallback;
+    if (value is String) return value;
+    return value.toString();
+  }
+
+  bool _boolValue(Object? value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      return normalized == 'true' || normalized == '1' || normalized == 'yes';
+    }
+    return false;
+  }
+
+  DateTime _dateTimeValue(Object? value) {
+    return _dateTimeValueOrNull(value) ?? DateTime.now();
+  }
+
+  DateTime? _dateTimeValueOrNull(Object? value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    if (value is String) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return null;
+      final parsed = DateTime.tryParse(trimmed);
+      if (parsed != null) return parsed;
+      final numeric = num.tryParse(trimmed);
+      if (numeric != null) return _dateTimeFromEpoch(numeric);
+      return null;
+    }
+    if (value is num) return _dateTimeFromEpoch(value);
+    return null;
+  }
+
+  DateTime _dateTimeFromEpoch(num value) {
+    final raw = value.round();
+    final millis = raw > 1000000000000 ? raw : raw * 1000;
+    return DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true).toLocal();
   }
 
   Map<String, dynamic> _decodeData(String body) {

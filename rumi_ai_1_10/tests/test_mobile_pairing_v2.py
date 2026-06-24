@@ -189,6 +189,43 @@ def test_mobile_pairing_status_requires_code_and_device_for_token():
     assert with_code["data"]["scopes"] == ["chat.read", "chat.write"]
 
 
+def test_mobile_pairing_status_returns_pc_label(monkeypatch):
+    from domain.p2p.pairing import PairingManager
+    from blocks.mobile.pairing import run
+
+    tmp = tempfile.mkdtemp()
+    monkeypatch.setenv("RUMI_PC_LABEL", "Haru MacBook")
+    session = PairingManager(tmp).start_pairing(capabilities=["chat.read"])
+
+    claim = run({
+        "action": "claim",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "code": session.code,
+        "device_id": "mobile-1",
+        "device_label": "iPhone",
+    }, None)
+    assert claim["status"] == "ok"
+
+    approved = run({
+        "action": "approve",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+    }, None)
+    assert approved["status"] == "ok"
+
+    status = run({
+        "action": "status",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "code": session.code,
+        "device_id": "mobile-1",
+    }, None)
+
+    assert status["status"] == "ok"
+    assert status["data"]["pc_label"] == "Haru MacBook"
+
+
 def test_mobile_pairing_base_urls_do_not_advertise_loopback():
     from domain.mobile.base_urls import mobile_base_urls_from_headers
 

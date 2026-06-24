@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../settings/api_config_store.dart';
@@ -55,6 +54,9 @@ class PairedDevice {
   bool get canObservePcTools => scopes.contains('tools.observe');
   bool get canApprovePcTools => scopes.contains('tools.approve');
   bool get canRequestCredentialCopy => scopes.contains('credentials.request');
+  bool get isConfigured =>
+      deviceToken.trim().isNotEmpty && pcBaseUrl.trim().isNotEmpty;
+  String get displayPcLabel => friendlyPcLabel(pcLabel, pcBaseUrl);
 
   PcConnection toPcConnection() =>
       PcConnection(baseUrl: pcBaseUrl, token: deviceToken);
@@ -80,6 +82,35 @@ class PairedDevice {
       pairingId: json['pairingId'] as String? ?? '',
     );
   }
+}
+
+String friendlyPcLabel(String? label, String baseUrl) {
+  final trimmed = (label ?? '').trim();
+  if (trimmed.isNotEmpty && !_looksLikeUrl(trimmed)) return trimmed;
+
+  final host = _hostFromBaseUrl(baseUrl);
+  if (host.isEmpty || _looksLikeIpAddress(host)) return 'PC';
+  final withoutLocal = host
+      .replaceFirst(RegExp(r'\.local$', caseSensitive: false), '')
+      .replaceFirst(RegExp(r'\.lan$', caseSensitive: false), '');
+  return withoutLocal.isEmpty ? 'PC' : withoutLocal;
+}
+
+bool _looksLikeUrl(String value) {
+  final lower = value.toLowerCase();
+  return lower.startsWith('http://') || lower.startsWith('https://');
+}
+
+String _hostFromBaseUrl(String baseUrl) {
+  final trimmed = baseUrl.trim();
+  if (trimmed.isEmpty) return '';
+  final normalized = trimmed.contains('://') ? trimmed : 'http://$trimmed';
+  return Uri.tryParse(normalized)?.host ?? '';
+}
+
+bool _looksLikeIpAddress(String value) {
+  return RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(value) ||
+      value.contains(':');
 }
 
 class PairingV2Payload {
@@ -111,25 +142,9 @@ class PairingV2Payload {
   }
 }
 
-class _SecureStorageAdapter implements SecureKeyValueStorage {
-  _SecureStorageAdapter([FlutterSecureStorage? storage])
-      : _storage = storage ?? const FlutterSecureStorage();
-  final FlutterSecureStorage _storage;
-
-  @override
-  Future<String?> read(String key) => _storage.read(key: key);
-
-  @override
-  Future<void> write(String key, String? value) =>
-      _storage.write(key: key, value: value);
-
-  @override
-  Future<void> delete(String key) => _storage.delete(key: key);
-}
-
 class MobileDeviceStore {
   MobileDeviceStore({SecureKeyValueStorage? storage})
-      : _storage = storage ?? _SecureStorageAdapter();
+      : _storage = storage ?? PlatformSecureStorage();
 
   static const _identityKey = 'rumi.device.identity.v1';
   static const _pairedKey = 'rumi.paired_device.v1';
@@ -165,7 +180,9 @@ class MobileDeviceStore {
     try {
       final raw = await _storage.read(_pairedKey);
       if (raw != null && raw.trim().isNotEmpty) {
-        return PairedDevice.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+        final device =
+            PairedDevice.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+        if (device.isConfigured) return device;
       }
     } catch (_) {
       // fall through to check legacy
@@ -198,6 +215,8 @@ class MobileDeviceStore {
     try {
       if (device == null) {
         await _storage.delete(_pairedKey);
+      } else if (!device.isConfigured) {
+        await _storage.delete(_pairedKey);
       } else {
         await _storage.write(_pairedKey, jsonEncode(device.toJson()));
         await addPairedDevice(device);
@@ -214,6 +233,7 @@ class MobileDeviceStore {
         final list = jsonDecode(raw) as List;
         return list
             .map((e) => PairedDevice.fromJson(e as Map<String, dynamic>))
+            .where((device) => device.isConfigured)
             .toList();
       }
     } catch (_) {
@@ -230,9 +250,10 @@ class MobileDeviceStore {
 
   Future<void> savePairedDevices(List<PairedDevice> devices) async {
     try {
+      final configured = devices.where((device) => device.isConfigured);
       await _storage.write(
         _pairedListKey,
-        jsonEncode(devices.map((d) => d.toJson()).toList()),
+        jsonEncode(configured.map((d) => d.toJson()).toList()),
       );
     } catch (_) {
       // ignore
@@ -240,6 +261,7 @@ class MobileDeviceStore {
   }
 
   Future<void> addPairedDevice(PairedDevice device) async {
+    if (!device.isConfigured) return;
     final devices = await loadPairedDevices();
     devices.removeWhere((d) => d.deviceId == device.deviceId);
     devices.add(device);
@@ -259,6 +281,7 @@ class MobileDeviceStore {
   Future<void> clear() async {
     try {
       await _storage.delete(_pairedKey);
+      await _storage.delete(_pairedListKey);
       await _storage.delete(_legacyPcKey);
     } catch (_) {
       // ignore

@@ -28,6 +28,7 @@ class PcCatalogClient {
   Map<String, String> _headers(PcConnection pc) => {
         'Authorization': 'Bearer ${pc.token.trim()}',
         'Accept': 'application/json',
+        'Content-Type': 'application/json',
       };
 
   Uri _uri(String baseUrl, String path) {
@@ -63,6 +64,24 @@ class PcCatalogClient {
     return PcCatalog.fromJson(data);
   }
 
+  Future<PcCommandExecuteResult> executeCommand(
+    PcConnection pc, {
+    required String command,
+    Map<String, dynamic> args = const {},
+    String? conversationId,
+    String mode = 'chat',
+  }) async {
+    final resp = await _post(pc, '/api/mobile/v1/commands/execute', {
+      'command': command,
+      'args': args,
+      'mode': mode,
+      if (conversationId != null && conversationId.trim().isNotEmpty)
+        'conversation_id': conversationId.trim(),
+    });
+    final data = _decodeData(resp.body);
+    return PcCommandExecuteResult.fromJson(data);
+  }
+
   Future<http.Response> _get(
     PcConnection pc,
     String path, [
@@ -83,6 +102,33 @@ class PcCatalogClient {
     }
     final resp = await _http
         .get(uri, headers: _headers(pc))
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw PcCatalogFetchException(
+        'PC接続に失敗しました (HTTP ${resp.statusCode})',
+        statusCode: resp.statusCode,
+      );
+    }
+    return resp;
+  }
+
+  Future<http.Response> _post(
+    PcConnection pc,
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    if (!pc.isConfigured) {
+      throw const PcCatalogFetchException('PC接続が設定されていません。');
+    }
+    if (_closed) {
+      throw const PcCatalogFetchException('クライアントは閉じられました。');
+    }
+    final resp = await _http
+        .post(
+          _uri(pc.baseUrl, path),
+          headers: _headers(pc),
+          body: jsonEncode(body),
+        )
         .timeout(const Duration(seconds: 15));
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw PcCatalogFetchException(
