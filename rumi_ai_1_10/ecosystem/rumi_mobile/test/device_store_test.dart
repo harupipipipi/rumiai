@@ -45,6 +45,27 @@ const _missingTokenDevice = PairedDevice(
 );
 
 void main() {
+  test('preferredPairingBaseUrl prefers reachable LAN addresses', () {
+    final selected = preferredPairingBaseUrl(const [
+      'http://169.254.193.88:8765',
+      'http://172.16.0.2:8765',
+      'http://192.168.11.25:8765',
+      'http://[fe80::1]:8765',
+    ]);
+
+    expect(selected, 'http://192.168.11.25:8765');
+  });
+
+  test('preferredPairingBaseUrl falls back to first usable url', () {
+    final selected = preferredPairingBaseUrl(const [
+      '',
+      'http://[fe80::1]:8765',
+      'http://169.254.193.88:8765',
+    ]);
+
+    expect(selected, 'http://[fe80::1]:8765');
+  });
+
   test('does not persist or load paired devices without a token', () async {
     final store = MobileDeviceStore(storage: _FakeSecureStorage());
 

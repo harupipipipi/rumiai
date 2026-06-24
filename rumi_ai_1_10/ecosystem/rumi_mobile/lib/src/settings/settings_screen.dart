@@ -209,8 +209,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final client = PcPairingClient();
     try {
-      final selectedUrl =
-          payload.baseUrls.isNotEmpty ? payload.baseUrls.first : '';
+      final selectedUrl = preferredPairingBaseUrl(payload.baseUrls);
       if (selectedUrl.isEmpty) {
         throw const PcPairingException('接続URLが見つかりません');
       }

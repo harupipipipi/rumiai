@@ -96,6 +96,40 @@ String friendlyPcLabel(String? label, String baseUrl) {
   return withoutLocal.isEmpty ? 'PC' : withoutLocal;
 }
 
+String preferredPairingBaseUrl(List<String> baseUrls) {
+  var selected = '';
+  var selectedScore = -1;
+  for (final rawUrl in baseUrls) {
+    final url = rawUrl.trim();
+    if (url.isEmpty) continue;
+    final score = _pairingBaseUrlScore(url);
+    if (score > selectedScore) {
+      selected = url;
+      selectedScore = score;
+    }
+  }
+  return selected;
+}
+
+int _pairingBaseUrlScore(String url) {
+  final host = _hostFromBaseUrl(url).toLowerCase();
+  if (host.isEmpty) return 0;
+  if (host == 'localhost' || host == '127.0.0.1' || host == '::1') return 10;
+  if (host.startsWith('169.254.') || host.startsWith('fe80:')) return 20;
+  if (host.startsWith('192.168.')) return 100;
+  if (host.startsWith('10.')) return 95;
+  if (_isPrivate172Address(host)) return 95;
+  if (!_looksLikeIpAddress(host)) return 90;
+  return 50;
+}
+
+bool _isPrivate172Address(String host) {
+  final match = RegExp(r'^172\.(\d{1,3})\.').firstMatch(host);
+  if (match == null) return false;
+  final secondOctet = int.tryParse(match.group(1) ?? '');
+  return secondOctet != null && secondOctet >= 16 && secondOctet <= 31;
+}
+
 bool _looksLikeUrl(String value) {
   final lower = value.toLowerCase();
   return lower.startsWith('http://') || lower.startsWith('https://');
