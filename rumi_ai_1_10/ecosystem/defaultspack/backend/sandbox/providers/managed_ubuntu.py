@@ -43,7 +43,6 @@ MANAGED_UBUNTU_CAPABILITIES = frozenset(
         "sandbox.exec",
         "sandbox.files",
         "sandbox.overlay_workspace",
-        "sandbox.port_forward",
         "sandbox.network_policy",
         "sandbox.resource_limits",
         "sandbox.desktop",
@@ -188,6 +187,15 @@ class ManagedUbuntuProvider:
                     )
 
         missing_capabilities = sorted(request.required_capabilities - MANAGED_UBUNTU_CAPABILITIES)
+        if missing_capabilities:
+            diagnostics.append(
+                Diagnostic(
+                    code=f"{self.provider_id.upper()}_CAPABILITY_UNSUPPORTED",
+                    message="Managed Ubuntu provider does not advertise every requested runtime capability.",
+                    severity="warning",
+                    details={"missing_capabilities": missing_capabilities},
+                )
+            )
         missing.extend(missing_capabilities)
         launcher_available = platform_ok and command_path is not None
         ready = launcher_available and guest_ready and not missing_deps and not missing_capabilities
@@ -201,7 +209,12 @@ class ManagedUbuntuProvider:
             capabilities=MANAGED_UBUNTU_CAPABILITIES if launcher_available else frozenset(),
             missing_requirements=tuple(missing),
             requires_user_action=not ready,
-            user_action=None if ready else self._setup_message(launcher_missing=platform_ok and command_path is None),
+            user_action=None
+            if ready
+            else self._setup_message(
+                launcher_missing=platform_ok and command_path is None,
+                missing_capabilities=missing_capabilities,
+            ),
             reboot_required=False,
             diagnostics=tuple(diagnostics),
         )
@@ -526,10 +539,18 @@ class ManagedUbuntuProvider:
             details={"display_min": GUEST_DISPLAY_MIN, "display_max": GUEST_DISPLAY_MAX},
         )
 
-    def _setup_message(self, *, launcher_missing: bool = False) -> str:
+    def _setup_message(self, *, launcher_missing: bool = False, missing_capabilities: Sequence[str] = ()) -> str:
+        if missing_capabilities:
+            return (
+                "Select a provider that supports "
+                f"{', '.join(missing_capabilities)}; managed Ubuntu currently does not provide host port forwarding."
+            )
         if launcher_missing:
-            return f"Install or bundle {self._launcher_command} before using the {self.provider_id} managed runtime provider."
-        return "Open the managed runtime setup flow to create and provision the Ubuntu guest."
+            return (
+                f"Install {self._launcher_command} first; this setup can create and provision "
+                "the Rumi Ubuntu guest after the launcher is available."
+            )
+        return "Open the runtime setup flow to create and provision the Ubuntu guest."
 
     def _guest_exists(self, command_path: str) -> bool:
         raise NotImplementedError

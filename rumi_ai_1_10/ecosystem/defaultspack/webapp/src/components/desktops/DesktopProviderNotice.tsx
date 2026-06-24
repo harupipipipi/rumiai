@@ -94,7 +94,7 @@ export function DesktopProviderNotice({
             className="flex h-8 items-center gap-1.5 rounded-md bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 transition-colors hover:bg-white disabled:cursor-wait disabled:opacity-60"
           >
             <Settings2 size={13} />
-            <span>Set up Rumi Managed Runtime</span>
+            <span>Provision guest runtime</span>
           </button>
           <button
             type="button"

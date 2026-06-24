@@ -161,7 +161,24 @@ def test_managed_provider_without_launcher_does_not_advertise_capabilities(monke
     assert status.ready is False
     assert status.capabilities == frozenset()
     assert "command:limactl" in status.missing_requirements
-    assert "Install or bundle limactl" in str(status.user_action)
+    assert "Install limactl first" in str(status.user_action)
+
+
+def test_managed_provider_does_not_advertise_host_port_forwarding(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    fake.guest_exists = True
+    fake.deps_installed = True
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+
+    status = provider.doctor(RuntimeRequirements(required_capabilities=frozenset({"sandbox.port_forward"})))
+
+    assert status.available is True
+    assert status.installed is True
+    assert status.ready is False
+    assert "sandbox.port_forward" not in status.capabilities
+    assert "sandbox.port_forward" in status.missing_requirements
+    assert "host port forwarding" in str(status.user_action)
 
 
 def _template(
@@ -176,11 +193,12 @@ def _template(
     network_approval_required: bool = True,
     packages: tuple[PackageSpec, ...] = (),
 ) -> ResolvedSandboxTemplate:
+    requirements = MANAGED_UBUNTU_CAPABILITIES if desktop else frozenset({"sandbox.exec", "sandbox.files"})
     return ResolvedSandboxTemplate(
         template_id="desktop.ubuntu" if desktop else "coding.python",
         template_version="1",
         runtime_os="linux",
-        provider_requirements=MANAGED_UBUNTU_CAPABILITIES if desktop else frozenset({"sandbox.exec", "sandbox.files", "sandbox.port_forward"}),
+        provider_requirements=requirements,
         packages=packages,
         desktop=DesktopSpec(enabled=True, width=800, height=600) if desktop else None,
         filesystem=FilesystemPolicy(),
@@ -188,7 +206,7 @@ def _template(
         secrets=SecretsPolicy(),
         resources=ResourceLimits(memory_mb=memory_mb, cpu_count=cpu_count, pids=pids, output_bytes=output_bytes, timeout_ms=timeout_ms),
         lifecycle=LifecyclePolicy(),
-        allowed_operations=MANAGED_UBUNTU_CAPABILITIES,
+        allowed_operations=requirements,
         source_template_ids=("test",),
     )
 

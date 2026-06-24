@@ -282,7 +282,9 @@ def _runtime_doctor(service: _SandboxApiService) -> dict[str, Any]:
         "providers": providers,
         "selected_provider_id": selected.get("provider_id"),
         "missing": selected.get("missing", []),
-        "message": "Rumi Managed Runtime is ready." if ready else "Rumi Managed Runtime needs provider setup before desktops can start.",
+        "message": "Rumi Managed Runtime is ready."
+        if ready
+        else str(selected.get("message") or "Selected runtime provider needs setup before desktops can start."),
         "diagnostics": {
             "runtime_api": "available",
             "execution_provider": selected.get("status", "unknown"),
@@ -924,7 +926,7 @@ def _provider_payload(status: RuntimeProviderStatus, *, selected: bool) -> dict[
             for item in status.missing_requirements
         ],
         "isolation": _provider_isolation(status.provider_id, status.ready),
-        "message": "Ready" if status.ready else (status.user_action or "Setup is required before managed desktops can start."),
+        "message": "Ready" if status.ready else (status.user_action or "Provider setup is required before desktops can start."),
     }
 
 
@@ -1177,11 +1179,11 @@ def _placeholder_provider(provider_id: str, *, selected: bool) -> dict[str, Any]
         "missing": [{
             "code": missing_code,
             "severity": "warning",
-            "message": "Managed provider is registered but not available on this host.",
-            "remediation": "Run runtime setup or select an available provider for this platform.",
+            "message": "Runtime provider is registered but not available on this host.",
+            "remediation": "Install the matching launcher first, or select an available provider for this platform.",
         }],
         "isolation": _provider_isolation(provider_id, False),
-        "message": "Setup is required before managed desktops can start.",
+        "message": "Provider setup is required before desktops can start.",
     }
 
 

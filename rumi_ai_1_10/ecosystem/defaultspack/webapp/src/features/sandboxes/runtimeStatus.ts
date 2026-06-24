@@ -117,7 +117,7 @@ export function runtimeAvailability(
       selectedProvider,
       providers,
       missing,
-      message: "Checking Rumi Managed Runtime.",
+      message: "Checking runtime providers.",
     };
   }
 
@@ -135,7 +135,7 @@ export function runtimeAvailability(
           detail: error,
         },
       ],
-      message: "Rumi Managed Runtime API is unavailable.",
+      message: "Runtime provider API is unavailable.",
     };
   }
 
@@ -152,7 +152,7 @@ export function runtimeAvailability(
       missing,
       message: provider
         ? `${providerLabel(provider)} is ready.`
-        : "Rumi Managed Runtime is ready.",
+        : "Runtime provider is ready.",
     };
   }
 
@@ -168,7 +168,7 @@ export function runtimeAvailability(
       message:
         doctor?.message ||
         selectedProvider?.message ||
-        "Rumi Managed Runtime needs setup before desktops can start.",
+        "Selected runtime provider needs setup before desktops can start.",
     };
   }
 
@@ -179,7 +179,7 @@ export function runtimeAvailability(
       providers,
       missing,
       message:
-        doctor?.message || error || "Rumi Managed Runtime reported an error.",
+        doctor?.message || error || "Runtime provider reported an error.",
     };
   }
 
