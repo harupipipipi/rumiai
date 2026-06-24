@@ -16,45 +16,108 @@ canonical control panel at `rumi_ai_1_10/ecosystem/defaultspack/`.
   No server is required to chat.
 - OpenAI-compatible streaming client (`/chat/completions` SSE).
 - QR import:
+  - **スマホをペアリング**: scan a `rumi_pair_v2` QR to claim a PC pairing
+    session and receive a scoped mobile device token after PC approval.
   - **API/モデル取り込み**: scan a `rumi_api` QR to fill API URL/key/model.
-  - **PC接続**: scan a `rumi_pc` QR to fill the Kernel API URL + bearer token.
+  - **PC接続 (Legacy)**: scan a `rumi_pc` QR to fill the Kernel API URL and
+    bearer token for compatibility testing.
 - PC pairing from the defaultspack control panel: open **Settings → アプリ** on
-  the Mac to display the PC接続QR, Cloudflare Pages QR, and API/モデル import QR.
+  the Mac to start **スマホをペアリング** or display the legacy PC接続QR,
+  Cloudflare Pages QR, and API/モデル import QR.
 
 ## QR payload format
 
 The PC side (defaultspack webapp **Settings → アプリ**) emits JSON QR codes:
 
 ```jsonc
+// Recommended PC pairing QR (kind=rumi_pair_v2)
+{
+  "kind": "rumi_pair_v2",
+  "version": 2,
+  "pairingId": "pair-...",
+  "code": "ABCD-2345",
+  "baseUrls": ["http://192.168.1.10:8765"],
+  "serverPublicKey": "",
+  "expiresAt": 1781830000000
+}
+
 // PC接続QR (kind=rumi_pc)
-{ "kind": "rumi_pc", "baseUrl": "http://192.168.1.10:8765", "token": "<hmac key>" }
+{ "kind": "rumi_pc", "baseUrl": "http://192.168.1.10:8765", "token": "<redacted bearer token>" }
 
 // API/モデルインポートQR (kind=rumi_api)
-{ "kind": "rumi_api", "baseUrl": "https://api.openai.com/v1", "apiKey": "sk-...", "model": "gpt-4o-mini", "label": "main" }
+{ "kind": "rumi_api", "baseUrl": "https://api.example.test/v1", "apiKey": "<redacted provider key>", "model": "model-id", "label": "main" }
 ```
 
 The mobile parser also accepts `api_key` as an alias for `apiKey`, and falls
 back to `QrUrl` for plain `http(s)://` links (e.g. Cloudflare Pages URLs).
 
-## PC setup (Kernel API for remote control)
+## PC pairing developer/tester checklist
 
-Start Rumi with the Kernel API bound to the trusted LAN:
+1. Start Rumi with the Kernel API bound to a trusted LAN address. Use this only
+   on a private network that the test phone can reach:
 
-```powershell
-$env:RUMI_API_BIND_ADDRESS="0.0.0.0"
-python -m rumi_ai
-```
+   ```bash
+   cd rumi_ai_1_10
+   RUMI_API_BIND_ADDRESS=0.0.0.0 python app.py
+   ```
 
-Read the active API token from `rumi_ai_1_10/user_data/hmac_keys.json` or:
+2. On the Mac/PC control panel, open **Settings → アプリ** and use
+   **スマホをペアリング**. If the QR panel says no LAN URL was detected, enter
+   `http://<PC LAN IP>:8765`; `localhost`, `127.0.0.1`, and `0.0.0.0` are not
+   reachable from a real phone.
+3. Scan the `rumi_pair_v2` QR from the mobile app. The app claims
+   `/api/mobile/v1/pairings/{id}/claim` with the QR code, the mobile
+   `device_id`, label, public key, and requested scopes.
+4. Approve the claimed device in the control panel. Mobile polls
+   `/api/mobile/v1/pairings/{id}/status?code=...&device_id=...` and stores the
+   returned `dtk_...` device token in secure storage.
+5. Confirm the paired phone can load PC chat state, create/send a test message,
+   and still cannot call non-mobile API routes with the `dtk_...` token.
 
-```powershell
-cd rumi_ai_1_10
-python -c "from core_runtime.hmac_key_manager import HMACKeyManager; print(HMACKeyManager().get_active_key())"
-```
+The legacy **PC接続QR** flow is still useful for compatibility checks, but it
+places a full bearer token in the QR payload. Prefer `rumi_pair_v2` for normal
+pairing tests.
 
-Then on the Mac, open the defaultspack control panel → **Settings → アプリ** and
-paste the token into the PC接続QR panel. Scan the displayed QR with the mobile
-app's **PC接続QRをスキャン**.
+## Security contracts from PR #364
+
+- `dtk_...` device tokens are mobile-only. The backend accepts them only on
+  `/api/mobile/v1/...` routes, and only when the route declares a matching
+  device scope such as `chat.read`, `chat.write`, `tools.observe`,
+  `tools.approve`, or `credentials.request`.
+- Pairing status is observable by the PC, but token pickup requires both the
+  original pairing code and the claimed `device_id`. A status response without
+  both values must not include `device_token`.
+- Credential transfer is fail-closed. PC-created transfers must name a paired
+  device and include encrypted `ciphertext` plus `nonce`; plaintext keys,
+  `api_key` fallback fields, and `plaintext`/`base64-wrapper` algorithms are
+  rejected. Mobile get/ack calls require the matching authenticated device.
+- Do not paste real provider keys, bearer tokens, or device tokens into docs,
+  screenshots, issues, or test fixtures. Use redacted placeholders.
+
+## Real-device install and LAN HTTP caveats
+
+- TestFlight and App Store builds are not published yet. For a real iPhone,
+  install from macOS with Xcode/Flutter and a valid signing team. The
+  `flutter build ios --no-codesign` command is for unsigned build verification;
+  use Xcode signing to run on a physical device.
+- iPhone and PC must be on the same reachable LAN. Disable guest Wi-Fi
+  isolation/VPNs for the test, allow the iOS Local Network prompt, and allow the
+  Rumi port through the host firewall.
+- iOS declares `NSLocalNetworkUsageDescription` and `NSAllowsLocalNetworking`
+  for private-network HTTP. This supports LAN origins such as
+  `http://192.168.x.x:8765`; use HTTPS or a reverse proxy for non-LAN exposure.
+- Android declares internet/network/camera permissions and a network security
+  config that permits cleartext HTTP for LAN testing. Keep cleartext pairing on
+  trusted private networks only.
+- For off-LAN smoke tests, expose the local Kernel API with Cloudflare Tunnel:
+
+  ```bash
+  cloudflared tunnel --protocol http2 --url http://127.0.0.1:8765
+  ```
+
+  Use the printed `https://...trycloudflare.com` origin in the `rumi_pair_v2`
+  QR. Cloudflare Pages can host docs/install pages, but it does not expose a
+  local Mac/PC Kernel API by itself.
 
 ## Distribution status
 
