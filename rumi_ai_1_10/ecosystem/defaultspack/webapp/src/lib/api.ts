@@ -820,8 +820,14 @@ export type MimoCodingCompanyStatus = OperationsCompanyStatus;
 
 export type ChatActivityEvent = {
   type: string;
+  run_id?: string;
+  seq?: number;
   message?: string;
   phase?: string;
+  status?: string;
+  summary?: string;
+  next_action?: string;
+  nextAction?: string;
   timestamp?: number | string;
   tool_name?: string;
   tool_call_id?: string;
