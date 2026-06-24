@@ -2614,11 +2614,6 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.continuity.checkpoint
-  defaults.continuity.handoff:
-    owner: continuity
-    reason: legacy caller compatibility
-    remove_after: v2.3
-    replacement: defaultspack.continuity.handoff
   defaults.continuity.list.nodes:
     owner: continuity
     reason: legacy caller compatibility
@@ -2729,16 +2724,6 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.continuity.remove_node
-  defaults.continuity.return.to.device:
-    owner: continuity
-    reason: legacy caller compatibility
-    remove_after: v2.3
-    replacement: defaultspack.continuity.return.to.device
-  defaults.continuity.return_to_device:
-    owner: continuity
-    reason: legacy caller compatibility
-    remove_after: v2.3
-    replacement: defaultspack.continuity.return_to_device
   defaults.continuity.set.provider.fallbacks:
     owner: continuity
     reason: legacy caller compatibility

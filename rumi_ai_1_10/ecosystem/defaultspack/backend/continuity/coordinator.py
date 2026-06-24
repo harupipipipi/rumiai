@@ -10,7 +10,7 @@ from .models import HandoffPlan, content_hash
 from .node_registry import NodeRegistry, utc_now
 from .operation_store import HandoffOperationStore
 from .primary_lease import PrimaryLeaseService
-from .provider_portability import ProviderPortabilityService, route_ref_from_dict
+from .provider_portability import ProviderPortabilityService
 from .store import JsonFileStore, default_continuity_dir
 
 
@@ -184,70 +184,24 @@ class ContinuityCoordinator:
             }
         )
         operation_id = str(operation["operation_id"])
-        if plan["status"] != "ready":
-            operation = self.operations.transition(
-                operation_id,
-                "PAUSED_USER_ACTION",
-                message="Preflight did not pass. Source remains primary.",
-                details={"plan": plan},
-            )
-            return {"operation": operation}
-
-        route = route_ref_from_dict(plan["provider_route_ref"])
-        source = self.node_registry.local_node()
-        source_keys = self.node_registry.local_key_material()
-        destination = self.node_registry.get(str(plan["destination_node_id"]))
-        self.operations.transition(operation_id, "PREFLIGHT", message="Destination and provider route passed preflight.")
-        self.operations.transition(operation_id, "PRESYNCING", message="Periodic pre-sync snapshot is current.")
-        self.operations.transition(operation_id, "FINAL_CHECKPOINT", message="Writing bounded final logical delta.")
-        secret = self.provider_routes.secret_for_route(route)
-        envelope_id = None
-        if secret:
-            envelope = self.credentials.create(
-                secret_value=secret,
-                source_node=source,
-                source_key_material=source_keys,
-                destination_node=destination,
-                provider_id=route.provider_id,
-                api_id=route.api_id,
-                allowed_model_ids=route.allowed_models or (route.model_id,),
-                base_url=route.base_url,
-                ttl_seconds=int(payload.get("credential_ttl_seconds") or 3600),
-                max_requests=payload.get("credential_max_requests"),
-            )
-            envelope_id = envelope.envelope_id
-        manifest = self.checkpoints.build(
-            sandbox_id=str(plan["sandbox_id"]),
-            source_node_id=str(source.get("node_id") or ""),
-            provider_route=route,
-            credential_envelope_id=envelope_id,
-            extra_state=payload.get("state") if isinstance(payload.get("state"), dict) else {},
-        )
-        self.operations.transition(operation_id, "TRANSFERRING", message="Encrypted manifest references were transferred.")
-        self.operations.transition(operation_id, "PROVISIONING_DESTINATION", message="Destination runtime capability check passed.")
-        self.operations.transition(operation_id, "RESTORING", message="Destination restored logical sandbox state.")
-        restore_record = self._record_restore(operation_id, manifest.as_dict(), destination)
-        self.operations.transition(operation_id, "PROVIDER_PROBE", message="Destination provider route probe passed.")
-        self.operations.transition(operation_id, "MODEL_PROBE", message="Authenticated model probe is ready for policy-approved execution.")
-        self.operations.transition(operation_id, "TOOL_HEALTH_CHECK", message="Destination tool and desktop health checks passed.")
-        self.operations.transition(operation_id, "AWAITING_CUTOVER", message="Waiting for atomic primary lease cutover.")
-        source_generation = int(manifest.source_generation)
-        lease = self.primary_leases.acquire(
-            str(plan["sandbox_id"]),
-            str(destination.get("node_id") or ""),
-            generation=source_generation + 1,
-        )
         operation = self.operations.transition(
             operation_id,
-            "COMPLETED",
-            message="Handoff completed after atomic primary lease cutover.",
+            "PAUSED_USER_ACTION",
+            message=(
+                "Remote continuity cutover is not enabled in this build. "
+                "Source remains primary until authenticated transport, restore, and probe support are available."
+            ),
             details={
-                "checkpoint_id": manifest.checkpoint_id,
-                "credential_envelope_id": envelope_id,
-                "primary_lease": lease,
-                "restore_record": restore_record,
-                "source_primary": False,
-                "destination_primary": True,
+                "code": "CONTINUITY_REMOTE_HANDOFF_UNAVAILABLE",
+                "source_primary": True,
+                "destination_primary": False,
+                "requires": [
+                    "authenticated_remote_transport",
+                    "destination_acknowledgement",
+                    "remote_restore",
+                    "model_probe",
+                    "tool_health_check",
+                ],
             },
         )
         return {"operation": operation}
@@ -283,10 +237,14 @@ class ContinuityCoordinator:
 
     def return_to_device(self, operation_id: str) -> dict[str, Any]:
         operation = self.get_operation(operation_id)
-        plan = operation.get("plan") if isinstance(operation.get("plan"), dict) else {}
-        source_node_id = str((operation.get("checkpoint") or {}).get("source_node_id") or self.node_registry.local_node().get("node_id") or "")
-        lease = self.primary_leases.acquire(str(plan.get("sandbox_id") or operation.get("sandbox_id") or ""), source_node_id, generation=int((operation.get("primary_lease") or {}).get("generation") or 1) + 1)
-        returned = self.operations.transition(operation_id, "COMPLETED", message="Execution returned to the source device.", details={"primary_lease": lease, "returned": True})
+        if str(operation.get("status") or "") == "COMPLETED" and operation.get("returned") is True:
+            return {"operation": operation}
+        returned = self.operations.transition(
+            operation_id,
+            "PAUSED_USER_ACTION",
+            message="Continuity return cutover is not enabled in this build. Primary lease was not changed.",
+            details={"code": "CONTINUITY_REMOTE_HANDOFF_UNAVAILABLE", "source_primary": True},
+        )
         return {"operation": returned}
 
     def _record_restore(self, operation_id: str, manifest: dict[str, Any], destination: dict[str, Any]) -> dict[str, Any]:

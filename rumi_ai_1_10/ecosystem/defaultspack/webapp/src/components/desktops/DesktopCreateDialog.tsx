@@ -163,7 +163,10 @@ export function DesktopCreateDialog({
     selectedProvider?.provider_id === "linux_native" ||
     selectedProvider?.isolation?.host_process_namespace ||
     selectedProvider?.isolation?.host_filesystem_shared ||
-    selectedProvider?.isolation?.host_network_shared;
+    selectedProvider?.isolation?.host_network_shared ||
+    selectedProvider?.isolation?.sandbox_workspace_shared ||
+    selectedProvider?.isolation?.sandbox_process_namespace_shared ||
+    selectedProvider?.isolation?.sandbox_network_namespace_shared;
 
   useEffect(() => {
     if (!workspaceId.trim()) {

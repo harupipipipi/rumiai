@@ -28,6 +28,11 @@ export type RuntimeIsolationFacts = {
   host_process_namespace?: boolean;
   host_filesystem_shared?: boolean;
   host_network_shared?: boolean;
+  sandbox_workspace_shared?: boolean;
+  sandbox_process_namespace_shared?: boolean;
+  sandbox_network_namespace_shared?: boolean;
+  sandbox_cgroup_scope?: string;
+  sandbox_operation_binding?: string;
   summary?: string;
   warnings?: string[];
 };

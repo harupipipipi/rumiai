@@ -111,6 +111,19 @@ class FakeManagedUbuntuCli:
     def _guest(self, argv: list[str], input_text: str | None) -> GuestCommandResult:
         if argv[:5] == ["unshare", "--user", "--map-root-user", "--net", "--"]:
             return self._guest(argv[5:], input_text)
+        if argv[:2] == ["env", "-i"]:
+            env: dict[str, str] = {}
+            index = 2
+            while index < len(argv) and "=" in argv[index]:
+                key, value = argv[index].split("=", 1)
+                env[key] = value
+                index += 1
+            command = argv[index:]
+            if command[:2] == ["bash", "-lc"] and "rumi-cd" in command:
+                marker_index = command.index("rumi-cd")
+                cwd = command[marker_index + 1]
+                return self._guest_exec(command[marker_index + 2 :], cwd=cwd, env=env)
+            return self._guest_exec(command, cwd="", env=env)
         if argv[:2] == ["bash", "-lc"]:
             script = argv[2]
             self.guest_scripts.append(script)
@@ -147,6 +160,20 @@ class FakeManagedUbuntuCli:
             return GuestCommandResult(returncode=0, stdout="0123456789", stderr="abcdefghij")
         if argv[:2] == ["echo", "hello"]:
             return GuestCommandResult(returncode=0, stdout="hello\n")
+        return GuestCommandResult(returncode=0)
+
+    def _guest_exec(self, argv: list[str], *, cwd: str, env: dict[str, str]) -> GuestCommandResult:
+        if argv[:1] == ["emit-long"]:
+            return GuestCommandResult(returncode=0, stdout="0123456789", stderr="abcdefghij")
+        if argv[:2] == ["echo", "hello"]:
+            return GuestCommandResult(returncode=0, stdout="hello\n")
+        if argv[:1] == ["pwd"]:
+            return GuestCommandResult(returncode=0, stdout=f"{cwd}\n")
+        if argv[:1] == ["printenv"] and len(argv) >= 2:
+            key = argv[1]
+            if key in env:
+                return GuestCommandResult(returncode=0, stdout=f"{env[key]}\n")
+            return GuestCommandResult(returncode=1)
         return GuestCommandResult(returncode=0)
 
 
@@ -284,6 +311,7 @@ def test_mac_lima_provider_ensure_and_guest_desktop_flow(monkeypatch) -> None:
     assert "sudo apt-get" not in install_script
     assert any("xterm -title 'Rumi Desktop'" in script for script in fake.guest_scripts)
     assert fake.command_containing("shell", "rumi-managed-runtime", "--", "echo", "hello")[-2:] == ["echo", "hello"]
+    assert started.opaque_state["guest_workspace"].startswith("/workspace/mac_lima-")
 
 
 def test_managed_ubuntu_guest_agent_rejects_exec_cwd_before_guest_command(monkeypatch) -> None:
@@ -385,6 +413,95 @@ def test_windows_wsl_provider_ensure_imports_rumi_owned_distribution(monkeypatch
     assert executed["stdout"] == "hello\n"
     assert fake.command_containing("--import", DEFAULT_WSL_RUNTIME_NAME, str(install_dir), str(rootfs), "--version", "2")
     assert fake.command_containing("-d", DEFAULT_WSL_RUNTIME_NAME, "--", "echo", "hello")[-2:] == ["echo", "hello"]
+    assert started.opaque_state["guest_workspace"].startswith("/workspace/windows_wsl-")
+
+
+def test_managed_ubuntu_exec_defaults_to_instance_workspace_and_clean_env(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+
+    provider.ensure(
+        EnsureRuntimeRequest(
+            provider_id="mac_lima",
+            requirements=RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec", "sandbox.files"})),
+        ),
+        NullProgressSink(),
+    )
+    started = provider.start(provider.create(_create_spec(_template(desktop=False))))
+    agent = provider.connect_agent(started)
+
+    pwd = agent.exec(started.sandbox_id, {"argv": ["pwd"], "cwd": ".", "client_request_id": "exec-pwd"})
+    env = agent.exec(
+        started.sandbox_id,
+        {"argv": ["printenv", "RUMI_TEST"], "cwd": ".", "env": {"RUMI_TEST": "from-request"}, "client_request_id": "exec-env"},
+    )
+    ambient = agent.exec(
+        started.sandbox_id,
+        {"argv": ["printenv", "HOST_SECRET"], "cwd": ".", "client_request_id": "exec-ambient"},
+    )
+    exec_call = next(call for call in fake.calls if "exec-env" not in str(call) and "printenv" in call[0])
+
+    assert pwd["stdout"] == f"{started.opaque_state['guest_workspace']}\n"
+    assert pwd["resolved_cwd"] == started.opaque_state["guest_workspace"]
+    assert env["stdout"] == "from-request\n"
+    assert ambient["exit_code"] == 1
+    assert "env" in exec_call[0]
+    assert "-i" in exec_call[0]
+    assert f"RUMI_SANDBOX_INSTANCE={started.provider_instance_id}" in exec_call[0]
+    assert f"RUMI_SANDBOX_WORKSPACE={started.opaque_state['guest_workspace']}" in exec_call[0]
+    assert all(not part.startswith("HOST_SECRET=") for part in exec_call[0])
+
+
+def test_managed_ubuntu_instances_bind_agent_operations_to_distinct_workspaces(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    root_a = tmp_path / "workspace-a"
+    root_b = tmp_path / "workspace-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    (root_a / "app.txt").write_text("A\n", encoding="utf-8")
+    (root_b / "app.txt").write_text("B\n", encoding="utf-8")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    provider.ensure(
+        EnsureRuntimeRequest(
+            provider_id="mac_lima",
+            requirements=RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec", "sandbox.files"})),
+        ),
+        NullProgressSink(),
+    )
+
+    first = provider.start(
+        provider.create(
+            _create_spec(
+                _template(desktop=False),
+                workspace_binding=WorkspaceBinding(workspace_id="workspace-a", mode="overlay", root=str(root_a)),
+            )
+        )
+    )
+    second = provider.start(
+        provider.create(
+            _create_spec(
+                _template(desktop=False),
+                workspace_binding=WorkspaceBinding(workspace_id="workspace-b", mode="overlay", root=str(root_b)),
+            )
+        )
+    )
+    first_agent = provider.connect_agent(first)
+    second_agent = provider.connect_agent(second)
+    first_agent.apply_file_patch(first.sandbox_id, {"path": "src/app.py", "content": "print('a')\n"})
+    second_agent.apply_file_patch(second.sandbox_id, {"path": "src/app.py", "content": "print('b')\n"})
+    python_writes = [call for call in fake.calls if len(call[0]) > 2 and call[0][-3:-1] == ["-c", "import base64, pathlib, sys\npath = pathlib.Path(sys.argv[1])\npath.write_bytes(base64.b64decode(sys.stdin.read().encode('ascii')))\n"]]
+
+    assert first.opaque_state["guest_workspace"] != second.opaque_state["guest_workspace"]
+    assert first.opaque_state["guest_workspace"].startswith("/workspace/mac_lima-")
+    assert second.opaque_state["guest_workspace"].startswith("/workspace/mac_lima-")
+    seed_scripts = [script for script in fake.guest_scripts if "RUMI_WORKSPACE_SEED_MODE=overlay" in script]
+    assert len(seed_scripts) >= 2
+    assert str(first.opaque_state["guest_workspace"]) in seed_scripts[-2]
+    assert str(second.opaque_state["guest_workspace"]) in seed_scripts[-1]
+    assert any(str(first.opaque_state["guest_workspace"]) + "/src/app.py" in " ".join(call[0]) for call in python_writes)
+    assert any(str(second.opaque_state["guest_workspace"]) + "/src/app.py" in " ".join(call[0]) for call in python_writes)
 
 
 def test_windows_wsl_provider_does_not_claim_existing_user_ubuntu_distribution(monkeypatch) -> None:
@@ -623,6 +740,10 @@ def test_managed_ubuntu_stop_cleans_desktop_starter_processes(monkeypatch) -> No
     assert "starter-terminal.pid" in stop_script
     assert stop_script.index("starter-browser.pid") < stop_script.index("openbox.pid")
     assert stop_script.index("starter-terminal.pid") < stop_script.index("xvfb.pid")
+    assert f"RUMI_SANDBOX_INSTANCE={started.provider_instance_id}" in stop_script
+    assert "/proc/[0-9]*/environ" in stop_script
+    assert "rumi_kill_instance_processes TERM" in stop_script
+    assert "rumi_kill_instance_processes KILL" in stop_script
 
 
 def test_managed_ubuntu_browser_url_starter_respects_network_policy(monkeypatch) -> None:
@@ -712,7 +833,7 @@ def test_managed_ubuntu_desktop_provisioning_installs_declared_apps_and_mcp(monk
     assert "python3-pip" in provision_script
     assert "xterm" in provision_script
     assert "code-editor" not in provision_script
-    assert "/workspace/.rumi/mcp_servers.txt" in provision_script
+    assert f"{started.opaque_state['guest_workspace']}/.rumi/mcp_servers.txt" in provision_script
     assert "@playwright/mcp" in provision_script
     assert "$RUMI_SUDO apt-get install -y" in provision_script
     assert "$RUMI_SUDO npm install -g @playwright/mcp" in provision_script
@@ -768,7 +889,7 @@ def test_managed_ubuntu_seeds_trusted_workspace_read_only(monkeypatch, tmp_path)
 
     assert ensured.ok is True
     assert started.state == "ready"
-    assert "find /workspace -mindepth 1 -maxdepth 1 ! -name .rumi" in seed_script
+    assert f"find {started.opaque_state['guest_workspace']} -mindepth 1 -maxdepth 1 ! -name .rumi" in seed_script
     assert "& ~0o222" in seed_script
     assert _workspace_seed_member(payload, "src/app.py") == b"print('seeded')\n"
 

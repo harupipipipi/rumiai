@@ -1403,6 +1403,32 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
             },
             {"agent_id": "agent-2"},
         )
+        spoofed_body_wrong_context = api.run(
+            {
+                "_handler": "desktop_ai_input",
+                "seat_id": "seat-locked",
+                "access_key": "correct-key",
+                "action": "click",
+                "client_action_id": "ai-spoof-wrong",
+                "x": 10,
+                "y": 10,
+                "agent_id": "agent-1",
+            },
+            {"agent_id": "agent-2"},
+        )
+        spoofed_body_no_context = api.run(
+            {
+                "_handler": "desktop_ai_input",
+                "seat_id": "seat-locked",
+                "access_key": "correct-key",
+                "action": "click",
+                "client_action_id": "ai-spoof-missing",
+                "x": 10,
+                "y": 10,
+                "agent_id": "agent-1",
+            },
+            {},
+        )
         ai_click = api.run(
             {
                 "_handler": "desktop_ai_input",
@@ -1463,6 +1489,10 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
     assert access_request["error"]["code"] == "DESKTOP_ACCESS_REQUEST_NOT_REQUIRED"
     assert wrong_agent_click["status"] == "error"
     assert wrong_agent_click["error"]["code"] == "DESKTOP_AGENT_NOT_ASSIGNED"
+    assert spoofed_body_wrong_context["status"] == "error"
+    assert spoofed_body_wrong_context["error"]["code"] == "DESKTOP_AGENT_NOT_ASSIGNED"
+    assert spoofed_body_no_context["status"] == "error"
+    assert spoofed_body_no_context["error"]["code"] == "DESKTOP_AGENT_PRINCIPAL_REQUIRED"
     assert ai_click["status"] == "ok"
     assert ai_click["data"]["agent_id"] == "agent-1"
     assert ai_click["data"]["assigned_agent"] == "agent-1"
@@ -1867,10 +1897,19 @@ def test_defaultspack_runtime_service_registers_cross_platform_providers(tmp_pat
     assert provider_ids == {"docker", "linux_native", "mac_lima", "windows_wsl"}
     assert mac_isolation["mode"] == "lima_vm"
     assert mac_isolation["vm"] is True
+    assert mac_isolation["sandbox_workspace_shared"] is False
+    assert mac_isolation["sandbox_process_namespace_shared"] is True
+    assert mac_isolation["sandbox_operation_binding"] == "provider_instance_id"
+    assert mac_isolation["sandbox_cgroup_scope"] == "not_claimed"
     assert windows_isolation["mode"] == "wsl2_vm"
     assert windows_isolation["vm"] is True
+    assert windows_isolation["sandbox_workspace_shared"] is False
+    assert windows_isolation["sandbox_process_namespace_shared"] is True
+    assert windows_isolation["sandbox_operation_binding"] == "provider_instance_id"
     assert linux_isolation["mode"] == "native_x11"
     assert docker_isolation["container"] is True
+    assert docker_isolation["sandbox_process_namespace_shared"] is False
+    assert docker_isolation["sandbox_cgroup_scope"] == "docker_container"
 
 
 def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -> None:

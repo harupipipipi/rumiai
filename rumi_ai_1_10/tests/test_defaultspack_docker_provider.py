@@ -73,8 +73,9 @@ class FakeDockerCli:
 class FakeDockerPortForwarder:
     host = "127.0.0.1"
 
-    def __init__(self, target_host: str, target_port: int, *, host_port: int) -> None:
-        self.target_host = target_host
+    def __init__(self, docker_path: str, container_name: str, target_port: int, *, host_port: int) -> None:
+        self.docker_path = docker_path
+        self.container_name = container_name
         self.target_port = target_port
         self.host_port = host_port
         self.stopped = False
@@ -84,8 +85,8 @@ class FakeDockerPortForwarder:
 
 
 def _manager(tmp_path, fake: FakeDockerCli) -> SandboxManager:
-    def forwarder_factory(target_host: str, target_port: int) -> FakeDockerPortForwarder:
-        forwarder = FakeDockerPortForwarder(target_host, target_port, host_port=49152 + len(fake.forwarders))
+    def forwarder_factory(docker_path: str, container_name: str, target_port: int) -> FakeDockerPortForwarder:
+        forwarder = FakeDockerPortForwarder(docker_path, container_name, target_port, host_port=49152 + len(fake.forwarders))
         fake.forwarders.append(forwarder)
         return forwarder
 
@@ -293,14 +294,39 @@ def test_docker_provider_exposes_container_port_metadata(tmp_path) -> None:
     assert result["ok"] is True
     assert result["port"] == 3000
     assert result["url"] == "http://127.0.0.1:49152"
-    assert result["target_url"] == "http://172.17.0.2:3000"
-    assert result["container_url"] == "http://172.17.0.2:3000"
+    assert result["target_url"] == "http://127.0.0.1:3000"
+    assert result["container_url"] == "http://127.0.0.1:3000"
     assert result["host_reachable"] is True
+    assert result["forwarding"] == "docker_exec_proxy"
     assert repeated["url"] == result["url"]
     network_connect = [call for call, _input, _timeout in fake.calls if call[1:4] == ["network", "connect", "bridge"]]
-    assert len(network_connect) == 1
+    assert network_connect == []
+    assert fake.networks[f"rumi-sandbox-{created['sandbox_id']}"] == "none"
     assert len(fake.forwarders) == 1
-    assert fake.forwarders[0].target_host == "172.17.0.2"
+    assert fake.forwarders[0].docker_path == "/usr/bin/docker"
+    assert fake.forwarders[0].container_name == f"rumi-sandbox-{created['sandbox_id']}"
     assert fake.forwarders[0].target_port == 3000
     assert destroyed["ok"] is True
     assert fake.forwarders[0].stopped is True
+
+
+def test_docker_port_forward_grant_expires_on_stop_restart(tmp_path) -> None:
+    fake = FakeDockerCli()
+    manager = _manager(tmp_path, fake)
+    created = manager.create(display=False, provider_id="docker", template_id="coding.python")
+
+    first = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"}, approved=True)
+    stopped = manager.stop(created["sandbox_id"])
+    restarted = manager.start(created["sandbox_id"])
+    second = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"}, approved=True)
+
+    assert first["ok"] is True
+    assert stopped["ok"] is True
+    assert restarted["ok"] is True
+    assert fake.forwarders[0].stopped is True
+    assert second["ok"] is True
+    assert second["url"] == "http://127.0.0.1:49153"
+    assert len(fake.forwarders) == 2
+    network_connect = [call for call, _input, _timeout in fake.calls if call[1:4] == ["network", "connect", "bridge"]]
+    assert network_connect == []
+    assert fake.networks[f"rumi-sandbox-{created['sandbox_id']}"] == "none"

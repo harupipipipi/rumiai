@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import os
 import platform
-import select
 import shutil
 import socket
 import subprocess
@@ -61,7 +60,7 @@ class DockerCommandResult:
 
 
 DockerRunner = Callable[[Sequence[str], str | None, float | None], DockerCommandResult]
-PortForwarderFactory = Callable[[str, int], "DockerPortForwarder"]
+PortForwarderFactory = Callable[[str, str, int], "DockerPortForwarder"]
 
 
 class DockerProvider:
@@ -438,32 +437,23 @@ class DockerGuestAgent:
         protocol = str(payload.get("protocol") or "http").strip().lower()
         if protocol not in {"http", "https", "tcp"}:
             raise SandboxContractError("INVALID_SANDBOX_PORT", "Sandbox port protocol must be http, https, or tcp.", status_code=400)
-        inspect = self._inspect_network_address()
-        if inspect.returncode != 0:
-            return _guest_operation_error(sandbox_id, "SANDBOX_PORTS_FAILED", "Sandbox port exposure could not inspect container networking.", inspect)
-        container_ip = inspect.stdout.strip()
-        if not container_ip and payload.get("_network_policy_approved") is True:
-            connected = self._runner((self._docker_path, "network", "connect", "bridge", self._container_name), None, 30)
-            if connected.returncode != 0:
-                return _guest_operation_error(sandbox_id, "SANDBOX_PORTS_FAILED", "Sandbox port exposure could not attach approved container networking.", connected)
-            inspect = self._inspect_network_address()
-            if inspect.returncode != 0:
-                return _guest_operation_error(sandbox_id, "SANDBOX_PORTS_FAILED", "Sandbox port exposure could not inspect approved container networking.", inspect)
-            container_ip = inspect.stdout.strip()
-        if not container_ip:
-            raise SandboxContractError(
+        probe = self._probe_container_loopback(port)
+        if probe.returncode != 0:
+            return _guest_operation_error(
+                sandbox_id,
                 "SANDBOX_PORTS_NOT_READY",
-                "Sandbox container does not have an inspectable network address.",
-                status_code=501,
+                "Sandbox port exposure could not verify a listening container service.",
+                probe,
+                status_code=503,
             )
         key = (self._container_name, port)
         forwarder = self._port_forwarders.get(key)
         if forwarder is None:
-            forwarder = self._port_forwarder_factory(container_ip, port)
+            forwarder = self._port_forwarder_factory(self._docker_path, self._container_name, port)
             self._port_forwarders[key] = forwarder
         scheme = "http" if protocol == "tcp" else protocol
         url = f"{scheme}://{forwarder.host}:{forwarder.host_port}"
-        container_url = f"{scheme}://{container_ip}:{port}"
+        container_url = f"{scheme}://127.0.0.1:{port}"
         return {
             "ok": True,
             "sandbox_id": sandbox_id,
@@ -475,17 +465,26 @@ class DockerGuestAgent:
             "target_url": container_url,
             "container_url": container_url,
             "host_reachable": True,
+            "forwarding": "docker_exec_proxy",
             "provider_runtime": "docker",
         }
 
-    def _inspect_network_address(self) -> DockerCommandResult:
+    def _probe_container_loopback(self, port: int) -> DockerCommandResult:
+        script = (
+            "import socket, sys\n"
+            "port = int(sys.argv[1])\n"
+            "with socket.create_connection(('127.0.0.1', port), timeout=1.0):\n"
+            "    pass\n"
+        )
         return self._runner(
             (
                 self._docker_path,
-                "inspect",
-                "--format",
-                "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                "exec",
                 self._container_name,
+                "python3",
+                "-c",
+                script,
+                str(int(port)),
             ),
             None,
             10,
@@ -539,8 +538,9 @@ def _subprocess_runner(command: Sequence[str], input_text: str | None, timeout: 
 class DockerPortForwarder:
     host = "127.0.0.1"
 
-    def __init__(self, target_host: str, target_port: int) -> None:
-        self._target_host = target_host
+    def __init__(self, docker_path: str, container_name: str, target_port: int) -> None:
+        self._docker_path = docker_path
+        self._container_name = container_name
         self._target_port = int(target_port)
         self._closed = threading.Event()
         self._listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -570,33 +570,101 @@ class DockerPortForwarder:
     def _handle_client(self, client: socket.socket) -> None:
         with client:
             try:
-                upstream = socket.create_connection((self._target_host, self._target_port), timeout=10)
+                proc = subprocess.Popen(
+                    (
+                        self._docker_path,
+                        "exec",
+                        "--interactive",
+                        self._container_name,
+                        "python3",
+                        "-c",
+                        _docker_exec_proxy_script(),
+                        str(self._target_port),
+                    ),
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                )
             except OSError:
                 return
-            with upstream:
-                _relay_sockets(client, upstream)
-
-
-def _relay_sockets(left: socket.socket, right: socket.socket) -> None:
-    sockets = {left: right, right: left}
-    try:
-        while True:
-            readable, _writable, _errored = select.select(tuple(sockets), (), tuple(sockets), 30)
-            if not readable:
-                continue
-            for source in readable:
-                chunk = source.recv(65536)
-                if not chunk:
-                    return
-                sockets[source].sendall(chunk)
-    except OSError:
-        return
-    finally:
-        for sock in sockets:
             try:
-                sock.shutdown(socket.SHUT_RDWR)
+                _relay_socket_process(client, proc)
+            finally:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+
+
+def _relay_socket_process(client: socket.socket, proc: subprocess.Popen[bytes]) -> None:
+    if proc.stdin is None or proc.stdout is None:
+        return
+    stop = threading.Event()
+
+    def client_to_process() -> None:
+        try:
+            while not stop.is_set():
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                assert proc.stdin is not None
+                proc.stdin.write(chunk)
+                proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            pass
+        finally:
+            try:
+                if proc.stdin is not None:
+                    proc.stdin.close()
             except OSError:
                 pass
+            stop.set()
+
+    def process_to_client() -> None:
+        try:
+            while not stop.is_set():
+                assert proc.stdout is not None
+                chunk = proc.stdout.read(65536)
+                if not chunk:
+                    break
+                client.sendall(chunk)
+        except OSError:
+            pass
+        finally:
+            stop.set()
+
+    left = threading.Thread(target=client_to_process, daemon=True)
+    right = threading.Thread(target=process_to_client, daemon=True)
+    left.start()
+    right.start()
+    while not stop.is_set() and proc.poll() is None:
+        left.join(timeout=0.1)
+        right.join(timeout=0.1)
+    stop.set()
+
+
+def _docker_exec_proxy_script() -> str:
+    return (
+        "import select, socket, sys\n"
+        "target = socket.create_connection(('127.0.0.1', int(sys.argv[1])), timeout=10)\n"
+        "target.setblocking(False)\n"
+        "stdin = sys.stdin.buffer\n"
+        "stdout = sys.stdout.buffer\n"
+        "while True:\n"
+        "    readable, _, _ = select.select([target, stdin], [], [], 30)\n"
+        "    if not readable:\n"
+        "        continue\n"
+        "    for source in readable:\n"
+        "        data = source.recv(65536) if source is target else source.read1(65536)\n"
+        "        if not data:\n"
+        "            raise SystemExit(0)\n"
+        "        if source is target:\n"
+        "            stdout.write(data); stdout.flush()\n"
+        "        else:\n"
+        "            target.sendall(data)\n"
+    )
 
 
 def _docker_run_command(docker_path: str, name: str, opaque_state: Mapping[str, object]) -> list[str]:

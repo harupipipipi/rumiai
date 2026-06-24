@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ChevronDown, Copy, KeyRound, Link2, Loader2, Play, RefreshCw, Route, Server, ShieldAlert, ShieldCheck } from "lucide-react";
+import { CheckCircle2, ChevronDown, Copy, KeyRound, Link2, Loader2, RefreshCw, Route, Server, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { cn } from "../../lib/cn";
 import type { SettingsFieldRendererProps } from "../../renderers/settings/fieldRendererRegistry";
@@ -229,21 +229,6 @@ export function ContinuitySettingsField({
     }
   };
 
-  const handleHandoff = async () => {
-    if (!canRun) return;
-    setAction("handoff");
-    setError("");
-    try {
-      const result = await continuityApi.startHandoff(handoffPayload());
-      setOperations((current) => [result.operation, ...current.filter((item) => item.operation_id !== result.operation.operation_id)]);
-      persistConfig({ last_operation_id: result.operation.operation_id });
-    } catch (handoffError) {
-      setError(formatError(handoffError));
-    } finally {
-      setAction("idle");
-    }
-  };
-
   const handlePairingCode = async () => {
     setAction("pairing");
     setError("");
@@ -252,20 +237,6 @@ export function ContinuitySettingsField({
       setPairing(result);
     } catch (pairingError) {
       setError(formatError(pairingError));
-    } finally {
-      setAction("idle");
-    }
-  };
-
-  const handleReturnToDevice = async () => {
-    if (!operation?.operation_id) return;
-    setAction("handoff");
-    setError("");
-    try {
-      const result = await continuityApi.returnHandoff(operation.operation_id);
-      setOperations((current) => [result.operation, ...current.filter((item) => item.operation_id !== result.operation.operation_id)]);
-    } catch (returnError) {
-      setError(formatError(returnError));
     } finally {
       setAction("idle");
     }
@@ -553,15 +524,6 @@ export function ContinuitySettingsField({
             {action === "plan" ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
             Review move
           </button>
-          <button
-            type="button"
-            disabled={!canRun || action !== "idle"}
-            onClick={() => void handleHandoff()}
-            className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 text-xs font-medium text-emerald-100 hover:border-emerald-400/70 disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            {action === "handoff" ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-            {completed ? "Start another handoff" : "Start handoff"}
-          </button>
         </div>
       </div>
 
@@ -578,32 +540,6 @@ export function ContinuitySettingsField({
           )}>
             {operationStatusLabel(operation.status)}
           </span>
-          {completed && (
-            <div className="flex w-full flex-wrap gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => void handleReturnToDevice()}
-                disabled={action !== "idle"}
-                className="h-8 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-[11px] text-zinc-300 hover:border-zinc-700 disabled:opacity-45"
-              >
-                Return to this device
-              </button>
-              <button
-                type="button"
-                onClick={() => setCopyState("kept")}
-                className="h-8 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-[11px] text-zinc-300 hover:border-zinc-700"
-              >
-                Keep running on destination
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAdvanced(true)}
-                className="h-8 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-[11px] text-zinc-300 hover:border-zinc-700"
-              >
-                View transfer details
-              </button>
-            </div>
-          )}
         </div>
       )}
     </div>

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -73,7 +73,7 @@ def test_provider_route_preserves_exact_named_api_route_and_blocks_local(continu
     assert {check["code"] for check in probe["checks"]} >= {"DESTINATION_ENDPOINT_REACHABLE", "CREDENTIAL_REFERENCE_CONFIGURED"}
 
 
-def test_handoff_creates_encrypted_credential_envelope_and_atomic_primary_lease(continuity_env):
+def test_handoff_start_is_scope_gated_and_keeps_source_primary(continuity_env):
     from ecosystem.defaultspack.backend.continuity import ContinuityCoordinator
 
     secret = "test-provider-secret-value"
@@ -86,6 +86,8 @@ def test_handoff_creates_encrypted_credential_envelope_and_atomic_primary_lease(
     )
     coordinator = ContinuityCoordinator()
     destination = coordinator.node_registry.register_destination(display_name="Workstation")
+    source_node_id = coordinator.node_registry.local_node()["node_id"]
+    coordinator.primary_leases.acquire("sandbox-123", source_node_id, generation=1)
 
     result = coordinator.start_handoff(
         {
@@ -99,27 +101,15 @@ def test_handoff_creates_encrypted_credential_envelope_and_atomic_primary_lease(
     )
 
     operation = result["operation"]
-    assert operation["status"] == "COMPLETED"
-    assert operation["destination_primary"] is True
-    assert operation["source_primary"] is False
-    assert operation["primary_lease"]["owner_node_id"] == destination["node_id"]
-    assert operation["primary_lease"]["generation"] == 2
+    assert operation["status"] == "PAUSED_USER_ACTION"
+    assert operation["code"] == "CONTINUITY_REMOTE_HANDOFF_UNAVAILABLE"
+    assert operation["destination_primary"] is False
+    assert operation["source_primary"] is True
+    assert coordinator.primary_leases.get("sandbox-123")["owner_node_id"] == source_node_id
 
-    envelope = coordinator.credentials.get(operation["credential_envelope_id"])
-    assert envelope is not None
-    assert secret not in json.dumps(envelope)
-    unwrapped = coordinator.credentials.unwrap(
-        envelope,
-        destination_private_key=coordinator.node_registry.private_key_for(destination["node_id"]),
-    )
-    assert unwrapped["secret"] == secret
-    assert unwrapped["allowed_model_ids"] == ["gpt-4.1"]
-
-    continuity_text = (Path(os.environ["RUMI_DEFAULTSPACK_CONTINUITY_DIR"]) / "credential_envelopes.json").read_text(encoding="utf-8")
-    assert secret not in continuity_text
-    checkpoint_text = (Path(os.environ["RUMI_DEFAULTSPACK_CONTINUITY_DIR"]) / "checkpoints.json").read_text(encoding="utf-8")
-    assert secret not in checkpoint_text
-    assert "credential_envelope_id" in checkpoint_text
+    credential_path = Path(os.environ["RUMI_DEFAULTSPACK_CONTINUITY_DIR"]) / "credential_envelopes.json"
+    if credential_path.exists():
+        assert secret not in credential_path.read_text(encoding="utf-8")
 
 
 def test_handoff_pauses_when_preflight_rejects_source_only_provider(continuity_env):
@@ -182,11 +172,17 @@ def test_continuity_routes_and_ai_functions_are_registered():
     from domain.function_runtime.registry import get_spec
     from transport.registry import canonical_http_route_specs
 
-    assert get_spec("continuity_handoff").risk == "high"
-    assert "continuity.handoff" in get_spec("continuity_handoff").aliases
+    assert get_spec("continuity_handoff") is None
+    assert get_spec("continuity_return_to_device") is None
     assert get_spec("continuity_plan_handoff").block_module == "blocks.continuity.api"
 
     routes = {(spec.method, spec.pattern, spec.function_id) for spec in canonical_http_route_specs()}
     assert ("GET", "/api/continuity/nodes", "continuity_list_nodes") in routes
-    assert ("POST", "/api/continuity/handoffs", "continuity_handoff") in routes
+    assert ("POST", "/api/continuity/handoffs", "continuity_handoff") not in routes
+    assert ("POST", "/api/continuity/handoffs/{operation_id}/return", "continuity_return_to_device") not in routes
     assert ("POST", "/api/continuity/provider-routes/{route_id}/probe", "continuity_probe_provider_route") in routes
+
+    aliases = yaml.safe_load((DEFAULTSPACK_ROOT / "compat_aliases.yaml").read_text(encoding="utf-8"))["aliases"]
+    assert "defaults.continuity.handoff" not in aliases
+    assert "defaults.continuity.return.to.device" not in aliases
+    assert "defaults.continuity.return_to_device" not in aliases

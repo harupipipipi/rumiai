@@ -513,13 +513,17 @@ class SandboxManager:
         payload: Dict[str, Any],
         *,
         actor: str = "human",
+        authenticated_agent_id: str | None = None,
     ) -> Dict[str, Any]:
         self._enforce_lifecycle_for_instance(seat_id)
         normalized_actor = "ai" if actor == "ai" else "human"
-        agent_id = _optional_clean_string(
-            payload.get("agent_id") or payload.get("actor_agent_id") or payload.get("assigned_agent_id"),
-            max_len=160,
-        )
+        if normalized_actor == "ai":
+            agent_id = _optional_clean_string(authenticated_agent_id, max_len=160)
+        else:
+            agent_id = _optional_clean_string(
+                payload.get("agent_id") or payload.get("actor_agent_id") or payload.get("assigned_agent_id"),
+                max_len=160,
+            )
         action = str(payload.get("action") or "")
         client_action_id = _optional_clean_string(payload.get("client_action_id"), max_len=160)
         normalized_payload: dict[str, Any] | None = None

@@ -600,18 +600,21 @@ def test_ai_desktop_input_rate_limit_is_actor_scoped(tmp_path):
     for index in range(30):
         last_ok = manager.desktop_input(
             seat_id,
-            {"action": "click", "client_action_id": f"ai-{index}", "x": 1, "y": 1, "agent_id": "agent-1"},
+            {"action": "click", "client_action_id": f"ai-{index}", "x": 1, "y": 1},
             actor="ai",
+            authenticated_agent_id="agent-1",
         )
     limited = manager.desktop_input(
         seat_id,
-        {"action": "click", "client_action_id": "ai-limited", "x": 1, "y": 1, "agent_id": "agent-1"},
+        {"action": "click", "client_action_id": "ai-limited", "x": 1, "y": 1},
         actor="ai",
+        authenticated_agent_id="agent-1",
     )
     other_agent = manager.desktop_input(
         seat_id,
-        {"action": "click", "client_action_id": "ai-other", "x": 1, "y": 1, "agent_id": "agent-2"},
+        {"action": "click", "client_action_id": "ai-other", "x": 1, "y": 1},
         actor="ai",
+        authenticated_agent_id="agent-2",
     )
 
     assert last_ok is not None and last_ok["ok"] is True

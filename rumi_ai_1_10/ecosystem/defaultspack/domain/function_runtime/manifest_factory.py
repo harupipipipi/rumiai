@@ -747,15 +747,6 @@ CONTINUITY_FUNCTIONS: tuple[FunctionSpec, ...] = (
         aliases=("defaults.continuity.plan_handoff", "defaultspack.continuity.plan_handoff", "continuity.plan_handoff"),
     ),
     _spec(
-        "continuity_handoff",
-        "Start a continuity handoff after preflight and credential delegation.",
-        ("continuity", "handoff", "cutover"),
-        risk="high",
-        block="blocks.continuity.api",
-        default_args={"_handler": "handoff"},
-        aliases=("defaults.continuity.handoff", "defaultspack.continuity.handoff", "continuity.handoff"),
-    ),
-    _spec(
         "continuity_status",
         "Get a continuity handoff operation status.",
         ("continuity", "handoff"),
@@ -771,15 +762,6 @@ CONTINUITY_FUNCTIONS: tuple[FunctionSpec, ...] = (
         block="blocks.continuity.api",
         default_args={"_handler": "handoff_cancel"},
         aliases=("defaults.continuity.cancel", "defaultspack.continuity.cancel", "continuity.cancel"),
-    ),
-    _spec(
-        "continuity_return_to_device",
-        "Return primary execution ownership to the source device.",
-        ("continuity", "return"),
-        risk="high",
-        block="blocks.continuity.api",
-        default_args={"_handler": "handoff_return"},
-        aliases=("defaults.continuity.return_to_device", "defaultspack.continuity.return_to_device", "continuity.return_to_device"),
     ),
     _spec(
         "continuity_checkpoint",

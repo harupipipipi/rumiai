@@ -41,6 +41,21 @@ function isolationRows(isolation: RuntimeIsolationFacts | null | undefined, prov
   rows.push(factRow("Host process namespace", isolation.host_process_namespace ? "Shared" : "Isolated", isolation.host_process_namespace ? "warning" : "default"));
   rows.push(factRow("Host filesystem", isolation.host_filesystem_shared ? "Shared" : "Backend-limited", isolation.host_filesystem_shared ? "warning" : "default"));
   rows.push(factRow("Host network", isolation.host_network_shared ? "Shared" : "Backend-limited", isolation.host_network_shared ? "warning" : "default"));
+  if (typeof isolation.sandbox_workspace_shared === "boolean") {
+    rows.push(factRow("Sandbox workspace", isolation.sandbox_workspace_shared ? "Shared" : "Per instance", isolation.sandbox_workspace_shared ? "warning" : "default"));
+  }
+  if (typeof isolation.sandbox_process_namespace_shared === "boolean") {
+    rows.push(factRow("Sandbox process namespace", isolation.sandbox_process_namespace_shared ? "Shared" : "Isolated", isolation.sandbox_process_namespace_shared ? "warning" : "default"));
+  }
+  if (typeof isolation.sandbox_network_namespace_shared === "boolean") {
+    rows.push(factRow("Sandbox network namespace", isolation.sandbox_network_namespace_shared ? "Shared" : "Isolated", isolation.sandbox_network_namespace_shared ? "warning" : "default"));
+  }
+  if (isolation.sandbox_cgroup_scope) {
+    rows.push(factRow("Sandbox cgroup scope", isolation.sandbox_cgroup_scope, isolation.sandbox_cgroup_scope === "not_claimed" ? "warning" : "default"));
+  }
+  if (isolation.sandbox_operation_binding) {
+    rows.push(factRow("Operation binding", isolation.sandbox_operation_binding));
+  }
   return rows;
 }
 

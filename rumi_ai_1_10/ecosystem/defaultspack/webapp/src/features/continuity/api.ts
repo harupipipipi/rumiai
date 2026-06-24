@@ -48,19 +48,11 @@ export const continuityApi = {
     return api.planContinuityHandoff(payload);
   },
 
-  startHandoff(payload: ContinuityHandoffRequest) {
-    return api.startContinuityHandoff(payload);
-  },
-
   listHandoffs() {
     return api.listContinuityHandoffs();
   },
 
   cancelHandoff(operationId: string) {
     return api.cancelContinuityHandoff(operationId);
-  },
-
-  returnHandoff(operationId: string) {
-    return api.returnContinuityHandoff(operationId);
   },
 };

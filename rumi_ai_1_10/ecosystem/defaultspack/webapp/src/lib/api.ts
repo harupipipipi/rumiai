@@ -2354,13 +2354,6 @@ export const api = {
     });
   },
 
-  startContinuityHandoff(payload: ContinuityHandoffRequest) {
-    return request<{ operation: ContinuityHandoffOperation }>("/api/continuity/handoffs", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  },
-
   listContinuityHandoffs() {
     return request<{ operations: ContinuityHandoffOperation[] }>("/api/continuity/handoffs", { cache: "no-store" });
   },
@@ -2373,18 +2366,6 @@ export const api = {
 
   cancelContinuityHandoff(operationId: string) {
     return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}/cancel`, {
-      method: "POST",
-    });
-  },
-
-  retryContinuityHandoff(operationId: string) {
-    return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}/retry`, {
-      method: "POST",
-    });
-  },
-
-  returnContinuityHandoff(operationId: string) {
-    return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}/return`, {
       method: "POST",
     });
   },

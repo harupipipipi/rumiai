@@ -781,8 +781,14 @@ def _desktop_ai_input(service: _SandboxApiService, payload: dict[str, Any], cont
         return access_error
     service.lease_manager.validate_ai_input(seat_id)
     agent_id = _agent_id(payload, context)
-    manager_payload = payload if agent_id is None or payload.get("agent_id") else {**payload, "agent_id": agent_id}
-    result = service.manager.desktop_input(seat_id, manager_payload, actor="ai")
+    if agent_id is None:
+        return _api_error("AI desktop input requires a server-authenticated agent principal.", "DESKTOP_AGENT_PRINCIPAL_REQUIRED", 403)
+    manager_payload = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"agent_id", "actor_agent_id", "assigned_agent_id"}
+    }
+    result = service.manager.desktop_input(seat_id, manager_payload, actor="ai", authenticated_agent_id=agent_id)
     if result.get("ok") is not True:
         return _api_error(str(result.get("error") or "Desktop input failed"), str(result.get("code") or "DESKTOP_INPUT_FAILED"), int(result.get("status_code") or 400))
     return ok(_desktop_input_payload(result, seat_id=seat_id, actor="ai"))
@@ -1132,6 +1138,11 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
         return {
             "mode": "container_optional",
             "container": True,
+            "sandbox_workspace_shared": False,
+            "sandbox_process_namespace_shared": False,
+            "sandbox_network_namespace_shared": False,
+            "sandbox_cgroup_scope": "docker_container",
+            "sandbox_operation_binding": "container_id",
             "summary": "Optional provider only; Docker Desktop is never installed silently.",
         }
     if provider_id == "mac_lima":
@@ -1142,7 +1153,13 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
             "host_process_namespace": False,
             "host_filesystem_shared": False,
             "host_network_shared": False,
-            "summary": "macOS provider uses a Rumi-owned Lima Ubuntu VM for sandbox and desktop runtime isolation.",
+            "sandbox_workspace_shared": False,
+            "sandbox_process_namespace_shared": True,
+            "sandbox_network_namespace_shared": True,
+            "sandbox_cgroup_scope": "not_claimed",
+            "sandbox_operation_binding": "provider_instance_id",
+            "summary": "macOS provider uses a Rumi-owned Lima Ubuntu VM with per-instance workspaces and process cleanup; guest kernel namespaces are not claimed.",
+            "warnings": ["Sandbox instances share the managed guest kernel namespaces; use Docker for container-level isolation."],
         }
     if provider_id == "windows_wsl":
         return {
@@ -1152,7 +1169,13 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
             "host_process_namespace": False,
             "host_filesystem_shared": False,
             "host_network_shared": False,
-            "summary": "Windows provider uses a Rumi-owned WSL2 Ubuntu distribution for sandbox and desktop runtime isolation.",
+            "sandbox_workspace_shared": False,
+            "sandbox_process_namespace_shared": True,
+            "sandbox_network_namespace_shared": True,
+            "sandbox_cgroup_scope": "not_claimed",
+            "sandbox_operation_binding": "provider_instance_id",
+            "summary": "Windows provider uses a Rumi-owned WSL2 Ubuntu distribution with per-instance workspaces and process cleanup; guest kernel namespaces are not claimed.",
+            "warnings": ["Sandbox instances share the managed guest kernel namespaces; use Docker for container-level isolation."],
         }
     return {"mode": "unavailable", "summary": "Runtime isolation is unavailable until a provider is ready."}
 
@@ -1410,13 +1433,11 @@ def _desktop_principal_id(context: dict[str, Any]) -> str | None:
 
 
 def _agent_id(payload: dict[str, Any], context: dict[str, Any]) -> str | None:
+    del payload
     for value in (
-        payload.get("agent_id"),
-        payload.get("actor_agent_id"),
-        payload.get("assigned_agent_id"),
+        context.get("authenticated_agent_id"),
         context.get("agent_id"),
-        context.get("actor_id"),
-        context.get("user_id"),
+        context.get("actor_agent_id"),
     ):
         text = str(value or "").strip()
         if text:
