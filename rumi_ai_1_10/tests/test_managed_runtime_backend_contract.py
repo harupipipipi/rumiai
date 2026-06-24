@@ -1692,8 +1692,9 @@ def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, 
     assert access_request["data"]["request_id"] not in registry_after_destroy
 
 
-def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
+def test_defaultspack_runtime_routes_return_honest_unavailable_state(monkeypatch) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
+    from ecosystem.defaultspack.backend.sandbox.providers import linux_native
     from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
 
     routes = {(spec.method, spec.pattern, spec.block_module) for spec in canonical_http_route_specs()}
@@ -1747,16 +1748,23 @@ def test_defaultspack_runtime_routes_return_honest_unavailable_state() -> None:
         assert route_pieces[function_id]["requires_confirmation"] is True
         assert route_pieces[function_id]["confirmation_field"] == "confirm_destructive"
 
-    providers = api.run({"_handler": "runtime_providers"}, {})
-    doctor = api.run({"_handler": "runtime_doctor"}, {})
-    ensure = api.run({"_handler": "runtime_ensure", "provider_id": "missing-provider"}, {})
-    update = api.run({"_handler": "runtime_update", "provider_id": "missing-provider"}, {})
-    uninstall = api.run(
-        {"_handler": "runtime_uninstall", "provider_id": "missing-provider", "confirm_destructive": True},
-        {},
-    )
-    templates = api.run({"_handler": "sandbox_templates"}, {})
-    desktops = api.run({"_handler": "desktops_list"}, {})
+    monkeypatch.setattr(api.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(linux_native.sys, "platform", "linux")
+    monkeypatch.setattr(linux_native.shutil, "which", lambda _name: None)
+    api._reset_service_for_tests(None)
+    try:
+        providers = api.run({"_handler": "runtime_providers"}, {})
+        doctor = api.run({"_handler": "runtime_doctor"}, {})
+        ensure = api.run({"_handler": "runtime_ensure", "provider_id": "missing-provider"}, {})
+        update = api.run({"_handler": "runtime_update", "provider_id": "missing-provider"}, {})
+        uninstall = api.run(
+            {"_handler": "runtime_uninstall", "provider_id": "missing-provider", "confirm_destructive": True},
+            {},
+        )
+        templates = api.run({"_handler": "sandbox_templates"}, {})
+        desktops = api.run({"_handler": "desktops_list"}, {})
+    finally:
+        api._reset_service_for_tests(None)
 
     assert providers["status"] == "ok"
     assert providers["data"]["providers"][0]["status"] == "unavailable"

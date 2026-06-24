@@ -77,13 +77,13 @@ class LinuxNativeProvider:
         self._sessions: dict[str, Any] = {}
 
     def doctor(self, request: RuntimeRequirements) -> RuntimeProviderStatus:
-        available = sys.platform.startswith("linux")
-        capabilities = DESKTOP_CAPABILITIES if available else frozenset()
+        platform_available = sys.platform.startswith("linux")
+        capabilities = DESKTOP_CAPABILITIES if platform_available else frozenset()
         missing: list[str] = []
         diagnostics: list[Diagnostic] = []
         installed = False
 
-        if not available:
+        if not platform_available:
             missing.append("linux_platform")
             diagnostics.append(
                 Diagnostic(
@@ -118,18 +118,23 @@ class LinuxNativeProvider:
                     details={"missing_capabilities": missing_capabilities},
                 )
             )
-        ready = available and installed and not missing_capabilities
+        ready = platform_available and installed and not missing_capabilities
         return RuntimeProviderStatus(
             provider_id=self.provider_id,
             platform="linux",
-            available=available,
+            available=platform_available and installed,
             installed=installed,
             ready=ready,
             version=None,
             capabilities=capabilities,
             missing_requirements=tuple(missing),
             requires_user_action=bool(missing),
-            user_action=None if ready else _linux_native_user_action(available=available, missing_capabilities=missing_capabilities),
+            user_action=None
+            if ready
+            else _linux_native_user_action(
+                available=platform_available,
+                missing_capabilities=missing_capabilities,
+            ),
             reboot_required=False,
             diagnostics=tuple(diagnostics),
         )

@@ -84,9 +84,13 @@ def test_linux_native_ensure_installs_desktop_dependencies(monkeypatch) -> None:
     after = provider.doctor(requirements)
 
     assert before.ready is False
+    assert before.available is False
+    assert before.installed is False
     assert "command:Xvfb" in before.missing_requirements
     assert ensured.ok is True
     assert after.ready is True
+    assert after.available is True
+    assert after.installed is True
     assert runner.command_containing("/usr/bin/apt-get", "update")[-1] == "update"
     install = runner.command_containing("/usr/bin/apt-get", "install", "-y")
     assert {"xvfb", "openbox", "xdotool", "imagemagick"}.issubset(set(install))
