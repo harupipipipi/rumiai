@@ -25,6 +25,28 @@ canonical control panel at `rumi_ai_1_10/ecosystem/defaultspack/`.
   the Mac to start **スマホをペアリング** or display the legacy PC接続QR,
   Cloudflare Pages QR, and API/モデル import QR.
 
+## PC chat controls
+
+When the phone is connected to a paired PC space, the chat header shows the
+active PC model next to the selected space. The composer has a left-side **+**
+menu for PC controls:
+
+- choose any selectable PC model/profile reported by the PC capabilities
+  endpoint;
+- toggle PC turn options such as DeepThink/thinking levels when the selected
+  model supports them;
+- run PC slash commands from the menu instead of typing them manually.
+
+The PC command list is not hard-coded in the mobile app. Mobile reads the
+paired PC's capabilities/catalog response, including command manifest entries,
+and posts selected commands to `/api/mobile/v1/commands/execute`. New public PC
+slash commands should therefore appear in the **+** menu after the PC exposes
+them through its command manifest and capabilities response.
+
+Typing slash commands still works. For discoverability, `/` commands should
+also be reachable from the **+** menu. Local on-device chat has its own model
+selection from the same menu, backed by the stored API/model config.
+
 ## QR payload format
 
 The PC side (defaultspack webapp **Settings → アプリ**) emits JSON QR codes:

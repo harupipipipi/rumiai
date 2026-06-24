@@ -72,6 +72,12 @@ mobile-reachable `baseUrls`, and `expiresAt`.
 - Credential transfer is encrypted and device-bound. Creation requires a target
   device, `ciphertext`, and `nonce`; plaintext or wrapper-only payloads fail
   closed. Get/ack calls require the authenticated device to match the transfer.
+- Mobile PC controls are catalog-driven. The phone reads the paired PC's mobile
+  capabilities response for selectable profiles, runtime model settings, and
+  public slash command manifest entries; it must not ship a separate hard-coded
+  list of PC commands. Command execution goes through
+  `POST /api/mobile/v1/commands/execute`, which is a scoped mobile facade over
+  the PC slash command registry and requires the route's mobile device scope.
 - LAN HTTP is for trusted private networks. Mobile pairing base URLs must not
   advertise loopback hosts; Android permits cleartext LAN HTTP through network
   security config, and iOS uses local-network/ATS local networking entries.
