@@ -165,7 +165,11 @@ private final class RumiKeychainStorage {
   private let service = "ai.rumi.remote.secure_storage"
 
   func read(key: String) throws -> String? {
-    try readValue(query: baseQuery(key: key)) ?? readValue(query: legacyQuery(key: key))
+    let current = try readValue(query: baseQuery(key: key))
+    if current != nil || skipsLegacyFallback(key: key) {
+      return current
+    }
+    return try readValue(query: legacyQuery(key: key))
   }
 
   private func readValue(query base: [CFString: Any]) throws -> String? {
@@ -211,7 +215,12 @@ private final class RumiKeychainStorage {
   }
 
   func delete(key: String) throws {
-    let status = SecItemDelete(baseQuery(key: key) as CFDictionary)
+    try deleteValue(query: baseQuery(key: key))
+    try deleteValue(query: legacyQuery(key: key))
+  }
+
+  private func deleteValue(query: [CFString: Any]) throws {
+    let status = SecItemDelete(query as CFDictionary)
     if status == errSecSuccess || status == errSecItemNotFound {
       return
     }
@@ -231,6 +240,17 @@ private final class RumiKeychainStorage {
       kSecClass: kSecClassGenericPassword,
       kSecAttrAccount: key,
     ]
+  }
+
+  private func skipsLegacyFallback(key: String) -> Bool {
+    switch key {
+    case "rumi.paired_device.v1",
+         "rumi.paired_devices.v1",
+         "rumi.pc_connection.v1":
+      return true
+    default:
+      return false
+    }
   }
 
   private func keychainError(_ status: OSStatus) -> NSError {

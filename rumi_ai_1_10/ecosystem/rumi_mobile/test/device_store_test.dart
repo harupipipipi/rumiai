@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:rumi_remote_app/src/data/pc/device_store.dart';
@@ -83,6 +85,22 @@ void main() {
     expect(await store.loadPairedDevices(), hasLength(1));
 
     await store.clear();
+
+    expect(await store.loadPairedDevice(), isNull);
+    expect(await store.loadPairedDevices(), isEmpty);
+  });
+
+  test('legacy pc connection does not resurrect paired state', () async {
+    final storage = _FakeSecureStorage();
+    final store = MobileDeviceStore(storage: storage);
+
+    await storage.write(
+      'rumi.pc_connection.v1',
+      jsonEncode({
+        'baseUrl': 'http://192.168.11.25:8765',
+        'token': 'dtk-legacy',
+      }),
+    );
 
     expect(await store.loadPairedDevice(), isNull);
     expect(await store.loadPairedDevices(), isEmpty);
