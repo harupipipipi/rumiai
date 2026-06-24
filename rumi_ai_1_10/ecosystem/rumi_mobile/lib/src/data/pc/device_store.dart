@@ -219,28 +219,7 @@ class MobileDeviceStore {
         if (device.isConfigured) return device;
       }
     } catch (_) {
-      // fall through to check legacy
-    }
-    // Migration: check legacy PcConnection
-    try {
-      final legacy = await _storage.read(_legacyPcKey);
-      if (legacy != null && legacy.trim().isNotEmpty) {
-        final pc =
-            PcConnection.fromJson(jsonDecode(legacy) as Map<String, dynamic>);
-        if (pc.isConfigured) {
-          return PairedDevice(
-            deviceId: 'legacy',
-            deviceToken: pc.token,
-            label: 'PC (legacy)',
-            scopes: const ['chat.read', 'chat.write', 'tools.observe'],
-            pcBaseUrl: pc.baseUrl,
-            pcLabel: 'PC',
-            pairingId: '',
-          );
-        }
-      }
-    } catch (_) {
-      // ignore
+      // ignore malformed paired device state
     }
     return null;
   }
