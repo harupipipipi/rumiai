@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rumi_remote_app/src/chat/chat_models.dart';
 import 'package:rumi_remote_app/src/chat/chat_store.dart';
@@ -37,6 +36,23 @@ class _FakeSecureStorage implements SecureKeyValueStorage {
   }
 }
 
+class _FakeChatStorage implements ChatKeyValueStorage {
+  final Map<String, String> _values = {};
+
+  @override
+  Future<String?> read(String key) async => _values[key];
+
+  @override
+  Future<void> write(String key, String value) async {
+    _values[key] = value;
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    _values.remove(key);
+  }
+}
+
 http.Client _sseClient(
     void Function(http.Request) onRequest, List<String> chunks) {
   return MockClient.streaming((request, bodyStream) async {
@@ -48,10 +64,6 @@ http.Client _sseClient(
 }
 
 void main() {
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
-  });
-
   group('ConversationLocator', () {
     test('local/pc factories set authority', () {
       expect(ConversationLocator.local('a').authority,
@@ -101,7 +113,7 @@ void main() {
     late ApiConfigStore configStore;
 
     setUp(() async {
-      store = ChatStore();
+      store = ChatStore(storage: _FakeChatStorage());
       await store.load();
       final storage = _FakeSecureStorage();
       await storage.write(

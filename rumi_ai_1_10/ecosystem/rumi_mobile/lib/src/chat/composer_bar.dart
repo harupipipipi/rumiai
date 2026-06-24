@@ -6,12 +6,14 @@ class ComposerBar extends StatefulWidget {
     required this.onSend,
     required this.onStop,
     required this.busy,
+    this.onAdd,
     this.hint = 'メッセージを入力...',
   });
 
   final ValueChanged<String> onSend;
   final VoidCallback onStop;
   final bool busy;
+  final VoidCallback? onAdd;
   final String hint;
 
   @override
@@ -65,6 +67,17 @@ class _ComposerBarState extends State<ComposerBar> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              IconButton(
+                tooltip: 'オプション',
+                onPressed: widget.busy ? null : widget.onAdd,
+                icon: const Icon(Icons.add_rounded),
+                style: IconButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(38, 38),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+              const SizedBox(width: 6),
               Expanded(
                 child: TextField(
                   controller: _controller,

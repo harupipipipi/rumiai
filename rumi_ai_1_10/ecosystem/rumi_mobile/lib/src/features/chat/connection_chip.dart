@@ -30,11 +30,11 @@ class ConnectionChip extends StatelessWidget {
     if (isPaired && isOnline) {
       color = scheme.primary;
       icon = Icons.desktop_windows;
-      label = pairedDevice?.pcLabel ?? 'PC';
+      label = pairedDevice?.displayPcLabel ?? 'PC';
     } else if (isPaired && !isOnline) {
       color = scheme.error;
       icon = Icons.desktop_windows;
-      label = '${pairedDevice?.pcLabel ?? "PC"} オフライン';
+      label = '${pairedDevice?.displayPcLabel ?? "PC"} オフライン';
     } else {
       color = scheme.onSurfaceVariant;
       icon = Icons.phone_android;
@@ -65,12 +65,17 @@ class ConnectionChip extends StatelessWidget {
             const SizedBox(width: 6),
             Icon(icon, size: 14, color: color),
             const SizedBox(width: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: color,
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 112),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: color,
+                ),
               ),
             ),
           ],

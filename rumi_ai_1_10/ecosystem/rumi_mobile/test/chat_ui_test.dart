@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rumi_remote_app/src/app_theme.dart';
 import 'package:rumi_remote_app/src/chat/chat_drawer.dart';
@@ -10,7 +9,9 @@ import 'package:rumi_remote_app/src/chat/chat_store.dart';
 import 'package:rumi_remote_app/src/chat/composer_bar.dart';
 import 'package:rumi_remote_app/src/chat/message_view.dart';
 import 'package:rumi_remote_app/src/data/pc/device_store.dart';
+import 'package:rumi_remote_app/src/domain/connection_state.dart';
 import 'package:rumi_remote_app/src/domain/space.dart';
+import 'package:rumi_remote_app/src/features/chat/connection_chip.dart';
 import 'package:rumi_remote_app/src/settings/api_config_store.dart';
 
 class _FakeSecureStorage implements SecureKeyValueStorage {
@@ -34,11 +35,24 @@ class _FakeSecureStorage implements SecureKeyValueStorage {
   }
 }
 
-void main() {
-  setUp(() async {
-    SharedPreferences.setMockInitialValues({});
-  });
+class _FakeChatStorage implements ChatKeyValueStorage {
+  final Map<String, String> _values = {};
 
+  @override
+  Future<String?> read(String key) async => _values[key];
+
+  @override
+  Future<void> write(String key, String value) async {
+    _values[key] = value;
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    _values.remove(key);
+  }
+}
+
+void main() {
   Widget wrap(Widget child) => MaterialApp(
         theme: buildRumiTheme(dark: true),
         home: child,
@@ -47,7 +61,7 @@ void main() {
   testWidgets('chat screen renders empty state with suggestions and composer',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(393, 852));
-    final store = ChatStore();
+    final store = ChatStore(storage: _FakeChatStorage());
     final fakeStorage = _FakeSecureStorage();
     final configStore = ApiConfigStore(storage: fakeStorage);
     final deviceStore = MobileDeviceStore(storage: fakeStorage);
@@ -71,7 +85,7 @@ void main() {
 
   testWidgets('chat drawer shows new chat button and sections', (tester) async {
     await tester.binding.setSurfaceSize(const Size(393, 852));
-    final store = ChatStore();
+    final store = ChatStore(storage: _FakeChatStorage());
     await store.load();
     final convo = await store.createAndPersist();
     await store.addMessage(
@@ -107,6 +121,35 @@ void main() {
     expect(find.text('新規チャット'), findsWidgets);
     expect(find.text('チャット'), findsOneWidget);
     expect(find.textContaining('こんにちは'), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('connection chip hides raw pc urls', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(393, 852));
+    const pairedDevice = PairedDevice(
+      deviceId: 'mobile-1',
+      deviceToken: 'dtk-test',
+      label: 'iPhone',
+      scopes: ['chat.read', 'chat.write'],
+      pcBaseUrl: 'http://192.168.11.25:8765',
+      pcLabel: 'http://192.168.11.25:8765',
+      pairingId: 'pair-1',
+    );
+
+    await tester.pumpWidget(wrap(const Scaffold(
+      body: Center(
+        child: ConnectionChip(
+          connectionView: DeviceConnectionView(
+            pairingState: PairingState.paired,
+            pcConnectionState: PcConnectionState.online,
+          ),
+          pairedDevice: pairedDevice,
+        ),
+      ),
+    )));
+
+    expect(find.text('PC'), findsOneWidget);
+    expect(find.textContaining('http://'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

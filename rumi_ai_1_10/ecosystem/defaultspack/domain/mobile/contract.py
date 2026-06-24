@@ -37,6 +37,14 @@ MOBILE_ROUTE_CONTRACTS: tuple[MobileRouteContract, ...] = (
     ),
     MobileRouteContract(
         "POST",
+        "/api/mobile/v1/commands/execute",
+        block_module="blocks.mobile.commands",
+        device_scope="chat.write",
+        feature="commands",
+        pc_equivalent="POST /api/ui/commands/execute",
+    ),
+    MobileRouteContract(
+        "POST",
         "/api/mobile/v1/pairings/{id}/claim",
         block_module="blocks.mobile.pairing",
         path_inject={"id": "pairing_id"},

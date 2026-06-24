@@ -53,6 +53,61 @@ void main() {
       expect(list.first.messageCount, 5);
     });
 
+    test('parses PC epoch timestamps and pinned aliases', () async {
+      final client = MockClient((request) async {
+        if (request.url.path == '/api/mobile/v1/conversations') {
+          return _ok({
+            'conversations': [
+              {
+                'id': 'c1',
+                'title': 'PC Chat',
+                'message_count': 1,
+                'updated_at': 1782325909557,
+                'is_pinned': true,
+                'revision': 4,
+              },
+            ],
+          });
+        }
+        return _ok({
+          'conversation': {
+            'id': 'c1',
+            'title': 'PC Chat',
+            'created_at': 1782325909557,
+            'updated_at': 1782325909557,
+            'is_pinned': true,
+            'revision': 4,
+            'messages': [
+              {
+                'id': 123,
+                'role': 'user',
+                'content': 'hello',
+                'created_at': 1782325909557,
+              },
+            ],
+          },
+        });
+      });
+
+      final backend = PcConversationBackend(
+        connection: _pc,
+        deviceId: 'mobile-abc',
+        client: client,
+      );
+
+      final summaries = await backend.listConversations();
+      final snapshot =
+          await backend.getConversation(ConversationLocator.pc('c1'));
+      backend.close();
+
+      expect(summaries.single.pinned, isTrue);
+      expect(summaries.single.updatedAt.year, greaterThanOrEqualTo(2026));
+      expect(snapshot.conversation.authority, ConversationAuthorityKind.pc);
+      expect(snapshot.conversation.pinned, isTrue);
+      expect(snapshot.conversation.messages.single.id, '123');
+      expect(snapshot.conversation.messages.single.content, 'hello');
+    });
+
     test('createConversation sends POST and returns locator', () async {
       final client = MockClient((request) async {
         expect(request.method, 'POST');
@@ -154,6 +209,44 @@ void main() {
 
       expect(events.whereType<ChatRunStarted>(), isNotEmpty);
       expect(events.whereType<ChatErrorEvent>(), isNotEmpty);
+    });
+
+    test('sendMessage includes selected PC model in params', () async {
+      Map<String, dynamic>? body;
+      final client = MockClient.streaming((request, bodyStream) async {
+        body = jsonDecode(await bodyStream.transform(utf8.decoder).join())
+            as Map<String, dynamic>;
+        return http.StreamedResponse(
+            Stream.value(utf8.encode('data: [DONE]\n\n')), 200);
+      });
+
+      final backend = PcConversationBackend(
+        connection: _pc,
+        client: client,
+      );
+
+      await backend.sendMessage(
+        locator: ConversationLocator.pc('c1'),
+        text: 'hi',
+        clientMessageId: 'u1',
+        expectedRevision: 0,
+        model: 'xiaomi-token-plan-sgp/mimo-v2.5-pro',
+        profileId: 'xiaomi-token-plan-sgp/mimo-v2.5-pro',
+        params: {
+          'thinking_level': 'low',
+          'metadata': {'mode': 'coding'},
+        },
+      ).toList();
+      backend.close();
+
+      expect(body?['model'], 'xiaomi-token-plan-sgp/mimo-v2.5-pro');
+      expect(body?['profile_id'], 'xiaomi-token-plan-sgp/mimo-v2.5-pro');
+      final params = body?['params'] as Map<String, dynamic>;
+      expect(params['model'], 'xiaomi-token-plan-sgp/mimo-v2.5-pro');
+      expect(params['profile_id'], 'xiaomi-token-plan-sgp/mimo-v2.5-pro');
+      expect(params['thinking_level'], 'low');
+      final message = body?['message'] as Map<String, dynamic>;
+      expect((message['metadata'] as Map)['mode'], 'coding');
     });
 
     test('isConfigured reflects connection state', () {

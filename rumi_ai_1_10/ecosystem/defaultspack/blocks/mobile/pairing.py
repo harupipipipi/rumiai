@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -123,6 +124,7 @@ def status(input_data, context=None):
     pairing = session.as_dict()
     result: dict = dict(pairing)
     result["pairing"] = pairing
+    result["pc_label"] = _pc_label()
     if session.status == "approved" and session.claimed_device_id:
         result["approved_device_id"] = session.claimed_device_id
 
@@ -153,6 +155,7 @@ def status(input_data, context=None):
                 result["scopes"] = list(device.scopes)
                 result["confirmation_code"] = device.confirmation_code
                 result["pc_base_url"] = _detect_base_url(input_data, context)
+                result["pc_label"] = _pc_label()
         except Exception:
             pass
     return ok(result)
@@ -172,6 +175,21 @@ def _detect_base_url(input_data, context) -> str:
     except Exception:
         pass
     return ""
+
+
+def _pc_label() -> str:
+    label = os.environ.get("RUMI_DEVICE_LABEL") or os.environ.get("RUMI_PC_LABEL") or ""
+    if not label:
+        try:
+            label = socket.gethostname()
+        except Exception:
+            label = ""
+    label = str(label or "PC").strip()
+    for suffix in (".local", ".lan"):
+        if label.lower().endswith(suffix):
+            label = label[: -len(suffix)]
+            break
+    return label or "PC"
 
 
 def list_devices(input_data, context=None):

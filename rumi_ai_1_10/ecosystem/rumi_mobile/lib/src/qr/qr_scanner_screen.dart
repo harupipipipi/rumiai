@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'qr_payload.dart';
 
@@ -21,22 +22,27 @@ class QrScannerScreen extends StatefulWidget {
 
 class _QrScannerScreenState extends State<QrScannerScreen> {
   final _controller = TextEditingController();
-  late final MobileScannerController _scanner;
   bool _handled = false;
   bool _showManualInput = false;
+  bool _scanLaunching = false;
+  String? _scanError;
+
+  static const _qrScannerChannel = MethodChannel('ai.rumi.remote/qr_scanner');
 
   @override
   void initState() {
     super.initState();
-    _scanner = MobileScannerController(
-      detectionSpeed: DetectionSpeed.noDuplicates,
-      formats: const [BarcodeFormat.qrCode],
-    );
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_showManualInput) {
+          _startNativeScanner();
+        }
+      });
+    }
   }
 
   @override
   void dispose() {
-    _scanner.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -72,91 +78,101 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     _handleRaw(_controller.text);
   }
 
-  void _onDetect(BarcodeCapture capture) {
-    final value = capture.barcodes
-        .map((barcode) => barcode.rawValue)
-        .whereType<String>()
-        .firstWhere((value) => value.trim().isNotEmpty, orElse: () => '');
-    _handleRaw(value);
+  Future<void> _startNativeScanner() async {
+    if (_scanLaunching || _handled) return;
+    setState(() {
+      _scanLaunching = true;
+      _scanError = null;
+    });
+    try {
+      final value = await _qrScannerChannel.invokeMethod<String>('scan');
+      if (!mounted || _handled) return;
+      if (value != null && value.trim().isNotEmpty) {
+        _handleRaw(value);
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _scanError = 'カメラを開始できませんでした');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _scanLaunching = false);
+      }
+    }
   }
 
   Widget _buildScanner() {
+    if (defaultTargetPlatform != TargetPlatform.iOS) {
+      return _buildScannerUnavailable();
+    }
     return AspectRatio(
       aspectRatio: 1,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
-        child: Stack(
-          fit: StackFit.expand,
+        child: Container(
+          color: Colors.black,
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.qr_code_scanner,
+                  color: Colors.white70, size: 48),
+              const SizedBox(height: 14),
+              Text(
+                _scanError ?? 'カメラを開いてQRをスキャンします',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 18),
+              FilledButton.icon(
+                icon: _scanLaunching
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.camera_alt_outlined),
+                label: Text(_scanLaunching ? 'カメラを開いています' : 'カメラを開く'),
+                onPressed: _scanLaunching ? null : _startNativeScanner,
+              ),
+              const SizedBox(height: 10),
+              TextButton.icon(
+                icon: const Icon(Icons.keyboard_outlined),
+                label: const Text('手入力'),
+                onPressed: () {
+                  setState(() => _showManualInput = true);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScannerUnavailable() {
+    return AspectRatio(
+      aspectRatio: 1,
+      child: Container(
+        color: Colors.black,
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            MobileScanner(
-              controller: _scanner,
-              onDetect: _onDetect,
-              errorBuilder: (context, error) => Container(
-                color: Colors.black,
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.no_photography_outlined,
-                        color: Colors.white70, size: 42),
-                    const SizedBox(height: 12),
-                    Text(
-                      error.errorDetails?.message ?? 'カメラを開始できませんでした',
-                      textAlign: TextAlign.center,
-                      style:
-                          const TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton.tonal(
-                      onPressed: () {
-                        setState(() => _showManualInput = true);
-                      },
-                      child: const Text('手入力に切り替え'),
-                    ),
-                  ],
-                ),
-              ),
+            const Icon(Icons.no_photography_outlined,
+                color: Colors.white70, size: 42),
+            const SizedBox(height: 12),
+            const Text(
+              'この環境ではカメラを開始できませんでした',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70, fontSize: 13),
             ),
-            IgnorePointer(
-              child: Center(
-                child: Container(
-                  width: 236,
-                  height: 236,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: Colors.white, width: 3),
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              left: 12,
-              right: 12,
-              bottom: 12,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton.filledTonal(
-                    tooltip: 'ライト',
-                    icon: const Icon(Icons.flashlight_on_outlined),
-                    onPressed: _scanner.toggleTorch,
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton.filledTonal(
-                    tooltip: 'カメラ切替',
-                    icon: const Icon(Icons.cameraswitch_outlined),
-                    onPressed: _scanner.switchCamera,
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton.filledTonal(
-                    tooltip: '手入力',
-                    icon: const Icon(Icons.keyboard_outlined),
-                    onPressed: () {
-                      setState(() => _showManualInput = true);
-                    },
-                  ),
-                ],
-              ),
+            const SizedBox(height: 16),
+            FilledButton.tonal(
+              onPressed: () {
+                setState(() => _showManualInput = true);
+              },
+              child: const Text('手入力に切り替え'),
             ),
           ],
         ),

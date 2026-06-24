@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../app_theme.dart';
+import '../platform/platform_services.dart';
 import 'chat_models.dart';
 
 class MessageView extends StatelessWidget {
@@ -122,7 +122,7 @@ class _MessageBody extends StatelessWidget {
       onTapLink: (text, href, title) async {
         if (href != null) {
           final uri = Uri.parse(href);
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
+          await const PlatformUrlLauncher().open(uri);
         }
       },
     );

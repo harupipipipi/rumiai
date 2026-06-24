@@ -47,6 +47,11 @@ def test_mobile_capabilities_returns_provider_and_model_catalogs():
     assert "model_id" in model
     assert "max_context" in model
 
+    assert "runtime" in data
+    assert "preferred_model" in data["runtime"]
+    assert "commands" in data
+    assert any(command["name"] == "model" for command in data["commands"])
+
 
 def test_mobile_capabilities_provider_filter_narrows_models():
     from blocks.mobile.capabilities import run
@@ -199,7 +204,21 @@ def test_mobile_device_scope_contract_blocks_unknown_routes():
         )
         == "chat.write"
     )
+    assert (
+        required_device_scope("POST", "/api/mobile/v1/commands/execute")
+        == "chat.write"
+    )
     assert required_device_scope("GET", "/api/packs") == ""
+
+
+def test_mobile_commands_execute_uses_pc_slash_registry():
+    from blocks.mobile.commands import run
+
+    result = run({"command": "model", "args": {}, "mode": "chat"}, None)
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["command"]["name"] == "model"
+    assert data["action"] == "open_model_picker"
 
 
 def _compiled_pattern_for(pattern: str) -> str:

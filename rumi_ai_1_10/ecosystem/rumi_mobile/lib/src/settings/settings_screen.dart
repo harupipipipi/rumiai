@@ -1,12 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../data/pc/device_store.dart';
 import '../data/pc/pc_catalog.dart';
 import '../data/pc/pc_catalog_client.dart';
 import '../data/pc/pc_pairing_client.dart';
+import '../platform/platform_services.dart';
 import '../qr/qr_payload.dart';
 import '../qr/qr_scanner_screen.dart';
 import 'api_config_store.dart';
@@ -102,15 +102,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   ApiConfig _buildConfig() => ApiConfig(
-    baseUrl: _baseUrl.text.trim(),
-    apiKey: _apiKey.text.trim(),
-    model: _model.text.trim().isEmpty
-        ? ApiConfig.defaults.model
-        : _model.text.trim(),
-    label: _label.text.trim(),
-    systemPrompt: _systemPrompt.text.trim(),
-    temperature: _config.temperature,
-  );
+        baseUrl: _baseUrl.text.trim(),
+        apiKey: _apiKey.text.trim(),
+        model: _model.text.trim().isEmpty
+            ? ApiConfig.defaults.model
+            : _model.text.trim(),
+        label: _label.text.trim(),
+        systemPrompt: _systemPrompt.text.trim(),
+        temperature: _config.temperature,
+      );
 
   Future<void> _save() async {
     setState(() => _saving = true);
@@ -209,9 +209,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final client = PcPairingClient();
     try {
-      final selectedUrl = payload.baseUrls.isNotEmpty
-          ? payload.baseUrls.first
-          : '';
+      final selectedUrl =
+          payload.baseUrls.isNotEmpty ? payload.baseUrls.first : '';
       if (selectedUrl.isEmpty) {
         throw const PcPairingException('接続URLが見つかりません');
       }
@@ -238,7 +237,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         client: client,
         pc: tempPc,
         pairingId: claimResp.pairingId,
-        pcLabel: selectedUrl,
+        pcLabel: friendlyPcLabel(null, selectedUrl),
         payload: payload,
       );
     } on PcPairingException catch (e) {
@@ -281,15 +280,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
           code: payload.code,
           deviceId: _deviceIdentity!.deviceId,
         );
-        if (statusResp.isAccepted) {
-          final token = statusResp.deviceToken ?? '';
+        if (statusResp.isAccepted && !statusResp.hasDeviceToken) {
+          if (!mounted) return;
+          setState(() {
+            _pairingInProgress = false;
+            _pairingError = 'PCから端末トークンが返りませんでした';
+          });
+          _toast('ペアリングエラー: 端末トークンが空です');
+          return;
+        }
+        if (statusResp.isReady) {
+          final token = statusResp.deviceToken!.trim();
           final device = PairedDevice(
             deviceId: _deviceIdentity!.deviceId,
             deviceToken: token,
             label: _deviceIdentity!.deviceLabel,
             scopes: statusResp.scopes,
             pcBaseUrl: pc.baseUrl,
-            pcLabel: statusResp.pcLabel ?? pcLabel,
+            pcLabel: friendlyPcLabel(statusResp.pcLabel, pc.baseUrl),
             pairingId: pairingId,
           );
           await widget.deviceStore.savePairedDevice(device);
@@ -503,8 +511,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     color: Theme.of(context).cardTheme.color,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color:
-                          Theme.of(context).dividerTheme.color ??
+                      color: Theme.of(context).dividerTheme.color ??
                           Colors.transparent,
                     ),
                   ),
@@ -655,9 +662,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _openUrl(String url) async {
     final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
+    await const PlatformUrlLauncher().open(uri);
   }
 }
 
@@ -695,7 +700,7 @@ class _PairedDeviceCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'PC: ${device.pcLabel}',
+            'PC: ${device.displayPcLabel}',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           Text(
@@ -947,9 +952,8 @@ class _PcModelPickerState extends State<_PcModelPicker> {
   void initState() {
     super.initState();
     final configured = widget.catalog.configuredProviders;
-    _selectedProvider = configured.isNotEmpty
-        ? configured.first.providerId
-        : null;
+    _selectedProvider =
+        configured.isNotEmpty ? configured.first.providerId : null;
   }
 
   @override
@@ -1032,8 +1036,8 @@ class _PcModelPickerState extends State<_PcModelPicker> {
                     m.supportsVision
                         ? Icons.visibility_outlined
                         : m.supportsThinking
-                        ? Icons.psychology_outlined
-                        : Icons.chat_outlined,
+                            ? Icons.psychology_outlined
+                            : Icons.chat_outlined,
                     size: 20,
                   ),
                   title: Text(

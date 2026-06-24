@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:integration_test/integration_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rumi_remote_app/src/app_theme.dart' as theme;
 import 'package:rumi_remote_app/src/chat/chat_screen.dart';
@@ -12,8 +10,10 @@ import 'package:rumi_remote_app/src/settings/api_config_store.dart';
 
 class _FakeSecureStorage implements SecureKeyValueStorage {
   final Map<String, String> _values = {};
+
   @override
   Future<String?> read(String key) async => _values[key];
+
   @override
   Future<void> write(String key, String? value) async {
     if (value == null) {
@@ -27,13 +27,29 @@ class _FakeSecureStorage implements SecureKeyValueStorage {
   Future<void> delete(String key) async => _values.remove(key);
 }
 
-void main() {
-  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+class _FakeChatStorage implements ChatKeyValueStorage {
+  final Map<String, String> _values = {};
 
+  @override
+  Future<String?> read(String key) async => _values[key];
+
+  @override
+  Future<void> write(String key, String value) async {
+    _values[key] = value;
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    _values.remove(key);
+  }
+}
+
+ChatStore _testStore() => ChatStore(storage: _FakeChatStorage());
+
+void main() {
   testWidgets('app launches and shows chat empty state', (tester) async {
-    SharedPreferences.setMockInitialValues({});
     final storage = _FakeSecureStorage();
-    final store = ChatStore();
+    final store = _testStore();
     final configStore = ApiConfigStore(storage: storage);
     final deviceStore = MobileDeviceStore(storage: storage);
 
@@ -52,9 +68,8 @@ void main() {
   });
 
   testWidgets('settings screen opens and shows sections', (tester) async {
-    SharedPreferences.setMockInitialValues({});
     final storage = _FakeSecureStorage();
-    final store = ChatStore();
+    final store = _testStore();
     final configStore = ApiConfigStore(storage: storage);
     final deviceStore = MobileDeviceStore(storage: storage);
 
@@ -76,9 +91,8 @@ void main() {
   });
 
   testWidgets('drawer shows space selector with local space', (tester) async {
-    SharedPreferences.setMockInitialValues({});
     final storage = _FakeSecureStorage();
-    final store = ChatStore();
+    final store = _testStore();
     final configStore = ApiConfigStore(storage: storage);
     final deviceStore = MobileDeviceStore(storage: storage);
 

@@ -33,6 +33,8 @@ from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
     list_provider_catalog,
 )
 from ecosystem.defaultspack.domain.template.gallery import get_gallery
+from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+from domain.frontend.command_registry import SlashCommandRegistry
 
 
 def _provider_summary(provider: dict) -> dict:
@@ -73,18 +75,66 @@ def _model_summary(model: dict) -> dict:
     }
 
 
-def _profile_summary(profile: dict) -> dict:
+def _profile_summary(profile: dict, settings: dict | None = None) -> dict:
+    settings = settings if isinstance(settings, dict) else _runtime_settings()
+    favorite_profiles = {
+        str(item or "").strip()
+        for item in settings.get("favorite_profiles", [])
+        if str(item or "").strip()
+    }
+    profile_id = str(profile.get("profile_id") or profile.get("id") or "")
+    qualified_model_id = str(profile.get("qualified_model_id") or profile_id)
+    provider_id = str(profile.get("provider_id") or profile.get("provider") or "")
+    model_id = str(profile.get("model_id") or profile.get("model") or "")
+    availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+    metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
+    local = bool(
+        profile.get("local")
+        or availability.get("local")
+        or availability.get("offline")
+        or provider_id in {"stub", "ollama", "lmstudio", "vllm"}
+    )
+    configured = bool(
+        profile.get("configured")
+        or availability.get("configured")
+        or availability.get("active")
+        or str(availability.get("status", "")).lower() in {"configured", "active"}
+        or provider_id == "stub"
+    )
     return {
-        "profile_id": str(profile.get("profile_id") or profile.get("id") or ""),
-        "provider_id": str(profile.get("provider_id") or ""),
-        "model_id": str(profile.get("model_id") or ""),
+        "profile_id": profile_id,
+        "provider_id": provider_id,
+        "model_id": model_id,
         "display_name": str(profile.get("display_name") or ""),
-        "qualified_model_id": str(profile.get("qualified_model_id") or ""),
+        "qualified_model_id": qualified_model_id,
+        "provider_display_name": str(
+            profile.get("provider_display_name")
+            or profile.get("provider_name")
+            or metadata.get("provider_display_name")
+            or provider_id
+            or ""
+        ),
+        "label": str(
+            profile.get("disambiguated_name")
+            or metadata.get("disambiguated_name")
+            or profile.get("display_name")
+            or model_id
+            or profile_id
+        ),
         "type": str(profile.get("type") or "chat"),
+        "configured": configured,
+        "local": local,
+        "requires_api_key": bool(provider_id and provider_id not in {"stub", "rumi"} and not local and not configured),
+        "favorite": profile_id in favorite_profiles or qualified_model_id in favorite_profiles,
         "max_context": int(profile.get("max_context") or profile.get("max_context_tokens") or -1),
         "supports_thinking": bool(profile.get("supports_thinking")),
         "supports_vision": bool(profile.get("supports_vision")),
         "supports_tool_calling": bool(profile.get("supports_tool_calling")),
+        "thinking_levels": list(profile.get("thinking_levels") or []),
+        "default_thinking_level": profile.get("default_thinking_level"),
+        "speed_tier": str(profile.get("speed_tier") or "balanced"),
+        "cost_tier": str(profile.get("cost_tier") or "unknown"),
+        "capability_tags": list(profile.get("capability_tags") or []),
     }
 
 
@@ -97,6 +147,64 @@ def _template_summary(entry: dict) -> dict:
         "tags": list(entry.get("tags") or []),
         "updated_at": str(entry.get("updated_at") or ""),
     }
+
+
+def _runtime_settings() -> dict:
+    try:
+        return ModelRuntimeSettingsService().get_settings()
+    except Exception:
+        return {}
+
+
+def _runtime_summary(settings: dict | None = None) -> dict:
+    settings = settings if isinstance(settings, dict) else _runtime_settings()
+    return {
+        "preferred_model": str(settings.get("preferred_model") or ""),
+        "preferred_model_group": str(settings.get("preferred_model_group") or "default"),
+        "thinking_level": str(settings.get("thinking_level") or "medium"),
+        "deepthink_enabled": bool(settings.get("deepthink_enabled", False)),
+        "favorite_profiles": [
+            str(item)
+            for item in settings.get("favorite_profiles", [])
+            if str(item or "").strip()
+        ],
+        "auto_route_within_group": bool(settings.get("auto_route_within_group", True)),
+    }
+
+
+def _command_summary(command: dict) -> dict:
+    return {
+        "id": str(command.get("id") or ""),
+        "name": str(command.get("name") or ""),
+        "aliases": [str(item) for item in command.get("aliases", [])],
+        "label": str(command.get("label") or command.get("name") or ""),
+        "description": str(command.get("description") or ""),
+        "category": str(command.get("category") or "chat"),
+        "visibility": str(command.get("visibility") or "default"),
+        "risk": str(command.get("risk") or "low"),
+        "modes": [str(item) for item in command.get("modes", [])],
+        "enabled": command.get("enabled", True) is not False,
+        "active": bool(command.get("active", False)),
+        "args": [
+            {
+                "name": str(arg.get("name") or ""),
+                "type": str(arg.get("type") or "string"),
+                "required": bool(arg.get("required", False)),
+                "values": [str(value) for value in arg.get("values", [])],
+            }
+            for arg in command.get("args", [])
+            if isinstance(arg, dict)
+        ],
+        "execution": dict(command.get("execution") if isinstance(command.get("execution"), dict) else {}),
+    }
+
+
+def _commands_payload() -> tuple[list[dict], list[dict]]:
+    try:
+        registry = SlashCommandRegistry()
+        return [_command_summary(command) for command in registry.list_commands()], registry.manifest_errors()
+    except Exception as exc:
+        return [], [{"level": "error", "code": "command_catalog_failed", "message": str(exc)}]
 
 
 def _merged_input(input_data: dict) -> dict:
@@ -129,9 +237,11 @@ def run(input_data, context):
     include_templates = _optional_bool(args.get("include_templates"), True)
     provider_filter = str(args.get("provider") or "")
 
+    settings = _runtime_settings()
     providers = [_provider_summary(p) for p in list_provider_catalog()]
     models = [_model_summary(m) for m in list_model_catalog(provider=provider_filter)]
-    profiles = [_profile_summary(p) for p in list_profile_catalog()]
+    profiles = [_profile_summary(p, settings) for p in list_profile_catalog()]
+    commands, command_errors = _commands_payload()
 
     templates: list[dict] = []
     if include_templates:
@@ -147,5 +257,8 @@ def run(input_data, context):
             "models": models,
             "profiles": profiles,
             "templates": templates,
+            "runtime": _runtime_summary(settings),
+            "commands": commands,
+            "command_manifest_errors": command_errors,
         }
     )

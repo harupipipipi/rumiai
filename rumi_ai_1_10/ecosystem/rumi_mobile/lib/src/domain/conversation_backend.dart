@@ -76,6 +76,9 @@ abstract interface class ConversationBackend {
     required String text,
     required String clientMessageId,
     required int expectedRevision,
+    String? model,
+    String? profileId,
+    Map<String, dynamic>? params,
   });
 
   Future<void> stop(String conversationId);
