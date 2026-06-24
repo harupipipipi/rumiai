@@ -118,7 +118,7 @@ test("inline pending tool activity renders above the message copy action", () =>
   assert.ok(pendingIndex < copyIndex);
 });
 
-test("completed tool activity summary leads with grouped work category", () => {
+test("completed tool activity summary uses compact work count", () => {
   const summary = summarizeToolActivityGroups([
     {
       id: "files",
@@ -126,6 +126,7 @@ test("completed tool activity summary leads with grouped work category", () => {
       items: [
         {
           id: "item-1",
+          kind: "tool" as const,
           toolName: "coding_file_list",
           folder: "coding/files",
           folderLabel: "ファイル",
@@ -141,13 +142,13 @@ test("completed tool activity summary leads with grouped work category", () => {
     },
   ]);
 
-  assert.equal(summary.label, "ファイルを実行");
+  assert.equal(summary.label, "✓ 1件の作業 · 3s");
   assert.equal(summary.itemCount, 1);
   assert.equal(summary.runningCount, 0);
   assert.equal(summary.failedCount, 0);
 });
 
-test("running tool activity summary remains openable as active work", () => {
+test("running tool activity summary exposes active work and next action", () => {
   const groups = [
     {
       id: "browser",
@@ -155,6 +156,7 @@ test("running tool activity summary remains openable as active work", () => {
       items: [
         {
           id: "item-1",
+          kind: "tool" as const,
           toolName: "browser_use",
           folder: "browser",
           folderLabel: "ブラウザ",
@@ -162,6 +164,7 @@ test("running tool activity summary remains openable as active work", () => {
           title: "ブラウザ / browser_use: 東京 今日の天気",
           detail: "使用中",
           durationLabel: "7s",
+          nextAction: "画面の変化を確認します",
           status: "running" as const,
           timestamp: 10_000,
           supported: true,
@@ -171,7 +174,10 @@ test("running tool activity summary remains openable as active work", () => {
   ];
 
   assert.equal(hasRunningToolActivityGroups(groups), true);
-  assert.equal(summarizeToolActivityGroups(groups).label, "ブラウザ 作業中");
+  const summary = summarizeToolActivityGroups(groups);
+  assert.equal(summary.label, "作業中 · 1件 · 7s");
+  assert.equal(summary.visibleTitle, "ブラウザ / browser_use: 東京 今日の天気");
+  assert.equal(summary.nextAction, "画面の変化を確認します");
 });
 
 test("empty response warning waits until streaming draft is finalized", () => {

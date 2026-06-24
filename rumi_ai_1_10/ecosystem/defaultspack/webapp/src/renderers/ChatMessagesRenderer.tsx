@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { ArtifactPreviewDialog, type ArtifactPreviewDialogItem } from "../components/ArtifactPreviewDialog";
 import { cn } from "../lib/cn";
 import { elapsedDurationLabel, formatCompactDuration, timestampMs } from "../lib/duration";
-import { buildToolActivityGroups, toolFolderFor, type ToolActivityGroup, type ToolActivityStatus } from "../lib/toolActivity";
+import { buildToolActivityGroups, buildToolActivityItems, toolFolderFor, type RunActivityItem, type ToolActivityGroup, type ToolActivityItem, type ToolActivityStatus } from "../lib/toolActivity";
 import type { ChatContentBlock } from "../lib/api";
 import {
   AUTHORITY_FOLLOWUP_TEXT,
@@ -63,14 +63,17 @@ type CompactLogPreview = {
 };
 
 type ToolActivityTraySummary = {
+  durationLabel: string;
   failedCount: number;
   itemCount: number;
   label: string;
+  nextAction: string;
   runningCount: number;
+  visibleTitle: string;
 };
 
 type MessageToolActivityState = {
-  groups: ToolActivityGroup[];
+  items: RunActivityItem[];
   hasRunningItems: boolean;
   summary: ToolActivityTraySummary;
 };
@@ -569,22 +572,29 @@ function compactDurationMs(label: string | undefined): number | null {
 }
 
 export function hasRunningToolActivityGroups(groups: ToolActivityGroup[]): boolean {
-  return groups.some((group) => group.items.some((item) => item.status === "running"));
+  return hasRunningToolActivityItems(groups.flatMap((group) => group.items));
 }
 
-function toolActivityDurationLabel(groups: ToolActivityGroup[]): string {
+function hasRunningToolActivityItems(items: RunActivityItem[]): boolean {
+  return items.some((item) => item.status === "running" || item.status === "waiting_approval");
+}
+
+function toolActivityDurationLabel(items: RunActivityItem[]): string {
   let firstStart: number | null = null;
   let lastEnd: number | null = null;
   let longestDurationMs = 0;
 
-  for (const item of groups.flatMap((group) => group.items)) {
+  for (const item of items) {
     const durationMs = compactDurationMs(item.durationLabel);
     if (durationMs !== null) {
       longestDurationMs = Math.max(longestDurationMs, durationMs);
     }
-    const end = timestampMs(item.timestamp);
+    const explicitStart = timestampMs(item.startedAt);
+    const explicitEnd = timestampMs(item.completedAt);
+    const eventTime = timestampMs(item.timestamp);
+    const end = explicitEnd ?? eventTime ?? explicitStart;
     if (end === null) continue;
-    const start = durationMs !== null ? end - durationMs : end;
+    const start = explicitStart ?? (durationMs !== null ? end - durationMs : eventTime ?? end);
     firstStart = firstStart === null ? start : Math.min(firstStart, start);
     lastEnd = lastEnd === null ? end : Math.max(lastEnd, end);
   }
@@ -596,26 +606,37 @@ function toolActivityDurationLabel(groups: ToolActivityGroup[]): string {
 }
 
 export function summarizeToolActivityGroups(groups: ToolActivityGroup[]): ToolActivityTraySummary {
-  const items = groups.flatMap((group) => group.items);
+  return summarizeToolActivityItems(groups.flatMap((group) => group.items));
+}
+
+function summarizeToolActivityItems(items: RunActivityItem[]): ToolActivityTraySummary {
   const itemCount = items.length;
   const failedCount = items.filter((item) => item.status === "failed").length;
-  const runningCount = items.filter((item) => item.status === "running").length;
-  const groupSummary = groups
-    .slice(0, 3)
-    .map((group) => group.items.length > 1 ? `${group.label} ${group.items.length}件` : group.label)
-    .join(" / ");
-  const hiddenGroupCount = Math.max(0, groups.length - 3);
-  const visibleSummary = hiddenGroupCount > 0 ? `${groupSummary} / 他${hiddenGroupCount}件` : groupSummary;
-  const label = visibleSummary
-    ? `${visibleSummary}${runningCount > 0 ? " 作業中" : "を実行"}`
-    : runningCount > 0
-      ? "toolを実行中"
-      : `${itemCount}件のtoolを実行しました`;
+  const runningCount = items.filter((item) => item.status === "running" || item.status === "waiting_approval").length;
+  const toolCount = items.filter((item) => item.kind === "tool").length;
+  let visible = items[items.length - 1];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index].status === "running" || items[index].status === "waiting_approval") {
+      visible = items[index];
+      break;
+    }
+    if ((visible?.status !== "failed" && visible?.status !== "blocked") && (items[index].status === "failed" || items[index].status === "blocked")) {
+      visible = items[index];
+    }
+  }
+  const durationLabel = toolActivityDurationLabel(items);
+  const baseCount = toolCount || itemCount;
+  const label = runningCount > 0
+    ? `作業中 · ${baseCount}件${durationLabel ? ` · ${durationLabel}` : ""}`
+    : `✓ ${baseCount}件の作業${durationLabel ? ` · ${durationLabel}` : ""}`;
   return {
+    durationLabel,
     failedCount,
     itemCount,
     label: failedCount > 0 ? `${label}・${failedCount}件失敗` : label,
+    nextAction: visible?.nextAction ?? visible?.nextStep?.replace(/^次:\s*/, "") ?? "",
     runningCount,
+    visibleTitle: visible?.title ?? "",
   };
 }
 
@@ -655,21 +676,21 @@ function toolActivityStateForMessage(
   message: ChatMessagesRendererProps["messages"][number],
   now?: number,
 ): MessageToolActivityState | null {
-  const staticGroups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId });
-  const hasRunningItems = hasRunningToolActivityGroups(staticGroups);
-  const groups = hasRunningItems && now !== undefined
-    ? buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId, now })
-    : staticGroups;
-  if (groups.length === 0) return null;
+  const staticItems = buildToolActivityItems(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId });
+  const hasRunningItems = hasRunningToolActivityItems(staticItems);
+  const items = hasRunningItems && now !== undefined
+    ? buildToolActivityItems(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId, now })
+    : staticItems;
+  if (items.length === 0) return null;
   return {
-    groups,
-    hasRunningItems: hasRunningToolActivityGroups(groups),
-    summary: summarizeToolActivityGroups(groups),
+    items,
+    hasRunningItems: hasRunningToolActivityItems(items),
+    summary: summarizeToolActivityItems(items),
   };
 }
 
 function hasRunningToolActivityMessage(message: ChatMessagesRendererProps["messages"][number]): boolean {
-  return hasRunningToolActivityGroups(buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId }));
+  return hasRunningToolActivityItems(buildToolActivityItems(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId }));
 }
 
 function activityPhase(status: string | null | undefined, toolNames: string[]): { label: string; detail: string } {
@@ -1033,32 +1054,8 @@ function AuthorityPendingNotice() {
   );
 }
 
-function ToolActivityToggle({
-  isOpen,
-  onToggle,
-  summary,
-}: {
-  isOpen: boolean;
-  onToggle: () => void;
-  summary: ToolActivityTraySummary;
-}) {
-  return (
-    <button
-      type="button"
-      aria-expanded={isOpen}
-      aria-label={`toolログを${isOpen ? "閉じる" : "開く"}: ${summary.label}`}
-      className="inline-flex min-w-0 max-w-[min(520px,62vw)] shrink items-center gap-1.5 whitespace-nowrap text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-300 focus-visible:text-zinc-200 focus-visible:outline-none"
-      onClick={onToggle}
-    >
-      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", summary.failedCount > 0 ? "bg-red-400" : summary.runningCount > 0 ? "animate-pulse bg-blue-300" : "bg-zinc-600")} />
-      <span className="min-w-0 truncate">{summary.label}</span>
-      {!isOpen && <span className="shrink-0 text-zinc-500">開く</span>}
-      <ChevronRight size={13} className={cn("shrink-0 transition-transform", isOpen && "rotate-90")} />
-    </button>
-  );
-}
-
 function toolActivityIcon(groupId: string) {
+  if (groupId.includes("progress")) return Wrench;
   if (groupId.includes("web")) return Globe2;
   if (groupId.includes("browser")) return Monitor;
   if (groupId.includes("terminal")) return Terminal;
@@ -1068,60 +1065,92 @@ function toolActivityIcon(groupId: string) {
   return Wrench;
 }
 
-function ToolActivityItemRow({
-  groupId,
+function activityStatusMarker(status: ToolActivityStatus): string {
+  if (status === "completed") return "✓";
+  if (status === "failed") return "!";
+  if (status === "waiting_approval") return "◷";
+  if (status === "blocked") return "!";
+  return "●";
+}
+
+function activityStatusTone(status: ToolActivityStatus): string {
+  if (status === "failed" || status === "blocked") return "text-red-300";
+  if (status === "waiting_approval") return "text-amber-300";
+  if (status === "running") return "text-blue-300";
+  return "text-zinc-500";
+}
+
+function activityRowTone(status: ToolActivityStatus): string {
+  if (status === "failed" || status === "blocked") return "bg-red-500/10 hover:bg-red-500/15";
+  if (status === "waiting_approval") return "bg-amber-500/10 hover:bg-amber-500/15";
+  if (status === "running") return "bg-blue-500/10 hover:bg-blue-500/15";
+  return "hover:bg-zinc-900/50";
+}
+
+function isToolActivityItem(item: RunActivityItem): item is ToolActivityItem {
+  return item.kind === "tool";
+}
+
+function visibleTimelineItems(items: RunActivityItem[]): { items: RunActivityItem[]; hiddenCount: number } {
+  if (items.length <= 10) return { items, hiddenCount: 0 };
+  const tailIds = new Set(items.slice(-10).map((item) => item.id));
+  const forcedIds = new Set(
+    items
+      .filter((item) => item.status === "failed" || item.status === "blocked" || item.status === "waiting_approval" || item.status === "running")
+      .map((item) => item.id),
+  );
+  const visible = items.filter((item) => tailIds.has(item.id) || forcedIds.has(item.id));
+  return { items: visible, hiddenCount: Math.max(0, items.length - visible.length) };
+}
+
+function ToolActivityTimelineRow({
   item,
   onOpenToolPreview,
   previewableCallIds,
 }: {
-  groupId: string;
-  item: ToolActivityGroup["items"][number];
+  item: RunActivityItem;
   onOpenToolPreview?: (previewId: string) => void;
   previewableCallIds: Set<string>;
 }) {
-  const artifactPreviewId = item.artifacts?.find((artifact) => artifact.url)?.path;
+  const artifactPreviewId = isToolActivityItem(item) ? item.artifacts?.find((artifact) => artifact.url)?.path : undefined;
   const previewId = item.toolCallId && previewableCallIds.has(item.toolCallId) ? item.toolCallId : artifactPreviewId;
   const hasPreview = Boolean(previewId);
-  const statusLabel = item.status === "failed" ? "エラー" : "";
+  const statusLabel = item.status === "failed" || item.status === "blocked"
+    ? "エラー"
+    : item.status === "waiting_approval"
+      ? "承認待ち"
+      : "";
   const statusLine = [statusLabel, item.detail].filter(Boolean).join(" · ");
-  const Icon = toolActivityIcon(groupId);
+  const Icon = toolActivityIcon(item.folder);
   const body = (
     <>
-      <span className={cn(
-        "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border",
-        item.status === "failed"
-          ? "border-red-400/20 bg-red-400/10 text-red-300"
-          : item.status === "running"
-            ? "border-blue-300/20 bg-blue-300/10 text-blue-200"
-            : "border-zinc-800 bg-zinc-900/80 text-zinc-400",
-      )}>
-        <Icon size={14} />
+      <span className={cn("mt-[3px] flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[11px] leading-none", activityStatusTone(item.status))}>
+        {activityStatusMarker(item.status)}
+      </span>
+      <span className="mt-[5px] flex h-3 w-3 shrink-0 items-center justify-center text-zinc-500" title={item.folderLabel}>
+        <Icon size={12} />
       </span>
       <span className="min-w-0 max-w-full flex-1 overflow-hidden">
-        <span className="flex min-w-0 max-w-full items-baseline gap-2 text-[12px] leading-5 text-zinc-300">
-          <span className="min-w-0 flex-1 truncate">{item.title || item.detail || item.toolName}</span>
+        <span className="flex min-w-0 max-w-full items-baseline gap-2 text-[12px] leading-4 text-zinc-300">
+          <span className="min-w-0 flex-1 truncate">{item.title || item.detail || (isToolActivityItem(item) ? item.toolName : item.folderLabel)}</span>
           {item.durationLabel && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{item.durationLabel}</span>}
         </span>
         {statusLine && (
-          <span className={cn("block max-w-full truncate text-[11px] leading-5", item.status === "failed" ? "text-red-300" : "text-zinc-500")}>
+          <span className={cn("block max-w-full truncate text-[10px] leading-4", item.status === "failed" || item.status === "blocked" ? "text-red-300" : item.status === "waiting_approval" ? "text-amber-200/80" : "text-zinc-500")}>
             {statusLine}
           </span>
         )}
         {item.nextStep && (
-          <span className="block max-w-full truncate text-[11px] leading-5 text-zinc-600">{item.nextStep}</span>
-        )}
-        {!item.supported && item.rawJson && (
-          <code className="mt-1 block max-h-28 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-zinc-950/70 px-2 py-1.5 font-mono text-[10px] leading-4 text-zinc-500">
-            {item.rawJson}
-          </code>
+          <span className="block max-w-full truncate text-[10px] leading-4 text-zinc-600">{item.nextStep}</span>
         )}
       </span>
+      {hasPreview && <ChevronRight size={12} className="mt-[5px] shrink-0 text-zinc-600" />}
     </>
   );
   return hasPreview ? (
     <button
       type="button"
-      className="group/tool -ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-zinc-900/55 focus-visible:bg-zinc-900/55 focus-visible:outline-none"
+      className={cn("group/tool flex min-h-7 w-full min-w-0 max-w-full items-start gap-2 overflow-hidden rounded px-1.5 py-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-600 sm:min-h-8", activityRowTone(item.status))}
       onClick={() => {
         if (previewId) onOpenToolPreview?.(previewId);
       }}
@@ -1129,82 +1158,29 @@ function ToolActivityItemRow({
       {body}
     </button>
   ) : (
-    <div className="-ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden px-1 py-1.5">
+    <div className={cn("flex min-h-7 w-full min-w-0 max-w-full items-start gap-2 overflow-hidden rounded px-1.5 py-1 sm:min-h-8", activityRowTone(item.status))}>
       {body}
     </div>
   );
 }
 
-function ToolActivityGroupDisclosure({
-  group,
-  onOpenToolPreview,
-  previewableCallIds,
-}: {
-  group: ToolActivityGroup;
-  onOpenToolPreview?: (previewId: string) => void;
-  previewableCallIds: Set<string>;
-}) {
-  const Icon = toolActivityIcon(group.id);
-  const status = toolActivityGroupStatus(group);
-  const duration = toolActivityDurationLabel([group]);
-  const detail = summarizeToolActivityGroupDetail(group);
-  const statusText = toolActivityGroupStatusText(group);
-  const detailLine = [statusText, detail].filter(Boolean).join(" · ");
-  return (
-    <details className="rumi-tool-activity-group overflow-hidden rounded-lg border border-zinc-800/70 bg-zinc-950/35">
-      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 px-2.5 py-2 transition-colors hover:bg-zinc-900/45 focus-visible:bg-zinc-900/55 focus-visible:outline-none">
-        <span className={cn(
-          "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border",
-          status === "failed"
-            ? "border-red-400/20 bg-red-400/10 text-red-300"
-            : status === "running"
-              ? "border-blue-300/20 bg-blue-300/10 text-blue-200"
-              : "border-zinc-800 bg-zinc-900/80 text-zinc-400",
-        )}>
-          <Icon size={15} />
-        </span>
-        <span className="min-w-0 flex-1 overflow-hidden">
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate text-[13px] font-medium text-zinc-300">{group.label}</span>
-            <span className="shrink-0 rounded-full bg-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-500">{group.items.length}件</span>
-            {duration && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{duration}</span>}
-          </span>
-          {detailLine && (
-            <span className={cn("block truncate text-[11px] leading-5", status === "failed" ? "text-red-300" : "text-zinc-500")}>
-              {detailLine}
-            </span>
-          )}
-        </span>
-        <span className="shrink-0 text-[10px] text-zinc-600">詳細</span>
-        <ChevronRight size={14} className="rumi-tool-caret shrink-0 text-zinc-600" />
-      </summary>
-      <div className="grid min-w-0 gap-1.5 border-t border-zinc-800/65 px-3 py-2 pl-5">
-        {group.items.map((item) => (
-          <ToolActivityItemRow
-            key={item.id}
-            groupId={group.id}
-            item={item}
-            onOpenToolPreview={onOpenToolPreview}
-            previewableCallIds={previewableCallIds}
-          />
-        ))}
-      </div>
-    </details>
-  );
-}
-
-function ToolActivityTray({
-  groups,
+function ToolActivityPanel({
+  items,
   isOpen,
+  onToggle,
+  summary,
   message,
   onOpenToolPreview,
 }: {
-  groups: ToolActivityGroup[];
+  items: RunActivityItem[];
   isOpen: boolean;
+  onToggle: () => void;
+  summary: ToolActivityTraySummary;
   message: ChatMessagesRendererProps["messages"][number];
   onOpenToolPreview?: (previewId: string) => void;
 }) {
-  if (!isOpen || groups.length === 0) return null;
+  const [showAll, setShowAll] = useState(false);
+  if (items.length === 0) return null;
   const previewableCallIds = new Set(
     (message.events ?? [])
       .filter((event) => (
@@ -1216,17 +1192,51 @@ function ToolActivityTray({
       .map((event) => String(event.tool_call_id ?? "").trim())
       .filter(Boolean),
   );
+  const timeline = showAll ? { items, hiddenCount: 0 } : visibleTimelineItems(items);
   return (
-    <div className="rumi-tool-activity mb-4 grid w-full gap-2 text-zinc-300">
-      {groups.map((group) => (
-        <ToolActivityGroupDisclosure
-          key={group.id}
-          group={group}
-          onOpenToolPreview={onOpenToolPreview}
-          previewableCallIds={previewableCallIds}
-        />
-      ))}
-    </div>
+    <section className="rumi-tool-activity mb-3 grid w-full max-w-[640px] gap-1 rounded-md border border-zinc-800/70 bg-zinc-950/45 px-2 py-1.5 text-zinc-300">
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        aria-label={`作業状況を${isOpen ? "閉じる" : "開く"}: ${summary.label}`}
+        className="flex min-w-0 items-center gap-2 rounded px-0.5 py-0.5 text-left transition-colors hover:bg-zinc-900/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-600"
+        onClick={onToggle}
+      >
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", summary.failedCount > 0 ? "bg-red-400" : summary.runningCount > 0 ? "animate-pulse bg-blue-300" : "bg-zinc-600")} />
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate text-[12px] font-medium leading-4 text-zinc-300">{summary.visibleTitle || summary.label}</span>
+            <span className="shrink-0 text-[10px] leading-4 text-zinc-500">{summary.label}</span>
+          </span>
+          {summary.runningCount > 0 && summary.nextAction && (
+            <span className="block truncate text-[10px] leading-4 text-zinc-500">次: {summary.nextAction}</span>
+          )}
+        </span>
+        <span className="shrink-0 text-[10px] text-zinc-500">{isOpen ? "閉じる" : "詳細"}</span>
+        <ChevronRight size={12} className={cn("shrink-0 text-zinc-600 transition-transform", isOpen && "rotate-90")} />
+      </button>
+      {isOpen && (
+        <div className="rumi-tool-activity-timeline grid min-w-0 gap-0.5 border-t border-zinc-800/65 pt-1">
+          {timeline.hiddenCount > 0 && (
+            <button
+              type="button"
+              className="mb-0.5 w-fit rounded px-1.5 py-0.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-900/50 hover:text-zinc-300"
+              onClick={() => setShowAll(true)}
+            >
+              前の {timeline.hiddenCount} 件を表示
+            </button>
+          )}
+          {timeline.items.map((item) => (
+            <ToolActivityTimelineRow
+              key={item.id}
+              item={item}
+              onOpenToolPreview={onOpenToolPreview}
+              previewableCallIds={previewableCallIds}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1316,7 +1326,7 @@ export function ChatMessagesRenderer({
                 : null;
               const sanitizeMessageText = message.role === "agent" ? sanitizeAssistantAuthorityBoilerplate : undefined;
               const isToolActivityOpen = toolActivity
-                ? openToolActivityByMessageId[message.id] ?? false
+                ? openToolActivityByMessageId[message.id] ?? toolActivity.hasRunningItems
                 : false;
               const isAuthorityPending = isAuthorityWaitingMessage(message);
               const toggleToolActivity = () => {
@@ -1341,17 +1351,20 @@ export function ChatMessagesRenderer({
                       {message.metadata?.thinkingDuration && (
                         <span className="shrink-0 font-mono text-[10px] text-zinc-600">thinking {message.metadata.thinkingDuration}</span>
                       )}
-                      {toolActivity && (
-                        <ToolActivityToggle
-                          isOpen={isToolActivityOpen}
-                          onToggle={toggleToolActivity}
-                          summary={toolActivity.summary}
-                        />
-                      )}
                     </div>
                   )}
 
                   <div className={cn("flex min-w-0 max-w-full flex-col", message.role === "user" ? "items-start" : "w-full items-start")}>
+                    {toolActivity && (
+                      <ToolActivityPanel
+                        items={toolActivity.items}
+                        isOpen={isToolActivityOpen}
+                        onToggle={toggleToolActivity}
+                        summary={toolActivity.summary}
+                        message={message}
+                        onOpenToolPreview={onOpenToolPreview}
+                      />
+                    )}
                     {(() => {
                       const hasToolActivity = Boolean(toolActivity);
                       return (
@@ -1363,15 +1376,6 @@ export function ChatMessagesRenderer({
                           : "w-full text-zinc-200 bg-transparent",
                       )}
                     >
-                      {toolActivity && (
-                        <ToolActivityTray
-                          groups={toolActivity.groups}
-                          isOpen={isToolActivityOpen}
-                          message={message}
-                          onOpenToolPreview={onOpenToolPreview}
-                        />
-                      )}
-
                       {message.role === "agent" && message.metadata?.thinkingTranscript && (
                         <details className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">
                           <summary className="cursor-pointer select-none text-[11px] font-medium text-zinc-300">

@@ -1029,3 +1029,28 @@ body,
   outline: none !important;
   box-shadow: none !important;
 }
+
+.rumi-tool-activity-timeline {
+  position: relative;
+}
+
+.rumi-tool-activity-timeline::before {
+  content: "";
+  position: absolute;
+  top: 0.45rem;
+  bottom: 0.45rem;
+  left: 0.95rem;
+  width: 1px;
+  background: rgba(113, 113, 122, 0.22);
+  pointer-events: none;
+}
+
+.rumi-tool-activity-timeline > * {
+  position: relative;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rumi-tool-activity .animate-pulse {
+    animation: none;
+  }
+}
