@@ -368,3 +368,28 @@ def test_defaultspack_browser_computer_block_uses_router(monkeypatch):
     assert captured["context"]["conversation_workspace_dir"] == "/tmp/work"
     assert captured["tool_name"] == "browser_computer"
     assert captured["yolo_mode"] is True
+
+
+def test_defaultspack_browser_computer_block_honors_settings_deny(tmp_path, monkeypatch):
+    import backend.tool.permission_policy as permission_policy
+    import ecosystem.defaultspack.blocks.tool.browser_computer as browser_computer_block
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_TOOL_PERMISSION_POLICY_PATH", str(tmp_path / "permission_policy.json"))
+    monkeypatch.setattr(permission_policy, "_POLICY_STORE", None)
+    permission_policy.get_tool_permission_policy_manager().save(
+        {"default_action": "ask", "tools": {"browser_computer": "deny"}}
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("Settings-denied browser_computer must not reach router")
+
+    monkeypatch.setattr(browser_computer_block, "run_computer_action", fail_if_called)
+
+    result = browser_computer_block.run(
+        {"action": "computer.observe", "payload": {"detail": "full"}},
+        {"yolo_mode": "true"},
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "PERMISSION_DENIED"
+    assert result["error"]["details"]["matched_by"] == "tools"

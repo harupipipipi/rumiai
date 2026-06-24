@@ -8,6 +8,20 @@ from domain.chat.tool_recommender import search_tools
 from domain.tool.registry import ToolRegistry
 
 
+_STRATEGY_ALIASES = {
+    "all": "all",
+    "all_schemas": "all",
+    "all_with_hints": "all",
+    "all-with-hints": "all",
+    "auto": "vector",
+    "recommended": "vector",
+    "relevant": "vector",
+    "vector": "vector",
+    "none": "off",
+    "off": "off",
+}
+
+
 def run(input_data, context):
     del context
     data = input_data if isinstance(input_data, dict) else {}
@@ -18,6 +32,31 @@ def run(input_data, context):
         tools = message.get("tools") or message.get("available_tools")
     if not isinstance(tools, list):
         tools = ToolRegistry().list_tools()
+    strategy = _normalize_strategy(data.get("strategy") or data.get("tool_selection_strategy"))
+    if strategy == "off":
+        return ok(
+            {
+                "profile_id": data.get("profile_id"),
+                "tools": [],
+                "matches": [],
+                "selection_reason": "turn_strategy_off",
+                "strategy": strategy,
+            }
+        )
+    if strategy == "all":
+        return ok(
+            {
+                "profile_id": data.get("profile_id"),
+                "tools": tools,
+                "matches": [
+                    {"tool_id": str(tool.get("tool_id") or tool.get("name") or ""), "score": 1.0}
+                    for tool in tools
+                    if isinstance(tool, dict) and str(tool.get("tool_id") or tool.get("name") or "").strip()
+                ],
+                "selection_reason": "turn_strategy_all_schemas",
+                "strategy": strategy,
+            }
+        )
     try:
         limit = int(data.get("limit", 8))
     except (TypeError, ValueError):
@@ -31,5 +70,10 @@ def run(input_data, context):
             "tools": selected_tools,
             "matches": matches,
             "selection_reason": "vector_docs_schema_skill_metadata",
+            "strategy": strategy or "vector",
         }
     )
+
+
+def _normalize_strategy(value):
+    return _STRATEGY_ALIASES.get(str(value or "").strip().lower(), "")

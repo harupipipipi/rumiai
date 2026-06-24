@@ -16,6 +16,16 @@ _ACTION_ALLOW = "allow"
 _ACTION_DENY = "deny"
 _ACTION_ASK = "ask"
 _VALID_ACTIONS = {_ACTION_ALLOW, _ACTION_DENY, _ACTION_ASK}
+_ACTION_STRICTNESS = {
+    _ACTION_ALLOW: 1,
+    _ACTION_ASK: 2,
+    _ACTION_DENY: 3,
+}
+_TAG_PRIORITY = {
+    "browser": 10,
+    "desktop": 20,
+    "computer": 30,
+}
 
 _DEFAULT_POLICY: Dict[str, Any] = {
     "version": 1,
@@ -73,6 +83,34 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
     return bool(value)
+
+
+def _best_tag_rule(tags: Any, policy_tags: Dict[str, str]) -> tuple[str, str] | None:
+    if not isinstance(policy_tags, dict):
+        return None
+    if isinstance(tags, str):
+        tags = [tags]
+    if not isinstance(tags, list):
+        return None
+    matches: list[tuple[int, int, int, str, str]] = []
+    for index, raw_tag in enumerate(tags):
+        tag = str(raw_tag or "").strip()
+        if not tag or tag not in policy_tags:
+            continue
+        action = policy_tags[tag]
+        matches.append(
+            (
+                _ACTION_STRICTNESS.get(action, 0),
+                _TAG_PRIORITY.get(tag, 0),
+                -index,
+                tag,
+                action,
+            )
+        )
+    if not matches:
+        return None
+    _, _, _, tag, action = sorted(matches, reverse=True)[0]
+    return tag, action
 
 
 def _context_yolo_mode(context: Optional[Dict[str, Any]]) -> bool:
@@ -165,12 +203,10 @@ class ToolPermissionPolicyStore:
                 matched_value = server_name
 
         if matched_by == "default_action":
-            for tag in tags or []:
-                if tag in policy["tags"]:
-                    action = policy["tags"][tag]
-                    matched_by = "tags"
-                    matched_value = tag
-                    break
+            tag_match = _best_tag_rule(tags, policy["tags"])
+            if tag_match is not None:
+                matched_value, action = tag_match
+                matched_by = "tags"
 
         if matched_by == "default_action":
             execution_type = str(execution.get("type", "") or "")

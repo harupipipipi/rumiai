@@ -6,6 +6,7 @@ from .eligibility import rejection_result
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from .security import is_trusted_pack_id, requires_approval_for_security, unsupported_execution_reason
 from domain.tool_policy.internal_context import (
+    internal_tool_decision,
     internal_tool_decision_allows,
     mark_tool_server_approval_context,
     tool_server_approval_context_is_internal,
@@ -128,6 +129,9 @@ class ToolExecutor:
                 "is_error": True,
                 "widget": None
             }
+        permission_denial = self._persistent_permission_denial(tool_name, tool_def, arguments, context)
+        if permission_denial is not None:
+            return permission_denial
         policy = policy_from_context(context if isinstance(context, dict) else {})
         if is_tool_rejected_by_policy(tool_def, policy):
             return {
@@ -191,7 +195,51 @@ class ToolExecutor:
 
         return self._execute_local_with_tool_def(tool_name, arguments, context, tool_def)
 
+    def _persistent_permission_denial(self, tool_name, tool_def, arguments, context):
+        sealed_decision = internal_tool_decision(context)
+        if sealed_decision is not None and sealed_decision.get("action") == "allow" and sealed_decision.get("allowed"):
+            return None
+        try:
+            from domain.tool.permission_checker import PermissionChecker
+
+            decision = PermissionChecker(registry=self._registry).decide(
+                tool_name,
+                context=context if isinstance(context, dict) else {},
+                arguments=arguments if isinstance(arguments, dict) else {},
+                tool_def=tool_def,
+            )
+        except Exception:
+            return None
+        if decision.get("action") != "deny":
+            return None
+        reason = str(decision.get("reason") or "blocked_by_policy")
+        return {
+            "result": "Tool '{}' blocked by Settings policy".format(tool_name),
+            "is_error": True,
+            "widget": {
+                "type": "tool_execution_denied",
+                "tool_name": tool_name,
+                "reason": reason,
+                "matched_by": decision.get("matched_by"),
+                "matched_value": decision.get("matched_value"),
+            },
+            "error_type": "permission_denied",
+            "rejected_by_permission_policy": True,
+            "permission": {
+                "action": decision.get("action"),
+                "allowed": decision.get("allowed", False),
+                "matched_by": decision.get("matched_by"),
+                "matched_value": decision.get("matched_value"),
+                "reason": reason,
+            },
+        }
+
     def _execute_rumi_function(self, tool_def, arguments, context):
+        tool_name = _tool_approval_tool_name(tool_def) if isinstance(tool_def, dict) else ""
+        if tool_name:
+            permission_denial = self._persistent_permission_denial(tool_name, tool_def, arguments, context)
+            if permission_denial is not None:
+                return permission_denial
         execution = tool_def.get("execution", {}) if isinstance(tool_def, dict) else {}
         qualified_name = str(execution.get("qualified_name") or "").strip()
         if not qualified_name:

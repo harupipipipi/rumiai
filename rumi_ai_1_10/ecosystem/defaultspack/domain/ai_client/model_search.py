@@ -28,7 +28,7 @@ def search_models(filters: dict[str, Any] | None = None, *, profiles: list[dict[
 
     matches: list[dict[str, Any]] = []
     for profile in profiles:
-        if not isinstance(profile, dict) or str(profile.get("type") or "chat") not in {"", "chat", "reasoning"}:
+        if not _is_chat_routing_profile(profile):
             continue
         item = _public_model(profile)
         if query and not _matches_query(item, query):
@@ -140,7 +140,11 @@ def recommend_model(request: dict[str, Any] | None = None, *, profiles: list[dic
 def models_for_group(group_id: str, settings: dict[str, Any] | None, profiles: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     groups = normalize_model_groups((settings or {}).get("model_groups") if isinstance(settings, dict) else None)
     group = groups.get(str(group_id or "default"), groups["default"])
-    candidates = [_public_model(profile) for profile in (profiles if profiles is not None else _profile_catalog()) if isinstance(profile, dict)]
+    candidates = [
+        _public_model(profile)
+        for profile in (profiles if profiles is not None else _profile_catalog())
+        if _is_chat_routing_profile(profile)
+    ]
     allowed = {str(item) for item in group.get("allowed_models", []) if str(item or "").strip()}
     if allowed:
         candidates = [item for item in candidates if str(item.get("profile_id") or "") in allowed or str(item.get("qualified_model_id") or "") in allowed]
@@ -166,6 +170,12 @@ def models_for_group(group_id: str, settings: dict[str, Any] | None, profiles: l
     if min_speed:
         candidates = [item for item in candidates if str(item.get("speed_tier") or "") == min_speed]
     return candidates
+
+
+def _is_chat_routing_profile(profile: Any) -> bool:
+    if not isinstance(profile, dict):
+        return False
+    return str(profile.get("type") or "chat").strip().lower() in {"", "chat", "reasoning"}
 
 
 def _profile_catalog() -> list[dict[str, Any]]:
@@ -205,6 +215,7 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
     return {
         "profile_id": profile_id,
         "qualified_model_id": str(profile.get("qualified_model_id") or profile_id),
+        "type": str(profile.get("type") or "chat"),
         "label": f"{label_provider} / {display_name}" if label_provider else display_name,
         "display_name": display_name,
         "provider_id": provider_id,

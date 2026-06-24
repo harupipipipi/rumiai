@@ -76,6 +76,7 @@ steps:
       profile_id: "{{active_profile.profile_id}}"
       message: "{{input.message}}"
       workspace: "{{profile_workspace}}"
+      strategy: "{{input.tool_selection.strategy || input.tool_selection_strategy || input.params.tool_selection.strategy || input.params.tool_selection_strategy || input.params.tool_policy.tool_selection.strategy || input.params.tool_policy.tool_selection_strategy || input.params.tool_policy.strategy || input.message.metadata.tool_selection.strategy || input.message.metadata.tool_selection_strategy}}"
     output: tool_selection
 
   - id: apply_permissions
@@ -129,6 +130,8 @@ steps:
       system_prompt: "{{prompt_compaction.prompt || system_prompt}}"
       vision_bridge_result: "{{vision_bridge_result}}"
       tools: "{{permitted_tools.tools}}"
+      tool_selection: "{{tool_selection}}"
+      tool_selection_strategy: "{{tool_selection.strategy || input.tool_selection.strategy || input.tool_selection_strategy || input.params.tool_selection.strategy || input.params.tool_selection_strategy || input.params.tool_policy.tool_selection.strategy || input.params.tool_policy.tool_selection_strategy || input.params.tool_policy.strategy || input.message.metadata.tool_selection.strategy || input.message.metadata.tool_selection_strategy}}"
       route_model: "{{route_model}}"
     output: ai_request
 

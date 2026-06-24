@@ -54,10 +54,13 @@ def _container_workdir(ws: Any, cwd: Any) -> str:
 def _run_in_docker(*, ws: Any, command: Any, cwd: Any, timeout: int, image: str) -> dict[str, Any]:
     container_command = _normalize_command(command)
     container_name = f"rumi-sandbox-{uuid.uuid4().hex[:12]}"
+    builder = DockerRunBuilder(name=container_name).pids_limit(100)
+    getuid = getattr(os, "getuid", None)
+    getgid = getattr(os, "getgid", None)
+    if callable(getuid) and callable(getgid):
+        builder = builder.user(f"{getuid()}:{getgid()}")
     docker_cmd = (
-        DockerRunBuilder(name=container_name)
-        .pids_limit(100)
-        .user(f"{os.getuid()}:{os.getgid()}")
+        builder
         .volume(f"{ws.root.resolve()}:/workspace:rw")
         .workdir(_container_workdir(ws, cwd))
         .label("rumi.managed", "true")

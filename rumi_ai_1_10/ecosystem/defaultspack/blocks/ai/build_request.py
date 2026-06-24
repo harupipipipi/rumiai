@@ -48,6 +48,25 @@ def run(input_data, context):
         "tools": tools,
         "params": {},
     }
+    tool_selection = data.get("tool_selection")
+    if isinstance(tool_selection, dict):
+        request["params"]["tool_selection"] = dict(tool_selection)
+    strategy = _tool_selection_strategy(data)
+    if strategy:
+        request["params"].setdefault("tool_selection", {})["strategy"] = strategy
+        request["params"]["tool_selection_strategy"] = strategy
     if data.get("vision_bridge_result"):
         request["vision_bridge_result"] = data["vision_bridge_result"]
     return ok(request)
+
+
+def _tool_selection_strategy(data):
+    strategy = str(data.get("tool_selection_strategy") or "").strip()
+    if strategy:
+        return strategy
+    tool_selection = data.get("tool_selection")
+    if isinstance(tool_selection, dict):
+        strategy = str(tool_selection.get("strategy") or "").strip()
+        if strategy:
+            return strategy
+    return ""

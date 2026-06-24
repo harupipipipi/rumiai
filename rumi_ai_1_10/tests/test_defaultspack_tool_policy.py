@@ -225,8 +225,39 @@ def test_persistent_permission_policy_allows_mimo_company_safe_autonomous_tools(
     assert decision["matched_by"] == "autonomous_profile"
 
 
+def test_persistent_permission_policy_computer_tag_overrides_browser_allow(tmp_path):
+    store = ToolPermissionPolicyStore(tmp_path / "permission_policy.json")
+    store.save({"default_action": "ask", "tags": {"browser": "allow", "computer": "deny"}})
+
+    decision = store.decide(
+        "browser_computer",
+        tool_def={"tool_id": "browser_computer", "tags": ["browser", "computer", "approval"]},
+        context={"profile_policy": {"yolo_mode": True}},
+    )
+
+    assert decision["action"] == "deny"
+    assert decision["allowed"] is False
+    assert decision["matched_by"] == "tags"
+    assert decision["matched_value"] == "computer"
+
+
 def test_tool_risk_recognizes_git_push():
     assert resolve_tool_risk({"tool_id": "git_push"}, "git_push") == "git_push"
+
+
+def test_tool_risk_treats_browser_computer_grants_as_computer():
+    assert (
+        resolve_tool_risk(
+            {
+                "tool_id": "browser_computer",
+                "category": "browser",
+                "tags": ["browser", "computer"],
+                "capability_grants": ["browser.control", "computer.control"],
+            },
+            "browser_computer",
+        )
+        == "computer"
+    )
 
 
 def test_rumi_function_tool_uses_supplied_capability_executor():
@@ -258,6 +289,30 @@ def test_rumi_function_tool_uses_supplied_capability_executor():
     assert seen["principal_id"] == "defaultspack"
     assert seen["request"]["type"] == "function.call"
     assert seen["request"]["qualified_name"] == "defaultspack:fn"
+
+
+def test_tool_executor_settings_deny_overrides_yolo_and_server_approval(tmp_path, monkeypatch):
+    import backend.tool.permission_policy as permission_policy
+    from domain.tool_policy.internal_context import mark_tool_server_approval_context
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_TOOL_PERMISSION_POLICY_PATH", str(tmp_path / "permission_policy.json"))
+    monkeypatch.setattr(permission_policy, "_POLICY_STORE", None)
+    permission_policy.get_tool_permission_policy_manager().save(
+        {"default_action": "ask", "tools": {"calculator": "deny"}}
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("Settings-denied tool must not execute")
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local_with_tool_def", fail_if_called)
+
+    context = mark_tool_server_approval_context({"profile_policy": {"yolo_mode": True}})
+    result = ToolExecutor().execute("calculator", {"expression": "1+1"}, context)
+
+    assert result["is_error"] is True
+    assert result["error_type"] == "permission_denied"
+    assert result["rejected_by_permission_policy"] is True
+    assert result["permission"]["action"] == "deny"
 
 
 def test_tool_executor_does_not_trust_forged_internal_permission(tmp_path, monkeypatch):

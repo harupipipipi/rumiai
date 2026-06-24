@@ -263,6 +263,87 @@ def test_run_request_tool_assist_off_keeps_unselected_tools_empty(monkeypatch):
     assert unknown == []
 
 
+def test_run_request_turn_strategy_all_schemas_overrides_settings_off(monkeypatch):
+    from domain.chat import run_request
+
+    fake_tools = [
+        {"tool_id": "web_search", "summary": "Search the web"},
+        {"tool_id": "calculator", "summary": "Compute arithmetic"},
+    ]
+
+    class FakeRegistry:
+        def list_tools(self):
+            return list(fake_tools)
+
+        def get(self, tool_id):
+            return next((tool for tool in fake_tools if tool["tool_id"] == tool_id), None)
+
+    monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
+    monkeypatch.setattr(run_request, "effective_tool_assist_mode", lambda **_kwargs: "off")
+    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: dict(context or {}))
+    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
+
+    raw_tools, provider_tools, resolved_context = run_request._available_tools(
+        {},
+        {"params": {"tool_selection": {"strategy": "all_schemas"}}},
+        user_text="search",
+    )
+
+    assert [tool["tool_id"] for tool in raw_tools] == ["web_search", "calculator"]
+    assert provider_tools == raw_tools
+    assert resolved_context["tool_selection_strategy"] == "all"
+    assert resolved_context["tool_selection"]["effective_mode"] == "all"
+
+
+def test_select_relevant_all_schemas_returns_every_tool(monkeypatch):
+    from blocks.tool import select_relevant
+
+    fake_tools = [
+        {"tool_id": "web_search", "summary": "Search the web"},
+        {"tool_id": "calculator", "summary": "Compute arithmetic"},
+    ]
+
+    class FakeRegistry:
+        def list_tools(self):
+            return list(fake_tools)
+
+    monkeypatch.setattr(select_relevant, "ToolRegistry", lambda: FakeRegistry())
+
+    result = select_relevant.run({"strategy": "all_schemas", "message": {"content": "search"}}, {})
+
+    assert result["status"] == "ok"
+    assert [tool["tool_id"] for tool in result["data"]["tools"]] == ["web_search", "calculator"]
+    assert result["data"]["strategy"] == "all"
+
+
+def test_chat_turn_flow_passes_tool_selection_strategy_to_discovery_and_request():
+    flow_text = (DEFAULTSPACK_ROOT / "flows" / "chat_turn.flow.yaml").read_text(encoding="utf-8")
+
+    assert "function: defaults.tools.select_relevant" in flow_text
+    assert "strategy: \"{{input.tool_selection.strategy" in flow_text
+    assert "tool_selection_strategy: \"{{tool_selection.strategy" in flow_text
+
+
+def test_build_request_preserves_tool_selection_strategy():
+    from blocks.ai import build_request
+
+    result = build_request.run(
+        {
+            "conversation_id": "c1",
+            "message": {"role": "user", "content": "hi"},
+            "tools": [],
+            "route_model": {"selected_model": "stub/default"},
+            "tool_selection": {"strategy": "all"},
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["params"]["tool_selection"]["strategy"] == "all"
+    assert result["data"]["params"]["tool_selection_strategy"] == "all"
+
+
 def test_run_request_explicit_empty_selected_tools_blocks_inferred_computer_tools():
     from domain.chat import run_request
 

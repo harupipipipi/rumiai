@@ -54,6 +54,18 @@ MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
 _DATA_IMAGE_PREFIX = "data:image/"
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _VECTOR_TOOL_ASSIST_PROFILE_IDS = {"defaultspack.mimo_coding_company"}
+_TOOL_SELECTION_STRATEGY_ALIASES = {
+    "all": "all",
+    "all_schemas": "all",
+    "all-with-hints": "all",
+    "all_with_hints": "all",
+    "auto": "vector",
+    "recommended": "vector",
+    "relevant": "vector",
+    "vector": "vector",
+    "none": "off",
+    "off": "off",
+}
 _COMPUTER_USE_REQUEST_RE = re.compile(
     r"compute[\s_-]*use|compu?ter[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
     r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,80}(操作|送信|入力|クリック|開いて|開く)",
@@ -1086,20 +1098,68 @@ def _image_data_url_byte_length(data_url: Any) -> int | None:
         return None
 
 
+def _normalize_tool_selection_strategy(value: Any) -> str:
+    strategy = str(value or "").strip().lower()
+    return _TOOL_SELECTION_STRATEGY_ALIASES.get(strategy, "")
+
+
+def _tool_selection_strategy(input_data: dict[str, Any], context: dict[str, Any] | None = None) -> str:
+    data = input_data if isinstance(input_data, dict) else {}
+    params = data.get("params") if isinstance(data.get("params"), dict) else {}
+    tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
+    message = data.get("message") if isinstance(data.get("message"), dict) else {}
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    candidates = [
+        data.get("tool_selection"),
+        params.get("tool_selection"),
+        tool_policy.get("tool_selection"),
+        metadata.get("tool_selection"),
+        context.get("tool_selection") if isinstance(context, dict) else None,
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            strategy = _normalize_tool_selection_strategy(candidate.get("strategy"))
+        else:
+            strategy = _normalize_tool_selection_strategy(candidate)
+        if strategy:
+            return strategy
+    for candidate in (
+        data.get("tool_selection_strategy"),
+        params.get("tool_selection_strategy"),
+        tool_policy.get("tool_selection_strategy"),
+        tool_policy.get("strategy"),
+        metadata.get("tool_selection_strategy"),
+    ):
+        strategy = _normalize_tool_selection_strategy(candidate)
+        if strategy:
+            return strategy
+    return ""
+
+
+def _remember_tool_selection_strategy(context: dict[str, Any] | None, strategy: str, mode: str) -> None:
+    if not isinstance(context, dict) or not strategy:
+        return
+    context["tool_selection_strategy"] = strategy
+    context["tool_selection"] = {"strategy": strategy, "effective_mode": mode}
+
+
 def _resolve_selected_tools(
     raw_tools: Any,
     *,
     user_text: str = "",
     context: dict[str, Any] | None = None,
+    strategy: str = "",
 ) -> tuple[list[dict[str, Any]], list[str]]:
     registry = ToolRegistry()
     if not isinstance(raw_tools, list):
         tools = registry.list_tools()
         pack_root = Path(__file__).resolve().parents[2]
-        mode = effective_tool_assist_mode(pack_root=pack_root)
+        normalized_strategy = _normalize_tool_selection_strategy(strategy)
+        mode = normalized_strategy or effective_tool_assist_mode(pack_root=pack_root)
         prefers_vector = _profile_prefers_vector_tool_assist(context)
-        if mode == "all" and prefers_vector:
+        if not normalized_strategy and mode == "all" and prefers_vector:
             mode = "vector"
+        _remember_tool_selection_strategy(context, normalized_strategy, mode)
         if mode == "off":
             return [], []
         if mode == "all":
@@ -1120,6 +1180,7 @@ def _resolve_selected_tools(
         if isinstance(context, dict):
             context["tool_assist"] = {
                 "mode": "vector",
+                **({"strategy": normalized_strategy} if normalized_strategy else {}),
                 "recommended_tools": recommended_ids,
                 "available_tool_count": len(candidate_tools),
             }
@@ -1249,6 +1310,7 @@ def _available_tools(
     user_text: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     raw_tools = input_data.get("tools")
+    selection_strategy = _tool_selection_strategy(input_data, context)
     params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
     tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
     if raw_tools is None and isinstance(tool_policy, dict) and "selected_tools" in tool_policy:
@@ -1259,10 +1321,17 @@ def _available_tools(
         if "selected_tools" in metadata:
             raw_tools = metadata.get("selected_tools")
     try:
-        tools, unknown_tools = _resolve_selected_tools(raw_tools, user_text=user_text, context=context)
+        tools, unknown_tools = _resolve_selected_tools(
+            raw_tools,
+            user_text=user_text,
+            context=context,
+            strategy=selection_strategy,
+        )
     except Exception:
         tools, unknown_tools = [], []
     resolved_context = resolve_runtime_profile_context(context or {})
+    if selection_strategy:
+        _remember_tool_selection_strategy(resolved_context, selection_strategy, selection_strategy)
     if unknown_tools:
         resolved_context["unknown_selected_tools"] = unknown_tools
     runtime_profile = resolved_context.get("runtime_profile")

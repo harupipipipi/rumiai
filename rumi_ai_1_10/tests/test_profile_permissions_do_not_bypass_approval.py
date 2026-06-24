@@ -43,3 +43,36 @@ def test_profile_permissions_cannot_disable_required_approval(tmp_path: Path):
     assert "approved" not in tool
     assert result["data"]["policy"]["write_actions_require_approval"] is True
     assert result["data"]["policy"]["allow_client_supplied_approved"] is False
+
+
+def test_read_and_search_tools_do_not_inherit_write_approval_policy(tmp_path: Path):
+    permissions_dir = tmp_path / "permissions"
+    permissions_dir.mkdir()
+    (permissions_dir / "tool_policy.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "profile_id": "p1",
+                "write_actions_require_approval": True,
+                "high_risk_tools_require_approval": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run(
+        {
+            "profile_id": "p1",
+            "workspace": {"permissions_dir": str(permissions_dir)},
+            "tools": [
+                {"name": "coding_file_read", "action_type": "read", "risk": "low"},
+                {"name": "coding_file_search", "action_type": "search", "risk": "low"},
+            ],
+        },
+        {},
+    )
+
+    tools = result["data"]["tools"]
+    assert [tool["name"] for tool in tools] == ["coding_file_read", "coding_file_search"]
+    assert all(tool.get("requires_approval") is not True for tool in tools)
+    assert all(not tool.get("approval_required_reasons") for tool in tools)

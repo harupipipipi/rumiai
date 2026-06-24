@@ -120,3 +120,43 @@ def test_router_still_routes_from_default_anchor_for_tools():
 
     assert decision.selected_model == "google/gemini-2.5-pro"
     assert "routed_within_group" in decision.reason_codes
+
+
+def test_models_for_group_excludes_embedding_profiles_from_chat_candidates():
+    from domain.ai_client.model_search import models_for_group
+
+    profiles = [
+        {
+            "profile_id": "openai/text-embedding-3-large",
+            "qualified_model_id": "openai/text-embedding-3-large",
+            "provider_id": "openai",
+            "model_id": "text-embedding-3-large",
+            "type": "embedding",
+            "configured": True,
+        },
+        {
+            "profile_id": "google/gemini-2.5-pro",
+            "qualified_model_id": "google/gemini-2.5-pro",
+            "provider_id": "google",
+            "model_id": "gemini-2.5-pro",
+            "type": "chat",
+            "configured": True,
+        },
+    ]
+
+    candidates = models_for_group(
+        "default",
+        {
+            "model_groups": {
+                "default": {
+                    "allowed_models": [
+                        "openai/text-embedding-3-large",
+                        "google/gemini-2.5-pro",
+                    ]
+                }
+            }
+        },
+        profiles=profiles,
+    )
+
+    assert [candidate["profile_id"] for candidate in candidates] == ["google/gemini-2.5-pro"]
